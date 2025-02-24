@@ -1,0 +1,145 @@
+.events-bottom
+  height: 200px
+  float: left
+
+
+.value-expanded-type
+  padding-right: 10px
+  white-space: nowrap
+
+.value-expanded-name
+  min-width: 60px
+  //cursor: pointer
+  font-size: 14px
+  line-height: 24px
+  padding-left: 10px
+  color: TEXT_CONTENT_COLOR
+
+.value-expand-button
+  display: inline-block
+  min-width: 15px
+  max-width: 15px
+  // ?
+  float: left
+
+  i
+    font-size: 15px
+
+.value-non-expanded
+  color: orange
+
+.value-error
+  color: red
+
+.value-non-expanded, .value-error
+  position: absolute
+  overflow: hidden
+  white-space: nowrap
+  text-overflow: ellipsis
+  width: 95%
+  background: BACKGROUND_COLOR
+
+.value-watch
+  font-style: italic
+
+.value-selected
+  opacity: 0.5
+
+.value-name
+  color: VALUE_NAME_COLOR
+
+.value-type
+  margin-left: 8px
+  color: VALUE_TYPE_COLOR
+  white-space: nowrap
+
+.value-annotation
+  margin-left: 5px
+  color: VALUE_TYPE_COLOR
+  opacity: 0.5
+  white-space: nowrap
+
+.value-view
+  .value-error
+    margin-left: 17px !important
+    position: inherit
+
+.value-name-container
+  display: flex
+  align-items: center
+
+  .caret-collapse
+    display: block
+    background-image: SHARED_OPEN_FA_ICON
+    background-size: 8px 8px
+    background-position: center
+    background-repeat: no-repeat
+    width: 10px
+    height: 10px
+
+  .caret-expand
+    display: block
+    background-image: SHARED_CLOSE_FA_ICON
+    background-size: 8px 8px
+    background-position: center
+    background-repeat: no-repeat
+    width: 10px
+    height: 10px
+
+.value-line-view-text
+  display: flex
+  white-space: nowrap
+  text-overflow: visible
+//padding-right: 25px
+
+.value-expanded-view-text
+  display: flex
+  flex-direction: column
+  white-space: nowrap
+  text-overflow: visible
+//padding-right: 25px
+
+.value-expanded-name-text-content
+  width: 100%
+  overflow: hidden
+  white-space: nowrap
+  text-overflow: ellipsis
+
+.value-expanded-view
+  //flex-basis: 68%
+  color: TEXT_CONTENT_COLOR
+  position: relative
+  margin-left: 10px
+  background: BACKGROUND_COLOR
+
+// maybe it helps with values not going left if label too long or panel too thin
+// but then they are not aligned in rights
+// not sure what to do, comment out for now
+// max-width: 68%
+
+.value-expanded-default
+  height: 20px
+
+#gdb-evaluate
+  padding-right: 8px
+
+// #watch, .calltrace-search input, .calltrace-filter input
+//   height: 30px
+//   font-size: 17px
+//   border: 0
+//   background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+//   width: 80%
+//   margin-left: 10%
+//   margin-top: 5px
+//   margin-bottom: 5px
+//   border-radius: 15px
+//   padding-left: 15px
+
+.right-value .simple-value
+  text-align: right
+
+.edit
+  height: calc(100% - 8px)
+  width: 100%
+  font-size: 0
+  overflow: hidden

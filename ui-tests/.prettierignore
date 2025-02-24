@@ -1,0 +1,6 @@
+# Ignore artifacts:
+build
+coverage
+binaries
+# ignore test programs
+programs

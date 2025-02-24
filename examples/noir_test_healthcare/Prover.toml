@@ -1,0 +1,4 @@
+patient_score = "75"
+min_score = "70"
+hashed_patient_data = "1234567890"
+provided_hash = "1234567890"

@@ -1,0 +1,13 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-content-file--empty-common-file" clip-path="url(#clip0_1660_12)">
+<g id="Group">
+<path id="Vector" d="M21.25 21.25C21.25 21.7008 21.0709 22.1332 20.7521 22.4521C20.4333 22.7709 20.0009 22.95 19.55 22.95H4.25005C3.79918 22.95 3.36678 22.7709 3.04797 22.4521C2.72916 22.1332 2.55005 21.7008 2.55005 21.25V2.54998C2.55005 2.09911 2.72916 1.66671 3.04797 1.34789C3.36678 1.02908 3.79918 0.849976 4.25005 0.849976H12.75L21.25 9.34998V21.25Z" stroke="#F3F3F3" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M12.75 0.849976V9.34998H21.25" stroke="#F3F3F3" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1660_12">
+<rect width="23.8" height="23.8" fill="white"/>
+</clipPath>
+</defs>
+</svg>

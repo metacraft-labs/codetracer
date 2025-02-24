@@ -1,0 +1,6 @@
+(set b (vector 0 1))
+(set (# b 0) 1)
+(push b 1)
+(loop i 0 100
+  (push b i))
+(print b)

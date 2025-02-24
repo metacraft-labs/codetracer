@@ -1,0 +1,16 @@
+<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-content-eye-glasses--vision-sunglasses-protection-spectacles-correction-sun-eye-glasses" clip-path="url(#clip0_1409_3242)">
+<g id="Group">
+<path id="Vector" d="M5.5 9H0.5V12C0.5 12.2652 0.605357 12.5196 0.792893 12.7071C0.98043 12.8946 1.23478 13 1.5 13H4.5C4.76522 13 5.01957 12.8946 5.20711 12.7071C5.39464 12.5196 5.5 12.2652 5.5 12V9Z" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M13.5 9H8.5V12C8.5 12.2652 8.60536 12.5196 8.79289 12.7071C8.98043 12.8946 9.23478 13 9.5 13H12.5C12.7652 13 13.0196 12.8946 13.2071 12.7071C13.3946 12.5196 13.5 12.2652 13.5 12V9Z" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M5.5 9H8.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_4" d="M13.5 9V3C13.5 2.46957 13.2893 1.96086 12.9142 1.58579C12.5391 1.21071 12.0304 1 11.5 1H10.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_5" d="M0.5 9V3C0.5 2.46957 0.710714 1.96086 1.08579 1.58579C1.46086 1.21071 1.96957 1 2.5 1H3.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1409_3242">
+<rect width="14" height="14" fill="white"/>
+</clipPath>
+</defs>
+</svg>

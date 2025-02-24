@@ -1,0 +1,409 @@
+
+.eventLogComponent-columns
+  position: relative
+
+.eventLog-switch
+  display: none
+
+.eventLog-categories
+  display: inherit
+  flex-wrap: wrap
+
+.eventLog-medium-control-button
+  user-select: none
+  border-radius: 6px
+  color: DROPDOWN_TEXT_COLOR
+  white-space: nowrap
+  cursor: pointer
+  height: 28px
+  // margin-bottom: 10px
+  margin-left: 10px
+  background-color: ACTIVE_MENU_BACKGROUND
+  text-align: center
+  transform: rotate(0deg)
+  width: fit-content
+  position: relative
+  z-index: 1
+  // font-weight: bold
+  display: flex
+  align-items: center
+  justify-content: start
+  padding-left: 8px
+  padding-right: 8px
+  font-weight: 400
+
+  &:hover
+    background-color: SECONDARY_BASE
+    color: DROPDOWN_TEXT_FOCUSED_COLOR
+  
+  &:active
+    background-color: ACTIVE_ROW
+  
+  &.active
+    background-color: ACTIVE_ROW
+  
+  .custom-tooltip
+    width: 200px
+    text-align: start
+    font-size: 12px
+    line-height: 16px
+    right: -46px
+
+#eventLog-category-filter
+  z-index: 4
+
+#eventLog-category-onlytrace
+  z-index: 3
+
+#eventLog-category-only-recorded-event
+  z-index: 2
+
+.eventLog-category-dropdown-button //TODO: think of a way to combine all dropdowns in one style class
+  font-family: "SpaceGrotesk" !important
+  display: flex
+  justify-content: start
+  align-items: center
+  user-select: none
+  border-radius: 6px
+  color: DROPDOWN_TEXT_COLOR
+  cursor: pointer
+  height: 28px
+  margin-bottom: 10px
+  margin-left: 10px
+  background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+  padding-left: 28px
+  padding-right: 30px
+  transform: translate(0px, 2px)
+  width: 150px
+  position: relative
+  z-index: 1
+  font-weight: bold
+
+
+  &:focus
+    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    background-color: ACTIVE_MENU_BACKGROUND !important
+    outline: 0px
+
+    &::after
+      transform: rotate(180deg)
+
+  &::after
+    content: SHARED_CLOSE_FA_ICON
+    position: absolute
+    left: 10px
+
+  &:hover
+    background-color: DEBUG_BUTTON_HOVER_BACKGROUND
+    color: DROPDOWN_TEXT_FOCUSED_COLOR
+
+.hamburger-dropdown-container
+  position: relative
+  display: flex
+  flex-direction: column
+  align-items: start
+
+.hamburger-dropdown
+  border-radius: 6px
+  color: DROPDOWN_COLOR
+  cursor: pointer
+  height: 24px
+  background-color: PRIMARY_BASE
+  right: 0
+  width: 24px
+  position: relative
+  z-index: 1
+  display: flex
+  justify-content: center
+  align-items: center
+
+  .fa-bars
+    height: 100%
+    width: 100%
+    display: flex
+    justify-content: center
+    align-items: center
+
+  &:focus
+    border: 1px solid BORDERS_COLOR
+    cursor: pointer
+    background-color: BUTTON_HOVER_BACKGROUND
+
+  &:hover
+    background-color: BUTTON_HOVER_BACKGROUND
+    color: DROPDOWN_TEXT_FOCUSED_COLOR
+
+.dropdown-container
+  position: absolute
+  display: flex
+  flex-direction: column
+  border-radius: 10px
+  background: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
+  color: DROPDOWN_TEXT_BACKGROUND_COLOR
+  right: 0
+  min-width: fit-content
+  z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
+  user-select: none
+  transform-origin: top right
+  top: 100%
+  right: 0
+
+.dropdown-list
+  width: 150px !important
+  list-style-type: none
+  padding-left: 8px
+  position: relative
+  display: flex
+  flex-direction: row
+
+  .dropdown-list-item
+    width: inherit
+    align-items: normal
+    justify-content: start
+    padding-left: 20px
+
+.toggle-buttons
+  display: flex
+  justify-content: start
+  background: DROPDOWN_TOGGLE_BUTTONS_BACKGROUND
+  padding-top: 10px
+  padding-bottom: 10px
+  align-items: center
+  border-bottom-left-radius: 10px
+  border-bottom-right-radius: 10px
+
+.eventLog
+  font-family: Arial, Helvetica, sans-serif
+  height: 100%
+  display: flex
+  flex-direction: column
+
+  .eventLog-detailed-table
+    display: none // TODO: show
+
+  .eventLog-columns
+    flex-basis: 15%
+
+    .eventLog-button
+      width: 50px !important
+
+  /* thanks to https://stackoverflow.com/a/52977310 */
+
+  .eventLog-index
+    width: 7.5% // calc(7.5%)
+    text-align: center
+
+  .eventLog-event
+    // background-image: EVENT_LOG_EVENT_ICON_PATH
+    background-repeat: no-repeat
+    width: 13px
+    height: 13px
+    position: relative
+    top: 30%
+
+  .eventLog-text
+    width: 25% // calc(15%)
+    margin-left: 15px
+    flex: auto
+    margin-right: 15px
+    display: flex
+
+  .eventLog-fullpath
+    width: 25% // calc(20%)
+    flex: auto
+
+  .eventLog-lowlevellocation
+    width: 25% // calc(25%)
+    flex: auto
+
+  .eventLog-events
+    display: flex
+    flex-basis: 50%
+
+    .dropdown
+      width: auto
+
+  .eventLog-button //.eventLog-kind, .eventLog-category
+    width: 150px
+    margin-left: 10px
+    margin-right: 10px
+    margin-top: 14px
+    margin-bottom: 14px
+    padding: 0
+    font-size: 15px
+    font-weight: bold
+    height: 32px
+    line-height: 20px
+    text-align: center
+    border-radius: 10px
+    border: 0
+    cursor: pointer
+    background-color: EVENT_LOG_BUTTON_BACKGROUND_COLOR
+    color: EVENT_LOG_BUTTON_UNSELECTED_COLOR
+
+  .eventLog-normal-color-button, .eventLog-selected-kind, .eventLog-selected-category
+    color: EVENT_LOG_BUTTON_SELECTED_COLOR
+
+  .eventLog-button
+    i
+      margin-left: 5px
+      vertical-align: -2px
+      color: EVENT_LOG_CARET_DOWN_COLOR
+
+  .eventLog-header
+    position: relative
+    z-index: 1
+    height: fit-content
+    display: flex
+    margin-top: 10px
+    margin-bottom: 10px
+    padding-right: 8px
+
+    .eventLog-search
+      height: 28px
+      width: -webkit-fill-available
+      padding-top: 2px
+
+    input
+      border: 0
+      // border-radius: 15px
+      font-size: 14px
+      font-weight: BOLD_WEIGHT
+      color: EVENT_LOG_INPUT_COLOR
+      // background-color: BACKGROUND_COLOR
+      // width: 130px
+      margin-left: 10px
+
+      &:focus
+        border: 1px solid BORDERS_COLOR
+
+    .eventLog-events
+      height: 50px
+
+    .eventLog-columns-dropdown
+      width: 60px
+
+    .eventLog-dropdown
+      top: 390px !important
+
+  /* thanks to https://stackoverflow.com/a/52977310 */
+  .eventLog-detailed-index
+    width: calc(20%) !important
+    color: black
+
+  .eventLog-detailed-event
+    width: calc(10%) !important
+
+  .eventLog-detailed-location
+    width: calc(70%) !important
+    height: 2px // TODO location? not in events currently
+
+  .eventLog-detailed-text
+    width: calc(100%) !important
+    float: left
+
+
+  /* TODO width */
+  .eventLog-detailed-table > :nth-child(1)
+    display: none
+
+    tr
+      display: flex
+      flex-direction: column
+      background-color: BACKGROUND_COLOR
+      width: 100%
+      border: 1px COLOR solid
+      margin-bottom: 20px
+
+    thead
+      tr
+        height: 20px
+
+label
+  text-align: start
+  min-width: 110px
+  color: DROPDOWN_TEXT_COLOR
+  font-weight: 400
+
+.eventLog-cell
+  text-overflow: ellipsis
+  white-space: nowrap
+  overflow: hidden
+  color: TEXT_CONTENT_COLOR
+  font-weight: bold
+  padding-right: 10px
+
+.eventLog-index, .eventLog-event, .eventLog-fullpath
+  padding-top: 0px !important
+  padding-bottom: 0px !important
+
+.eventLog-text
+  padding-top: 4px !important
+  line-height: 16px !important
+  padding-bottom: 0px !important
+
+.eventLog-text:hover
+  overflow-x: auto
+  white-space: nowrap
+
+  &::-webkit-scrollbar-thumb:horizontal
+    border: 0px !important
+    background-color: PRIMARY_BASE
+
+.eventLog-lowlevellocation:hover
+  overflow-x: overlay
+  white-space: nowrap
+
+.eventLog-cell::-webkit-scrollbar
+  width 8px
+  height 4px
+  background-color: transparent
+
+.eventLog-cell::-webkit-scrollbar:hover
+  background-color: transparent
+  position: absolute
+
+
+/* todo .eventLog-cell */
+
+.dropdown-list-tag
+  display: flex
+  flex-direction: column
+
+.dropdown-kind-container
+  display: flex
+  flex-direction: column
+
+.dropdown-list-kind
+  display: flex
+
+.paging-menu
+  display: flex
+
+  .paging-page
+    background-color: blue
+    color: white
+    cursor: pointer
+    margin-left: 2px
+    margin-right: 2px
+
+  .paging-active-page
+    background-color: yellow
+
+.paging-content
+  display: flex
+  flex-direction: column
+
+  .paging-child
+    display: flex
+
+    .paging-view
+      flex-basis: 80%
+
+    .paging-expand
+      color: green
+      flex-basis: 20%
+
+    .paging-collapse
+      color: red
+      flex-basis: 20%

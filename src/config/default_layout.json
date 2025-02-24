@@ -1,0 +1,124 @@
+{
+    "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "responsiveMode": "always"
+    },
+    "dimensions": {
+        "borderWidth": 2,
+        "borderHeight": 4,
+        "headerHeight": 35,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+    },
+    "root": {
+        "type": "row",
+        "size": "100%",
+        "isClosable": false,
+        "content": [
+            {
+                "type": "column",
+                "size": "20%",
+                "content": [
+                    {
+                        "type": "stack",
+                        "content": [
+                            {
+                                "type": "component",
+                                "size": "100%",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
+                                    "label": "filesystemComponent",
+                                    "content": 9
+                                },
+                                "title": "genericUiComponent"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "column",
+                "content": [
+                    {
+                        "type": "row",
+                        "size": "50%",
+                        "content": [
+                            {
+                                "type": "stack",
+                                "size": "50%",
+                                "content": [
+                                    {
+                                        "type": "component",
+                                        "componentType": "genericUiComponent",
+                                        "componentState": {
+                                            "id": 0,
+                                            "label": "stateComponent-0",
+                                            "content": 4
+                                        },
+                                        "title": "genericUiComponent"
+                                    },
+                                    {
+                                        "type": "component",
+                                        "componentType": "genericUiComponent",
+                                        "componentState": {
+                                            "id": 0,
+                                            "label": "scratchpadComponent-0",
+                                            "content": 17
+                                        },
+                                        "title": "genericUiComponent"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "stack",
+                                "size": "50%",
+                                "content": [
+                                    {
+                                        "type": "component",
+                                        "componentType": "genericUiComponent",
+                                        "componentState": {
+                                            "id": 0,
+                                            "label": "calltraceComponent-0",
+                                            "content": 6
+                                        },
+                                        "title": "genericUiComponent"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "stack",
+                        "content": [
+                            {
+                                "type": "component",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
+                                    "label": "eventLogComponent-0",
+                                    "content": 8
+                                },
+                                "title": "genericUiComponent"
+                            },
+                            {
+                                "type": "component",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
+                                    "label": "terminalComponent-0",
+                                    "content": 24
+                                },
+                                "title": "genericUiComponent"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    "openPopouts": []
+}

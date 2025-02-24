@@ -1,0 +1,11 @@
+[Desktop Entry]
+Encoding=UTF-8
+Version=1.0
+Type=Application
+Terminal=false
+Exec=codetracer run-ci %u
+Name=CODETRACER
+Comment=CODETRACER handler
+Icon=
+Categories=Application;Network;
+MimeType=x-scheme-handler/codetracer;

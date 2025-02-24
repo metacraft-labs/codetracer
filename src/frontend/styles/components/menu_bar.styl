@@ -1,0 +1,527 @@
+// The top bar
+#menu
+  display: flex
+  flex-direction: row
+  top: 0
+  height: 38px
+  -webkit-app-region: drag
+  user-select: none
+
+  #debug
+    -webkit-app-region: no-drag
+    gap: 12px
+
+    .debug-button-container
+      width: 28px
+      height: 28px
+      border: 0.5px solid DEBUG_BUTTON_BORDER_COLOR
+      border-radius: 6px
+      display: flex
+      cursor: pointer
+
+      &:hover
+        background-color: DEBUG_BUTTON_HOVER_BACKGROUND
+      
+      &:active
+        background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+
+      &.disabled
+        cursor: default !important
+        background-color: PRIMARY_BASE
+
+      .disabled
+        opacity: 0.5
+        cursor: default !important
+
+        &:hover
+          background-color: PRIMARY_BASE !important
+
+      .debug-button
+        // font-size: 15px
+        color: DEBUG_BUTTON_COLOR
+        width: 28px
+        height: 28px
+        display: flex
+        align-items: center
+        justify-content: center
+
+        &:focus
+          outline: 0px !important
+      
+      #history-back-debug, #history-forward-debug,
+      #continue-debug, #reverse-continue-debug,
+      #next-debug, #reverse-next-debug
+        padding-bottom: 2px
+
+      #run-to-entry-debug
+        padding-bottom: 4px
+      
+      #reverse-step-out-debug, #step-in-debug
+        padding-top: 2px
+      
+      #step-out-debug, #reverse-step-in-debug
+        padding-bottom: 4px
+
+      #run-to-entry-debug
+        padding-bottom: 4px
+        padding-right: 2px
+
+        i
+          font-size: 15px
+
+    .busy
+      visibility: hidden
+
+    .debug-finished
+      float: left
+      width: 100px
+      color: yellow
+
+    &:hover
+      opacity: 1
+
+    // .debug-button
+    //   width: 25px
+    //   height: 25px
+    //   margin-left: 5px
+    //   margin-right: 5px
+    // padding: 10px
+
+    /* based on https://codepen.io/sosuke/pen/Pjoqqp : CSS filter generator to convert from black to target hex color
+      Barrett Sonntag  found from
+      https://stackoverflow.com/a/53336754/438099
+    */
+    // converts to white
+    // .debug-button-svg
+    //   filter: invert(100%) sepia(100%) saturate(0%) hue-rotate(288deg) brightness(102%) contrast(102%)
+
+    .debug-text
+      color: white
+
+    .debug-skip
+      color: white
+      background: transparent
+
+    .active-debug-skip
+      color: COLOR
+      background: white
+
+  .debug-finished-background
+    background-color: BACKGROUND_COLOR
+
+  #menu-flow-value-mode
+    display: inline-block
+    width: 600px
+    float: left
+    color: OPPOSITE_COLOR
+    height: 25px
+    margin-left: 50px
+    .menu-flow-value-mode-case
+      display: inline-block
+      width: 200px
+      //padding: 2px
+      cursor: pointer
+
+    .selected-value-mode
+      background-color: green
+
+.window-menu
+  display: flex
+  position: absolute
+  right: 5px
+  top: 0
+  margin-right: 0
+  -webkit-app-region: no-drag
+  z-index: 50
+  height: 100%
+  align-items: center
+  cursor: pointer
+
+  .menu-button-svg
+    width: 28px
+    height: 28px
+    background-position: center
+    background-repeat: no-repeat
+
+    &.minimize
+      background-image: WINDOW_MINIMIZE_ICON_PATH
+      opacity: 1
+      margin-top: auto
+
+    &.restore
+      background-image: WINDOW_RESTORE_ICON_PATH
+      opacity: 1
+
+    &.maximize
+      background-image: WINDOW_MAXIMIZE_ICON_PATH
+      opacity: 1
+
+    &.close
+      background-image: WINDOW_CLOSE_ICON_PATH
+      opacity: 1
+
+    &:hover
+      opacity: 0.5;
+
+#menu
+  /* based on design : psd file and krita color selector */
+  /* TODO move to light theme */
+  background-color: MENU_BACKGROUND_COLOR
+  position: fixed
+  width: 100vw
+  top: 0
+  z-index: 20
+  border-top-left-radius: 8px
+  border-top-right-radius: 8px
+
+  i.fa-window-minimize, i.fa-window-maximize
+    width: 50px
+    height: 50px
+    font-size: 20px
+    color: OPPOSITE_COLOR
+
+  #navigation-menu
+    font-size: MENU_FONT_SIZE
+    color: white // TODO is this correct
+    z-index: 10
+    -webkit-app-region: no-drag
+
+    &:focus
+      outline: 0 !important
+
+  #menu-root
+    height: 100%
+    display: flex
+    width: fit-content
+    min-width: 46px
+    align-items: center
+    // TODO height variables and maybe width variables
+
+    #menu-root-logo
+      height: 28px
+      width: 28px
+      align-items: center
+      justify-items: center
+      display: grid
+      margin-left: 6px
+      background: CT_LOGO_BACKGROUND_COLOR
+      border-radius: 6px
+
+      #menu-logo-img
+        width: 20px
+        height: 20px
+        background-image: url("../../public/resources/menu/ct_logo_dark.svg")
+        background-size: cover
+        background-position: center
+        display: inline-block
+        position: relative
+        cursor: pointer
+
+    #menu-root-name
+      height: 25px
+      font-size: 15px
+      font-family: Arial, Helvetica, sans-serif
+      font-weight: bold
+      max-width: 48ex;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding-right: 10px
+
+  #menu-main
+    font-family: "SpaceGrotesk"
+    width: 200px
+    margin-left: 6px
+    height: fit-content
+    padding-bottom: 4px
+    // min-height: 245px
+    // border: 1px solid NAVIGATION_MENU_BORDER_COLOR
+    position: absolute
+    top: 38px
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+    border-radius: 6px
+
+    // &::before
+    //   content:''
+    //   position: absolute
+    //   width: 12px
+    //   height: 12px
+    //   background-color: NAVIGATION_MENU_INPUT_BACKGROUND_COLOR
+    //   transform: rotate(45deg)
+    //   top: -7.5px
+    //   left: 10px
+    //   border-left: 1px solid NAVIGATION_MENU_BORDER_COLOR
+    //   border-top: 1px solid NAVIGATION_MENU_BORDER_COLOR
+  // margin-top: -5px
+  // transform: rotate(180deg)
+
+
+  .menu-node, .menu-search-result
+    font-size: MENU_FONT_SIZE
+    height: auto
+    min-width: fit-content //"calc(%s + 2px)" % MENU_NODE_MIN_WIDTH
+    display: flex
+    padding-top: 2px
+    padding-bottom: 2px
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+    margin-left: 4px
+    margin-right: 4px
+    align-items: center
+    border-radius: 4px
+
+
+  // .menu-node:hover
+  //   background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR
+
+  // .menu-node:hover > .menu-node-icon
+  //   opacity: 1
+
+  .menu-element, .menu-search-result, .menu-folder
+    .menu-node-name
+      // width: MENU_ELEMENT_NAME_WIDTH
+      width: -webkit-fill-available !important
+      justify-content: space-between
+      float: left
+      padding-left: 8px
+      padding-right: 8px
+      color: NAVIGATION_MENU_COLOR
+      font-size: MENU_FONT_SIZE
+      border-radius: 5px
+      display: flex
+      align-items: center
+      font-weight: 400
+      line-height: 18px
+      white-space: nowrap
+
+    .menu-node-shortcut
+      width: fit-content !important
+      // min-width: MENU_NODE_SHORTCUT_MIN_WIDTH
+      background-color: MENU_NODE_SHORTCUT_BACKGROUND
+      border-radius: 6px
+      color: MENU_NODE_SHORTCUT_TEXT_COLOR
+      // overflow: hidden
+      font-size: 10px
+      text-align: right
+      padding: 4px
+      line-height: 10px
+      margin-right: 8px
+      margin-left: 8px
+      white-space: nowrap
+      // padding-right: 15px
+
+
+  .menu-folder
+    .menu-node-name
+      // width: MENU_NODE_NAME_WIDTH !important
+      width: -webkit-fill-available !important
+      justify-content: space-between
+      float: left
+      padding-left: 8px
+      padding-right: 8px
+      color: NAVIGATION_MENU_COLOR
+      font-size: MENU_FONT_SIZE
+      border-radius: 5px
+      display: flex
+      align-items: center
+      font-weight: 400
+      white-space: nowrap
+
+
+    .menu-expand
+      width: MENU_EXPAND_WIDTH
+      float: left
+      position: relative
+      margin-left: 8px
+      display: flex
+      align-items: center
+
+      &::after
+        position: absolute
+        right: 0px
+        // top: calc(50% - 6px)
+        width: 7px
+        height: 8px
+        content: MENU_EXTEND_ARROW_ICON
+        display: flex
+        align-items: center
+        padding-bottom: 2px
+        // border: 6px solid transparent
+        // border-left-color: NAVIGATION_MENU_COLOR
+
+  .menu-node-icon
+    width: 14px
+    height: 24px
+    display: flex
+    align-items: center
+    margin-left: 4px
+    opacity: 0.5
+
+    i
+      font-size: 14px !important
+
+  .icon
+    width: 14px
+    height: 14px
+    background-repeat: no-repeat
+    background-position: center
+    background-size: 14px
+
+    &.file
+      background-image: FILE_MENU_ICON
+
+    &.new-file
+      background-image: NEW_FILE_MENU_ICON
+
+    &.open-file
+      background-image: OPEN_FILE_MENU_ICON
+
+    &.edit
+      background-image: EDIT_MENU_ICON
+
+    &.navigate
+      background-image: NAVIGATE_MENU_ICON
+
+    &.view
+      background-image: VIEW_MENU_ICON
+
+    &.build
+      background-image: BUILD_MENU_ICON
+
+    &.debug
+      background-image: DEBUG_MENU_ICON
+
+    &.help
+      background-image: HELP_MENU_ICON
+
+  #menu-elements
+    width: 100%
+    float: left
+    // background-color: MENU_BACKGROUND_COLOR
+    // border-right: 1px solid NAVIGATION_MENU_COLOR
+    // border-left: 1px solid NAVIGATION_MENU_COLOR
+    // border-bottom: 1px solid NAVIGATION_MENU_COLOR
+    color: NAVIGATION_MENU_COLOR
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+
+  .menu-nested-elements-1
+    float: left
+
+  .menu-nested-elements
+    position: absolute
+    float: left
+    font-size: MENU_FONT_SIZE
+    // border: 1px NAVIGATION_MENU_BORDER_COLOR solid
+    border-radius: 6px
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+    padding-top: 4px
+    padding-bottom: 4px
+
+    .menu-node-icon
+      width: 0px !important
+      margin-left: 0px !important
+
+  .menu-enabled
+    color: NAVIGATION_MENU_COLOR
+    cursor: pointer
+    border-radius: 4px
+
+  .menu-disabled
+    .menu-node-name
+      color: #777
+
+  #menu-search-results
+    height: auto
+    margin-top: 5px
+    margin-bottom: 5px
+
+  #menu-search
+    margin-left: 4px
+    margin-right: 4px
+    // border-right: 1px solid NAVIGATION_MENU_COLOR
+    border-top: 0
+    font-size: 14px
+
+  #menu-search-header
+    display: block
+    height: 11px
+    width: 100%
+    color: NAVIGATION_MENU_COLOR
+    background: linear-gradient(to top, NAVIGATION_MENU_BACKGROUND_COLOR, transparent 1px),
+            linear-gradient(315deg, NAVIGATION_MENU_BACKGROUND_COLOR, NAVIGATION_MENU_BACKGROUND_COLOR 5px, transparent, transparent calc(6px)),
+            linear-gradient(45deg, NAVIGATION_MENU_BACKGROUND_COLOR, NAVIGATION_MENU_BACKGROUND_COLOR 5px, transparent, transparent calc(6px)),
+            linear-gradient(to top, NAVIGATION_MENU_BACKGROUND_COLOR, transparent 1px)
+    background-repeat: no-repeat, no-repeat, no-repeat, no-repeat
+    background-size: 1vw 11px, 11px 11px, 11px 11px, calc(16vw - 22px) 11px
+    background-position: left 0 bottom, left 1vw bottom, left calc(1vw + 11px) bottom, left calc(1vw + 22px) bottom
+    position: fixed
+    border: 0
+    top: 25px
+
+  #menu-search input
+    position: relative
+    height: 28px
+    bottom: 0
+    width: 100% //MENU_SEARCH_INPUT_WIDTH
+    // min-width: MENU_SEARCH_INPUT_MIN_WIDTH
+    border: 0.5px solid SEARCH_STROKE
+    border-radius: 6px
+    background-color: NAVIGATION_MENU_INPUT_BACKGROUND_COLOR
+    color: TEXT_CONTENT_COLOR
+    margin: 0 !important
+    font-size: 14px !important
+
+    &:focus
+      outline: 0 !important
+      border: 0 !important
+
+
+  .menu-search-icon
+    width: MENU_EXPAND_WIDTH
+    cursor: pointer
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+    height: MENU_LINE_HEIGHT
+    color: NAVIGATION_MENU_COLOR
+    border: 0
+    display: inline-block
+  // border-top: 1px solid NAVIGATION_MENU_COLOR
+
+
+  .menu-search-result
+    height: MENU_LINE_HEIGHT
+    cursor: pointer
+    color: NAVIGATION_MENU_COLOR
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+
+  .menu-sub-group-separator
+    border: 0
+    // width: "calc(%s - 2px)" % MENU_NODE_WIDTH
+    height: 14px
+    margin: 0
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+
+    &::after
+      content: ""
+      display: block
+      width: 100%
+      height: 1px
+      background-color: INACTIVE_BASE
+      position: relative
+      top: 50%
+
+  .menu-active-node
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+
+    .menu-node
+      background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR
+    
+    .menu-node-icon
+      opacity: 1
+
+  .menu-active-search-result
+    background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR
+
+  .menu-no-search-results
+    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+    color: TEXT_CONTENT_COLOR
+    font-style: italic
+    padding-left: 20px

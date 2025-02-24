@@ -1,0 +1,23 @@
+
+.run-time {
+    width: 100%;
+}
+
+.run-line {
+    width: 100%;
+}
+
+.run-times {
+    flex-basis: 5%;
+}
+
+.run-lines {
+    flex-basis: 90%;
+}
+
+.run-segment {
+    border: 1px #427 solid;
+    display: flex;
+    background-color: #000;
+    color: #fff;
+}

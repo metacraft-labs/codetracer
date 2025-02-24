@@ -1,0 +1,230 @@
+@import "defaults"
+
+// TODO: integrate themes with subwindow 
+// or move subwindow to a div inside normal window
+// for now copying those from the dark theme
+TEXT_CONTENT_COLOR=#F3F3F3
+NOTIFICATION_INFO_COLOR = #3B82F6
+NOTIFICATION_WARNING_COLOR = #FACC15
+NOTIFICATION_ERROR_COLOR = #EF4444
+NOTIFICATION_SUCCESS_COLOR = #22C55E
+// === end of copied constants
+
+MARGIN_RIGHT=15px
+
+@font-face {
+  font-family: 'SpaceGrotesk';
+  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: "FiraCode";
+  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
+}
+
+body
+  font-family Arial, sans-serif
+  background-color #1e1e1e
+  color #ffffff
+  display flex
+  align-items flex-start
+  height 50vh
+  margin 0
+  padding-left 42px
+  padding-top 42px
+  padding-right: 24px
+
+#ROOT
+  width: -webkit-fill-available
+
+.dialog-container
+  padding-top 100px
+  display flex
+  flex-direction column
+  align-items flex-start
+  padding-left 40px
+  border-radius 12px
+  background-color #252526
+  box-shadow 0px 4px 10px rgba(0, 0, 0, 0.5)
+  width 500px
+
+.dialog-header
+  display flex
+  align-items center
+  margin-bottom 32px
+
+.dialog-header img
+  width 40px
+  height 40px
+  margin-right $(MARGIN_RIGHT)
+
+.dialog-header h2
+  font-size 20px
+  font-weight bold
+  margin 0
+
+.dialog-icon
+  max-width 40px
+  max-height 40px
+  width auto
+  height auto
+  margin-right $(MARGIN_RIGHT)
+
+.dialog-content
+  color: #f3f3f3
+  font-family: "SpaceGrotesk"
+  font-size: 28px
+  font-style: normal
+  font-weight: 500
+  line-height: 32px
+  letter-spacing: -0.28px
+  margin-bottom 32px
+
+.info-icon
+  margin-left 10px
+
+.dialog-actions
+  display flex
+  gap 8px
+  margin-bottom 60px
+
+.install-btn
+  background-color #4f46e5
+  color white
+  border none
+  padding 10px 16px
+  border-radius 6px
+  cursor pointer
+  font-weight normal
+  width 145px
+  height: 34px
+  font-family: 'SpaceGrotesk'
+
+.dismiss-btn
+  background-color #3a3a3a
+  color white
+  border none
+  padding 10px 16px
+  border-radius 6px
+  cursor pointer
+  width: 89px
+  height: 34px
+  font-family: 'SpaceGrotesk'
+
+.install-btn:hover
+  background-color #7c6efc
+
+.dismiss-btn:hover
+  background-color #4d4d4d
+
+.dialog-options
+  display flex
+  flex-direction column
+  gap 8px
+  margin-bottom: 32px
+  font-family: 'SpaceGrotesk'
+
+.dialog-options input[type="checkbox"]
+  appearance none
+  width 16px
+  height 16px
+  border-radius 4px
+  border 1px solid #ABABAB
+  background-color transparent
+  cursor pointer
+  display flex
+  align-items center
+  justify-content center
+  position relative
+
+.dialog-options input[type="checkbox"]:checked
+  background-color transparent
+  border-color #ABABAB
+
+.dialog-options input[type="checkbox"]:checked::after
+  content "✓"
+  font-size 14px
+  color #4CAF50
+  position absolute
+  top 50%
+  left 50%
+  transform translate(-50%, -50%)
+  font-weight normal
+
+.dialog-options label
+  display flex
+  align-items center
+  color: #ABABAB
+  font-family: "SpaceGrotesk"
+  font-size: 14px
+  font-style: normal
+  font-weight: 400
+  line-height: normal
+  cursor pointer
+
+.dialog-options input[type="checkbox"]
+  margin-right 8px
+  accent-color #6a5acd
+
+.custom-tooltip
+  display: block
+  position: absolute
+  font-family: "SpaceGrotesk"
+  background-color: #1B1B1B
+  color: #f3f3f3
+  padding: 5px 10px
+  font-size: 14px
+  border-radius: 4px
+  white-space: nowrap
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2)
+  opacity: 0
+  visibility: hidden
+  transition: opacity 0.3s ease, visibility 0.3s ease, top 0.3s ease
+  pointer-events: none
+  text-align: start
+  font-size: 12px
+  line-height: 16px
+
+  &.active
+    opacity: 1
+    visibility: visible
+    top: -100%
+    height: 24px
+    right: 4px
+
+.info-icon:hover > .custom-tooltip
+  opacity: 1
+  visibility: visible
+  transition-delay: 1s
+
+.dialog-ask-again
+  margin-bottom: 0px !important
+  color: #ABABAB
+  font-family: "SpaceGrotesk"
+  font-size: 14px
+  font-style: normal
+  font-weight: 400
+  line-height: normal
+  display: flex
+  align-items: flex-end
+
+.dialog-ask-again input[type="checkbox"]
+  margin-left: 8px
+  margin-right: 0px !important
+
+.dialog-install-status
+  font-family: "SpaceGrotesk"
+  font-size: 22px
+  font-style: normal
+  font-weight: 400
+  line-height: normal
+  margin-bottom: 50px
+
+.dialog-install-status-installing
+  color: NOTIFICATION_INFO_COLOR
+
+.dialog-install-status-ok
+  color: NOTIFICATION_SUCCESS_COLOR
+
+.dialog-install-status-problem
+  color: NOTIFICATION_ERROR_COLOR

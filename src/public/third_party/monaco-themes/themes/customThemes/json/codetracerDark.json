@@ -1,0 +1,58 @@
+{
+  "base": "vs-dark",
+  "inherit": true,
+  "rules": [
+    {
+      "foreground": "F3F3F3",
+      "token": ""
+    },
+    {
+      "foreground": "FB923C",
+      "token": "comment"
+    },
+    {
+      "foreground": "cdd3de",
+      "token": "variable"
+    },
+    {
+      "foreground": "22D3EE",
+      "token": "keyword"
+    },
+    {
+      "foreground": "cd536d",
+      "token": "type"
+    },
+    {
+      "foreground": "BBF7D0",
+      "token": "string"
+    },
+    {
+      "foreground": "BBF7D0",
+      "token": "number"
+    },
+    {
+      "foreground":"F3F3F3",
+      "token": "delimiter"
+    }
+  ],
+  "colors": {
+    "editorBracketHighlight.foreground1": "#EAB308",
+    "editorBracketHighlight.foreground2": "#8B5CF6",
+    "editorBracketHighlight.foreground3": "#3B82F6",
+    "editorBracketHighlight.foreground4": "#EAB308",
+    "editorBracketHighlight.foreground5": "#8B5CF6",
+    "editorBracketHighlight.foreground6": "#3B82F6",
+    "editor.foreground": "#2c2c2c",
+    "editor.background": "#2c2c2c",
+    "editor.selectionBackground": "#3a3a3ab3",
+    "editor.lineHighlightBackground": "#3A3A3AB3",
+    "editorCursor.foreground": "#c0c5ce",
+    "editorWhitespace.foreground": "#65737e",
+    "editorIndentGuide.background": "#65737F",
+    "editorIndentGuide.activeBackground": "#FBC95A",
+    "editorSuggestWidget.foreground": "#8e8f92",
+    "editorSuggestWidget.background": "#2c2c2c",
+    "editorLineNumber.foreground": "#919191",
+    "focusBorder": "#2c2c2c"
+  }
+}

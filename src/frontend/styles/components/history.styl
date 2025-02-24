@@ -1,0 +1,239 @@
+.history-list
+  position: absolute
+  display: flex
+  flex-direction: column
+  margin-top: 34px
+  white-space: nowrap
+  padding: 2px
+  padding-top: 4px
+  padding-bottom: 4px
+  transform: translate(0, 50%)
+  border-radius: 6px
+  background: DROPDOWN_BASE
+
+  .history-list-item-wrapper
+    padding-left: 2px
+    padding-right: 2px
+
+    .history-list-item
+      width: 100%
+      padding-left: 8px
+      padding-right: 8px
+      cursor: pointer
+      font-family: "SpaceGrotesk"
+      color: PRIMARY_TEXT_COLOR
+      border-radius: 6px
+      font-size: 14px
+      line-height: 24px
+      display: flex
+      justify-content: space-between
+
+
+      &:hover
+        background: ACTIVE_ROW
+
+      &:focus
+        outline: none
+
+.full-history-list
+  display: flex
+  position: absolute
+  background: DROPDOWN_BASE
+  flex-direction: column
+  padding: 2px
+  padding-top: 4px
+  padding-bottom: 4px
+  left: 100%
+  transform: translateY(-28px)
+  overflow-y: auto
+  min-height: 0
+  max-height: 30vh
+  border-radius: 6px
+
+  &::-webkit-scrollbar-thumb
+    border-color: DROPDOWN_BASE
+
+.menu-expand
+  width: MENU_EXPAND_WIDTH
+  float: left
+  position: relative
+  margin-left: 8px
+  display: flex
+  align-items: center
+
+  &::after
+    position: absolute
+    right: 4px
+    // top: calc(50% - 6px)
+    width: 7px
+    height: 8px
+    content: MENU_EXTEND_ARROW_ICON
+    display: flex
+    align-items: center
+    padding-bottom: 2px
+    transform: translateY(1px)
+// .full-history-item:after
+//   content: MENU_EXTEND_ARROW_ICON
+//   width: 7px
+//   height: 8px
+//   padding-bottom: 2px
+//   position: absolute
+//   bottom: 10px
+//   right: 12px
+//   display: flex
+//   align-items: center
+
+.history-list-item.active
+  background-color: ACTIVE_ROW
+  color: red
+
+#history
+  display: flex
+  flex-direction: column
+
+  > #results
+    display: flex
+    flex-direction: column
+
+#history-switch
+  margin-left: 90px
+
+#values-switch
+  margin-left: 90px
+
+.history-expandable
+  color: COLOR
+
+.history-even
+  background-color: BACKGROUND_COLOR
+
+.history-odd
+  background-color: BACKGROUND_NEIGHBOUR_COLOR
+
+.value-name-container
+  .toggle-value-history
+    transform: translateY(0px)
+    margin-left: 4px
+
+.toggle-value-history
+  background-image: HISTORY_VALUE_VIEW_TOGGLE_IMAGE
+  background-size: 10px 10px
+  background-position: center
+  background-repeat: no-repeat
+  display: inline-block
+  height: 16px
+  min-width: 16px
+  margin-left: 8px
+  transform: translateY(3px)
+  padding: 2px
+  border-radius: 100px
+  cursor: pointer
+  outline: 1px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+
+  &.active
+    outline: 2px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+
+  &:hover > .custom-tooltip
+    opacity: 1
+    visibility: visible
+    transition-delay: 1s
+  
+  .custom-tooltip
+    top: -30%
+    left: 120%
+
+    &:after
+      content: '';
+      position: absolute;
+      left: -14px
+      top: 20%
+      border-width: 8px
+      border-style: solid
+      border-color: transparent TOOLTIP_BACKGROUND transparent transparent
+
+.history-text
+  display: flex
+  flex-direction: column
+  align-items:start
+
+  .history-text-element
+    display: flex
+    justify-content: flex-end
+    // border: 1px COLOR solid
+
+    .history-location-element
+      margin-right: 8px
+      display: flex
+      flex-direction: column
+      align-items: end
+
+    .history-location
+      // flex-basis: 25%
+      width: fit-content
+      color: VALUE_TYPE_COLOR
+
+
+    .history-value
+      flex-basis: 25%
+      white-space: nowrap
+      color: VALUE_RESULT_COLOR
+      margin-right: 25px
+
+
+.history-header
+  position: relative
+  top: 0
+  height: 30px
+  margin-top: 5px
+
+.history-button-close
+  z-index: 1
+  padding-left: 10px
+  background-image: ELEMENT_COMPONENT_CLOSE_ICON
+  background-size: 22px 22px
+  background-position: center
+  background-repeat: no-repeat
+  width: 24px
+  height: 24px
+  background-color: transparent
+  
+  &:hover
+    background-color: TOOLTIP_BACKGROUND
+
+.history-container
+  display: flex
+  width: fit-content
+  margin-left: 12px
+
+.inline-history, .history
+  background-color: DROPDOWN_BASE
+  color: TEXT_CONTENT_COLOR
+  font-size: 14px
+  cursor: pointer
+  height: 100px
+  position: relative
+  display: flex
+  overflow-y: scroll
+  border-radius: 6px
+  padding-left: 8px
+
+  &::-webkit-scrollbar-thumb
+    border-color: DROPDOWN_BASE
+
+  .inline-history-event
+    display: flex
+    border-style: solid
+    border-width: 1px
+    border-color: COLOR
+    padding: 1px
+
+    .inline-history-event-codeID
+      border-right: solid 1px COLOR
+      flex-basis: 50%
+
+    .inline-history-event-value
+      flex-basis: 50%
+      padding: 1px
+
+.history
+  width: 100%

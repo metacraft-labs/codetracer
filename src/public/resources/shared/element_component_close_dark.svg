@@ -1,0 +1,16 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-delete-square--button-remove-buttons-add-square-delete" clip-path="url(#clip0_1738_3)">
+<g id="Group">
+<g id="Group_2">
+<path id="Vector" d="M15.504 8.29614L8.29602 15.5041" stroke="#F3F3F3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M8.29602 8.29614L15.504 15.5041" stroke="#F3F3F3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<path id="Vector_3" d="M17.85 0.850098H5.95001C3.13335 0.850098 0.850006 3.13345 0.850006 5.9501V17.8501C0.850006 20.6667 3.13335 22.9501 5.95001 22.9501H17.85C20.6667 22.9501 22.95 20.6667 22.95 17.8501V5.9501C22.95 3.13345 20.6667 0.850098 17.85 0.850098Z" stroke="#F3F3F3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1738_3">
+<rect width="23.8" height="23.8" fill="white"/>
+</clipPath>
+</defs>
+</svg>

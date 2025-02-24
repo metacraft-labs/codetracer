@@ -1,0 +1,6 @@
+(loop counter 1 1001
+  ((print counter)
+  (set a 0)))
+
+(print 0)
+(write-file "example.txt" "example")

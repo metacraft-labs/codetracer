@@ -1,0 +1,14 @@
+<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-arrows-data-transfer-horizontal--arrow-square-data-internet-transfer-network-horizontal" clip-path="url(#clip0_1409_3252)">
+<g id="Group">
+<path id="Vector" d="M10.5 0.5H3.5C1.84315 0.5 0.5 1.84315 0.5 3.5V10.5C0.5 12.1569 1.84315 13.5 3.5 13.5H10.5C12.1569 13.5 13.5 12.1569 13.5 10.5V3.5C13.5 1.84315 12.1569 0.5 10.5 0.5Z" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M6 10.5L4 8.5H10" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M8 3.5L10 5.5H4" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1409_3252">
+<rect width="14" height="14" fill="white"/>
+</clipPath>
+</defs>
+</svg>

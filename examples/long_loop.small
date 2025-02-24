@@ -1,0 +1,5 @@
+(set b 0)
+(set c 0)
+(loop i 0 10000000 (
+  (set b i)
+  (set c i)))

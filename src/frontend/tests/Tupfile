@@ -1,0 +1,21 @@
+include_rules
+
+#: example-based/ui_test_simple.nim |> !nim_test_js |>
+#: example-based/ui_test_simple.nim |> !nim_test_core |> ../ui_test_simple
+
+# : example-based/quicksort_tests.nim |> !nim_test_js |>
+# : example-based/fibonacci_tests.nim |> !nim_test_js |>
+# : example-based/rr_gdb_tests.nim |> !nim_test_js |>
+#: example-based/one_hundred_iterations_tests.nim |> !nim_test_js |>
+#: example-based/ui_simple_tests.nim |> !nim_test_js |>
+
+
+: foreach example-based/*_tests.nim |> !nim_test_js |> ../../tests/%B.js
+
+# : test_suites/regression_tests/event_log_jump_to_all_events.nim |> !nim_test_js |>
+# : test_suites/regression_tests/run_to_entry.nim |> !nim_test_js |>
+#: example-based/ui_simple_tests.nim |> !nim_test_js |>
+#: example-based/a_million_lines_of_code_tests.nim |> !nim_test_js |>
+#: example-based/calc_tests.nim |> !nim_test_js |>
+
+: foreach *.yaml |> !tup_preserve |> ../../tests/

@@ -1,0 +1,25 @@
+(defun inc-first-with-ten (list) ; atom #0; variable list (?)
+  (loop i 0 10 ( ; atom 8; variable i;
+    (set new-first (add (# list 0) 1)) ; atom 9; variable new-first;
+    (set (# list 0) new-first) ; assign_atom 1; -> value from #9; (copy!) maybe eventually copy(#9 -> #1)
+    )
+  (print list))) ; eventually access(#0 #1.. : list)
+
+(set list (vector 0 1 2 3 4)) ; compound #0; variable list;
+(set limit 10_000) ; atom #6; variable limit;
+(loop i 0 limit ; atom #7; variable i; assign_atom; assign_atom;
+  (inc-first-with-ten list))
+
+; list : track for each history: maybe on compound change, update length; up to length find back each value recursively;
+; best to add also checkpoints: maybe postprocessing?? or in record; easier..
+; if postprocessing: track graph forward and maybe maintain for each step at least compound mapping!
+; but we might leave atom for later; or create just some checkpoints or cache values;
+; for first version; postprocessing: track graph forward and maintain mapping for each step somehow
+; for evaluation: point to each atom for now and go back
+
+
+; compound
+; atom/cell
+; assign_cell;
+; eventually variable/additional
+

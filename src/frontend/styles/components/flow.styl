@@ -1,0 +1,504 @@
+
+.flow-status-widget
+  height: 19px
+  width: max-content
+  display: inline-block
+  background-color: FLOW_PARALLEL_NAME_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_NAME_COLOR
+  font-size: 15px
+  padding-left: 2px
+  padding-right: 2px
+
+.flow-loop-legend
+  position: absolute
+  display: inline-flex
+  height: 20px
+  overflow: visible !important
+  font-size: 0.9em
+  margin-right: 10px
+
+.flow-parallel-values
+  float: left
+  height: 20px // border: box is 18px
+  transition: all 400ms ease
+  border-right: 1px solid FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
+
+.flow-parallel-value
+  display: inline-flex
+  padding-right: 10px
+
+.flow-parallel-value-name
+  // font-size: 15px
+  background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_NAME_COLOR
+  padding-left: 10px
+  padding-right: 10px
+  padding-top: 0
+  padding-bottom: 3px
+  // height: 17px
+  // line-height: 17px
+  display: inline-block
+  border-radius: 0px !important
+  border-top-left-radius: 4px !important
+  border-bottom-left-radius: 4px !important
+  box-sizing: border-box
+  white-space: nowrap
+
+.flow-error-name
+  background: FLOW_PARALLEL_ERROR_NAME !important
+
+.flow-std-default-name
+  background: FLOW_PARALLEL_STD_DEFAULT_NAME !important
+
+.flow-error-box
+  background: FLOW_PARALLEL_ERROR_BOX !important
+
+.flow-std-default-box
+  background: FLOW_PARALLEL_STD_DEFAULT_BOX !important
+
+.flow-parallel-value-before
+  background-color: FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_BEFORE_VALUE_COLOR
+
+.flow-parallel-value-after
+  background-color: FLOW_PARALLEL_AFTER_VALUE_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_AFTER_VALUE_COLOR
+
+.flow-parallel-value-box
+  width: 100%
+  display: inline-block
+  padding-left: 5px
+  padding-right: 5px
+  padding-top: 0
+  box-sizing: border-box
+  text-align: center
+  border-top-right-radius: 4px
+  border-bottom-right-radius: 4px
+  font-family: "FiraCode"
+  white-space: nowrap
+  max-width: 400px
+  min-width: fit-content
+  overflow: hidden
+  text-overflow: ellipsis
+
+.flow-dual-value-before
+  border-top-right-radius: 0px !important
+  border-bottom-right-radius: 0px !important
+
+.flow-dual-arrow
+  border-top-left-radius: 0px !important
+  border-bottom-left-radius: 0px !important
+
+.flow-parallel-value-before-only
+  background-color: FLOW_PARALLEL_BEFORE_ONLY_VALUE_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_BEFORE_ONLY_VALUE_COLOR
+  // box-shadow: 1px 1px 1px FLOW_LOOP_VALUE_BOX_SHADOW_COLOR
+
+.flow-parallel-value-after-only
+  background-color: FLOW_PARALLEL_AFTER_VALUE_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_AFTER_VALUE_COLOR
+  // box-shadow: -1px -1px FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
+
+.flow-parallel-value-dual
+  background-color: FLOW_PARALLEL_DUAL_VALUE_BACKGROUND_COLOR
+  color: FLOW_PARALLEL_DUAL_VALUE_COLOR
+
+.flow-inline-value-box
+  height: 17px
+  width: 100%
+  display: inline-block
+  padding-left: 2px
+  padding-right: 2px
+  padding-top: 0
+  padding-bottom: 3px
+  line-height: 17px
+  box-sizing: border-box
+  font-size: 12px
+  // min-width: 20px
+  // max-width: 100px // 31px // it seems we need a ~200px max or no max? (old: all width should be ~70px for two int values)
+  overflow: hidden
+  text-align: center
+  border-radius: 2px
+  text-overflow: ellipsis
+  font-family: monospace
+  margin-top: 1.5px
+
+.flow-inline-value-before-only
+  background-color: FLOW_INLINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR
+  color: FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR
+  box-shadow: 1px 1px 1px FLOW_LOOP_VALUE_BOX_SHADOW_COLOR
+
+.flow-inline-value-after-only
+  background-color: FLOW_INLINE_AFTER_VALUE_BACKGROUND_COLOR
+  color: FLOW_INLINE_AFTER_VALUE_COLOR
+  box-shadow: -1px -1px FLOW_INLINE_BEFORE_VALUE_BACKGROUND_COLOR
+
+
+
+  pre
+    display: inline-block
+    margin: 0
+    overflow: initial
+
+  .flow-parallel-loop-values
+    float: left
+    display: inline-block
+
+  .flow-iteration-info
+    width: 70px
+    float: left
+    background-color: FLOW_PARALLEL_ITERATION_INFO_BACKGROUND_COLOR
+    color: FLOW_PARALLEL_ITERATION_INFO_COLOR
+    height: 18px
+    line-height: 18px
+    border-radius: 1px
+    border: 0
+// box-shadow: -2px -2px #eee
+// box-shadow: -2px -2px #eee
+
+.flow-inline-decoration
+  height: 18px
+  width: 80px
+  display: inline-block
+
+  .flow-inline-value-box
+    // height: 15px
+    width: 80%
+    display: inline-block
+    padding-left: 2px
+    padding-right: 2px
+    padding-top: 0
+    // top: 1.5px
+    // line-height: 17px
+    // font-size: 12px
+    overflow: hidden
+    text-align: center
+    border-radius: 2px
+    text-overflow: ellipsis
+    font-family: monospace
+    font-weight: normal
+    margin-left: 15%
+    position: relative
+
+  .flow-inline-value-before-only
+    background-color: FLOW_MULTILINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR
+    color: FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR
+    box-shadow: 1px 1px 1px FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
+
+.flow-loop-background
+  position: absolute
+  z-index: -1
+  background-color: FLOW_PARALLEL_BACKGROUND_COLOR
+  border-radius: 5px
+  border: 1px solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
+  opacity: 0.5
+
+.flow-loop-slider-container
+  position: absolute
+  width: 100px !important
+
+.flow-loop-slider
+  border-color: FLOW_PARALLEL_SLIDER_COLOR !important
+  border-width: 1px !important
+  position: fixed !important
+  font-size: 0.9em
+  height: 2px !important
+
+  .noUi-base
+    width: 100%
+    height: 2px !important
+    background-color: NOUI_SLIDER_BACKGROUND_COLOR
+
+  .noUi-handle
+    width: 1.5ch !important
+    height: 1.5ch !important
+    background-color: NOUI_SLIDER_HANDLER_BACKGROUND
+    // border: 1px solid NOUI_SLIDER_HANDLER_BORDER
+    right: -0.7ch !important
+    top: -0.65ch !important
+    background-image: NOUI_SLIDER_HANDLER_IMAGE
+    background-position: center
+    background-size: 0.5ch 0.5ch
+    background-repeat: no-repeat
+    border-radius: 100px
+    outline: 2px solid NOUI_SLIDER_HANDLER_BORDER
+  .noUi-connect
+    background: transparent
+  .noUi-tooltip
+    position: absolute
+    font-size: 12px !important
+    display: none
+    z-index: 100 !important
+  .noUi-tooltip::after
+    display: none
+  .noUi-handle:before
+    display: none
+  .noUi-handle:after
+    display: none
+  .noUi-active
+    background-color: NOUI_SLIDER_ACTIVE_HANDLER_BACKGROUND
+    background-image: NOUI_SLIDER_ACTIVE_HANDLER_IMAGE
+    .noUi-tooltip
+      display: block !important
+  .noUi-base
+    // width: 60% !important
+    // max-width: 300px
+  .noUi-target
+    width: 500px
+    margin-right: 64px !important
+    border: 0px !important
+    box-shadow: none !important
+    background: NOUI_SLIDER_BACKGROUND_COLOR !important
+
+  #slider-slow.noUi-state-tap .noUi-connect
+  #slider-slow.noUi-state-tap .noUi-origin
+    -webkit-transition: transform 1600ms
+    transition: transform 1600ms
+
+
+
+.flow-loop-first-line
+  .flow-iteration-info
+    height: 16px !important
+    line-height: 16px !important
+
+  .flow-parallel-values
+    height: 18px // border: box is 16px
+
+  .flow-left-button
+    position: fixed
+    margin-top: 20px
+    font-size: 20px
+    cursor: pointer
+    z-index: 20
+
+  .flow-right-button
+    position: fixed
+    margin-top: 20px
+    font-size: 20px
+    margin-left: 570px
+    cursor: pointer
+
+.flow-tooltip-value
+  white-space: nowrap
+  // max-width: 100%
+  overflow: hidden
+  text-overflow: ellipsis
+
+
+// TODO
+// why ex and not em? it seems it should be em, used also in flow.nim
+// https://developer.mozilla.org/en-US/docs/Learn/CSS/Building_blocks/Values_and_units
+// but it looks too wide e.g. 48em vs 48ex for left for flow
+
+.flow-loop-multiline
+  left: 40ex /* TODO: custom based on annotations */
+  position: fixed
+  margin-top: 19px
+  margin-bottom: 19px
+
+.flow-loop-line
+  left: 80ex
+  position: fixed
+
+.flow-loop-empty-space
+  position: relative
+
+
+.flow-loop-empty-space-left-border
+  min-width: 6%
+  max-width: 6%
+  border-left: 1px solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
+  height: 20px
+
+.flow-loop-shrinked-iteration
+  background-color: #384149
+  width: 100%
+  height: 16px
+  position: absolute
+  left: 1.5px
+  top: 2px
+  border-radius: 2.5px
+
+.flow-loop-continuous-iteration
+  background-color: #384149
+  width: 100%
+  height: 16px
+  position: absolute
+  top: 2px
+  border-radius: 0.5px
+
+.flow-loop-continuous-iteration.first
+  border-top-left-radius: 2.5px
+  border-bottom-left-radius: 2.5px
+
+.flow-loop-continuous-iteration.last
+  border-top-right-radius: 2.5px
+  border-bottom-right-radius: 2.5px
+  margin-right: 5px
+
+.flow-loop-legend-expression
+  height: 17px
+  width: 100%
+  display: inline-block
+  padding-left: 2px
+  padding-right: 2px
+  padding-bottom: 3px
+  line-height: 17px
+  box-sizing: border-box
+  font-size: 12px
+  overflow: hidden
+  text-align: center
+  border-radius: 2px
+  text-overflow: ellipsis
+  font-family: monospace
+  background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR// #C2C4CD
+  box-shadow: 1px 1px 1px FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR//#9A9DA7
+  margin-top: 1.5px
+  color: FLOW_PARALLEL_NAME_COLOR
+
+.flow-loop-value-single
+  display: flex
+
+.tippy-box[data-theme~='internal_default_light']
+  background-color: FLOW_BACKGROUND_COLOR
+  border-top-left-radius: 0
+  border-top-right-radius: 0
+  border-bottom-left-radius: 6px
+  border-bottom-right-radius: 6px
+  color: PRIMARY_TEXT_COLOR
+  display: inline-flex
+  font-size: 14px
+  // height: 40px
+  min-width: 50px
+  max-width: fit-content !important
+  padding-right: 8px
+  position: relative
+  // width: fit-content
+  // margin-top: 16px
+  z-index: 20
+  padding-left: 8px
+  top: 1.2ch
+
+  &::before
+    position: absolute
+    display: flex
+    align-items: center
+    content: 'Values:'
+    font-size: 12px
+    width: 100%
+    height: 24px
+    top: -24px
+    left: 0
+    background-color: FLOW_VALUE_NAME_BACKGROUND
+    border-top-left-radius: 6px
+    border-top-right-radius: 6px
+    text-indent: 5px
+    font-weight: bold
+  
+  .value-expanded-compound::before
+    left: 4px !important
+  
+  .toggle-value-history
+    display: none
+
+  .value-expand-button
+    display: none
+  
+  .value-expanded-name
+    padding-left: 0px !important
+
+  .flow-tooltip-step-info
+    font-style: italic
+    color: FLOW_VALUE_NAME_BACKGROUND
+  
+  .add-to-scratchpad-button
+    width: 16px
+    height: 16px
+    background-image: ADD_TO_SCRATCHPAD_BUTTON_IMAGE
+    background-size: 16px 16px
+    background-position: center
+    background-repeat: no-repeat
+    cursor: pointer
+    transform: translateX(-4px)
+    border-radius: 100px
+    outline: 1px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+
+    &:hover
+      outline: 2px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+
+    &:active
+      opacity: 0.5
+    
+    .custom-tooltip
+      left: -140px
+      top: -6px
+
+      &:after
+        border-color: transparent transparent transparent TOOLTIP_BACKGROUND
+        left: 98%
+        bottom: 0%
+        border-width: 12px
+        top: 0%
+
+  &[data-placement^="top"] > .tippy-arrow::before {
+    border-top-color: #FEFEFE
+  }
+
+  &[data-placement^="top"] > .tippy-content {
+    position: relative
+    // top: 13px
+    font-weight: 400
+    overflow: visible
+    white-space: nowrap
+    max-width: 100%
+  }
+
+.line-flow-hit
+  font-weight: BOLD_WEIGHT
+  opacity: 1
+  position: relative
+// top: -3px
+
+.line-flow-skip
+  opacity: 0.5
+  font-weight: normal
+
+.line-flow-unknown
+  font-weight: normal
+  opacity: 0.5
+
+.flow-taken
+  width: 100px
+  background: FLOW_CONDITION_TAKEN
+
+.flow-not-taken
+  width: 100px
+  background: FLOW_CONDITION_NOT_TAKEN
+
+@font-face
+  font-family: FontAwesome
+  src: url(../../public/resources/fonts/fontawesome-webfont.woff) format('woff'),
+          url(fontawesome-webfont.ttf) format('truetype')
+  font-weight: 400
+  font-style: normal
+
+@keyframes flow-width
+  0%
+    background-color: #00f
+
+  100%
+    background-color: #0f0
+
+.status-timer
+  margin-left: 10px
+
+  #slower-message
+    padding-left: 10px
+
+.flow-inline-value-before:after
+  content: attr(data-content)
+  border: 1px solid COLOR
+  height: 18px
+  background-color: #0ff
+  display: inline-block

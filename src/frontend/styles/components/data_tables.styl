@@ -1,0 +1,176 @@
+.data-table
+  // font-family: Arial, Helvetica, sans-serif
+  font-size: 14px !important
+  font-weight: 400 !important
+  font-family: 'FiraCode'
+  letter-spacing: -0.14px !important
+  flex: 1 1 auto
+  overflow: hidden
+  color: COLOR
+
+  .rr-ticks-line-container
+    position: relative
+    height: 10px
+
+    .rr-ticks-line
+      display: inline-block
+      background: linear-gradient(to right, RR_TICKS_LINE_LEFT_COLOR, RR_TICKS_LINE_RIGHT_COLOR)
+      height: 3px !important
+
+  .rr-ticks-empty-remaining
+    display: inline-block
+    background-color: RR_TICKS_EMPTY_REMAINING_COLOR
+    height: 3px !important
+    position: absolute
+    z-index: 2
+
+  .rr-ticks-time-container
+    // font-family: sans-serif
+    font-size: 13px
+    width: 100%
+    height: 22px
+    line-height: 2em
+    position: relative
+
+    .rr-ticks-time
+      position: unset
+      text-indent: -50%
+
+  .direct-location-rr-ticks
+    display: inline-block
+    position: relative
+    width: 15%
+    min-width: 15ex
+    padding-left: 3ex
+    padding-right: 3ex
+    max-height: 24px
+    transform: translateY(-4px)
+
+  .event-rr-ticks-line
+    height: 2px
+    width: 100%
+    display: inline-block
+    position:absolute
+    z-index: 0
+
+  .paging_simple_numbers
+    display: none
+
+  .dataTables_length
+    display: none
+
+  table
+    width: 100%
+    display: block
+
+    tbody
+      display: block
+      cursor: pointer
+
+  tr
+    height: 24px
+    font-size: 14px
+    font-weight: 400
+    display: flex
+    margin-left: 8px
+    margin-right: 8px
+    border-top: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    color: COLOR
+    align-items: start
+
+    td
+      cursor: normal
+
+    .dataTables_empty
+      cursor: normal
+
+    &.future
+      opacity: 0.5
+
+    &.future:hover
+      opacity: 1
+
+    &.odd.past:hover
+      background-color: ACTIVE_ROW
+      opacity: 1
+
+    &.even.past:hover
+      background-color: ACTIVE_ROW
+      opacity: 1
+
+    &.odd.future:hover
+      background-color: ACTIVE_ROW
+      opacity: 1
+
+    &.even.future:hover
+      background-color: ACTIVE_ROW
+      opacity: 1
+
+    td
+      display: grid
+      color: EVENT_LOG_CONTENT_COLOR
+      font-weight: 400
+  td
+    text-overflow: clip
+  /* max-width: 200px // TODO */
+
+  thead
+    display: none
+
+.dataTables_wrapper
+  height: 100%
+
+  .dataTables_length
+    display: none
+
+  .dataTables_scrollHead
+    height: 0 !important
+
+  .dataTables_info
+    padding-left: 10px
+
+.data-tables-footer
+  position: relative
+  padding-left: 15px
+  height: 24px
+  font-size: 12px
+  line-height: 24px
+  // font-style: italic
+  font-family: "SpaceGrotesk"
+  color: TEXT_CONTENT_COLOR
+  display: flex
+
+  .data-tables-footer-info
+    position: relative
+    margin-right: 10px
+    display: flex
+    align-items: center
+
+    .data-tables-footer-end-row
+      padding-left: 0.5ex
+      padding-right: 0.5ex
+
+    .data-tables-footer-rows-count
+      padding-left: 0.5ex
+      padding-right: 0.5ex
+  
+  .data-tables-footer-input
+    margin-bottom: 0px !important
+
+  .data-tables-footer-checkbox-container
+    position: relative
+    height: 100%
+    padding-left: 20px
+
+  input
+    border-radius: 4px
+    padding: 0 !important
+    margin-left: 10px !important
+    margin-right: 10px
+    height: 16px
+    width: 50px
+    text-align: start
+    font-size: 12px !important
+    background-image: none !important
+    padding-left: 4px !important
+    padding-right: 4px !important

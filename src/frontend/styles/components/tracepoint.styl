@@ -1,0 +1,602 @@
+.write-file
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+
+  .write-file-path
+    color: blue
+  .write-file-content
+    height: 100px
+
+
+
+.read-file
+  background-color: blue
+  color: white
+
+  .read-file-path
+    color: #eee
+  .read-file-content
+    height: 100px
+    overflow: hidden
+
+.open-dir, .read-dir
+  background-color: green
+  color: black
+
+.traceLog
+  display: flex;
+  flex-direction: column;
+  color: COLOR
+
+  .trace-location
+    width: 20%
+
+  .trace-function-name
+    width: 10%
+
+  .trace-values
+    width: 45%
+    cursor: pointer
+    text-overflow: ellipsis
+    overflow: visible
+    white-space: nowrap
+    display: flex
+
+
+.trace-main
+  // stop:8px
+  top: 8px
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+  // width: calc(100%+71px)
+  width: 100% !important
+  padding-right: 1ch
+  // height: 36ch
+  position: absolute
+  // left: -81px
+
+  .editor-textarea
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 5
+
+  .cursor
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 4
+
+  .view-overlays.focused
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 3
+    opacity: 0.4
+    cursor: text
+
+  .view-overlays
+    z-index: 5
+    cursor: text
+
+  .view-line
+    font-weight: 400
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 2
+
+  .view-lines
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 1
+
+  .trace-view
+    position: relative
+    width: 100%
+    height: -webkit-fill-available
+
+    .direct-location-rr-ticks
+      transform: translateY(0px)
+      padding-top: 2px
+
+    tbody
+      tr
+        height: 24px
+
+      td
+        height: 24px
+
+    .rr-ticks-time-container
+      height: 16px
+      line-height: normal
+
+    .trace-line
+      width: 20%
+      color: COLOR
+
+    .trace-values
+      padding-top: 4px !important
+      line-height: 16px !important
+      width: 80%
+      color: TEXT_CONTENT_COLOR
+      cursor: pointer
+      overflow: hidden
+      white-space: nowrap
+      text-overflow: clip
+      display: flex
+
+      &:hover
+        overflow-x: overlay !important
+
+        &::-webkit-scrollbar-thumb:horizontal
+          border: 0px !important
+          background-color: PRIMARY_BASE
+
+        &::-webkit-scrollbar
+          height: 4px !important
+
+    // .odd, .even
+    //  opacity: 0.5
+
+    .direct-location-rr-ticks
+      width: 20%
+      height: 22px
+
+  .scrollbar
+    .slider
+      border-radius: 2.5px
+
+  .trace-chevron
+    position: absolute
+    left:50%
+
+    .trace-chevron-baseline
+      position: absolute;
+      width: 80px;
+      height: 2px;
+      top: 0;
+      background-color: TRACEPOINT_CHEVRON_COLOR;
+      z-index: 3;
+      left: calc(50% - 40px);
+      border-top-left-radius: 2px
+      border-top-right-radius: 2px
+
+    .trace-chevron-baseline-cut
+      position: absolute;
+      width: 10px;
+      height: 2px;
+      top: 0;
+      background-color: TRACEPOINT_BACKGROUND_COLOR;
+      z-index: 3;
+      left: calc(50% - 5px);
+
+    .trace-chevron-arrow
+      color: TRACEPOINT_CHEVRON_COLOR
+      cursor: pointer
+      position: absolute
+      left: 50%
+      z-index: 4
+
+      &::before
+        border-style: solid
+        border-width: 2px 2px 0 0
+        content: ''
+        display: inline-block
+        height: 9px
+        left: -4.5px
+        position: absolute
+        top: -5px
+        transform: rotate(315deg)
+        vertical-align: top
+        width: 9px
+
+  .trace-modal
+    border: 1px solid black
+    position: relative
+    display: none
+    margin-left: 60px
+    background-color: TRACEPOINT_BACKGROUND_COLOR
+    width: 85%
+    overflow: visible
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 5
+
+    .value-view
+      position: relative !important
+
+    .modal-close-button
+      position: absolute
+      top: 3px
+      right: 0
+      height: 17px
+      display: flex
+      z-index: 2
+
+    .modal-close-button::after
+      content: "X"
+      font-size: 15px
+      font-weight: bold
+
+    .select-kind-button-container
+      display: none
+
+    .value-expanded-compound
+      height: 100%
+
+    .value-expanded-view
+      overflow-x: auto
+      background-color: inherit
+
+    .atom-even
+      height: 100%
+      background-color: inherit
+
+    .atom-odd
+      height: 100%
+      background-color: inherit
+
+
+.current-trace
+  border-color: #00a
+
+.trace-menu
+  min-height: 36px
+  // width: 100%
+  display: flex
+  padding-left: 6px
+  padding-right: 6px
+  // padding-bottom: 8px
+  padding-top: 6px
+  align-items: start
+  justify-content: space-between
+  border-radius: 6px
+
+  .trace-search
+    line-height: 0
+
+  .dropdown-list
+    position: absolute
+    top: 100%
+    background-color: transparent
+    width: fit-content !important
+
+    .trace-dropdown-list-container
+      padding: 4px
+      background-color: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
+      border-radius: 6px
+
+  .dropdown-list.active
+    .fa
+      color: DROPDOWN_TEXT_BACKGROUND_COLOR
+
+  .trace-buttons-container
+    display: flex
+    gap: 6px
+
+  .run-trace-button
+    border-radius: 6px;
+    color: BORDER_COLOR;
+    cursor: pointer;
+    height: 24px;
+    background: BUTTON_COLOR;
+    width: 24px;
+    position: relative;
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
+    display: flex
+    justify-content: center
+    align-items: center
+
+    &:hover
+      background: BUTTON_HOVER_BACKGROUND
+
+  .trace-search
+    width: -webkit-fill-available
+    padding-right: 8px
+
+    input
+      height: 24px
+      font-size: 14px
+      border: 0
+      background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+      color: TEXT_CONTENT_COLOR
+      margin-left: 10%
+      // margin-top: 5px
+      margin-bottom: 0px !important
+      border-radius: 6px
+      padding-left: 24px
+
+      &:focus
+        border: 1px solid BORDERS_COLOR
+        outline: none
+
+  .hamburger-dropdown
+    border-radius: 6px
+    height: 24px
+    z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
+    top: 0
+
+  .trace-dropdown-menu
+    display: none
+
+    &.active
+      background: #b8c0cf !important
+      position: absolute
+      border: 1px solid
+      border-radius: 10px
+      border-color: darkgrey
+      padding-top: 0
+      padding-left: 5px
+      padding-right: 10px
+      padding-bottom: 10px
+      margin-top: 5px
+      z-index: 56
+      top: 0
+      right: 20px
+      transform: translate3d(0px, 26px, 0px)
+      display: block
+      color: black
+
+  .trace-search-unselected
+    flex-basis: 75%
+
+  .trace-right
+    position: relative
+  // right: 0px
+
+  .trace-menu-header
+    height: 30px
+    margin-top: 5px
+
+    // button
+    //   background-color: TRACE_HEADER_BACKGROUND_COLOR
+    //   color: COLOR
+    //   height: 25px
+    //   margin-top: 0
+    //   margin-left: 0
+    //   margin-right: 0
+    //   padding: 0
+    //   width: 50%
+    //   float: left
+
+    .dropdown
+      border-radius: 15px
+      color:#434f6a
+      cursor: pointer
+      height: 30px
+      margin-top: 10px
+      background-color: DROPDOWN_TEXT_BACKGROUND_COLOR
+      padding-top: 2px
+      padding-left: 15px
+      padding-right: 30px
+      right: 10px
+      width: 30px
+      position: absolute
+      z-index: 1
+
+  .search-traces
+    flex-basis: 50%
+    margin: 0
+    padding: 0
+
+.kind-dropdown-menu
+  background: #b8c0cf !important
+  position: absolute
+  border: 1px solid
+  border-radius: 10px
+  border-color: darkgrey
+  padding-top: 0
+  padding-left: 5px
+  padding-right: 10px
+  padding-bottom: 10px
+  margin-top: 5px
+  width: fit-content
+  z-index: 56
+  top: 0 !important
+  // right: 75px
+  transform: translate3d(0px, 21px, 0px)
+  display: block
+  color: black
+  user-select: none
+
+
+.trace-simple
+  color: TRACE_SIMPLE_COLOR
+  cursor: pointer
+  padding-top: 5px
+
+.trace-sequence
+  display: flex
+  flex-direction: column
+
+.trace-var
+  color: TRACE_VAR_COLOR
+  font-size: 20px
+
+.trace-enum
+  color: TRACE_ENUM_COLOR
+  font-weight: bold
+
+.inline-value > .simple-value > .trace-simple
+  text-align: left
+
+
+.instance-0
+  margin-left: 4%
+
+.instance-1
+  width: 64%
+  margin-left: 10%
+
+.trace-metadata
+  flex-basis: 5%
+
+.trace-field
+  width: 100%
+
+.trace-field-name
+  width: 100%
+
+.trace-data
+  font-size: 16px
+
+.links line
+  stroke: #999
+  stroke-opacity: 0.6
+
+.nodes circle
+  stroke: #fff
+  stroke-width: 1.5px
+
+.trace-slot
+  width: 5%
+
+.trace-expand
+  color: TRACE_EXPAND_COLOR
+  cursor: pointer
+  text-align: right
+
+
+RESIZING_BORDER_SIZE = 4px
+
+.width-border
+  height RESIZING_BORDER_SIZE
+  &:hover
+    cursor: row-resize
+
+.height-border
+  width RESIZING_BORDER_SIZE
+  &:hover
+    cursor: col-resize
+
+.width-border, .height-border
+  background-color COLOR_PANEL_BORDER
+
+.trace-error
+  color: NOTIFICATION_ERROR_COLOR
+  padding-right: 8px
+
+.trace-simple-metadata
+  flex-grow: 20
+
+.trace-expandables
+  border-color: COLOR
+  display: flex
+  flex-direction: column
+
+.trace-expandable
+  /*border-width: 1px*/
+  /*border-color: #000*/
+  /*border-style: solid*/
+  display: flex
+
+.switch
+  background-color: BACKGROUND_OPPOSITE_COLOR
+  color: white
+  width: 78px
+  float: left
+  cursor: pointer
+
+#trace-switch
+  margin-left: 90px
+
+.select-view-kind
+  position: relative
+  display: none
+
+.select-view-kind-button
+  text-align: center
+  height: 25px
+  width: 100px
+  background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  font-size: 15px
+  border-radius: 15px
+  cursor: pointer
+  display: none
+  position: absolute
+  // right: 75px
+  left: 0
+
+  &.active
+    border-radius: 15px
+    border: 2px solid
+    border-color: rgb(126, 126, 126)
+    text-align: center
+    height: 25px
+    width: 100px
+    background-color: #b8c0cf
+    color: HEADER_ELEMENT_BACKGROUND_COLOR
+    font-size: 15px
+    cursor: pointer
+    position: absolute
+    // right: 75px
+    left: 0
+
+  &:hover
+    background-color: #b8c0cf
+    color: HEADER_ELEMENT_BACKGROUND_COLOR
+
+  ::after
+    margin-left: 10px !important
+
+.expanded-compound-select-view-kind
+  margin-left: 32%
+
+.editor-trace
+  cursor: pointer
+
+//.active-trace
+//  background-color: #00f
+
+#save-trace
+  cursor: pointer
+  font-size: 24px
+
+.trace
+  .dropdown-list-item
+    display: flex
+    text-indent: 0 !important
+    padding-left: 4px !important
+    padding-right: 4px !important
+    text-align: start
+    font-weight: 400
+    font-size: 14px
+    justify-content: start
+    border-radius: 4px
+
+    &:hover
+      background-color: ACTIVE_ROW
+
+  // .dropdown-list
+  //   min-width: 80px !important
+
+// based on https://stackoverflow.com/questions/2941189/how-to-overlay-one-div-over-another-div
+.tracepoint-overlay
+  opacity: 0.8
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+  z-index: TRACE_LOG_EDITOR_Z_INDEX + 6
+  position: absolute
+  width: 100%
+  height: 100%
+  display: flex
+  align-items: center
+  justify-content: center
+  overflow: hidden !important
+
+.trace-overlay
+  font-family: "SpaceGrotesk"
+  position: relative
+  // top: calc(50% - 0.5ex)
+  font-size: 14px
+  text-align: center
+  cursor: text
+  user-select: text
+
+.graph
+  position: absolute
+  z-index: 21
+  visibility: hidden
+
+.expand-trace
+  cursor: pointer
+  opacity: 0
+
+.trace
+  font-size: 16px
+  // width: 100%
+  height: 100%
+  z-index: TRACE_LOG_EDITOR_Z_INDEX
+
+// .trace > div
+//   width: 100%
+
+.error-trace
+  color: NOTIFICATION_ERROR_COLOR
+  padding-right: 8px

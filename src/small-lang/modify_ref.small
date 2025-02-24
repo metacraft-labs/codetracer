@@ -1,0 +1,12 @@
+(defun inc (ptr)
+  (set-deref ptr (add (deref ptr) 1)))
+
+(defun inc-value (value)
+  (set value (add value 1)))
+
+(set limit 10)
+(set value 0)
+(set r (ref value))
+(loop i 0 limit
+  (inc r))
+(print value)

@@ -1,0 +1,358 @@
+import
+  std / options,
+  confutils/defs
+
+# TODO check if the values with special characters are parsed correctly by confutils
+# and consider a fix if not
+type
+  StartupCommand* {.pure.} = enum
+    noCommand,
+    replay,
+    run,
+    install,
+    upload,
+    download,
+    # build,
+    record,
+    console,
+
+    # `g++`,
+    # gcc,
+    # rustc,
+    # `cargo`,
+    # clang,
+    # ruby,
+    # python,
+    # lua,
+    # nim,
+
+    list,
+    help,
+    version,
+    # tail,
+    start_core, # TODO .hidden?
+    # host,
+    # `import`,
+    # `import-db-trace`,
+    # summary,
+    # `report-bug`,
+    `trace-metadata`, # TODO .hidden?
+
+type
+  # the following TODOs are for changes in confutils
+  # TODO handle descriptions of commands
+  CodetracerConf* = object
+    case cmd* {.
+      command,
+      defaultValue: noCommand
+    .}: StartUpCommand
+    of noCommand:
+      noCmdArgs* {.
+        ignore
+      .}: string
+    # of `g++`:
+    #   # forward the arguments to g++ compiler
+    #   gppArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to g++ compiler"
+    #   .}: seq[string]
+    # of gcc:
+    #   # forward the arguments to gcc compiler
+    #   gccArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to gcc compiler"
+    #   .} : seq[string]
+    # of rustc:
+    #   # forward the arguments to rustc compiler
+    #   rustcArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to rustc compiler"
+    #   .} : seq[string]
+    # of `cargo`:
+    #   # forward the arguments to cargo, which will, in turn, forward them to rustc
+    #   cargoArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to cargo"
+    #   .} : seq[string]
+    # of clang:
+    #   # forward the arguments to clang compiler
+    #   clangArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to clang compiler"
+    #   .} : seq[string]
+    # of ruby:
+    #   # forward the arguments to ruby interpreter
+    #   rubyArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to ruby interpreter"
+    #   .} : seq[string]
+    # of python:
+    #   # forward the arguments to python interpreter
+    #   pythonArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to python interpreter"
+    #   .} : seq[string]
+    # of lua:
+    #   # forward the arguments to lua interpreter
+    #   luaArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to lua interpreter"
+    #   .} : seq[string]
+    # of nim:
+    #   # forward the arguments to nim compiler
+    #   nimArgs* {.
+    #     restOfArgs
+    #     defaultValue: @[]
+    #     desc: "Arguments to forward to nim compiler"
+    #   .} : seq[string]
+    of install:
+      installCtOnPath* {.
+        name: "path",
+        abbr: "p",
+        desc: "Install CodeTracer on the PATH"
+        defaultValue: true
+       .}: bool
+      # TODO: This should be put behind a when defined(linux) condition,
+      #       but Confutils doesn't support this currently.
+      installCtDesktopFile* {.
+        name: "desktop",
+        abbr: "d",
+        desc: "Install CodeTracer .desktop file"
+        defaultValue: true
+       .}: bool
+    of list:
+      listFormat* {.
+        name: "format",
+        desc: "text or json",
+        defaultValue: "text"
+      .} : string
+      listTarget* {.
+        argument,
+        name: "target",
+        defaultValue: "local",
+        desc: "target for list: local or remote"
+      .}: string
+    of help:
+      helpArgs* {.
+        ignore
+      .} : seq[string]
+    of version:
+      versionArgs* {.
+        ignore
+      .} : seq[string]
+    of console:
+     consoleTraceId* {.
+        name: "id",
+        desc: "a trace id"
+      .}: Option[int]
+     consoleTraceFolder* {.
+        name: "trace-folder",
+        abbr: "t",
+        desc: "the trace output folder"
+      .}: Option[string]
+     consoleLastTraceMatchingPattern* {.
+        argument,
+        desc: "a string matching the name of the traced program"
+      .}: Option[string]
+     consoleInteractive* {.
+       name: "interactive",
+       abbr: "i",
+       desc: "explicit flag for interactively choosing a trace"
+      .}: Option[bool]
+    # of build:
+    #   buildProgramPath* {.
+    #     argument
+    #     desc: "path to program source code"
+    #   .} : string
+    #   buildOutputPath* {.
+    #     argument
+    #     defaultValue: ""
+    #     desc: "Output path: by default the program path without the extension"
+    #   .} : string
+    of record:
+      # recordOutputFolder* {.
+      #   name: "output-folder"
+      #   abbr: "o"
+      #   defaultValue: "."
+      #   desc: "Output folder for the recording"
+      # .} : string
+
+      # recordExportFile* {.
+      #   name: "export"
+      #   abbr: "e"
+      #   defaultValue: "",
+      #   desc: "Export zip file for the recording"
+      # .} : string
+
+      # recordLang* {.
+      #   name: "lang"
+      #   defaultValue: ""
+      #   desc: "Language of the recording. Supported languages: c, cpp, rust, ruby, python, lua, nim ???"
+      # .} : string
+
+      # recordProgram* {.
+      #   argument
+      #   desc: "Program to record"
+      # .} : string
+
+      recordArgs* {.
+        restOfArgs
+        defaultValue: @[]
+        desc: "Arguments for record",
+        longDesc: "longer description for record"
+      .} : seq[string]
+    of replay:
+     replayTraceId* {.
+        name: "id",
+        desc: "a trace id"
+      .}: Option[int]
+     replayTraceFolder* {.
+        name: "trace-folder",
+        abbr: "t",
+        desc: "the trace output folder"
+      .}: Option[string]
+     lastTraceMatchingPattern* {.
+        argument,
+        desc: "a string matching the name of the traced program"
+      .}: Option[string]
+     replayInteractive* {.
+       name: "interactive",
+       abbr: "i",
+       desc: "explicit flag for interactively choosing a trace"
+      .}: Option[bool]
+    of run:
+      runTracePathOrId* {.
+        argument
+        desc: "If not a valid trace ID, interpreted as a path to a trace, if not a valid path, interpreted as a program to run"
+      .} : string
+
+      runArgs* {.
+        restOfArgs
+        defaultValue: @[]
+        desc: "Arguments to forward to trace run command"
+      .} : seq[string]
+    of upload:
+      # same args as replay
+      uploadTraceId* {.
+        name: "id",
+        desc: "a trace id"
+      .}: Option[int]
+      uploadTraceFolder* {.
+        name: "trace-folder",
+        abbr: "t",
+        desc: "the trace output folder"
+      .}: Option[string]
+      uploadLastTraceMatchingPattern* {.
+        argument,
+        desc: "a string matching the name of the traced program"
+      .}: Option[string]
+      uploadInteractive* {.
+        name: "interactive",
+        abbr: "i",
+        desc: "explicit flag for interactively choosing a trace"
+      .}: Option[bool]
+    of download:
+      traceRegistryId* {.
+        argument,
+        desc: "the trace registry unique id: <program-name>#<id> e.g. a.rb#5"
+      .}: string
+    of start_core:
+      coreTraceArg* {.
+        argument
+        desc: "Trace id or program name"
+      .} : string
+      coreCallerPid* {.
+        argument
+        desc: "Unique codetracer instance run pid"
+      .}: int
+      coreInTest* {.
+        name: "test",
+        defaultValue: false
+        desc: "Is it in test mode"
+      .}: bool
+    # of `import`:
+    #   importTraceZipPath* {.
+    #     argument
+    #     desc: "Trace zip file to import"
+    #   .} : string
+    #   importOutputPath* {.
+    #     argument
+    #     defaultValue: ""
+    #     desc: "Output folder for the import command"
+    #   .} : string
+    # of `import-db-trace`:
+    #   importDbTracePath* {.
+    #     argument
+    #     desc: "Trace path to import"
+    #   .}: string
+    # of summary:
+    #   summaryTraceId* {.
+    #     argument
+    #     desc: "Trace id to summarize"
+    #   .} : int
+
+    #   summaryOutputFolder* {.
+    #     argument
+    #     desc: "Output folder for the summary command. If empty "
+    #   .} : string
+    # of `report-bug`:
+    #   title* {.
+    #     name: "title",
+    #     defaultValue: "",
+    #     desc: "Title for the bug report message"
+    #   .} : string
+    #   description* {.
+    #     name: "description",
+    #     defaultValue: "",
+    #     desc: "Description for the bug report message"
+    #   .} : string
+    #   pid* {.
+    #     argument,
+    #     defaultValue: "last",
+    #     desc: "PID number for the process"
+    #   .} : string
+    #   confirmSend* {.
+    #     name: "confirm-send",
+    #     defaultValue: true,
+    #     desc: "Warning message for sensative data"
+    #   .} : bool
+    of `trace-metadata`:
+      traceMetadataIdArg* {.
+        name: "id",
+        desc: "id of a trace"
+      .} : Option[int]
+      traceMetadataPathArg* {.
+        name: "path",
+        desc: "path for a trace"
+      .}: Option[string]
+      traceMetadataRecordPidArg* {.
+        name: "record-pid",
+        abbr: "r",
+        desc: "record pid for a trace"
+      .}: Option[int]
+      traceMetadataProgramArg* {.
+        name: "program",
+        desc: "program pattern to find a trace with"
+      .}: Option[string]
+      traceMetadataRecent* {.
+        name: "recent",
+        desc: "return recent traces",
+        defaultValue: false,
+      .}: bool
+      traceMetadataRecentLimit* {.
+        name: "limit",
+        desc: "recent traces limit",
+        defaultValue: 4,
+      .}: int
+      traceMetadataTest* {.
+        name: "test",
+        defaultValue: false,
+      .}: bool

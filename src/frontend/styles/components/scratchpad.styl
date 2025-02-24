@@ -1,0 +1,49 @@
+
+[id^="scratchpadComponent-"]
+  height: 105%
+
+#scratchpad
+  background-color: BACKGROUND_COLOR
+  height: 100vh
+
+  .scratchpad-element
+
+    .scratchpad-value
+      width: calc(100% - 20px)
+      float: left
+
+      .atom-even
+        background-color: BACKGROUND_COLOR
+        border: 1px COLOR solid
+
+    .scratchpad-close
+      width: 20px
+      float: left
+      color: COLOR
+
+.scratchpad-value-view
+  display: flex
+  align-items: start
+
+  .toggle-value-history
+    display: none
+
+  .scratchpad-value-close
+    background-image: ELEMENT_COMPONENT_CLOSE_ICON
+    background-size: 16px 16px
+    background-position: center
+    background-repeat: no-repeat
+    padding: 0
+    width: 24px
+    height: 24px
+    background-color: transparent
+    cursor: pointer
+
+    &:hover
+      opacity: 0.5
+
+  .value-expanded
+    padding: 0
+
+  .value-expanded-compound:before
+    left: 4px !important

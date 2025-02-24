@@ -1,0 +1,10 @@
+# This folder contains cloned repositories that we need to build
+# in the non-Nix environment
+deps/
+
+# All build tools go here
+bin/ 
+
+# All files for distribution go here
+dist/
+CodeTracer.app/

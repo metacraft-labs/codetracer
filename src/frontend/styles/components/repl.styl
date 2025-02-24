@@ -1,0 +1,76 @@
+.repl-msg-wrapper
+  width: inherit
+  height: inherit
+  display: flex
+  justify-content: center
+  align-items: center
+  color: COLOR
+  font-style: italic
+
+  .repl-disabled-msg
+    text-align: center
+    white-space: break-spaces
+
+#repl
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+
+  #repl-input
+    color: TEXT_CONTENT_COLOR
+    height: 28px
+    font-size: 17px !important
+    border: 0
+    background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+    width: calc(100% - 6px)
+    margin-left: 8px !important
+    margin-right: 8px
+    margin-bottom: 5px !important
+    border-radius: 4px
+    padding-left: 15px
+    overflow: hidden !important
+    text-overflow: ellipsis !important
+    white-space: nowrap !important
+
+    &:focus
+      outline: 2px solid BORDERS_COLOR !important
+      border: 1px solid BACKGROUND_COLOR !important
+      overflow: hidden !important
+      text-overflow: ellipsis !important
+      white-space: nowrap !important
+
+  #repl-history
+
+    .repl-input-history
+      background-color: BACKGROUND_NEIGHBOUR_COLOR
+      border-radius: 10px
+      margin: 5px
+      padding-left: 5px
+
+    .repl-output-history
+      overflow-x: auto
+      margin: 5px
+      padding-left: 10px
+      padding-right: 10px
+
+      .repl-output-loading
+        font-style: italic
+        white-space: pre-wrap
+
+      .repl-output-result
+        color: blue
+        white-space: pre-wrap
+
+      .repl-output-move
+        font-style:italic
+        color: grey
+        white-space: pre-wrap
+
+      .repl-output-error
+        font-weight: bold
+        font-style: italic
+        color: red
+        white-space: pre-wrap
+
+#replComponent
+  height: inherit
+  overflow: auto

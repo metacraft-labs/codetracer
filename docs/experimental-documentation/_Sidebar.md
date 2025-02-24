@@ -1,0 +1,33 @@
+- [Home](https://dev-docs.codetracer.com/)
+- Beginner topics
+  - [Introduction](https://dev-docs.codetracer.com/Introduction/Introduction)
+  - [Usage guide](https://dev-docs.codetracer.com/Introduction/CodetracerGuide)
+    - [CLI](https://dev-docs.codetracer.com/Introduction/UsageGuide/CLI)
+    - [GUI](https://dev-docs.codetracer.com/Introduction/UsageGuide/BasicGUI)
+    - [Tracepoints](https://dev-docs.codetracer.com/Introduction/UsageGuide/Tracepoints)
+    - [CodeTracer Shell](https://dev-docs.codetracer.com/Introduction/UsageGuide/CodetracerShell)
+    - [Building C/C++ applications manually](https://dev-docs.codetracer.com/Introduction/UsageGuide/ManualBuilding)
+  - [Test applications](https://dev-docs.codetracer.com/Introduction/TestApplications)
+  - Backends
+    - [CoreBackend](https://dev-docs.codetracer.com/Introduction/Backends/CoreBackend)
+      - [C & C++](https://dev-docs.codetracer.com/Introduction/Backends/CoreBackend/CAndCpp)
+      - [Rust](https://dev-docs.codetracer.com/Introduction/Backends/CoreBackend/Rust)
+      - [Nim](https://dev-docs.codetracer.com/Introduction/Backends/CoreBackend/Nim)
+      - [Golang](https://dev-docs.codetracer.com/Introduction/Backends/CoreBackend/Golang)
+    - [DBBackend](https://dev-docs.codetracer.com/Introduction/Backends/DBBackend)
+      - [Noir](https://dev-docs.codetracer.com/Introduction/Backends/DBBackend/Noir)
+      - [Ruby](https://dev-docs.codetracer.com/Introduction/Backends/DBBackend/Ruby)
+      - [SmallLang](https://dev-docs.codetracer.com/Introduction/Backends/DBBackend/SmallLang)
+  <!--- [Frontend](https://dev-docs.codetracer.com/Introduction/Frontend)
+    - [Styles](https://dev-docs.codetracer.com/Introduction/Frontend/Styles) -->
+  - Client-server model
+  - [Building & packaging](https://dev-docs.codetracer.com/Introduction/BuildSystem)
+  - [Configuration](https://dev-docs.codetracer.com/Introduction/Configuration)
+  - Limitations
+  - [Troubleshooting](https://dev-docs.codetracer.com/Introduction/Troubleshooting)
+- Advanced topics
+  - Custom patches
+  - Dotfiles
+- Misc
+  - [Applications that use CodeTracer](https://dev-docs.codetracer.com/Misc/Dependencies)
+  - [Building the documentation](https://dev-docs.codetracer.com/Misc/BuildingDocs)

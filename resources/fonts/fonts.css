@@ -1,0 +1,22 @@
+@font-face {
+    font-family: 'Inconsolata';
+    font-style: normal;
+    font-weight: 400;
+    src: url(Inconsolata_400_normal.eot); /* {{embedded-opentype-gf-url}} */
+    src: local('☺'),
+        url(Inconsolata_400_normal.eot?#iefix) format('embedded-opentype'), /* {{embedded-opentype-gf-url}} */
+        url(Inconsolata_400_normal.woff) format('woff'), /* http://fonts.gstatic.com/s/inconsolata/v16/BjAYBlHtW3CJxDcjzrnZCIbN6UDyHWBl620a-IRfuBk.woff */
+        url(Inconsolata_400_normal.ttf) format('truetype'), /* http://fonts.gstatic.com/s/inconsolata/v16/BjAYBlHtW3CJxDcjzrnZCCwlidHJgAgmTjOEEzwu1L8.ttf */
+        url(Inconsolata_400_normal.svg#Inconsolata_400_normal) format('svg'); /* http://fonts.gstatic.com/l/font?kit=BjAYBlHtW3CJxDcjzrnZCHNsigHlcrQGNV8nkUSFQfc&skey=20fa6569a31c71ee&v=v16#Inconsolata */
+}
+@font-face {
+    font-family: 'Droid Sans Mono';
+    font-style: normal;
+    font-weight: 400;
+    src: url(Droid+Sans+Mono_400_normal.eot); /* {{embedded-opentype-gf-url}} */
+    src: local('☺'),
+        url(Droid+Sans+Mono_400_normal.eot?#iefix) format('embedded-opentype'), /* {{embedded-opentype-gf-url}} */
+        url(Droid+Sans+Mono_400_normal.woff) format('woff'), /* http://fonts.gstatic.com/s/droidsansmono/v9/ns-m2xQYezAtqh7ai59hJUYuTAAIFFn5GTWtryCmBQ4.woff */
+        url(Droid+Sans+Mono_400_normal.ttf) format('truetype'), /* http://fonts.gstatic.com/s/droidsansmono/v9/ns-m2xQYezAtqh7ai59hJS3rKpnh3vKfPxmMHVt_-Qc.ttf */
+        url(Droid+Sans+Mono_400_normal.svg#Droid+Sans+Mono_400_normal) format('svg'); /* http://fonts.gstatic.com/l/font?kit=ns-m2xQYezAtqh7ai59hJaCLXEu0wbeKjKdJPgQe1G4&skey=4f85afbb2287170b&v=v9#DroidSansMono */
+}

@@ -1,0 +1,122 @@
+variables:
+  GIT_STRATEGY: fetch
+  GIT_SUBMODULE_STRATEGY: "recursive"
+
+default:
+  before_script:
+    - |
+      set -euo pipefail
+      NIX_CONFIG_FILE=~/.config/nix/nix.conf
+      mkdir -p "$(dirname "$NIX_CONFIG_FILE")"
+      {
+        echo "access-tokens = ${CI_SERVER_HOST}=PAT:${CI_GROUP_TOKEN}"
+      } > "$NIX_CONFIG_FILE"
+
+stages:
+  - lint
+  - build
+  - test
+  - deploy
+
+lint:bash:
+  stage: lint
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh
+
+lint:nim:
+  stage: lint
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh
+
+lint:nix:
+  stage: lint
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/lint/nix.sh
+
+lint:rust:
+  stage: lint
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
+
+lint:ui-tests:
+  stage: lint
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default -c ./ci/lint/ui-tests.sh
+
+dev-build:
+  stage: build
+  only:
+    - master
+    - merge_requests
+  script:
+    - git clean -xfd
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
+  resource_group: tup-build
+
+nix-build:
+  stage: build
+  only:
+    - master
+    - merge_requests
+  script:
+    - git clean -xfd
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh
+
+appimage-build:
+  stage: build
+  only:
+    - master
+    - merge_requests
+  script:
+    - git clean -xfd
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh
+  #artifacts:
+  #  paths:
+  #    - CodeTracer.AppImage
+
+test:rust:
+  stage: test
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/rust.sh
+
+test:ui-tests:
+  stage: test
+  only:
+    - master
+    - merge_requests
+  variables:
+    DISPLAY: ":99"
+  script:
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh
+
+push-to-cachix:
+  stage: deploy
+  only:
+    - master
+  script:
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-cachix.sh
+
+build-and-deploy-docs:
+  stage: deploy
+  only:
+    - master
+  script:
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
