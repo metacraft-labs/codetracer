@@ -1,0 +1,868 @@
+// Styles named monaco override the original editor's styles
+
+.monaco-editor
+  margin-left: 2px
+  border-bottom-left-radius: 6px
+
+.margin-view-overlays
+  height: 100%
+
+  div
+    background-color: SECONDARY_BASE
+
+.monaco-editor .margin .margin-view-overlays .folding
+  margin-left: 15px !important
+  background-color: transparent
+  width: 5px !important
+
+.sticky-widget
+  width: 100% !important
+
+.monaco-editor
+  .slider
+    border-radius: 100px !important
+    background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR !important
+
+    &:active
+      background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR !important
+
+  .minimap
+    right: 8px !important
+    left: unset !important
+
+  .decorationsOverviewRuler
+    // background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR !important
+    z-index: 10 !important
+    pointer-events: none
+    // width: 8px !important
+    margin-right: 2px !important
+  
+  // .visible.scrollbar.horizontal
+  //   .slider
+  //     height: 8px !important
+  
+  // .visible.scrollbar.vertical
+  //   width: 8px !important
+  //   margin-right: 2px !important
+
+  //   .slider
+  //     width: 8px !important
+      
+.monaco-editor, .monaco-editor-background, .monaco-editor .inputarea.ime-input, .monaco-editor .margin, .monaco-editor .sticky-line-content, .monaco-editor .sticky-line-number
+  background-color: transparent !important
+  z-index: 2
+
+  .monaco-scrollable-element
+    overflow: visible !important
+    z-index: 1
+
+    .visible
+      z-index: 9 !important
+    
+    .vertical
+      transform: translateX(-4px) !important
+
+  .monaco-editor-background
+    overflow: visible !important
+    background-color: inherit !important
+    contain: unset !important
+
+
+  .view-line
+    font-family "FiraCode" !important
+    font-weight: 400
+    color: TEXT_CONTENT_COLOR !important
+
+  .sticky-line-content
+    font-family "FiraCode" !important
+    font-weight: 400
+    color: TEXT_CONTENT_COLOR !important
+    background-color: SECONDARY_BASE !important
+
+.view-zones
+  .value-expanded
+    position: relative
+    z-index: 1
+    background-color: BACKGROUND_COLOR;
+    // border-radius: 1rem
+    border: 1px solid gray
+    // width: fit-content !important
+    padding-right: 10px
+    height: 25px !important
+    margin-top: 0
+
+.code-editor
+  width: 500px
+  overflow: hidden !important
+
+.expansion // unspecified or >= 4
+  .monaco-editor, .marginm
+    background-color: #bbb
+
+// Right click context menu in the code editor
+#context-menu-container
+  width: fit-content
+  display: none
+  flex-direction: column
+  // border: 1px solid grey
+  position: absolute
+  background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+  border-radius: 6px
+  padding-top: 4px
+  padding-bottom: 4px
+  font-family: "SpaceGrotesk"
+  font-size: 14px
+  z-index: 1000
+
+.context-menu-item-container
+  background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+  line-height: 28px
+
+.context-menu-item
+  cursor: pointer
+  color: NAVIGATION_MENU_COLOR
+  display: flex
+  flex-direction: row
+  // border: 1px solid white
+  // height: 24px
+  margin-left: 4px
+  margin-right: 4px
+  padding-left: 8px
+  // padding-right: 8px
+  border-radius: 6px
+  justify-content: space-between
+  text-align: left
+  align-items: center
+  white-space: nowrap
+
+  &:hover
+    background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR
+
+.context-menu-hint
+  color: MENU_NODE_SHORTCUT_TEXT_COLOR
+  text-align: right
+  font-size: 10px
+  padding: 4px
+  line-height: 10px
+  margin-right: 8px
+  margin-left: 8px
+  background-color: MENU_NODE_SHORTCUT_BACKGROUND
+  border-radius: 6px
+  line-height: 10px
+
+.expansion-1
+  .monaco-editor, .margin
+    background-color: #eee !important
+
+.expansion-2
+  .monaco-editor, .margin
+    background-color: #ddd !important
+
+.expansion-3
+  .monaco-editor, .margin
+    background-color: #ccc !important
+
+.monaco-inputbox
+  border-radius: 25px
+
+.code-editor
+  // background-color: BACKGROUND_COLOR
+  height: 100% //100vh
+  overflow: scroll
+  flex-basis: 100%
+  border-radius: 6px
+
+  &:focus
+    outline: 0px
+
+  //.editor
+  //height: 100vh
+
+  .line
+    height: 24px
+    white-space: pre
+    display: flex
+    opacity: 0.8
+
+    > .raw
+      width: 80%
+      display: flex
+
+
+  .hit-overlay
+    height: 20px
+    width: 20px
+
+  .overlay > .hit-overlay
+    background-color: inherit
+
+  .overlay
+    background-color: OVERLAY_COLOR_BG
+    margin-left: auto
+
+    .low-level-overlay
+      display: flex
+      flex-direction: column
+
+      .low-level-child
+        background-color: OVERLAY_COLOR_BG
+        color: OVERLAY_COLOR_FG
+        height: 24px
+
+    .hit-overlay
+      margin-right: 50px
+      width: 150px
+      height: 24px
+
+
+  // .gutter-default
+  //   background-color: GUTTER_COLOR_BG
+
+  // .gutter-flow
+  //   background-color: GUTTER_FLOW_COLOR_BG
+
+
+  // .raw
+  //   padding-left 72px
+  // /*width: 170%*/
+
+  .raw-info
+    width: 80%
+
+  .flow-content-widget
+    position: relative
+    z-index: 5
+    display: flex !important
+    align-items: center
+
+  .flow-loop
+    position: relative
+    overflow: visible !important
+    font-size: 0.9em
+    height: 20px
+    width: 100%
+
+  .flow-line-buffer
+    position: relative
+
+  .flow-parallel
+    position: fixed
+    overflow: visible !important
+    font-size: 0.9em
+    display: inline-flex
+    transform: translateY(2px)
+
+  .flow-multiline-value-container
+    position: absolute
+    // background-color: FLOW_PARALLEL_BACKGROUND_COLOR
+    height: 20px
+    width: fit-content
+    // min-width: 20px
+    // max-width: 250px
+    z-index:1
+    display: flex
+    align-items: center
+
+  button
+    background-color: PRIMARY_BASE
+    padding-left: 10px
+    color: PRIMARY_TEXT_COLOR
+    padding-right: 10px
+    // height: 100%
+    // font-size: 13px
+    font-family: "FiraCode"
+    margin: 1px !important
+    margin-left: 2px !important
+    display: flex
+    align-items: center
+    border-radius: 4px !important
+    cursor: pointer !important
+    background-position: center
+    background-repeat: no-repeat
+    background-size: 1ch
+
+    &:hover
+      background-color: ACTIVE_MENU_BACKGROUND
+
+    &:disabled
+      opacity: 0.5 !important
+      cursor: default !important
+
+      &:hover
+        background-color: PRIMARY_BASE
+    
+    &.backward
+      background-image: url('../../public/shared/omniscience_backward_dark.svg')
+
+    &.forward
+      background-image: url('../../public/shared/omniscience_forward_dark.svg')
+
+  .flow-parallel-value
+    display: inline-flex
+    padding-right: 0
+    align-items: center
+    margin-right: 10px
+
+  .flow-parallel-value-name
+    // font-size: 13px
+    font-family: "FiraCode"
+    background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+    // box-shadow: 1px 1px 1px FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
+    color: FLOW_PARALLEL_NAME_COLOR
+    padding-left: 5px
+    padding-right: 5px
+    padding-top: 0
+    padding-bottom: 0
+    // height: 17px
+    // line-height: 17px
+    display: flex
+    border-radius: 2px
+    box-sizing: border-box
+    white-space: nowrap
+
+  .flow-loop-value-name
+    // font-size: 13px
+    font-family: "FiraCode"
+    background: PRIMARY_BASE
+    box-shadow: 1px 1px 1px FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
+    color: PRIMARY_TEXT_COLOR
+    padding-left: 5px
+    padding-right: 5px
+    padding-top: 0
+    padding-bottom: 0
+    margin-right: 0px !important
+    // height: 17px
+    // line-height: 17px
+    display: flex
+    border-radius: 2px
+    box-sizing: border-box
+    white-space: nowrap
+
+  .flow-loop-textarea
+    height: 100%
+    background-color: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+    font-family: monospace
+    border: 0
+    padding: 0
+    padding-right: 3px
+    overflow: hidden
+    resize: none
+    color: FLOW_PARALLEL_NAME_COLOR
+    outline: none
+    cursor: text
+    opacity: 0.7
+
+    &:focus
+      opacity: 1
+
+    &::placeholder
+      color: FLOW_PARALLEL_NAME_COLOR
+
+  .flow-parallel-loop-iteration-end
+    padding-left: 3px
+    border-left: 1px solid SECONDARY_BASE
+
+  .flow-parallel-loop-iteration-start
+    padding-right: 5px
+    border-right: 1px solid SECONDARY_BASE
+
+  .flow-multiline-value-pointer
+    width: 1px
+    border: 0.5px grey dashed
+    position: absolute
+
+  .flow-multiline-value-box
+    // margin-left: 5px
+    height: 17px
+    width: 100%
+    display: inline-block
+    padding-left: 2px
+    padding-right: 2px
+    padding-top: 0
+    padding-bottom: 3px
+    line-height: 17px
+    box-sizing: border-box
+    font-size: 12px
+    // min-width: 20px
+    // max-width: 100px // 31px // it seems we need a ~200px max or no max? (old: all width should be ~70px for two int values)
+    overflow: hidden
+    text-align: center
+    border-radius: 2px
+    text-overflow: ellipsis
+    font-family: monospace
+    // margin-top: 1.5px
+    // position: absolute
+    z-index: 2
+
+  .flow-multiline-value-before-only
+    // border: 1px FLOW_PARALLEL_BEFORE_VALUE_BORDER_COLOR solid
+    background-color: FLOW_MULTILINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR
+    color: FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR
+    box-shadow: 1px 1px 1px FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
+    // box-shadow: -1px -1px FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
+    width: fit-content
+
+  .flow-loop-container
+    overflow-x: clip
+    overflow-y: visible
+    position: absolute
+    height: 100%
+    display: inline-flex
+    // transition-property: left // TODO: transition
+    // transition-duration: 1s
+
+    .flow-loop-step-splitter
+      position: relative
+      width: 1px
+      background-color: FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
+      z-index: 5
+      min-width: 1px
+
+  .flow-nested-loop-container
+    position: absolute
+    height: 100%
+    display: inline-flex
+  // transition-property: left // TODO: transition
+  // transition-duration: 1s
+
+  .flow-loop-empty-cell
+    position: relative
+    height: 100%
+    // margin-left: 5px
+    margin-right: 10px
+    width: 24px
+  // max-width: 270px
+  // transition-property: left // TODO: transition
+  // transition-duration: 1s
+
+  .flow-loop-container > .flow-loop-empty-cell
+    margin-right: 0
+
+  .flow-loop-step-container
+    position: absolute
+    height: 100%
+    // margin-left: 5px
+    margin-right: 10px
+    // border-right: 1px red solid
+    width: 50px
+    // max-width: 270px
+    // transition-property: left // TODO: transition
+    // transition-duration: 1s
+    z-index: 2
+
+    &.active-flow-step
+      .flow-multiline-value-before-only
+        background-color: FLOW_MULTILINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR
+        color: black
+
+      .flow-inline-value-box
+        background-color: FLOW_INLINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR
+        color: black
+
+      .flow-parallel-value-box
+        background-color: FLOW_PARALLEL_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR
+        color: black
+
+    &.shrinked
+      background-color: FLOW_MULTILINE_BACKGROUND_COLOR
+      border-radius: 2.5px
+
+      &.active
+        .flow-loop-shrinked-iteration
+          background-color: FLOW_MULTILINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR
+
+    &.continuous
+      margin-right: 0
+
+      &.active
+        .flow-loop-continuous-iteration
+          background-color: FLOW_MULTILINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR
+
+    .flow-multiline-value-before-only
+      // border: 1px FLOW_PARALLEL_BEFORE_VALUE_BORDER_COLOR solid
+      background-color: FLOW_MULTILINE_LOOP_VALUE_BACKGROUND_COLOR
+      color: FLOW_MULTILINE_LOOP_VALUE_COLOR
+      box-shadow: 1px 1px 1px FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR
+    // box-shadow: -1px -1px FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR
+
+    .flow-multiline-value
+      position:absolute
+      width: 100%
+
+  .flow-multiline
+    font-size: 15px
+    background-color: BACKGROUND_NEIGHBOUR_COLOR
+
+    .flow-multiline-previous
+      background-color: #0ff
+
+    .flow-multiline-next
+      background-color: #00f
+
+    .flow-multiline-loop
+      left: 450px
+      position: absolute
+      width: 700px
+      max-width: 700px
+      overflow-x: scroll
+      float: right
+
+    td.multiline-group
+      min-width: 180px
+      max-width: 180px
+
+      span
+        display: block
+
+
+  .zfuture-expression::after
+    background-color: #0ff
+
+  .previous-expression::after
+    background-color: #00f
+
+  .future
+    background-color: FUTURE_COLOR_BG
+    > .raw
+      color: FUTURE_COLOR_FG
+
+      > .token-label
+        color: FUTURE_COLOR_FG
+
+      > .token-symbol
+        color: FUTURE_COLOR_FG
+
+  .tra
+    background-color: TRACE_COLOR_BG
+
+    > .raw
+      color: TRACE_COLOR_FG
+
+      > .token-label
+        color: TRACE_COLOR_FG
+
+      > .token-symbol
+        color: TRACE_COLOR_FG
+
+  .instantiations-menu
+    cursor: pointer
+    background-color: INSTANTIATIONS_MENU_COLOR_BG
+    color: INSTANTIATIONS_MENU_COLOR_FG
+
+    .menu-header
+      font-size: 17px
+
+    .instantiation-location
+      height: 20px
+      font-size: 15px
+      cursor: pointer
+      background-color: INSTANTIATIONS_MENU_COLOR_BG
+      color: INSTANTIATIONS_MENU_COLOR_FG
+      opacity: 0.7
+
+.high-level-line
+  color: TEXT_CONTENT_COLOR
+
+.jump-back-button
+  white-space: nowrap
+
+.unknown-location
+  padding: 3ex
+  display: flex
+  flex-direction: column
+
+  .unknown-border
+    border-bottom: solid 1px
+    border-color: CALLGRAP_TOOLTIP_BORDER_COLOR
+    padding-top: 10px
+
+  .unknown-location-header
+    font-weight: 700
+
+  .unknown-location-buttons
+    margin: 2ex;
+    display: flex
+    justify-content: space-between
+    height: 40px
+
+  .unknown-location-asm
+    white-space: pre
+    font-family: monospace
+    overflow-y: scroll
+    overflow-x: auto
+
+    .asm-code .asm-highlight
+      color: red
+
+#breakpoint-list_wrapper, #tracepoint-list_wrapper
+  width: 50%
+  float: left
+  tr
+    height: 20px
+
+  .odd
+    background-color: BACKGROUND_NEIGHBOUR_COLOR
+
+  .even
+    background-color: BACKGROUND_COLOR
+
+  color: COLOR
+
+  .dataTables_length
+    display: none
+
+  .dataTables_info
+    display: none
+
+  .dataTables_paginate
+    display: none
+
+.context-menu
+  position: fixed
+  z-index: 10000
+  width: fit-content
+  background-color: BACKGROUND_COLOR
+  border-radius: 5px
+  display: none
+
+  &:focus
+    outline: 0 !important
+    border: 1px solid DROPDOWN_TEXT_COLOR !important
+
+  &.visible
+    display: block
+
+.context-menu-option
+  height: 25px
+  color: DROPDOWN_TEXT_COLOR
+  background-color: DROPDOWN_LIST_BACKGROUND_COLOR
+  border-radius: 5px
+  padding-right: 10px
+  padding-left: 10px
+  font-size: 14px
+  display: flex
+  align-items: center
+
+  &:hover
+    background-color: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
+    color: DROPDOWN_TEXT_FOCUSED_COLOR
+
+.context-menu-option-text
+  width: 100%
+
+.gutter
+  width: 100%
+  height: 100%
+  position: relative
+  cursor: pointer
+  // &:hover
+  // TODO relative to font size margin top/width/height
+  .gutter-trace
+    width: 1.2ch
+    background: TRACEPOINT_COLOR
+    height: 1.2ch
+    border-radius: 50%
+    margin-top: 0.57ch
+    position: absolute
+    right: 0.5ch
+    z-index: 1
+    outline: 2px solid SECONDARY_BASE
+
+  .gutter-disabled-trace
+    width: 1.2ch !important
+    background: PRIMARY_BASE
+    height: 1.2ch
+    border-radius: 50%
+    margin-top: 0.57ch
+    position: absolute
+    right: 0.5ch
+    z-index: 1
+    outline: 2px solid SECONDARY_BASE
+
+  .gutter-breakpoint-enabled
+    width: 1.1ch
+    background: BREAKPOINT_COLOR
+    float: left
+    height: 1.1ch
+    border-radius: 50%
+    margin-top: 0.63ch
+    position: absolute
+    right: 1.2ch
+
+  .gutter-breakpoint-error
+    width: 1.2ch
+    background: red
+    float: left
+    height: 1.2ch
+    border-radius: 50%
+    margin-top: 4px
+
+  .gutter-breakpoint-disabled
+    width: 1.1ch
+    background: PRIMARY_BASE
+    float: left
+    height: 1.1ch
+    border-radius: 50%
+    margin-top: 0.63ch
+    position: absolute
+    right: 1.2ch
+
+  .gutter-no-breakpoint
+    width: 1.1ch
+    height: 1.1ch
+    float: left
+    position: absolute
+    right: 1.2ch
+
+  .gutter-no-trace
+    width: 1.2ch
+    height: 1.2ch
+    float: left
+    position: absolute
+    right: 0.5ch
+
+  &:hover > .gutter-no-breakpoint
+    background: BREAKPOINT_COLOR
+    border-radius: 50%
+    margin-top: 0.63ch
+    opacity: 0.3
+
+
+  .gutter-line
+    width: 14px
+    //color: GUTTER_LINE_TEXT_COLOR
+    float: left
+    cursor: default
+//font-weight: bold
+
+.line-numbers
+  border-right: 1px solid LINE_NUMBERS_BORDER_COLOR
+  margin-left: 14px !important
+  font-weight: 300
+  text-align: left !important
+  font-family: "FiraCode"
+  line-height: inherit
+  font-size: inherit !important
+  margin-top: 0px !important
+  padding-top: 1px !important
+  // color: LINE_NUMBERS_TEXT_COLOR !important
+
+
+.on
+  background-color: ON_BG_COLOR
+  position: relative
+  z-index: -2
+
+.gutter-highlight-active:before
+  content: HIGHLIGHT_LINE_ARROW
+  display: block
+  position: absolute
+  color: PRIMARY_FONT_COLOR
+  transform: translateX(-14px)
+
+.inline-expanded-value-view
+  width: 100%
+  background-color: INLINE_EXPANDED_COLOR
+
+.trace-button
+  margin-left: 40%
+  cursor: pointer
+
+.breakpoint-program-select
+  width: 32px
+  background-color: BREAKPOINT_MENU_0
+
+.breakpoint-frame-select
+  width: 32px
+  background-color: BREAKPOINT_MENU_1
+
+.limited-expanded
+  font-size: 16px
+  overflow-y: scroll
+  height: 50vh
+
+.breakpoint-menu
+  width: 72px
+
+#trace-nav
+  width: 100%
+
+.container
+  top: 50px
+  position: absolute
+
+#editor-menu
+  font-size: 18px
+
+.editor-menu-trace
+  cursor: pointer
+  margin-right: 20px
+  color: EDITOR_MENU_TRACE_COLOR
+
+.editor-menu-close
+  cursor: pointer
+  color: red
+
+.expand-inline
+  color: #0ff
+
+.expand-trace:hover
+  opacity: 1
+
+.path
+  width: 100
+
+.name
+  width: 100%
+
+.break
+  color: BREAK_COLOR
+
+#tabs
+  width: 72%
+  float: left
+
+.tab
+  float: left
+  overflow: auto
+  display: flex
+  flex-basis: 100%
+
+#values
+  overflow-x: scroll
+  width: 100%
+
+#right
+  width: 24%
+  float: left
+  height: 1000px
+  overflow-y: scroll
+
+.invisible
+  display: none
+
+.jump
+  color: JUMP_COLOR
+  width: 100%
+  font-size: 18px
+  cursor: pointer
+
+.expansion
+  left: -70px !important
+  z-index: 1
+  width: 100% !important
+  height: 200px
+  overflow: scroll
+  position: absolute
+
+.active-tab
+  display: flex
+
+.tab
+  width: 100%
+
+#active-tab
+  display: flex
+
+.inactive-tab
+  display: none

@@ -1,0 +1,163 @@
+
+.lm_goldenlayout
+  background: BACKGROUND_COLOR !important
+  border-right: 1px solid PRIMARY_BASE
+
+.lm_header
+  background-color: HEADER_PANEL_BACKGROUND_COLOR !important
+  color: HEADER_PANEL_COLOR !important
+  position: relative
+  height: 34px !important
+  padding-left: 2px !important
+  box-shadow: 2px 0 0 0 HEADER_PANEL_BACKGROUND_COLOR !important
+  z-index: 10 !important
+  margin-right: 2px !important
+
+.lm_splitter
+  background: LAYOUT_SPLITTER_COLOR !important
+  opacity: unset !important
+  transition: opacity 200ms ease !important
+
+.lm_tabs
+  width: calc(100% - 2px)
+  background-color: HEADER_PANEL_BACKGROUND_COLOR !important
+  display: flex
+  justify-content: space-between
+
+.lm_splitter.lm_dragging
+  background: #444444;
+  z-index: 11
+
+.lm_tab
+  font-family: "SpaceGrotesk" !important
+  font-size: 14px !important
+  font-style: normal
+  font-weight: 600 !important
+  letter-spacing: -0.14px !important
+  //height: 25px !important
+  background-color: HEADER_PANEL_INACTIVE_COLOR !important
+  color: HEADER_PANEL_COLOR !important
+  margin: 0 !important
+  border: 0 !important
+  margin-top: 2px !important
+  padding-top: 2px !important
+  padding-bottom: 2px !important
+  padding-left: 8px !important
+  padding-right: 25px !important
+  box-shadow: none !important
+  height: 24px !important
+  line-height: 24px !important
+  // max-width: min(200px, 30%)
+  overflow: hidden
+  border-top-left-radius: 6px
+  border-top-right-radius: 6px
+  // margin-left: 2px !important
+  margin-right: 4px !important
+  margin-bottom: 0px !important
+  flex: 1
+  text-align: center
+  // box-sizing: border-box
+
+.lm_tabdropdown::before
+  color: LAYOUT_DROPDOWN_ICON_COLOR !important
+  vertical-align: text-top !important
+
+.lm_item
+  background-color: LAYOUT_SPLITTER_COLOR !important
+  outline: 1px solid LAYOUT_SPLITTER_COLOR !important
+
+.lm_items
+  transform: translateX(-2px)
+  // box-shadow: inset -1px 0 0 0 LAYOUT_SPLITTER_COLOR
+  // width: calc(100% - 6px)
+  border-radius: 6px
+
+.lm_content
+  background-color: BACKGROUND_COLOR !important
+  box-shadow: inset 2px 0px 0px 0px LAYOUT_SPLITTER_COLOR
+  border: 0 !important
+  padding-top: 8px
+  border-radius: 6px
+  // padding-right: 2px
+  margin-left: 2px
+  // padding-right: 10px
+
+.lm_items
+  background-color: LAYOUT_SPLITTER_COLOR
+  // outline: 2px solid PRIMARY_BASE
+
+.lm_splitter.lm_horizontal
+  width: 2px !important
+
+.lm_splitter.lm_vertical
+  height: 2px !important
+
+.lm_splitter.lm_vertical .lm_drag_handle
+  top: 0 !important
+  height: 4px !important
+  background-color: LAYOUT_SPLITTER_COLOR
+
+.lm_splitter.lm_horizontal .lm_drag_handle
+  //left: -5px
+  left: 0 !important
+  width: 4px !important
+  background-color: LAYOUT_SPLITTER_COLOR
+
+.lm_title
+  color: HEADER_PANEL_COLOR !important
+  // font-family: sans-serif !important
+  font-weight: 500 !important
+  font-size: 14px !important
+  overflow: hidden
+  white-space: nowrap
+  text-overflow: ellipsis
+  width: 100%
+  padding-top: 0px !important
+  text-align: start !important
+// direction: rtl
+
+.lm_active
+  background-color: HEADER_ACTIVE_PANEL_BACKGROUND_COLOR !important
+  //border-radius: 2px
+  border-top-left-radius: 6px
+  border-top-right-radius: 6px
+  border-bottom-right-radius: 0px
+  border-bottom-left-radius: 0px
+  box-shadow: 0px 8px 0px 0px HEADER_ACTIVE_PANEL_BACKGROUND_COLOR !important
+
+.lm_header .lm_active .lm_title
+  color: HEADER_ACTIVE_PANEL_TEXT_COLOR !important
+
+.lm_header .lm_controls
+  height: 100% !important
+  align-items: center !important
+
+.lm_controls > *
+  opacity: 1 !important
+//   margin-right: 10px !important
+//   height: 12px !important
+//   width: 12px !important
+
+.lm_maximise
+  background-image: LAYOUT_MAXIMIZE_ICON_PATH !important
+
+.lm_popout
+  display: none !important
+
+.lm_close
+  background-image: LAYOUT_CLOSE_ICON_PATH !important
+
+/* based on https://codepen.io/sosuke/pen/Pjoqqp : CSS filter generator to convert from black to target hex color
+    Barrett Sonntag  found from
+    https://stackoverflow.com/a/53336754/438099
+  */
+// converts to white
+// .menu-button-svg, .menu-node-svg
+//   filter: MENU_BUTTON_SVG_FILTER
+
+.lm_header .lm_tab .lm_close_tab
+  background-image: LAYOUT_TAB_CLOSE_ICON_PATH !important
+  width: 8px !important
+  height: 8px !important
+  top: 10px !important
+  padding-right: 4px !important

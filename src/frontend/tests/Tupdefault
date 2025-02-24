@@ -1,0 +1,4 @@
+#include_rules
+
+#: program.c  |> !test_program_build_and_record |>
+# | ../../../codetracer

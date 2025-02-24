@@ -1,0 +1,34 @@
+{
+  "grammars": [
+    {
+      "name": "tracepoint",
+      "camelcase": "Tracepoint",
+      "scope": "source.trace",
+      "file-types": [
+        ".trace"
+      ],
+      "injection-regex": "^tracepoint$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tracepoint grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Metacraft Labs Ltd"
+      }
+    ],
+    "links": {
+      "repository": ""
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}

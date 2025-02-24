@@ -1,0 +1,15 @@
+<svg width="16" height="18" viewBox="0 0 16 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-time-hour-glass--hourglass-loading-measure-clock-time" clip-path="url(#clip0_1749_309)">
+<g id="Group">
+<path id="Vector" d="M12 4.49996C12 5.69344 10.7501 6.83803 10 7.68194C9.24985 8.52586 9.06087 8.99996 8 8.99996C6.93913 8.99996 6.92172 8.52586 6.17157 7.68195C5.42143 6.83803 4 5.69344 4 4.49996V0.642822H12V4.49996Z" stroke="#F3F3F3" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M12 13.5C12 12.3065 10.5786 11.1619 9.82843 10.318C9.07828 9.47411 9.06087 9 8 9C6.93913 9 6.92172 9.47411 6.17157 10.318C5.42143 11.1619 4 12.3065 4 13.5V17.3571H12V13.5Z" stroke="#F3F3F3" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M2.71429 0.642822H13.2857" stroke="#F3F3F3" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_4" d="M2.71429 17.3572H13.2857" stroke="#F3F3F3" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1749_309">
+<rect width="16" height="18" fill="white"/>
+</clipPath>
+</defs>
+</svg>

@@ -1,0 +1,443 @@
+// Welcome screen widget styles
+#welcomeScreen
+  position: relative;
+
+  .window-menu
+    align-items: start
+    height: 28px
+
+    .minimize
+      background-position: bottom
+      background-position-y: 18px
+
+.welcome-screen-loading-overlay
+  position: absolute
+  top: 0
+  background-color: black
+  width: 100%
+  height: 100%
+  opacity: 0.8
+  z-index: 100
+  display: flex
+  align-items: center
+  justify-content: center
+
+  &-text
+    padding-left: 10px
+    color: white
+    font-size: x-large
+    font-style: italic
+
+  .welcome-screen-loading-overlay-icon
+    width: 32px
+    height: 32px
+    background-repeat: no-repeat
+    background-position: center
+    background-image: url("../../public/loading_sign_dots_32.svg")
+    animation: infinite linear
+    animation-name: loading
+    animation-duration: 3s
+
+.welcome-logo
+  background-image: url('../../public/shared/codetracer_welcome_logo.svg')
+  min-width: 62px
+  min-height: 62px
+  background-size: 62px 62px
+  background-position: center
+  margin-right: 12px
+  background-repeat: no-repeat
+
+.welcome-screen-wrapper
+  color: WELCOME_SCREEN_TEXT_COLOR;
+  background-color: WELCOME_SCREEN_BACKGROUND_COLOR;
+  height: 100vh;
+  position: relative;
+  width: 100vw;
+  z-index: 50
+  display: flex;
+  justify-content: center;
+  align-items: center
+  border-radius: 8px
+
+  .welcome-screen
+    position: relative
+    height: fit-content
+    background-color: gradien
+    width: 700px
+    padding: 48px
+    padding-bottom: 60px
+    background: WELCOME_SCREEN_BACKGROUND_COLOR
+    display: flex
+    flex-direction: column
+    border-radius: 12px
+    align-items: center
+    border: 1px solid LINE_STROKE
+
+    &.welcome-screen-loading
+      cursor: wait !important
+
+    .welcome-title
+      position: relative
+      font-family: 'SpaceGrotesk'
+      text-align: start
+      display: flex
+      align-items: flex-end
+      justify-content: space-between
+      color: WELCOME_SCREEN_TEXT_COLOR
+      width: -webkit-fill-available
+
+      .welcome-text
+        word-break: break-word
+        display: flex
+        align-items: center
+        font-weight: BOLD_WEIGHT
+        width: 304px
+        font-size: 32px
+        line-height: 34px
+        letter-spacing: -0.32px
+
+      .welcome-version
+        color: WELCOME_SCREEN_VERSION_TEXT_COLOR
+        font-size: 12px
+        font-family: 'SpaceGrotesk'
+        font-weight: 400
+        line-height: normal
+        text-align: center
+
+    .welcome-content
+      display: flex
+      flex-direction: column
+      align-items: center
+      width: -webkit-fill-available
+
+      .start-options
+        position: relative
+        display: flex
+        width: -webkit-fill-available
+        justify-content: space-between
+
+        .start-option
+          position: relative
+          right: 0
+          display: flex
+          cursor: pointer
+          justify-content: center
+          font-family: 'SpaceGrotesk'
+
+          &.hovered
+            opacity: 1
+
+        .inactive-start-option
+          opacity: 0.2
+          pointer-events: none
+
+          &.hovered
+            color: inherit
+            opacity: 0.2
+
+        .start-option-icon
+          width: 100px
+          height: 100px
+          background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON
+          background-repeat: no-repeat
+          background-position: center
+
+          &.hovered
+            background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON_HOVERED
+            opacity: 1
+
+        .start-option-name
+          text-align: center
+          font-size: 14px
+          font-weight: BOLD_WEIGHT
+          letter-spacing: -0.14px
+          line-height: 18px
+          background-color: ACTIVE_ROW
+          display: flex
+          align-items: center
+          color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR
+          justify-content: center
+          white-space: nowrap
+          padding: 6px
+          padding-left: 14px
+          padding-right: 14px
+          border-radius: 4px
+
+          &.hovered
+            // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
+            // background-color: PRIMARY_BASE
+            outline: 1px solid SEARCH_STROKE
+            opacity: 1
+
+      .no-recent-traces
+        height: 67px;
+        width: 350px;
+        align-items: center;
+        display: flex;
+        text-align: left;
+        font-size: 18px;
+        font-weight: bold;
+        font-style: italic;
+
+      .recent-traces
+        position: relative
+        width: -webkit-fill-available
+        background-color: SECONDARY_BASE
+        border-radius: 6px
+        padding: 8px
+        margin-top: 48px
+        margin-bottom: 48px
+
+        .recent-traces-title
+          text-align: start
+          font-size: 18px
+          font-weight: BOLD_WEIGHT
+          line-height: 18px
+          letter-spacing: -0.18px
+          font-family: 'SpaceGrotesk'
+
+        .recent-trace
+          color: WELCOME_SCREEN_RECENT_TRACE_COLOR
+          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR;
+          height: 28px;
+          margin-top: 8px;
+          display: flex
+          // font-family: monolith;
+          position: relative
+          text-align: left
+          border-radius: 4px
+
+          &:hover
+            cursor: pointer
+            background-color: PRIMARY_BASE
+
+          .recent-trace-title
+            display:flex
+            align-items: center
+            position: relative
+
+            .separate-bar
+              border-color: WELCOME_SCREEN_SEPARATE_BAR_COLOR
+
+            .recent-trace-title-id,.recent-trace-title-content
+              margin-left: 8px
+              margin-right: 8px
+              font-size: 14px
+              font-weight: BOLD_WEIGHT
+              font-family: 'FiraCode'
+              line-height: 18px
+              letter-spacing: -0.14px
+              // font-weight: bold
+              position: relative
+              overflow: hidden
+              white-space: nowrap
+              text-overflow: ellipsis
+              
+          .recent-trace-title-content
+            // seems to be required, so ellipsis can work
+            width: 500px
+            // this could put an ellipsis in the beginning if long
+            // but it seems it has problems with punctuation, and indeed with
+            // path separators e.g. `/` going in the end
+            // ( https://stackoverflow.com/a/74455333/438099 )
+            // so: for now we're trying to limit the count of characters
+            // programatically in the frontend code, and put there an
+            // `..` ellipsis in the beginning if needed
+            // as it's more useful to see the end of the path with the filename
+            // usually
+            //
+            // direction: rtl 
+
+          .recent-trace-info
+            height: 40px
+            display: flex
+            position: relative
+
+            .recent-trace-date
+              padding-left: 10px
+              width: 50%
+              text-align: left
+              display: flex
+              align-items: center
+
+            .recent-trace-duration
+              width: 50%
+              text-align: right
+              display: flex
+              align-items: center
+              color: #667283
+
+  .new-record-screen
+    position: relative
+    display: flex
+    align-items: center
+    justify-content: center
+    z-index: 50
+
+    hr
+      border-color: HEADER_ELEMENT_BACKGROUND_COLOR
+
+    .new-record-screen-content
+      position: relative
+      width: 700px
+      background: WELCOME_SCREEN_BACKGROUND_COLOR
+      border: 1px solid LINE_STROKE
+      border-radius: 12px
+      padding: 48px
+      padding-bottom: 60px
+
+      .welcome-logo
+        min-width: 40px
+        max-width: 40px
+        min-height: 40px
+        background-size: 40px 40px
+
+    .new-record-title
+      position: relative
+      font-size: 32px
+      font-family: 'SpaceGrotesk'
+      font-weight: BOLD_WEIGHT
+      text-align: start
+      width: 100%
+      letter-spacing: -0.32px
+      line-height: 32px
+      margin-bottom: 32px
+      margin-top: 32px
+
+    .new-record-form
+
+      .new-record-form-row
+        display: flex;
+        align-items: center;
+        flex-direction: column;
+        margin-top: 5px
+
+        .form-validation-row
+          height: 16px;
+          font-size: 14px;
+          position: relative;
+          width: 100%;
+          text-indent: 13vw;
+          font-style: italic;
+          color: FORM_INVALID_INPUT_COLOR;
+
+        .new-record-input-row
+          position: relative
+          width: 100%
+          display: flex
+          align-items: center
+          margin-bottom: 16px
+
+        .checkmark
+          position: relative
+          margin-right: 8px !important
+          top: 0 !important
+
+        label
+          margin-bottom: 0 !important
+          position: relative
+          width: fit-content
+          text-align: left
+          color: NEW_RECORD_LABEL_COLOR
+          font-family: 'SpaceGrotesk'
+          font-weight: bold
+          font-size: 14px
+          font-weight: 400
+
+        input
+          background-color: NEW_RECORD_SCREEN_INPUT_BACKGROUND_COLOR
+          margin-left: 0px !important
+          margin-bottom: 0px !important
+
+          &.disabled
+            pointer-events: none
+            opacity: 0.4
+
+          &.invalid
+            outline: 2px solid FORM_INVALID_INPUT_COLOR
+
+        button
+          min-width: 8px
+          background-color: NEW_RECORD_SCREEN_BUTTON_BACKGROUND_COLOR
+          margin-left: 8px
+          position: relative
+          border: 0
+          border-radius: 6px
+          color: TEXT_CONTENT_COLOR
+          font-weight: 400
+          padding: 0px !important
+          padding-left: 22px !important
+          padding-right: 22px !important
+          font-family: 'SpaceGrotesk'
+          font-size: 14px
+          height: 28px
+          display: flex
+          align-items: center
+          justify-content: center
+
+          &.disabled
+            pointer-events: none
+            opacity: 0.4
+
+          &:hover
+            opacity: 0.5
+            // background-color: TEXT_CONTENT_COLOR
+            // color: NEW_RECORD_SCREEN_INPUT_BACKGROUND_COLOR
+          
+          &.cancel-button
+            background-color: DEBUG_BUTTON_BORDER_COLOR !important
+            margin: 0px !important
+
+          &.confirmation-button
+            background-color: NEW_RECORD_CONFIRMATION_BUTTON_BACKGROUND !important
+            margin-left: 8px !important
+            width: 146px
+            padding-left: 16px
+            padding-right: 16px
+
+      .new-record-form-row:last-child
+        display: flex
+        flex-direction: row !important
+        justify-content: flex-start !important
+
+    .new-record-result
+      position: relative
+      width: 100%
+      text-align: center
+      font-family: 'SpaceGrotesk'
+      display: flex
+      flex-direction: column
+      align-items: center
+
+      &.empty
+        display: none
+
+      .new-record-status-icon
+        position: relative
+        width: 46px
+        height: 46px
+        background-repeat: no-repeat
+        background-size: 40px 40px
+        background-position: center
+        margin-bottom: 8px
+
+        &.in-progress
+          background-image: url("../../public/loading_sign_dots_128.svg")
+          animation: infinite linear
+          animation-name: loading
+          animation-duration: 3s
+
+        &.failed
+          background-image: url("../../public/error_sign_128.svg")
+        &.success
+          border-radius: 100px
+          border: 1px solid LINE_STROKE
+          background-image: url("../../public/done_sign_128.svg")
+
+      .new-record-result-info
+        text-align: center
+        position: relative
+        width: 100%
+        height: 30px
+        font-family: monolith
+        font-size: 20px

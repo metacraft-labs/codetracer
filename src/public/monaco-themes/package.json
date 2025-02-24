@@ -1,0 +1,35 @@
+{
+  "name": "monaco-themes",
+  "version": "0.3.3",
+  "description": "Themes for monaco editor in web browser",
+  "main": "src/index.js",
+  "scripts": {
+    "prepublishOnly": "npm run build && npm run download && npm run generate",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack --mode production",
+    "download": "node ./scripts/download.js",
+    "generate": "node ./scripts/generate.js"
+  },
+  "keywords": [
+    "monaco",
+    "editor",
+    "themes"
+  ],
+  "files": [
+    "themes",
+    "src",
+    "dist",
+    "README.md"
+  ],
+  "author": "Brijesh <brijesh@bitwiser.in>",
+  "license": "MIT",
+  "devDependencies": {
+    "follow-redirects": "^1.9.0",
+    "webpack": "^4.41.2",
+    "webpack-cli": "^3.3.10",
+    "webpack-dev-server": "^3.9.0"
+  },
+  "dependencies": {
+    "fast-plist": "^0.1.2"
+  }
+}

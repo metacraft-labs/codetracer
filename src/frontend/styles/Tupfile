@@ -1,0 +1,12 @@
+include_rules
+
+# workaround if css does not build:
+# css
+# comment uncomment the line below and comment out everything else
+# save the file, let tup work its magic and after that return the file to previous state
+#: foreach *.styl |> !stylus |>
+
+: default_white_theme.styl |> !stylus |> default_white_theme.css
+: default_dark_theme.styl |> !stylus |> default_dark_theme.css
+: loader.styl |> !stylus |> loader.css
+: subwindow.styl |> !stylus |> subwindow.css

@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "noImplicitAny": true,
+    "sourceMap": true,
+    "strictNullChecks": true,
+    "esModuleInterop": true
+  },
+  "include": ["tests/**.ts", "playwright.config.ts"],
+  "exclude": ["**.mjs"]
+}

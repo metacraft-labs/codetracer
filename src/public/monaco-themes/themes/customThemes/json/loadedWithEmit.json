@@ -1,0 +1,48 @@
+{
+  "base": "vs-dark",
+  "inherit": true,
+  "rules": [
+    {
+      "foreground": "8e8f92",
+      "token": ""
+    },
+    {
+      "foreground": "a0735e",
+      "token": "comment"
+    },
+    {
+      "foreground": "cdd3de",
+      "token": "variable"
+    },
+    {
+      "foreground": "e48e59",
+      "token": "keyword"
+    },
+    {
+      "foreground": "cd536d",
+      "token": "type"
+    },
+    {
+      "foreground": "83319c",
+      "token": "string"
+    },
+    {
+      "foreground": "d55670",
+      "token": "number"
+    },
+    {
+      "foreground":"8e8f92",
+      "token": "delimiter"
+    }
+  ],
+  "colors": {
+    "editor.foreground": "#CDD3DE",
+    "editor.background": "#FFFFFF",
+    "editor.selectionBackground": "#4f5b66",
+    "editor.lineHighlightBackground": "#65737e55",
+    "editorCursor.foreground": "#c0c5ce",
+    "editorWhitespace.foreground": "#65737e",
+    "editorIndentGuide.background": "#65737F",
+    "editorIndentGuide.activeBackground": "#FBC95A"
+  }
+}

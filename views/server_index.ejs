@@ -1,0 +1,91 @@
+<!-- Praise the Lord! -->
+
+<!-- using libs -->
+<!-- fuzzysort: credit to farzher -->
+<!-- credit to Rick Strahl for jquery-resizable -->
+<!-- bootstrap 4 : credit to bootstrap authors-->
+
+<!doctype html>
+<html>
+    <head>
+        <meta charset='utf-8'>
+        <title>editor</title>
+
+        <!--
+          don't remove this: placeholder and default,
+          later we use `loadTheme` in ui_js.nim to load the configured theme -->
+        <link id='theme' rel='stylesheet' href='styles/default_white_theme.css' type='text/css'>
+
+        <link rel='stylesheet' type='text/css' href='styles/loader.css'>
+
+        <!-- 3rd party -->
+        <link rel='stylesheet' type='text/css' href='public/font-awesome.min.css'>
+        <link rel="stylesheet" type='text/css' href="public/vex.css" />
+        <link rel="stylesheet" type='text/css' href="public/vex-theme-os.css" />
+
+        <!-- golden layout css -->
+        <link rel="stylesheet" href="public/golden-layout/dist/css/goldenlayout-base.css" type="text/css"/>
+        <link rel="stylesheet" href="public/golden-layout/dist/css/themes/goldenlayout-light-theme.css" type="text/css"/>
+
+        <link rel="stylesheet" href="public/jstree_default.css" type="text/css" />
+
+
+        <link rel="stylesheet" href="../public/bootstrap-4.3.1-dist/css/bootstrap.css" type="text/css" />
+        <link rel="stylesheet" href="../public/bootstrap-4.3.1-dist/css/bootstrap-grid.css" type="text/css" />
+
+
+        <link rel="stylesheet" href="public/nouislider.css" type="text/css" />
+
+        <!--file-icons-->
+        <link rel="stylesheet" href="public/@exuanbo/file-icons-js/dist/css/file-icons.css" type="text/css" />
+
+        <script type='text/javascript' src='public/socket.io.js'></script>
+
+        <script>
+          self.module = undefined
+          // self.process.browser = true
+
+          window.electron = undefined;
+
+          inElectron = false;
+          loadScripts = true;
+
+          frontendSocketPort = <%= frontendSocketPort %>;
+          frontendSocketParameters = "<%= frontendSocketParameters %>";
+
+      </script>
+
+    </head>
+    <body>
+        <div id='menu' class='menu'>
+        </div>
+        <div id='welcomeScreen'>
+
+        </div>
+        <div id='root-container' class='container'>
+          <div id='ROOT'>
+            <div id="context-menu-container" style="display: none;"></div>
+            <div id='command-p'>
+            </div>
+            <div id='fixed-search'>
+            </div>
+            <section id="main">
+            </section>
+          </div>
+
+
+
+          <footer>
+            <div id='search-results'>
+            </div>
+            <div id='status'>
+            </div>
+          </footer>
+        </div>
+        <!-- <script async id="__bs_script__" src="http://localhost:9700/browser-sync/browser-sync-client.js?v=2.28.3"></script> -->
+        <script src="public/dist/frontend_bundle.js" type="text/javascript"> </script>
+        <script src='public/jstree.min.js' type='text/javascript'></script>
+        <script src='public/ui.js' type='text/javascript'></script>
+
+    </body>
+</html>

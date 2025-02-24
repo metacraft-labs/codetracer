@@ -1,0 +1,67 @@
+[submodule "libs/quicktest"]
+	path = libs/quicktest
+	url = https://github.com/alehander92/nim-quicktest.git
+	branch = group
+[submodule "libs/poly"]
+	path = libs/poly
+	url = https://github.com/alehander92/poly.git
+[submodule "libs/karax"]
+	path = libs/karax
+	url = ../karax.git
+	branch = new-karax
+[submodule "libs/NimYAML"]
+	path = libs/NimYAML
+	url = https://github.com/status-im/NimYAML.git
+	branch = devel
+[submodule "libs/nim-chronicles"]
+	path = libs/nim-chronicles
+	url = https://github.com/alehander92/nim-chronicles.git
+	branch = codetracer-unified-log-format
+[submodule "libs/nim-prompt"]
+	path = libs/nim-prompt
+	url = https://github.com/surf1nb1rd/nim-prompt
+[submodule "libs/nim-serialization"]
+	path = libs/nim-serialization
+	url = https://github.com/status-im/nim-serialization.git
+	branch = master
+[submodule "libs/nim-faststreams"]
+	path = libs/nim-faststreams
+	url = https://github.com/status-im/nim-faststreams.git
+	branch = master
+[submodule "libs/nim-stew"]
+	path = libs/nim-stew
+	url = https://github.com/status-im/nim-stew.git
+	branch = master
+[submodule "libs/nim-json-serialization"]
+	path = libs/nim-json-serialization
+	url = ../nim-json-serialization.git
+	branch = fix-track-field-name-errors
+[submodule "libs/asynctools"]
+	path = libs/asynctools
+	url = https://github.com/cheatfate/asynctools.git
+[submodule "libs/chronos"]
+	path = libs/chronos
+	url = https://github.com/status-im/nim-chronos.git
+	branch = achannels
+[submodule "libs/nim-unicodedb"]
+	path = libs/nim-unicodedb
+	url = https://github.com/nitely/nim-unicodedb
+[submodule "libs/parsetoml"]
+	path = libs/parsetoml
+	url = https://github.com/NimParsers/parsetoml.git
+[submodule "libs/nim-result"]
+	path = libs/nim-result
+	url = https://github.com/metacraft-labs/nim-result.git
+[submodule "libs/nim-confutils"]
+	path = libs/nim-confutils
+	url = https://github.com/alehander92/nim-confutils
+	branch = rest-of-args-improvements
+[submodule "libs/runtime_tracing"]
+	path = libs/runtime_tracing
+	url = https://github.com/metacraft-labs/runtime_tracing.git
+[submodule "libs/codetracer-ruby-recorder"]
+	path = libs/codetracer-ruby-recorder
+	url = https://github.com/metacraft-labs/codetracer-ruby-recorder.git
+[submodule "libs/codetracer-python-recorder"]
+	path = libs/codetracer-python-recorder
+	url = https://github.com/metacraft-labs/codetracer-python-recorder.git

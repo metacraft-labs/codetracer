@@ -1,0 +1,16 @@
+<svg width="18" height="20" viewBox="0 0 18 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Frame" clip-path="url(#clip0_1408_92)">
+<path id="Vector" d="M18 4.99979H6" stroke="#F3F3F3" stroke-width="1.3" stroke-miterlimit="10"/>
+<path id="Vector_2" d="M18 12.9998H6" stroke="#F3F3F3" stroke-width="1.3" stroke-miterlimit="10"/>
+<path id="Vector_3" d="M18 16.9998H6" stroke="#F3F3F3" stroke-width="1.3" stroke-miterlimit="10"/>
+<path id="Vector_4" d="M18 8.99979H10" stroke="#F3F3F3" stroke-width="1.3" stroke-miterlimit="10"/>
+<g id="Group">
+<path id="Vector_5" d="M1.04907e-06 12.5998L7.5 8.79979L-9.9662e-07 4.99979" fill="#F3F3F3"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1408_92">
+<rect width="18" height="19.7143" fill="white" transform="matrix(-1 0 0 1 18 0.142853)"/>
+</clipPath>
+</defs>
+</svg>

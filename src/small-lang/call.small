@@ -1,0 +1,11 @@
+(defun inc-first-with-ten (list)
+  (loop i 0 10 (
+    (set new-first (add (# list 0) 1))
+    (set (# list 0) new-first)
+    )
+  (print list)))
+
+(set list (vector 0 1 2 3 4))
+(set limit 100)
+(loop i 0 limit
+  (inc-first-with-ten list))

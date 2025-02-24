@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.unshift(File.join(File.dirname(__FILE__), '..', 'lib'))
+$LOAD_PATH.unshift(File.dirname(__FILE__))
+require 'rubytracer'
+
+def main
+  filename = ARGV[0]
+  source = File.read(filename)
+  path = filename.split('/')[0..-2].join('/')
+  File.write("#{path}/x.rb", RubyTracer.instrument(source))
+  File.write("#{path}/trace.rb", File.read("trace.rb"))
+  `ruby #{path}/x.rb`
+end
+
+main

@@ -1,0 +1,1608 @@
+import
+  async, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
+  karax, karaxdsl, kdom, vstyles,
+  ui/[layout, editor, trace, events, event_log,
+      state, calltrace, loading, start, menu,
+      debug, flow, filesystem, value, repl,
+      build, welcome_screen, point_list, scratchpad,
+      trace_log, calltrace_editor, terminal_output, shell,
+      no_source, ui_imports, shortcuts, step_list, low_level_code],
+  lib, types, lang, renderer, config,
+  property_test / test
+
+import vdom except Event
+from dom import Element, getAttribute, Node, preventDefault, document,
+                getElementById, querySelectorAll, querySelector
+
+proc configureIPC(data: Data)
+
+# IPC HANDLERS
+
+var vex* {.importc.}: js
+const TAB_LIMIT = 20
+const MIN_FONTSIZE = 10
+const MAX_FONTSIZE = 18
+
+proc defineMenuImpl(node: NimNode): (NimNode, bool) =
+  # echo node.treerepr
+  case node.kind:
+  of nnkCommand:
+    # echo "error"
+    # return (node, false)
+    let kindOriginal = node[0]
+    let nameNode = node[1]
+    var currentParent: MenuNode
+    if kindOriginal.repr == "folder":
+      var elementsNode: NimNode = quote do: @[]
+      if node.len > 2:
+        for element in node[2]:
+          let (element, isSeparator) = defineMenuImpl(element)
+          if not isSeparator:
+            elementsNode[1].add(element)
+          else:
+            elementsNode[1][^1].add(nnkExprColonExpr.newTree(ident"isBeforeNextSubGroup", newLit(true)))
+      var r = quote:
+        MenuNode(
+          kind: MenuFolder,
+          name: `nameNode`,
+          elements: `elementsNode`,
+          enabled: true)
+      result = (r, false)
+    else:
+      if node.len < 3:
+        macros.error "no action " & node.repr & " "
+
+      let actionNode = node[2]
+      # if node.len >
+      let last = if node.len == 3: newLit(true) else: node[^1]
+      var r = quote:
+        MenuNode(
+          kind: MenuElement,
+          name: `nameNode`,
+          action: `actionNode`,
+          elements: @[],
+          enabled: `last`)
+      result = (r, false)
+  of nnkPrefix:
+    if node.repr == "--sub":
+      result = (nil, true)
+      return
+  else:
+    echo "menu: expect command or prefix " & $node.kind
+    # # echo "expect command"
+    # static:
+    #   macros.error "expect command or prefix ", $node.kind
+
+macro defineMenu(code: untyped): untyped =
+  # defineMenu:
+  #   folder "menu":
+  #     element name, action, [enabled=MEnabled] or false or name of check
+  # =>
+  # MenuNode(
+  #   kind: MenuFolder, name: "menu", elements: @[
+  #    MenuNode(kind: MenuElement, name: name, action: action, enabled: true)])
+  result = defineMenuImpl(code[0])[0]
+
+func webTechMenu(data: Data, program: cstring): MenuNode =
+  let config = data.config
+  if not data.startOptions.shellUi:
+    defineMenu:
+      folder program:
+        folder "File":
+          # element "New File", newTab, false
+          # element "Preferences", preferences
+          # --sub
+          # element "Open File", ClientAction.openFile
+          # element "Open Folder", openFolder, false
+          # element "Open Recent", openRecent, false
+          # --sub
+          # element "Save", aSave
+          # element "Save As ...", saveAs
+          # element "Save All", saveAll
+          # --sub
+          element "Close Current File", closeTab
+          element "Reopen File", reopenTab
+          element "Next File", switchTabRight
+          element "Previous File", switchTabLeft
+          element "Switch File", ClientAction.switchTabHistory
+          --sub
+          # element "Close All Documents", closeAllDocuments
+          element "Exit", aExit
+        folder "Edit":
+          # element "Undo", aUndo, false
+          # element "Redo", aRedo, false
+          # --sub
+          # element "Cut", aCut
+          # element "Copy", aCopy
+          # element "Paste", aPaste
+          # --sub
+          # element "Replace", aReplace, false
+          # --sub
+          element "Find in Files", findInFiles
+          element "Find Symbol", findSymbol
+          # element "Replace in Files", replaceInFiles, false
+          --sub
+          # folder "Code folding":
+            # element "Collapse under cursor", aCollapseUnderCursor, false
+            # element "Expand under cursor", aExpandUnderCursor, false
+          element "Expand All", aExpandAll
+          element "Collapse All", aCollapseAll
+          # --sub
+          # folder "Advanced":
+          #   element "Toggle Comment", aToggleComment, false
+          #   element "Increase Indentation", aIncreaseIndentation, false
+          #   element "Decrease Indentation", aDecreaseIndentation, false
+          #   element "Make Uppercase", aMakeUppercase, false
+          #   element "Make Lowercase", aMakeLowercase, false
+          #   #* (Other suitalbe Monaco commands)
+
+            #* (Other suitable Monaco commands)
+          # element "Delete", ClientAction.del
+        folder "View":
+          # folder "Panes":
+            # folder "New"
+          element "Filesystem", aFilesystem
+          element "Calltrace", aFullCalltrace
+          element "State", aState
+          element "Event Log", aEventLog
+          element "Terminal Output", aTerminal
+          element "Scratchpad", aScratchpad
+          # element "Step List", aStepList
+            # element "Shell", aShell
+            # element "Find Results", aFindResults, false
+            # element "Build Log", aBuildLog, false
+            # element "File Explorer", aFileExplorer, false
+          # folder "Layouts":
+            # element "Save Layout", aSaveLayout, false
+            # element "Load Layout", aLoadLayout, false
+            # element "Debug (Normal Screen)", switchDebug
+            # element "Debug (Wide Screen)", switchDebugWide, false
+            # element "Edit (Normal Screen)", switchEditNormal, false
+            # element "Edit (Wide Screen)", switchEdit
+            #element "can be also"
+            #element "Normal screen"
+            #element "Wide screen"
+            #element "Debug"
+            #element "Edit"
+          # element "New Horizontal Tab Group", aNewHorizontalTabGroup, false
+          # element "New Vertical Tab Group", aNewVerticalTabGroup, false
+          # --sub
+          # element "Notifications", aNotifications, false
+          # element "Start Window", aStartWindow, false
+          # element "Full Screen Toggle", aFullScreen, false
+          # folder "Choose App Theme":
+            # element "Mac Classic Theme", aTheme0
+            # element "Default White Theme", aTheme1
+            # element "Default Black Theme", aTheme2
+            # element "Default Dark Theme", aTheme3
+          # folder "Choose Monaco Theme":
+            # element "vs-light", aMonacoTheme0, false
+            # element "etc",
+          # --sub
+          # element "Multi-line Preview Mode", aMultiline, false
+          # element "Single-line Preview Mode", aSingleLine, false
+          # element "No Preview", aNoPreview, false
+          # --sub
+          # element "View C Code (here it depends on Lang for project)", aLowLevel0, false
+          # element "View Assembly Code (similar: can be llvm ir)", aLowLevel1, false
+          # --sub
+          # element "Zoom In", zoomIn
+          # element "Zoom Out", zoomOut
+          # element "Show Minimap", aShowMinimap, false
+        # folder "Navigate":
+        #   element "Go to File", aGotoFile, false
+        #   element "Go to Symbol", aGotoSymbol, false
+        #   --sub
+        #   element "Go to Definition", aGotoDefinition, false
+        #   element "Find References", aFindReferences, false
+        #   element "Go to Line", aGotoLine, false
+        #   --sub
+        #   element "Go to Previous Cursor Location", aGotoPreviousCursorLocation, false
+        #   element "Go to Next Cursor Location", aGotoNextCursorLocation, false
+        #   --sub
+        #   element "Go to Previous Edit Location", aGotoPrevious, false
+        #   element "Go to Next Edit Location", aGotoNextEditLocation, false
+        #   --sub
+        #   element "Go to Previous Point in Time", aGotoPreviousPointInTime, false
+        #   element "Go to Next Point in Time", aGotoNextPointInTime, false
+        #   --sub
+        #   element "Go to Next Error", aGotoNextError, false
+        #   element "Go to Previous Error", aGotoPreviousError, false
+        #   --sub
+        #   element "Go to Next Search Result", aGotoNextSearchResult, false
+        #   element "Go to Previous Search Result", aGotoPreviousSearchResult, false
+
+        # folder "Build":
+        #   element "Build Project", aBuild, false
+        #   element "Compile Current File (Nim Check)", aCompile, false
+        #   element "Run Static Analysis (drnim)", aRunStatic, false
+        #   # element "Build tasks (nimble)", nil, false
+
+        folder "Debug":
+          # element "Trace Existing Program...", aTrace, false
+          # element "Load Existing Trace...", aLoadTrace, false
+          # folder "Panes":
+          #   folder "New":
+          #     element "Program state explorer", aNewState, false
+          #     element "Event log", aNewEventLog, false
+          #     element "Full call trace", aNewFullCalltrace, false
+          #     element "Terminal output", aNewTerminal, false
+          #   element "Breakpoints/Tracepoints", aPointList, false
+          #   element "Mixed call/stack trace", aLocalCalltrace, false
+          #   element "Full call trace", aFullCalltrace, false
+          #   element "Program state explorer", aState, false
+          #   element "Event log", aEventLog
+          #   element "Terminal output", aTerminal, false
+          # element "Options", aOptions, false
+          # --sub
+          # element "Start Debugging", aDebug, false
+          element "Continue", ClientAction.forwardContinue
+          element "Step Over", ClientAction.forwardNext
+          element "Step In", ClientAction.forwardStep
+          element "Step Out", ClientAction.forwardStepOut
+          element "Reverse Continue", ClientAction.reverseContinue
+          element "Reverse Step Over", ClientAction.reverseNext
+          element "Reverse Step In", ClientAction.reverseStep
+          element "Reverse Step Out", ClientAction.reverseStepOut
+          # element "Stop Debugging", ClientAction.stop
+          # TODO dynamic name
+          # element "Pause (currently using stop shortcut?)", stop, false
+          --sub
+          element "Add a Breakpoint", aBreakpoint
+          element "Delete Breakpoint", aDeleteBreakpoint
+          element "Delete All Breakpoints", aDeleteAllBreakpoints
+          element "Enable Breakpoint", aEnableBreakpoint
+          element "Enable All Breakpoints", aEnableAllBreakpoint
+          element "Disable Breakpoint", aDisableBreakpoint
+          element "Disable All Breakpoints", aDisableAllBreakpoints
+          --sub
+          element "Add a Tracepoint", aTracepoint
+          element "Delete Tracepoint", aDeleteTracepoint
+          element "Enable Tracepoint", aEnableTracepoint
+          element "Enable All Tracepoints", aEnableAllTracepoints
+          element "Disable Tracepoint", aDisableTracepoint
+          element "Disable All Tracepoints", aDisableAllTracepoints
+          element "Run All Tracepoints", aCollectEnabledTracepointResults
+        # folder "Help":
+        #   element "User Manual (TODO)", aUserManual, false
+        #   element "Report a Problem (TODO)", aReportProblem, false
+        #   element "Suggest a Feature", aSuggestFeature, false
+        #   element "About (TODO)", aAbout, false
+  else:
+    defineMenu:
+      folder program:
+        # element "New Terminal", aTheme0, false
+        folder "Themes":
+          element "Mac Classic Theme", aTheme0
+          element "Default White Theme", aTheme1
+          element "Default Black Theme", aTheme2
+          element "Default Dark Theme", aTheme3
+        element "Close", aExit, true
+
+proc update*(self: Data, build: bool = false) =
+  if build:
+    let buildComponent = data.buildComponent(0)
+    buildComponent.builds.add(buildComponent.build)
+    buildComponent.build = Build(output: @[], running: true)
+    data.saveFiles()
+  else:
+    data.saveFiles(data.services.editor.active)
+  if build:
+    data.services.calltrace.restart()
+    data.services.eventLog.restart()
+    data.services.debugger.restart()
+    data.services.flow.restart()
+    data.services.history.restart()
+    # maybe not? we want the files there data.services.editor
+    for content, map in data.ui.componentMapping:
+      for id, component in map:
+        component.restart()
+
+  # TODO : are undefined/null cstrings handled as cstring"" in the javascript backend?
+  # there are a possible edge case, good to be handled as an empty cstring
+  # is active focus ok in general?
+  # document with active
+  ipc.send "CODETRACER::update", js{build: build, currentPath: cast[cstring](self.ui.activeFocus.toJs.path)}
+  redrawAll()
+
+# alt+1 => low level view source 1
+# alt+2/alt+i => low level view source2 / instructions for now
+# alt+a => low level ast view
+# alt+c => low level cfg view
+# they all share the same window, but they are displayed in the order in which they are toggled
+
+# proc toggle
+proc switchToEdit*(data: Data) =
+  if data.ui.mode != EditMode:
+    data.ui.mode = EditMode
+    data.ui.readOnly = false
+    # TODO separate action for those?
+    # data.ui.layout.root.contentItems[0].contentItems[1].config.width = 0
+    # data.ui.layout.root.contentItems[0].contentItems[0].config.width = 100
+
+    # data.ui.layout.root.contentItems[0].contentItems[0].contentItems[0].config.width = 20
+    # data.ui.layout.root.contentItems[0].contentItems[0].contentItems[1].config.width = 80
+    # data.ui.layout.updateSize()
+    # data.ui.layout.root.contentItems[0].contentItems[1].element.hide()
+    for content, map in data.ui.componentMapping:
+      for id, component in map:
+        try:
+          component.clear()
+        except:
+          cerror "layout: component clear: " & getCurrentExceptionMsg()
+    for label, editor in data.ui.editors:
+      editor.disableDebugShortcuts()
+      if not editor.monacoEditor.isNil:
+        var options = MonacoEditorOptions(
+          scrollbar: js{},
+          minimap: js{ enabled: data.config.showMinimap },
+          readOnly: false)
+        editor.monacoEditor.updateOptions(options)
+  redrawAll()
+
+proc switchToDebug*(data: Data) =
+  if data.ui.mode != DebugMode:
+    data.ui.mode = DebugMode
+    data.ui.readOnly = true
+    # TODO separate action?
+    data.ui.layout.root.contentItems[0].contentItems[0].config.width = 50
+    data.ui.layout.root.contentItems[0].contentItems[1].config.width = 50
+    data.ui.layout.updateSize()
+    data.ui.layout.root.contentItems[0].contentItems[1].element.show()
+    for label, editor in data.ui.editors:
+      editor.enableDebugShortcuts()
+      if not editor.monacoEditor.isNil:
+        var options = MonacoEditorOptions(readOnly: true)
+        editor.monacoEditor.updateOptions(options)
+  redrawAll()
+
+proc toggleMode*(data: Data) =
+  if data.ui.mode == DebugMode:
+    data.switchToEdit()
+  else:
+    data.switchToDebug()
+
+
+data.functions.toggleMode = toggleMode
+data.functions.update = update
+data.functions.switchToEdit = switchToEdit
+data.functions.switchToDebug = switchToDebug
+data.functions.focusEventLog = focusEventLog
+data.functions.focusCalltrace = focusCalltrace
+data.functions.focusEditorView = focusEditorView
+
+
+proc configure(data: Data) =
+  Mousetrap.`bind`("ctrl+f5") do ():
+    data.toggleMode()
+
+  Mousetrap.`bind`("ctrl+s") do ():
+    data.update()
+
+  Mousetrap.`bind`("alt+1") do ():
+    data.openLowLevelCode()
+
+  # Mousetrap.`bind`("alt+2") do ():
+  #   data.openAlternativeView(2)
+
+  domwindow.onresize = proc(e: js) =
+    if not data.isNil and not data.ui.isNil and not data.ui.layout.isNil:
+      data.ui.layout.updateSize()
+
+proc loadShortcut*(action: ClientAction, config: Config): cstring =
+  # load a shortcut for this node from config
+  # if we update config it should effect it
+  result = j""
+  for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
+    if index == 0:
+      result = result & shortcutValue.renderer.toUpperCase()
+    else:
+      result = result & j" " & shortcutValue.renderer.toUpperCase()
+
+proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Command = nil) =
+  # check if node has children and is enabled
+  if node.elements.len == 0 and node.enabled:
+
+    # add node as a subcommand to its parent if it  has one
+    if not parent.isNil:
+      if not names.hasKey(parent.name):
+        names[parent.name] = parent
+      names[parent.name].subcommands.add(node.name)
+
+    # add node as a command in commands collection
+    if not names.hasKey(node.name):
+      names[node.name] = Command(
+        name: node.name,
+        kind: ActionCommand,
+        action: node.action,
+        shortcut: loadShortcut(node.action, data.config))
+
+  else:
+    # create a parent command from parent
+    let parent = Command(
+      name: node.name,
+      kind: ParentCommand)
+
+    # get commands of parent children
+    for node in node.elements:
+      node.getCommand(names, parent)
+
+proc getCommands(node: MenuNode): JsAssoc[cstring, Command] =
+  var names = JsAssoc[cstring, Command]{}
+  node.getCommand(names)
+  return names
+
+proc followMouse(event: dom.Event) =
+  # dont support ancient IE
+  var ev = event
+  if ev == nil:
+    ev = dom.window.event
+  # data.mouseCoords = (ev.pageX, ev.pageY)
+  # dom.document.toJs.body.classList.remove(j"global-no-cursor")
+  # if TELEMETRY_ENABLED:
+  #   telemetryBackupIndex += 1
+  #   if telemetryBackupIndex == 10:
+  #   #  updateTelemetryLog()
+  #    telemetryBackupIndex = 0
+
+proc tryInitLayout*(data: Data) =
+  if data.ui.pageLoaded and data.ui.initEventReceived:
+    initLayout(data.ui.resolvedConfig)
+    redrawAll()
+
+proc onReady(event: dom.Event) =
+  if cast[cstring](cast[js](dom.document).readyState) == j"complete":
+    data.ui.pageLoaded = true
+    data.tryInitLayout()
+    cast[js](dom.document).onmousemove = followMouse
+
+    # jqueryFind("body").toJs.on(j"click", onGlobalClick)
+
+    discard windowsetInterval(proc =
+      if not data.services.editor.active.isNil:
+        if data.services.editor.changeLine:
+          gotoLine(data.services.editor.currentLine, change=true)
+
+        if data.lowAsm() and scrollAssembly != -1:
+          let index = scrollAssembly
+          scrollAssembly = -1
+          jq(".low-level").toJs.scrollTop = cast[int](jqall(".assembly-offset")[index].toJs.offsetTop) - 300, 500)
+
+      # TODO different debug?
+
+      # TODO next few lines are for live notifications/warnings in the app
+      # let debugComponent = data.debugComponent
+      # if debugComponent.message.message.len > 0 and
+      #   delta(now(), debugComponent.message.time) > 5_000:
+      #     debugComponent.message.message = ""
+      #     redrawAll()
+
+proc onInit*(
+    sender: js,
+    response: jsobject(
+      time=BiggestInt,
+      config=Config,
+      layout=js,
+      home=cstring,
+      startOptions=StartOptions,
+      bypass=bool,
+      helpers=Helpers)) =
+  data.startOptions = response.startOptions
+  data.homedir = response.home
+  data.config = response.config
+  data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
+  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.services.flow.enabledFlow = response.config.flow
+
+  renderer.helpers = response.helpers
+
+  # TELEMETRY_ENABLED = false
+
+  # SILENT_LOG = not data.config.debug
+
+  data.createUIComponents()
+
+  loadTheme(data.config.theme)
+
+  configureShortcuts()
+
+  if not response.bypass:
+    redrawAll()
+
+cast[js](dom.document).onreadystatechange = onReady
+
+proc onTraceLoaded(
+  sender: js,
+  response: jsobject(
+    trace=Trace,
+    tags=JsAssoc[cstring, seq[Tag]],
+    functions=seq[Function],
+    save=Save,
+    dontAskAgain=bool)) {.async.} =
+
+  data.trace = response.trace
+  data.ui.readOnly = true
+  data.services.debugger.functions = response.functions
+  data.services.editor.tags = response.tags
+  data.save = response.save
+  data.save.fileMap = JsAssoc[cstring, int]{}
+  data.ui.menuNode = data.webTechMenu(baseName(response.trace.program))
+
+  for i, file in data.save.files:
+    data.save.fileMap[file.path] = i
+
+  # create Command objects from main menuNode
+  data.ui.commandPalette.interpreter.commands = getCommands(data.ui.menuNode)
+
+  # prepare command for fast search with fuzzysort
+  for key, command in data.ui.commandPalette.interpreter.commands:
+    data.ui.commandPalette.interpreter.commandsPrepared.add(fuzzysort.prepare(key))
+
+  duration("traceLoaded")
+
+  if data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
+    data.startOptions.loading = false
+  CURRENT_LANG = data.trace.lang
+
+  data.ui.initEventReceived = true
+  data.tryInitLayout()
+
+  if data.startOptions.rawTestStrategy.len > 0:
+    data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
+
+  if not data.startOptions.isInstalled and not response.dontAskAgain:
+    installMessage()
+
+
+proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
+  # domwindow.kxi = JsAssoc[cstring, KaraxInstance]{}
+  data.startOptions.loading = false
+  data.startOptions.shellUi = true
+  data.config = response.config
+  data.ui.menuNode = data.webTechMenu(j"Shell")
+  loadTheme(data.config.theme)
+  var shellComponent = data.shellComponent(0)
+
+  if shellComponent.isNil:
+    shellComponent =
+      cast[ShellComponent](data.makeComponent(
+        Content.Shell, data.generateId(Content.Shell)))
+  shellComponent.createShell()
+
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.welcomeScreen = false
+    data.ui.welcomeScreen.newRecordScreen = false
+
+  if data.ui.menu.isNil:
+    discard data.makeMenuComponent()
+
+  data.ui.initEventReceived = true
+  data.tryInitLayout()
+
+
+proc onFilenamesLoaded(
+    sender: js,
+    response: jsobject(
+      filenames=seq[string])) =
+
+  data.services.debugger.paths = response.filenames
+
+  # add file paths to command interpreter
+  for path in data.services.debugger.paths:
+    let fileName = baseName(path)
+    data.ui.commandPalette.interpreter.files[path] = path
+
+    # prepare file paths for fast srearch widh fuzzysort
+    data.ui.commandPalette.interpreter.filesPrepared.add(fuzzysort.prepare(path))
+
+  data.redraw()
+
+proc onSymbolsLoaded(
+    sender: js,
+    response: jsobject(
+      symbols=seq[Symbol])) =
+
+  data.ui.commandPalette.interpreter.symbols = JsAssoc[cstring, seq[Symbol]]{}
+
+  for symbol in response.symbols:
+    if not data.ui.commandPalette.interpreter.symbols.hasKey(symbol.name):
+      data.ui.commandPalette.interpreter.symbols[symbol.name] = @[]
+
+      # prepare file paths for fast search widh fuzzysort
+      data.ui.commandPalette.interpreter.symbolsPrepared.add(fuzzysort.prepare(cstring(symbol.name)))
+
+    # It's possible to have the same symbol in different files
+    var nameSymbols = data.ui.commandPalette.interpreter.symbols[symbol.name]
+    nameSymbols.add(symbol)
+    data.ui.commandPalette.interpreter.symbols[symbol.name] = nameSymbols
+
+  data.redraw()
+
+
+proc onFilesystemLoaded(
+  sender: js,
+  response: jsobject(
+    folders=CodetracerFile)) =
+  data.services.editor.filesystem = response.folders
+  data.redraw()
+
+proc onUpdatePathContent(
+  sender: js,
+  response: jsobject(
+    content=CodetracerFile,
+    nodeId=cstring,
+    nodeIndex=int,
+    nodeParentIndices=seq[int])) =
+  let tree = jqFind(".filesystem").jstree(true)
+  let parent = tree.get_node(response.nodeId)
+  var children = parent.children.to(seq[cstring])
+
+  # remove current jstree node children
+  if children.len > 0:
+    var deletedItems = 0
+    for i in 0..<children.len:
+      tree.delete_node(children[i - deletedItems])
+      deletedItems += 1
+
+  # create new jstree node children
+  response.content.changeIcons()
+  if response.content.children.len > 0:
+    for child in response.content.children:
+      tree.create_node(response.nodeId, child)
+
+  # update component state
+  var nodeParent = data.services.editor.filesystem
+
+  for index in response.nodeParentIndices:
+    nodeParent = nodeParent.children[index]
+
+  var node = nodeParent.children[response.nodeIndex]
+  node[] = response.content[]
+
+
+proc onUpdateTrace(sender: js, response: jsobject(trace=Trace)) =
+  data.trace = response.trace
+  data.ui.readOnly = false
+  let oldPaths = data.services.debugger.paths
+  let oldTags = data.services.editor.tags
+  let oldFilesystem = data.services.editor.filesystem
+  let oldSave = data.save
+
+  data.services.editor.tags = oldTags
+  # TODO initDataTable = true
+  data.services.debugger.paths = oldPaths
+  data.services.editor.filesystem = oldFilesystem
+  data.save = oldSave
+  data.switchToDebug()
+  redrawAll()
+
+
+proc onNoTrace(
+    sender: js,
+    response: jsobject(
+      path=cstring,
+      lang=Lang,
+      layout=js,
+      home=cstring,
+      startOptions=StartOptions,
+      bypass=bool,
+      helpers=Helpers,
+      config=Config,
+      filenames=seq[string],
+      filesystem=CodetracerFile,
+      functions=seq[Function],
+      save=Save)) {.async.} =
+
+  data.trace = nil
+  data.ui.readOnly = false
+  data.startOptions = response.startOptions
+  data.homedir = response.home
+  data.startOptions.app = response.home & cstring"/.local/share" & cstring"/codetracer"
+  data.services.debugger.paths = response.filenames
+  data.services.debugger.functions = response.functions
+  data.ui.menuNode = data.webTechMenu(baseName(response.path))
+
+  for path in data.services.debugger.paths:
+    data.services.search.pathsPrepared.add(fuzzysort.prepare(path))
+
+  for name, source in data.services.search.pluginCommands:
+    data.services.search.commandsPrepared.add(
+      fuzzysort.prepare(name))
+
+  for function in data.services.debugger.functions:
+    var prepared = fuzzysort.prepare(function.signature)
+    prepared.obj = function
+    data.services.search.functionsPrepared.add(prepared)
+    if function.inSourcemap:
+      data.services.search.functionsInSourcemapPrepared.add(prepared)
+
+  data.services.editor.filesystem = response.filesystem
+  data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
+  data.config = response.config
+  data.config.layout = j"default_white"
+  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.save = response.save
+  data.save.fileMap = JsAssoc[cstring, int]{}
+  for i, file in data.save.files:
+    data.save.fileMap[file.path] = i
+  loadTheme(j"default_white")
+  # data.tabManager.tabs = JsAssoc[cstring, TabInfo]{}
+  # data.tabManager.tabList = @[]
+  if response.path.len > 0:
+    data.openTab(response.path, ViewSource) # , response.lang)
+  data.startOptions.screen = false
+  data.startOptions.loading = false
+
+  data.ui.initEventReceived = true
+  data.tryInitLayout()
+
+  data.switchToEdit()
+  let ext = $toJsLang(response.lang)
+  # for i, file in data.save.files:
+    # if i < TAB_LIMIT:
+      # if ($file.path).endsWith(ext):
+        # data.openTab(file.path, j"", 0, response.lang)
+      # else:
+        # data.openTab(file.path, j"", 0, LangUnknown)
+    # else:
+      # remember those and be able to load them on ctrl+page etc
+      # TODO
+      # discard
+
+  configureShortcuts()
+  redrawAll()
+  data.ui.layout.updateSize()
+  discard windowSetTimeout(proc =
+    redrawAll()
+    data.ui.layout.updateSize(), 1_000)
+  discard windowSetTimeout(proc = redrawAll(), 5_000)
+  # sometimes stuff isn't rendered and it needs redraw
+
+proc invalidPath(data: Data, fieldName: cstring, message: cstring) =
+  let formValidator = data.ui.welcomeScreen.newRecord.formValidator
+  let capitalizedField = capitalize(fieldName)
+  formValidator.toJs[&"valid{capitalizedField}"] = false
+  formValidator.toJs[&"invalid{capitalizedField}Message"] = message
+
+proc recordPath(data: Data, path: cstring, fieldName: cstring) =
+  if not data.ui.welcomeScreen.newRecord.isNil:
+    data.ui.welcomeScreen.newRecord.toJs[$(fieldName)] = path
+    let formValidator = data.ui.welcomeScreen.newRecord.formValidator
+    let capitalizedField = capitalize(fieldName)
+    formValidator.toJs[&"valid{capitalizedField}"]= true
+    formValidator.toJs[&"invalid{capitalizedField}Message"] = cstring""
+    redrawAll()
+
+proc onRecordPath(
+  sender: js,
+  response: jsobject(
+    execPath=cstring,
+    fieldName=cstring)) =
+
+    data.recordPath(response.execPath, response.fieldName)
+
+proc onPathValidated(
+  sender: js,
+  response: jsobject(
+    execPath=cstring,
+    isValid=bool,
+    fieldName=cstring,
+    message=cstring)) =
+  if not response.isValid:
+    data.invalidPath(response.fieldName, response.message)
+    redrawAll()
+  else:
+    data.recordPath(response.execPath, response.fieldName)
+
+proc onSuccessfulRecord(
+  sender: js,
+  response: jsobject()) =
+    data.ui.welcomeScreen.newRecord.status.kind = RecordSuccess
+    redrawAll()
+
+proc onFailedRecord(
+  sender: js,
+  response: jsobject(errorMessage=cstring)) =
+    data.ui.welcomeScreen.newRecord.status.kind = RecordError
+    data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
+    redrawAll()
+
+proc onLoadingTrace(
+  sender: js,
+  response: jsobject(trace=Trace)) =
+  data.ui.welcomeScreen.loading = true
+  data.ui.welcomeScreen.loadingTrace = response.trace
+  redrawAll()
+
+
+proc onWelcomeScreen(
+  sender: js,
+  response: jsobject(
+    home=cstring,
+    layout=js,
+    startOptions=StartOptions,
+    config=Config,
+    recentTraces=seq[Trace])) =
+
+  clog "welcome_screen: on welcome screen"
+  # TODO: remove unnecessary rows
+  data.trace = nil
+  data.ui.readOnly = false
+  data.startOptions = response.startOptions
+  data.homedir = response.home
+  data.services.debugger.paths = @[]
+  data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
+  data.config = response.config
+  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.recentTraces = response.recentTraces
+  loadTheme(data.config.theme)
+  configureShortcuts()
+
+  if data.ui.welcomeScreen.isNil:
+    discard data.makeWelcomeScreenComponent()
+
+  data.ui.initEventReceived = true
+  data.tryInitLayout()
+
+proc onNewNotification(sender: js, notification: Notification) =
+  data.showNotification(notification)
+
+# func renderVariables(self: TimelineComponent): VNode =
+  # buildHtml(tdi)
+method render(self: TimelineComponent): VNode =
+
+  # var view = case self.active:
+  # of TimelineVariables:
+  #   self.renderVariables()
+  # of TimelineRegisters:
+  #   self.renderRegisters()
+  buildHtml(tdiv()):
+    tdiv(id="timeline") #:
+      # for
+
+proc onCtInstallStatus(sender: js, status: (cstring, cstring)) =
+  if status[0] == cstring"ok":
+    successMessage($(status[1]))
+  else:
+    errorMessage($(status[1]))
+
+proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
+  # discard
+  # TODO
+  for untitledName, newPath in files:
+    data.services.editor.open[newPath] = data.services.editor.open[untitledName]
+    data.services.editor.open[newPath].untitled = false
+    data.services.editor.open[newPath].changed = false
+    data.services.editor.open[newPath].name = newPath
+    # data.services.editor.open[newPath].fileInfo.path = newPath
+    discard jsDelete(data.services.editor.open[untitledName])
+    kxiMap[newPath] = kxiMap[untitledName]
+    discard jsDelete(kxiMap[untitledName])
+    data.ui.editors[newPath] = data.ui.editors[untitledName]
+    discard jsDelete(data.ui.editors[untitledName])
+    data.ui.editors[newPath].path = newPath
+    data.ui.editors[newPath].name = newPath
+    if not data.services.search.paths.hasKey(newPath):
+      data.services.search.pathsPrepared.add(fuzzysort.prepare(newPath))
+      data.services.search.paths[newPath] = true
+    var tokens = rsplit($newPath, {'/'}, maxsplit=1)
+    var label = $newPath
+    if tokens.len >= 2:
+      label = tokens[1]
+    data.ui.editors[newPath].contentItem.setTitle(j(label))
+    data.ui.editors[newPath].contentItem.config.componentState.label = newPath
+    data.ui.editors[newPath].contentItem.config.componentState.fullPath = newPath
+  data.redraw()
+
+proc saveAllFiles*(data: Data): Future[void] =
+  var promise = newPromise[void] do (resolve: proc: void):
+    var input = ""
+
+    var i = 0
+    var changed: seq[TabInfo]
+    for name, tab in data.services.editor.open:
+      if tab.changed:
+        input.add(&"<label for=tab-{i}>{name}</label><input type=checkbox name=tab-{i} />")
+        i += 1
+        changed.add(tab)
+
+    if i > 0:
+      vex.dialog.open(js{
+        message: j"",
+        input: j(&"close: files changed, save?\n{input}"),
+        buttons: @[
+          vex.dialog.buttons.YES, vex.dialog.buttons.NO
+        ],
+        callback: proc (checkbox: JsAssoc[cstring, cstring]) =
+          if cast[bool](checkbox) == false:
+            return
+          for name, check in checkbox:
+            let i = ($name)[4 .. ^1].parseInt
+            if check == j"on":
+              data.saveFiles(changed[i].name)
+            changed[i].changed = false
+          resolve()
+      })
+    else:
+      resolve()
+  return promise
+
+proc closeAllTabsAfterSave*(data: Data) {.locks: 0.} =
+  for id, editorComponent in (data.ui.componentMapping)[Content.EditorView]:
+    try:
+      # get editor component layout item
+      let layoutItem = editorComponent.layoutItem
+      let parentContentItem = layoutItem.parent
+
+      # remove component layout item
+      if parentContentItem.contentItems.len > 1:
+        layoutItem.remove()
+      else:
+        parentContentItem.remove()
+
+    except Exception as e:
+      # maybe removed already
+      warnMessage(&"warn: {e.msg}")
+
+proc exit*(data: Data) {.async.} =
+  await data.saveAllFiles()
+  ipc.send "CODETRACER::close-app", js{}
+
+proc closeAllFiles*(data: Data) {.async.} =
+  await data.saveAllFiles()
+  data.closeAllTabsAfterSave()
+
+proc onClose*(data: Data) =
+  discard data.exit()
+
+macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
+  let ipc = ident("ipc")
+  let data = ident("data")
+  result = nnkStmtList.newTree()
+  for message in messages:
+    var fullMessage: NimNode
+    var handler: NimNode
+    var messageCode: NimNode
+    if message.kind == nnkStrLit:
+      fullMessage = (namespace & $message).newLit
+      handler = (("on-" & $message).toCamelCase).ident
+      messageCode = quote:
+        `ipc`["on"].call(`ipc`, `fullMessage`, `handler`)
+    else:
+      # a:t => b
+      # echo message.treerepr
+      fullMessage = (namespace & $(message[0])).newLit
+      var elements: seq[NimNode]
+      if message[1][0][2].kind == nnkIdent:
+        elements.add(message[1][0][2])
+      else:
+        for element in message[1][0][2]:
+          elements.add(element)
+      let response = ident("response")
+      var handlers = nnkStmtList.newTree()
+      let temp = message[1][0][1]
+      for element in elements:
+        if element.repr != "ui":
+          let service = element
+          let name = (("on-" & $(message[0])).toCamelCase).ident
+          handler = quote:
+            discard functionAsJS(`data`.services.`service`.`name`).call(jsUndefined, `data`.services.`service`, `response`)
+        else:
+          let name = (("on-" & $(message[0])).toCamelCase).ident
+          let nameLit = newLit($name)
+          handler = quote:
+            # var i = 0
+            # while true:
+            #   # echo i
+            #   if i == `data`.ui.list.len or i > 50:
+            #     break
+            #   var component = `data`.ui.list[i]
+            for content, map in `data`.ui.componentMapping:
+              for id, component in map:
+                discard component.`name`(cast[`temp`](`response`))
+        handlers.add(handler)
+      messageCode = quote:
+        `ipc`["on"].call(`ipc`, `fullMessage`) do (sender: js, `response`: js):
+          echo "-> received: ", `fullMessage`
+          `handlers`
+      # echo messageCode.repr
+    result.add(messageCode)
+
+proc configureIPC(data: Data) =
+  uiIpcHandlers("CODETRACER::"):
+    # "new-record-window"
+    "record-path"
+    "path-validated"
+    "successful-record"
+    "failed-record"
+    "loading-trace"
+
+    "trace-loaded"
+    "update-trace"
+    "start-shell-ui"
+
+    "no-trace"
+    "welcome-screen"
+    "saved-as"
+
+    # notifications
+    "new-notification"
+    "ct-install-status"
+
+    "init"
+    "tab-load-received"
+    "asm-load-received"
+    "load-locals-received"
+    "expand-value-received"
+    "evaluate-expression-received"
+    "expand-values-received"
+    "search-calltrace-received"
+    "load-parsed-exprs-received"
+    "updated-events": seq[EventElement] => eventLog
+    "updated-events-content": cstring => eventLog
+    "updated-trace": TraceUpdate => [ui]
+    "updated-history": HistoryUpdate => [ui]
+    "updated-flow": FlowUpdate => [ui]
+    "loaded-terminal": seq[ProgramEvent] => [ui]
+    "updated-table": TableUpdate => [ui]
+    "updated-call-args": CallArgsUpdateResults => [ui]
+    "updated-watches": JsAssoc[cstring, Value] => debugger
+    "updated-shell": ShellUpdate => shell
+    "loaded-flow-shape": FlowShape => [ui]
+    "context-start-trace"
+    "context-start-history"
+    "complete-move": MoveState => [debugger, editor, eventLog, ui]
+    "tracepoint-locals": TraceValues => [ui]
+    "loaded-locals": JsAssoc[cstring, Value] => debugger
+    "search-results-updated": seq[SearchResult] => search
+    "load-callstack-received"
+    "debug-output": DebugOutput => [debugger, ui]
+    "log-output"
+    # filesystem handlers
+    "filesystem-loaded"
+    "update-path-content"
+    # load trace resources
+    "filenames-loaded"
+    "symbols-loaded"
+    "build-stdout": BuildOutput => [ui]
+    "build-stderr": BuildOutput => [ui]
+    "build-code": BuildCode => [ui]
+    "build-command": BuildCommand => [ui]
+    "started"
+    "change-file"
+    "tab-reloaded"
+    "opened-tab": OpenedTab => editor
+    "close"
+    "open-location"
+    "add-breakpoint"
+    "run-to"
+    "collapse-expansion"
+    "collapse-all-expansion"
+    "add-break-response": BreakpointInfo => debugger
+    "add-break-c-response": BreakpointInfo => debugger
+    "debugger-started": int => [debugger, ui]
+    "output-jump-from-shell-ui": int => ui
+    "program-search-results": seq[CommandPanelResult] => ui
+    "updated-load-step-lines": LoadStepLinesUpdate => ui
+
+    "finished": JsObject => debugger
+    "error": DebuggerError => [debugger, ui]
+
+    "follow-history"
+
+  duration("configureIPCRun")
+
+proc zoomInEditors*(data: Data) =
+  if data.ui.fontSize < MAX_FONTSIZE:
+    data.ui.fontSize += 1
+    for path, editor in data.ui.monacoEditors:
+      let options = cast[MonacoEditorOptions](editor.getOptions())
+      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      editor.updateOptions(options)
+    for path, editor in data.ui.traceMonacoEditors:
+      let options = cast[MonacoEditorOptions](editor.getOptions())
+      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      editor.updateOptions(options)
+    for path, editor in data.ui.editors:
+      if not editor.flow.isNil and not editor.flow.flow.isNil:
+        editor.flow.redrawFlow()
+    clog "editor: zoom in!"
+
+proc zoomOutEditors*(data: Data) =
+  if data.ui.fontSize > MIN_FONTSIZE:
+    data.ui.fontSize -= 1
+    for path, editor in data.ui.monacoEditors:
+      let options = cast[MonacoEditorOptions](editor.getOptions())
+      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      editor.updateOptions(options)
+    for path, editor in data.ui.traceMonacoEditors:
+      let options = cast[MonacoEditorOptions](editor.getOptions())
+      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      editor.updateOptions(options)
+    for path, editor in data.ui.editors:
+      if not editor.flow.isNil and not editor.flow.flow.isNil:
+        editor.flow.redrawFlow()
+    clog "editor: zoom out!"
+
+proc zoomFlowLoopIn*(data: Data) =
+  let flow = data.ui.editors[data.services.editor.active].flow
+  for loopIndex, state in flow.loopStates:
+    if state.viewState == LoopShrinked:
+      resetShrinkedLoopIterations(flow)
+      state.defaultIterationWidth = state.minWidth
+      flow.resetColumnsWidth(1, loopIndex, true)
+      state.viewState = LoopValues
+    else:
+      state.defaultIterationWidth += 1
+      flow.resetColumnsWidth(1, loopIndex, false)
+  discard calculateLoopSliderWidth(flow)
+
+proc zoomFlowLoopOut*(data: Data) =
+  let flow = data.ui.editors[data.services.editor.active].flow
+  for loopIndex, state in flow.loopStates:
+    if state.defaultIterationWidth > state.minWidth:
+      state.defaultIterationWidth -= 1
+      flow.resetColumnsWidth(-1, loopIndex, false)
+    else:
+      if state.viewState != LoopShrinked:
+        flow.shrinkLoopIterations(loopIndex)
+
+proc setFlowTypeToMultiline*(data: Data) =
+  let activeEditor = data.ui.editors[data.services.editor.active]
+  let flow = activeEditor.flow
+  flow.switchFlowType(FlowMultiline)
+
+proc setFlowTypeToParallel*(data: Data) =
+  let activeEditor = data.ui.editors[data.services.editor.active]
+  let flow = activeEditor.flow
+  flow.switchFlowType(FlowParallel)
+
+proc setFlowTypeToInline*(data: Data) =
+  let activeEditor = data.ui.editors[data.services.editor.active]
+  let flow = activeEditor.flow
+  flow.switchFlowType(FlowInline)
+
+proc switchFocusedLoopLevelAtPosition*(data: Data) =
+  console.time("switchFocusedLoopLevelAtPosition")
+  let activeEditor = data.ui.editors[data.services.editor.active]
+  let flow = activeEditor.flow
+
+  # get active editor current position
+  let monaco = activeEditor.monacoEditor
+  let currentEditorPosition = monaco.getPosition().toJs.lineNumber.to(int)
+
+  if not toSeq(flow.flow.positionStepCounts.keys())
+    .any(key => key == currentEditorPosition):
+      cwarn "flow: no flow at this position"
+      return
+
+  # get loops at current position
+  let loopsAtCurrentPosition = flow.flowLines[currentEditorPosition].loopIds
+
+  # get currently focused loops
+  let currentFocusedLoops = flow.getFocusedLoopsIds()
+
+  if loopsAtCurrentPosition.len > 0 and
+    loopsAtCurrentPosition.all(loopIndex => not flow.loopStates[loopIndex].focused):
+
+    # first loop at current position
+    let firstLoop = flow.flow.loops[loopsAtCurrentPosition[0]]
+    let firstLoopFirstLine = firstLoop.first
+    # flow line width at first line of first loop at current position
+    let sliderPosition = flow.flowLines[firstLoopFirstLine].sliderPosition
+    let sliderPositionLoop = sliderPosition.loopIndex
+    let sliderPositionIteration = sliderPosition.iteration
+    let step = flow.flow.steps.filterIt(
+      it.position == firstLoopFirstLine and
+      it.loop == sliderPositionLoop and
+      it.iteration == sliderPositionIteration)[0]
+    var stepNode = flow.stepNodes[step.stepCount]
+
+    let stepNodeOffset = flow.getStepDomOffsetLeft(step)
+
+    # remove focus on focused loops
+    for loopIndex in currentFocusedLoops:
+      flow.loopStates[loopIndex].focused = false
+
+    # switch focused loops
+    for loopIndex in loopsAtCurrentPosition:
+      flow.loopStates[loopIndex].focused = true
+
+    # recalculate loop iterationsWidth
+    flow.calculateFlowLoopIterationsWidths()
+
+    # recalculate flowLines width
+    for line, flowLine in flow.flowLines:
+      flowLine.totalLineWidth = flow.calclulateFlowLineTotalWidth(line)
+
+    flow.redrawLinkedLoops()
+
+    flow.move(sliderPositionLoop, sliderPositionIteration, firstLoopFirstLine, refocus = true)
+
+    flow.updateFlowDom()
+  console.timeEnd("switchFocusedLoopLevelAtPosition")
+
+proc restartCodetracer*(data: Data) =
+  data.ipc.send "CODETRACER::restart", js{}
+
+proc switchFocusedLoopLevelUp*(data: Data) =
+  let flow = data.ui.editors[data.services.editor.active].flow
+  let currentFocusedLoops = flow.getFocusedLoopsIds()
+
+  # switch focused loops
+  var focusedLoops: seq[int] = @[]
+  for loopIndex in currentFocusedLoops:
+    let parentLoopIndex = flow.flow.loops[loopindex].base
+    if parentLoopIndex != -1:
+      flow.loopStates[loopIndex].focused = false
+      flow.loopStates[parentLoopIndex].focused = true
+      if not focusedLoops.any(index => index == parentLoopIndex):
+        focusedLoops.add(parentLoopIndex)
+
+  # recalculate loop iterationsWidth
+  flow.calculateFlowLoopIterationsWidths()
+
+  # recalculate flowLines width
+  for line, flowLine in flow.flowLines:
+    flowLine.totalLineWidth = flow.calclulateFlowLineTotalWidth(line)
+
+  # redraw loops
+  flow.redrawLinkedLoops()
+
+proc switchFocusedLoopLevelDown*(data: Data) =
+  discard
+
+template pointsOperationsSetup(data: Data): untyped =
+  let
+    debuggerService {.inject.} = data.services.debugger
+    activeEditorPath {.inject.} = data.services.editor.active
+    editor {.inject.} = data.ui.editors[activeEditorPath]
+    monacoEditor {.inject.} = editor.monacoEditor
+    line {.inject.} = monacoEditor.getPosition().lineNumber
+
+proc expandWholeSource*(data: Data) =
+  data.pointsOperationsSetup()
+  monacoEditor.trigger("unfold", "editor.unfoldAll")
+
+proc collapseWholeSource*(data: Data) =
+  data.pointsOperationsSetup()
+  monacoEditor.trigger("fold", "editor.foldAll")
+
+proc toggleMinimap*(data: Data) =
+  discard
+
+proc addBreakpointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  debuggerService.addBreakpoint(activeEditorPath, line)
+  editor.refreshEditorLine(line)
+
+proc removeBreakpointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  debuggerService.deleteBreakpoint(activeEditorPath, line)
+  editor.refreshEditorLine(line)
+
+proc removeAllBreakpoints*(data: Data) =
+  data.pointsOperationsSetup()
+  for line, point in debuggerService.breakpointTable[activeEditorPath]:
+    debuggerService.deleteBreakpoint(activeEditorPath, line)
+    editor.refreshEditorLine(line)
+
+proc enableBreakpointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  debuggerService.enable(activeEditorPath, line)
+  editor.refreshEditorLine(line)
+
+proc enableAllBreakpoints*(data: Data) =
+  data.pointsOperationsSetup()
+  for line, point in debuggerService.breakpointTable[activeEditorPath]:
+    debuggerService.enable(activeEditorPath, line)
+    editor.refreshEditorLine(line)
+
+proc disableBreakpointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  debuggerService.disable(activeEditorPath, line)
+  editor.refreshEditorLine(line)
+
+proc disableAllBreakpoints*(data: Data) =
+  data.pointsOperationsSetup()
+  for line, point in debuggerService.breakpointTable[activeEditorPath]:
+    debuggerService.disable(activeEditorPath, line)
+    editor.refreshEditorLine(line)
+
+proc addTracepointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  if not editor.traces.hasKey(line):
+    editor.toggleTrace(editor.name, line)
+
+proc removeTracepointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  if editor.traces.hasKey(line):
+    let trace = editor.traces[line]
+    trace.closeTrace()
+
+proc enableTracepointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  if editor.traces.hasKey(line):
+    let trace = editor.traces[line]
+    if trace.isDisabled:
+      trace.toggleTraceState()
+
+proc enableAllTracepoints*(data: Data) =
+  data.pointsOperationsSetup()
+  for line, trace in editor.traces:
+    if trace.isDisabled:
+      trace.toggleTraceState()
+
+proc disableTracepointAtPosition*(data: Data) =
+  data.pointsOperationsSetup()
+  if editor.traces.hasKey(line):
+    let trace = editor.traces[line]
+    if not trace.isDisabled:
+      trace.toggleTraceState()
+
+proc disableAllTracepoints*(data: Data) =
+  data.pointsOperationsSetup()
+  for line, trace in editor.traces:
+    if not trace.isDisabled:
+      trace.toggleTraceState()
+
+const ClientActionCount = ClientAction.high.int - ClientAction.low.int + 1
+
+# static:
+  # echo ClientActionCount
+
+proc isEditorFocused(data: Data): bool =
+  for editor in data.ui.monacoEditors:
+    if editor.hasTextFocus():
+      return true
+
+proc isInputElementFocused(data: Data): bool =
+  var element: JsObject = cast[JsObject](dom.window.document.activeElement)
+  return element.tagName.to(cstring) == cstring("INPUT")
+
+proc toggleTracepoint*(path: cstring, line: int) {.exportc.} =
+  data.ui.editors[path].toggleTrace(path, line)
+
+var actions*: array[ClientAction, ClientActionHandler] = [
+  proc = forwardContinue(fromShortcut=true),
+  proc = reverseContinue(fromShortcut=true),
+  proc = next(fromShortcut=true),
+  proc = reverseNext(fromShortcut=true),
+  proc = stepIn(fromShortcut=true),
+  proc = reverseStepIn(fromShortcut=true),
+  proc = stepOut(fromShortcut=true),
+  proc = reverseStepOut(fromShortcut=true),
+  proc = stopAction(),
+  proc = data.update(build=true),
+  proc = switchTab(change = -1),
+  proc = switchTab(change = 1),
+  proc = data.switchTabHistory(),
+  proc = openFile(),
+  proc = data.openNewTab(),
+  proc = data.reopenLastTab(),
+  proc = data.closeActiveTab(),
+  proc = data.switchToEdit(),
+  proc = data.switchToDebug(),
+  proc = data.commandSearch(),
+  proc = data.fileSearch(),
+  proc = data.fixedSearch(),
+  proc =
+    if not data.ui.activeFocus.isNil:
+      discard data.ui.activeFocus.delete(),
+  proc = discard data.onSelectFlow(),
+  proc = discard data.onSelectState(),
+  proc =
+    if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
+      discard data.ui.activeFocus.onUp(),
+  proc =
+    if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
+      discard data.ui.activeFocus.onDown(),
+  proc =
+    if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
+      discard data.ui.activeFocus.onRight(),
+  proc =
+    if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
+      discard data.ui.activeFocus.onLeft(),
+  proc =
+    if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
+      discard data.ui.activeFocus.onPageUp(),
+  proc =
+    if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
+      discard data.ui.activeFocus.onPageDown(),
+  proc =
+    if not data.ui.activeFocus.isNil:
+      discard data.ui.activeFocus.onGotoStart(),
+  proc =
+    if not data.ui.activeFocus.isNil:
+      discard data.ui.activeFocus.onGotoEnd(),
+  proc = # aEnter
+    # echo "global array map: enter"
+    # affects only renderer, map manually editor differently
+    if not data.ui.activeFocus.isNil and not data.isInputElementFocused():
+      # echo "  => global array map: enter: activeFocus not nil, calling its method"
+      discard data.ui.activeFocus.onEnter(),
+  proc = # goUp
+    if not data.ui.activeFocus.isNil:
+      discard data.ui.activeFocus.onEscape(),
+  proc = data.zoomInEditors(),
+  proc = data.zoomOutEditors(),
+  (proc = echo "example"),
+  proc = discard data.exit(), # aExit
+  proc = data.openNewTab(), # NewFile
+  proc = data.openPreferences(), # TODO: fix bottom panels Preferences
+  nil,# TODO proc = data.openNewTab(folder=true), # NewFold
+  nil,# TODO OpenRecent
+  # aSave
+  proc = data.saveFiles(data.services.editor.active),
+  proc = data.saveFiles(data.services.editor.active, saveAs=true),
+  proc = data.saveFiles(),
+  proc = discard data.closeAllFiles(), # close all,
+  (proc = clipboardCopy(data.getMonacoSelectionText())), # aCut
+  (proc = clipboardCopy(data.getMonacoSelectionText())), # aCopy
+  (proc = data.clipboardPaste()), # aPaste
+  proc =
+    if not data.ui.activeFocus.isNil:
+      discard data.ui.activeFocus.onFindOrFilter(),
+  nil,
+  proc = data.findInFiles(),
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  proc = data.expandWholeSource(), # aExpandAll
+  proc = data.collapseWholeSource(), # aCollapseAll
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  proc = loadThemeForIndex(0), # aTheme0
+  proc = loadThemeForIndex(1), # aTheme1
+  proc = loadThemeForIndex(2), # aTheme2
+  proc = loadThemeForIndex(3), # aTheme3
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  proc = data.openLowLevelCode(), # aLowLevel1
+  proc = data.toggleMinimap(), # aShowMinimap
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  proc = data.openLayoutTab(Content.PointList),
+  nil,
+  proc = data.openLayoutTab(Content.Calltrace),
+  proc = data.openLayoutTab(Content.State),
+  proc = data.openLayoutTab(Content.EventLog),
+  proc = data.openLayoutTab(Content.TerminalOutput),
+  proc = data.openLayoutTab(Content.StepList),
+  proc = data.openLayoutTab(Content.Scratchpad),
+  proc = data.openLayoutTab(Content.Filesystem),
+  proc = data.openShellTab(),
+  nil,
+  nil,
+  proc = data.addBreakpointAtPosition(),
+  proc = data.removeBreakpointAtPosition(),
+  proc = data.removeAllBreakpoints(),
+  proc = data.enableBreakpointAtPosition(),
+  proc = data.enableAllBreakpoints(),
+  proc = data.disableBreakpointAtPosition(),
+  proc = data.disableAllBreakpoints(),
+  proc = data.addTracepointAtPosition(),
+  proc = data.removeTracepointAtPosition(),
+  proc = data.enableTracepointAtPosition(),
+  proc = data.enableAllTracepoints(),
+  proc = data.disableTracepointAtPosition(),
+  proc = data.disableAllTracepoints(),
+  proc = runTracepoints(),
+  nil,
+  nil,
+  nil,
+  nil,
+  proc = data.ui.menu.toggle(),
+  proc = data.zoomFlowLoopIn(),
+  proc = data.zoomFlowLoopOut(),
+  proc = data.switchFocusedLoopLevelUp(),
+  proc = data.switchFocusedLoopLevelDown(),
+  proc = data.switchFocusedLoopLevelAtPosition(),
+  proc = data.setFlowTypeToMultiline(),
+  proc = data.setFlowTypeToParallel(),
+  proc = data.setFlowTypeToInline(),
+  proc = data.restartCodetracer(),
+  proc = data.findSymbol()
+]
+
+data.actions = actions
+
+
+if not inElectron:
+  var io {.importc.}: proc(address: cstring, options: JsObject): js
+  var frontendSocketPort {.importc.}: int
+  var frontendSocketParameters {.importc.}: cstring
+
+  proc startIPC =
+    let host = domwindow.location.hostname.to(cstring)
+    let parameters = if frontendSocketParameters.len > 0:
+        cstring"/" & frontendSocketParameters
+      else:
+        cstring""
+
+    let port = if frontendSocketPort != -1:
+        cstring($frontendSocketPort)
+      else:
+        domwindow.location.port.to(cstring)
+
+    let protocol = domwindow.location.protocol.to(cstring)
+    let wsProtocol = if protocol == cstring"https:":
+        cstring"wss:"
+      else: # assume http: , can it be different?
+        cstring"ws:"
+    let address = if port != cstring"":
+        cstring(fmt"{wsProtocol}//{host}:{port}")
+      else:
+        cstring(fmt"{wsProtocol}//{host}")
+
+    console.log protocol, wsProtocol, address
+    var socket = io(
+      address,
+      js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}")})
+    socketdebug = socket
+    socket.on(cstring"connect") do ():
+      ipc = js{
+        send: proc(id: cstring, response: js) =
+          console.log cstring"=> ", id, response
+          socket.emit(id, response),
+        on: proc(id: cstring, code: js) = socket.on(id, proc(response: cstring) =
+          console.log cstring"<= ", id, response
+          code.call(code, undefined, JSON.parse(response))
+          )}
+      data.ipc = ipc
+      configureIPC(data)
+      configure(data)
+
+  startIPC()
+
+
+if inElectron:
+  once:
+    configureIPC(data)
+    configure(data)
+# else:
+  # configureIPC = functionAsJs(configureIPCRun)

@@ -1,0 +1,509 @@
+
+#build, #build-errors
+  background-color: BACKGROUND_COLOR
+
+  .build-stdout, .build-error
+    color: COLOR
+
+  .build-stderr
+    color: red
+
+  .build-location
+    cursor: pointer
+
+  .build-error
+    border: COLOR solid 1px
+
+  overflow: scroll
+
+  height: 500px //100vh
+
+#errors
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+
+#active-notifications
+  width: 100vw
+  height: fit-content
+  top: 38px
+  position: fixed
+  z-index: 100
+
+  .status-notification
+    border: 2px solid STATUS_BACKGROUND_COLOR
+    border-radius: 4px
+    height: 28px
+
+    &.info
+      border-color: NOTIFICATION_INFO_COLOR
+    &.warning
+      border-color: NOTIFICATION_WARNING_COLOR
+    &.error
+      border-color: NOTIFICATION_ERROR_COLOR
+    &.success
+      border-color: NOTIFICATION_SUCCESS_COLOR
+
+
+#status
+  position: relative
+  width: 100vw
+  display: flex
+  flex-direction: column-reverse
+
+  #status-base
+    bottom: 0
+    background-color: STATUS_BACKGROUND_COLOR
+    height: 28px
+    font-size: 14px
+    white-space: nowrap
+    position: fixed
+    width: 100%
+    color: TEXT_CONTENT_COLOR
+    line-height: 24px
+    z-index: 100 !important
+    display: flex
+    justify-content: space-between
+    gap: 12px
+    border-bottom-left-radius: 8px
+    border-bottom-right-radius: 8px
+
+    .checkbox
+      display: inherit
+      height: auto
+      margin-bottom: 0px !important
+
+    .checkbox-text
+      white-space: nowrap
+
+    .toggle-switch
+      display: flex
+      align-items: center
+      // margin-left: 1vw
+
+    .status-button
+      position: relative
+      float: left
+      width: max-content
+      margin-left: 20px
+      background-color: BUTTON_BACKGROUND_COLOR
+      text-align: center
+      padding-left: 20px
+      padding-right: 20px
+      height: 21px
+      line-height: 21px
+      border-radius: 5px
+      cursor: pointer
+      margin-top: 2px
+      margin-bottom: 2px
+      user-select: none
+
+    .status-button-clicked
+      background-color: HOVERED_BUTTON_BACKGROUND_COLOR
+      color: HOVERED_BUTTON_COLOR
+      float: left
+      width: max-content
+      margin-left: 20px
+      text-align: center
+      padding-left: 20px
+      padding-right: 20px
+      height: 21px
+      line-height: 21px
+      border-radius: 5px
+      cursor: pointer
+      margin-top: 2px
+      margin-bottom: 2px
+
+    .new-notifications-counter
+      position: absolute;
+      top: -14px;
+      right: 4px;
+      padding-left: 6px;
+      padding-right: 6px;
+      background-color: red;
+      border-radius: 10.5px;
+      color: white;
+      font-weight: bold;
+
+    .location-path
+      float: left
+      width: auto
+      margin-right: 12px
+      overflow: hidden
+      text-overflow: ellipsis
+      text-align: end
+
+    .whitespace-set
+      width: 10px
+      float: left
+      font-size: 7px
+      color: WHITESPACE_STATUS_BUTTON_COLOR
+      margin-top: 4px
+      margin-bottom: 2px
+
+    .whitespace-change
+      height: 8px
+      width: 10px
+      cursor: pointer
+
+      :hover
+        color: WHITESPACE_STATUS_BUTTON_HOVER_COLOR
+
+      i
+        display: block !important
+
+    .whitespace-label
+      width: 80px
+      float: left
+      margin-left: 10px
+
+    .status-buttons
+      float: left
+      margin-left: 2vw
+      display: flex
+
+    #file-info-status
+      margin-left: 12px
+      display: flex
+      align-items: center
+      gap: 12px
+
+    #file-info-status-editor-whitespace
+      margin-left: 2vw
+      float: left
+      width: 100px !important
+
+    #operation-status
+      float: left
+      width: 200px
+      // margin-left: 2vw
+      white-space: nowrap
+      color: OPERATION_STATUS_COLOR
+
+    #version-control-status
+      margin-left:10px
+      float: left
+
+    .status-right
+      float: right
+      width: auto
+      display: flex
+      padding-right: 8px
+    // margin-right: 3vw
+
+    #location-status
+      float: left
+      display: flex
+      align-items: center
+
+    .status-flow-buttons
+      .status-flow-types-list
+        position: absolute
+        top: -85px
+        color: white
+        text-align: left
+        background-color: BUTTON_BACKGROUND_COLOR
+        border-radius: 5px
+        padding: 10px
+        display: none
+
+        &-active
+          position: absolute
+          top: -85px
+          color: white
+          text-align: left
+          background-color: BUTTON_BACKGROUND_COLOR
+          border-radius: 5px
+          padding: 10px
+          display: block
+
+      .status-flow-type
+        border-radius: 5px
+        padding-left: 5px
+        padding-right: 5px
+
+        &:hover
+          background-color: grey
+
+
+  #notifications-container
+    width: 100%
+    max-height: 50vh
+    overflow-y: scroll
+    background-color: BACKGROUND_COLOR
+    border-top: 5px solid STATUS_BACKGROUND_COLOR
+    border-left: 5px solid STATUS_BACKGROUND_COLOR
+    border-right: 5px solid STATUS_BACKGROUND_COLOR
+    border-top-left-radius: 5px
+    border-top-right-radius: 5px
+    color: TEXT_CONTENT_COLOR
+    position: absolute
+    z-index: 100
+
+    .status-notification-header
+      color: #5885ac !important;
+      text-indent: 10px;
+      font-family: arial;
+      font-weight: bold;
+
+  #bug-report-container
+    width: 50%
+    max-height: 50vh
+    overflow-y: scroll
+    background-color: BACKGROUND_COLOR
+    border-top: 5px solid STATUS_BACKGROUND_COLOR
+    border-left: 5px solid STATUS_BACKGROUND_COLOR
+    border-right: 5px solid STATUS_BACKGROUND_COLOR
+    border-top-left-radius: 5px
+    border-top-right-radius: 5px
+    color: TEXT_CONTENT_COLOR
+    position: absolute
+    z-index: 100
+    transform: translate(50%, 0)
+
+    .bug-report-header
+      color: #5885ac !important
+      text-indent: 10px
+      font-family: arial
+      font-weight: bold
+
+    .bug-report-text
+      color: #5885ac !important
+      text-indent: 10px
+      margin-left: 10%
+      font-family: arial
+      font-weight: bold
+
+    .bug-report-description
+      height: 150px
+
+    #bug-report-title
+      margin-left: 10% !important
+
+    textarea
+      color: TEXT_CONTENT_COLOR
+      height: 100px
+      min-height: 100px
+      max-height: 300px
+      font-size: 17px !important
+      border: 0
+      background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+      width: 80%
+      margin-left: 10% !important
+      margin-bottom: 5px !important
+      border-radius: 15px
+      padding-left: 15px
+      overflow-wrap: break-word
+
+      &:focus
+        outline: 2px solid BORDERS_COLOR !important
+
+    .bug-report-button-container
+      display: flex
+      justify-content: space-between
+      margin-left: 10%
+
+    .bug-report-button
+      padding-top: 5px
+      padding-bottom: 5px
+      margin-bottom: 10px
+
+      &:focus
+        outline: 2px solid BORDERS_COLOR !important
+
+.status-notification
+  background-color: BACKGROUND_COLOR
+  display: flex
+  height: fit-content
+  padding-right: 5px
+  align-items: center
+
+  .notification-icon
+    width: 25px
+    min-width: 25px
+    height: 25px
+    min-height: 25px
+    background-repeat: no-repeat
+    background-position: center
+
+    &.info
+      background-image: url("../../public/notifications/info_icon_16.svg")
+    &.warning
+      background-image: url("../../public/notifications/warning_icon_16.svg")
+    &.error
+      background-image: url("../../public/notifications/error_icon_16.svg")
+    &.success
+      // svg gotten from here: "https://www.iconpacks.net/free-icon/green-check-mark-verified-circle-16223.html"
+      background-image: url("../../public/notifications/success_icon_16.svg")
+
+  .notification-message
+    padding-left: 10px
+    flex: 1
+    color: TEXT_CONTENT_COLOR
+    font-family: 'SpaceGrotesk'
+    font-size: 14px
+
+  .notification-message-prefix
+    font-family: 'SpaceGrotesk'
+
+    &.info
+      color: NOTIFICATION_INFO_COLOR
+    &.warning
+      color: NOTIFICATION_WARNING_COLOR
+    &.error
+      color: NOTIFICATION_ERROR_COLOR
+    &.success
+      color: NOTIFICATION_SUCCESS_COLOR
+
+  .notification-button
+    background-color: BUTTON_BACKGROUND_COLOR
+    text-align: center
+
+    margin-left: 10px
+
+    padding-left: 18px
+    padding-right: 18px
+    height: 20px
+    line-height: 20px
+    border-radius: 4px
+    cursor: pointer
+    margin-top: 2px
+    margin-bottom: 2px
+    user-select: none
+    font-family: 'SpaceGrotesk'
+
+    &:hover
+      opacity: 0.5
+
+    &.info
+      background-color: NOTIFICATION_INFO_COLOR
+    &.warning
+      background-color: NOTIFICATION_WARNING_COLOR
+    &.error
+      background-color: NOTIFICATION_ERROR_COLOR
+    &.success
+      background-color: NOTIFICATION_SUCCESS_COLOR
+
+
+
+
+
+// [1vw] file info lang , file info encoding [2vw] file info editor whitespace [20vw] operation [25vw] errors, build output buttons [..] location version control status [3vw] end
+
+// 51vw + ~47vw ? max ~250px for ~10 fields ? maybe shorter distance for smaller size?
+// uh, maybe flex ?
+// focus on normal screen size for now
+// TODO more responsive status
+
+.copy-file-path
+  width: 14px
+  height: 14px
+  background-repeat: no-repeat
+  background-position: center
+  background-image: url("../../public/menu/copy_file_path_dark.svg")
+  cursor: pointer
+
+  &:hover
+    opacity: 0.5
+
+#status-expanded
+  bottom: 20px
+  background-color: #444
+  height: 200px
+  font-size: 15px
+  position: fixed
+  width: 100vw
+
+#build-status
+  background-color: #2a344c
+  font-size: 15px
+  height: 50px
+  float: left
+
+  #build-command
+    height: 25px
+    background-color: yellow
+    width: 100%
+
+  #build-output
+    height: 25px
+    width: 100%
+
+
+.build-running
+  background-color: green !important
+  color: white !important
+
+.toggle-search-results
+  color: OPPOSITE_COLOR
+
+.debug-notification
+  margin-left: 10px
+
+#debug
+  float: left
+  display: flex
+  height: 100%
+  align-items: center
+
+  .status-notification
+    background-color: transparent
+
+  .notification-message
+    color: DEBUG_NOTIFICATIONS_TEXT
+
+.viewer-search
+  background-color: QUERY_COMPLETION_BG
+  float: right
+  width: 240px
+  overflow: hidden
+  position: absolute
+  z-index: 2
+
+  .query-completion
+    color: QUERY_COMPLETION_FG
+    font-size: 18px
+
+  .editor-layout
+    display: flex
+
+
+.animate
+  width: 500px
+  height: 500px
+
+.event-newline
+  width: 100%
+
+.event-line
+  float: left
+  cursor: pointer
+  width 100%
+
+.short-event
+  color: #0aa
+
+.future-event
+  opacity: 0.4
+
+#message
+  /*position: fixed*/
+  /*top: 20px*/
+  width: 100%
+  text-align: center
+  z-index: 2
+  height: 20px
+
+.message-error
+  background-color: ERROR_COLOR_BG
+  color: ERROR_COLOR_FG
+
+.message-info
+  background-color: NORMAL_COLOR_BG
+  color: NORMAL_COLOR_FG
+
+.message-warn
+  background-color: WARN_COLOR_BG
+  color: WARN_COLOR_FG
+
+.debug-skip-toggle
+  margin-left: 10px

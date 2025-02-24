@@ -1,0 +1,169 @@
+.shell-container
+  background-color: BACKGROUND_COLOR
+  display: flex
+  height: 100%
+  width: 100%
+  position: relative
+
+  .shell-events
+    width: 100%
+    position: absolute
+    display: inline-flex
+    justify-content: right
+
+  .custom-compiler-flag-command
+    .shell-event-status
+      background-color: rgb(29, 129, 210) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
+    .shell-event-range
+      background-color: rgb(29, 129, 210) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
+
+  .linking-binary
+    .shell-event-status
+      background-color: rgb(222, 31, 222) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
+    .shell-event-range
+      background-color: rgb(222, 31, 222) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
+
+  .recording-command
+    .shell-event-status
+      background-color: rgb(85, 232, 85) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
+    .shell-event-range
+      background-color: rgb(85, 232, 85) // SHELL_CUSTOM_COMPILER_FLAG_COMMAND_BACKGROUND_COLOR
+
+  .shell-event
+    width: 20px
+    position: relative
+
+    .shell-event-type
+      position: absolute
+      font-size: 12px
+      width: 100%
+      color: gray
+      font-style: italic
+      top: 100%
+      left: -8px
+      transform-origin: (0 0)
+      transform: rotate(270deg)
+      overflow: hidden
+      text-overflow: ellipsis
+
+    .shell-event-range
+      position: absolute
+      top: 8px
+      left: 9px
+      height: calc(100% - 8px)
+      width: 2px
+      border-radius: 2px
+      overflow: hidden
+
+      .shell-event-summary
+        display: none
+
+    .shell-event-status
+      position: absolute
+      top: 0
+      left: 2px
+      width: 16px
+      height: 16px
+      background-repeat: no-repeat
+      border-radius: 8px
+      background-position: center
+      font-size: 12px
+      color: white
+      text-indent: 20px
+      font-weight: bold
+
+      @keyframes loading {
+        from {
+          transform: rotate(0deg)
+        }
+        to {
+          transform: rotate(360deg)
+        }
+      }
+
+      &.working
+        background-image: url("../../public/shell/loading_sign_dots_10.svg")
+        animation: infinite linear
+        animation-name: loading
+        animation-duration: 1.5s
+
+      &.error
+        background-image: url("../../public/shell/error_sign_16.svg")
+      &.done
+        background-image: url("../../public/shell/done_sign_16.svg")
+
+    &:hover
+      .shell-event-range
+        position: absolute
+        top: 0
+        left: 2px
+        width: 300px
+        border-radius: 8px
+        transition: width 2s
+        height: 100px
+        z-index: 10
+
+      .shell-event-status
+        z-index: 10
+        left: 10px
+        top: 8px
+        transition: top 0.5s, left 0.5s
+
+        &.working
+          background-image: url("../../public/shell/loading_sign_dots_20.svg")
+        &.error
+          background-image: url("../../public/shell/error_sign_32.svg")
+        &.done
+          background-image: url("../../public/shell/done_sign_32.svg")
+
+      .shell-event-summary
+        position: absolute
+        font-size: 16px
+        color: white
+        display: block
+        padding: 10px
+        margin-left: 20px
+
+#ROOT > .component-container > .shell-container
+  height: calc(100% + 28px)
+
+.shell-gutter
+  background-color: BACKGROUND_COLOR
+  border-right: 2px solid grey
+  height: 100%
+  position: absolute
+  visibility: visible !important
+  width 35px
+  z-index: 5
+
+.terminal.xterm
+  width: 100%
+  padding-left: 5px
+
+.xterm-screen
+  height: 100% !important
+  position: absolute !important
+  left: 40px !important
+
+  .xterm-rows
+    position: relative
+
+    div
+      overflow: visible !important
+      word-wrap: break-word
+
+      span
+        cursor: pointer
+
+  canvas
+    left: 80px !important
+
+.xterm-viewport
+  position: relative
+  width: 100%
+
+  .xterm-scroll-area
+    position: relative !important
+
+  .xterm-decoration
+    visibility: visible

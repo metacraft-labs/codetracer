@@ -1,0 +1,269 @@
+:root {
+    --main-background-colour: #f9fbf2;
+    --main-colour: #00000;
+    --main-accent-colour: #7776bc;
+    --main-border-colour: #0e1c36;
+    --main-code-background-colour: #0e1c36;
+
+
+    --note-colour: #2f81f7;
+    --tip-colour: #3fb950;
+    --important-colour: #a371f7;
+    --warning-colour: #d29922;
+    --caution-colour: #f85149;
+}
+
+html {
+    margin: 0;
+    padding: 0;
+
+    background-color: var(--main-background-colour);
+}
+
+main {
+    display: grid;
+    grid-template-columns: 4fr 1fr;
+}
+
+@media (orientation: portrait) {
+    main {
+        display: block;
+    }
+
+    #main-text {
+        border-bottom: 0.1rem solid var(--main-border-colour);
+    }
+}
+
+main, footer {
+    max-width: 1920px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+footer {
+    list-style: none;
+    overflow: hidden;
+}
+
+footer p, footer select {
+    padding: 0 0.33rem 0 0.33rem;
+    font-size: 14px;
+    color: var(--main-colour);
+}
+
+h1, h2, h3, h4, h5, h6, p, li {
+    color: var(--main-colour);
+    font-family: "Ubuntu", sans-serif;
+}
+
+a {
+    text-decoration: none;
+    color: var(--main-accent-colour);
+    font-family: "Ubuntu", sans-serif;
+}
+
+li {
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
+header {
+    border-bottom: 1px solid var(--main-border-colour);
+}
+
+header ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+}
+
+header ul li {
+    float: left;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+header ul li a {
+    display: block;
+    color: var(--main-accent-colour);
+    text-align: center;
+    padding: 0 24px 0 24px;
+    text-decoration: none;
+    font-size: 32px;
+    line-height: 1.5;
+}
+
+select {
+    padding: 0 0 0 0;
+    margin: 0 0 0 0;
+    max-width: max-content;
+    resize: horizontal;
+}
+
+option {
+    display: flex;
+    min-width: 0;
+    flex-direction: row;
+    border-color: red;
+    box-sizing: border-box;
+}
+
+pre > code, code, .sourceCode, .liquid, code .sourceCode span {
+    width: fit-content;
+    overflow-x: scroll;
+    font-family: "JetBrains Mono", monospace;
+    font-optical-sizing: auto;
+    font-weight: 400;
+    font-style: normal;
+    color: var(--main-background-colour);
+}
+
+code, .sourceCode pre, .liquid pre {
+    width: fix-content;
+    overflow-x: scroll;
+    background-color: var(--main-code-background-colour);
+    padding: 0.2em;
+    white-space: pre-wrap;
+    white-space: -moz-pre-wrap;
+    white-space: pre-wrap;
+    white-space: -o-pre-wrap;
+    word-wrap: break-word;
+}
+
+code:not([class]) {
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    white-space: break-spaces;
+    border-radius: 6px;
+}
+
+.sourceCode code {
+    color: var(--main-colour);
+    padding: 0;
+    display: block;
+    margin: auto;
+}
+
+figcaption {
+    display: none;
+}
+
+figure {
+    margin: 0;
+    overflow-x: scroll;
+}
+
+table, .table {
+    display: block;
+    border-collapse: collapse;
+    overflow-x: scroll;
+}
+
+th, td {
+    color: white;
+    border: 1px solid var(--main-colour);
+}
+
+th {
+    font-weight: bold;
+}
+
+tr {
+    text-align: center;
+}
+
+input[type=text]::before, input[type=text]::after, input[type=text] {
+    box-sizing: border-box;
+}
+
+/* Configure input text fields to follow our style */
+input[type=text] {
+    color: var(--main-colour);
+    max-width: 85%;
+    font-size: 16px;
+    font-family: inherit;
+    padding: 2px 2px 2px 2px;
+    background-color: var(--main-background-colour);
+    border: 1px solid var(--main-accent-colour);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+img {
+    width: 100%;
+    overflow: scroll;
+}
+
+iframe {
+    border: 0;
+}
+
+hr {
+    padding: 0 0 0 0;
+    margin: 0 0 0 0;
+    border: 0;
+    border-top: 0.1rem solid var(--main-border-colour);
+    background-color: var(--main-border-colour);
+}
+
+#err-404-emoji {
+    font-size: 14vw;
+}
+
+.centered {
+    text-align: center;
+}
+
+.vcentered {
+    margin: auto;
+}
+
+.note, .tip, .important, .warning, .caution {
+    padding-left: 0.5rem;
+    border-left-width: 0.25em;
+    border-left-style: solid;
+}
+
+.note {
+    border-left-color: var(--note-colour);
+}
+
+.note .title p {
+    color: var(--note-colour);
+}
+
+.tip {
+    border-left-color: var(--tip-colour);
+}
+
+.tip .title p {
+    color: var(--tip-colour);
+}
+
+.important {
+    border-left-color: var(--important-colour);
+}
+
+.important .title p {
+    color: var(--important-colour);
+}
+
+.warning {
+    border-left-color: var(--warning-colour);
+}
+
+.warning .title p {
+    color: var(--warning-colour);
+}
+
+.caution {
+    border-left-color: var(--caution-colour);
+}
+
+.caution .title p {
+    color: var(--caution-colour)
+}

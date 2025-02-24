@@ -1,0 +1,47 @@
+[package]
+name = "db-backend"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+cc="*"
+
+[dependencies]
+num-traits = "0.2"
+num-derive = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_repr = "0.1"
+log = "0.4.21"
+env_logger = "0.11.3"
+# log2 = "0.1.11"
+regex = "1"
+tree-sitter = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-ruby = "0.23"
+# tree-sitter-elisp = "1.5.0"
+tree-sitter-traversal2 = "0.2.0"
+indexmap = "1.9.3"
+once_cell = "1.10.0"
+
+tokio = {version = "1.37.0", features=["full", "rt", "net", "signal"]}
+futures = "0.3.30"
+futures-timer = "3.0.3"
+clap = { version = "4.5.4", features = ["derive"] }
+runtime_tracing = { git = "https://github.com/metacraft-labs/runtime_tracing.git", tag = "0.6.0" }
+tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
+
+[lib]
+name = "db_backend"
+path = "src/lib.rs"
+crate-type   = ["rlib", "cdylib"]
+
+[[bin]]
+name = "db-backend"
+path = "src/main.rs"
+
+[[bin]]
+name = "virtualization-layers"
+path = "src/bin/virtualization-layers.rs"

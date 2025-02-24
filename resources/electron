@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+CURRENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+cd $CURRENT_DIR
+../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron "$@"

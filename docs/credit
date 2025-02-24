@@ -1,0 +1,43 @@
+* praise Jesus Christ! *
+
+
+some of the libraries used:
+
+jquery resizable: resize inline editors
+golden-layout:    layout engine
+bootstrap: 		  various ui stuff
+ansi_up: 		  terminal user interface and converting text with ansi color escapes to html
+xterm.js / xterm-headless:     a javascript terminal emulator library for the shell frontend and
+  for headless evaluation in codetracer shell
+node-pty:     a node pseudoterminal library: for connecting the frontend shell to a os terminal with a shell
+socket.io:    a web socket library that we use for communication with the server in the browser
+
+pernosco: authors are also some of the authors and current maintainers of rr, various inspirations/impressions
+e.g. showing return values in calltrace, unified ctrlP-like interface for various search results, TODO many different
+
+unified ctrlP/panel-like interface for various search results :
+  sublime, pernosco, google, vim, probably others
+
+useful answers:
+
+css overlaying (inline editor)  https://stackoverflow.com/questions/2941189/how-to-overlay-one-div-over-another-div
+
+line numbers monaco:
+  @RabsRincon  https://github.com/mattgodbolt/compiler-explorer/commit/fd6b1a7d48ffc9be0a1a1e4ba47d059754efe3bd
+  @ alexandrudima https://github.com/Microsoft/monaco-editor/issues/322
+
+
+change language of editor monaco:
+  @datummm (https://github.com/datummm) https://github.com/microsoft/monaco-editor/issues/375#issuecomment-334900902
+  :)
+
+tree-sitter and tree-sitter wrappers:
+  tree-sitter,
+  tree-sitter-c
+  tree-sitter-rust
+
+  [tree-sitter-nim](https://github.com/alaviss/tree-sitter-nim) by
+
+  [https://github.com/alaviss](@alaviss) and [https://github.com/aMOPel](@aMOPel)
+
+  used with license MPL-2.0: you can find it at https://github.com/alaviss/tree-sitter-nim

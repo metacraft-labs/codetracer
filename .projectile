@@ -1,0 +1,7 @@
++/src/
+-/src/build-debug/
+-/src/.tup
+-/src/tests/records/
+-/src/tests/binaries/
+-/src/public/
+-/src/deprecated/

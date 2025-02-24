@@ -1,0 +1,15 @@
+[package]
+name = "small-lang"
+version = "0.1.0"
+authors = ["runner"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+num-traits = "0.2"
+num-derive = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_repr = "0.1"
+runtime_tracing = { git = "https://github.com/metacraft-labs/runtime_tracing.git", tag = "0.7.0" }

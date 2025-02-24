@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Exec=ct
+Name=CodeTracer
+Name[ja]=コードトレーサ始める
+Comment=A user-friendly time-travelling debugger designed to support a wide range of programming languages.
+Icon=codetracer
+Categories=Development
+Keywords=codetracer;time-travelling;debugger;omniscient;noir;nargo;tracing
+StartupWMClass=CodeTracer
+

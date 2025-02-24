@@ -1,0 +1,10 @@
+*
+!*.*
+!*/
+*.exe
+
+nimcache/
+metadata_*
+macro_sourcemap*.json
+
+*_actual.txt

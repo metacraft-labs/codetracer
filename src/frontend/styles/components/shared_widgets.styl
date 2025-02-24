@@ -1,0 +1,506 @@
+// File containing style for widgets that are shared across all other widgets
+::-webkit-scrollbar
+  width: 14px
+  height: 14px
+  background-color: transparent
+
+::-webkit-scrollbar-corner
+  background-color: WEBKIT_SCROLLER_BACKGROUND_COLOR
+
+::-webkit-scrollbar:hover
+  background-color: transparent
+
+::-webkit-scrollbar-thumb:vertical,
+::-webkit-scrollbar-thumb:horizontal
+  border-radius: 100px
+  background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR
+  border: 3px solid WEBKIT_SCROLLER_BACKGROUND_COLOR
+
+::-webkit-scrollbar-thumb:vertical:active,
+::-webkit-scrollbar-thumb:horizontal:active
+  background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
+
+input::-webkit-input-placeholder
+  color: INPUT_PLACEHOLDER_COLOR;
+
+input:-moz-placeholder
+  color: INPUT_PLACEHOLDER_COLOR
+
+input::-moz-placeholder
+  color: INPUT_PLACEHOLDER_COLOR
+
+TRACE_LOG_EDITOR_Z_INDEX = 50
+
+@font-face {
+  font-family: monolith;
+  src: url("../../public/Monolith.otf");
+}
+
+@font-face {
+  font-family: 'SpaceGrotesk';
+  src: url('../../public/Fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: "FiraCode";
+  src: url('../../public/Fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
+}
+
+.hidden
+  display: none !important
+
+// TODO: Maybe move to another file?
+.chart-line
+  width: 100%
+  height: 100%
+  position: relative
+
+.chart-results-container
+  height: inherit
+  // width: fit-content
+  position: relative
+
+  .view-inactive
+    display: none
+    visibility: hidden
+
+.chartjs-render-monitor
+  width: 100% !important
+  height: 100% !important
+  min-height: 170px
+
+html, body
+  padding: 0
+  margin: 0
+  overflow: hidden
+
+body
+  font-family: -apple-system, 'Helvetica Neue', Helvetica, sans-serif !important
+  background-color: BACKGROUND_COLOR
+
+.separate-bar
+  width: 0px
+  height: 16px
+  border-left: 1px solid DEBUG_SEPARATE_BAR_COLOR
+
+.wrapper
+  input
+    margin-left: 0 !important
+
+input
+  font-family: "SpaceGrotesk" !important
+  font-size: 14px !important
+  font-style: normal !important
+  font-weight: 400 !important
+  color: TEXT_CONTENT_COLOR
+  height: 28px
+  // font-size: 17px !important
+  border: 0
+  background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+  width: calc(100% - 6px)
+  margin-left: 8px !important
+  margin-right: 8px
+  margin-bottom: 5px !important
+  border-radius: 6px
+  padding-left: 24px
+  padding-bottom: 0px !important
+  padding-top: 0px !important
+  overflow: hidden !important
+  text-overflow: ellipsis !important
+  white-space: nowrap !important
+  border: 1px solid INPUT_BORDER_COLOR
+  background-image: INPUT_DEFAULT_SEARCH_ICON
+  background-repeat: no-repeat
+  background-position: 8px center
+  background-size: 12px 12px
+
+  &:focus
+    outline: 0px solid BORDERS_COLOR !important
+    border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
+    overflow: hidden !important
+    text-overflow: ellipsis !important
+    white-space: nowrap !important
+
+#root-container
+  padding 0
+  position: fixed
+  height: calc(100% - 66px)
+  top: 38px
+  z-index: 0
+
+#ROOT
+  background-color: BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  height: 100%
+  width: 100vw
+  position: relative
+
+#main
+  background-color: BACKGROUND_COLOR
+  font-size: 20px
+  display: flex
+  flex-wrap: wrap
+  flex-direction: row
+  width: 100%
+
+#dock
+  height: 80%
+
+button
+  background-color: BUTTON_BACKGROUND_COLOR
+  color: BUTTON_COLOR
+  border: 0
+  border-radius: 1ex !important
+  padding-left: 2ex
+  padding-right: 2ex
+  margin-left: 1ex !important
+  margin-right: 1ex !important
+
+  &:hover
+    background-color: HOVERED_BUTTON_BACKGROUND_COLOR
+    color: HOVERED_BUTTON_COLOR
+
+  &:focus
+    outline: 0 !important
+
+.highlight
+  background-color: HIGHLIGHT_COLOR !important
+
+.value-expanded-compound::before
+  content: ''
+  position: absolute
+  left: 14px
+  top: 20px
+  bottom: 0
+  width: 1px
+  background-color: VALUE_TYPE_COLOR
+  opacity: 0.2
+
+.value-load-more-button
+  width: 100%
+
+.component-container
+  font-family: "FiraCode" !important
+  font-size: 14px !important
+  line-height: 24px !important
+  font-weight: 400 !important
+  width: 100%
+  height: 100%
+  box-shadow: inset 2px 0px 0px 0px LAYOUT_SPLITTER_COLOR
+
+  &:focus
+    outline: 0px
+
+.hovered
+  opacity: 0.6
+
+.panel
+  font-size: 18px
+  border-color: COLOR
+  border-width: 1px
+  border-style: solid
+  overflow: hidden
+  display: flex
+
+.r
+  opacity: 1
+
+.panel-width
+  flex-basis 100%
+  flex-direction column
+  display flex
+  width 100%
+
+.selector
+  position: absolute
+  opacity: 0.5
+  z-index: 22
+  background-color: #555
+  display: none
+
+.absolute-panel
+  position: absolute
+
+.unselectable
+  user-select: none
+  #trace-query
+    height: 18px
+    font-size: 16px
+
+.dataTables_filter
+  display: none
+
+#trace-q
+  width: 100%
+
+.searched-token
+  background-color: SEARCHED_TOKEN_COLOR
+
+.indeterminate-checkmark
+  border: 1px solid BORDERS_COLOR
+  border-radius: 2.5px
+  display: flex
+  position: absolute
+  top: 5px
+  left: 0
+  width: 15px
+  height: 15px
+  background-color: DROPDOWN_LIST_BACKGROUND_COLOR
+
+.indeterminate-checkmark::after
+  content: "-"
+  display: flex
+  position: relative
+  align-items: center
+  transform: translateX(4px)
+
+.checkbox
+  display:none
+  width: 20px !important
+  margin-left: 0 !important
+  margin-right: 5
+
+  &::after
+    content: ""
+    position: absolute
+    display: none
+
+.checkmark::after
+  content: "";
+  position: absolute;
+  display: none;
+
+
+input:checked ~ .checkmark:after
+  display: block
+
+.code-tooltip
+  display: block
+  padding-left: 4px
+  padding-right: 4px
+  width: fit-content
+  font-size: 14px
+  line-height: 24px
+  overflow-wrap: normal
+  max-width: calc(100% - 8px)
+  position: absolute
+  background-color: PRIMARY_BASE
+  z-index: 3
+  font-family: "FiraCode"
+  margin-bottom: 0
+  list-style-type: none
+  opacity: 0
+  visibility: hidden
+  transition: opacity 0.3s ease-in-out
+  white-space: normal
+  pointer-events: none
+  border-radius: 6px
+
+  .active-line
+    .excerpt-code
+      color: ACTIVE_COLOR_FG !important
+    background: ACTIVE_COLOR_BG
+    border-radius: 4px
+    width: fit-content
+    padding-right: 4px
+  
+  li
+    padding-left: 4px
+
+.checkmark
+  border: 0.5px solid CHECKMARK_BORDERS_COLOR
+  border-radius: 2.5px
+  display:block
+  position: absolute
+  top: 6px
+  left: 0
+  width: 14px
+  height: 14px
+  background-color: DROPDOWN_LIST_BACKGROUND_COLOR
+
+  &::after
+    left: 3.6px;
+    top: 1.6px;
+    width: 6px;
+    height: 8px;
+    border: solid DROPDOWN_CHECKMARK_COLOR;
+    border-width: 0 2px 2px 0;
+    border-radius: 2px
+    -webkit-transform: rotate(45deg);
+    -ms-transform: rotate(45deg);
+    transform: rotate(45deg);
+
+.dropdown-list
+  border-radius: 6px
+  background: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
+  color: DROPDOWN_TEXT_BACKGROUND_COLOR
+  display: flex
+  flex-direction: column
+  // border: 1px solid BORDERS_COLOR
+  // padding-top: 5px
+  // padding-left: 10px
+  // padding-bottom: 5px
+  // padding-right: 10px
+  margin-top: 4px
+  right: 0
+  min-width: fit-content
+  position: relative
+  z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
+  user-select: none
+
+  &-item
+    position: relative
+    color: DROPDOWN_TEXT_FOCUSED_COLOR
+    user-select: none
+    list-style-type: none
+    width: 100%
+    height: 24px
+    // margin-bottom: 5px
+    cursor: pointer
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+    font-weight: bold
+    display: flex
+    align-items: center
+    justify-content: center
+
+.hamburger-dropdown + .dropdown-list.active
+  width: fit-content
+
+.layout-buttons-container
+  width: 28px !important
+  height: 28px !important
+  background-color: SECONDARY_BASE
+  border-radius: 6px
+  background-image: LAYOUT_TAB_NESTED_ICON
+  background-repeat: no-repeat
+  background-position: center
+  margin-top: 2px
+  cursor: pointer
+
+  &:hover
+    background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+  
+  &.active
+    background-image: ACTIVE_LAYOUT_TAB_NESTED_ICON
+    background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+
+  .layout-dropdown
+    width: fit-content;
+    position: absolute;
+    top: 32px;
+    right: 0px;
+    background-color: DROPDOWN_BASE
+    border-radius: 6px
+    font-family: "SpaceGrotesk"
+    font-size: 14px
+    line-height: 24px
+    color: PRIMARY_TEXT_COLOR
+    font-weight: 400
+    padding: 4px
+  
+    .layout-dropdown-node
+      border-radius: 4px
+      padding-left: 4px
+      padding-right: 4px
+
+      &:hover
+        background-color: ACTIVE_MENU_BACKGROUND
+
+
+.custom-tooltip
+  display: block
+  position: absolute
+  font-family: "SpaceGrotesk"
+  top: 100%
+  background-color: TOOLTIP_BACKGROUND
+  color: PRIMARY_TEXT_COLOR
+  padding: 5px 10px
+  font-size: 14px
+  border-radius: 4px
+  white-space: nowrap
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2)
+  opacity: 0
+  visibility: hidden
+  transition: opacity 0.3s ease, visibility 0.3s ease, top 0.3s ease
+  pointer-events: none
+  text-align: start
+  font-size: 12px
+  line-height: 16px
+
+  &.active
+    opacity: 1
+    visibility: visible
+    top: -100%
+    height: 24px
+    right: 4px
+
+    &:after
+      content: '';
+      position: absolute;
+      top: 100%
+      left: unset
+      right: 4px
+      border-width: 8px
+      border-style: solid
+      border-color: TOOLTIP_BACKGROUND transparent transparent transparent
+
+  &:after
+    content: '';
+    position: absolute;
+    bottom: 100%
+    left: calc(50% - 8px)
+    border-width: 8px
+    border-style: solid
+    border-color: transparent transparent TOOLTIP_BACKGROUND transparent
+
+.debug-button:hover > .custom-tooltip
+.eventLog-medium-control-button:hover > .custom-tooltip
+#command-query:hover > .custom-tooltip
+.add-to-scratchpad-button:hover > .custom-tooltip
+.run-trace-button:hover > .custom-tooltip
+  opacity: 1
+  visibility: visible
+  top: calc(100% + 5px)
+  transition-delay: 1s
+
+.copy-file-path:hover > custom-tooltip
+  opacity: 1
+
+.run-trace-button
+  .custom-tooltip
+    right: 0px
+  
+    &:after
+      left: 90%
+
+.eventLog-medium-control-button
+  .custom-tooltip
+    overflow-wrap: normal
+    white-space: normal
+
+.custom-noir-icon::before
+  content: url("../../public/noir_logo_dark_theme.svg")
+  display: block
+  width: 16px
+  height: 16px
+  position: absolute
+  transform: translate(4px, 4px)
+
+.empty-overlay
+  display: flex
+  width: inherit
+  height: inherit
+  justify-content: center
+  align-items: center
+  font-family: 'FiraCode'
+  font-size: 14px
+  padding-left: 12px
+  padding-right: 12px
+  text-align: center
+  white-space: break-spaces
+
+.jstree-default-contextmenu
+  display: none !important
+  visibility: hidden !important

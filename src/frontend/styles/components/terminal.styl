@@ -1,0 +1,32 @@
+.line-before, .line-before-or-on
+  color: COLOR
+  opacity: 1.0
+
+.line-after
+  color: TERMINAL_LESS_VISIBLE_COLOR
+  opacity: 0.7
+
+.terminal
+  color: COLOR
+  height: 100%
+
+  .terminal-line
+    cursor: pointer
+    padding-left: 10px
+    color: TEXT_CONTENT_COLOR
+    // font-weight: bold
+    // font-family: monospace, monospace
+    display: flex
+    font-size: 14px
+    font-family: "FiraCode" !important
+
+  pre
+    color: COLOR
+    height: 100% // it seems to help with scroll on overflow
+
+.terminal-output, .terminal-input
+  background-color: black
+  color: white
+  word-wrap: break-all
+  white-space: pre-line
+  cursor: pointer

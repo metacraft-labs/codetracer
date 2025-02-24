@@ -1,0 +1,1086 @@
+{
+  "program": "PROGRAM_NAME_PLACEHOLDER",
+  "args": [
+    "PROGRAM_NAME_PLACEHOLDER"
+  ],
+  "workdir": "/home/stan/code/repos/codetracer-desktop",
+  "calls": [
+    {
+      "key": 0,
+      "path_id": 0,
+      "line": 1,
+      "name": "<top-level>",
+      "args": [],
+      "return_value": {
+        "kind": "None",
+        "ti": 3
+      },
+      "step_id": 0,
+      "depth": 0,
+      "parent_key": -1
+    },
+    {
+      "key": 1,
+      "path_id": 1,
+      "line": 1,
+      "name": "read_and_evaluate",
+      "args": [
+        [
+          "message",
+          {
+            "kind": "String",
+            "ti": 1,
+            "text": "2 + 5"
+          }
+        ]
+      ],
+      "return_value": {
+        "kind": "Int",
+        "ti": 0,
+        "i": 7
+      },
+      "step_id": 1,
+      "depth": 1,
+      "parent_key": 0
+    },
+    {
+      "key": 2,
+      "path_id": 1,
+      "line": 6,
+      "name": "read",
+      "args": [
+        [
+          "calc",
+          {
+            "kind": "String",
+            "ti": 1,
+            "text": "2 + 5"
+          }
+        ]
+      ],
+      "return_value": {
+        "kind": "Sequence",
+        "ti": 8,
+        "elements": [
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 50
+          },
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 59
+          },
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 53
+          }
+        ]
+      },
+      "step_id": 3,
+      "depth": 2,
+      "parent_key": 1
+    },
+    {
+      "key": 3,
+      "path_id": 1,
+      "line": 11,
+      "name": "evaluate",
+      "args": [
+        [
+          "tokens",
+          {
+            "kind": "Sequence",
+            "ti": 11,
+            "elements": [
+              {
+                "kind": "Int",
+                "ti": 1,
+                "i": 50
+              },
+              {
+                "kind": "Int",
+                "ti": 1,
+                "i": 59
+              },
+              {
+                "kind": "Int",
+                "ti": 1,
+                "i": 53
+              }
+            ]
+          }
+        ]
+      ],
+      "return_value": {
+        "kind": "Int",
+        "ti": 0,
+        "i": 7
+      },
+      "step_id": 7,
+      "depth": 2,
+      "parent_key": 1
+    },
+    {
+      "key": 4,
+      "path_id": 1,
+      "line": 15,
+      "name": "evaluate_binop",
+      "args": [
+        [
+          "op",
+          {
+            "kind": "Int",
+            "ti": 3,
+            "i": 59
+          }
+        ],
+        [
+          "left",
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 50
+          }
+        ],
+        [
+          "right",
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 53
+          }
+        ]
+      ],
+      "return_value": {
+        "kind": "Int",
+        "ti": 0,
+        "i": 7
+      },
+      "step_id": 9,
+      "depth": 3,
+      "parent_key": 3
+    },
+    {
+      "key": 5,
+      "path_id": 1,
+      "line": 32,
+      "name": "evaluate_node",
+      "args": [
+        [
+          "node",
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 50
+          }
+        ]
+      ],
+      "return_value": {
+        "kind": "Int",
+        "ti": 0,
+        "i": 2
+      },
+      "step_id": 11,
+      "depth": 4,
+      "parent_key": 4
+    },
+    {
+      "key": 6,
+      "path_id": 1,
+      "line": 32,
+      "name": "evaluate_node",
+      "args": [
+        [
+          "node",
+          {
+            "kind": "Int",
+            "ti": 1,
+            "i": 53
+          }
+        ]
+      ],
+      "return_value": {
+        "kind": "Int",
+        "ti": 0,
+        "i": 5
+      },
+      "step_id": 17,
+      "depth": 4,
+      "parent_key": 4
+    }
+  ],
+  "steps": [
+    {
+      "step_id": 0,
+      "path_id": 1,
+      "line": 57,
+      "call_key": 0
+    },
+    {
+      "step_id": 1,
+      "path_id": 1,
+      "line": 1,
+      "call_key": 1
+    },
+    {
+      "step_id": 2,
+      "path_id": 1,
+      "line": 2,
+      "call_key": 1
+    },
+    {
+      "step_id": 3,
+      "path_id": 1,
+      "line": 6,
+      "call_key": 2
+    },
+    {
+      "step_id": 4,
+      "path_id": 1,
+      "line": 7,
+      "call_key": 2
+    },
+    {
+      "step_id": 5,
+      "path_id": 1,
+      "line": 8,
+      "call_key": 2
+    },
+    {
+      "step_id": 6,
+      "path_id": 1,
+      "line": 3,
+      "call_key": 1
+    },
+    {
+      "step_id": 7,
+      "path_id": 1,
+      "line": 11,
+      "call_key": 3
+    },
+    {
+      "step_id": 8,
+      "path_id": 1,
+      "line": 12,
+      "call_key": 3
+    },
+    {
+      "step_id": 9,
+      "path_id": 1,
+      "line": 15,
+      "call_key": 4
+    },
+    {
+      "step_id": 10,
+      "path_id": 1,
+      "line": 16,
+      "call_key": 4
+    },
+    {
+      "step_id": 11,
+      "path_id": 1,
+      "line": 32,
+      "call_key": 5
+    },
+    {
+      "step_id": 12,
+      "path_id": 1,
+      "line": 33,
+      "call_key": 5
+    },
+    {
+      "step_id": 13,
+      "path_id": 1,
+      "line": 35,
+      "call_key": 5
+    },
+    {
+      "step_id": 14,
+      "path_id": 1,
+      "line": 37,
+      "call_key": 5
+    },
+    {
+      "step_id": 15,
+      "path_id": 1,
+      "line": 38,
+      "call_key": 5
+    },
+    {
+      "step_id": 16,
+      "path_id": 1,
+      "line": 17,
+      "call_key": 4
+    },
+    {
+      "step_id": 17,
+      "path_id": 1,
+      "line": 32,
+      "call_key": 6
+    },
+    {
+      "step_id": 18,
+      "path_id": 1,
+      "line": 33,
+      "call_key": 6
+    },
+    {
+      "step_id": 19,
+      "path_id": 1,
+      "line": 35,
+      "call_key": 6
+    },
+    {
+      "step_id": 20,
+      "path_id": 1,
+      "line": 37,
+      "call_key": 6
+    },
+    {
+      "step_id": 21,
+      "path_id": 1,
+      "line": 39,
+      "call_key": 6
+    },
+    {
+      "step_id": 22,
+      "path_id": 1,
+      "line": 41,
+      "call_key": 6
+    },
+    {
+      "step_id": 23,
+      "path_id": 1,
+      "line": 43,
+      "call_key": 6
+    },
+    {
+      "step_id": 24,
+      "path_id": 1,
+      "line": 44,
+      "call_key": 6
+    },
+    {
+      "step_id": 25,
+      "path_id": 1,
+      "line": 19,
+      "call_key": 4
+    },
+    {
+      "step_id": 26,
+      "path_id": 1,
+      "line": 20,
+      "call_key": 4
+    },
+    {
+      "step_id": 27,
+      "path_id": 1,
+      "line": 21,
+      "call_key": 4
+    },
+    {
+      "step_id": 28,
+      "path_id": 1,
+      "line": 29,
+      "call_key": 4
+    },
+    {
+      "step_id": 29,
+      "path_id": 1,
+      "line": 58,
+      "call_key": 0
+    }
+  ],
+  "variables": [
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ],
+      [
+        "message_bytes",
+        {
+          "kind": "Sequence",
+          "ti": 8,
+          "elements": [
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 50
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 32
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 59
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 32
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 53
+            }
+          ]
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ],
+      [
+        "tokens",
+        {
+          "kind": "Sequence",
+          "ti": 8,
+          "elements": [
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 50
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 59
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 53
+            }
+          ]
+        }
+      ]
+    ],
+    [
+      [
+        "tokens",
+        {
+          "kind": "Sequence",
+          "ti": 8,
+          "elements": [
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 50
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 59
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 53
+            }
+          ]
+        }
+      ]
+    ],
+    [
+      [
+        "tokens",
+        {
+          "kind": "Sequence",
+          "ti": 8,
+          "elements": [
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 50
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 59
+            },
+            {
+              "kind": "Int",
+              "ti": 1,
+              "i": 53
+            }
+          ]
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ],
+      [
+        "l",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 2
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "node",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ],
+      [
+        "l",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 2
+        }
+      ],
+      [
+        "r",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 5
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ],
+      [
+        "l",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 2
+        }
+      ],
+      [
+        "r",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 5
+        }
+      ],
+      [
+        "result",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 0
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ],
+      [
+        "l",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 2
+        }
+      ],
+      [
+        "r",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 5
+        }
+      ],
+      [
+        "result",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 0
+        }
+      ]
+    ],
+    [
+      [
+        "op",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 59
+        }
+      ],
+      [
+        "left",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 50
+        }
+      ],
+      [
+        "right",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 53
+        }
+      ],
+      [
+        "l",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 2
+        }
+      ],
+      [
+        "r",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 5
+        }
+      ],
+      [
+        "result",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 7
+        }
+      ]
+    ],
+    [
+      [
+        "message",
+        {
+          "kind": "String",
+          "ti": 1,
+          "text": "2 + 5"
+        }
+      ],
+      [
+        "result",
+        {
+          "kind": "Int",
+          "ti": 1,
+          "i": 7
+        }
+      ]
+    ]
+  ],
+  "types": [
+    {
+      "kind": 7,
+      "lang_type": "Fixnum"
+    },
+    {
+      "kind": 9,
+      "lang_type": "String"
+    },
+    {
+      "kind": 12,
+      "lang_type": "Boolean"
+    },
+    {
+      "kind": 24,
+      "lang_type": "No type"
+    },
+    {
+      "kind": 16,
+      "lang_type": "Calculator"
+    },
+    {
+      "kind": 16,
+      "lang_type": "Calculator"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 16,
+      "lang_type": "Calculator"
+    },
+    {
+      "kind": 0,
+      "lang_type": "Array"
+    },
+    {
+      "kind": 16,
+      "lang_type": "Calculator"
+    },
+    {
+      "kind": 16,
+      "lang_type": "Calculator"
+    },
+    {
+      "kind": 16,
+      "lang_type": "Calculator"
+    }
+  ],
+  "events": [
+    {
+      "kind": 0,
+      "content": "7",
+      "step_id": 29
+    }
+  ],
+  "paths": [
+    "",
+    "PROGRAM_NAME_PLACEHOLDER"
+  ]
+}

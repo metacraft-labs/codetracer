@@ -1,0 +1,162 @@
+NIM_COMMON_FLAGS=\
+-d:asyncBackend=asyncdispatch\
+-d:chronicles_sinks=json\
+-d:chronicles_line_numbers=true\
+-d:chronicles_timestamps=UnixTime\
+--gc:refc\
+--hints:off\
+--warnings:off\
+--hint[Processing]:off\
+--hint[Conf]:off\
+--hint[CC]:off\
+--hint[Pattern]:off\
+--hint[XDeclaredButNotUsed]:off\
+--hint[XCannotRaiseY]:off\
+--warning[CaseTransition]:off
+
+NIM_DEBUG_FLAGS=\
+$(NIM_COMMON_FLAGS)\
+-d:debug\
+--debugInfo\
+--lineDir:on\
+--stacktrace:on\
+--linetrace:on\
+
+NIM_RELEASE_FLAGS=\
+$(NIM_COMMON_FLAGS)\
+-d:release\
+--boundChecks:on
+
+NIM_DANGER_FLAGS=\
+-d:danger\
+-d:chronicles_log_level=DEBUG\
+--stacktrace:off\
+--linetrace:off
+
+ROOT = $(TUP_CWD)/../../
+NIM_BIN = nim
+
+NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
+NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)
+NIM_DANGER  = $(NIM_BIN) $(NIM_DANGER_FLAGS)
+
+TSC = tsc
+STYLUS = stylus
+
+# misc rules
+!cp = |> ^ %f^ cp %f %o |>
+!stylus = |> ^ %f^ $(STYLUS) %f -o %o |>
+# workaround for errors, file seems to be still generated
+!ts = |> ^ %f^ $(TSC) %f |> %o
+
+# JS Rules:
+!nim_js = |> ^ %f^ $(NIM_RELEASE)\
+-d:chronicles_enabled=off\
+-d:ctRenderer\
+--debugInfo:on\
+--lineDir:on\
+--hotCodeReloading:on\
+--out:%o\
+js %f |> %B.js
+
+!nim_node = |> ^ %f^ $(NIM_RELEASE)\
+-d:nodejs\
+--out:%o\
+js %f |> %B.js
+
+!nim_node_index = |> ^ %f^ $(NIM_RELEASE)\
+-d:ctIndex\
+-d:nodejs\
+--sourcemap:on\
+--out:%o\
+js %f |> %B.js %B.js.map
+
+!nim_node_subwindow = |> ^ %f^ $(NIM_RELEASE)\
+-d:chronicles_enabled=off\
+-d:ctRenderer\
+--debugInfo:on\
+--lineDir:on\
+--hotCodeReloading:on\
+--sourcemap:on\
+--out:%o\
+js %f |> %B.js %B.js.map
+
+!nim_node_index_server = |> ^ %f^ $(NIM_RELEASE)\
+-d:ctIndex\
+-d:server\
+-d:nodejs\
+--sourcemap:on\
+--out:%o \
+js %f |> %B.js %B.js.map
+
+!codetracer_shell = |> $(NIM_RELEASE)\
+-d:nodejs\
+--out:%o\
+js %f |> %o
+
+!nim_test_js = |> ^ %f^ $(NIM_RELEASE) \
+-d:ctTest\
+-d:chronicles_log_level=DEBUG\
+--verbosity:1\
+--hint:Processing:on\
+--stacktrace:on\
+--linetrace:on \
+--lineDir:on\
+--debugInfo\
+--nimcache:/tmp/ct-nim-cache/%B_test_nimcache2\
+--out:%o\
+js %f |> %B.js
+
+# C rules:
+!nim_c = |> ^ %f^ $(NIM_RELEASE)\
+--out:%o\
+c %f |> %o
+
+!codetracer = |> $(NIM_RELEASE)\
+-d:testing\
+--boundChecks:on\
+--stacktrace:on\
+--linetrace:on\
+--warnings:on\
+--hints:on\
+-d:ctEntrypoint \
+-d:withTup \
+--nimcache:/tmp/ct-nim-cache/codetracer_binary\
+--out:%o\
+c %f |> %o
+
+!nim_tester = |> ^ %f^ $(NIM_RELEASE) \
+--nimcache:/tmp/ct-nim-cache/codetracer_binary \
+--warnings:on \
+--hints:on \
+--out:%o\
+c %f |> %B macro_sourcemap_%B.json
+
+# mypy
+!mypy = |> ^ %f^ mypy --implicit-optional --cache-dir /tmp/.mypy-cache %f; |>
+
+# gcc
+!trace_object_file = |> ^ %f^ gcc -fPIC -g3 -c -o %o %f |> %o
+
+# !shell_preload = |> gcc -O0 -g3 -fPIC -nostdlib -shared \
+#   -o %o %f -ldl |> %o
+
+# rust
+export RUSTUP_HOME
+
+!rust_cargo_tui = |> \
+  CARGO_TARGET_DIR=/tmp/codetracer/tui_target \
+    cargo build && \
+    cp /tmp/codetracer/tui_target/debug/tui %o |> %o
+!rust_cargo_db_backend = |> \
+  CARGO_TARGET_DIR=/tmp/codetracer/db_backend_target \
+    cargo build --release && \
+    cp /tmp/codetracer/db_backend_target/release/db-backend %o |> %o
+!rust_cargo_virtualization_layers = |> \
+  CARGO_TARGET_DIR=/tmp/codetracer/virtualization_layers_target \
+    cargo build --release && \
+    cp /tmp/codetracer/virtualization_layers_target/release/virtualization-layers %o |> %o
+!rust_cargo_small_lang = |> \
+  CARGO_TARGET_DIR=/tmp/codetracer/small_lang_target \
+    cargo build --release && \
+    cp /tmp/codetracer/small_lang_target/release/small-lang %o |> %o

@@ -1,0 +1,138 @@
+#command-data
+  height: 28px
+
+#command-view
+  background-color: BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  font-size: 14px
+  // position: fixed
+  // top: 40px
+  z-index: 9999
+  left: 35vw
+  width: 30vw
+  right: 35vw
+
+  input
+    height: 28px !important
+    width: 30vw !important
+    font-size: 14px !important
+    position: absolute
+    z-index: 21
+    // outline: 2px solid COMMAND_BORDERS_COLOR
+    margin-left: 0 !important
+    border-radius: 6px !important
+    background-color: BACKGROUND_COLOR
+    border: 1px solid INPUT_BORDER_COLOR !important
+    background-image: INPUT_DEFAULT_SEARCH_ICON
+    background-size: 14px 14px
+    padding-left: 26px
+
+    &:focus
+      border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
+      margin-left: 0 !important
+
+    &.disabled
+      pointer-events: none
+
+  #command-query-text
+    background: transparent
+
+  #command-results
+    width: inherit
+    position: absolute
+    padding-top: 4px
+    top: 36px
+    padding-left: 4px
+    padding-right: 4px
+    padding-bottom: 4px
+    outline: 1px solid COMMAND_BORDERS_COLOR
+    border-radius: 6px
+    background-color: COMMAND_RESULT_BACKGROUND_COLOR
+
+  .command-result
+    background-color: COMMAND_RESULT_BACKGROUND_COLOR
+    color: TEXT_CONTENT_COLOR
+    font-size: 14px
+    position: relative
+    height: 24px
+    width: 100%
+    line-height: 24px
+    border-radius: 4px
+    padding-left: 8px
+    overflow: hidden
+    cursor: pointer
+
+    &:hover
+      background-color: COMMAND_RESULT_HOVERED_BACKGROUND_COLOR
+
+    b
+      color: COMMAND_HIGHLIGHTED_RESULT_TEXT_COLOR
+
+  .no-results
+    display: none
+
+  .command-even
+    // background-color: COMMAND_EVEN_BACKGROUND_COLOR
+    // color: COMMAND_ODD_BACKGROUND_COLOR
+
+  .command-odd
+    // background-color: COMMAND_ODD_BACKGROUND_COLOR
+    // color: COMMAND_EVEN_BACKGROUND_COLOR
+
+  .command-selected
+    background-color: COMMAND_RESULT_SELECTED_BACKGROUND_COLOR !important
+    color: COMMAND_RESULT_SELECTED_TEXT_COLOR !important
+
+  opacity: 1
+
+
+.command-non-active
+  display: none
+
+#fixed-search
+  font-size: 20px
+  position: fixed
+  left: 40vw
+  width: 20vw
+  right: 40vw
+  top: 20px
+  z-index: 5
+
+.fixed-search-non-active
+  display: none
+
+.search-results
+  font-size: 20px
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+  position: fixed
+  bottom: 20px
+  max-height: 40vh
+  overflow: scroll
+  cursor: pointer
+
+  .search-results-location
+    width: 50vw
+    background-color: #eee
+
+  .search-results-text
+    width: 50vw
+
+.search-results-active
+  display: block
+
+.search-results-non-active
+  display: none
+
+.command-program-search-result-value > div
+  font-family: monospace
+  display: inline
+
+.command-program-search-result-location
+  font-weight: lighter
+  font-size: 10px
+  float: right
+  padding-right: 8px
+
+.command-program-search-result-line
+  font-weight: normal

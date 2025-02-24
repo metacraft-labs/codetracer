@@ -1,0 +1,14 @@
+: foreach *.* |> !tup_preserve |>
+: foreach wnumb-1.2.0/*.js |> !tup_preserve |> %f
+: foreach window/*.svg |> !tup_preserve |> %f
+: foreach notifications/*.svg |> !tup_preserve |> %f
+: foreach bootstrap-4.3.1-dist/css/*.css |> !tup_preserve |> %f
+: tippy.js/tippy.css |> !tup_preserve |> %f
+: bootstrap-4.3.1-dist/js/bootstrap.bundle.js |> !tup_preserve |> %f
+: monaco-editor/min |> !tup_preserve |> %f
+: @exuanbo |> !tup_preserve |> %f
+: golden-layout/dist |> !tup_preserve |> %f
+: mousetrap |> !tup_preserve |> %f
+: vex-js |> !tup_preserve |> %f
+: xterm |> !tup_preserve |> %f
+: foreach dist/* |> !tup_preserve |> %f

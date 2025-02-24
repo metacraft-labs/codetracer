@@ -1,0 +1,20 @@
+<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-setting-slider-vertical--adjustment-adjust-controls-fader-vertical-settings-slider" clip-path="url(#clip0_1409_3228)">
+<g id="Group">
+<path id="Vector" d="M2 6C2.82843 6 3.5 5.32843 3.5 4.5C3.5 3.67157 2.82843 3 2 3C1.17157 3 0.5 3.67157 0.5 4.5C0.5 5.32843 1.17157 6 2 6Z" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M2 6V13.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M2 0.5V3" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_4" d="M12 6C12.8284 6 13.5 5.32843 13.5 4.5C13.5 3.67157 12.8284 3 12 3C11.1716 3 10.5 3.67157 10.5 4.5C10.5 5.32843 11.1716 6 12 6Z" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_5" d="M12 3V0.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_6" d="M12 13.5V6" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_7" d="M7 8.5C7.82843 8.5 8.5 7.82843 8.5 7C8.5 6.17157 7.82843 5.5 7 5.5C6.17157 5.5 5.5 6.17157 5.5 7C5.5 7.82843 6.17157 8.5 7 8.5Z" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_8" d="M7 0.5V5.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_9" d="M7 8.5V13.5" stroke="#E8E8E8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_1409_3228">
+<rect width="14" height="14" fill="white"/>
+</clipPath>
+</defs>
+</svg>

@@ -1,0 +1,7 @@
+sender_balance = "1000"
+transaction_amount = "200"
+recipient_balance = "300"
+sender_account_hash = "0xabc123"  # This would typically be a hash of the sender's account details
+recipient_account_hash = "0xdef456"  # Similarly, a hash of the recipient's account details
+recipient_provided_hash = "0xdef457"
+sender_provided_hash = "0xdef458"

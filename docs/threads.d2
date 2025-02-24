@@ -1,0 +1,28 @@
+central
+client-sending
+client-receiving
+send-to-client
+receive-from-client
+receive-central-channel
+receive-from-worker-1
+receive-from-worker-2
+log-processes
+worker-1-receiving
+worker-2-receiving
+worker-1-sending
+worker-2-sending
+
+
+client-sending -> receive-from-client: socket
+receive-from-client -> receive-central-channel
+receive-central-channel -> central
+central -> log-processes: shared data structure
+central -> worker-1-receiving: socket
+central -> worker-2-receiving: socket
+worker-1-sending -> receive-from-worker-1: socket
+worker-2-sending -> receive-from-worker-2: socket
+receive-from-worker-1 -> send-to-client: channel
+receive-from-worker-2 -> send-to-client: channel
+send-to-client -> receive-central-channel: channel,caching/storing values
+send-to-client -> client-receiving: socket
+

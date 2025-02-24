@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Monaco Themes</title>
+  <style type="text/css">
+    body {
+      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol";
+    }
+    #editor {
+      width: 100%;
+      height: 600px;
+    }
+  </style>
+</head>
+<body>
+  <div>
+    <a target="_blank" href="https://github.com/brijeshb42/monaco-themes/">Fork on Github</a>
+  </div>
+  <div style="overflow: auto;margin-bottom: 10px">
+    <label>
+      Select local theme file
+      <input type="file" id="file" accept=".tmTheme" />
+    </label>
+    <select id=lang style="float: right;">
+      <option value="vs">Default</option>
+    </select>
+  </div>
+  <div id=editor></div>
+  <script type="text/javascript" src="https://unpkg.com/monaco-themes/dist/monaco-themes.js"></script>
+  <script type="text/javascript" src="https://unpkg.com/monaco-editor@0.14.2/min/vs/loader.js"></script>
+  <script type="text/javascript">
+    var lang = document.getElementById('lang');
+    var loadedThemes = null;
+    var loadedThemesData = {};
+    var count = 0;
+
+    function loadTheme(theme) {
+      var path = './themes/' + loadedThemes[theme] + '.json';
+      return fetch(path)
+        .then(r => r.json())
+        .then(data => {
+          loadedThemesData[theme] = data;
+          if (window.monaco) {
+            monaco.editor.defineTheme(theme, data);
+          }
+          return data;
+        });
+    }
+
+    function setEditorValue(jsn) {
+      if (!window.editor) {
+        return;
+      }
+
+      window.editor.setValue('const themeData = ' + JSON.stringify(jsn, null, 2));
+    }
+
+    function addFileListener() {
+      var fileNode = document.getElementById('file');
+
+      if (!window.FileReader) {
+        fileNode.disabled = true;
+      }
+
+      fileNode.addEventListener('change', function(ev) {
+        var file = ev.target.files[0];
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+          var themeSlug = 'localtheme-' + count;
+          count++;
+          loadedThemes[themeSlug] = MonacoThemes.parseTmTheme(ev.target.result);
+
+          monaco.editor.defineTheme(themeSlug, loadedThemes[themeSlug]);
+          monaco.editor.setTheme(themeSlug);
+          setEditorValue(loadedThemes[themeSlug]);
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    lang.addEventListener('change', function(ev) {
+      var val = ev.target.value;
+      if (val === 'vs' || val === 'vs-dark' || val === 'hc-black') {
+        monaco.editor.setTheme(val);
+        return;
+      }
+
+      if (loadedThemesData[val]) {
+        monaco.editor.setTheme(val);
+        setEditorValue(loadedThemesData[val]);
+      } else {
+        loadTheme(val).then((data) => {
+          monaco.editor.setTheme(val);
+          setEditorValue(data);
+        });
+      }
+    });
+
+    function loadThemeList() {
+      return fetch('./themes/themelist.json')
+        .then(r => r.json())
+        .then(data => {
+          loadedThemes = data;
+          var themes = Object.keys(data);
+          themes.forEach(theme => {
+            var opt = document.createElement('option');
+            opt.value = theme;
+            opt.text = data[theme]
+            lang.add(opt);
+          });
+        });
+    }
+
+    loadThemeList();
+
+    require.config({ paths: { 'vs': 'https://unpkg.com/monaco-editor@0.14.2/min/vs' }});
+    window.MonacoEnvironment = {
+      getWorkerUrl: function(workerId, label) {
+        return `data:text/javascript;charset=utf-8,${encodeURIComponent(`
+          self.MonacoEnvironment = {
+            baseUrl: 'https://unpkg.com/monaco-editor@0.14.2/min'
+          };
+          importScripts('https://unpkg.com/monaco-editor@0.14.2/min/vs/base/worker/workerMain.js');`
+        )}`;
+      }
+    };
+    require(['vs/editor/editor.main'], function() {
+      var editor = monaco.editor.create(document.getElementById('editor'), {
+        value: [
+          '{',
+          '  "value": "Select a locally available tmtheme file or choose from the many pregenrated themes"',
+          '}'
+        ].join('\n'),
+        language: 'javascript',
+        fontSize: 16,
+        fontFamily: 'monospace',
+        minimap: {
+          enabled: false,
+        },
+        scrollBeyondLastLine: false,
+      });
+      editor.focus();
+      window.editor = editor;
+      addFileListener();
+    });
+  </script>
+</body>
+</html>

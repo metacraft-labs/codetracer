@@ -1,0 +1,1 @@
+: foreach *.* |> !tup_preserve |>

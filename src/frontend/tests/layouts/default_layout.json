@@ -1,0 +1,221 @@
+{
+  "settings": {
+      "hasHeaders": true,
+      "constrainDragToContainer": true,
+      "reorderEnabled": true,
+      "selectionEnabled": false,
+      "popoutWholeStack": false,
+      "blockedPopoutsThrowError": true,
+      "closePopoutsOnUnload": true,
+      "showPopoutIcon": true,
+      "showMaximiseIcon": true,
+      "showCloseIcon": true,
+      "responsiveMode": "onload"
+  },
+  "dimensions": {
+      "borderWidth": 5,
+      "minItemHeight": 200,
+      "minItemWidth": 300,
+      "headerHeight": 35,
+      "dragProxyWidth": 300,
+      "dragProxyHeight": 200
+  },
+  "labels": {
+      "close": "close",
+      "maximise": "maximise",
+      "minimise": "minimise",
+      "popout": "open in new window",
+      "popin": "pop in",
+      "tabDropdown": "additional tabs"
+  },
+  "content": [
+      {
+          "type": "row",
+          "isClosable": true,
+          "reorderEnabled": true,
+          "title": "",
+          "content": [
+              {
+                  "type": "row",
+                  "isClosable": true,
+                  "reorderEnabled": true,
+                  "title": "",
+                  "width": 65,
+                  "content": [
+                      {
+                          "type": "stack",
+                          "isClosable": true,
+                          "reorderEnabled": true,
+                          "title": "",
+                          "width": 5,
+                          "activeItemIndex": 0,
+                          "content": [
+                              {
+                                  "type": "component",
+                                  "componentName": "genericUiComponent",
+                                  "componentState": {
+                                      "id": 0,
+                                      "label": "filesystemComponent",
+                                      "content": 9
+                                  },
+                                  "isClosable": true,
+                                  "reorderEnabled": true,
+                                  "title": "genericUiComponent"
+                              }
+                          ]
+                      },
+                      {
+                          "type": "column",
+                          "isClosable": true,
+                          "reorderEnabled": true,
+                          "title": "",
+                          "width": 35,
+                          "content": [
+                              {
+                                  "type": "row",
+                                  "isClosable": true,
+                                  "reorderEnabled": true,
+                                  "title": "",
+                                  "height": 50,
+                                  "content": [
+                                      {
+                                          "type": "stack",
+                                          "isClosable": true,
+                                          "reorderEnabled": true,
+                                          "title": "",
+                                          "width": 65,
+                                          "activeItemIndex": 0,
+                                          "content": [
+                                              {
+                                                  "type": "component",
+                                                  "componentName": "genericUiComponent",
+                                                  "componentState": {
+                                                      "id": 0,
+                                                      "label": "stateComponent-0",
+                                                      "content": 4
+                                                  },
+                                                  "isClosable": true,
+                                                  "reorderEnabled": true,
+                                                  "title": "genericUiComponent"
+                                              },
+                                              {
+                                                  "type": "component",
+                                                  "componentName": "genericUiComponent",
+                                                  "componentState": {
+                                                      "id": 0,
+                                                      "label": "scratchpadComponent-0",
+                                                      "content": 17
+                                                  },
+                                                  "isClosable": true,
+                                                  "reorderEnabled": true,
+                                                  "title": "genericUiComponent"
+                                              },
+                                              {
+                                                  "type": "component",
+                                                  "componentName": "genericUiComponent",
+                                                  "componentState": {
+                                                      "id": 0,
+                                                      "label": "replComponent",
+                                                      "content": 10
+                                                  },
+                                                  "isClosable": true,
+                                                  "reorderEnabled": true,
+                                                  "title": "genericUiComponent"
+                                              },
+                                              {
+                                                "type": "component",
+                                                "componentName": "genericUiComponent",
+                                                "componentState": {
+                                                    "id": 0,
+                                                    "label": "stepListComponent",
+                                                    "content": 33
+                                                },
+                                                "isClosable": true,
+                                                "reorderEnabled": true,
+                                                "title": "genericUiComponent"
+                                            }
+                                          ]
+                                      },
+                                      {
+                                          "type": "stack",
+                                          "width": 32,
+                                          "isClosable": true,
+                                          "reorderEnabled": true,
+                                          "title": "",
+                                          "activeItemIndex": 0,
+                                          "content": [
+                                              {
+                                                  "type": "component",
+                                                  "componentName": "genericUiComponent",
+                                                  "componentState": {
+                                                      "id": 0,
+                                                      "label": "calltraceComponent-0",
+                                                      "content": 6
+                                                  },
+                                                  "isClosable": true,
+                                                  "reorderEnabled": true,
+                                                  "title": "genericUiComponent"
+                                              }
+                                          ]
+                                      }
+                                  ]
+                              },
+                              {
+                                  "type": "stack",
+                                  "height": 50,
+                                  "isClosable": true,
+                                  "reorderEnabled": true,
+                                  "title": "",
+                                  "activeItemIndex": 0,
+                                  "content": [
+                                      {
+                                          "type": "component",
+                                          "componentName": "genericUiComponent",
+                                          "componentState": {
+                                              "id": 0,
+                                              "label": "eventLogComponent-0",
+                                              "content": 8
+                                          },
+                                          "isClosable": true,
+                                          "reorderEnabled": true,
+                                          "title": "genericUiComponent"
+                                      },
+                                      {
+                                          "type": "component",
+                                          "componentName": "genericUiComponent",
+                                          "componentState": {
+                                              "id": 0,
+                                              "label": "terminalOutputComponent-0",
+                                              "content": 24
+                                          },
+                                          "isClosable": true,
+                                          "reorderEnabled": true,
+                                          "title": "genericUiComponent"
+                                      },
+                                      {
+                                          "type": "component",
+                                          "componentName": "genericUiComponent",
+                                          "componentState": {
+                                              "id": 0,
+                                              "label": "traceLogComponent-0",
+                                              "content": 22
+                                          },
+                                          "isClosable": true,
+                                          "reorderEnabled": true,
+                                          "title": "genericUiComponent"
+                                      }
+                                  ]
+                              }
+                          ]
+                      }
+                  ]
+              }
+          ]
+      }
+  ],
+  "isClosable": true,
+  "reorderEnabled": true,
+  "title": "",
+  "openPopouts": [],
+  "maximisedItemId": null
+}

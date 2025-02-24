@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+if [[ -s ~/.local/share/codetracer/app-install-fs-location ]]; then
+  app_location=$(< ~/.local/share/codetracer/app-install-fs-location)
+  os=$(uname)
+  if [[ "$os" == "Darwin" ]]; then
+    if [ -d "$app_location" ]; then
+      # We need to launch the CodeTracer app like this in order for the OS
+      # to display its icon and name property in the Dock, Alt+Tab menus, etc.
+      if [[ $1 == "" || $1 == "run" ]]; then
+        open "$app_location" --args "$@"
+      else
+        "$app_location/Contents/MacOS/bin/ct" "$@"
+      fi
+    elif [ -f "$app_location" ]; then
+      # The app binary has been linked directry. This is used sometimes during development.
+      "$app_location" "$@"
+    else
+      # TODO: Use the 'bookmarks' feature of the macOS file system to track to
+      #       discover the new location of the CodeTracer.app
+      #       https://stackoverflow.com/questions/10276026/how-do-i-keep-track-of-file-locations-on-mac-os-x
+      echo "The CodeTracer app has been moved" >&2
+      exit 1
+    fi
+  elif [[ "$os" == "Linux" ]]; then
+    "$app_location" "$@"
+  else
+    echo "The $os system is not yet supported by CodeTracer. Please file an issue at https://github.com/metacraft-labs/codetracer/" >&2
+  fi
+else
+  echo "Unable to find the location of the CodeTracer app" >&2
+  exit 1
+fi
