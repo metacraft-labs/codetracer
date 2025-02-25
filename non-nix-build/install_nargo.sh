@@ -2,7 +2,7 @@
 
 set -e
 
-WANTED_NARGO_REVISION=ad2f0701d32edb91592fcca37ce98d3c491cde77
+WANTED_NARGO_REVISION=8584e105549d6daa29d7b2be83bd5883016cfbd7
 
 if command -v nargo &> /dev/null; then
   echo nargo is already installed
