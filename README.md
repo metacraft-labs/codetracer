@@ -36,7 +36,7 @@ Compared to traditional debuggers, CodeTracer gives you two major superpowers:
 
   These features combined, make for a truly powerful debugging experience, which we invite you to see in the video below:
   
-  [![Watch the video](https://img.youtube.com/vi/TsY1oNiJtgA/maxresdefault.jpg)](https://www.youtube.com/watch?v=TsY1oNiJtgA)
+  [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
 
 ## Current state of the project and 2025 roadmap
 
