@@ -1,4 +1,4 @@
-[![Release](https://img.shields.io/github/release/metacraft-labs/codetracer.svg)](https://github.com/metacraft-labs/codetracer/releases)
+<!-- enable when we have a github release [![Release](https://img.shields.io/github/release/metacraft-labs/codetracer.svg)](https://github.com/metacraft-labs/codetracer/releases) -->
 [![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
