@@ -1,5 +1,5 @@
 <!-- enable when we have a github release [![Release](https://img.shields.io/github/release/metacraft-labs/codetracer.svg)](https://github.com/metacraft-labs/codetracer/releases) -->
-[![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
+[![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg?branch=main)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
 [Download CodeTracer AppImage](https://downloads.codetracer.com/CodeTracer-25.02.1-amd64.AppImage)
@@ -98,7 +98,7 @@ https://downloads.codetracer.com/feature-highlights/eventlog.mp4
 
 ### Terminal Output
 
-The terminal output panel renders the recorded `stdout` and `stderr` events like a standard terminal. Clicking anywhere in the output takes you to the exact moment when the specific character was generated. This allows for a fallback to a more traditional print-style debugging when the expressivity of tracepoints is not sufficient. In the future, CodeTracer will allow you to slide through the states of the terminal through time which will help for debugging highly interactive TUI apps. 
+The terminal output panel renders the recorded `stdout` and `stderr` events like a standard terminal. Clicking anywhere in the output takes you to the exact moment when the specific character was generated. This allows for a fallback to a more traditional print-style debugging when the expressivity of tracepoints is not sufficient. In the future, CodeTracer will allow you to slide through the states of the terminal through time which will help for debugging highly interactive TUI apps.
 
 https://downloads.codetracer.com/feature-highlights/terminal.mp4
 
