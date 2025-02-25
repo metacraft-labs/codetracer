@@ -12,7 +12,9 @@ When you launch CodeTracer, it will prompt you to complete the final installatio
 
 CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages.
 
-It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a  GUI environment that allows you to move forward and backward through the execution and to examine the history of all memory locations.
+It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a  GUI environment that allows you to move forward and backward through the execution and to examine the history of all memory locations:
+
+  [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
 
 Compared to traditional debuggers, CodeTracer gives you two major superpowers:
 
@@ -34,9 +36,7 @@ Compared to traditional debuggers, CodeTracer gives you two major superpowers:
 
   Every time you jump to a new moment in the execution, you can fearlessly explore your surroundings by stepping forward or backwards, having access to a back button that can always get you to any previous point of interest. At every point of the journey, our novel UI shows you details about the past and future program states at a glance and you know your position in the precisely recorded call trace of the program.
 
-  These features combined, make for a truly powerful debugging experience, which we invite you to see in the video below:
-  
-  [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
+  These features combined, make for a truly powerful debugging experience, which we invite you to see in the video above.
 
 ## Current state of the project and 2025 roadmap
 
