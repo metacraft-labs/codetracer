@@ -51,7 +51,7 @@ CodeTracer uses an [open format](https://github.com/metacraft-labs/runtime_traci
 
 Metacraft Labs is also developing an alternative back-end, capable of working with [RR] recordings, which will make CodeTracer suitable for debugging large-scale programs in a variety of system programming languages such as C/C++, Rust, Nim, D, Zig, Go, Fortran and FreePascal.
 
-To shape our priorities and to help us understand the demographics of our user base better, please fill out [CodeTracer Developer Preferences Survey](https://form.typeform.com/to/M2Z28VFj).
+To shape our priorities and to help us understand the demographics of our user base better, please fill out [CodeTracer Developer Preferences Survey](https://form.typeform.com/to/M2Z28VFj?utm_source=Github).
 
 To accelerate our development, please consider donating to our Open Collective campaign. Anyone who contributes more than $50 before June 2025 will get early access to our beta releases for system programming languages, forever.
 
