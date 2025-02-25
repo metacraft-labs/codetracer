@@ -51,7 +51,7 @@ CodeTracer uses an [open format](https://github.com/metacraft-labs/runtime_traci
 
 Metacraft Labs is also developing an alternative back-end, capable of working with [RR] recordings, which will make CodeTracer suitable for debugging large-scale programs in a variety of system programming languages such as C/C++, Rust, Nim, D, Zig, Go, Fortran and FreePascal.
 
-To shape our priorities and to help us understand the demographics of our user base better, please fill out [CodeTracer Developer Preferences Survey].
+To shape our priorities and to help us understand the demographics of our user base better, please fill out [CodeTracer Developer Preferences Survey](https://form.typeform.com/to/M2Z28VFj).
 
 To accelerate our development, please consider donating to our Open Collective campaign. Anyone who contributes more than $50 before June 2025 will get early access to our beta releases for system programming languages, forever.
 
@@ -76,31 +76,31 @@ CodeTracer gives you the best of both worlds. A tracepoint allows you to see the
 
 The added code can feature if statements, additional function calls and various ways to print or plot the captured data. The output is typically produced in seconds.
 
-https://downloads.codetracer.com/feature-highlights/tracepoint.mp4
+![tracepoint](https://downloads.codetracer.com/feature-highlights/tracepoint.webp "tracepoint")
 
 ### Call Trace
 
 Instead of a stack trace limited to a single moment in time, CodeTracer shows you the entire tree of function calls in the recorded execution. You can navigate and filter it in various ways and the clever collapsing and expanding algorithms still allow you to obtain a classic stack trace whenever you need it.
 
-https://downloads.codetracer.com/feature-highlights/calltrace.mp4
+![calltrace](https://downloads.codetracer.com/feature-highlights/calltrace.webp "calltrace")
 
 ### State and History Explorer
 
 Every variable in CodeTracer has a history. You can see all the values that the variable held during the entire execution of the program and for each of them you can jump to the originating expression that computed it. CodeTracer follows the path of trivial copies in assignments to save you extra time when tracking down more convoluted bugs.
 
-https://downloads.codetracer.com/feature-highlights/state-and-history.mp4
+![state-and-history](https://downloads.codetracer.com/feature-highlights/state-and-history.webp "state-and-history")
 
 ### Event Log
 
 The event log gives you a chronological view over anything of interest in your program, interleaved with the tracepoint outputs. Clicking on any event takes you to the precise moment in time when it was produced, which gives you excellent starting points for your investigations. Tracking down the origins of anomalous events and program states through the history of the involved variables is the essence of debugging with CodeTracer.
 
-https://downloads.codetracer.com/feature-highlights/eventlog.mp4
+![eventlog](https://downloads.codetracer.com/feature-highlights/eventlog.webp "eventlog")
 
 ### Terminal Output
 
 The terminal output panel renders the recorded `stdout` and `stderr` events like a standard terminal. Clicking anywhere in the output takes you to the exact moment when the specific character was generated. This allows for a fallback to a more traditional print-style debugging when the expressivity of tracepoints is not sufficient. In the future, CodeTracer will allow you to slide through the states of the terminal through time which will help for debugging highly interactive TUI apps.
 
-https://downloads.codetracer.com/feature-highlights/terminal.mp4
+![terminal](https://downloads.codetracer.com/feature-highlights/terminal.webp "terminal")
 
 ### Mouse Stepping
 
@@ -114,8 +114,6 @@ Explore the right-click context menu for additional operations.
 ### Scratchpad
 
 The scratchpad provides a play area where you can pin values from different locations and moments in time. You can explore their differences both manually and algorithmically to gain quick insights into the behavior of your program.
-
-[Short animation for using Scratchpad diff/REPL when we have it]
 
 ### The CodeTracer CLI
 
