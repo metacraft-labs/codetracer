@@ -150,6 +150,7 @@ jobs:
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh"
 
+
   appimage-build:
     runs-on: [self-hosted, nixos]
     needs:
@@ -173,12 +174,6 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
       - name: Build
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AppImage
-          path: CodeTracer.AppImage
 
 
   test-rust:
