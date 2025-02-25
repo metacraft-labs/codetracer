@@ -2,8 +2,8 @@
 [![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg?branch=main)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
-[Download CodeTracer AppImage](https://downloads.codetracer.com/CodeTracer-25.02.1-amd64.AppImage)
-[Download CodeTracer for macOS](https://downloads.codetracer.com/CodeTracer-25.02.1-arm64.dmg)
+[![Download AppImage](https://img.shields.io/badge/Download-AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.02.1-amd64.AppImage)
+[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.02.1-arm64.dmg)
 
 You can place the downloaded app bundle in a location of your choosing (e.g., the Applications folder on macOS or ~/.local/share/applications on Linux).
 When you launch CodeTracer, it will prompt you to complete the final installation steps, such as adding the command-line utilities to your PATH.
@@ -66,7 +66,7 @@ Once you have time travel, you can re-imagine how a debugger works from the grou
 
 When CodeTracer breaks at a certain line of code, it knows not only the past but also the future. You can immediately see the values of all variables in the current function right next to the source code. This includes variables in loops where you can easily scroll through the iterations. Taken code branches are highlighted, while the non-executed code is immediately grayed out.
 
-https://downloads.codetracer.com/feature-highlights/omniscience.mp4
+![omniscience](https://downloads.codetracer.com/feature-highlights/omniscience.webp "omniscience")
 
 ### Tracepoints
 
