@@ -13,12 +13,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -34,12 +32,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -55,12 +51,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -76,12 +70,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -97,12 +89,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -124,12 +114,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -151,12 +139,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -177,12 +163,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -208,12 +192,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -233,12 +215,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -252,18 +232,16 @@ jobs:
     needs:
       - test-rust
       - test-ui-tests
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
@@ -275,18 +253,16 @@ jobs:
   build-and-deploy-docs:
     runs-on: [self-hosted, nixos]
     needs: [push-to-cachix]
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
 
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          nix-github-token: ${{ secrets.SUBMODULE_ACCESS_TOKEN }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
