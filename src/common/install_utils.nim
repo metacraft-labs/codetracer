@@ -54,10 +54,13 @@ const
   fishrc = "fishrc"
 
 template slurpShellIntegrationFile(name: string): string =
-  const
-    slurpedFile = currentSourcePath().parentDir & "/../shell-integrations/" & name
-    slurpedContent = staticRead(slurpedFile)
-  slurpedContent
+  when not defined(windows):
+    const
+      slurpedFile = currentSourcePath().parentDir & "/../shell-integrations/" & name
+      slurpedContent = staticRead(slurpedFile)
+    slurpedContent
+  else:
+    ""
 
 proc createRcFile(filePath: FilePath, content: string): CreatedFilePath
                  {.raises: [IOError, OSError].} =

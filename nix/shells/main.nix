@@ -51,10 +51,6 @@ in
         ripgrep
         universal-ctags
 
-        # Tup builds
-        fuse
-        tup
-
         # Make alternative
         # https://github.com/casey/just
         just
@@ -138,6 +134,10 @@ in
         inputs'.appimage-channel.legacyPackages.appimagekit
         appimage-run
         pax-utils
+
+        # Tup builds
+        fuse
+        tup
       ];
 
       # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";

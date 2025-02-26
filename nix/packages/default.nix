@@ -361,7 +361,7 @@
           pname = "node-modules-derivation";
 
           nativeBuildInputs = [pkgs.typescript yarn-python3];
-          buildInputs = oldAttrs.buildInputs ++ [yarn-python3 pkgs.typescript];
+          buildInputs = oldAttrs.buildInputs ++ [yarn-python3 pkgs.typescript pkgs.xz ];
 
           installPhase =
             oldAttrs.installPhase
@@ -521,11 +521,6 @@
           echo ${runtimeDeps.outPath}/bin
           ls -al ${runtimeDeps.outPath}/bin
 
-          # ${upstream-nim-codetracer.out}/bin/nim \
-          #   -d:release \
-          #   --nimcache:nimcache_ct \
-          #   --out:ct c ./src/ct/ct.nim
-
           ${upstream-nim-codetracer.out}/bin/nim \
             -d:debug -d:asyncBackend=asyncdispatch \
             --gc:refc --hints:off --warnings:off \
@@ -535,7 +530,6 @@
             -d:chronicles_timestamps=UnixTime \
             -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
             -d:linksPathConst=${runtimeDeps.outPath}/ \
-            -d:libcPath=${pkgs.glibc.out} \
             -d:builtWithNix \
             -d:ctEntrypoint \
             -d:pathToNodeModules=${node-modules-derivation.outPath}/bin/node_modules \

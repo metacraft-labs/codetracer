@@ -1614,8 +1614,9 @@ proc cleanup*: void {.noconv.} =
   # Franz found an issue
   # https://gitlab.com/metacraft-labs/code-tracer/CodeTracer/-/merge_requests/116#note_1360620095
   # which shows maybe we need to stop the electron process if not stopped too
-  if electronPid != -1:
-    discard kill(electronPid.Pid, SIGKILL)
+  when not defined(windows):
+    if electronPid != -1:
+      discard kill(electronPid.Pid, SIGKILL)
 
 
 onSignal(SIGINT):
@@ -1701,11 +1702,13 @@ proc runInitial(conf: CodetracerConf) =
           quit 1
 
       if conf.installCtOnPath:
-        echo "About to install on PATH"
-        let status = installCodetracerOnPath(codetracerExe)
-        if status.isErr:
-          echo "Failed to install CodeTracer: " & status.error
-          quit 1
+        when not defined(windows):
+          echo "About to install on PATH"
+          let status = installCodetracerOnPath(codetracerExe)
+          if status.isErr:
+            echo "Failed to install CodeTracer: " & status.error
+            quit 1
+        quit 0
 
       when defined(linux):
         if conf.installCtDesktopFile:
