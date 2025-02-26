@@ -2,19 +2,21 @@
 [![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg?branch=main)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
-[![Download AppImage](https://img.shields.io/badge/Download-AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.02.1-amd64.AppImage)
+[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.02.1-amd64.AppImage)
 [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.02.1-arm64.dmg)
 
-You can place the downloaded app bundle in a location of your choosing (e.g., the Applications folder on macOS or ~/.local/share/applications on Linux).
-When you launch CodeTracer, it will prompt you to complete the final installation steps, such as adding the command-line utilities to your PATH.
+> You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/share/applications` on Linux).
+When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
 
 # Introduction
 
 CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages.
 
-It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a  GUI environment that allows you to move forward and backward through the execution and to examine the history of all memory locations:
+It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward through the execution and to examine the history of all memory locations. They say a picture is worth a thousand words — well, a video is even better! Watch the demo below to see CodeTracer in action:
 
   [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
+
+## The Benefits of Time-Travel
 
 Compared to traditional debuggers, CodeTracer gives you two major superpowers:
 
@@ -36,7 +38,7 @@ Compared to traditional debuggers, CodeTracer gives you two major superpowers:
 
   Every time you jump to a new moment in the execution, you can fearlessly explore your surroundings by stepping forward or backwards, having access to a back button that can always get you to any previous point of interest. At every point of the journey, our novel UI shows you details about the past and future program states at a glance and you know your position in the precisely recorded call trace of the program.
 
-  These features combined, make for a truly powerful debugging experience, which we invite you to see in the video above.
+  These features combined, make for a truly powerful debugging experience.
 
 ## Current state of the project and 2025 roadmap
 
@@ -55,8 +57,7 @@ To shape our priorities and to help us understand the demographics of our user b
 
 To accelerate our development, please consider donating to our Open Collective campaign. Anyone who contributes more than $50 before June 2025 will get early access to our beta releases for system programming languages, forever.
 
-[Open Collective Donate Button]
-
+[![CodeTracer OpenCollective](https://img.shields.io/badge/Donate%20On-OpenCollective-green?style=for-the-badge)](https://opencollective.com/codetracer)
 
 ## The features of CodeTracer in more depth
 
