@@ -27,9 +27,9 @@
     <key>DTSDKName</key>
     <string>macosx14.5</string>
     <key>DTXcode</key>
-    <string>1540</string>
+    <string>1200</string>
     <key>DTXcodeBuild</key>
-    <string>15F31d</string>
+    <string>12A7209</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
     <key>LSEnvironment</key>
