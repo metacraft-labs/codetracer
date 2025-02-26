@@ -121,6 +121,7 @@ in
         # ci deps
         python3Packages.flake8
         shellcheck
+        awscli2
 
         # This dependency is needed only while compiling the `lzma-native`
         # node.js module, and only when building an AppImage on Linux/ARM.
