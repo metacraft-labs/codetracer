@@ -434,12 +434,8 @@ when defined(ctIndex) or defined(ctTest):
       # debugPrint "OPTIONS: ", $(options.to(cstring))
 
       setupLdLibraryPath()
- 
-      var processOptions = options
-      # important to ignore stderr, as otherwise too much of it can lead to
-      # the spawned process hanging: this is a bugfix for such a situation
-      processOptions.stdio = cstring"ignore"
-      let process = nodeStartProcess.spawn(path, args, processOptions)
+
+      let process = nodeStartProcess.spawn(path, args, options)
 
       process.stdout.setEncoding(cstring"utf8")
 
@@ -471,6 +467,11 @@ when defined(ctIndex) or defined(ctTest):
       # debugPrint "OPTIONS: ", $(options.to(cstring))
 
       let process = nodeStartProcess.spawn(path, args, options)
+
+      var processOptions = options
+      # important to ignore stderr, as otherwise too much of it can lead to
+      # the spawned process hanging: this is a bugfix for such a situation
+      processOptions.stdio = cstring"ignore"
 
       process.toJs.on("spawn", proc() =
         resolve(Result[NodeSubProcess, JsObject].ok(process)))
