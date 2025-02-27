@@ -10,13 +10,17 @@
   height: 34px !important
   padding-left: 2px !important
   box-shadow: 2px 0 0 0 HEADER_PANEL_BACKGROUND_COLOR !important
-  z-index: 10 !important
+  z-index: 3 !important
   margin-right: 2px !important
 
 .lm_splitter
   background: LAYOUT_SPLITTER_COLOR !important
   opacity: unset !important
   transition: opacity 200ms ease !important
+  z-index: 4 !important
+
+.lm_stack
+  overflow: hidden !important
 
 .lm_tabs
   width: calc(100% - 2px)
@@ -49,8 +53,7 @@
   line-height: 24px !important
   // max-width: min(200px, 30%)
   overflow: hidden
-  border-top-left-radius: 6px
-  border-top-right-radius: 6px
+  border-radius: 6px
   // margin-left: 2px !important
   margin-right: 4px !important
   margin-bottom: 0px !important
@@ -65,6 +68,7 @@
 .lm_item
   background-color: LAYOUT_SPLITTER_COLOR !important
   outline: 1px solid LAYOUT_SPLITTER_COLOR !important
+  z-index: 3 !important
 
 .lm_items
   transform: translateX(-2px)
@@ -124,6 +128,37 @@
   border-bottom-right-radius: 0px
   border-bottom-left-radius: 0px
   box-shadow: 0px 8px 0px 0px HEADER_ACTIVE_PANEL_BACKGROUND_COLOR !important
+  overflow: visible !important
+
+  &::before
+    content: " ";
+    pointer-events: none;
+    position: absolute;
+    display: block;
+    height: 80%;
+    width: 26px;
+    bottom: 0px;
+    z-index: 1;
+    left: -26px;
+    border-radius: 0 0 10px 0;
+    opacity: 1;
+    box-shadow: 10px 0.34em 0 -4px SECONDARY_BASE
+    transform: translate(0px, 4.1px)
+  
+  &::after
+    content: " ";
+    pointer-events: none;
+    position: absolute;
+    display: block;
+    height: 80%;
+    width: 26px;
+    bottom: 0px;
+    z-index: 1;
+    right: -26px;
+    border-radius: 0 0 0 10px;
+    opacity: 1;
+    box-shadow: -10px 0.34em 0 -4px SECONDARY_BASE
+    transform: translate(0px, 4.1px)
 
 .lm_header .lm_active .lm_title
   color: HEADER_ACTIVE_PANEL_TEXT_COLOR !important
