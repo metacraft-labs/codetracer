@@ -3057,7 +3057,7 @@ proc renderFlowLines*(self: FlowComponent) =
     if not self.stepNodes.hasKey(step.stepCount):
       if step.position == self.flow.loops[loopId].registeredLine:
         self.addLoopInfo(step)
-      if step.beforeValues.len > 0:
+      if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
         self.addStepValues(step)
 
 proc reloadFlow*(self:FlowComponent) =
