@@ -3,12 +3,12 @@
 import
   results,
   std / [
-    strutils, strformat, sequtils, sets, streams, json, tables, os, osproc,
-    asyncdispatch, posix, strtabs, algorithm, rdstdin, nativesockets, re
+    strutils, strformat, sequtils, sets, streams, json, tables, times, os, osproc,
+    asyncdispatch, posix, strtabs, algorithm, rdstdin, nativesockets, re, random
   ],
   json_serialization
 
-import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils]
+import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils, config]
 import version, confutils, codetracerconf
 
 const
@@ -687,11 +687,35 @@ when defined(testing):
       let recordCore = envLoadRecordCore()
       discard runRecordedTrace(trace, true, recordCore=recordCore)
 
+proc generateSecurePassword(length: int): string =
+  let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  randomize(getTime().toUnix)
+  result = newString(length)
+  for i in 0..<length:
+    result[i] = chars[rand(chars.len - 1)]
+  return result
+
+proc zipFileWithPassword(inputFile: string, outputZip: string, password: string) =
+  let basePath = lastPathPart(inputFile)
+  let cmd = &"cd {parentDir(inputFile)} && zip -r -P " & password & " " & outputZip & " " & basePath
+  discard execShellCmd(cmd)
+
+proc uploadEncyptedZip(file: string): int =
+  # TODO: Plug in http client instead of curl
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let cmd = &"curl -X POST -F \"file=@{file}\" {config.webApiRoot}/upload"
+  let exitCode = execCmd(cmd)
+  exitCode
 
 proc uploadTrace(trace: Trace) =
-  echo "error: uploading traces not supported currently!"
-  quit(1)
+  let outputZip = trace.outputFolder / "archived.zip"
+  let password = generateSecurePassword(20)
+  echo password
 
+  zipFileWithPassword(trace.outputFolder, outputZip, password)
+  let exitCode = uploadEncyptedZip(outputZip)
+
+  quit(exitCode)
 
 proc fillSourceFiles(folder: string, sourcePaths: seq[string]) =
   for path in sourcePaths:
@@ -1757,13 +1781,12 @@ proc runInitial(conf: CodetracerConf) =
       notSupportedCommand($conf.cmd)
     of StartupCommand.upload:
       # similar to replay/console
-      notSupportedCommand($conf.cmd)
       # eventually enable?
-      # uploadCommand(
-      #   conf.uploadLastTraceMatchingPattern,
-      #   conf.uploadTraceId,
-      #   conf.uploadTraceFolder,
-      #   replayInteractive)
+      uploadCommand(
+        conf.uploadLastTraceMatchingPattern,
+        conf.uploadTraceId,
+        conf.uploadTraceFolder,
+        replayInteractive)
     of StartupCommand.download:
       notSupportedCommand($conf.cmd)
       # eventually enable?

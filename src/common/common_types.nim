@@ -1341,6 +1341,10 @@ type
   BugReportArg* = object ## BugReport arg
     title*: langstring
     description*: langstring
+  
+  UploadTraceArg* = object
+    trace*: Trace
+    programName*: langstring
 
   DbEventKind* {.pure.} = enum Record, Trace, History
 
