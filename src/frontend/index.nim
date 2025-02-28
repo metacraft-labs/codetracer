@@ -800,6 +800,27 @@ proc onSearchProgram(sender: js, query: cstring) {.async.} =
 proc onLoadStepLines(sender: js, response: LoadStepLinesArg) {.async.} =
   discard debugger.loadStepLines(response)
 
+proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[
+      j"upload",
+      j"--trace-folder=" & response.trace.outputFolder
+    ]
+  )
+
+  if res.isOk:
+    echo "### TODO: STORE THE PASSWORD AND DOWNLOAD ID"
+    let commandList = res.v.split("\n")
+    let password = commandList[0]
+    let message = commandList[^1]
+    echo "### PASSWORD = ", password
+    echo "### MESSAGE = ", message
+
+proc onDownloadTraceFile(sender: js) {.async.} =
+  # TODO: Implement download trace from downloadId and key
+  discard
+
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
     codetracerExe.cstring,
@@ -1297,6 +1318,10 @@ proc configureIpcMain =
     "open-trace"
     "show-in-debug-instance"
     "send-bug-report-and-logs"
+
+    # Upload/Download
+    "upload-trace-file"
+    "download-trace-file"
 
     "restart"
 
