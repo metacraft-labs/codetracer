@@ -3,6 +3,13 @@ import
   ../../ct/version, 
   ui_imports, ../types
 
+proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) =
+  self.data.ipc.send "CODETRACER::upload-trace-file",
+    UploadTraceArg(
+      trace: trace,
+      programName: trace.program
+    )
+
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
   buildHtml(
     tdiv(
@@ -26,6 +33,13 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
       separateBar()
       span(class = "recent-trace-title-content"):
         text limitedProgramName # TODO: tippy
+    tdiv(class = "recent-trace-buttons"):
+      span(
+        onclick = proc(ev: Event, tg: VNode) =
+          ev.stopPropagation()
+          self.uploadTrace(trace)
+        ):
+        text "^"
     # tdiv(class = "recent-trace-info"):
     #   tdiv(class = "recent-trace-date"):
     #     text trace.date
