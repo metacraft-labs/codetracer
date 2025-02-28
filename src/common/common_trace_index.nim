@@ -39,7 +39,10 @@ const SQL_CREATE_TABLE_STATEMENTS = @[
       exitCode integer,
       calltrace integer,
       calltraceMode string,
-      date text);""",
+      date text,
+      downloadId string,
+      controlId string,
+      key string);""",
   """CREATE TABLE IF NOT EXISTS trace_values (
       id integer,
       maxTraceID integer,
