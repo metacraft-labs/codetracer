@@ -416,20 +416,20 @@
 
           # golden-layout: Copyright (c) 2016 deepstream.io (MIT License)
           # https://github.com/golden-layout/golden-layout/blob/master/LICENSE
-          # rm -rf $out/public/golden-layout
-          # mkdir -p $out/public/golden-layout/
-          # mkdir -p $out/public/golden-layout/dist/css
-          # cp -r src/public/golden-layout/dist/css/* $out/public/golden-layout/dist/css/
-          # mkdir -p $out/public/golden-layout/dist/img
-          # cp -r src/public/golden-layout/dist/img/* $out/public/golden-layout/dist/img/
+          # rm -rf $out/public/third_party/golden-layout
+          # mkdir -p $out/public/third_party/golden-layout/
+          # mkdir -p $out/public/third_party/golden-layout/dist/css
+          # cp -r src/public/third_party/golden-layout/dist/css/* $out/public/third_party/golden-layout/dist/css/
+          # mkdir -p $out/public/third_party/golden-layout/dist/img
+          # cp -r src/public/third_party/golden-layout/dist/img/* $out/public/third_party/golden-layout/dist/img/
 
           # file-icons-js: Copyright (c) 2020 Xuanbo (MIT License)
           # https://github.com/exuanbo/file-icons-js?tab=MIT-1-ov-file#readme
-          # rm -rf $out/public/@exuanbo
-          # mkdir -p $out/public/@exuanbo/file-icons-js/
-          # cp src/public/@exuanbo/file-icons-js/LICENSE $out/public/@exuanbo/file-icons-js/LICENSE
-          # mkdir -p $out/public/@exuanbo/file-icons-js/dist/css
-          # cp -r src/public/@exuanbo/file-icons-js/dist/css/* $out/public/@exuanbo/file-icons-js/dist/css/
+          # rm -rf $out/public/third_party/@exuanbo
+          # mkdir -p $out/public/third_party/@exuanbo/file-icons-js/
+          # cp src/public/third_party/@exuanbo/file-icons-js/LICENSE $out/public/third_party/@exuanbo/file-icons-js/LICENSE
+          # mkdir -p $out/public/third_party/@exuanbo/file-icons-js/dist/css
+          # cp -r src/public/third_party/@exuanbo/file-icons-js/dist/css/* $out/public/third_party/@exuanbo/file-icons-js/dist/css/
 
           mkdir -p $out/styles
           mv src/frontend/styles/*.css $out/styles/
@@ -569,8 +569,8 @@
 
           # UI static resources
           cp -Lr ${codetracer-electron}/src/public/* $out/public/
-          # tree ${codetracer-electron}/src/public/golden-layout
-          # tree $out/public/golden-layout/
+          # tree ${codetracer-electron}/src/public/third_party/golden-layout
+          # tree $out/public/third_party/golden-layout/
 
           cp -Lr ${codetracer-electron}/src/frontend/styles/* $out/frontend/styles/
 

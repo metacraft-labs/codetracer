@@ -79,22 +79,22 @@ proc action(self: DebugComponent, id: string) =
 
 
 var buttons = JsAssoc[cstring, VNode]{
-  "history-back": buildHtml(img(src="public/debug/history_back_black.svg", height="20px", width="18px", class="debug-button-svg")),
-  "history-forward": buildHtml(img(src="public/debug/history_forward_black.svg", height="20px", width="18px", class="debug-button-svg")),
-  "next": buildHtml(img(src="public/debug/next_dark.svg", height="20px", width="18px", class="debug-button-svg")),
-  "reverse-next": buildHtml(img(src="public/debug/reverse_next_dark.svg", height="20px", width="18px", class="debug-button-svg")),
-  "step-in": buildHtml(img(src="public/debug/step-in_dark.svg", height="14px", width="16px", class="debug-button-svg")),
-  "reverse-step-in": buildHtml(img(src="public/debug/reverse_step-in_dark.svg", height="14px", width="16px", class="debug-button-svg")),
-  "step-out": buildHtml(img(src="public/debug/step-out_dark.svg", height="14px", width="16px", class="debug-button-svg")),
-  "reverse-step-out": buildHtml(img(src="public/debug/reverse_step-out_dark.svg", height="14px", width="16px", class="debug-button-svg")),
-  "continue": buildHtml(img(src="public/debug/continue_dark.svg", height="16px", width="28px", class="debug-button-svg")),
-  "reverse-continue": buildHtml(img(src="public/debug/reverse_continue_dark.svg", height="16px", width="28px", class="debug-button-svg")),
-  "reset-operation": buildHtml(img(src="public/debug/reset_operation_dark.svg", height="16px", width="18px", class="debug-button-svg")),
-  "reset-operation-loading": buildHtml(img(src="public/debug/pause_ongoing_16.gif", height="16px", width="16px", class="debug-button-svg")),
-  "stop": buildHtml(img(src="public/debug/stop_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
-  "jump-before": buildHtml(img(src="public/debug/jump-before_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
-  "jump-after": buildHtml(img(src="public/debug/jump-after_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
-  "run-to-entry": buildHtml(img(src="public/debug/run_to_entry_dark.svg", height="20px", width="18px", class="debug-button-svg"))
+  "history-back": buildHtml(img(src="public/resources/debug/history_back_black.svg", height="20px", width="18px", class="debug-button-svg")),
+  "history-forward": buildHtml(img(src="public/resources/debug/history_forward_black.svg", height="20px", width="18px", class="debug-button-svg")),
+  "next": buildHtml(img(src="public/resources/debug/next_dark.svg", height="20px", width="18px", class="debug-button-svg")),
+  "reverse-next": buildHtml(img(src="public/resources/debug/reverse_next_dark.svg", height="20px", width="18px", class="debug-button-svg")),
+  "step-in": buildHtml(img(src="public/resources/debug/step-in_dark.svg", height="14px", width="16px", class="debug-button-svg")),
+  "reverse-step-in": buildHtml(img(src="public/resources/debug/reverse_step-in_dark.svg", height="14px", width="16px", class="debug-button-svg")),
+  "step-out": buildHtml(img(src="public/resources/debug/step-out_dark.svg", height="14px", width="16px", class="debug-button-svg")),
+  "reverse-step-out": buildHtml(img(src="public/resources/debug/reverse_step-out_dark.svg", height="14px", width="16px", class="debug-button-svg")),
+  "continue": buildHtml(img(src="public/resources/debug/continue_dark.svg", height="16px", width="28px", class="debug-button-svg")),
+  "reverse-continue": buildHtml(img(src="public/resources/debug/reverse_continue_dark.svg", height="16px", width="28px", class="debug-button-svg")),
+  "reset-operation": buildHtml(img(src="public/resources/debug/reset_operation_dark.svg", height="16px", width="18px", class="debug-button-svg")),
+  "reset-operation-loading": buildHtml(img(src="public/resources/debug/pause_ongoing_16.gif", height="16px", width="16px", class="debug-button-svg")),
+  "stop": buildHtml(img(src="public/resources/debug/stop_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
+  "jump-before": buildHtml(img(src="public/resources/debug/jump-before_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
+  "jump-after": buildHtml(img(src="public/resources/debug/jump-after_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
+  "run-to-entry": buildHtml(img(src="public/resources/debug/run_to_entry_dark.svg", height="20px", width="18px", class="debug-button-svg"))
  }
 
 let shortcuts = JsAssoc[cstring, cstring]{

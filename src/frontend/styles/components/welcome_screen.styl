@@ -33,13 +33,13 @@
     height: 32px
     background-repeat: no-repeat
     background-position: center
-    background-image: url("../../public/loading_sign_dots_32.svg")
+    background-image: url("../../public/resources/welcome/loading_sign_dots_32.svg")
     animation: infinite linear
     animation-name: loading
     animation-duration: 3s
 
 .welcome-logo
-  background-image: url('../../public/shared/codetracer_welcome_logo.svg')
+  background-image: url('../../public/resources/shared/codetracer_welcome_logo.svg')
   min-width: 62px
   min-height: 62px
   background-size: 62px 62px
@@ -202,7 +202,6 @@
           height: 28px;
           margin-top: 8px;
           display: flex
-          // font-family: monolith;
           position: relative
           text-align: left
           border-radius: 4px
@@ -422,22 +421,22 @@
         margin-bottom: 8px
 
         &.in-progress
-          background-image: url("../../public/loading_sign_dots_128.svg")
+          background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
           animation: infinite linear
           animation-name: loading
           animation-duration: 3s
 
         &.failed
-          background-image: url("../../public/error_sign_128.svg")
+          background-image: url("../../public/resources/welcome/error_sign_128.svg")
         &.success
           border-radius: 100px
           border: 1px solid LINE_STROKE
-          background-image: url("../../public/done_sign_128.svg")
+          background-image: url("../../public/resources/welcome/done_sign_128.svg")
 
       .new-record-result-info
         text-align: center
         position: relative
         width: 100%
         height: 30px
-        font-family: monolith
+        font-family: "FiraCode"
         font-size: 20px

@@ -1,5 +1,5 @@
 import ../ui_helpers, ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom, ../renderer
-  # ../public/monaco-themes/themes/customThemes/nim/customThemes
+  # ../public/third_party/monaco-themes/themes/customThemes/nim/customThemes
 import std/[ cstrutils, jsre ]
 
 from dom import createElement
@@ -1135,8 +1135,8 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       else:
         readOnly = false
 
-      const whiteThemeDef = staticRead("../../public/monaco-themes/themes/customThemes/json/codetracerWhite.json")
-      const darkThemeDef = staticRead("../../public/monaco-themes/themes/customThemes/json/codetracerDark.json")
+      const whiteThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
+      const darkThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
 
       try:
         {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}

@@ -32,18 +32,13 @@ input::-moz-placeholder
 TRACE_LOG_EDITOR_Z_INDEX = 50
 
 @font-face {
-  font-family: monolith;
-  src: url("../../public/Monolith.otf");
-}
-
-@font-face {
   font-family: 'SpaceGrotesk';
-  src: url('../../public/Fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
+  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
 }
 
 @font-face {
   font-family: "FiraCode";
-  src: url('../../public/Fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
+  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
 }
 
 .hidden
@@ -484,7 +479,7 @@ input:checked ~ .checkmark:after
     white-space: normal
 
 .custom-noir-icon::before
-  content: url("../../public/noir_logo_dark_theme.svg")
+  content: url("../../public/resources/shared/noir_logo_dark_theme.svg")
   display: block
   width: 16px
   height: 16px

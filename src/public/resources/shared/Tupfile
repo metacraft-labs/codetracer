@@ -1,0 +1,2 @@
+: foreach *.* |> !tup_preserve |>
+: foreach filesystem/*.svg |> !tup_preserve |> %f

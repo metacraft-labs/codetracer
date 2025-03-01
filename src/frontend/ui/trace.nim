@@ -529,7 +529,7 @@ proc traceMenuView(self: TraceComponent): VNode =
     tdiv(class = "trace-buttons-container"):
       tdiv(class = "run-trace-button", onclick = proc() = runTracepoints()):
         img(
-          src = "public/tracepoints/run_tracepoints_dark.svg",
+          src = "public/resources/tracepoints/run_tracepoints_dark.svg",
           height = "24px",
           width = "24px",
           class = "trace-run-button-svg"
@@ -548,7 +548,7 @@ proc traceMenuView(self: TraceComponent): VNode =
           onblur = proc (e: Event, et: VNode) =
             self.closeHamburger()
         ):
-          img(src="public/tracepoints/trace_hamburger_dark.svg", height="8px", width="12px", class="trace-hamburger-svg")
+          img(src="public/resources/tracepoints/trace_hamburger_dark.svg", height="8px", width="12px", class="trace-hamburger-svg")
         tdiv(
           class = "dropdown-list hidden",
           onmousedown = proc (ev: Event, et: VNode) = ev.preventDefault()

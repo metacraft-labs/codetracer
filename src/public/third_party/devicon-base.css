@@ -1,9 +1,9 @@
 @font-face {
   font-family: 'devicon';
   src:
-    url('Fonts/devicon.ttf') format('truetype'),
-    url('Fonts/devicon.woff') format('woff'),
-    url('Fonts/devicon.svg') format('svg');
+    url('../resources/fonts/devicon.ttf') format('truetype'),
+    url('../resources/fonts/devicon.woff') format('woff'),
+    url('../resources/fonts/devicon.svg') format('svg');
   font-weight: normal;
   font-style: normal;
   font-display: block;
