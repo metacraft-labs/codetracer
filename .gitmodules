@@ -65,3 +65,12 @@
 [submodule "libs/codetracer-python-recorder"]
 	path = libs/codetracer-python-recorder
 	url = https://github.com/metacraft-labs/codetracer-python-recorder.git
+[submodule "libs/nim"]
+    path = libs/nim
+    url = https://github.com/nim-lang/Nim.git
+[submodule "libs/csources_v1"]
+	path = libs/csources_v1
+	url = https://github.com/nim-lang/csources_v1
+[submodule "libs/sqlite"]
+	path = libs/sqlite
+	url = https://github.com/sqlite/sqlite
