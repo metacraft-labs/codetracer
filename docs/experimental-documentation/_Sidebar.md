@@ -26,6 +26,7 @@
   - Limitations
   - [Troubleshooting](https://dev-docs.codetracer.com/Introduction/Troubleshooting)
 - Advanced topics
+  - [Environment variables](https://dev-docs.codetracer.com/Advanced/EnvironmentVariables)
   - Custom patches
   - Dotfiles
 - Misc
