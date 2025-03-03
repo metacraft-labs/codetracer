@@ -1,6 +1,8 @@
 import
-  std / options,
-  confutils/defs
+  std/options,
+  confutils/defs,
+  cli/logging,
+  globals
 
 # TODO check if the values with special characters are parsed correctly by confutils
 # and consider a fix if not
@@ -356,3 +358,51 @@ type
         name: "test",
         defaultValue: false,
       .}: bool
+
+proc customValidateConfig*(conf: CodetracerConf) =
+  case conf.cmd:
+    of StartupCommand.replay, StartupCommand.console, StartupCommand.upload:
+      let r = conf.cmd == StartupCommand.replay
+      discard r
+      let lastTraceMatchingPattern = case conf.cmd:
+        of StartupCommand.replay:
+          conf.lastTraceMatchingPattern
+        of StartupCommand.console:
+          conf.consoleLastTraceMatchingPattern
+        else: # possible only StartupCommand.upload:
+          conf.uploadLastTraceMatchingPattern
+
+
+      let (traceId, traceFolder, interactive) =
+        case conf.cmd:
+        of StartupCommand.replay:
+          (conf.replayTraceId,
+           conf.replayTraceFolder,
+           conf.replayInteractive)
+        of StartupCommand.console:
+          (conf.consoleTraceId,
+           conf.consoleTraceFolder,
+           conf.consoleInteractive)
+        else: # possible only StartupCommand.upload:
+          (conf.uploadTraceId,
+           conf.uploadTraceFolder,
+           conf.uploadInteractive)
+
+      let isSetPattern = lastTraceMatchingPattern.isSome
+      let isSetTraceId = traceId.isSome
+      let isSetTraceFolder = traceFolder.isSome
+      let isSetInteractive = interactive.isSome
+      let setArgsCount = isSetPattern.int + isSetTraceId.int +
+        isSetTraceFolder.int + isSetInteractive.int
+      if setArgsCount > 1:
+        errorMessage "configuration error: expected no more than one arg to command to be passed"
+        echo "Try `codetracer --help` for more information"
+        quit(1)
+      if not isSetPattern and not isSetTraceId and not isSetTraceFolder:
+        replayInteractive = true
+      elif isSetInteractive:
+        replayInteractive = interactive.get
+      else:
+        replayInteractive = false
+    else:
+      discard
