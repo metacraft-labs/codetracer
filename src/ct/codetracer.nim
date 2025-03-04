@@ -1185,14 +1185,12 @@ proc console(
 #   # if called from replay, return the trace so it can be replayed easily
 
 
-# proc downloadCommand(traceRegistryId: string) =
-#   let trace = downloadTrace(traceRegistryId)
-#   if not trace.isNil:
-#     echo "downloaded trace locally"
-#     echo fmt"you can replay it with `ct replay {traceRegistryId}`"
-#   else:
-#     echo "assuming some problem with trace download"
-#     quit(1)
+proc downloadCommand(traceRegistryId: string) =
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let localPath = os.getHomeDir() / ".local" / "share" / "codetracer" / "tmp.zip"
+  let cmd = &"curl -s -o {localPath} {config.webApiRoot}/download?DownloadId={traceRegistryId}"
+  let (output, exitCode) = execCmdEx(cmd)
+  quit(exitCode)
 
 proc runWithRestart(
   test: bool,
@@ -1801,16 +1799,13 @@ proc runInitial(conf: CodetracerConf) =
       notSupportedCommand($conf.cmd)
     of StartupCommand.upload:
       # similar to replay/console
-      # eventually enable?
       uploadCommand(
         conf.uploadLastTraceMatchingPattern,
         conf.uploadTraceId,
         conf.uploadTraceFolder,
         replayInteractive)
     of StartupCommand.download:
-      notSupportedCommand($conf.cmd)
-      # eventually enable?
-      # downloadCommand(conf.traceRegistryId)
+      downloadCommand(conf.traceRegistryId)
     # of StartupCommand.build:
     #   notSupportedCommand($conf.cmd)
       # eventually enable if needed?
