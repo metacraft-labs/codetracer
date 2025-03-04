@@ -42,7 +42,8 @@ const SQL_CREATE_TABLE_STATEMENTS = @[
       date text,
       downloadId string,
       controlId string,
-      key string);""",
+      passwordKey string,
+      expireTime integer);""",
   """CREATE TABLE IF NOT EXISTS trace_values (
       id integer,
       maxTraceID integer,

@@ -64,6 +64,34 @@ proc ensureDB(test: bool): DBConn =
   globalDbMap[test.int] = db
   db
 
+proc updateField*(
+  id: int,
+  fieldName: string,
+  fieldValue: string,
+  test: bool
+) =
+  let db = ensureDB(test)
+  db.exec(
+    sql(&"UPDATE traces SET {fieldName} = ? WHERE id = ?"),
+    fieldValue, id
+  )
+  db.close()
+
+proc getField*(
+  id: int,
+  fieldName: string,
+  test: bool
+): string =
+  let db = ensureDB(test)
+  let res = db.getAllRows(
+    sql(&"SELECT {fieldName} FROM traces WHERE id = ? LIMIT 1"),
+    id
+  )
+  db.close()
+  if res.len > 0:
+    return res[0][0]
+  return ""
+
 proc recordTrace*(
     id: int,
     program: string,

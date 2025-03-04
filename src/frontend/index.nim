@@ -813,14 +813,6 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
     ]
   )
 
-  if res.isOk:
-    echo "### TODO: STORE THE PASSWORD AND DOWNLOAD ID"
-    let commandList = res.v.split("\n")
-    let password = commandList[0]
-    let message = commandList[^1]
-    echo "### PASSWORD = ", password
-    echo "### MESSAGE = ", message
-
 proc onDownloadTraceFile(sender: js) {.async.} =
   # TODO: Implement download trace from downloadId and key
   discard
