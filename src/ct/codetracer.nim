@@ -700,20 +700,26 @@ proc zipFileWithPassword(inputFile: string, outputZip: string, password: string)
   let cmd = &"cd {parentDir(inputFile)} && zip -r -P " & password & " " & outputZip & " " & basePath
   discard execShellCmd(cmd)
 
-proc uploadEncyptedZip(file: string): int =
+proc uploadEncyptedZip(file: string): (string, int) =
   # TODO: Plug in http client instead of curl
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
-  let cmd = &"curl -X POST -F \"file=@{file}\" {config.webApiRoot}/upload"
-  let exitCode = execCmd(cmd)
-  exitCode
+  let cmd = &"curl -s -X POST -F \"file=@{file}\" {config.webApiRoot}/upload"
+  let (output, exitCode) = execCmdEx(cmd)
+  (output, exitCode)
 
 proc uploadTrace(trace: Trace) =
   let outputZip = trace.outputFolder / "archived.zip"
   let password = generateSecurePassword(20)
-  echo password
 
   zipFileWithPassword(trace.outputFolder, outputZip, password)
-  let exitCode = uploadEncyptedZip(outputZip)
+
+  let (output, exitCode) = uploadEncyptedZip(outputZip)
+  let jsonMessage = parseJson(output)
+
+  updateField(trace.id, "passwordKey", password, false)
+  updateField(trace.id, "downloadId", jsonMessage["DownloadId"].getStr(""), false)
+  updateField(trace.id, "controlId", jsonMessage["ControlId"].getStr(""), false)
+  updateField(trace.id, "expireTime", jsonMessage["Expires"].getStr(""), false)
 
   quit(exitCode)
 
