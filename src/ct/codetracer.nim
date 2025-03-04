@@ -10,6 +10,7 @@ import
 
 import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils, config]
 import version, confutils, codetracerconf
+import nimcrypto, nimcrypto/pbkdf2
 
 const
   CODETRACER_RECORD_CORE: string = "CODETRACER_RECORD_CORE"
@@ -687,17 +688,15 @@ when defined(testing):
       let recordCore = envLoadRecordCore()
       discard runRecordedTrace(trace, true, recordCore=recordCore)
 
-proc generateSecurePassword(length: int): string =
+proc generateSecurePassword(length: int): seq[char] =
   let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   randomize(getTime().toUnix)
-  result = newString(length)
-  for i in 0..<length:
-    result[i] = chars[rand(chars.len - 1)]
+  result = newSeqWith(length, chars[rand(chars.len - 1)]) 
   return result
 
 proc zipFileWithPassword(inputFile: string, outputZip: string, password: string) =
   let basePath = lastPathPart(inputFile)
-  let cmd = &"cd {parentDir(inputFile)} && zip -r -P " & password & " " & outputZip & " " & basePath
+  let cmd = &"cd {parentDir(inputFile)} && zip -r -P \"" & password & "\" " & outputZip & " " & basePath
   discard execShellCmd(cmd)
 
 proc uploadEncyptedZip(file: string): (string, int) =
@@ -707,16 +706,31 @@ proc uploadEncyptedZip(file: string): (string, int) =
   let (output, exitCode) = execCmdEx(cmd)
   (output, exitCode)
 
+proc deriveAESKey(password: seq[char], salt: seq[char]): string =
+  let iterations = 100_000
+  let keyLength = 32
+  let derivedKey = pbkdf2(
+    sha256,
+    password.toOpenArrayByte(0, password.high),
+    salt.toOpenArrayByte(0, salt.high),
+    iterations,
+    32
+  )
+
+  derivedKey.toHex()
+
 proc uploadTrace(trace: Trace) =
   let outputZip = trace.outputFolder / "archived.zip"
-  let password = generateSecurePassword(20)
+  let password = generateSecurePassword(32)
+  let salt = generateSecurePassword(16)
+  let aesKey = deriveAESKey(password, salt)
 
-  zipFileWithPassword(trace.outputFolder, outputZip, password)
+  zipFileWithPassword(trace.outputFolder, outputZip, aesKey)
 
   let (output, exitCode) = uploadEncyptedZip(outputZip)
   let jsonMessage = parseJson(output)
 
-  updateField(trace.id, "passwordKey", password, false)
+  updateField(trace.id, "passwordKey", aesKey, false)
   updateField(trace.id, "downloadId", jsonMessage["DownloadId"].getStr(""), false)
   updateField(trace.id, "controlId", jsonMessage["ControlId"].getStr(""), false)
   updateField(trace.id, "expireTime", jsonMessage["Expires"].getStr(""), false)
