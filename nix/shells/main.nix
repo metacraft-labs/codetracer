@@ -82,8 +82,8 @@ in
         dash
         lesspipe
         unixtools.killall
-        # zip
-        # unzip
+        zip
+        unzip
         # curl
 
         # for pgrep at least
