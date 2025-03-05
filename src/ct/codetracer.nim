@@ -10,7 +10,7 @@ import
 
 import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils, config]
 import version, confutils, codetracerconf
-import nimcrypto
+import nimcrypto, zip/zipfiles
 
 const
   CODETRACER_RECORD_CORE: string = "CODETRACER_RECORD_CORE"
@@ -695,10 +695,22 @@ proc generateSecurePassword(): string =
   result = key.mapIt(it.toHex(2)).join("")
   return result
 
+proc encryptZip(zipFile, password: string) =
+  # TODO: Encrypt the zip file before uploading
+  discard
+
+
 proc zipFileWithPassword(inputFile: string, outputZip: string, password: string) =
-  let basePath = lastPathPart(inputFile)
-  let cmd = &"cd {parentDir(inputFile)} && zip -r -P \"" & password & "\" " & outputZip & " " & basePath
-  discard execShellCmd(cmd)
+  var zip: ZipArchive
+  if not zip.open(outputZip, fmWrite):
+    raise newException(IOError, "Failed to create zip file: " & outputZip)
+
+  for file in walkDirRec(inputFile):
+    let relPath = file.relativePath(inputFile)
+    zip.addFile(relPath, file)
+
+  encryptZip(outputZip, password)
+  zip.close()
 
 proc uploadEncyptedZip(file: string): (string, int) =
   # TODO: Plug in http client instead of curl
@@ -708,7 +720,7 @@ proc uploadEncyptedZip(file: string): (string, int) =
   (output, exitCode)
 
 proc uploadTrace(trace: Trace) =
-  let outputZip = trace.outputFolder / "archived.zip"
+  let outputZip = trace.outputFolder / "tmp.zip"
   var aesKey = generateSecurePassword()
 
   zipFileWithPassword(trace.outputFolder, outputZip, aesKey)
@@ -720,6 +732,9 @@ proc uploadTrace(trace: Trace) =
   updateField(trace.id, "downloadId", jsonMessage["DownloadId"].getStr(""), false)
   updateField(trace.id, "controlId", jsonMessage["ControlId"].getStr(""), false)
   updateField(trace.id, "expireTime", jsonMessage["Expires"].getStr(""), false)
+
+  # TODO: Uncomment when finished implementing
+  # removeFile(outputZip)
 
   quit(exitCode)
 
