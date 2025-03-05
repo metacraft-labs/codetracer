@@ -10,7 +10,7 @@ import
 
 import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils, config]
 import version, confutils, codetracerconf
-import nimcrypto, nimcrypto/pbkdf2
+import nimcrypto
 
 const
   CODETRACER_RECORD_CORE: string = "CODETRACER_RECORD_CORE"
@@ -688,10 +688,11 @@ when defined(testing):
       let recordCore = envLoadRecordCore()
       discard runRecordedTrace(trace, true, recordCore=recordCore)
 
-proc generateSecurePassword(length: int): seq[char] =
-  let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  randomize(getTime().toUnix)
-  result = newSeqWith(length, chars[rand(chars.len - 1)]) 
+proc generateSecurePassword(): string =
+  var key: array[32, byte]
+  discard randomBytes(key)
+
+  result = key.mapIt(it.toHex(2)).join("")
   return result
 
 proc zipFileWithPassword(inputFile: string, outputZip: string, password: string) =
@@ -706,24 +707,9 @@ proc uploadEncyptedZip(file: string): (string, int) =
   let (output, exitCode) = execCmdEx(cmd)
   (output, exitCode)
 
-proc deriveAESKey(password: seq[char], salt: seq[char]): string =
-  let iterations = 100_000
-  let keyLength = 32
-  let derivedKey = pbkdf2(
-    sha256,
-    password.toOpenArrayByte(0, password.high),
-    salt.toOpenArrayByte(0, salt.high),
-    iterations,
-    32
-  )
-
-  derivedKey.toHex()
-
 proc uploadTrace(trace: Trace) =
   let outputZip = trace.outputFolder / "archived.zip"
-  let password = generateSecurePassword(32)
-  let salt = generateSecurePassword(16)
-  let aesKey = deriveAESKey(password, salt)
+  var aesKey = generateSecurePassword()
 
   zipFileWithPassword(trace.outputFolder, outputZip, aesKey)
 
