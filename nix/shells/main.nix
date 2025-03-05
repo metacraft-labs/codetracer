@@ -82,8 +82,9 @@ in
         dash
         lesspipe
         unixtools.killall
-        zip
-        unzip
+        # zip
+        # unzip
+        libzip
         # curl
 
         # for pgrep at least
@@ -157,7 +158,7 @@ in
         # copied case for libstdc++.so (needed by better-sqlite3) from
         # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
         # gcc.cc.lib ..
-        export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib";
+        export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
 
         export RUST_LOG=info
 
