@@ -1274,7 +1274,8 @@ proc downloadCommand(traceRegistryId: string) =
     discard importDbTrace(traceMetadataPath, traceId, LangNoir, DB_SELF_CONTAINED_DEFAULT)
     removeFile(localPath)
     removeFile(zipPath)
-    discard replay(none(string), none(int), some(traceFolder), false)
+
+    echo traceId
 
     quit(exitCode)
 
