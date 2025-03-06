@@ -813,9 +813,11 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
     ]
   )
 
-proc onDownloadTraceFile(sender: js) {.async.} =
-  # TODO: Implement download trace from downloadId and key
-  discard
+proc onDownloadTraceFile(sender: js, response: jsobject(downloadId=seq[cstring])) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[j"download"].concat(response.downloadId)
+  )
 
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
