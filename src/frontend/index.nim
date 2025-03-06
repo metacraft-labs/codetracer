@@ -27,6 +27,8 @@ data.start = now()
 var close = false
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
+proc loadExistingRecord(traceId: int) {.async.}
+proc prepareForLoadingTrace(traceId: int, pid: int) {.async.}
 proc isCtInstalled: bool
 
 
@@ -818,6 +820,10 @@ proc onDownloadTraceFile(sender: js, response: jsobject(downloadId=seq[cstring])
     codetracerExe.cstring,
     @[j"download"].concat(response.downloadId)
   )
+
+  if res.isOk:
+    await prepareForLoadingTrace(parseInt($res.v.trim()), nodeProcess.pid.to(int))
+    await loadExistingRecord(parseInt($res.v.trim()))
 
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
