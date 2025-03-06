@@ -695,10 +695,34 @@ proc generateSecurePassword(): string =
   result = key.mapIt(it.toHex(2)).join("")
   return result
 
-proc encryptZip(zipFile, password: string) =
-  # TODO: Encrypt the zip file before uploading
-  discard
+proc pkcs7Pad(data: seq[byte], blockSize: int): seq[byte] =
+  let padLen = blockSize - (data.len mod blockSize)
+  result = data & repeat(cast[byte](padLen), padLen)
 
+func toBytes(s: string): seq[byte] =
+  ## Convert a string to the corresponding byte sequence - since strings in
+  ## nim essentially are byte sequences without any particular encoding, this
+  ## simply copies the bytes without a null terminator
+  when nimvm:
+    var r = newSeq[byte](s.len)
+    for i, c in s:
+      r[i] = cast[byte](c)
+    r
+  else:
+    @(s.toOpenArrayByte(0, s.high))
+
+proc encryptZip(zipFile, password: string) =
+  var iv: seq[byte] = password.toBytes()[0..15]
+
+  var aes: CBC[aes256]
+  aes.init(password.toOpenArrayByte(0, len(password) - 1), iv)
+
+  var zipData = readFile(zipFile).toBytes()
+  var paddedData = pkcs7Pad(zipData, 16)
+  var encrypted = newSeq[byte](paddedData.len)
+
+  aes.encrypt(paddedData, encrypted.toOpenArray(0, len(encrypted) - 1))
+  writeFile(zipFile & ".enc", encrypted)
 
 proc zipFileWithPassword(inputFile: string, outputZip: string, password: string) =
   var zip: ZipArchive
@@ -709,13 +733,14 @@ proc zipFileWithPassword(inputFile: string, outputZip: string, password: string)
     let relPath = file.relativePath(inputFile)
     zip.addFile(relPath, file)
 
-  encryptZip(outputZip, password)
   zip.close()
+  encryptZip(outputZip, password)
+  removeFile(outputZip)
 
 proc uploadEncyptedZip(file: string): (string, int) =
   # TODO: Plug in http client instead of curl
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
-  let cmd = &"curl -s -X POST -F \"file=@{file}\" {config.webApiRoot}/upload"
+  let cmd = &"curl -s -X POST -F \"file=@{file}.enc\" {config.webApiRoot}/upload"
   let (output, exitCode) = execCmdEx(cmd)
   (output, exitCode)
 
@@ -734,7 +759,7 @@ proc uploadTrace(trace: Trace) =
   updateField(trace.id, "expireTime", jsonMessage["Expires"].getStr(""), false)
 
   # TODO: Uncomment when finished implementing
-  # removeFile(outputZip)
+  removeFile(outputZip & ".enc")
 
   quit(exitCode)
 
