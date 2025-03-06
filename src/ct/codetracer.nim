@@ -699,6 +699,16 @@ proc pkcs7Pad(data: seq[byte], blockSize: int): seq[byte] =
   let padLen = blockSize - (data.len mod blockSize)
   result = data & repeat(cast[byte](padLen), padLen)
 
+proc pkcs7Unpad(data: seq[byte]): seq[byte] =
+  if data.len == 0:
+    raise newException(ValueError, "Data is empty, cannot unpad")
+
+  let padLen = int64(data[^1])  # Convert last byte to int64 safely
+  if padLen <= 0 or padLen > data.len:
+    raise newException(ValueError, "Invalid padding")
+
+  result = data[0 ..< data.len - padLen]
+
 func toBytes(s: string): seq[byte] =
   ## Convert a string to the corresponding byte sequence - since strings in
   ## nim essentially are byte sequences without any particular encoding, this
@@ -710,6 +720,24 @@ func toBytes(s: string): seq[byte] =
     r
   else:
     @(s.toOpenArrayByte(0, s.high))
+
+proc decryptZip(encryptedFile: string, password: string, outputFile: string) =
+  var encData = readFile(encryptedFile).toBytes()
+  if encData.len < 16:
+    raise newException(ValueError, "Invalid encrypted data (too short)")
+
+  let iv = password.toBytes()[0 ..< 16]
+  let ciphertext = encData[16 .. ^1]
+  let key = password.toBytes()
+
+  var aes: CBC[aes256]
+  aes.init(key, iv)
+
+  var decrypted = newSeq[byte](encData.len)
+  aes.decrypt(encData, decrypted.toOpenArray(0, len(decrypted) - 1))
+
+  var depaddedData = pkcs7Unpad(decrypted)
+  writeFile(outputFile, depaddedData)
 
 proc encryptZip(zipFile, password: string) =
   var iv: seq[byte] = password.toBytes()[0..15]
@@ -724,7 +752,21 @@ proc encryptZip(zipFile, password: string) =
   aes.encrypt(paddedData, encrypted.toOpenArray(0, len(encrypted) - 1))
   writeFile(zipFile & ".enc", encrypted)
 
-proc zipFileWithPassword(inputFile: string, outputZip: string, password: string) =
+proc unzipDecryptedFile(zipFile: string, outputDir: string): (string, int) =
+  var zip: ZipArchive
+  if not zip.open(zipFile, fmRead):
+    raise newException(IOError, "Failed to open decrypted ZIP: " & zipFile)
+
+  let traceId = trace_index.newID(false)
+  let outPath = outputDir / "trace-" & $traceId
+
+  createDir(outPath)
+  zip.extractAll(outPath)
+
+  zip.close()
+  return (outPath, traceId)
+
+proc zipFileWithEncryption(inputFile: string, outputZip: string, password: string) =
   var zip: ZipArchive
   if not zip.open(outputZip, fmWrite):
     raise newException(IOError, "Failed to create zip file: " & outputZip)
@@ -748,17 +790,16 @@ proc uploadTrace(trace: Trace) =
   let outputZip = trace.outputFolder / "tmp.zip"
   var aesKey = generateSecurePassword()
 
-  zipFileWithPassword(trace.outputFolder, outputZip, aesKey)
+  zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
 
   let (output, exitCode) = uploadEncyptedZip(outputZip)
   let jsonMessage = parseJson(output)
+  let downloadId = jsonMessage["DownloadId"].getStr("") & "::" & aesKey
 
-  updateField(trace.id, "passwordKey", aesKey, false)
-  updateField(trace.id, "downloadId", jsonMessage["DownloadId"].getStr(""), false)
-  updateField(trace.id, "controlId", jsonMessage["ControlId"].getStr(""), false)
-  updateField(trace.id, "expireTime", jsonMessage["Expires"].getStr(""), false)
+  updateField(trace.id, "remoteShareDownloadId", downloadId, false)
+  updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
+  updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getStr(""), false)
 
-  # TODO: Uncomment when finished implementing
   removeFile(outputZip & ".enc")
 
   quit(exitCode)
@@ -1212,11 +1253,29 @@ proc console(
 
 
 proc downloadCommand(traceRegistryId: string) =
-  let config = loadConfig(folder=getCurrentDir(), inTest=false)
-  let localPath = os.getHomeDir() / ".local" / "share" / "codetracer" / "tmp.zip"
-  let cmd = &"curl -s -o {localPath} {config.webApiRoot}/download?DownloadId={traceRegistryId}"
-  let (output, exitCode) = execCmdEx(cmd)
-  quit(exitCode)
+  # We expect a traceRegistryId to have <downloadId>::<passwordKey>
+  let stringSplit = traceRegistryId.split("::")
+  if stringSplit.len() != 2:
+    quit(1)
+  else:
+    let downloadId = stringSplit[0]
+    let password = stringSplit[1]
+    let zipPath = "/tmp/tmp.zip"
+    let config = loadConfig(folder=getCurrentDir(), inTest=false)
+    let localPath = "/tmp" / "tmp.zip.enc"
+    # TODO: Plug in an http client
+    let cmd = &"curl -s -o {localPath} {config.webApiRoot}/download?DownloadId={downloadId}"
+    let (output, exitCode) = execCmdEx(cmd)
+
+    decryptZip(localPath, password, zipPath)
+    let (traceFolder, traceId) = unzipDecryptedFile(zipPath, os.getHomeDir() / ".local" / "share" / "codetracer")
+    let tracePath = traceFolder / "trace.json"
+    let traceMetadataPath = traceFolder / "trace_metadata.json"
+    discard importDbTrace(traceMetadataPath, traceId, LangNoir, DB_SELF_CONTAINED_DEFAULT)
+    removeFile(localPath)
+    removeFile(zipPath)
+
+    quit(exitCode)
 
 proc runWithRestart(
   test: bool,
