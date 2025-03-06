@@ -219,6 +219,48 @@ proc prepareArgs(self: WelcomeScreenComponent): seq[cstring] =
 
   return args.concat(self.newRecord.args)
 
+proc onlineFormView(self: WelcomeScreenComponent): VNode =
+  buildHtml(
+    tdiv(class = "new-record-form")
+  ):
+    renderInputRow(
+      "args",
+      "Download ID with password",
+      "",
+      proc(ev: Event, tg: VNode) = discard,
+      proc(ev: Event, tg: VNode) = self.newDownload.args = ev.target.value.split(" "),
+      hasButton = false,
+      inputText = self.newDownload.args.join(j" ")
+    )
+    tdiv(class = "new-record-form-row"):
+      button(
+        class = "cancel-button",
+        onclick = proc(ev: Event, tg: VNode) =
+          ev.preventDefault()
+          self.welcomeScreen = true
+          self.openOnlineTrace = false
+          self.newDownload = nil
+      ):
+        text "Back"
+      button(
+        class = "confirmation-button",
+        onclick = proc(ev: Event, tg: VNode) =
+          ev.preventDefault()
+          self.loading = true
+          # TODO: Implement progress bar
+          # self.newRecord.status.kind = InProgress
+          # let workDir = if self.newRecord.workDir.isNil or self.newRecord.workDir.len == 0:
+          #     jsUndefined
+          #   else:
+          #     cast[JsObject](self.newRecord.workDir)
+          self.data.ipc.send(
+              "CODETRACER::download-trace-file", js{
+                downloadId: concat(self.newDownload.args),
+              }
+          )
+      ):
+        text "Download"
+
 proc newRecordFormView(self: WelcomeScreenComponent): VNode =
   buildHtml(
     tdiv(class = "new-record-form")
@@ -352,6 +394,16 @@ proc newRecordView(self: WelcomeScreenComponent): VNode =
         text "Start Debugger"
       newRecordFormView(self)
 
+proc onlineTraceView(self: WelcomeScreenComponent): VNode =
+  buildHtml(
+    tdiv(class = "new-record-screen")
+  ):
+    tdiv(class = "new-record-screen-content"):
+      tdiv(class = "welcome-logo")
+      tdiv(class = "new-record-title"):
+        text "Start Debugger"
+      onlineFormView(self)    
+
 proc loadInitialOptions(self: WelcomeScreenComponent) =
   self.options = @[
     WelcomeScreenOption(
@@ -386,8 +438,12 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     ),
     WelcomeScreenOption(
       name: "Open online trace",
-      inactive: true,
-      command: proc = discard
+      command: proc = 
+        self.openOnlineTrace = true
+        self.welcomeScreen = false
+        self.newDownload = NewDownloadRecord(
+          args: @[]
+        )
     ),
     WelcomeScreenOption(
       name: "CodeTracer shell",
@@ -435,13 +491,15 @@ method render*(self: WelcomeScreenComponent): VNode =
     self.loadInitialOptions()
 
   buildHtml(tdiv()):
-    if self.welcomeScreen or self.newRecordScreen:
+    if self.welcomeScreen or self.newRecordScreen or self.openOnlineTrace:
       tdiv(class = "welcome-screen-wrapper"):
         windowMenu(data, true)
         if self.welcomeScreen:
           welcomeScreenView(self)
         elif self.newRecordScreen:
           newRecordView(self)
+        elif self.openOnlineTrace:
+          onlineTraceView(self)
 
       if self.loading:
         loadingOverlay(self)

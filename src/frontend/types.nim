@@ -1094,6 +1094,8 @@ type
     kind*: RecordStatusKind
     errorMessage*: cstring
 
+  NewDownloadRecord* = ref object
+    args*: seq[cstring]
 
   NewTraceRecord* = ref object
     kit*: cstring
@@ -1131,7 +1133,9 @@ type
     options*: seq[WelcomeScreenOption]
     welcomeScreen*: bool
     newRecordScreen*: bool
+    openOnlineTrace*: bool
     newRecord*: NewTraceRecord
+    newDownload*: NewDownloadRecord
     loading*: bool
     loadingTrace*: Trace
 
