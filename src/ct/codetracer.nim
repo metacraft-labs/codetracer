@@ -788,15 +788,15 @@ proc uploadEncyptedZip(file: string): (string, int) =
 
 proc uploadTrace(trace: Trace) =
   let outputZip = trace.outputFolder / "tmp.zip"
-  var aesKey = generateSecurePassword()
+  let aesKey = generateSecurePassword()
 
   zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
 
   let (output, exitCode) = uploadEncyptedZip(outputZip)
   let jsonMessage = parseJson(output)
-  let downloadId = jsonMessage["DownloadId"].getStr("") & "::" & aesKey
+  let downloadKey = jsonMessage["DownloadId"].getStr("") & "::" & aesKey
 
-  updateField(trace.id, "remoteShareDownloadId", downloadId, false)
+  updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
   updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
   updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getStr(""), false)
 
@@ -1268,10 +1268,22 @@ proc downloadCommand(traceRegistryId: string) =
     let (output, exitCode) = execCmdEx(cmd)
 
     decryptZip(localPath, password, zipPath)
+
     let (traceFolder, traceId) = unzipDecryptedFile(zipPath, os.getHomeDir() / ".local" / "share" / "codetracer")
     let tracePath = traceFolder / "trace.json"
+    let traceJson = parseJson(readFile(tracePath))
     let traceMetadataPath = traceFolder / "trace_metadata.json"
-    discard importDbTrace(traceMetadataPath, traceId, LangNoir, DB_SELF_CONTAINED_DEFAULT)
+
+    var pathValue = ""
+
+    for item in traceJson:
+      if item.hasKey("Path"):
+        pathValue = item["Path"].getStr("")
+        break
+
+    let lang = detectLang(pathValue, LangUnknown)
+    discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT)
+
     removeFile(localPath)
     removeFile(zipPath)
 
