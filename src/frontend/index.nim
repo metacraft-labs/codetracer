@@ -815,15 +815,16 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
     ]
   )
 
-proc onDownloadTraceFile(sender: js, response: jsobject(downloadId=seq[cstring])) {.async.} =
+proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey=seq[cstring])) {.async.} =
   let res = await readProcessOutput(
     codetracerExe.cstring,
-    @[j"download"].concat(response.downloadId)
+    @[j"download"].concat(response.downloadKey)
   )
 
   if res.isOk:
-    await prepareForLoadingTrace(parseInt($res.v.trim()), nodeProcess.pid.to(int))
-    await loadExistingRecord(parseInt($res.v.trim()))
+    let traceId = parseInt($res.v.trim())
+    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+    await loadExistingRecord(traceId)
 
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
