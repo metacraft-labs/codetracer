@@ -3,13 +3,14 @@
 import
   results,
   std / [
-    strutils, strformat, sequtils, sets, streams, json, tables, os, osproc,
-    asyncdispatch, posix, strtabs, algorithm, rdstdin, nativesockets, re
+    strutils, strformat, sequtils, sets, streams, json, tables, times, os, osproc,
+    asyncdispatch, posix, strtabs, algorithm, rdstdin, nativesockets, re, random
   ],
   json_serialization
 
-import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils]
+import .. / common / [trace_index, types, start_utils, intel_fix, path_utils, paths, lang, install_utils, config]
 import version, confutils, codetracerconf
+import nimcrypto, zip/zipfiles
 
 const
   CODETRACER_RECORD_CORE: string = "CODETRACER_RECORD_CORE"
@@ -687,11 +688,121 @@ when defined(testing):
       let recordCore = envLoadRecordCore()
       discard runRecordedTrace(trace, true, recordCore=recordCore)
 
+proc generateSecurePassword(): string =
+  var key: array[32, byte]
+  discard randomBytes(key)
+
+  result = key.mapIt(it.toHex(2)).join("")
+  return result
+
+proc pkcs7Pad(data: seq[byte], blockSize: int): seq[byte] =
+  let padLen = blockSize - (data.len mod blockSize)
+  result = data & repeat(cast[byte](padLen), padLen)
+
+proc pkcs7Unpad(data: seq[byte]): seq[byte] =
+  if data.len == 0:
+    raise newException(ValueError, "Data is empty, cannot unpad")
+
+  let padLen = int64(data[^1])  # Convert last byte to int64 safely
+  if padLen <= 0 or padLen > data.len:
+    raise newException(ValueError, "Invalid padding")
+
+  result = data[0 ..< data.len - padLen]
+
+func toBytes(s: string): seq[byte] =
+  ## Convert a string to the corresponding byte sequence - since strings in
+  ## nim essentially are byte sequences without any particular encoding, this
+  ## simply copies the bytes without a null terminator
+  when nimvm:
+    var r = newSeq[byte](s.len)
+    for i, c in s:
+      r[i] = cast[byte](c)
+    r
+  else:
+    @(s.toOpenArrayByte(0, s.high))
+
+proc decryptZip(encryptedFile: string, password: string, outputFile: string) =
+  var encData = readFile(encryptedFile).toBytes()
+  if encData.len < 16:
+    raise newException(ValueError, "Invalid encrypted data (too short)")
+
+  let iv = password.toBytes()[0 ..< 16]
+  let ciphertext = encData[16 .. ^1]
+  let key = password.toBytes()
+
+  var aes: CBC[aes256]
+  aes.init(key, iv)
+
+  var decrypted = newSeq[byte](encData.len)
+  aes.decrypt(encData, decrypted.toOpenArray(0, len(decrypted) - 1))
+
+  var depaddedData = pkcs7Unpad(decrypted)
+  writeFile(outputFile, depaddedData)
+
+proc encryptZip(zipFile, password: string) =
+  var iv: seq[byte] = password.toBytes()[0..15]
+
+  var aes: CBC[aes256]
+  aes.init(password.toOpenArrayByte(0, len(password) - 1), iv)
+
+  var zipData = readFile(zipFile).toBytes()
+  var paddedData = pkcs7Pad(zipData, 16)
+  var encrypted = newSeq[byte](paddedData.len)
+
+  aes.encrypt(paddedData, encrypted.toOpenArray(0, len(encrypted) - 1))
+  writeFile(zipFile & ".enc", encrypted)
+
+proc unzipDecryptedFile(zipFile: string, outputDir: string): (string, int) =
+  var zip: ZipArchive
+  if not zip.open(zipFile, fmRead):
+    raise newException(IOError, "Failed to open decrypted ZIP: " & zipFile)
+
+  let traceId = trace_index.newID(false)
+  let outPath = outputDir / "trace-" & $traceId
+
+  createDir(outPath)
+  zip.extractAll(outPath)
+
+  zip.close()
+  return (outPath, traceId)
+
+proc zipFileWithEncryption(inputFile: string, outputZip: string, password: string) =
+  var zip: ZipArchive
+  if not zip.open(outputZip, fmWrite):
+    raise newException(IOError, "Failed to create zip file: " & outputZip)
+
+  for file in walkDirRec(inputFile):
+    let relPath = file.relativePath(inputFile)
+    zip.addFile(relPath, file)
+
+  zip.close()
+  encryptZip(outputZip, password)
+  removeFile(outputZip)
+
+proc uploadEncyptedZip(file: string): (string, int) =
+  # TODO: Plug in http client instead of curl
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let cmd = &"curl -s -X POST -F \"file=@{file}.enc\" {config.webApiRoot}/upload"
+  let (output, exitCode) = execCmdEx(cmd)
+  (output, exitCode)
 
 proc uploadTrace(trace: Trace) =
-  echo "error: uploading traces not supported currently!"
-  quit(1)
+  let outputZip = trace.outputFolder / "tmp.zip"
+  let aesKey = generateSecurePassword()
 
+  zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
+
+  let (output, exitCode) = uploadEncyptedZip(outputZip)
+  let jsonMessage = parseJson(output)
+  let downloadKey = jsonMessage["DownloadId"].getStr("") & "::" & aesKey
+
+  updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
+  updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
+  updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getStr(""), false)
+
+  removeFile(outputZip & ".enc")
+
+  quit(exitCode)
 
 proc fillSourceFiles(folder: string, sourcePaths: seq[string]) =
   for path in sourcePaths:
@@ -1141,14 +1252,44 @@ proc console(
 #   # if called from replay, return the trace so it can be replayed easily
 
 
-# proc downloadCommand(traceRegistryId: string) =
-#   let trace = downloadTrace(traceRegistryId)
-#   if not trace.isNil:
-#     echo "downloaded trace locally"
-#     echo fmt"you can replay it with `ct replay {traceRegistryId}`"
-#   else:
-#     echo "assuming some problem with trace download"
-#     quit(1)
+proc downloadCommand(traceRegistryId: string) =
+  # We expect a traceRegistryId to have <downloadId>::<passwordKey>
+  let stringSplit = traceRegistryId.split("::")
+  if stringSplit.len() != 2:
+    quit(1)
+  else:
+    let downloadId = stringSplit[0]
+    let password = stringSplit[1]
+    let zipPath = "/tmp/tmp.zip"
+    let config = loadConfig(folder=getCurrentDir(), inTest=false)
+    let localPath = "/tmp" / "tmp.zip.enc"
+    # TODO: Plug in an http client
+    let cmd = &"curl -s -o {localPath} {config.webApiRoot}/download?DownloadId={downloadId}"
+    let (output, exitCode) = execCmdEx(cmd)
+
+    decryptZip(localPath, password, zipPath)
+
+    let (traceFolder, traceId) = unzipDecryptedFile(zipPath, os.getHomeDir() / ".local" / "share" / "codetracer")
+    let tracePath = traceFolder / "trace.json"
+    let traceJson = parseJson(readFile(tracePath))
+    let traceMetadataPath = traceFolder / "trace_metadata.json"
+
+    var pathValue = ""
+
+    for item in traceJson:
+      if item.hasKey("Path"):
+        pathValue = item["Path"].getStr("")
+        break
+
+    let lang = detectLang(pathValue, LangUnknown)
+    discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT)
+
+    removeFile(localPath)
+    removeFile(zipPath)
+
+    echo traceId
+
+    quit(exitCode)
 
 proc runWithRestart(
   test: bool,
@@ -1757,17 +1898,13 @@ proc runInitial(conf: CodetracerConf) =
       notSupportedCommand($conf.cmd)
     of StartupCommand.upload:
       # similar to replay/console
-      notSupportedCommand($conf.cmd)
-      # eventually enable?
-      # uploadCommand(
-      #   conf.uploadLastTraceMatchingPattern,
-      #   conf.uploadTraceId,
-      #   conf.uploadTraceFolder,
-      #   replayInteractive)
+      uploadCommand(
+        conf.uploadLastTraceMatchingPattern,
+        conf.uploadTraceId,
+        conf.uploadTraceFolder,
+        replayInteractive)
     of StartupCommand.download:
-      notSupportedCommand($conf.cmd)
-      # eventually enable?
-      # downloadCommand(conf.traceRegistryId)
+      downloadCommand(conf.traceRegistryId)
     # of StartupCommand.build:
     #   notSupportedCommand($conf.cmd)
       # eventually enable if needed?

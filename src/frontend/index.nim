@@ -27,6 +27,8 @@ data.start = now()
 var close = false
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
+proc loadExistingRecord(traceId: int) {.async.}
+proc prepareForLoadingTrace(traceId: int, pid: int) {.async.}
 proc isCtInstalled: bool
 
 
@@ -800,6 +802,26 @@ proc onSearchProgram(sender: js, query: cstring) {.async.} =
 proc onLoadStepLines(sender: js, response: LoadStepLinesArg) {.async.} =
   discard debugger.loadStepLines(response)
 
+proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[
+      j"upload",
+      j"--trace-folder=" & response.trace.outputFolder
+    ]
+  )
+
+proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey=seq[cstring])) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[j"download"].concat(response.downloadKey)
+  )
+
+  if res.isOk:
+    let traceId = parseInt($res.v.trim())
+    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+    await loadExistingRecord(traceId)
+
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
     codetracerExe.cstring,
@@ -1297,6 +1319,10 @@ proc configureIpcMain =
     "open-trace"
     "show-in-debug-instance"
     "send-bug-report-and-logs"
+
+    # Upload/Download
+    "upload-trace-file"
+    "download-trace-file"
 
     "restart"
 

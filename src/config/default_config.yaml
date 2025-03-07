@@ -54,7 +54,7 @@ defaultBuild: ""
 showMinimap: true
 
 # for now local setup
-webApiRoot: http://100.87.206.30:57103/api/codetracer
+webApiRoot: http://localhost:55500/api/codetracer/anon
 
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
