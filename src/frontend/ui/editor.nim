@@ -311,10 +311,7 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
     self.decorations.mapIt(it[0]))
 
   if not self.data.ui.welcomeScreen.isNil:
-    self.data.ui.welcomeScreen.loading = false
-    self.data.ui.welcomeScreen.welcomeScreen = false
-    self.data.ui.welcomeScreen.newRecordScreen = false
-    self.data.ui.welcomeScreen.openOnlineTrace = false
+    self.data.ui.welcomeScreen.resetView()
 
 proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
   var element = line
