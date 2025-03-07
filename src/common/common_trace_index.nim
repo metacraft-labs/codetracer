@@ -59,9 +59,9 @@ const SQL_INITIAL_INSERT_STATEMENTS = @[
 const SQL_ALTER_TABLE_STATEMENTS: seq[string] = @[
    # example: adding a new column
    """ALTER TABLE traces ADD COLUMN calltraceMode text;""",
+   """ALTER TABLE traces RENAME COLUMN callgraph TO calltrace""",
    """ALTER TABLE traces ADD COLUMN remoteShareDownloadId text;""",
    """ALTER TABLE traces ADD COLUMN remoteShareControlId text;""",
-   """ALTER TABLE traces ADD COLUMN remoteShareExpireTime text;""",
-   """ALTER TABLE traces RENAME COLUMN callgraph TO calltrace"""
+   """ALTER TABLE traces ADD COLUMN remoteShareExpireTime text;"""
    # """ALTER TABLE traces ADD COLUMN love integer;"""
 ]
