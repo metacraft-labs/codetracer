@@ -3,6 +3,8 @@ import
   ../../ct/version, 
   ui_imports, ../types
 
+const PROGRAM_NAME_LIMIT = 45
+
 proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) =
   self.data.ipc.send "CODETRACER::upload-trace-file",
     UploadTraceArg(
@@ -21,7 +23,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
         self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: trace.id }
     )
   ):
-    let programLimitName = 45 
+    let programLimitName = PROGRAM_NAME_LIMIT 
     let limitedProgramName = if trace.program.len > programLimitName:
         ".." & ($trace.program)[^programLimitName..^1]
       else:
@@ -255,7 +257,7 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
           #     cast[JsObject](self.newRecord.workDir)
           self.data.ipc.send(
               "CODETRACER::download-trace-file", js{
-                downloadId: concat(self.newDownload.args),
+                downloadKey: concat(self.newDownload.args),
               }
           )
       ):

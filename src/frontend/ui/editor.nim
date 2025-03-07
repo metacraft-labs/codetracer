@@ -314,6 +314,7 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
     self.data.ui.welcomeScreen.loading = false
     self.data.ui.welcomeScreen.welcomeScreen = false
     self.data.ui.welcomeScreen.newRecordScreen = false
+    self.data.ui.welcomeScreen.openOnlineTrace = false
 
 proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
   var element = line
