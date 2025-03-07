@@ -1,0 +1,8 @@
+[book]
+authors = ["Stanislav Vasilev"]
+language = "en"
+multilingual = false
+src = "src"
+title = "codetracer docs"
+
+[preprocessor.alerts]

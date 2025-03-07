@@ -14,5 +14,6 @@ There are 2 commands that can be used to completely wipe all traces from your us
 
 ## Broken local build
 Sometimes your local build might break. In most cases, a simple `direnv reload` and `just build` should be able to fix it.
+Otherwise, you can ask for help on our [issues tracker](github.com/metacraft-labs/codetracer), or in our [chat server](https://discord.gg/aH5WTMnKHT)
 
 <!-- TODO: Add more info here -->
