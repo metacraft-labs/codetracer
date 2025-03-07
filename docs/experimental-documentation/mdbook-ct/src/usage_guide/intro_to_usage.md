@@ -1,5 +1,7 @@
 <!-- This page's structure feels really off, please help me rewrite it -->
 
+# Intro to usage guide
+
 CodeTracer is a semi-portable piece of technology, so its usage varies, the following subpages explain how you can
 interact with it through different interfaces, as well as, how to use its signature features:
 
