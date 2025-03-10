@@ -13,3 +13,4 @@ except Exception as ex:
   echo "Unhandled exception"
   echo getStackTrace(ex)
   error "error: unhandled " & ex.msg
+
