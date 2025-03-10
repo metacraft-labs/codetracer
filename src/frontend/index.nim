@@ -815,7 +815,7 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
     ]
   )
 
-proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey=seq[cstring])) {.async.} =
+proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[j"download"].concat(response.downloadKey)
@@ -825,6 +825,16 @@ proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey=seq[cstring]
     let traceId = parseInt($res.v.trim())
     await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
     await loadExistingRecord(traceId)
+
+proc onDeleteOnlineTraceFile(sender: js, response: DeleteTraceArg) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[
+      j"cmdDelete",
+      j"--trace-id=" & $response.traceId,
+      j"--control-id=" & response.controlId
+    ]
+  )
 
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
@@ -1327,6 +1337,7 @@ proc configureIpcMain =
     # Upload/Download
     "upload-trace-file"
     "download-trace-file"
+    "delete-online-trace-file"
 
     "restart"
 

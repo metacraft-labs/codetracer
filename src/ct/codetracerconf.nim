@@ -14,6 +14,7 @@ type
     install,
     upload,
     download,
+    cmdDelete,
     # build,
     record,
     console,
@@ -264,7 +265,16 @@ type
     of download:
       traceRegistryId* {.
         argument,
-        desc: "the trace registry unique id: <program-name>#<id> e.g. a.rb#5"
+        desc: "the trace registry unique id: <program-name>//<downloadId>//<password> e.g. noir//1234//asd"
+      .}: string
+    of cmdDelete:
+      traceId* {.
+        name: "trace-id"
+        desc: "trace trace unique id"
+      .}: int
+      controlId* {.
+        name: "control-id",
+        desc: "the trace control id to delete the online trace"
       .}: string
     of start_core:
       coreTraceArg* {.

@@ -12,6 +12,13 @@ proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) =
       programName: trace.program
     )
 
+proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) =
+  self.data.ipc.send "CODETRACER::delete-online-trace-file",
+    DeleteTraceArg(
+      traceId: trace.id,
+      controlId: trace.controlId
+    )
+
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
   buildHtml(
     tdiv(
@@ -35,13 +42,23 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
       separateBar()
       span(class = "recent-trace-title-content"):
         text limitedProgramName # TODO: tippy
-    tdiv(class = "recent-trace-buttons"):
-      span(
-        onclick = proc(ev: Event, tg: VNode) =
-          ev.stopPropagation()
-          self.uploadTrace(trace)
-        ):
-        text "^"
+    tdiv(class = "online-functionality-buttons"):
+      if trace.downloadKey == "" and trace.onlineExpireTime == -1:
+        tdiv(class = "recent-trace-buttons", id = "upload-button"):
+          span(
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              self.uploadTrace(trace)
+            ):
+            text "upload"
+      if trace.controlId != "":
+        tdiv(class = "recent-trace-buttons", id = "delete-button"):
+          span(
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              self.deleteUploadedTrace(trace)
+            ):
+            text "delete"
     # tdiv(class = "recent-trace-info"):
     #   tdiv(class = "recent-trace-date"):
     #     text trace.date
