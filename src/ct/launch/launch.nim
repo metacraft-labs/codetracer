@@ -2,6 +2,7 @@ import
   std/[strutils, strformat, osproc],
   ../../common/[ paths, types, intel_fix, install_utils, trace_index, start_utils ],
   ../utilities/[ git, env ],
+  ../online_sharing/trace_manager,
   ../cli/[ logging, list, help ],
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
@@ -101,15 +102,15 @@ proc runInitial*(conf: CodetracerConf) =
       notSupportedCommand($conf.cmd)
     of StartupCommand.upload:
       # similar to replay/console
-      notSupportedCommand($conf.cmd)
-      # eventually enable?
-      # uploadCommand(
-      #   conf.uploadLastTraceMatchingPattern,
-      #   conf.uploadTraceId,
-      #   conf.uploadTraceFolder,
-      #   replayInteractive)
+      uploadCommand(
+        conf.uploadLastTraceMatchingPattern,
+        conf.uploadTraceId,
+        conf.uploadTraceFolder,
+        replayInteractive)
     of StartupCommand.download:
-      notSupportedCommand($conf.cmd)
+      downloadCommand(conf.traceRegistryId)
+    of StartupCommand.cmdDelete:
+      deleteTraceCommand(conf.traceId, conf.controlId)
       # eventually enable?
       # downloadCommand(conf.traceRegistryId)
     # of StartupCommand.build:

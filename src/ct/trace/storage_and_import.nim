@@ -2,6 +2,7 @@ import
   std/[os, json, strutils, strformat, sets, algorithm],
   ../../common/[trace_index, lang, types, paths],
   ../utilities/git,
+  ../online_sharing/security_upload,
   json_serialization
 
 proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
@@ -78,10 +79,12 @@ proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = 
 
 
 proc importDbTrace*(
-    traceMetadataPath: string,
-    traceIdArg: int,
-    lang: Lang = LangNoir,
-    selfContained: bool = true): Trace =
+  traceMetadataPath: string,
+  traceIdArg: int,
+  lang: Lang = LangNoir,
+  selfContained: bool = true,
+  downloadKey: string = ""
+): Trace =
   let rawTraceMetadata = readFile(traceMetadataPath)
   let untypedJson = parseJson(rawTraceMetadata)
   let program = untypedJson{"program"}.getStr()
@@ -155,8 +158,32 @@ proc importDbTrace*(
     calltrace = true,
     # for now always use FullRecord for db-backend
     # and ignore possible env var override
-    calltraceMode = CalltraceMode.FullRecord)
+    calltraceMode = CalltraceMode.FullRecord,
+    downloadKey = downloadKey)
 
 proc uploadTrace*(trace: Trace) =
-  echo "error: uploading traces not supported currently!"
-  quit(1)
+  let outputZip = trace.outputFolder / "tmp.zip"
+  let aesKey = generateSecurePassword()
+
+  zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
+
+  let (output, exitCode) = uploadEncyptedZip(outputZip)
+  let jsonMessage = parseJson(output)
+  let downloadKey = trace.program & "//" & jsonMessage["DownloadId"].getStr("") & "//" & aesKey
+
+  if jsonMessage["DownloadId"].getStr("") notin @["", "Errored"]:
+
+    updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
+    updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
+    updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getInt(), false)
+
+    echo downloadKey
+    echo jsonMessage["ControlId"].getStr("")
+    echo jsonMessage["Expires"].getInt()
+
+  else:
+    echo downloadKey
+
+  removeFile(outputZip & ".enc")
+
+  quit(exitCode)
