@@ -1,1 +1,0 @@
-We currently have MVP support for the Noir programming language in the DB Backend.

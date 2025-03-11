@@ -11,7 +11,7 @@ build-*/
 .direnv/
 result
 
-docs/experimental-documentation/build/*
+docs/book/book
 src/index.js
 ui.js
 debugger.js
