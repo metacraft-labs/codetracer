@@ -2,11 +2,14 @@ import std / [os, sequtils, strformat]
 import env
 
 when not defined(js):
-  import std / posix
+  when not defined(ctWindows):
+    import std / posix
 
-  # copied and adapted from https://stackoverflow.com/a/8953445/438099
-  let pwd = getpwuid(geteuid())
-  let username = pwd.pw_name
+    # copied and adapted from https://stackoverflow.com/a/8953445/438099
+    let pwd = getpwuid(geteuid())
+    let username = pwd.pw_name
+  else:
+    let username = "<unknown>"
 
   var inUiTest = false
 else:

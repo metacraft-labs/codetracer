@@ -92,6 +92,9 @@ in
         # a tool to help with binary files
         hexdump
 
+        # cross-compiling to windows
+        pkgsCross.mingwW64.buildPackages.gcc
+
         # cachix support
         cachix
 

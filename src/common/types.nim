@@ -137,7 +137,13 @@ proc toEnum*(langType: string, i: int, n: defaultstring): Value =
 proc baseName*(a: string): string =
   extractFilename(a)
 
-import posix # os is already imported when not defined(js)
+when not defined(ctWindows):
+  import posix # os is already imported when not defined(js)
+
+  proc stopProcess*(a: Pid, b: cint): int =
+    posix.kill(a, b)
+else:
+  discard
 
 proc ensureExists*(program: string) =
   # TODO redirect output?
@@ -147,6 +153,3 @@ proc ensureExists*(program: string) =
   # if output# if code != 0: # LINUX_ERROR_NOT_FOUND_CODE:
   #   echo fmt"EXTERNAL COMMAND ERROR: PROGRAM NOT FOUND {program}"
   #   quit 1
-
-proc stopProcess*(a: Pid, b: cint): int =
-  posix.kill(a, b)

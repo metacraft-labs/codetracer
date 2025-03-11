@@ -4,7 +4,7 @@ import
   results,
   std / [
     strutils, strformat, sequtils, sets, streams, json, tables, os, osproc,
-    asyncdispatch, posix, strtabs, algorithm, rdstdin, nativesockets, re
+    asyncdispatch, strtabs, algorithm, nativesockets, re
   ],
   json_serialization
 
@@ -938,6 +938,9 @@ func tracesInJson(traces: seq[Trace]): string =
   Json.encode(traces)
 
 
+when not defined(ctWindows):
+  import rdstdin
+
 proc interactiveReplayMenu(command: StartupCommand, repl: bool) =
   let recordCore = envLoadRecordCore()
   # ordered by id
@@ -959,22 +962,23 @@ proc interactiveReplayMenu(command: StartupCommand, repl: bool) =
 
   echo ""
 
-  while true:
-    let raw = readLineFromStdin("replay: ")
-    try:
-      let traceId = raw.parseInt
-      let trace = trace_index.find(traceId, test=false)
-      if not trace.isNil:
-        if command != StartupCommand.upload:
-          discard runRecordedTrace(trace, test=false, repl=repl, recordCore=recordCore)
+  when not defined(ctWindows):
+    while true:
+      let raw = readLineFromStdin("replay: ")
+      try:
+        let traceId = raw.parseInt
+        let trace = trace_index.find(traceId, test=false)
+        if not trace.isNil:
+          if command != StartupCommand.upload:
+            discard runRecordedTrace(trace, test=false, repl=repl, recordCore=recordCore)
+          else:
+            uploadTrace(trace)
+          break
         else:
-          uploadTrace(trace)
-        break
-      else:
-        echo fmt"trace with id {traceId} not found in local codetracer db, please try again"
-    except:
-      echo "error: ", getCurrentExceptionMsg()
-      echo "please try again"
+          echo fmt"trace with id {traceId} not found in local codetracer db, please try again"
+      except:
+        echo "error: ", getCurrentExceptionMsg()
+        echo "please try again"
 
 
 proc findTraceForArgs(
@@ -1614,24 +1618,25 @@ proc cleanup*: void {.noconv.} =
   # Franz found an issue
   # https://gitlab.com/metacraft-labs/code-tracer/CodeTracer/-/merge_requests/116#note_1360620095
   # which shows maybe we need to stop the electron process if not stopped too
-  when not defined(windows):
+  when not defined(ctWindows):
     if electronPid != -1:
       discard kill(electronPid.Pid, SIGKILL)
 
 
-onSignal(SIGINT):
-  cleanup()
-  quit(1)
+when not defined(ctWindows):
+  onSignal(SIGINT):
+    cleanup()
+    quit(1)
 
 
-# onSignal(SIGKILL):
-#   cleanup()
-#   quit(0)
+  # onSignal(SIGKILL):
+  #   cleanup()
+  #   quit(0)
 
 
-onSignal(SIGTERM):
-  cleanup()
-  quit(0)
+  onSignal(SIGTERM):
+    cleanup()
+    quit(0)
 
 
 # proc runCommandWithCurrentBackend(conf: CodetracerConf) =
