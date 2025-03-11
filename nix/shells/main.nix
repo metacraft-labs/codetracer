@@ -221,8 +221,8 @@ in
 
         # workaround to reuse devshell node_modules for tup build
         # make sure it's always updated
-        rm -rf node_modules
-        ln -s $NIX_NODE_PATH node_modules
+        rm -rf $ROOT_PATH/node_modules
+        ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
 
         export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
         export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
