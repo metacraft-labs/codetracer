@@ -46,10 +46,15 @@ build-once:
   cd src
   tup build-debug
 
-build-docs *LOCALHOST:
+build-docs:
   #!/usr/bin/env bash
-  cd docs/experimental-documentation/
-  nix-shell --run "./generate-html.sh {{LOCALHOST}}"
+  cd docs/book/
+  mdbook build
+
+serve-docs hostname="localhost" port="3000":
+  #!/usr/bin/env bash
+  cd docs/book/
+  mdbook serve --hostname {{hostname}} --port {{port}}
 
 build-deb-package file_sizes_report="false":
   #!/usr/bin/env bash

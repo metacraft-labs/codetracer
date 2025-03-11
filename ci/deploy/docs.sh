@@ -2,7 +2,7 @@
 
 set -e
 
-pushd docs/experimental-documentation/mdbook-ct
+pushd docs/book/
 
 # TODO: eventually: a more fine-grained nix shell/env?
 # nix-shell --command "mdbook build"

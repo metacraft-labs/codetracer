@@ -1,1 +1,0 @@
-We currently have partial support for the Ruby programming language in the DB backend. 
