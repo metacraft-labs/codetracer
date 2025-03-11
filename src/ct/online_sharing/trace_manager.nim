@@ -1,5 +1,5 @@
 import std/[ options, strutils, os, osproc, strformat, json ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
-import ../../common/[ config, trace_index, lang ]
+import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import, record ]
 import security_upload
@@ -53,16 +53,16 @@ proc downloadCommand*(traceRegistryId: string) =
   else:
     let downloadId = stringSplit[1]
     let password = stringSplit[2]
-    let zipPath = "/tmp/tmp.zip"
+    let zipPath = codetracerTmpPath / "tmp.zip"
     let config = loadConfig(folder=getCurrentDir(), inTest=false)
-    let localPath = "/tmp" / "tmp.zip.enc"
+    let localPath = codetracerTmpPath / "tmp.zip.enc"
     # TODO: Plug in an http client
     let cmd = &"curl -s -o {localPath} {config.webApiRoot}/download?DownloadId={downloadId}"
     let (output, exitCode) = execCmdEx(cmd)
 
     decryptZip(localPath, password, zipPath)
 
-    let (traceFolder, traceId) = unzipDecryptedFile(zipPath, os.getHomeDir() / ".local" / "share" / "codetracer")
+    let (traceFolder, traceId) = unzipDecryptedFile(zipPath, codetracerTraceDir)
     let tracePath = traceFolder / "trace.json"
     let traceJson = parseJson(readFile(tracePath))
     let traceMetadataPath = traceFolder / "trace_metadata.json"
