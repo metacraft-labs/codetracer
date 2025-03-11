@@ -2,8 +2,11 @@ import
   ../ui_helpers,
   ../../ct/version, 
   ui_imports, ../types
+import std/times except now
 
 const PROGRAM_NAME_LIMIT = 45
+const NO_EXPIRE_TIME = -1
+const EMPTY_STRING = ""
 
 proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   var uploadedData = await self.data.asyncSend(
@@ -35,9 +38,9 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   )
 
   if deleted:
-    trace.controlId = ""
-    trace.downloadKey = ""
-    trace.onlineExpireTime = -1
+    trace.controlId = EMPTY_STRING
+    trace.downloadKey = EMPTY_STRING
+    trace.onlineExpireTime = NO_EXPIRE_TIME
 
   self.data.redraw()
 
@@ -65,7 +68,12 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
       span(class = "recent-trace-title-content"):
         text limitedProgramName # TODO: tippy
     tdiv(class = "online-functionality-buttons"):
-      if trace.downloadKey == "" and trace.onlineExpireTime == -1:
+      if trace.onlineExpireTime != NO_EXPIRE_TIME:
+        let dt = fromUnix(trace.onlineExpireTime)
+        let time = dt.format("dd MM yyyy")
+        span(class = "expire-time-text"):
+          text &"Expires on {time}"
+      if trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME:
         tdiv(class = "recent-trace-buttons", id = "upload-button"):
           span(
             onclick = proc(ev: Event, tg: VNode) =
@@ -73,14 +81,25 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               discard self.uploadTrace(trace)
             ):
             text "upload"
-      if trace.controlId != "":
+      if trace.controlId != EMPTY_STRING:
         tdiv(class = "recent-trace-buttons", id = "delete-button"):
           span(
             onclick = proc(ev: Event, tg: VNode) =
               ev.stopPropagation()
               discard self.deleteUploadedTrace(trace)
             ):
+
             text "delete"
+      if trace.downloadKey != EMPTY_STRING:
+        tdiv(class = "recent-trace-buttons", id = "copy-button"):
+          span(
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              clipboardCopy(trace.downloadKey)
+            ):
+
+            text "copy"
+
     # tdiv(class = "recent-trace-info"):
     #   tdiv(class = "recent-trace-date"):
     #     text trace.date
