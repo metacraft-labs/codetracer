@@ -5,19 +5,41 @@ import
 
 const PROGRAM_NAME_LIMIT = 45
 
-proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) =
-  self.data.ipc.send "CODETRACER::upload-trace-file",
+proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
+  var uploadedData = await self.data.asyncSend(
+    "upload-trace-file",
     UploadTraceArg(
       trace: trace,
       programName: trace.program
-    )
+    ),
+    &"{trace.program}:{trace.id}", UploadedTraceData
+  )
 
-proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) =
-  self.data.ipc.send "CODETRACER::delete-online-trace-file",
+  if uploadedData.downloadKey != "Errored":
+    trace.downloadKey = uploadedData.downloadKey
+    trace.controlId = uploadedData.controlId
+    trace.onlineExpireTime = ($uploadedData.expireTime).parseInt()
+  else:
+    trace.downloadKey = uploadedData.downloadKey
+
+  self.data.redraw()
+
+proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
+  var deleted = await self.data.asyncSend(
+    "delete-online-trace-file",
     DeleteTraceArg(
       traceId: trace.id,
       controlId: trace.controlId
-    )
+    ),
+    &"{trace.id}:{trace.controlId}", bool
+  )
+
+  if deleted:
+    trace.controlId = ""
+    trace.downloadKey = ""
+    trace.onlineExpireTime = -1
+
+  self.data.redraw()
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
   buildHtml(
@@ -48,7 +70,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
           span(
             onclick = proc(ev: Event, tg: VNode) =
               ev.stopPropagation()
-              self.uploadTrace(trace)
+              discard self.uploadTrace(trace)
             ):
             text "upload"
       if trace.controlId != "":
@@ -56,7 +78,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
           span(
             onclick = proc(ev: Event, tg: VNode) =
               ev.stopPropagation()
-              self.deleteUploadedTrace(trace)
+              discard self.deleteUploadedTrace(trace)
             ):
             text "delete"
     # tdiv(class = "recent-trace-info"):

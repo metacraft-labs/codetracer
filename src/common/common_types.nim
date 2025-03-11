@@ -1349,6 +1349,11 @@ type
     trace*: Trace
     programName*: langstring
 
+  UploadedTraceData* = object
+    downloadKey*: langstring
+    controlId*: langstring
+    expireTime*: langstring
+
   DeleteTraceArg* = object
     traceId*: int
     controlId*: langstring
