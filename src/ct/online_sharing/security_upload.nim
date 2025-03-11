@@ -1,5 +1,5 @@
 import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, osproc ]
-import ../../common/[ config, trace_index, lang ]
+import ../../common/[ config ]
 
 proc generateSecurePassword*(): string =
   var key: array[32, byte]
