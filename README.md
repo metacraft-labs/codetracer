@@ -134,7 +134,7 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
    - `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
    - `ct replay <program-name>` - Opens the last trace of an application.
    - `ct replay --id=<trace-id>` - Opens a trace by its trace id.
-   - `ct replay --trace-folde=<trace-folder>` - Opens a trace by its trace folder.
+   - `ct replay --trace-folder=<trace-folder>` - Opens a trace by its trace folder.
 1. `ct` - Launches the startup screen of the CodeTracer GUI.
 1. `ct help / ct --help` - Gives you a help message.
 1. `ct version` - Returns the current version of CodeTracer.
