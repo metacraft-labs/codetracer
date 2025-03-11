@@ -3,7 +3,9 @@ let
 in
   pkgs.mkShell {
     buildInputs = with pkgs; [
-      bash     
+      bash
+      mdbook
+      mdbook-alerts     
     ];
     nativeBuildInputs = with pkgs; [
       bash

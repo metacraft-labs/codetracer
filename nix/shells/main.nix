@@ -96,6 +96,10 @@ in
         # a tool to help with binary files
         hexdump
 
+        # docs
+        mdbook
+        mdbook-alerts     
+  
         # cachix support
         cachix
 

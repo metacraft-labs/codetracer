@@ -2,10 +2,18 @@
 
 set -e
 
-pushd  docs/experimental-documentation
+pushd docs/experimental-documentation/mdbook-ct
+
+# TODO: eventually: a more fine-grained nix shell/env?
+# nix-shell --command "mdbook build"
+
+# for now depending on global project devshell 
+mdbook build # build output is in the `book` directory
+
+# TODO: deploy book to codetracer.com ? ask Zahary?
 
 echo '###############################################################################'
-echo TODO
+echo "TODO upload book"
 echo '###############################################################################'
 
 popd
