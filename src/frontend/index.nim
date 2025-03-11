@@ -815,6 +815,33 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
     ]
   )
 
+  if res.isOk:
+    let splitData =  res.v.split("\n")
+    if splitData.len() == 4:
+      let uploadData = UploadedTraceData(
+        downloadKey: splitData[0],
+        controlId: splitData[1],
+        expireTime: splitData[2]
+      )
+      mainWindow.webContents.send(
+        "CODETRACER::uploaded-trace-received",
+        js{
+          "argId": j(response.trace.program & ":" & $response.trace.id),
+          "value": uploadData
+        }
+      )
+    else:
+      let uploadData = UploadedTraceData(
+        downloadKey: splitData[0],
+      )
+      mainWindow.webContents.send(
+        "CODETRACER::uploaded-trace-received",
+        js{
+          "argId": j(response.trace.program & ":" & $response.trace.id),
+          "value": uploadData
+        }
+      )
+
 proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
   let res = await readProcessOutput(
     codetracerExe.cstring,
@@ -834,6 +861,14 @@ proc onDeleteOnlineTraceFile(sender: js, response: DeleteTraceArg) {.async.} =
       j"--trace-id=" & $response.traceId,
       j"--control-id=" & response.controlId
     ]
+  )
+
+  mainWindow.webContents.send(
+    "CODETRACER::deleted-online-trace-received",
+    js{
+      "argId": j($response.traceId & ":" & response.controlId),
+      "value": res.isOk
+    }
   )
 
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =

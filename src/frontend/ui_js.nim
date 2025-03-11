@@ -1090,6 +1090,9 @@ proc configureIPC(data: Data) =
 
     "follow-history"
 
+    "uploaded-trace-received"
+    "deleted-online-trace-received"
+
   duration("configureIPCRun")
 
 proc zoomInEditors*(data: Data) =
