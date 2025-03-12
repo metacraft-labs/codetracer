@@ -1,6 +1,7 @@
 ## Summary
 
 - [Introduction](./introduction.md)
+- [Contributions](./contributions.md)
 
 ## Usage guide
 
