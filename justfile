@@ -283,3 +283,10 @@ ls-trace-folder-for-id trace_id:
 
 # end of trace folder helpers
 # ===========================
+
+# ====
+# e2e helpers
+
+test-e2e:
+  cd ${CODETRACER_REPO_ROOT_PATH}/ui-tests && \
+    env CODETRACER_OPEN_DEV_TOOLS=0 npx playwright test --reporter=list --workers=1
