@@ -1,5 +1,7 @@
 ## DB backend
 
+### Languages
+
 The DB backend is currently used for interpreted languages, like scripting and blockchain/zero knowledge languages:
 
 1. [Noir](./db-backend/noir.md)
@@ -8,13 +10,17 @@ The DB backend is currently used for interpreted languages, like scripting and b
 1. [Lua(not done: just a plan)](./db-backend/lua.md)
 1. [small(a toy interpreter for dogfooding)](./db-backend/small.md)
 
-If you're interested in db-backend support for those languages or for now ones, you can discuss with us on our Github issue tracker,
-in the discussions or in our [chat server](https://discord.gg/aH5WTMnKHT). We welcome contributors!
+If you're interested in db-backend support for those languages or for now ones, you can discuss with us on our [GitHub issue tracker](https://github.com/metacraft-labs/codetracer/issues),
+in the [GitHub repo discussions forum](https://github.com/metacraft-labs/codetracer/discussions) or in our [discord chat server](https://discord.gg/aH5WTMnKHT). We welcome contributors!
 
-However it might be used for emulators(and this way for native languages) in the future.
+### Additional directions
+
+However we're exploring using this method for emulators(and conversely, for emulating native languages) in the future.
 
 Also, languages can have both native(AOT) and interpreted implementations: 
 so we can more easily support e.g. interpreters/VM-s of certain languages with this backend currently.
+
+### Implementation
 
 As the name suggests, this backend is implemented as a database. Due to its properties, this backend provides
 a more complete feature set - one of the reasons it was ready first.

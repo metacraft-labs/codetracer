@@ -3,14 +3,16 @@
 Codetracer uses nix, just, tup and direnv as parts of its build system.
 
 ## Breakdown of the different components
+
 ### Nix
-The Nix package manager/build system deals with managing all dependencies, required by CodeTracer, as well as packaging
+
+The [Nix](https://nixos.org/) package manager/build system deals with managing all dependencies, required by CodeTracer, as well as packaging
 it for NixOS. It can package for other operating systems through an AppImage generator utility, however currently we are building our
 appimages with custom shell scripts in `appimage-scripts`.
 
 ### Just
 
-The `just` tool is used to trigger build commands and various other actions. It's semi-analogous to a Makefile. The following commands are
+The [just](https://just.systems/) task runner is used to trigger build commands and various other actions. It's semi-analogous to a Makefile. The following commands are
 the most widely-used:
 
 1. `just build` - Builds the project with Tup and starts the automatic build process, which is used for active development
@@ -25,10 +27,11 @@ the most widely-used:
 1. `just reset-config` - Resets the user's configuration if it's incompatible with the latest version of CodeTracer. Further [documentation](https://dev-docs.codetracer.com/Introduction/Configuration)
 
 ### Tup
-The Tup build system is used for local builds of CodeTracer and deals with calling the actual low-level build instructions.
+
+The [Tup](https://gittup.org/tup/) build system is used for local builds of CodeTracer and deals with calling the actual low-level build instructions.
 
 ### Direnv
-The `direnv` utility sets up your local environment for using CodeTracer.
+The [direnv](https://direnv.net/) utility sets up your local environment for using CodeTracer.
 
 ## Packaging
 
