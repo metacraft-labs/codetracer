@@ -385,6 +385,9 @@ proc record*(args: seq[string]): Trace =
       # registerRecordInReportFile(reportFile, trace, outputPath)
     putEnv("CODETRACER_RECORDING", "")
 
+    let inUiTest = getEnv("CODETRACER_IN_UI_TEST", "") == "1"
+    if inUiTest:
+      echo fmt"> codetracer: finished with trace id: {traceId}"
     return trace
   except CatchableError as e:
     if sessionId != -1:
