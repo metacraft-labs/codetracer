@@ -1,4 +1,4 @@
-## python
+## Python language
 
 We currently have started adding support for recording python programs for the DB backend, but the prototype isn't finished yet. 
 

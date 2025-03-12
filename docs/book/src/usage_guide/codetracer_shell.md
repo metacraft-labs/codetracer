@@ -1,9 +1,9 @@
 ## Codetracer Shell
 
 > [!NOTE]
-> This feature is in its infancy, but in development. API may be subject to change!
+> This feature is in its infancy, but in development. The API, implementation approach and feature set/goals may be subject to change!
 >
-> It's not a part of the public CodeTracer features or source code for now.
+> It's not a part of the public CodeTracer feature set or source code for now.
 
 CodeTracer Shell is a special feature of CodeTracer that creates an environment, and optionally an interactive shell,
 that can be used to build applications with complex, or unorthodox build systems.

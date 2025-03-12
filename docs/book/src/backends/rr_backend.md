@@ -17,7 +17,7 @@ preloading information, such as the information, needed for omniscience and call
 currently implemented using python code using the gdb API. 
 (If required, this can be changed to use the lldb API or something more custom, like a dwarf lib-based solution. We are currently using the rust `gimli` DWARF lib for a tool, that helps with recording/metadata in the RR backend).
 
-These are the main differences, when compared to the DB Backend: based on the way RR works:
+These are the main differences, when compared to the DB Backend, based on the way RR works:
 
 1. Only non-deterministic events are recorded.
 1. The program's different states are navigated through re-execution.

@@ -4,10 +4,12 @@ Welcome to the codetracer-desktop wiki. Here you can find information on almost 
 regarding codetracer development and usage.
 
 ## Installation
+
 > [!CAUTION]
 > Codetracer can only be installed on Linux and macOS currently.
 
 ### Prerequisites
+
 On systems that are not NixOS, you need to install `direnv` and `nix`.
 
 Nix should not be installed through your distribution's package manager, but from [here](https://nixos.org/download/).
@@ -15,6 +17,7 @@ Nix should not be installed through your distribution's package manager, but fro
 Direnv should be set up in your shell, as shown [here](https://direnv.net/docs/hook.html).
 
 ### Installation
+
 1. Setup SSH with our private GitLab instance: <https://gitlab.metacraft-labs.com>
 1. Clone the repository with submodules: `git clone gitlab@gitlab.metacraft-labs.com:codetracer/codetracer-desktop.git --recursive`
 1. Enter the created directory
