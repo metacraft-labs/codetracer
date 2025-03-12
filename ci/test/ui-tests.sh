@@ -9,7 +9,6 @@ set -e
 # stop_processes
 # DISPLAY: ":99" in .gitlab-ci.yml?
 # not sure if relevant
-#xvfb-run tester ui
 
 # cleanup before recording in local folder
 # which is shard with normal user recordings and
@@ -25,10 +24,11 @@ set -e
 # # rm -rf /tmp/codetracer
 # rm -rf /dev/shm/codetracer
 
-# pushd ui-tests;
-# xvfb-run npx playwright test
-# popd;
+echo "========================"
+echo "RUNNING ui e2e tests"
+
+nix-shell -p xvfb-run --command "xvfb-run just test-e2e"
+
+echo "========================"
 
 # stop_processes
-
-echo TODO
