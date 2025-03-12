@@ -8,7 +8,6 @@
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
-import * as fs from "node:fs";
 
 import { test, type Page } from "@playwright/test";
 import { _electron, chromium } from "playwright";
@@ -138,10 +137,10 @@ async function replayCodetracerInElectron(
     ["start_core", `${traceId}`, runPid.toString()],
     { cwd: codetracerInstallDir },
   );
-  ctProcess.stdout.setEncoding("utf8");
-  ctProcess.stdout.on("data", console.log);
-  ctProcess.stderr.setEncoding("utf8");
-  ctProcess.stderr.on("data", console.log);
+  // ctProcess.stdout.setEncoding("utf8");
+  // ctProcess.stdout.on("data", console.log);
+  // ctProcess.stderr.setEncoding("utf8");
+  // ctProcess.stderr.on("data", console.log);
   ctProcess.on("close", (code) => {
     console.log(`child process exited with code ${code}`);
 
@@ -206,7 +205,7 @@ async function replayCodetracerInBrowser(
   const chromiumBrowser = await chromium.launch({
     executablePath: path.join(
       process.env.PLAYWRIGHT_BROWSERS_PATH,
-      "chromium-1091",
+      "chromium-1134",
       "chrome-linux",
       "chrome",
     ),
@@ -281,7 +280,7 @@ function recordTestProgram(recordArg: string): number {
       encoding: "utf-8",
     },
   );
-  console.log(ctProcess);
+  // console.log(ctProcess);
   if (ctProcess.error !== undefined || ctProcess.status !== OK_EXIT_CODE) {
     console.log(
       `ERROR: codetracer record: error: ${ctProcess.error}; status: ${ctProcess.status}`,
@@ -343,6 +342,10 @@ async function recordAndReplayTestProgram(
 
 export async function readyOnEntryTest(): Promise<void> {
   await page.locator(".location-path").click();
+}
+
+export async function loadedEventLog(): Promise<void> {
+  await page.locator(".data-tables-footer-rows-count").click();
 }
 
 export class CodetracerTestError extends Error {

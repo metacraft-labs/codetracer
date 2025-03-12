@@ -2,9 +2,10 @@ import { test, expect } from "@playwright/test";
 import {
   window,
   page,
-  wait,
+  // wait,
   // debugCodetracer,
   readyOnEntryTest as readyOnEntry,
+  loadedEventLog,
   ctRun,
 } from "./lib/ct_helpers";
 import { StatusBar } from "./page_objects/status_bar";
@@ -28,23 +29,22 @@ test("correct entry status path/line", async () => {
   expect(simpleLocation.line).toBe(ENTRY_LINE);
 });
 
-// TODO: not finding element
 // TODO: run tests serially if in the same instance (?)
+//   for now we're passing `--workers=1` to prevent parallelism: is this sufficient?
+//   maybe we should use groups instead, as we might want parallelism in the future
+//  (on the other hand, codetracer/backend itself might use parallelism, so we wouldn't want to parallelize tests in all cases)
 
-// const DELAY = 3_000;
+test("expected event count", async () => {
+  await loadedEventLog();
 
-// test("expected event count", async () => {
-//   await readyOnEntry();
+  const raw = await page.$eval(
+    ".data-tables-footer-rows-count",
+    (el) => el.textContent ?? "",
+  );
 
-//   const raw = await page.$eval(
-//     ".data-tables-footer-rows-count",
-//     (el) => el.textContent ?? "",
-//   );
-
-//   await wait(DELAY);
-//   expect(raw.endsWith("2")).toBeTruthy();
-//   expect(raw.endsWith("1")).toBeFalsy();
-// });
+  expect(raw.endsWith("2")).toBeTruthy();
+  expect(raw.endsWith("1")).toBeFalsy();
+});
 
 test("state panel loaded initially", async () => {
   await readyOnEntry();
@@ -53,6 +53,7 @@ test("state panel loaded initially", async () => {
   );
 });
 
+// TODO
 // test("state panel after jump to end of run function", async () => {
 //   await readyOnEntry();
 // });
