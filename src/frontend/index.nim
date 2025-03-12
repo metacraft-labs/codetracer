@@ -31,7 +31,7 @@ proc isCtInstalled: bool
 
 
 proc onClose(e: js) =
-  if data.config.test:
+  if not data.config.isNil and data.config.test:
     discard
   elif not close:
     # TODO refactor to use just `client.send`
@@ -49,9 +49,13 @@ proc onClose(e: js) =
 # --caller-pid <callerPid>
 # # eventually if needed --backend-socket-host <backend-socket-host>
 proc parseArgs =
+  # echo "parseArgs"
+
   data.startOptions.screen = true
   data.startOptions.loading = false
   data.startOptions.record = false
+
+  data.startOptions.folder = electronprocess.cwd()
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TRACE_ID"):
     data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"].parseJSInt
@@ -61,7 +65,7 @@ proc parseArgs =
   else:
     discard
 
-  data.startOptions.folder = electronprocess.cwd()
+  
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TEST_STRATEGY"):
     data.startOptions.rawTestStrategy = electronProcess.env[cstring"CODETRACER_TEST_STRATEGY"]

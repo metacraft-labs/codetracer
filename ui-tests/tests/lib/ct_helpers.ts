@@ -49,44 +49,49 @@ export function debugCodetracer(name: string, langExtension: string): void {
 }
 
 export function getTestProgramNameFromPath(filePath: string): string {
-  const relativePath = path.relative("programs", filePath);
+  if (filePath.startsWith("noir_")) {
+    return path.basename(filePath);
+  } else {
+    const relativePath = path.relative("programs", filePath);
 
-  // Split the relative path into segments
-  const pathSegments = relativePath.split(path.sep);
+    // Split the relative path into segments
+    const pathSegments = relativePath.split(path.sep);
 
-  // The first segment is the folder inside 'programs'
-  // eslint-disable-next-line @typescript-eslint/no-magic-numbers
-  const folderName = pathSegments[0];
-  return folderName;
+    // The first segment is the folder inside 'programs'
+    // eslint-disable-next-line @typescript-eslint/no-magic-numbers
+    const folderName = pathSegments[0];
+    return folderName;
+  }
 }
 
-export function codeTracerRun(relativeSourceFilePath: string): void {
+export function ctRun(relativeSourcePath: string): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
 
-    const sourceFilePath = path.join(testProgramsPath, relativeSourceFilePath);
-    const sourceFileName = path.basename(
-      relativeSourceFilePath,
-      path.extname(relativeSourceFilePath),
-    );
+    const sourcePath = path.join(testProgramsPath, relativeSourcePath);
+    // const sourceFileName = path.basename(
+    //   relativeSourceFilePath,
+    //   path.extname(relativeSourceFilePath),
+    // );
     // const sourceFileExtension = path.extname(sourceFilePath);
-    const programName = getTestProgramNameFromPath(sourceFilePath);
+    const programName = getTestProgramNameFromPath(relativeSourcePath);
 
-    fs.mkdirSync(testBinariesPath, { recursive: true });
+    // fs.mkdirSync(testBinariesPath, { recursive: true });
 
-    const binaryFileName = `${programName}__${sourceFileName}`;
-    const binaryFilePath = path.join(testBinariesPath, binaryFileName);
+    // const binaryFileName = `${programName}__${sourceFileName}`;
+    // const binaryFilePath = path.join(testBinariesPath, binaryFileName);
 
-    buildTestProgram(sourceFilePath, binaryFilePath);
+    // TODO: if rr-backend?
+    // buildTestProgram(sourceFilePath, binaryFilePath);
 
-    const traceId = recordTestProgram(binaryFilePath);
+    const traceId = recordTestProgram(sourcePath);
 
     const inBrowser = process.env.CODETRACER_TEST_IN_BROWSER === "1";
     if (!inBrowser) {
       const runPid = 1;
-      await replayCodetracerInElectron(binaryFileName, traceId, runPid);
+      await replayCodetracerInElectron(programName, traceId, runPid);
     } else {
-      await replayCodetracerInBrowser(binaryFileName, traceId);
+      await replayCodetracerInBrowser(programName, traceId);
     }
   });
 }
@@ -120,19 +125,23 @@ function setupLdLibraryPath(): void {
 }
 
 async function replayCodetracerInElectron(
-  binaryFileName: string,
+  programName: string,
   traceId: number,
   runPid: number,
 ): Promise<number> {
   // not clear, but maybe possible to directly augment the playwright test report?
   // test.info().annotations.push({type: 'something', description: `# starting codetracer for ${pattern}`});
-  console.log(`# replay codetracer rr/gdb core process for ${binaryFileName}`);
+  console.log(`# replay codetracer rr/gdb core process for ${programName}`);
 
   const ctProcess = childProcess.spawn(
     codetracerPath,
-    ["start_core", binaryFileName, runPid.toString()],
+    ["start_core", `${traceId}`, runPid.toString()],
     { cwd: codetracerInstallDir },
   );
+  ctProcess.stdout.setEncoding("utf8");
+  ctProcess.stdout.on("data", console.log);
+  ctProcess.stderr.setEncoding("utf8");
+  ctProcess.stderr.on("data", console.log);
   ctProcess.on("close", (code) => {
     console.log(`child process exited with code ${code}`);
 
@@ -148,11 +157,14 @@ async function replayCodetracerInElectron(
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
 
+  // console.log(ctProcess);
+
   electronApp = await electron.launch({
     executablePath: electronPath,
     cwd: codetracerInstallDir,
     args: [indexPath],
   });
+
   const firstWindow = await electronApp.firstWindow();
   const firstWindowTitle = await firstWindow.title();
 
@@ -254,21 +266,26 @@ function buildTestProgram(
   console.log(`# codetracer built ${outputBinaryPath} succesfully`);
 }
 
-function recordTestProgram(outputBinaryPath: string): number {
+function recordTestProgram(recordArg: string): number {
+  process.env.CODETRACER_IN_UI_TEST = "1";
+
   // non-obvious options!
   // stdio: 'pipe', encoding: 'utf8' found form
   // https://stackoverflow.com/a/35690273/438099
   const ctProcess = childProcess.spawnSync(
     codetracerPath,
-    ["record", outputBinaryPath],
+    ["record", recordArg],
     {
       cwd: codetracerInstallDir,
       stdio: "pipe",
       encoding: "utf-8",
     },
   );
+  console.log(ctProcess);
   if (ctProcess.error !== undefined || ctProcess.status !== OK_EXIT_CODE) {
-    console.log(`ERROR: codetracer record: ${ctProcess.error}`);
+    console.log(
+      `ERROR: codetracer record: error: ${ctProcess.error}; status: ${ctProcess.status}`,
+    );
     console.log(ctProcess.stderr);
     process.exit(ERROR_EXIT_CODE);
   }
@@ -292,7 +309,7 @@ function recordTestProgram(outputBinaryPath: string): number {
     process.exit(ERROR_EXIT_CODE);
   }
   console.log(
-    `# codetracer recorded a trace for ${outputBinaryPath} with trace id ${maybeTraceId} succesfully`,
+    `# codetracer recorded a trace for ${recordArg} with trace id ${maybeTraceId} succesfully`,
   );
   return maybeTraceId;
 }
