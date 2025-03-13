@@ -27,7 +27,7 @@ set -e
 echo "========================"
 echo "RUNNING ui e2e tests"
 
-nix-shell -p xvfb-run --command "xvfb-run just test-e2e"
+nix-shell --command "xvfb-run just test-e2e"
 
 echo "========================"
 
