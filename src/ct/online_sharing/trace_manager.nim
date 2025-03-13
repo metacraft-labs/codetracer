@@ -1,4 +1,4 @@
-import std/[ options, strutils, os, osproc, strformat, json, httpclient ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
+import std / [ options, strutils, os, osproc, strformat, json, httpclient ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
 import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import, record ]
