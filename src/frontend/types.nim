@@ -1138,6 +1138,7 @@ type
     newDownload*: NewDownloadRecord
     loading*: bool
     loadingTrace*: Trace
+    copyMessageActive*: JsAssoc[int, bool]
 
   ReplComponent* = ref object of Component
     history*: seq[DebugInteraction]
