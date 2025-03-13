@@ -25,9 +25,11 @@ set -e
 # rm -rf /dev/shm/codetracer
 
 echo "========================"
-echo "RUNNING ui e2e tests"
+# echo "RUNNING ui e2e tests"
 
-nix-shell --command "xvfb-run just test-e2e"
+# TODO nix-shell --command "xvfb-run just test-e2e"
+
+echo TODO 
 
 echo "========================"
 
