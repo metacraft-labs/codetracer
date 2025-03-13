@@ -46,28 +46,30 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
+  let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
 
   let currentTime = cast[int](getTime().toJs.seconds)
   let oneWeek = cast[int]((3.days).toJs.seconds)
   let remainingTime = if trace.onlineExpireTime != NO_EXPIRE_TIME: trace.onlineExpireTime - currentTime else: 0
-  let expireState =
+  var (expireState, expireId) =
     if trace.onlineExpireTime == NO_EXPIRE_TIME:
-      NoExpireState
+      (NoExpireState, "trace-info-button")
     elif remainingTime > oneWeek:
-      NotExpiringSoon
+      (NotExpiringSoon, "trace-info-button")
     elif remainingTime < 0:
-      Expired
+      (Expired, "trace-info-button-active")
     else:
-      ThreeDaysLeft
+      (ThreeDaysLeft, "trace-info-button-active")
 
   buildHtml(
     tdiv(class = "recent-trace-container")
   ):
     tdiv(
       class = "recent-trace",
-      onclick = proc =
+      onclick = proc (ev: Event, tg: VNode) =
         self.loading = true
         self.loadingTrace = trace
+        ev.target.focus()
         data.redraw()
         self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: trace.id }
     ):
@@ -91,6 +93,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
             id = "trace-upload-button",
             onclick = proc(ev: Event, tg: VNode) =
               ev.stopPropagation()
+              ev.target.focus()
               discard self.uploadTrace(trace)
             )
       if trace.controlId != EMPTY_STRING and expireState != Expired:
@@ -100,6 +103,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
             id = "trace-delete-button",
             onclick = proc(ev: Event, tg: VNode) =
               ev.stopPropagation()
+              ev.target.focus()
               discard self.deleteUploadedTrace(trace)
             )
       if trace.downloadKey != EMPTY_STRING and expireState != Expired:
@@ -111,6 +115,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.stopPropagation()
               clipboardCopy(trace.downloadKey)
               self.copyMessageActive[trace.id] = true
+              ev.target.focus()
               self.data.redraw()
               discard setTimeout(proc() =
                 self.copyMessageActive[trace.id] = false
@@ -124,14 +129,29 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
         let dt = fromUnix(trace.onlineExpireTime)
         let time = dt.format("dd MM yyyy")
         let formatted = time.replace(" ", ".")
-        span(class = "expire-time-text"):
-          case expireState:
-          of ThreeDaysLeft:
-            text "Expires soon"
-          of Expired:
-            text "Expired key"
-          else:
-            text &"Exp. {formatted}"
+        tdiv(class = &"recent-trace-buttons {expireId}"):
+          tdiv(
+            class = "recent-trace-buttons-image",
+            id = &"{expireId}",
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              clipboardCopy(trace.downloadKey)
+              self.infoMessageActive[trace.id] = if self.infoMessageActive.hasKey(trace.id): not self.infoMessageActive[trace.id] else: true
+              if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]:
+                self.copyMessageActive[trace.id] = false
+              ev.target.parentNode.focus()
+              self.data.redraw(),
+            onmouseleave = proc(ev: Event, tg: VNode) =
+              self.infoMessageActive[trace.id] = false
+          ):
+            tdiv(class = fmt"custom-tooltip {infoActive}"):
+              case expireState:
+              of ThreeDaysLeft:
+                text &"The key will expire on {formatted}"
+              of Expired:
+                text "The key has expired"
+              else:
+                text &"The online share key expires on {formatted}"
 
 proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   buildHtml(
@@ -306,15 +326,27 @@ proc prepareArgs(self: WelcomeScreenComponent): seq[cstring] =
   return args.concat(self.newRecord.args)
 
 proc onlineFormView(self: WelcomeScreenComponent): VNode =
+  proc handler(ev: Event, tg: VNode) =
+    ev.preventDefault()
+    self.loading = true
+    # TODO: Implement progress bar?
+    self.data.ipc.send(
+        "CODETRACER::download-trace-file", js{
+          downloadKey: concat(self.newDownload.args),
+        }
+    )
+
   buildHtml(
-    tdiv(class = "new-record-form")
+    tdiv(class = "new-record-form new-online-trace-form")
   ):
     renderInputRow(
       "args",
       "Download ID with password",
       "",
       proc(ev: Event, tg: VNode) = discard,
-      proc(ev: Event, tg: VNode) = self.newDownload.args = ev.target.value.split(" "),
+      proc(ev: Event, tg: VNode) = 
+        self.newDownload.args = ev.target.value.split(" ")
+        handler(ev, tg),
       hasButton = false,
       inputText = self.newDownload.args.join(j" ")
     )
@@ -330,20 +362,7 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
         text "Back"
       button(
         class = "confirmation-button",
-        onclick = proc(ev: Event, tg: VNode) =
-          ev.preventDefault()
-          self.loading = true
-          # TODO: Implement progress bar
-          # self.newRecord.status.kind = InProgress
-          # let workDir = if self.newRecord.workDir.isNil or self.newRecord.workDir.len == 0:
-          #     jsUndefined
-          #   else:
-          #     cast[JsObject](self.newRecord.workDir)
-          self.data.ipc.send(
-              "CODETRACER::download-trace-file", js{
-                downloadKey: concat(self.newDownload.args),
-              }
-          )
+        onclick = handler
       ):
         text "Download"
 
@@ -487,7 +506,7 @@ proc onlineTraceView(self: WelcomeScreenComponent): VNode =
     tdiv(class = "new-record-screen-content"):
       tdiv(class = "welcome-logo")
       tdiv(class = "new-record-title"):
-        text "Start Debugger"
+        text "Download and open online trace"
       onlineFormView(self)    
 
 proc loadInitialOptions(self: WelcomeScreenComponent) =
