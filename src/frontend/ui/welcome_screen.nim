@@ -47,6 +47,19 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
 
+  let currentTime = cast[int](getTime().toJs.seconds)
+  let oneWeek = cast[int]((3.days).toJs.seconds)
+  let remainingTime = if trace.onlineExpireTime != NO_EXPIRE_TIME: trace.onlineExpireTime - currentTime else: 0
+  let expireState =
+    if trace.onlineExpireTime == NO_EXPIRE_TIME:
+      NoExpireState
+    elif remainingTime > oneWeek:
+      NotExpiringSoon
+    elif remainingTime < 0:
+      Expired
+    else:
+      ThreeDaysLeft
+
   buildHtml(
     tdiv(class = "recent-trace-container")
   ):
@@ -71,7 +84,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
         span(class = "recent-trace-title-content"):
           text limitedProgramName # TODO: tippy
     tdiv(class = "online-functionality-buttons"):
-      if trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME:
+      if (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or expireState == ExpireTraceState.Expired:
         tdiv(class = "recent-trace-buttons", id = "upload-button"):
           tdiv(
             class = "recent-trace-buttons-image",
@@ -80,7 +93,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.stopPropagation()
               discard self.uploadTrace(trace)
             )
-      if trace.controlId != EMPTY_STRING:
+      if trace.controlId != EMPTY_STRING and expireState != Expired:
         tdiv(class = "recent-trace-buttons", id = "delete-button"):
           tdiv(
             class = "recent-trace-buttons-image",
@@ -89,7 +102,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.stopPropagation()
               discard self.deleteUploadedTrace(trace)
             )
-      if trace.downloadKey != EMPTY_STRING:
+      if trace.downloadKey != EMPTY_STRING and expireState != Expired:
         tdiv(class = "recent-trace-buttons"):
           tdiv(
             class = "recent-trace-buttons-image",
@@ -107,11 +120,18 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
           ):
             tdiv(class = fmt"custom-tooltip {activeClass}"):
               text "Download key copied to clipboard"
-      if trace.onlineExpireTime != NO_EXPIRE_TIME:
+      if expireState != NoExpireState or expireState in @[Expired, ThreeDaysLeft]:
         let dt = fromUnix(trace.onlineExpireTime)
         let time = dt.format("dd MM yyyy")
+        let formatted = time.replace(" ", ".")
         span(class = "expire-time-text"):
-          text &"Exp. {time}"
+          case expireState:
+          of ThreeDaysLeft:
+            text "Expires soon"
+          of Expired:
+            text "Expired key"
+          else:
+            text &"Exp. {formatted}"
 
 proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   buildHtml(
