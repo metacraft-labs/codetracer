@@ -187,6 +187,12 @@
         padding: 8px
         margin-top: 48px
         margin-bottom: 48px
+        padding-right: 0px
+      
+      .recent-traces-list
+        max-height: 176px
+        overflow-y: scroll
+        overflow-x: visible
 
         .recent-traces-title
           text-align: start
@@ -503,9 +509,9 @@
     visibility: visible
     height: 24px
     left: calc(100% + 8px)
-    position: relative
+    position: absolute
     width: fit-content
-    top: 4px
+    top: auto
 
     &:after
       top: 18%
