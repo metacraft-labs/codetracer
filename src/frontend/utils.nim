@@ -163,7 +163,8 @@ proc makeShellComponent*(data: Data, id: int): ShellComponent =
 proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
   result = WelcomeScreenComponent(
     id: data.generateId(Content.WelcomeScreen),
-    welcomeScreen: true
+    welcomeScreen: true,
+    copyMessageActive: JsAssoc[int, bool]{}
   )
   data.ui.welcomeScreen = result
   data.registerComponent(result, Content.WelcomeScreen)

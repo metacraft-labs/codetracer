@@ -161,7 +161,7 @@
           padding: 6px
           padding-left: 14px
           padding-right: 14px
-          border-radius: 4px
+          border-radius: 6px
 
           &.hovered
             // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
@@ -205,6 +205,7 @@
           position: relative
           text-align: left
           border-radius: 4px
+          width: -webkit-fill-available
 
           &:hover
             cursor: pointer
@@ -234,7 +235,7 @@
               
           .recent-trace-title-content
             // seems to be required, so ellipsis can work
-            width: 500px
+            max-width: 45ch
             // this could put an ellipsis in the beginning if long
             // but it seems it has problems with punctuation, and indeed with
             // path separators e.g. `/` going in the end
@@ -444,11 +445,65 @@
 .online-functionality-buttons
   display: flex
 
-  #delete-button
-    padding-left: 4px
-
-  #copy-button
-    padding-left: 4px
+  .recent-trace-buttons
+    margin-left: 8px
+    margin-top: 8px
+    height: 28px
+    width: 28px
+    background-color: DEBUG_BUTTON_BORDER_COLOR
+    border-radius: 4px
+    cursor: pointer
   
+    &:hover
+      outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+
+    &:active
+      background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+  
+  .recent-trace-buttons-image
+    background-repeat: no-repeat
+    background-size: 16px 16px
+    background-position: center
+    height: 28px
+  
+  #trace-upload-button
+    background-image: WELCOME_SCREEN_UPLOAD_BUTTON
+
+  #trace-copy-button
+    background-image: WELCOME_SCREEN_COPY_BUTTON
+  
+  #trace-delete-button
+    background-image: WELCOME_SCREEN_DELETE_BUTTON
+
   .expire-time-text
+    margin-top: 8px
     white-space: nowrap
+    color: WELCOME_SCREEN_EXPIRE_TIME_COLOR
+    font-family: "SpaceGrotesk"
+    font-size: 12px
+    font-style: normal
+    font-weight: 400
+    line-height: 18px
+    letter-spacing: -0.12px
+    display: flex
+    align-items: center
+    margin-left: 8px
+
+  .welcome-path-active
+    opacity: 1
+    visibility: visible
+    height: 24px
+    left: calc(100% + 8px)
+    position: relative
+    width: fit-content
+    top: 4px
+
+    &:after
+      top: 18%
+      left: -14px
+      border-color: transparent TOOLTIP_BACKGROUND transparent transparent !important
+
+.recent-trace-container
+  display: flex
+  align-items: center
+  justify-content: space-between
