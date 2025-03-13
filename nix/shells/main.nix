@@ -100,6 +100,9 @@ in
         mdbook
         mdbook-alerts     
   
+        # github CLI
+        gh
+
         # cachix support
         cachix
 
