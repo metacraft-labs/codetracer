@@ -45,7 +45,11 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   self.data.redraw()
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
+  let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
+
   buildHtml(
+    tdiv(class = "recent-trace-container")
+  ):
     tdiv(
       class = "recent-trace",
       onclick = proc =
@@ -53,59 +57,61 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
         self.loadingTrace = trace
         data.redraw()
         self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: trace.id }
-    )
-  ):
-    let programLimitName = PROGRAM_NAME_LIMIT 
-    let limitedProgramName = if trace.program.len > programLimitName:
-        ".." & ($trace.program)[^programLimitName..^1]
-      else:
-        $trace.program
+    ):
+      let programLimitName = PROGRAM_NAME_LIMIT 
+      let limitedProgramName = if trace.program.len > programLimitName:
+          ".." & ($trace.program)[^programLimitName..^1]
+        else:
+          $trace.program
 
-    tdiv(class = "recent-trace-title"):
-      span(class = "recent-trace-title-id"):
-        text fmt"ID: {trace.id}"
-      separateBar()
-      span(class = "recent-trace-title-content"):
-        text limitedProgramName # TODO: tippy
+      tdiv(class = "recent-trace-title"):
+        span(class = "recent-trace-title-id"):
+          text fmt"ID: {trace.id}"
+        separateBar()
+        span(class = "recent-trace-title-content"):
+          text limitedProgramName # TODO: tippy
     tdiv(class = "online-functionality-buttons"):
+      if trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME:
+        tdiv(class = "recent-trace-buttons", id = "upload-button"):
+          tdiv(
+            class = "recent-trace-buttons-image",
+            id = "trace-upload-button",
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              discard self.uploadTrace(trace)
+            )
+      if trace.controlId != EMPTY_STRING:
+        tdiv(class = "recent-trace-buttons", id = "delete-button"):
+          tdiv(
+            class = "recent-trace-buttons-image",
+            id = "trace-delete-button",
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              discard self.deleteUploadedTrace(trace)
+            )
+      if trace.downloadKey != EMPTY_STRING:
+        tdiv(class = "recent-trace-buttons"):
+          tdiv(
+            class = "recent-trace-buttons-image",
+            id = "trace-copy-button",
+            onclick = proc(ev: Event, tg: VNode) =
+              ev.stopPropagation()
+              clipboardCopy(trace.downloadKey)
+              self.copyMessageActive[trace.id] = true
+              self.data.redraw()
+              discard setTimeout(proc() =
+                self.copyMessageActive[trace.id] = false
+                self.data.redraw(),
+                2000
+              )
+          ):
+            tdiv(class = fmt"custom-tooltip {activeClass}"):
+              text "Download key copied to clipboard"
       if trace.onlineExpireTime != NO_EXPIRE_TIME:
         let dt = fromUnix(trace.onlineExpireTime)
         let time = dt.format("dd MM yyyy")
         span(class = "expire-time-text"):
-          text &"Expires on {time}"
-      if trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME:
-        tdiv(class = "recent-trace-buttons", id = "upload-button"):
-          span(
-            onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              discard self.uploadTrace(trace)
-            ):
-            text "upload"
-      if trace.controlId != EMPTY_STRING:
-        tdiv(class = "recent-trace-buttons", id = "delete-button"):
-          span(
-            onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              discard self.deleteUploadedTrace(trace)
-            ):
-
-            text "delete"
-      if trace.downloadKey != EMPTY_STRING:
-        tdiv(class = "recent-trace-buttons", id = "copy-button"):
-          span(
-            onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              clipboardCopy(trace.downloadKey)
-            ):
-
-            text "copy"
-
-    # tdiv(class = "recent-trace-info"):
-    #   tdiv(class = "recent-trace-date"):
-    #     text trace.date
-    #   if not trace.duration.isNil:
-    #     tdiv(class = "recent-trace-duration"):
-    #       text trace.duration
+          text &"Exp. {time}"
 
 proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   buildHtml(
