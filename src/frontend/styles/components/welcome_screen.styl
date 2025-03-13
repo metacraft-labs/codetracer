@@ -459,6 +459,9 @@
 
     &:active
       background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+
+    &.trace-info-button-active
+      background-color: WELCOME_SCREEN_ACTIVE_BACKGROUND
   
   .recent-trace-buttons-image
     background-repeat: no-repeat
@@ -474,6 +477,12 @@
   
   #trace-delete-button
     background-image: WELCOME_SCREEN_DELETE_BUTTON
+  
+  #trace-info-button
+    background-image: WELCOME_SCREEN_INFO_BUTTON
+  
+  #trace-info-button-active
+    background-image: WELCOME_SCREEN_INFO_ACTIVE_BUTTON
 
   .expire-time-text
     margin-top: 8px
@@ -507,3 +516,8 @@
   display: flex
   align-items: center
   justify-content: space-between
+
+.new-online-trace-form
+  input
+    padding-left: 8px
+    background-image: none
