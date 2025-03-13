@@ -49,13 +49,6 @@ proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
     echo "WARNING: Can't extract symbols. Some functionality may not work correctly!"
     echo ""
 
-# for now hardcode: files are usually useful and
-# probably much less perf/size compared to actual traces
-# it's still good to have an option/opt-out, so we leave that
-# as a flag in the internals, but not exposed to user yet
-# that's why for now it's hardcoded for db
-const DB_SELF_CONTAINED_DEFAULT* = true
-
 # rr patches for ruby/other vm-s: not supported now, instead
 # in db backend support only direct traces
 

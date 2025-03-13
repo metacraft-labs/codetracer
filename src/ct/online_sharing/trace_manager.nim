@@ -3,6 +3,7 @@ import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import, record ]
 import security_upload
+import ../globals
 
 proc uploadCommand*(
   patternArg: Option[string],
