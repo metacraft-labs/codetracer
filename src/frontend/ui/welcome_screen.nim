@@ -7,6 +7,7 @@ import std/times except now
 const PROGRAM_NAME_LIMIT = 45
 const NO_EXPIRE_TIME = -1
 const EMPTY_STRING = ""
+const ERROR_DOWNLOAD_KEY = "Errored"
 
 proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   var uploadedData = await self.data.asyncSend(
@@ -24,6 +25,7 @@ proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
     trace.onlineExpireTime = ($uploadedData.expireTime).parseInt()
   else:
     trace.downloadKey = uploadedData.downloadKey
+    self.errorMessageActive[trace.id] = true
 
   self.data.redraw()
 
@@ -47,6 +49,14 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
   let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
+  let (errorActiveClass, errorInfo) = if trace.downloadKey == ERROR_DOWNLOAD_KEY: ("welcome-path-active", "active-error") else: ("", "")
+  if self.errorMessageActive.hasKey(trace.id) and self.errorMessageActive[trace.id]:
+    discard setTimeout(proc() =
+      self.errorMessageActive[trace.id] = false
+      trace.downloadKey = ""
+      self.data.redraw(),
+      2000
+    )
 
   let currentTime = cast[int](getTime().toJs.seconds)
   let oneWeek = cast[int]((3.days).toJs.seconds)
@@ -86,7 +96,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
         span(class = "recent-trace-title-content"):
           text limitedProgramName # TODO: tippy
     tdiv(class = "online-functionality-buttons"):
-      if (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or expireState == ExpireTraceState.Expired:
+      if (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or expireState == ExpireTraceState.Expired or trace.downloadKey == ERROR_DOWNLOAD_KEY:
         tdiv(class = "recent-trace-buttons", id = "upload-button"):
           tdiv(
             class = "recent-trace-buttons-image",
@@ -95,7 +105,9 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.stopPropagation()
               ev.target.focus()
               discard self.uploadTrace(trace)
-            )
+            ):
+            tdiv(class = fmt"custom-tooltip {errorActiveClass}"):
+              text "Server error when uploading"
       if trace.controlId != EMPTY_STRING and expireState != Expired:
         tdiv(class = "recent-trace-buttons", id = "delete-button"):
           tdiv(
@@ -106,7 +118,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.target.focus()
               discard self.deleteUploadedTrace(trace)
             )
-      if trace.downloadKey != EMPTY_STRING and expireState != Expired:
+      if trace.downloadKey != EMPTY_STRING and expireState != Expired and trace.downloadKey != ERROR_DOWNLOAD_KEY:
         tdiv(class = "recent-trace-buttons"):
           tdiv(
             class = "recent-trace-buttons-image",
@@ -159,12 +171,13 @@ proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   ):
     tdiv(class = "recent-traces-title"):
       text "RECENT TRACES"
-    if self.data.recentTraces.len > 0:
-      for trace in self.data.recentTraces:
-        recentProjectView(self, trace)
-    else:
-      tdiv(class = "no-recent-traces"):
-        text "No traces yet."
+    tdiv(class = "recent-traces-list"):
+      if self.data.recentTraces.len > 0:
+        for trace in self.data.recentTraces:
+          recentProjectView(self, trace)
+      else:
+        tdiv(class = "no-recent-traces"):
+          text "No traces yet."
 
 proc renderOption(self: WelcomeScreenComponent, option: WelcomeScreenOption): VNode =
   let optionClass = toLowerAscii($(option.name)).split().join("-")

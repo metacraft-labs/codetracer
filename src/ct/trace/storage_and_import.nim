@@ -186,4 +186,4 @@ proc uploadTrace*(trace: Trace) =
 
   removeFile(outputZip & ".enc")
 
-  quit(exitCode)
+  quit(0)

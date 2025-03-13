@@ -1142,6 +1142,7 @@ type
     loadingTrace*: Trace
     copyMessageActive*: JsAssoc[int, bool]
     infoMessageActive*: JsAssoc[int, bool]
+    errorMessageActive*: JsAssoc[int, bool]
 
   ReplComponent* = ref object of Component
     history*: seq[DebugInteraction]
