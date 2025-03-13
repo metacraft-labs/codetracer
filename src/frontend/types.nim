@@ -88,6 +88,8 @@ type
 
   EventDropDownBox* = enum Filter, OnlyTrace, OnlyRecordedEvent, EnableDisable
 
+  ExpireTraceState* = enum ThreeDaysLeft, Expired, NotExpiringSoon, NoExpireState
+
   # works great yes
   WithLocation* = concept a
     a.path is cstring
