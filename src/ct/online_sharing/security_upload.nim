@@ -1,4 +1,4 @@
-import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, osproc ]
+import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, osproc, httpclient, mimetypes ]
 import ../../common/[ config ]
 
 proc generateSecurePassword*(): string =
@@ -61,8 +61,24 @@ proc zipFileWithEncryption*(inputFile: string, outputZip: string, password: stri
   removeFile(outputZip)
 
 proc uploadEncyptedZip*(file: string): (string, int) =
-  # TODO: Plug in http client instead of curl
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
-  let cmd = &"curl -s -X POST -F \"file=@{file}.enc\" {config.webApiRoot}/upload"
-  let (output, exitCode) = execCmdEx(cmd)
-  (output, exitCode)
+  var exitCode = 0
+  var response = ""
+
+  var client = newHttpClient()
+  let mimes = newMimetypes()
+  var data = newMultipartData()
+
+  data.addFiles({"file": file & ".enc"}, mimeDb = mimes)
+  
+  try:
+    response = client.postContent(fmt"{config.webApiRoot}/upload", multipart=data)
+    exitCode = 0
+  except CatchableError as e:
+    echo fmt"error: can't upload to API: {e.msg}"
+    response = ""
+    exitCode = 1
+  finally:
+    client.close()
+  
+  (response, exitCode)
