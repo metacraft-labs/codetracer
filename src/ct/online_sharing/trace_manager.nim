@@ -1,4 +1,4 @@
-import std/[ options, strutils, os, osproc, strformat, json ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
+import std/[ options, strutils, os, osproc, strformat, json, httpclient ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
 import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import, record ]
@@ -56,9 +56,16 @@ proc downloadCommand*(traceRegistryId: string) =
     let zipPath = codetracerTmpPath / "tmp.zip"
     let config = loadConfig(folder=getCurrentDir(), inTest=false)
     let localPath = codetracerTmpPath / "tmp.zip.enc"
-    # TODO: Plug in an http client
-    let cmd = &"curl -s -o {localPath} {config.webApiRoot}/download?DownloadId={downloadId}"
-    let (output, exitCode) = execCmdEx(cmd)
+
+    var client = newHttpClient()
+    
+    try:
+      client.downloadFile(fmt"{config.webApiRoot}/download?DownloadId={downloadId}", localPath)
+    except CatchableError as e:
+      echo fmt"error: can't download from API: {e.msg}"
+      quit(1)
+    finally:
+      client.close()
 
     decryptZip(localPath, password, zipPath)
 
@@ -81,8 +88,7 @@ proc downloadCommand*(traceRegistryId: string) =
     removeFile(zipPath)
 
     echo traceId
-
-    quit(exitCode)
+    quit(0)
 
 proc deleteAndResetFields(id: int, test: bool) =
   updateField(id, "remoteShareDownloadId", "", test)
