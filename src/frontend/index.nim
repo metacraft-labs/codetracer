@@ -830,17 +830,17 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
           "value": uploadData
         }
       )
-    else:
-      let uploadData = UploadedTraceData(
-        downloadKey: splitData[0],
-      )
-      mainWindow.webContents.send(
-        "CODETRACER::uploaded-trace-received",
-        js{
-          "argId": j(response.trace.program & ":" & $response.trace.id),
-          "value": uploadData
-        }
-      )
+  else:
+    let uploadData = UploadedTraceData(
+      downloadKey: "Errored"
+    )
+    mainWindow.webContents.send(
+      "CODETRACER::uploaded-trace-received",
+      js{
+        "argId": j(response.trace.program & ":" & $response.trace.id),
+        "value": uploadData
+      }
+    )
 
 proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
   let res = await readProcessOutput(
@@ -1492,7 +1492,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
       save: save
     }
   else:
-    let recentTraces = await app.findRecentTracesWithCodetracer(limit=4)
+    let recentTraces = await app.findRecentTracesWithCodetracer(limit=(-1))
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,
