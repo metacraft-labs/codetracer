@@ -13,3 +13,10 @@ let
 var replayInteractive* = false
 var electronPid*: int = -1
 var rrPid* = -1 # global, so it can be updated immediately on starting a process, and then used in `onInterrupt` if needed
+
+# for now hardcode: files are usually useful and
+# probably much less perf/size compared to actual traces
+# it's still good to have an option/opt-out, so we leave that
+# as a flag in the internals, but not exposed to user yet
+# that's why for now it's hardcoded for db
+const DB_SELF_CONTAINED_DEFAULT* = true
