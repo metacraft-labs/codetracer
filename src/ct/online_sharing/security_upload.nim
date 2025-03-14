@@ -71,7 +71,7 @@ proc uploadEncyptedZip*(file: string): (string, int) =
   data.addFiles({"file": file & ".enc"}, mimeDb = mimes)
   
   try:
-    response = client.postContent(fmt"{config.webApiRoot}/upload", multipart=data)
+    response = client.postContent(fmt"{config.uploadApi}", multipart=data)
     exitCode = 0
   except CatchableError as e:
     echo fmt"error: can't upload to API: {e.msg}"

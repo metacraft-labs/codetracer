@@ -28,7 +28,10 @@ type
     shortcutMap* {.defaultVal: ShortcutMap().}: ShortcutMap
     defaultBuild*: string
     showMinimap*: bool
-    webApiRoot*:  string
+    downloadApi*: string
+    uploadApi*: string
+    deleteApi*: string
+    traceSharingEnabled*: bool
 
   Config* = ref ConfigObject
 
