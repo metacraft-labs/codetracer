@@ -161,7 +161,7 @@
           padding: 6px
           padding-left: 14px
           padding-right: 14px
-          border-radius: 4px
+          border-radius: 6px
 
           &.hovered
             // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
@@ -187,24 +187,33 @@
         padding: 8px
         margin-top: 48px
         margin-bottom: 48px
+        padding-right: 0px
+      
+      .recent-traces-title
+        text-align: start
+        font-size: 18px
+        font-weight: BOLD_WEIGHT
+        line-height: 18px
+        letter-spacing: -0.18px
+        font-family: 'SpaceGrotesk'
+        margin-bottom: 6px
 
-        .recent-traces-title
-          text-align: start
-          font-size: 18px
-          font-weight: BOLD_WEIGHT
-          line-height: 18px
-          letter-spacing: -0.18px
-          font-family: 'SpaceGrotesk'
+      .recent-traces-list
+        max-height: 172px
+        overflow-y: scroll
+        overflow-x: visible
 
         .recent-trace
           color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR;
-          height: 28px;
-          margin-top: 8px;
+          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
+          height: 28px
+          margin-top: 2px
+          margin-bottom: 6px
           display: flex
           position: relative
           text-align: left
           border-radius: 4px
+          width: -webkit-fill-available
 
           &:hover
             cursor: pointer
@@ -234,7 +243,7 @@
               
           .recent-trace-title-content
             // seems to be required, so ellipsis can work
-            width: 500px
+            max-width: 45ch
             // this could put an ellipsis in the beginning if long
             // but it seems it has problems with punctuation, and indeed with
             // path separators e.g. `/` going in the end
@@ -418,7 +427,8 @@
         background-repeat: no-repeat
         background-size: 40px 40px
         background-position: center
-        margin-bottom: 8px
+        margin-top: 2px
+        margin-bottom: 6px
 
         &.in-progress
           background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
@@ -440,3 +450,70 @@
         height: 30px
         font-family: "FiraCode"
         font-size: 20px
+
+.online-functionality-buttons
+  display: flex
+  padding-right: 2px
+
+  .recent-trace-buttons
+    margin-left: 8px
+    margin-top: 2px
+    margin-bottom: 6px
+    height: 28px
+    width: 28px
+    background-color: DEBUG_BUTTON_BORDER_COLOR
+    border-radius: 4px
+    cursor: pointer
+  
+    &:hover
+      outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+
+    &:active
+      background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+
+    &.trace-info-button-active
+      background-color: WELCOME_SCREEN_ACTIVE_BACKGROUND
+  
+  .recent-trace-buttons-image
+    background-repeat: no-repeat
+    background-size: 16px 16px
+    background-position: center
+    height: 28px
+  
+  #trace-upload-button
+    background-image: WELCOME_SCREEN_UPLOAD_BUTTON
+
+  #trace-copy-button
+    background-image: WELCOME_SCREEN_COPY_BUTTON
+  
+  #trace-delete-button
+    background-image: WELCOME_SCREEN_DELETE_BUTTON
+  
+  #trace-info-button
+    background-image: WELCOME_SCREEN_INFO_BUTTON
+  
+  #trace-info-button-active
+    background-image: WELCOME_SCREEN_INFO_ACTIVE_BUTTON
+
+  .welcome-path-active
+    opacity: 1
+    visibility: visible
+    height: 24px
+    left: calc(100% + 8px)
+    position: absolute
+    width: fit-content
+
+    &:after
+      top: 18%
+      left: -14px
+      border-color: transparent TOOLTIP_BACKGROUND transparent transparent !important
+
+.recent-trace-container
+  display: flex
+  align-items: center
+  justify-content: space-between
+
+.new-online-trace-form
+  input
+    padding-left: 8px
+    background-image: none

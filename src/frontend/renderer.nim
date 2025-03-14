@@ -488,6 +488,12 @@ proc onContextStartHistory*(sender: js, response: jsobject(inState=bool, express
 proc onLoadParsedExprsReceived*(sender: js, response: jsobject(argId=cstring, value=JsAssoc[cstring, seq[FlowExpression]])) =
   jsAsFunction[proc(response: JsAssoc[cstring, seq[FlowExpression]]): void](data.network.futures["load-parsed-exprs"][response.argId])(response.value)
 
+proc onUploadedTraceReceived*(sender: js, response: jsobject(argId=cstring, value=UploadedTraceData)) =
+  jsAsFunction[proc(response: UploadedTraceData): void](data.network.futures["upload-trace-file"][response.argId])(response.value)
+
+proc onDeletedOnlineTraceReceived*(sender: js, response: jsobject(argId=cstring, value=bool)) =
+  jsAsFunction[proc(response: bool): void](data.network.futures["delete-online-trace-file"][response.argId])(response.value)
+
 # TODO: make some kind of dsl?
 # locals
 proc onLoadLocalsReceived*(sender: js, response: jsobject(argId=cstring, value=JsAssoc[cstring, Value])) =

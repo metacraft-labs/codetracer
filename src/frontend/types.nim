@@ -88,6 +88,8 @@ type
 
   EventDropDownBox* = enum Filter, OnlyTrace, OnlyRecordedEvent, EnableDisable
 
+  ExpireTraceState* = enum ThreeDaysLeft, Expired, NotExpiringSoon, NoExpireState
+
   # works great yes
   WithLocation* = concept a
     a.path is cstring
@@ -1094,6 +1096,9 @@ type
     kind*: RecordStatusKind
     errorMessage*: cstring
 
+  NewDownloadRecord* = ref object
+    args*: seq[cstring]
+    status*: RecordStatus
 
   NewTraceRecord* = ref object
     kit*: cstring
@@ -1126,14 +1131,21 @@ type
     hovered*: bool
     inactive*: bool # grayed out by default (lower opacity)
 
+  MessageKind* = enum UploadError, DeleteError, ResetMessage
 
   WelcomeScreenComponent* = ref object of Component
     options*: seq[WelcomeScreenOption]
     welcomeScreen*: bool
     newRecordScreen*: bool
+    openOnlineTrace*: bool
     newRecord*: NewTraceRecord
+    newDownload*: NewDownloadRecord
     loading*: bool
     loadingTrace*: Trace
+    recentTracesScroll*: int
+    copyMessageActive*: JsAssoc[int, bool]
+    infoMessageActive*: JsAssoc[int, bool]
+    errorMessageActive*: JsAssoc[int, MessageKind]
 
   ReplComponent* = ref object of Component
     history*: seq[DebugInteraction]
@@ -1453,6 +1465,7 @@ type
     shortcutMap*: ShortcutMap
     defaultBuild*: cstring
     showMinimap*: bool
+    traceSharingEnabled*: bool
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint

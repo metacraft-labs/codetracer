@@ -153,6 +153,9 @@ type
     rrPid*: int
     exitCode*: int
     calltraceMode*: CalltraceMode
+    downloadKey*: langstring
+    controlId*: langstring
+    onlineExpireTime*: int
 
   CalltraceMode* {.pure.} = enum NoInstrumentation, CallKeyOnly, RawRecordNoValues, FullRecord
 
@@ -1341,6 +1344,19 @@ type
   BugReportArg* = object ## BugReport arg
     title*: langstring
     description*: langstring
+  
+  UploadTraceArg* = object
+    trace*: Trace
+    programName*: langstring
+
+  UploadedTraceData* = object
+    downloadKey*: langstring
+    controlId*: langstring
+    expireTime*: langstring
+
+  DeleteTraceArg* = object
+    traceId*: int
+    controlId*: langstring
 
   DbEventKind* {.pure.} = enum Record, Trace, History
 

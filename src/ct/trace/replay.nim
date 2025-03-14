@@ -6,7 +6,7 @@ import std/[options ],
   shell,
   run
 
-proc internalReplayOrUpload(
+proc internalReplayOrUpload*(
   patternArg: Option[string],
   traceIdArg: Option[int],
   traceFolderArg: Option[string],

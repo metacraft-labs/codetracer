@@ -163,7 +163,10 @@ proc makeShellComponent*(data: Data, id: int): ShellComponent =
 proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
   result = WelcomeScreenComponent(
     id: data.generateId(Content.WelcomeScreen),
-    welcomeScreen: true
+    welcomeScreen: true,
+    copyMessageActive: JsAssoc[int, bool]{},
+    infoMessageActive: JsAssoc[int, bool]{},
+    errorMessageActive: JsAssoc[int, MessageKind]{}
   )
   data.ui.welcomeScreen = result
   data.registerComponent(result, Content.WelcomeScreen)
@@ -1312,3 +1315,9 @@ proc clearViewZones*(self: EditorViewComponent) =
   self.monacoEditor.changeViewZones do (view: js):
     for viewZone in self.viewZones:
       view.removeZone(viewZone)
+
+proc resetView*(self: WelcomeScreenComponent) =
+  self.loading = false
+  self.welcomeScreen = false
+  self.newRecordScreen = false
+  self.openOnlineTrace = false

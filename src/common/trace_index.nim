@@ -64,6 +64,47 @@ proc ensureDB(test: bool): DBConn =
   globalDbMap[test.int] = db
   db
 
+proc updateField*(
+  id: int,
+  fieldName: string,
+  fieldValue: string,
+  test: bool
+) =
+  let db = ensureDB(test)
+  db.exec(
+    sql(&"UPDATE traces SET {fieldName} = ? WHERE id = ?"),
+    fieldValue, id
+  )
+  db.close()
+
+proc updateField*(
+  id: int,
+  fieldName: string,
+  fieldValue: int,
+  test: bool
+) =
+  let db = ensureDB(test)
+  db.exec(
+    sql(&"UPDATE traces SET {fieldName} = ? WHERE id = ?"),
+    fieldValue, id
+  )
+  db.close()
+
+proc getField*(
+  id: int,
+  fieldName: string,
+  test: bool
+): string =
+  let db = ensureDB(test)
+  let res = db.getAllRows(
+    sql(&"SELECT {fieldName} FROM traces WHERE id = ? LIMIT 1"),
+    id
+  )
+  db.close()
+  if res.len > 0:
+    return res[0][0]
+  return ""
+
 proc recordTrace*(
     id: int,
     program: string,
@@ -81,7 +122,8 @@ proc recordTrace*(
     exitCode: int,
     calltrace: bool,
     calltraceMode: CalltraceMode,
-    test: bool): Trace =
+    test: bool,
+    downloadKey: string = ""): Trace =
   # TODO pass here a Trace value and instead if neeeded construct it from other helpers
 
   let currentDate: DateTime = now()
@@ -107,19 +149,19 @@ proc recordTrace*(
             sourceFolders, lowLevelFolder, outputFolder,
             lang, imported, shellID,
             rrPid, exitCode,
-            calltrace, calltraceMode, date)
+            calltrace, calltraceMode, date, remoteShareDownloadId)
           VALUES (?, ?, ?,
              ?, ?, ?, ?,
              ?, ?, ?,
              ?, ?, ?,
              ?, ?,
-             ?, ?, ?)""",
+             ?, ?, ?, ?)""",
             $id, program, args.join(" "),
             compileCommand, env, workdir, "", # <- output
             sourceFolders, lowLevelFolder, outputFolder,
             $(lang.int), $(imported.int), $shellID,
             $rrPid, $exitCode,
-            ord(calltrace), $calltraceMode, $traceDate)
+            ord(calltrace), $calltraceMode, $traceDate, downloadKey)
       break
     except DbError:
       echo "error: ", getCurrentExceptionMsg()
@@ -177,6 +219,12 @@ proc loadCalltraceMode*(raw: string, lang: Lang): CalltraceMode =
 proc loadTrace(trace: Row, test: bool): Trace =
   try:
     let lang = trace[10].parseInt.Lang
+    var expireTime = -1
+    try:
+      expireTime = trace[20].parseInt
+    except:
+      discard
+
     result = Trace(
       id: trace[0].parseInt,
       program: trace[1],
@@ -196,7 +244,10 @@ proc loadTrace(trace: Row, test: bool): Trace =
       shellID: trace[14].parseInt,
 
       calltrace: trace[15].parseInt != 0,
-      calltraceMode: loadCalltraceMode(trace[16], lang))
+      calltraceMode: loadCalltraceMode(trace[16], lang),
+      downloadKey: trace[18],
+      controlId: trace[19],
+      onlineExpireTime: expireTime)
   except CatchableError as e:
     # assume db schema change?
     echo "internal error: ", e.msg
@@ -314,9 +365,17 @@ proc findByRecordProcessId*(pid: int, test: bool): Trace =
 
 proc findRecentTraces*(limit: int, test: bool): seq[Trace] =
   let db = ensureDB(test)
-  let traces = db.getAllRows(
-    sql("SELECT * FROM traces ORDER BY id DESC LIMIT ?"),
-    $limit)
+  let traces =
+    if limit == -1:
+      db.getAllRows(
+        sql("SELECT * FROM traces ORDER BY id DESC LIMIT ?"),
+        $limit
+      )
+    else:
+      db.getAllRows(
+        sql("SELECT * FROM traces ORDER BY id DESC")
+      )
+
   if traces.len > 0:
     result = traces.mapIt(it.loadTrace(test))
 

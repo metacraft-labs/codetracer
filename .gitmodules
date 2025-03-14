@@ -65,3 +65,9 @@
 [submodule "libs/codetracer-python-recorder"]
 	path = libs/codetracer-python-recorder
 	url = https://github.com/metacraft-labs/codetracer-python-recorder.git
+[submodule "libs/nimcrypto"]
+	path = libs/nimcrypto
+	url = https://github.com/cheatfate/nimcrypto.git
+[submodule "libs/zip"]
+	path = libs/zip
+	url = git@github.com:nim-lang/zip.git

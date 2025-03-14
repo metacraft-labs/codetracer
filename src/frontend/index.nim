@@ -27,6 +27,8 @@ data.start = now()
 var close = false
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
+proc loadExistingRecord(traceId: int) {.async.}
+proc prepareForLoadingTrace(traceId: int, pid: int) {.async.}
 proc isCtInstalled: bool
 
 
@@ -804,6 +806,75 @@ proc onSearchProgram(sender: js, query: cstring) {.async.} =
 proc onLoadStepLines(sender: js, response: LoadStepLinesArg) {.async.} =
   discard debugger.loadStepLines(response)
 
+proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[
+      j"upload",
+      j"--trace-folder=" & response.trace.outputFolder
+    ]
+  )
+
+  if res.isOk:
+    let splitData =  res.v.split("\n")
+    if splitData.len() == 4:
+      let uploadData = UploadedTraceData(
+        downloadKey: splitData[0],
+        controlId: splitData[1],
+        expireTime: splitData[2]
+      )
+      mainWindow.webContents.send(
+        "CODETRACER::uploaded-trace-received",
+        js{
+          "argId": j(response.trace.program & ":" & $response.trace.id),
+          "value": uploadData
+        }
+      )
+  else:
+    let uploadData = UploadedTraceData(
+      downloadKey: "Errored"
+    )
+    mainWindow.webContents.send(
+      "CODETRACER::uploaded-trace-received",
+      js{
+        "argId": j(response.trace.program & ":" & $response.trace.id),
+        "value": uploadData
+      }
+    )
+
+proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[j"download"].concat(response.downloadKey)
+  )
+
+  if res.isOk:
+    let traceId = parseInt($res.v.trim())
+    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+    await loadExistingRecord(traceId)
+    mainWindow.webContents.send "CODETRACER::successful-download"
+  else:
+    mainWindow.webContents.send "CODETRACER::failed-download",
+      js{errorMessage: cstring"codetracer server down or wrong download key"}
+
+proc onDeleteOnlineTraceFile(sender: js, response: DeleteTraceArg) {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[
+      j"cmdDelete",
+      j"--trace-id=" & $response.traceId,
+      j"--control-id=" & response.controlId
+    ]
+  )
+
+  mainWindow.webContents.send(
+    "CODETRACER::deleted-online-trace-received",
+    js{
+      "argId": j($response.traceId & ":" & response.controlId),
+      "value": res.isOk
+    }
+  )
+
 proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
     codetracerExe.cstring,
@@ -1302,6 +1373,11 @@ proc configureIpcMain =
     "show-in-debug-instance"
     "send-bug-report-and-logs"
 
+    # Upload/Download
+    "upload-trace-file"
+    "download-trace-file"
+    "delete-online-trace-file"
+
     "restart"
 
     # "debug-gdb"
@@ -1420,7 +1496,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
       save: save
     }
   else:
-    let recentTraces = await app.findRecentTracesWithCodetracer(limit=4)
+    let recentTraces = await app.findRecentTracesWithCodetracer(limit=(-1))
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,
