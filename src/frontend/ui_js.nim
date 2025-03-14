@@ -814,6 +814,20 @@ proc onLoadingTrace(
   data.ui.welcomeScreen.loadingTrace = response.trace
   redrawAll()
 
+proc onFailedDownload(
+  sender: js,
+  response: jsobject(errorMessage=cstring)
+) =
+  data.ui.welcomeScreen.newDownload.status.kind = RecordError
+  data.ui.welcomeScreen.newDownload.status.errorMessage = response.errorMessage
+  redrawAll()
+
+proc onSuccessfulDownload(
+  sender: js,
+  response: jsobject()
+) =
+  data.ui.welcomeScreen.newDownload.status.kind = RecordSuccess
+  redrawAll()
 
 proc onWelcomeScreen(
   sender: js,
@@ -1087,6 +1101,8 @@ proc configureIPC(data: Data) =
 
     "finished": JsObject => debugger
     "error": DebuggerError => [debugger, ui]
+    "failed-download"
+    "successful-download"
 
     "follow-history"
 
