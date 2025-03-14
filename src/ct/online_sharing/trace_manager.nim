@@ -46,10 +46,11 @@ proc unzipFile(zipFile: string, outputDir: string): (string, int) =
   zip.close()
   return (outPath, traceId)
 
-proc downloadCommand*(traceRegistryId: string) =
+proc downloadTraceCommand*(traceRegistryId: string) =
   # We expect a traceRegistryId to have <downloadId>::<passwordKey>
   let stringSplit = traceRegistryId.split("//")
   if stringSplit.len() != 3:
+    echo "error: Invalid download key! Should be <program_name>//<download_id>//<encryption_password>"
     quit(1)
   else:
     let downloadId = stringSplit[1]
