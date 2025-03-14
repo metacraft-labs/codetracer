@@ -1,4 +1,5 @@
 import
+  std / os,
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../online_sharing/trace_manager,
@@ -10,6 +11,16 @@ import
   electron,
   results,
   backends
+
+proc eventuallyWrapElectron*: bool =
+  if getEnv("CODETRACER_WRAP_ELECTRON", "") == "1":
+    var args: seq[string] = @[]
+    for i in 1 .. paramCount():
+      args.add(paramStr(i))
+    wrapElectron(args)
+    true
+  else:
+    false
 
 proc runInitial*(conf: CodetracerConf) =
   # TODO should this be here?
@@ -137,6 +148,8 @@ proc runInitial*(conf: CodetracerConf) =
     #   replaySummary(conf.summaryTraceId, conf.summaryOutputFolder)
     # of StartupCommand.`report-bug`:
     #   sendBugReportAndLogsCommand(conf.title, conf.description, conf.pid, conf.confirmSend)
+    of StartupCommand.electron:
+      wrapElectron(conf.electronArgs)
     of StartupCommand.`trace-metadata`:
       traceMetadata(
         conf.traceMetadataIdArg, conf.traceMetadataPathArg,
