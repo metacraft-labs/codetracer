@@ -114,7 +114,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
             tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
               style = style(StyleAttr.top, &"{tooltipTopPosition}px")
             ):
-              text "Server error when uploading"
+              text "Server error or maximum file size reached (4GB)"
       if trace.controlId != EMPTY_STRING and expireState != Expired:
         tdiv(class = "recent-trace-buttons", id = "delete-button"):
           tdiv(

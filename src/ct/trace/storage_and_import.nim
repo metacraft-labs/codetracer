@@ -161,29 +161,49 @@ proc importDbTrace*(
     calltraceMode = CalltraceMode.FullRecord,
     downloadKey = downloadKey)
 
+proc getFolderSize(folderPath: string): int64 =
+  var totalSize: int64 = 0
+  for kind, path in walkDir(folderPath):
+    if kind == pcFile:
+      totalSize += getFileSize(path)
+  return totalSize
+
 proc uploadTrace*(trace: Trace) =
   let outputZip = trace.outputFolder / "tmp.zip"
   let aesKey = generateSecurePassword()
 
-  zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
+  var (output, exitCode) = ("", 0)
+  
+  if getFolderSize(trace.outputFolder) > 4_000_000_000:
+    quit(153)
 
-  let (output, exitCode) = uploadEncyptedZip(outputZip)
-  let jsonMessage = parseJson(output)
-  let downloadKey = trace.program & "//" & jsonMessage["DownloadId"].getStr("") & "//" & aesKey
+  try:
+    zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
 
-  if jsonMessage["DownloadId"].getStr("") notin @["", "Errored"]:
+    (output, exitCode) = uploadEncyptedZip(outputZip)
+    let jsonMessage = parseJson(output)
+    let downloadKey = trace.program & "//" & jsonMessage["DownloadId"].getStr("") & "//" & aesKey
 
-    updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
-    updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
-    updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getInt(), false)
+    if jsonMessage["Successful"].getBool(false):
 
-    echo downloadKey
-    echo jsonMessage["ControlId"].getStr("")
-    echo jsonMessage["Expires"].getInt()
+      updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
+      updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
+      updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getInt(), false)
 
-  else:
-    echo downloadKey
+      echo downloadKey
+      echo jsonMessage["ControlId"].getStr("")
+      echo jsonMessage["Expires"].getInt()
 
+    else:
+      exitCode = 1
+
+  except CatchableError as e:
+    echo fmt"error: can't delete trace {e.msg}"
+    removeFile(outputZip)
+    removeFile(outputZip & ".enc")
+    exitCode = 1
+
+  removeFile(outputZip)
   removeFile(outputZip & ".enc")
 
-  quit(0)
+  quit(exitCode)

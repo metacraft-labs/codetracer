@@ -32,7 +32,7 @@ proc decryptZip(encryptedFile: string, password: string, outputFile: string) =
   var depaddedData = pkcs7Unpad(decrypted)
   writeFile(outputFile, depaddedData)
 
-proc unzipDecryptedFile(zipFile: string, outputDir: string): (string, int) =
+proc unzipFile(zipFile: string, outputDir: string): (string, int) =
   var zip: ZipArchive
   if not zip.open(zipFile, fmRead):
     raise newException(IOError, "Failed to open decrypted ZIP: " & zipFile)
@@ -54,54 +54,63 @@ proc downloadCommand*(traceRegistryId: string) =
   else:
     let downloadId = stringSplit[1]
     let password = stringSplit[2]
-    let zipPath = codetracerTmpPath / "tmp.zip"
+    let zipPath = codetracerTmpPath / &"{downloadId}.zip"
     let config = loadConfig(folder=getCurrentDir(), inTest=false)
-    let localPath = codetracerTmpPath / "tmp.zip.enc"
+    let localPath = codetracerTmpPath / &"{downloadId}.zip.enc"
 
     var client = newHttpClient()
-    
+    var exitCode = 0
+
     try:
       client.downloadFile(fmt"{config.webApiRoot}/download?DownloadId={downloadId}", localPath)
+
+      decryptZip(localPath, password, zipPath)
+
+      let (traceFolder, traceId) = unzipFile(zipPath, codetracerTraceDir)
+      let tracePath = traceFolder / "trace.json"
+      let traceJson = parseJson(readFile(tracePath))
+      let traceMetadataPath = traceFolder / "trace_metadata.json"
+
+      var pathValue = ""
+
+      for item in traceJson:
+        if item.hasKey("Path"):
+          pathValue = item["Path"].getStr("")
+          break
+
+      let lang = detectLang(pathValue, LangUnknown)
+      discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceRegistryId)
+
+      echo traceId
+
     except CatchableError as e:
-      echo fmt"error: can't download from API: {e.msg}"
-      quit(1)
+      echo fmt"error: downloading file '{e.msg}'"
+      exitCode = 1
+
     finally:
-      client.close()
+      removeFile(localPath)
+      removeFile(zipPath)
 
-    decryptZip(localPath, password, zipPath)
-
-    let (traceFolder, traceId) = unzipDecryptedFile(zipPath, codetracerTraceDir)
-    let tracePath = traceFolder / "trace.json"
-    let traceJson = parseJson(readFile(tracePath))
-    let traceMetadataPath = traceFolder / "trace_metadata.json"
-
-    var pathValue = ""
-
-    for item in traceJson:
-      if item.hasKey("Path"):
-        pathValue = item["Path"].getStr("")
-        break
-
-    let lang = detectLang(pathValue, LangUnknown)
-    discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceRegistryId)
-
-    removeFile(localPath)
-    removeFile(zipPath)
-
-    echo traceId
-    quit(0)
-
-proc deleteAndResetFields(id: int, test: bool) =
-  updateField(id, "remoteShareDownloadId", "", test)
-  updateField(id, "remoteShareControlId", "", test)
-  updateField(id, "remoteShareExpireTime", -1, test)
+    quit(exitCode)
 
 proc deleteTraceCommand*(id: int, controlId: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
-  let cmd = &"curl -s {config.webApiRoot}/delete?ControlId={controlId}"
-  let (output, exitCode) = execCmdEx(cmd)
+  let test = false
+  var exitCode = 0
 
-  if exitCode == 0:
-    deleteAndResetFields(id, false)
+  var client = newHttpClient()
+  
+  try:
+    discard client.getContent(fmt"{config.webApiRoot}/delete?ControlId={controlId}")
+    
+    updateField(id, "remoteShareDownloadId", "", test)
+    updateField(id, "remoteShareControlId", "", test)
+    updateField(id, "remoteShareExpireTime", -1, test)
+    exitCode = 0
+  except CatchableError as e:
+    echo fmt"error: can't delete trace {e.msg}"
+    exitCode = 1
+  finally:
+    client.close()
 
   quit(exitCode)
