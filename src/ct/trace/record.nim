@@ -161,7 +161,7 @@ proc record(cmd: string, args: seq[string], compileCommand: string,
   except OsError:
     let foundExe = findExe(executable)
     if foundExe == "":
-      error &"Can't find {executable}"
+      errorMessage &"Can't find {executable}"
       quit(1)
     else:
       executable = foundExe
