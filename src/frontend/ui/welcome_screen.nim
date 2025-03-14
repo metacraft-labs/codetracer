@@ -307,9 +307,10 @@ proc chooseExecutable(self: WelcomeScreenComponent) =
 proc chooseDir(self: WelcomeScreenComponent, fieldName: cstring) =
   self.data.ipc.send "CODETRACER::choose-dir", js{ fieldName: fieldName }
 
-proc renderRecordResult(self: WelcomeScreenComponent, status: RecordStatus): VNode =
+proc renderRecordResult(self: WelcomeScreenComponent, status: RecordStatus, isDownload: bool = false): VNode =
   var containerClass = "new-record-result"
   var iconClass = "new-record-status-icon"
+  let name = if isDownload: "Download" else: "Record"
   case status.kind:
   of RecordInit:
     containerClass = containerClass & " empty"
@@ -334,13 +335,13 @@ proc renderRecordResult(self: WelcomeScreenComponent, status: RecordStatus): VNo
     tdiv(class = &"new-record-{status.kind}-message"):
       case status.kind:
       of InProgress:
-        text &"Recording..."
+        text &"{name}ing..."
 
       of RecordError:
-        text &"Record failed. Error: {status.errorMessage}"
+        text &"{name} failed. Error: {status.errorMessage}"
 
       of RecordSuccess:
-        text &"Record successful! Opening..."
+        text &"{name} successful! Opening..."
 
       else:
         discard
@@ -382,7 +383,7 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
       hasButton = false,
       inputText = self.newDownload.args.join(j" ")
     )
-    renderRecordResult(self, self.newDownload.status)
+    renderRecordResult(self, self.newDownload.status, true)
     tdiv(class = "new-record-form-row"):
       button(
         class = "cancel-button",
