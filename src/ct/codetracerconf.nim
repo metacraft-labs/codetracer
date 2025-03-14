@@ -32,6 +32,9 @@ type
     list,
     help,
     version,
+
+    electron,
+
     # tail,
     start_core, # TODO .hidden?
     # host,
@@ -336,6 +339,13 @@ type
     #     defaultValue: true,
     #     desc: "Warning message for sensative data"
     #   .} : bool
+    of electron:
+      electronArgs* {.
+        restOfArgs
+        defaultValue: @[]
+        desc: "Arguments for electron",
+        longDesc: "a wrapper to be able to call directly the electron in our distribution"
+      .} : seq[string]
     of `trace-metadata`:
       traceMetadataIdArg* {.
         name: "id",

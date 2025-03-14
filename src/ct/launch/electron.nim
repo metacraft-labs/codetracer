@@ -71,3 +71,41 @@ proc launchElectron*(args: seq[string] = @[], trace: Trace = nil, recordCore: bo
     return electronExitCode == RESTART_EXIT_CODE
 
   return false
+
+when defined(posix):
+  import std / posix 
+
+  proc wrapElectron*(args: seq[string]) =
+    let startIndex = getEnv("CODETRACER_START_INDEX", "") == "1"
+
+    # internal ct runs should be normal, not wrapping electron again
+    putEnv("CODETRACER_WRAP_ELECTRON", "")
+    putEnv("CODETRACER_START_INDEX", "")
+
+    let execvArgsCount = if startIndex: args.len + 2 else: args.len + 1
+
+    # copied and adapted from nim forum: nucky9 and Araq:
+    #   https://forum.nim-lang.org/t/7415#47044
+    var execvArgs = cast[cstringArray](alloc0((execvArgsCount + 1) * sizeof(cstring)))
+    execvArgs[0] = electronExe.cstring
+    for i, arg in args:
+      execvArgs[i + 1] = arg.cstring
+    
+    if startIndex:
+      execvArgs[execvArgsCount - 1] = electronIndexPath.cstring
+    
+    execvArgs[execvArgsCount] = nil
+
+    discard execv(
+      electronExe.cstring,
+      execvArgs)
+    
+    #   options = {poParentStreams})
+    # let code = waitForExit(process)
+    # quit(code)
+
+else:
+  proc wrapElectron*(args: seq[string]) =
+    echo "UNSUPPORTED: wrapping electron with ct currently on this platform"
+    # TODO find the equivalent of `execv` on windows, if it makes sense for
+    # the e2e (playwright) case
