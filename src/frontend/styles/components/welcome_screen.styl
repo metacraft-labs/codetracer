@@ -189,24 +189,26 @@
         margin-bottom: 48px
         padding-right: 0px
       
+      .recent-traces-title
+        text-align: start
+        font-size: 18px
+        font-weight: BOLD_WEIGHT
+        line-height: 18px
+        letter-spacing: -0.18px
+        font-family: 'SpaceGrotesk'
+        margin-bottom: 6px
+
       .recent-traces-list
-        max-height: 176px
+        max-height: 172px
         overflow-y: scroll
         overflow-x: visible
 
-        .recent-traces-title
-          text-align: start
-          font-size: 18px
-          font-weight: BOLD_WEIGHT
-          line-height: 18px
-          letter-spacing: -0.18px
-          font-family: 'SpaceGrotesk'
-
         .recent-trace
           color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR;
-          height: 28px;
-          margin-top: 8px;
+          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
+          height: 28px
+          margin-top: 2px
+          margin-bottom: 6px
           display: flex
           position: relative
           text-align: left
@@ -425,7 +427,8 @@
         background-repeat: no-repeat
         background-size: 40px 40px
         background-position: center
-        margin-bottom: 8px
+        margin-top: 2px
+        margin-bottom: 6px
 
         &.in-progress
           background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
@@ -450,10 +453,12 @@
 
 .online-functionality-buttons
   display: flex
+  padding-right: 2px
 
   .recent-trace-buttons
     margin-left: 8px
-    margin-top: 8px
+    margin-top: 2px
+    margin-bottom: 6px
     height: 28px
     width: 28px
     background-color: DEBUG_BUTTON_BORDER_COLOR
@@ -490,20 +495,6 @@
   #trace-info-button-active
     background-image: WELCOME_SCREEN_INFO_ACTIVE_BUTTON
 
-  .expire-time-text
-    margin-top: 8px
-    white-space: nowrap
-    color: WELCOME_SCREEN_EXPIRE_TIME_COLOR
-    font-family: "SpaceGrotesk"
-    font-size: 12px
-    font-style: normal
-    font-weight: 400
-    line-height: 18px
-    letter-spacing: -0.12px
-    display: flex
-    align-items: center
-    margin-left: 8px
-
   .welcome-path-active
     opacity: 1
     visibility: visible
@@ -511,7 +502,6 @@
     left: calc(100% + 8px)
     position: absolute
     width: fit-content
-    top: auto
 
     &:after
       top: 18%

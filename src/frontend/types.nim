@@ -1130,6 +1130,7 @@ type
     hovered*: bool
     inactive*: bool # grayed out by default (lower opacity)
 
+  MessageKind* = enum UploadError, DeleteError, ResetMessage
 
   WelcomeScreenComponent* = ref object of Component
     options*: seq[WelcomeScreenOption]
@@ -1140,9 +1141,10 @@ type
     newDownload*: NewDownloadRecord
     loading*: bool
     loadingTrace*: Trace
+    recentTracesScroll*: int
     copyMessageActive*: JsAssoc[int, bool]
     infoMessageActive*: JsAssoc[int, bool]
-    errorMessageActive*: JsAssoc[int, bool]
+    errorMessageActive*: JsAssoc[int, MessageKind]
 
   ReplComponent* = ref object of Component
     history*: seq[DebugInteraction]

@@ -25,7 +25,7 @@ proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
     trace.onlineExpireTime = ($uploadedData.expireTime).parseInt()
   else:
     trace.downloadKey = uploadedData.downloadKey
-    self.errorMessageActive[trace.id] = true
+    self.errorMessageActive[trace.id] = UploadError
 
   self.data.redraw()
 
@@ -43,17 +43,22 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
     trace.controlId = EMPTY_STRING
     trace.downloadKey = EMPTY_STRING
     trace.onlineExpireTime = NO_EXPIRE_TIME
+  else:
+    self.errorMessageActive[trace.id] = DeleteError
 
   self.data.redraw()
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
+  let tooltipTopPosition = (self.data.recentTraces.len - trace.id) * 36 - self.recentTracesScroll
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
   let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
-  let (errorActiveClass, errorInfo) = if trace.downloadKey == ERROR_DOWNLOAD_KEY: ("welcome-path-active", "active-error") else: ("", "")
-  if self.errorMessageActive.hasKey(trace.id) and self.errorMessageActive[trace.id]:
+  let uploadErrorClass = if self.errorMessageActive.hasKey(trace.id) and self.errorMessageActive[trace.id] == UploadError: "welcome-path-active" else: ""
+  let deleteErrorClass = if self.errorMessageActive.hasKey(trace.id) and self.errorMessageActive[trace.id] == DeleteError: "welcome-path-active" else: ""
+  if self.errorMessageActive.hasKey(trace.id) and self.errorMessageActive[trace.id] in @[UploadError, DeleteError]:
     discard setTimeout(proc() =
-      self.errorMessageActive[trace.id] = false
-      trace.downloadKey = ""
+      self.errorMessageActive[trace.id] = ResetMessage
+      if self.errorMessageActive[trace.id] == UploadError:
+        trace.downloadKey = ""
       self.data.redraw(),
       2000
     )
@@ -106,7 +111,9 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.target.focus()
               discard self.uploadTrace(trace)
             ):
-            tdiv(class = fmt"custom-tooltip {errorActiveClass}"):
+            tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
+              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+            ):
               text "Server error when uploading"
       if trace.controlId != EMPTY_STRING and expireState != Expired:
         tdiv(class = "recent-trace-buttons", id = "delete-button"):
@@ -117,7 +124,11 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
               ev.stopPropagation()
               ev.target.focus()
               discard self.deleteUploadedTrace(trace)
-            )
+            ):
+            tdiv(class = fmt"custom-tooltip {deleteErrorClass}", id = &"tooltip-{trace.id}",
+              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+            ):
+              text "Server error when deleting"
       if trace.downloadKey != EMPTY_STRING and expireState != Expired and trace.downloadKey != ERROR_DOWNLOAD_KEY:
         tdiv(class = "recent-trace-buttons"):
           tdiv(
@@ -135,7 +146,9 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
                 2000
               )
           ):
-            tdiv(class = fmt"custom-tooltip {activeClass}"):
+            tdiv(class = fmt"custom-tooltip {activeClass}", id = &"tooltip-{trace.id}",
+              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+            ):
               text "Download key copied to clipboard"
       if expireState != NoExpireState or expireState in @[Expired, ThreeDaysLeft]:
         let dt = fromUnix(trace.onlineExpireTime)
@@ -156,7 +169,9 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
             onmouseleave = proc(ev: Event, tg: VNode) =
               self.infoMessageActive[trace.id] = false
           ):
-            tdiv(class = fmt"custom-tooltip {infoActive}"):
+            tdiv(class = fmt"custom-tooltip {infoActive}", id = &"tooltip-{trace.id}",
+              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+            ):
               case expireState:
               of ThreeDaysLeft:
                 text &"The key will expire on {formatted}"
@@ -171,7 +186,11 @@ proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   ):
     tdiv(class = "recent-traces-title"):
       text "RECENT TRACES"
-    tdiv(class = "recent-traces-list"):
+    tdiv(
+      class = "recent-traces-list",
+      onscroll = proc(ev: Event, tg: VNode) =
+        self.recentTracesScroll = cast[int](ev.target.scrollTop)
+    ):
       if self.data.recentTraces.len > 0:
         for trace in self.data.recentTraces:
           recentProjectView(self, trace)
