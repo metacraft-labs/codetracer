@@ -1,4 +1,4 @@
-import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, osproc, httpclient, mimetypes ]
+import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes ]
 import ../../common/[ config ]
 
 proc generateSecurePassword*(): string =
@@ -58,7 +58,6 @@ proc zipFileWithEncryption*(inputFile: string, outputZip: string, password: stri
 
   zip.close()
   encryptZip(outputZip, password)
-  removeFile(outputZip)
 
 proc uploadEncyptedZip*(file: string): (string, int) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
