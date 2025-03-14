@@ -855,7 +855,7 @@ proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey = seq[cstrin
     mainWindow.webContents.send "CODETRACER::successful-download"
   else:
     mainWindow.webContents.send "CODETRACER::failed-download",
-      js{errorMessage: cstring"codetracer server down"}
+      js{errorMessage: cstring"codetracer server down or wrong download key"}
 
 proc onDeleteOnlineTraceFile(sender: js, response: DeleteTraceArg) {.async.} =
   let res = await readProcessOutput(
