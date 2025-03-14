@@ -102,99 +102,86 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
         separateBar()
         span(class = "recent-trace-title-content"):
           text limitedProgramName # TODO: tippy
-    tdiv(class = "online-functionality-buttons"):
-      if (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or expireState == ExpireTraceState.Expired or trace.downloadKey == ERROR_DOWNLOAD_KEY:
-        tdiv(class = "recent-trace-buttons", id = "upload-button"):
-          tdiv(
-            class = "recent-trace-buttons-image",
-            id = "trace-upload-button",
-            onclick = proc(ev: Event, tg: VNode) =
-              if featureFlag:
+    if featureFlag:
+      tdiv(class = "online-functionality-buttons"):
+        if (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or expireState == ExpireTraceState.Expired or trace.downloadKey == ERROR_DOWNLOAD_KEY:
+          tdiv(class = "recent-trace-buttons", id = "upload-button"):
+            tdiv(
+              class = "recent-trace-buttons-image",
+              id = "trace-upload-button",
+              onclick = proc(ev: Event, tg: VNode) =
                 ev.stopPropagation()
                 ev.target.focus()
                 discard self.uploadTrace(trace)
-              else:
-                self.infoMessageActive[trace.id] = true
+              ):
+                tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
+                  style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+                ):
+                  text "Server error or maximum file size reached (4GB)"
+        if trace.controlId != EMPTY_STRING and expireState != Expired:
+          tdiv(class = "recent-trace-buttons", id = "delete-button"):
+            tdiv(
+              class = "recent-trace-buttons-image",
+              id = "trace-delete-button",
+              onclick = proc(ev: Event, tg: VNode) =
+                ev.stopPropagation()
+                ev.target.focus()
+                discard self.deleteUploadedTrace(trace)
+              ):
+              tdiv(class = fmt"custom-tooltip {deleteErrorClass}", id = &"tooltip-{trace.id}",
+                style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+              ):
+                text "Server error when deleting"
+        if trace.downloadKey != EMPTY_STRING and expireState != Expired and trace.downloadKey != ERROR_DOWNLOAD_KEY:
+          tdiv(class = "recent-trace-buttons"):
+            tdiv(
+              class = "recent-trace-buttons-image",
+              id = "trace-copy-button",
+              onclick = proc(ev: Event, tg: VNode) =
+                ev.stopPropagation()
+                clipboardCopy(trace.downloadKey)
+                self.copyMessageActive[trace.id] = true
+                ev.target.focus()
+                self.data.redraw()
                 discard setTimeout(proc() =
-                  self.infoMessageActive[trace.id] = false
-                  data.redraw(),
+                  self.copyMessageActive[trace.id] = false
+                  self.data.redraw(),
                   2000
                 )
             ):
-            if featureFlag:
-              tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
+              tdiv(class = fmt"custom-tooltip {activeClass}", id = &"tooltip-{trace.id}",
                 style = style(StyleAttr.top, &"{tooltipTopPosition}px")
               ):
-                text "Server error or maximum file size reached (4GB)"
-            else:
+                text "Download key copied to clipboard"
+        if expireState != NoExpireState or expireState in @[Expired, ThreeDaysLeft]:
+          let dt = fromUnix(trace.onlineExpireTime)
+          let time = dt.format("dd MM yyyy")
+          let formatted = time.replace(" ", ".")
+          tdiv(class = &"recent-trace-buttons {expireId}"):
+            tdiv(
+              class = "recent-trace-buttons-image",
+              id = &"{expireId}",
+              onclick = proc(ev: Event, tg: VNode) =
+                ev.stopPropagation()
+                clipboardCopy(trace.downloadKey)
+                self.infoMessageActive[trace.id] = if self.infoMessageActive.hasKey(trace.id): not self.infoMessageActive[trace.id] else: true
+                if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]:
+                  self.copyMessageActive[trace.id] = false
+                ev.target.parentNode.focus()
+                self.data.redraw(),
+              onmouseleave = proc(ev: Event, tg: VNode) =
+                self.infoMessageActive[trace.id] = false
+            ):
               tdiv(class = fmt"custom-tooltip {infoActive}", id = &"tooltip-{trace.id}",
                 style = style(StyleAttr.top, &"{tooltipTopPosition}px")
               ):
-                text "Coming soon (remote sharing)"
-      if trace.controlId != EMPTY_STRING and expireState != Expired:
-        tdiv(class = "recent-trace-buttons", id = "delete-button"):
-          tdiv(
-            class = "recent-trace-buttons-image",
-            id = "trace-delete-button",
-            onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              ev.target.focus()
-              discard self.deleteUploadedTrace(trace)
-            ):
-            tdiv(class = fmt"custom-tooltip {deleteErrorClass}", id = &"tooltip-{trace.id}",
-              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
-            ):
-              text "Server error when deleting"
-      if trace.downloadKey != EMPTY_STRING and expireState != Expired and trace.downloadKey != ERROR_DOWNLOAD_KEY:
-        tdiv(class = "recent-trace-buttons"):
-          tdiv(
-            class = "recent-trace-buttons-image",
-            id = "trace-copy-button",
-            onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              clipboardCopy(trace.downloadKey)
-              self.copyMessageActive[trace.id] = true
-              ev.target.focus()
-              self.data.redraw()
-              discard setTimeout(proc() =
-                self.copyMessageActive[trace.id] = false
-                self.data.redraw(),
-                2000
-              )
-          ):
-            tdiv(class = fmt"custom-tooltip {activeClass}", id = &"tooltip-{trace.id}",
-              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
-            ):
-              text "Download key copied to clipboard"
-      if expireState != NoExpireState or expireState in @[Expired, ThreeDaysLeft]:
-        let dt = fromUnix(trace.onlineExpireTime)
-        let time = dt.format("dd MM yyyy")
-        let formatted = time.replace(" ", ".")
-        tdiv(class = &"recent-trace-buttons {expireId}"):
-          tdiv(
-            class = "recent-trace-buttons-image",
-            id = &"{expireId}",
-            onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              clipboardCopy(trace.downloadKey)
-              self.infoMessageActive[trace.id] = if self.infoMessageActive.hasKey(trace.id): not self.infoMessageActive[trace.id] else: true
-              if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]:
-                self.copyMessageActive[trace.id] = false
-              ev.target.parentNode.focus()
-              self.data.redraw(),
-            onmouseleave = proc(ev: Event, tg: VNode) =
-              self.infoMessageActive[trace.id] = false
-          ):
-            tdiv(class = fmt"custom-tooltip {infoActive}", id = &"tooltip-{trace.id}",
-              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
-            ):
-              case expireState:
-              of ThreeDaysLeft:
-                text &"The key will expire on {formatted}"
-              of Expired:
-                text "The key has expired"
-              else:
-                text &"The online share key expires on {formatted}"
+                case expireState:
+                of ThreeDaysLeft:
+                  text &"The key will expire on {formatted}"
+                of Expired:
+                  text "The key has expired"
+                else:
+                  text &"The online share key expires on {formatted}"
 
 proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   buildHtml(
