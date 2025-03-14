@@ -1465,6 +1465,7 @@ type
     shortcutMap*: ShortcutMap
     defaultBuild*: cstring
     showMinimap*: bool
+    traceSharingEnabled*: bool
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint
