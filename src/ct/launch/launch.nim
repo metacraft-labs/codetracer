@@ -108,7 +108,7 @@ proc runInitial*(conf: CodetracerConf) =
         conf.uploadTraceFolder,
         replayInteractive)
     of StartupCommand.download:
-      downloadCommand(conf.traceRegistryId)
+      downloadTraceCommand(conf.traceRegistryId)
     of StartupCommand.cmdDelete:
       deleteTraceCommand(conf.traceId, conf.controlId)
       # eventually enable?
