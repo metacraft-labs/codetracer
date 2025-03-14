@@ -20,18 +20,22 @@ export let page: Page; // eslint-disable-line @typescript-eslint/init-declaratio
 
 export const currentDir = path.resolve(); // the ui-tests dir
 export const codetracerInstallDir = path.dirname(currentDir);
-export const buildDebugPath = path.join(
-  codetracerInstallDir,
-  "src",
-  "build-debug",
-);
-export const codetracerPath = path.join(buildDebugPath, "bin", "ct");
 export const codetracerTestDir = path.join(currentDir, "tests");
 export const testProgramsPath = path.join(currentDir, "programs");
 export const testBinariesPath = path.join(currentDir, "binaries");
-export const linksPath = path.join(codetracerInstallDir, "src", "links");
-export const electronPath = path.join(linksPath, "electron");
-export const indexPath = path.join(buildDebugPath, "src", "index.js");
+
+// in the sense of `linksPath`, NOT dev build src/links !
+// only matters if `CODETRACER_E2E_CT_PATH` is NOT overriden:
+//   as a default dev build test setup
+// otherwise this is not really used
+export const linksPath = path.join(codetracerInstallDir, "src", "build-debug");
+
+const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
+export const codetracerPath =
+  // eslint-disable-next-line @typescript-eslint/no-magic-numbers
+  envCodetracerPath.length > 0
+    ? envCodetracerPath
+    : path.join(linksPath, "bin", "ct");
 
 const OK_EXIT_CODE = 0;
 const ERROR_EXIT_CODE = 1;
@@ -155,13 +159,15 @@ async function replayCodetracerInElectron(
   process.env.CODETRACER_CALLER_PID = runPid.toString();
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
+  process.env.CODETRACER_WRAP_ELECTRON = "1";
+  process.env.CODETRACER_START_INDEX = "1";
 
   // console.log(ctProcess);
 
   electronApp = await electron.launch({
-    executablePath: electronPath,
+    executablePath: codetracerPath, // electronPath,
     cwd: codetracerInstallDir,
-    args: [indexPath],
+    args: [],
   });
 
   const firstWindow = await electronApp.firstWindow();

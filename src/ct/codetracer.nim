@@ -6,9 +6,10 @@ import
   codetracerconf, confutils
 
 try:
-  let conf = CodetracerConf.load()
-  customValidateConfig(conf)
-  runInitial(conf)
+  if not eventuallyWrapElectron():
+    let conf = CodetracerConf.load()
+    customValidateConfig(conf)
+    runInitial(conf)
 except Exception as ex:
   echo "Unhandled exception"
   echo getStackTrace(ex)
