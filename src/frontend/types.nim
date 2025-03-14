@@ -1098,6 +1098,7 @@ type
 
   NewDownloadRecord* = ref object
     args*: seq[cstring]
+    status*: RecordStatus
 
   NewTraceRecord* = ref object
     kit*: cstring
