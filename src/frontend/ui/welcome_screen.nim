@@ -2,6 +2,7 @@ import
   ../ui_helpers,
   ../../ct/version, 
   ui_imports, ../types
+import std/options
 import std/times except now
 
 const PROGRAM_NAME_LIMIT = 45
@@ -49,6 +50,7 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   self.data.redraw()
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
+  let featureFlag = data.config.traceSharingEnabled
   let tooltipTopPosition = (self.data.recentTraces.len - trace.id) * 36 - self.recentTracesScroll
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
   let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
@@ -107,14 +109,28 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
             class = "recent-trace-buttons-image",
             id = "trace-upload-button",
             onclick = proc(ev: Event, tg: VNode) =
-              ev.stopPropagation()
-              ev.target.focus()
-              discard self.uploadTrace(trace)
+              if featureFlag:
+                ev.stopPropagation()
+                ev.target.focus()
+                discard self.uploadTrace(trace)
+              else:
+                self.infoMessageActive[trace.id] = true
+                discard setTimeout(proc() =
+                  self.infoMessageActive[trace.id] = false
+                  data.redraw(),
+                  2000
+                )
             ):
-            tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
-              style = style(StyleAttr.top, &"{tooltipTopPosition}px")
-            ):
-              text "Server error or maximum file size reached (4GB)"
+            if featureFlag:
+              tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
+                style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+              ):
+                text "Server error or maximum file size reached (4GB)"
+            else:
+              tdiv(class = fmt"custom-tooltip {infoActive}", id = &"tooltip-{trace.id}",
+                style = style(StyleAttr.top, &"{tooltipTopPosition}px")
+              ):
+                text "Coming soon (remote sharing)"
       if trace.controlId != EMPTY_STRING and expireState != Expired:
         tdiv(class = "recent-trace-buttons", id = "delete-button"):
           tdiv(
@@ -577,6 +593,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     ),
     WelcomeScreenOption(
       name: "Open online trace",
+      inactive: not data.config.traceSharingEnabled,
       command: proc = 
         self.openOnlineTrace = true
         self.welcomeScreen = false
