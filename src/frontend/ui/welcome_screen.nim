@@ -307,10 +307,10 @@ proc chooseExecutable(self: WelcomeScreenComponent) =
 proc chooseDir(self: WelcomeScreenComponent, fieldName: cstring) =
   self.data.ipc.send "CODETRACER::choose-dir", js{ fieldName: fieldName }
 
-proc renderRecordResult(self: WelcomeScreenComponent): VNode =
+proc renderRecordResult(self: WelcomeScreenComponent, status: RecordStatus): VNode =
   var containerClass = "new-record-result"
   var iconClass = "new-record-status-icon"
-  case self.newRecord.status.kind:
+  case status.kind:
   of RecordInit:
     containerClass = containerClass & " empty"
     iconClass = iconClass & " empty"
@@ -331,13 +331,13 @@ proc renderRecordResult(self: WelcomeScreenComponent): VNode =
     tdiv(class = containerClass)
   ):
     tdiv(class = iconClass)
-    tdiv(class = &"new-record-{self.newRecord.status.kind}-message"):
-      case self.newRecord.status.kind:
+    tdiv(class = &"new-record-{status.kind}-message"):
+      case status.kind:
       of InProgress:
         text &"Recording..."
 
       of RecordError:
-        text &"Record failed. Error: {self.newRecord.status.errorMessage}"
+        text &"Record failed. Error: {status.errorMessage}"
 
       of RecordSuccess:
         text &"Record successful! Opening..."
@@ -360,8 +360,8 @@ proc prepareArgs(self: WelcomeScreenComponent): seq[cstring] =
 proc onlineFormView(self: WelcomeScreenComponent): VNode =
   proc handler(ev: Event, tg: VNode) =
     ev.preventDefault()
-    self.loading = true
     # TODO: Implement progress bar?
+    self.newDownload.status.kind = InProgress
     self.data.ipc.send(
         "CODETRACER::download-trace-file", js{
           downloadKey: concat(self.newDownload.args),
@@ -382,6 +382,7 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
       hasButton = false,
       inputText = self.newDownload.args.join(j" ")
     )
+    renderRecordResult(self, self.newDownload.status)
     tdiv(class = "new-record-form-row"):
       button(
         class = "cancel-button",
@@ -473,7 +474,7 @@ proc newRecordFormView(self: WelcomeScreenComponent): VNode =
       validInput = self.newRecord.formValidator.validOutputFolder,
       disabled = self.newRecord.defaultOutputFolder
     )
-    renderRecordResult(self)
+    renderRecordResult(self, self.newRecord.status)
     case self.newRecord.status.kind:
     of RecordInit, RecordError:
       tdiv(class = "new-record-form-row"):
@@ -539,7 +540,7 @@ proc onlineTraceView(self: WelcomeScreenComponent): VNode =
       tdiv(class = "welcome-logo")
       tdiv(class = "new-record-title"):
         text "Download and open online trace"
-      onlineFormView(self)    
+      onlineFormView(self)
 
 proc loadInitialOptions(self: WelcomeScreenComponent) =
   self.options = @[
@@ -579,7 +580,8 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
         self.openOnlineTrace = true
         self.welcomeScreen = false
         self.newDownload = NewDownloadRecord(
-          args: @[]
+          args: @[],
+          status: RecordStatus(kind: RecordInit)
         )
     ),
     WelcomeScreenOption(
@@ -608,7 +610,7 @@ proc welcomeScreenView(self: WelcomeScreenComponent): VNode =
         tdiv(class = "welcome-logo")
         text "Welcome to CodeTracer IDE"
       tdiv(class = "welcome-version"):
-        text fmt"Version {CodeTracerVersionStr}" # TODO include dynamically from e.g. version.nim
+        text fmt"Version {CodeTracerVersionStr}"
     tdiv(class = "welcome-content"):
       recentProjectsView(self)
       renderStartOptions(self)
