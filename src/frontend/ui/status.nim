@@ -366,10 +366,12 @@ proc buttonActionView(self: StatusComponent, notification: Notification, buttonA
   let notificationKind = convertNotificationKind(notification.kind)
 
   buildHtml(
-    tdiv(class = &"notification-button action-notification-button {notificationKind.toLowerCase()}",
+    tdiv(class = "notification-action-wrapper")
+  ):
+    tdiv(class = &"notification-action-button action-notification-button {notificationKind.toLowerCase()}",
          onclick = proc =
           buttonAction.handler()
-          self.deactivateNotification(notification))):
+          self.deactivateNotification(notification)):
       text &"{buttonAction.name}"
 
 proc notificationActionView(self: StatusComponent, notification: Notification, action: NotificationAction): VNode =
@@ -389,23 +391,23 @@ proc notificationView(
   dismiss: bool = false): VNode =
   let notificationKind = convertNotificationKind(notification.kind)
   let secondaryClass = if notification.isOperationStatus: "secondary-notification" else: ""
-  self.setNotificationTimer(notification)
+  # self.setNotificationTimer(notification)
 
   buildHtml(
     tdiv(class = &"status-notification {notificationKind.toLowerCase()} {notification.active} {secondaryClass}")
   ):
-    tdiv(class = &"notification-icon {notificationKind.toLowerCase()}")
-    tdiv(class = "notification-message"):
-      text notification.text
+    tdiv(class = "notification-wrapper"):
+      tdiv(class = &"notification-icon {notificationKind.toLowerCase()}")
+      tdiv(class = "notification-message"):
+        text notification.text
 
+      if dismiss:
+        tdiv(
+          class = &"notification-button dismiss-notification-button {notificationKind.toLowerCase()}",
+          onclick = proc = self.deactivateNotification(notification)
+        )
     for action in notification.actions:
       notificationActionView(self, notification, action)
-
-    if dismiss:
-      tdiv(
-        class = &"notification-button dismiss-notification-button {notificationKind.toLowerCase()}",
-        onclick = proc = self.deactivateNotification(notification)
-      )
 
 proc activeNotificationView(self: StatusComponent, notification: Notification): VNode =
   notificationView(self, notification, true)
