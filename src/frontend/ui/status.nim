@@ -391,7 +391,7 @@ proc notificationView(
   dismiss: bool = false): VNode =
   let notificationKind = convertNotificationKind(notification.kind)
   let secondaryClass = if notification.isOperationStatus: "secondary-notification" else: ""
-  # self.setNotificationTimer(notification)
+  self.setNotificationTimer(notification)
 
   buildHtml(
     tdiv(class = &"status-notification {notificationKind.toLowerCase()} {notification.active} {secondaryClass}")
