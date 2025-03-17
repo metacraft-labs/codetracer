@@ -216,7 +216,7 @@ impl Handler {
             serde_json::to_string(&move_state)?,
             false,
         ))?;
-        self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 
         let exact = false; // or for now try as flow // true just for this exact step
         let step_events = self.db.load_step_events(self.step_id, exact);
