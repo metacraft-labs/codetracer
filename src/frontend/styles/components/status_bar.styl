@@ -318,8 +318,9 @@
 .status-notification
   background-color: NOTIFICATION_BACKGROUND_COLOR
   display: flex
+  flex-direction: column
   height: fit-content
-  align-items: center
+  align-items: start
 
   .notification-icon
     width: 24px
@@ -385,15 +386,41 @@
     &:hover
       opacity: 0.5
 
-    // TODO: DELETE LATER!
-    // &.info
-    //   background-color: NOTIFICATION_INFO_COLOR
-    // &.warning
-    //   background-color: NOTIFICATION_WARNING_COLOR
-    // &.error
-    //   background-color: NOTIFICATION_ERROR_COLOR
-    // &.success
-    //   background-color: NOTIFICATION_SUCCESS_COLOR
+  .notification-action-wrapper
+    width: -webkit-fill-available
+    display: flex
+    align-items: flex-end
+    justify-content: end
+    margin-top: 8px
+
+  .notification-action-button
+    background-color: BUTTON_BACKGROUND_COLOR
+    text-align: center
+    display: flex
+    align-items: center
+    color: PRIMARY_TEXT_COLOR
+
+    margin-left: 8px
+    height: 24px
+    width: fit-content
+    line-height: 20px
+    border-radius: 4px
+    cursor: pointer
+    user-select: none
+    font-family: 'SpaceGrotesk'
+    padding: 4px
+
+    &:hover
+      opacity: 0.5
+
+    &.info
+      background-color: NOTIFICATION_INFO_COLOR
+    &.warning
+      background-color: NOTIFICATION_WARNING_COLOR
+    &.error
+      background-color: NOTIFICATION_ERROR_COLOR
+    &.success
+      background-color: NOTIFICATION_SUCCESS_COLOR
 
 
 // [1vw] file info lang , file info encoding [2vw] file info editor whitespace [20vw] operation [25vw] errors, build output buttons [..] location version control status [3vw] end
@@ -525,3 +552,8 @@
 
 .debug-skip-toggle
   margin-left: 10px
+
+.notification-wrapper
+  display: flex
+  flex-direction: row
+  width: -webkit-fill-available
