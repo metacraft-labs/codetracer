@@ -3,6 +3,7 @@ import
   ../../ct/version, 
   ui_imports, ../types
 import std/options
+import std/enumerate
 import std/times except now
 
 const PROGRAM_NAME_LIMIT = 45
@@ -49,9 +50,9 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 
   self.data.redraw()
 
-proc recentProjectView(self: WelcomeScreenComponent, trace: Trace): VNode =
+proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
   let featureFlag = data.config.traceSharingEnabled
-  let tooltipTopPosition = (self.data.recentTraces.len - trace.id) * 36 - self.recentTracesScroll
+  let tooltipTopPosition = (position + 1) * 36 - self.recentTracesScroll
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
   let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
   let uploadErrorClass = if self.errorMessageActive.hasKey(trace.id) and self.errorMessageActive[trace.id] == UploadError: "welcome-path-active" else: ""
@@ -195,8 +196,8 @@ proc recentProjectsView(self: WelcomeScreenComponent): VNode =
         self.recentTracesScroll = cast[int](ev.target.scrollTop)
     ):
       if self.data.recentTraces.len > 0:
-        for trace in self.data.recentTraces:
-          recentProjectView(self, trace)
+        for (i, trace) in enumerate(self.data.recentTraces):
+          recentProjectView(self, trace, i)
       else:
         tdiv(class = "no-recent-traces"):
           text "No traces yet."
