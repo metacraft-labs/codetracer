@@ -1,4 +1,5 @@
 import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri ]
+from stew / byteutils import toBytes
 import ../../common/[ config ]
 
 proc generateSecurePassword*(): string =
@@ -22,17 +23,6 @@ proc pkcs7Unpad*(data: seq[byte]): seq[byte] =
 
   result = data[0 ..< data.len - padLen]
 
-func toBytes*(s: string): seq[byte] =
-  ## Convert a string to the corresponding byte sequence - since strings in
-  ## nim essentially are byte sequences without any particular encoding, this
-  ## simply copies the bytes without a null terminator
-  when nimvm:
-    var r = newSeq[byte](s.len)
-    for i, c in s:
-      r[i] = cast[byte](c)
-    r
-  else:
-    @(s.toOpenArrayByte(0, s.high))
 
 proc encryptZip(zipFile, password: string) =
   var iv: seq[byte] = password.toBytes()[0..15]
@@ -81,3 +71,5 @@ proc uploadEncyptedZip*(file: string): (string, int) =
     client.close()
   
   (response, exitCode)
+
+export toBytes

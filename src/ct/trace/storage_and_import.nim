@@ -1,5 +1,5 @@
 import
-  std/[os, json, strutils, strformat, sets, algorithm],
+  std/[os, json, strutils, strformat, sets, algorithm, terminal],
   ../../common/[trace_index, lang, types, paths],
   ../utilities/git,
   ../online_sharing/security_upload,
@@ -168,6 +168,9 @@ proc getFolderSize(folderPath: string): int64 =
       totalSize += getFileSize(path)
   return totalSize
 
+const
+  FILE_SIZE_LIMIT_EXCEETED_EXIT_CODE = 153
+
 proc uploadTrace*(trace: Trace) =
   let outputZip = trace.outputFolder / "tmp.zip"
   let aesKey = generateSecurePassword()
@@ -175,7 +178,7 @@ proc uploadTrace*(trace: Trace) =
   var (output, exitCode) = ("", 0)
   
   if getFolderSize(trace.outputFolder) > 4_000_000_000:
-    quit(153)
+    quit(FILE_SIZE_LIMIT_EXCEETED_EXIT_CODE)
 
   try:
     zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
@@ -190,9 +193,20 @@ proc uploadTrace*(trace: Trace) =
       updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
       updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getInt(), false)
 
-      echo downloadKey
-      echo jsonMessage["ControlId"].getStr("")
-      echo jsonMessage["Expires"].getInt()
+      if isatty(stdout):
+        echo fmt"""
+OK: uploaded, you can share the link.
+NB: It's sensitive: everyone with this link can access your trace!
+
+Download with:
+`ct download {downloadKey}`
+"""
+
+      else:
+        # for parsing by `ct` index code
+        echo downloadKey
+        echo jsonMessage["ControlId"].getStr("")
+        echo jsonMessage["Expires"].getInt()
 
     else:
       exitCode = 1

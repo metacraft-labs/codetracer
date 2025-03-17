@@ -1,9 +1,15 @@
-import std / [ options, strutils, os, osproc, strformat, json, httpclient, uri ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
+import std / [ options, strutils, os, strformat, json, httpclient, uri, terminal ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
 import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
-import ../trace/[ storage_and_import, record ]
+import ../trace/[ storage_and_import]
 import security_upload
 import ../globals
+
+const TRACE_SHARING_DISABLED_ERROR_MESSAGE = """
+trace sharing disabled in config!
+you can enable it by editing `$HOME/.config/codetracer/.config.yaml`
+and toggling `traceSharingEnabled` to true
+"""
 
 proc uploadCommand*(
   patternArg: Option[string],
@@ -11,13 +17,21 @@ proc uploadCommand*(
   traceFolderArg: Option[string],
   interactive: bool
 ) =
-  discard internalReplayOrUpload(patternArg, traceIdArg, traceFolderArg, interactive, command=StartupCommand.upload)
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  if config.traceSharingEnabled:
+    discard internalReplayOrUpload(patternArg, traceIdArg, traceFolderArg, interactive, command=StartupCommand.upload)
+  else:
+    echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
+    quit(1)
 
 
 proc decryptZip(encryptedFile: string, password: string, outputFile: string) =
   var encData = readFile(encryptedFile).toBytes()
   if encData.len < 16:
     raise newException(ValueError, "Invalid encrypted data (too short)")
+
+  if password.len < 16:
+    raise newException(ValueError, "Invalid password (too short)")
 
   let iv = password.toBytes()[0 ..< 16]
   let ciphertext = encData[16 .. ^1]
@@ -57,6 +71,12 @@ proc downloadTraceCommand*(traceRegistryId: string) =
     let password = stringSplit[2]
     let zipPath = codetracerTmpPath / &"{downloadId}.zip"
     let config = loadConfig(folder=getCurrentDir(), inTest=false)
+    if not config.traceSharingEnabled:
+      echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
+      quit(1)
+
+    # <enabled case>:
+
     let localPath = codetracerTmpPath / &"{downloadId}.zip.enc"
 
     var client = newHttpClient()
@@ -82,7 +102,11 @@ proc downloadTraceCommand*(traceRegistryId: string) =
       let lang = detectLang(pathValue, LangUnknown)
       discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceRegistryId)
 
-      echo traceId
+      if isatty(stdout):
+        echo fmt"OK: downloaded with trace id {traceId}"
+      else:
+        # being parsed by `ct` index code
+        echo traceId
 
     except CatchableError as e:
       echo fmt"error: downloading file '{e.msg}'"
@@ -96,6 +120,12 @@ proc downloadTraceCommand*(traceRegistryId: string) =
 
 proc deleteTraceCommand*(id: int, controlId: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  if not config.traceSharingEnabled:
+    echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
+    quit(1)
+
+  # <enabled case>:
+
   let test = false
   var exitCode = 0
 

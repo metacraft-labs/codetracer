@@ -1,14 +1,12 @@
 import
-  std/[strutils, strformat, osproc],
-  ../../common/[ paths, types, intel_fix, install_utils, trace_index, start_utils ],
-  ../utilities/[ git, env ],
+  ../../common/[ paths, types, intel_fix, install_utils ],
+  ../utilities/[ git ],
   ../online_sharing/trace_manager,
   ../cli/[ logging, list, help ],
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
   ../version,
   ../globals,
-  cleanup,
   electron,
   results,
   backends
