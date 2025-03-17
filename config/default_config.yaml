@@ -10,6 +10,7 @@ events: true
 # history: experimental support
 history: true
 repl: true
+traceSharingEnabled: false
 
 # === feature settings
 
@@ -54,7 +55,11 @@ defaultBuild: ""
 showMinimap: true
 
 # for now local setup
-webApiRoot: http://100.87.206.30:57103/api/codetracer
+baseUrl: http://localhost:55500/api/codetracer
+
+downloadApi: /download
+uploadApi: /upload
+deleteApi: /delete
 
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
