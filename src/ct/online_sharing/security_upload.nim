@@ -1,4 +1,4 @@
-import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes ]
+import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri ]
 import ../../common/[ config ]
 
 proc generateSecurePassword*(): string =
@@ -69,9 +69,9 @@ proc uploadEncyptedZip*(file: string): (string, int) =
   var data = newMultipartData()
 
   data.addFiles({"file": file & ".enc"}, mimeDb = mimes)
-  
+
   try:
-    response = client.postContent(fmt"{config.baseUrl}{config.uploadApi}", multipart=data)
+    response = client.postContent(fmt"{parseUri(config.baseUrl) / config.uploadApi}", multipart=data)
     exitCode = 0
   except CatchableError as e:
     echo fmt"error: can't upload to API: {e.msg}"

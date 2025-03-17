@@ -1,4 +1,4 @@
-import std / [ options, strutils, os, osproc, strformat, json, httpclient ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
+import std / [ options, strutils, os, osproc, strformat, json, httpclient, uri ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
 import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import, record ]
@@ -63,7 +63,7 @@ proc downloadTraceCommand*(traceRegistryId: string) =
     var exitCode = 0
 
     try:
-      client.downloadFile(fmt"{config.baseUrl}{config.downloadApi}?DownloadId={downloadId}", localPath)
+      client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?DownloadId={downloadId}", localPath)
 
       decryptZip(localPath, password, zipPath)
 
@@ -102,7 +102,7 @@ proc deleteTraceCommand*(id: int, controlId: string) =
   var client = newHttpClient()
   
   try:
-    discard client.getContent(fmt"{config.baseUrl}{config.deleteApi}?ControlId={controlId}")
+    discard client.getContent(fmt"{parseUri(config.baseUrl) / config.deleteApi}?ControlId={controlId}")
     
     updateField(id, "remoteShareDownloadId", "", test)
     updateField(id, "remoteShareControlId", "", test)
