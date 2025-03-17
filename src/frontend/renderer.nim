@@ -448,7 +448,7 @@ proc runTracepoints*() {.exportc.} =
   data.services.eventLog.events = newEvents
 
   if tracepoints.len == 0:
-    warnMessage("There is not any changes in the tracepoints input.")
+    warnMessage("There are no changes in the tracepoints input.")
 
   let results = JsAssoc[int, seq[Stop]]{}
   results[OLD_SESSION_RESULTS_KEY] = oldResults
