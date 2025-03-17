@@ -1,0 +1,13 @@
+<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="interface-alert-information-circle--information-frame-info-more-help-point-circle" clip-path="url(#clip0_2240_561)">
+<path id="Vector" d="M7 13.5C10.5899 13.5 13.5 10.5899 13.5 7C13.5 3.41015 10.5899 0.5 7 0.5C3.41015 0.5 0.5 3.41015 0.5 7C0.5 10.5899 3.41015 13.5 7 13.5Z" stroke="#FAFAFA" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_2" d="M5.5 10H8.5" stroke="#FAFAFA" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M7 5C7.55228 5 8 4.55228 8 4C8 3.44772 7.55228 3 7 3C6.44772 3 6 3.44772 6 4C6 4.55228 6.44772 5 7 5Z" fill="#FAFAFA"/>
+<path id="Vector_4" d="M7 10V6.5H5.5" stroke="#FAFAFA" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<defs>
+<clipPath id="clip0_2240_561">
+<rect width="14" height="14" fill="white"/>
+</clipPath>
+</defs>
+</svg>

@@ -1,6 +1,6 @@
 import ui_imports, flow, shell, sequtils
 
-const NOTIFICATION_LIMIT = 5
+const NOTIFICATION_LIMIT = 3
 
 proc locationView(self: StatusComponent): VNode =
   buildHtml(span(id = "location-status")):
@@ -377,19 +377,24 @@ proc notificationActionView(self: StatusComponent, notification: Notification, a
     of ButtonAction:
       buttonActionView(self, notification, action)
 
+proc setNotificationTimer(self: StatusComponent, notification: Notification) =
+  if not notification.hasTimeout and notification.actions.len == 0:
+    notification.timeoutId = windowSetTimeout(proc =
+      self.deactivateNotification(notification), self.activeNotificationDuration)
+    notification.hasTimeout = true
 
 proc notificationView(
   self: StatusComponent,
   notification: Notification,
   dismiss: bool = false): VNode =
   let notificationKind = convertNotificationKind(notification.kind)
+  let secondaryClass = if notification.isOperationStatus: "secondary-notification" else: ""
+  self.setNotificationTimer(notification)
 
   buildHtml(
-    tdiv(class = &"status-notification {notificationKind.toLowerCase()} {notification.active}")
+    tdiv(class = &"status-notification {notificationKind.toLowerCase()} {notification.active} {secondaryClass}")
   ):
     tdiv(class = &"notification-icon {notificationKind.toLowerCase()}")
-    tdiv(class = &"notification-message-prefix {notificationKind.toLowerCase()}"):
-      text &"{notificationKind}: "
     tdiv(class = "notification-message"):
       text notification.text
 
@@ -397,26 +402,19 @@ proc notificationView(
       notificationActionView(self, notification, action)
 
     if dismiss:
-      tdiv(class = &"notification-button dismiss-notification-button {notificationKind.toLowerCase()}",
-           onclick = proc = self.deactivateNotification(notification)):
-        text "Dismiss"
+      tdiv(
+        class = &"notification-button dismiss-notification-button {notificationKind.toLowerCase()}",
+        onclick = proc = self.deactivateNotification(notification)
+      )
 
 proc activeNotificationView(self: StatusComponent, notification: Notification): VNode =
-
-  # TODO: Add proper bookkeeping. For now we assume:
-  # actions.len != 0 <=> We require user input and we don't timeout
-  if not notification.hasTimeout and notification.actions.len == 0:
-    notification.timeoutId = windowSetTimeout(proc =
-      self.deactivateNotification(notification), self.activeNotificationDuration)
-    notification.hasTimeout = true
-
   notificationView(self, notification, true)
 
 proc activeNotificationsView(self: StatusComponent): VNode =
   var count = 0
   buildHtml(tdiv(id = "active-notifications")):
     for notification in self.notifications:
-      if notification.active and not notification.isOperationStatus and count <= NOTIFICATION_LIMIT:
+      if notification.active and not notification.isOperationStatus and count < NOTIFICATION_LIMIT:
         activeNotificationView(self, notification)
         count += 1
 
@@ -484,6 +482,10 @@ method render*(self: StatusComponent): VNode =
 
   result = buildHtml(tdiv(class=statusClass)):
     activeNotificationsView(self)
+    if self.notifications != @[] and self.notifications[^1].isOperationStatus:
+      if self.notifications[^1].active:
+        tdiv(class="debug-notification"):
+          notificationView(self, self.notifications[^1])
     if self.build.expanded or self.errors.expanded:
       statusExpandedView(self)
     tdiv(id = "status-base"):

@@ -23,25 +23,30 @@
   color: COLOR
 
 #active-notifications
-  width: 100vw
+  width: fit-content
   height: fit-content
   top: 38px
   position: fixed
   z-index: 100
+  left: 33%
 
-  .status-notification
-    border: 2px solid STATUS_BACKGROUND_COLOR
-    border-radius: 4px
-    height: 28px
+.status-notification
+  border: 2px solid STATUS_BACKGROUND_COLOR
+  border-radius: 6px
+  height: auto
+  width: 466px
+  position: relative
+  margin: 8px
+  padding: 4px
 
-    &.info
-      border-color: NOTIFICATION_INFO_COLOR
-    &.warning
-      border-color: NOTIFICATION_WARNING_COLOR
-    &.error
-      border-color: NOTIFICATION_ERROR_COLOR
-    &.success
-      border-color: NOTIFICATION_SUCCESS_COLOR
+  &.info
+    border-color: NOTIFICATION_INFO_COLOR
+  &.warning
+    border-color: NOTIFICATION_WARNING_COLOR
+  &.error
+    border-color: NOTIFICATION_ERROR_COLOR
+  &.success
+    border-color: NOTIFICATION_SUCCESS_COLOR
 
 
 #status
@@ -311,36 +316,43 @@
         outline: 2px solid BORDERS_COLOR !important
 
 .status-notification
-  background-color: BACKGROUND_COLOR
+  background-color: NOTIFICATION_BACKGROUND_COLOR
   display: flex
   height: fit-content
-  padding-right: 5px
   align-items: center
 
   .notification-icon
-    width: 25px
-    min-width: 25px
-    height: 25px
-    min-height: 25px
+    width: 24px
+    min-width: 24px
+    height: 24px
+    min-height: 24px
     background-repeat: no-repeat
     background-position: center
+    border-radius: 4px
 
     &.info
-      background-image: url("../../public/resources/notifications/info_icon_16.svg")
+      background-color: NOTIFICATION_INFO_COLOR
+      background-image: NOTIFICATION_INFO_IMG
     &.warning
-      background-image: url("../../public/resources/notifications/warning_icon_16.svg")
+      background-color: NOTIFICATION_WARNING_COLOR
+      background-image: NOTIFICATION_WARNING_IMG
     &.error
-      background-image: url("../../public/resources/notifications/error_icon_16.svg")
+      background-color: NOTIFICATION_ERROR_COLOR
+      background-image: NOTIFICATION_ERROR_IMG
     &.success
+      background-color: NOTIFICATION_SUCCESS_COLOR
       // svg gotten from here: "https://www.iconpacks.net/free-icon/green-check-mark-verified-circle-16223.html"
-      background-image: url("../../public/resources/notifications/success_icon_16.svg")
+      background-image: NOTIFICATION_SUCCESS_IMG
 
   .notification-message
-    padding-left: 10px
+    padding-left: 8px
     flex: 1
     color: TEXT_CONTENT_COLOR
     font-family: 'SpaceGrotesk'
     font-size: 14px
+    font-weight: 400
+    letter-spacing: -0.14px
+    line-height: 130%
 
   .notification-message-prefix
     font-family: 'SpaceGrotesk'
@@ -358,33 +370,30 @@
     background-color: BUTTON_BACKGROUND_COLOR
     text-align: center
 
-    margin-left: 10px
-
-    padding-left: 18px
-    padding-right: 18px
-    height: 20px
+    margin-left: 8px
+    height: 24px
+    width: 24px
     line-height: 20px
     border-radius: 4px
     cursor: pointer
-    margin-top: 2px
-    margin-bottom: 2px
     user-select: none
     font-family: 'SpaceGrotesk'
+    background-image: NOTIFICATION_CLOSE_BUTTON
+    background-repeat: no-repeat
+    background-position: center
 
     &:hover
       opacity: 0.5
 
-    &.info
-      background-color: NOTIFICATION_INFO_COLOR
-    &.warning
-      background-color: NOTIFICATION_WARNING_COLOR
-    &.error
-      background-color: NOTIFICATION_ERROR_COLOR
-    &.success
-      background-color: NOTIFICATION_SUCCESS_COLOR
-
-
-
+    // TODO: DELETE LATER!
+    // &.info
+    //   background-color: NOTIFICATION_INFO_COLOR
+    // &.warning
+    //   background-color: NOTIFICATION_WARNING_COLOR
+    // &.error
+    //   background-color: NOTIFICATION_ERROR_COLOR
+    // &.success
+    //   background-color: NOTIFICATION_SUCCESS_COLOR
 
 
 // [1vw] file info lang , file info encoding [2vw] file info editor whitespace [20vw] operation [25vw] errors, build output buttons [..] location version control status [3vw] end
@@ -437,7 +446,16 @@
   color: OPPOSITE_COLOR
 
 .debug-notification
-  margin-left: 10px
+  min-width: fit-content
+  max-width: 466px
+  height: fit-content
+  bottom: 38px
+  position: fixed
+  z-index: 100
+  left: 8px
+
+  .status-notification
+    width: inherit
 
 #debug
   float: left
