@@ -824,7 +824,7 @@ proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
         expireTime: splitData[2]
       )
       mainWindow.webContents.send(
-        "CODETRACER::uploaded-trace-received",
+        "CODETRACER::upload-trace-file-received",
         js{
           "argId": j(response.trace.program & ":" & $response.trace.id),
           "value": uploadData
@@ -868,7 +868,7 @@ proc onDeleteOnlineTraceFile(sender: js, response: DeleteTraceArg) {.async.} =
   )
 
   mainWindow.webContents.send(
-    "CODETRACER::deleted-online-trace-received",
+    "CODETRACER::delete-online-trace-file-received",
     js{
       "argId": j($response.traceId & ":" & response.controlId),
       "value": res.isOk
@@ -1391,6 +1391,9 @@ when not defined(server):
       app.quit(0)
 
 
+const NO_LIMIT = (-1)
+
+
 proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
   debugPrint "index: init"
   let bypass = true
@@ -1496,7 +1499,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
       save: save
     }
   else:
-    let recentTraces = await app.findRecentTracesWithCodetracer(limit=(-1))
+    let recentTraces = await app.findRecentTracesWithCodetracer(limit=NO_LIMIT)
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,

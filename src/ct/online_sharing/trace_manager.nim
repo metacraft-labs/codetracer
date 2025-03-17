@@ -63,7 +63,7 @@ proc downloadTraceCommand*(traceRegistryId: string) =
     var exitCode = 0
 
     try:
-      client.downloadFile(fmt"{config.downloadApi}?DownloadId={downloadId}", localPath)
+      client.downloadFile(fmt"{config.baseUrl}{config.downloadApi}?DownloadId={downloadId}", localPath)
 
       decryptZip(localPath, password, zipPath)
 
@@ -102,7 +102,7 @@ proc deleteTraceCommand*(id: int, controlId: string) =
   var client = newHttpClient()
   
   try:
-    discard client.getContent(fmt"{config.deleteApi}?ControlId={controlId}")
+    discard client.getContent(fmt"{config.baseUrl}{config.deleteApi}?ControlId={controlId}")
     
     updateField(id, "remoteShareDownloadId", "", test)
     updateField(id, "remoteShareControlId", "", test)
