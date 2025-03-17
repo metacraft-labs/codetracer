@@ -1106,8 +1106,8 @@ proc configureIPC(data: Data) =
 
     "follow-history"
 
-    "uploaded-trace-received"
-    "deleted-online-trace-received"
+    "upload-trace-file-received"
+    "delete-online-trace-file-received"
 
   duration("configureIPCRun")
 

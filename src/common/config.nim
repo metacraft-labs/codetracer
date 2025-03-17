@@ -28,6 +28,7 @@ type
     shortcutMap* {.defaultVal: ShortcutMap().}: ShortcutMap
     defaultBuild*: string
     showMinimap*: bool
+    baseUrl*: string
     downloadApi*: string
     uploadApi*: string
     deleteApi*: string
