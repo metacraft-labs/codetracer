@@ -408,48 +408,64 @@
         flex-direction: row !important
         justify-content: flex-start !important
 
-    .new-record-result
-      position: relative
-      width: 100%
-      text-align: center
-      font-family: 'SpaceGrotesk'
+    .new-record-result-wrapper
       display: flex
-      flex-direction: column
       align-items: center
+      justify-content: center
+      margin-bottom: 16px
+      border-radius: 6px
+      padding: 8px
 
       &.empty
-        display: none
+        outline: none
+      
+      &.in-progress
+        outline: 1px solid NOTIFICATION_INFO_COLOR
+      
+      &.failed
+        outline: 1px solid NOTIFICATION_ERROR_COLOR
+      
+      &.success
+        outline: 1px solid NOTIFICATION_SUCCESS_COLOR
 
-      .new-record-status-icon
-        position: relative
-        width: 46px
-        height: 46px
-        background-repeat: no-repeat
-        background-size: 40px 40px
-        background-position: center
-        margin-top: 2px
-        margin-bottom: 6px
-
-        &.in-progress
-          background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
-          animation: infinite linear
-          animation-name: loading
-          animation-duration: 3s
-
-        &.failed
-          background-image: url("../../public/resources/welcome/error_sign_128.svg")
-        &.success
-          border-radius: 100px
-          border: 1px solid LINE_STROKE
-          background-image: url("../../public/resources/welcome/done_sign_128.svg")
-
-      .new-record-result-info
-        text-align: center
+      .new-record-result
         position: relative
         width: 100%
-        height: 30px
-        font-family: "FiraCode"
-        font-size: 20px
+        text-align: center
+        font-family: 'SpaceGrotesk'
+        display: flex
+        align-items: center
+
+        &.empty
+          display: none
+
+        .new-record-status-icon
+          position: relative
+          width: 24px
+          height: 24px
+          background-repeat: no-repeat
+          background-size: 18px 18px
+          background-position: center
+          margin-right: 4px
+
+          &.in-progress
+            background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
+            animation: infinite linear
+            animation-name: loading
+            animation-duration: 3s
+
+          &.failed
+            background-image: NOTIFICATION_ERROR_IMG
+          &.success
+            background-image: NOTIFICATION_SUCCESS_IMG
+
+        .new-record-result-info
+          text-align: center
+          position: relative
+          width: 100%
+          height: 30px
+          font-family: "FiraCode"
+          font-size: 20px
 
 .online-functionality-buttons
   display: flex

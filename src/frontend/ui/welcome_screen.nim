@@ -333,22 +333,23 @@ proc renderRecordResult(self: WelcomeScreenComponent, status: RecordStatus, isDo
     iconClass = iconClass & " in-progress"
 
   buildHtml(
-    tdiv(class = containerClass)
+    tdiv(class = fmt"new-record-result-wrapper {iconClass}")
   ):
-    tdiv(class = iconClass)
-    tdiv(class = &"new-record-{status.kind}-message"):
-      case status.kind:
-      of InProgress:
-        text &"{name}ing..."
+    tdiv(class = containerClass):
+      tdiv(class = iconClass)
+      tdiv(class = &"new-record-{status.kind}-message"):
+        case status.kind:
+        of InProgress:
+          text &"{name}ing..."
 
-      of RecordError:
-        text &"{name} failed. Error: {status.errorMessage}"
+        of RecordError:
+          text &"{name} failed. Error: {status.errorMessage}"
 
-      of RecordSuccess:
-        text &"{name} successful! Opening..."
+        of RecordSuccess:
+          text &"{name} successful! Opening..."
 
-      else:
-        discard
+        else:
+          discard
 
 proc prepareArgs(self: WelcomeScreenComponent): seq[cstring] =
   var args: seq[cstring] = @[]
