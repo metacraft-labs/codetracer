@@ -2,244 +2,254 @@
   pkgs,
   inputs',
   self',
-}: let
+}:
+let
   ourPkgs = self'.packages;
 in
-  with pkgs;
-    mkShell {
-      # inputsFrom = [ pkgs.codetracer ]; TODO: useful for tup
+with pkgs;
+mkShell {
+  # inputsFrom = [ pkgs.codetracer ]; TODO: useful for tup
 
-      # TODO: Add comment explaining why this is needed
-      hardeningDisable = ["all"];
+  # TODO: Add comment explaining why this is needed
+  hardeningDisable = [ "all" ];
 
-      # TODO
-      # linuxPackages = [
-      #   strace
-      #   # testing UI
-      #   xvfb-run
-      # ];
+  # TODO
+  # linuxPackages = [
+  #   strace
+  #   # testing UI
+  #   xvfb-run
+  # ];
 
-      packages = [
-        # Print a welcome banner for the shell
-        figlet
-        delta
+  packages =
+    [
+      # Print a welcome banner for the shell
+      figlet
+      delta
 
-        # general dependencies
-        git
+      # general dependencies
+      git
 
-        gcc
-        binutils
+      gcc
+      binutils
 
-        electron_33
+      electron_33
 
-        # node and build tools
-        nodejs-18_x
-        nodePackages.webpack-cli
-        corepack
+      # node and build tools
+      nodejs-18_x
+      nodePackages.webpack-cli
+      corepack
 
-        # ourPkgs.chromedriver-102
+      # ourPkgs.chromedriver-102
 
-        ourPkgs.noir
+      ourPkgs.noir
 
-        yarn
-        yarn2nix
+      yarn
+      yarn2nix
 
-        gnugrep
-        gawk
-        coreutils
-        killall
-        ripgrep
-        universal-ctags
+      gnugrep
+      gawk
+      coreutils
+      killall
+      ripgrep
+      universal-ctags
 
-        # Tup builds
-        fuse
-        tup
+      # Tup builds
+      fuse
+      tup
 
-        # Make alternative
-        # https://github.com/casey/just
-        just
+      # Make alternative
+      # https://github.com/casey/just
+      just
 
-        cargo
-        rustfmt
-        rustc
-        # ourPkgs.codetracer-rust-wrapped
-        clippy
+      cargo
+      rustfmt
+      rustc
+      # ourPkgs.codetracer-rust-wrapped
+      clippy
 
-        # For inspecting our deb packages
-        dpkg
+      # For inspecting our deb packages
+      dpkg
 
-        sqlite
-        pcre
-        glib
-        libelf
-        # clang
-        # curl
-        openssl
-        which
-        unixtools.script
-        bashInteractive
-        # ovh-ttyrec
-        dash
-        lesspipe
-        unixtools.killall
-        # zip
-        # unzip
-        libzip
-        # curl
+      sqlite
+      pcre
+      glib
+      libelf
+      # clang
+      # curl
+      openssl
+      which
+      unixtools.script
+      bashInteractive
+      # ovh-ttyrec
+      dash
+      lesspipe
+      unixtools.killall
+      # zip
+      # unzip
+      libzip
+      # curl
 
-        # for pgrep at least
-        procps
+      # for pgrep at least
+      procps
 
-        # development
-        pstree
-        # watch-like tool with history/time travel support
-        viddy
-        # a tool to help with binary files
-        hexdump
+      # development
+      pstree
+      # watch-like tool with history/time travel support
+      viddy
+      # a tool to help with binary files
+      hexdump
 
-        # docs
-        mdbook
-        mdbook-alerts     
-  
-        # github CLI
-        gh
+      # docs
+      mdbook
+      mdbook-alerts
 
-        # cachix support
-        cachix
+      # github CLI
+      gh
 
-        # ruby experimental support
-        ruby
+      # cachix support
+      cachix
 
-        # testing shell
-        tmux
-        vim
+      # ruby experimental support
+      ruby
 
-        tree-sitter
+      # testing shell
+      tmux
+      vim
 
-        # TODO: use eventually if more stable, instead of
-        # a lot of the shellHook logic
-        # ourPkgs.staticDeps
-        ourPkgs.upstream-nim-codetracer
+      # mac build
 
-        # useful for lsp/editor support
-        nimlsp
-        nimlangserver
-        rust-analyzer
+      tree-sitter
 
-        # ci deps
-        python3Packages.flake8
-        shellcheck
-        awscli2
+      # TODO: use eventually if more stable, instead of
+      # a lot of the shellHook logic
+      # ourPkgs.staticDeps
+      ourPkgs.upstream-nim-codetracer
 
-        # This dependency is needed only while compiling the `lzma-native`
-        # node.js module, and only when building an AppImage on Linux/ARM.
-        # (i.e. during the `yarn install` step).
-        # TODO: This is quite curious. We should investigate how the AppImage
-        # build environment is different from the regular one.
-        python3Packages.distutils
+      # useful for lsp/editor support
+      nimlsp
+      nimlangserver
+      rust-analyzer
 
-        # ui-test dependencies
-        playwright-driver.browsers
-        playwright
-      ]
-      ++ pkgs.lib.optionals (!stdenv.isDarwin) [
-        # Building AppImage
-        inputs'.appimage-channel.legacyPackages.appimagekit
-        appimage-run
-        pax-utils
-      ];
+      # ci deps
+      python3Packages.flake8
+      shellcheck
+      awscli2
 
-      # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
+      # This dependency is needed only while compiling the `lzma-native`
+      # node.js module, and only when building an AppImage on Linux/ARM.
+      # (i.e. during the `yarn install` step).
+      # TODO: This is quite curious. We should investigate how the AppImage
+      # build environment is different from the regular one.
+      python3Packages.distutils
 
-      shellHook = ''
-        # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
-        ROOT_PATH=$(git rev-parse --show-toplevel)
+      # ui-test dependencies
+      playwright-driver.browsers
+      playwright
+    ]
+    ++ pkgs.lib.optionals (!stdenv.isDarwin) [
+      # Building AppImage
+      inputs'.appimage-channel.legacyPackages.appimagekit
+      appimage-run
+      pax-utils
 
-        # copied case for libstdc++.so (needed by better-sqlite3) from
-        # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
-        # gcc.cc.lib ..
-        export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
+    ]
+    ++ pkgs.lib.optionals stdenv.isDarwin [
+      # Building AppImage
+      create-dmg
 
-        export RUST_LOG=info
+    ];
 
-        # NODE MODULES
-        export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"
-        export NODE_PATH="$NODE_PATH:$NIX_NODE_PATH"
+  # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
-        # =========
-        # (copied from original commit that comments it out):
-        #
-        # fix: don't set LD_LIBRARY_PATH in shell, but only for needed ops
-        #
-        # in https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/5
-        # and from our xp this seems true even if i didn't think
-        # it's important: setting things like this can break other software
-        # e.g. nix wasn't working because of clash between itc GLIBC version
-        # and some from those LD_LIBRARY_PATH
-        #
-        # so we pass it in tester explicitly where needed
-        # and this already happens in `ct`: however this breaks for now
-        # `codetracer`, but not sure what to do there: maybe pass it as well?
-        # (however it itself needs the sqlite path)
+  shellHook = ''
+    # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
+    ROOT_PATH=$(git rev-parse --show-toplevel)
 
-        # export LD_LIBRARY_PATH = $CT_LD_LIBRARY_PATH
+    # copied case for libstdc++.so (needed by better-sqlite3) from
+    # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
+    # gcc.cc.lib ..
+    export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
 
-        # ====
+    export RUST_LOG=info
 
-        export CODETRACER_LINKS_PATH=$PWD/src/build-debug/
+    # NODE MODULES
+    export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"
+    export NODE_PATH="$NODE_PATH:$NIX_NODE_PATH"
 
-        echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
+    # =========
+    # (copied from original commit that comments it out):
+    #
+    # fix: don't set LD_LIBRARY_PATH in shell, but only for needed ops
+    #
+    # in https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/5
+    # and from our xp this seems true even if i didn't think
+    # it's important: setting things like this can break other software
+    # e.g. nix wasn't working because of clash between itc GLIBC version
+    # and some from those LD_LIBRARY_PATH
+    #
+    # so we pass it in tester explicitly where needed
+    # and this already happens in `ct`: however this breaks for now
+    # `codetracer`, but not sure what to do there: maybe pass it as well?
+    # (however it itself needs the sqlite path)
 
-        # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
+    # export LD_LIBRARY_PATH = $CT_LD_LIBRARY_PATH
 
-        # ==== src/links for tup
+    # ====
 
-        # make sure we have the correct up to date links
-        # each time for now
-        rm -rf src/links;
-        # TODO
-        # ln -s "$ {ourPkgs TODO .shellLinksDeps.outPath}" src/links;
+    export CODETRACER_LINKS_PATH=$PWD/src/build-debug/
 
-        mkdir -p src/links
+    echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
 
-        cd src;
+    # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
 
-        [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
-        [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
-        [ ! -f links/node ] && ln -s ${nodejs-18_x.outPath}/bin/node links/node
-        [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
-        [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
-        [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
-        [ ! -f links/electron ] && ln -s ${electron_33.outPath}/bin/electron links/electron
-        [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
-        # TODO: try to add an option to link to libs/upstream-nim, libs/rr
-        #   for faster iteration when patching them as Zahary suggested?
-        [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
-        [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
-        [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
-        [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py
+    # ==== src/links for tup
 
-        cd ..;
+    # make sure we have the correct up to date links
+    # each time for now
+    rm -rf src/links;
+    # TODO
+    # ln -s "$ {ourPkgs TODO .shellLinksDeps.outPath}" src/links;
 
-        # ==== END of src/links for tup
+    mkdir -p src/links
 
-        # ui-test shell hooks
-        export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
-        export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+    cd src;
 
-        # workaround to reuse devshell node_modules for tup build
-        # make sure it's always updated
-        rm -rf $ROOT_PATH/node_modules
-        ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
+    [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
+    [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
+    [ ! -f links/node ] && ln -s ${nodejs-18_x.outPath}/bin/node links/node
+    [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
+    [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
+    [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
+    [ ! -f links/electron ] && ln -s ${electron_33.outPath}/bin/electron links/electron
+    [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
+    # TODO: try to add an option to link to libs/upstream-nim, libs/rr
+    #   for faster iteration when patching them as Zahary suggested?
+    [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
+    [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
+    [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
+    [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py
 
-        export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
-        export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
-        export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-        export PATH=$PATH:$PWD/src/build-debug/bin
-        export PATH=$PATH:$ROOT_PATH/node_modules/.bin/
-        export CODETRACER_OPEN_DEV_TOOLS=1
-        export CODETRACER_LOG_LEVEL=INFO
+    cd ..;
 
-        figlet "Welcome to CodeTracer"
-      '';
-    }
+    # ==== END of src/links for tup
+
+    # ui-test shell hooks
+    export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
+    export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+
+    # workaround to reuse devshell node_modules for tup build
+    # make sure it's always updated
+    rm -rf $ROOT_PATH/node_modules
+    ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
+
+    export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
+    export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
+    export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+    export PATH=$PATH:$PWD/src/build-debug/bin
+    export PATH=$PATH:$ROOT_PATH/node_modules/.bin/
+    export CODETRACER_OPEN_DEV_TOOLS=1
+    export CODETRACER_LOG_LEVEL=INFO
+
+    figlet "Welcome to CodeTracer"
+  '';
+}
