@@ -25,10 +25,12 @@
 #active-notifications
   width: fit-content
   height: fit-content
-  top: 38px
+  bottom: 38px
+  display: flex
+  flex-direction: column-reverse
   position: fixed
   z-index: 100
-  left: 33%
+  right: 8px
 
 .status-notification
   border: 2px solid STATUS_BACKGROUND_COLOR
@@ -36,7 +38,7 @@
   height: auto
   width: 466px
   position: relative
-  margin: 8px
+  margin: 4px
   padding: 4px
 
   &.info
@@ -323,25 +325,28 @@
   align-items: start
 
   .notification-icon
-    width: 24px
-    min-width: 24px
-    height: 24px
-    min-height: 24px
+    width: 18px
+    min-width: 18px
+    height: 18px
+    min-height: 18px
     background-repeat: no-repeat
+    background-size: 18px
     background-position: center
+    margin-top: 3px
+    margin-left: 4px
     border-radius: 4px
 
     &.info
-      background-color: NOTIFICATION_INFO_COLOR
+      // background-color: NOTIFICATION_INFO_COLOR
       background-image: NOTIFICATION_INFO_IMG
     &.warning
-      background-color: NOTIFICATION_WARNING_COLOR
+      // background-color: NOTIFICATION_WARNING_COLOR
       background-image: NOTIFICATION_WARNING_IMG
     &.error
-      background-color: NOTIFICATION_ERROR_COLOR
+      // background-color: NOTIFICATION_ERROR_COLOR
       background-image: NOTIFICATION_ERROR_IMG
     &.success
-      background-color: NOTIFICATION_SUCCESS_COLOR
+      // background-color: NOTIFICATION_SUCCESS_COLOR
       // svg gotten from here: "https://www.iconpacks.net/free-icon/green-check-mark-verified-circle-16223.html"
       background-image: NOTIFICATION_SUCCESS_IMG
 
@@ -354,6 +359,8 @@
     font-weight: 400
     letter-spacing: -0.14px
     line-height: 130%
+    align-items: center
+    display: flex
 
   .notification-message-prefix
     font-family: 'SpaceGrotesk'
@@ -557,3 +564,8 @@
   display: flex
   flex-direction: row
   width: -webkit-fill-available
+
+.secondary-notification
+  .notification-icon
+    margin-top: 0px !important
+    margin-left: 0px !important
