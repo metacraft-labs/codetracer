@@ -4,6 +4,7 @@ import {
   readyOnEntryTest as readyOnEntry,
   ctRun,
 } from "../lib/ct_helpers";
+import { StatePanel } from "../page_objects/state";
 
 ctRun("noir_example/");
 
@@ -14,7 +15,18 @@ ctRun("noir_example/");
 
 test("state panel loaded initially", async () => {
   await readyOnEntry();
-  await expect(page.locator("#code-state-line-0")).toContainText(
-    "17 | println(",
-  );
+  const statePanel = new StatePanel(page);
+  await expect(statePanel.codeStateLine()).toContainText("17 | println(");
+});
+
+test("state panel supports integer values", async () => {
+  // await readyOnEntry();
+  const statePanel = new StatePanel(page);
+
+  const values = await statePanel.values();
+  expect(values.x.text).toBe("0");
+  expect(values.x.typeText).toBe("Field");
+
+  expect(values.y.text).toBe("1");
+  expect(values.y.typeText).toBe("Field");
 });
