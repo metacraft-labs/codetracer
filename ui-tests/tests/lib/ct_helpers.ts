@@ -273,6 +273,7 @@ function buildTestProgram(
 
 function recordTestProgram(recordArg: string): number {
   process.env.CODETRACER_IN_UI_TEST = "1";
+  process.env.CODETRACER_WRAP_ELECTRON = "";
 
   // non-obvious options!
   // stdio: 'pipe', encoding: 'utf8' found form
