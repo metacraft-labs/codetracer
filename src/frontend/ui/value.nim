@@ -673,8 +673,8 @@ proc atomValueView(self: ValueComponent, valueText: string, expression: cstring,
     if not self.uiExpanded(value, expression) or not self.charts.hasKey(expression):
       span(class = "value-expanded-text"):
         text htmlText
-        span(class = "value-type"):
-          text(value.typ.langType)
+      span(class = "value-type"):
+        text(value.typ.langType)
     else:
       switchChartKindView(self.charts[expression])
 

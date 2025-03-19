@@ -188,4 +188,3 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
 
   self.completeMoveIndex += 1
   self.data.redraw()
-
