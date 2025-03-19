@@ -96,7 +96,7 @@ body
   border-radius 6px
   cursor pointer
   font-weight normal
-  width 145px
+  width 146px
   height: 34px
   font-family: 'SpaceGrotesk'
 
@@ -142,14 +142,19 @@ body
   border-color #ABABAB
 
 .dialog-options input[type="checkbox"]:checked::after
-  content "✓"
-  font-size 14px
-  color #4CAF50
-  position absolute
-  top 50%
-  left 50%
-  transform translate(-50%, -50%)
-  font-weight normal
+  content: ""
+  position: absolute
+  display: block
+  left: 3.8px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #16A34A;
+  border-width: 0 2px 2px 0;
+  border-radius: 2px
+  -webkit-transform: rotate(45deg);
+  -ms-transform: rotate(45deg);
+  transform: rotate(45deg);
 
 .dialog-options label
   display flex
