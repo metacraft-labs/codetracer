@@ -29,6 +29,8 @@
 
         libzip = pkgs.libzip;
 
+        openssl = pkgs.openssl;
+
         chromedriver-102 = pkgs.chromedriver.overrideAttrs (old: {
           version = "102.0.5005.27";
           src = builtins.fetchurl {

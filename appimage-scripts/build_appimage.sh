@@ -74,6 +74,9 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip"
 LIBZIP=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip.out")
 cp -L "${LIBZIP}"/lib/libzip.so.5 "${APP_DIR}"/lib
 
+OPENSSL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl.out")
+cp -L "${OPENSSL}"/lib/libssl.so.3 "${APP_DIR}"/lib
+
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
 bash "${ROOT_PATH}"/appimage-scripts/install_electron.sh
