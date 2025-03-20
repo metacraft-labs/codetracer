@@ -22,8 +22,10 @@ nim -d:release \
     --gc:refc --hints:on --warnings:off \
     --dynlibOverride:"sqlite3" \
     --dynlibOverride:"pcre" \
+    --dynlibOverride:"libzip" \
     --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
     --passL:"${APP_DIR}/lib/libpcre.so.1" \
+    --passL:"${APP_DIR}/lib/libzip.so.5" \
     --boundChecks:on \
     -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
     -d:chronicles_timestamps=UnixTime \
