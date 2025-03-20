@@ -78,7 +78,7 @@ let
   taskProcessExe* = linksPath / "bin" / "task_process"
   python3Path* = linksPath / "bin" / "python3"
   # TODO: tup/nix? => in linksPath / "bin
-  rubyExe* = linksPath / "bin" / "ruby"
+  rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH", linksPath / "bin" / "ruby" )
   rubyTracerPath* = linksPath / "src" / "trace.rb"
   smallExe* = linksPath / "bin" / "small-lang"
   noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
