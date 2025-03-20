@@ -3,6 +3,7 @@ NIM_COMMON_FLAGS=\
 -d:chronicles_sinks=json\
 -d:chronicles_line_numbers=true\
 -d:chronicles_timestamps=UnixTime\
+-d:ssl\
 --gc:refc\
 --hints:off\
 --warnings:off\

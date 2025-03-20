@@ -55,7 +55,7 @@ defaultBuild: ""
 showMinimap: true
 
 # for now local setup
-baseUrl: http://localhost:55500/api/codetracer
+baseUrl: https://localhost:55504/api/codetracer
 
 downloadApi: /download
 uploadApi: /upload

@@ -67,12 +67,12 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
     )
 
   let currentTime = cast[int](getTime().toJs.seconds)
-  let oneWeek = cast[int]((3.days).toJs.seconds)
+  let threeDays = cast[int]((3.days).toJs.seconds)
   let remainingTime = if trace.onlineExpireTime != NO_EXPIRE_TIME: trace.onlineExpireTime - currentTime else: 0
   var (expireState, expireId) =
     if trace.onlineExpireTime == NO_EXPIRE_TIME:
       (NoExpireState, "trace-info-button")
-    elif remainingTime > oneWeek:
+    elif remainingTime > threeDays:
       (NotExpiringSoon, "trace-info-button")
     elif remainingTime < 0:
       (Expired, "trace-info-button-active")
