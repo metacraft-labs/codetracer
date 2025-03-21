@@ -1269,6 +1269,7 @@ type
     flowMenuIsOpen*: bool
     showBugReport*: bool
     copyMessageActive*: bool
+    completeMoveId*: int
 
   CalltraceEditorComponent* = ref object of Component
     loading*:   JsAssoc[cstring, bool]

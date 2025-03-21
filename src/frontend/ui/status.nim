@@ -37,6 +37,9 @@ proc locationView(self: StatusComponent): VNode =
         tdiv(class = fmt"custom-tooltip {activeClass}"):
           text "Path copied to clipboard"
 
+method onCompleteMove*(self: StatusComponent, response: MoveState) {.async.} =
+  self.completeMoveId += 1
+
 proc counterHandler(self: StatusComponent): void {.async.} =
   const SLOW_MESSAGE_TIME = 2.0 # seconds
   const MAXIMUM_TIME_ALLOWED = 180 # seconds
@@ -504,6 +507,9 @@ method render*(self: StatusComponent): VNode =
       #   span(class="status-flow-buttons"):
       #     flowButtonsView(self)
       #   # createShellContainer(self)
+      if data.startOptions.inTest:
+        span(class = "test-movement"):
+          text $self.completeMoveId
       span(class = "status-right"):
         locationView(self)
     if self.showNotifications:
