@@ -22,6 +22,7 @@ case $platform in
   'mac')
     ./build_in_simple_env.sh "$platform" "$os"
     ./build_mac_app.sh
+    ./build_dmg.sh
     echo Successfully built non-nix-build/CodeTracer.app
     ;;
    *)
