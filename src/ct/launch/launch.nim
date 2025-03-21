@@ -1,5 +1,5 @@
 import
-  std / os,
+  std / [os, strutils ],
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../online_sharing/trace_manager,
