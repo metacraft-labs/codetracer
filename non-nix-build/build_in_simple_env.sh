@@ -14,7 +14,6 @@ rm -rf "$ROOT_DIR/non-nix-build/CodeTracer.app"
 
 mkdir -p $DIST_DIR/bin
 mkdir -p $DIST_DIR/src
-mkdir -p $DIST_DIR/lib
 
 # setup node deps
 bash setup_node_deps.sh
