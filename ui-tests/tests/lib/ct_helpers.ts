@@ -378,15 +378,14 @@ async function debugMovement(selector: string): Promise<void> {
 
   await page.locator(selector).click();
   await readyOnCompleteMove(initialValue);
-
 }
 
 export async function clickContinue(): Promise<void> {
-  await debugMovement("#continue-debug")
+  await debugMovement("#continue-debug");
 }
 
 export async function clickNext(): Promise<void> {
-  await debugMovement("#next-debug")
+  await debugMovement("#next-debug");
 }
 
 export async function readyOnCompleteMove(initialValue: number): Promise<void> {
@@ -399,6 +398,6 @@ export async function readyOnCompleteMove(initialValue: number): Promise<void> {
       const current = parseInt(el.textContent ?? "", 10);
       return !isNaN(current) && current !== expected;
     },
-    { el: await movement.evaluateHandle(el => el), expected: initialValue } // pass both in an object
+    { el: await movement.evaluateHandle((el) => el), expected: initialValue }, // pass both in an object
   );
 }

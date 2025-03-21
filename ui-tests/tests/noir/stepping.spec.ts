@@ -15,12 +15,12 @@ ctRun("noir_example/");
 
 const ENTRY_LINE = 17;
 
-test("continue", async() => {
-    await readyOnEntry();
-    await clickContinue();
+test("continue", async () => {
+  await readyOnEntry();
+  await clickContinue();
 });
 
-test("next", async() => {
-    await readyOnEntry();
-    await clickNext();
+test("next", async () => {
+  await readyOnEntry();
+  await clickNext();
 });
