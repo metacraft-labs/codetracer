@@ -24,6 +24,8 @@ case $platform in
     ./build_mac_app.sh
     ./install_libraries.sh
     echo Successfully built non-nix-build/CodeTracer.app
+    ./buid_dmg.sh
+    echo Successfully built non-nix-build/CodeTracer.dmg
     ;;
    *)
     echo "unsupported platform"
