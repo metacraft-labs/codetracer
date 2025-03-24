@@ -79,7 +79,7 @@ proc downloadTraceCommand*(traceRegistryId: string) =
 
     let localPath = codetracerTmpPath / &"{downloadId}.zip.enc"
 
-    var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyNone))
+    var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
     var exitCode = 0
 
     try:
@@ -129,7 +129,7 @@ proc deleteTraceCommand*(id: int, controlId: string) =
   let test = false
   var exitCode = 0
 
-  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyNone))
+  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
   
   try:
     discard client.getContent(fmt"{parseUri(config.baseUrl) / config.deleteApi}?ControlId={controlId}")

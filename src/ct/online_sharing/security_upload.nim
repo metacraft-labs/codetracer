@@ -54,7 +54,7 @@ proc uploadEncyptedZip*(file: string): (string, int) =
   var exitCode = 0
   var response = ""
 
-  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyNone))
+  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
   let mimes = newMimetypes()
   var data = newMultipartData()
 
