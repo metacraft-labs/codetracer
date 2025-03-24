@@ -4,7 +4,7 @@ set -e
 
 WANTED_TUP_REVISION=4247a523
 WANTED_TUP_VERSION=v0.8-8
-  
+
 if command -v tup &> /dev/null; then
   TUP_VERSION=$(tup --version)
   if [ "$TUP_VERSION" == "tup $WANTED_TUP_VERSION-g$WANTED_TUP_REVISION" ]; then
@@ -17,7 +17,7 @@ else
   echo tup is missing! installing...
 fi
 
-brew install pkg-config pcre2
+brew install pkg-config pcre2 macFUSE
 : ${DEPS_DIR:=$PWD/deps}
 cd "$DEPS_DIR"
 rm -rf tup

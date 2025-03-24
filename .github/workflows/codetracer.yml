@@ -203,6 +203,7 @@ jobs:
         run: ./non-nix-build/build.sh
 
       - name: Install AWS CLI
+        if: startsWith(github.ref, 'refs/tags/')
         run: brew install awscli
 
       - name: Upload artifact
@@ -244,6 +245,7 @@ jobs:
       - dev-build
       - nix-build
       - appimage-build
+      - dmg-build
     steps:
       - name: Checkout
         uses: actions/checkout@v4
