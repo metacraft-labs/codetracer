@@ -55,7 +55,6 @@ if [ "$os" == "mac" ]; then
   brew install sqlite3 ruby node universal-ctags
 fi
 
-./install_tup.sh
 ./install_rust.sh
 ./install_nargo.sh
 ./install_nim_osx.sh

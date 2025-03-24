@@ -200,7 +200,7 @@ jobs:
           submodules: recursive
 
       - name: Build
-        run: ./non-nix-build/build.sh
+        run: ./ci/build/dmg.sh
 
       - name: Install AWS CLI
         if: startsWith(github.ref, 'refs/tags/')
