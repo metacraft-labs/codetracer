@@ -32,6 +32,12 @@ export os
 : ${BIN_DIR:=$NON_NIX_BUILD_DIR/bin}
 : ${DEPS_DIR:=$NON_NIX_BUILD_DIR/deps}
 
+echo "BIN_DIR" "${BIN_DIR}"
+echo "DEPS_DIR" "${DEPS_DIR}"
+
+mkdir -p "$BIN_DIR"
+mkdir -p "$DEPS_DIR"
+
 export BIN_DIR
 export DEPS_DIR
 export DIST_DIR
@@ -49,7 +55,6 @@ if [ "$os" == "mac" ]; then
   brew install sqlite3 ruby node universal-ctags
 fi
 
-./install_tup.sh
 ./install_rust.sh
 ./install_nargo.sh
 ./install_nim_osx.sh

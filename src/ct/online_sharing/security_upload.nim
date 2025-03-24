@@ -1,4 +1,4 @@
-import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri ]
+import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net ]
 from stew / byteutils import toBytes
 import ../../common/[ config ]
 
@@ -54,7 +54,7 @@ proc uploadEncyptedZip*(file: string): (string, int) =
   var exitCode = 0
   var response = ""
 
-  var client = newHttpClient()
+  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
   let mimes = newMimetypes()
   var data = newMultipartData()
 

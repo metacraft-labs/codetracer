@@ -7,9 +7,9 @@ cd $NON_NIX_BUILD_DIR
 
 source env.sh
 
+
 echo "platform: ${platform}; os: ${os}"
 
-mkdir -p "$BIN_DIR" "$DEPS_DIR"
 
 # passing platform and os as args, not env var, to make it easier
 # to pass in nix-shell without modifying env
@@ -24,6 +24,8 @@ case $platform in
     ./build_mac_app.sh
     ./install_libraries.sh
     echo Successfully built non-nix-build/CodeTracer.app
+    ./build_dmg.sh
+    echo Successfully built non-nix-build/CodeTracer.dmg
     ;;
    *)
     echo "unsupported platform"

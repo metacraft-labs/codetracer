@@ -1,4 +1,4 @@
-import std / [ options, strutils, os, strformat, json, httpclient, uri, terminal ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
+import std / [ options, strutils, os, strformat, json, httpclient, uri, terminal, net ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
 import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import]
@@ -79,7 +79,7 @@ proc downloadTraceCommand*(traceRegistryId: string) =
 
     let localPath = codetracerTmpPath / &"{downloadId}.zip.enc"
 
-    var client = newHttpClient()
+    var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
     var exitCode = 0
 
     try:
@@ -129,7 +129,7 @@ proc deleteTraceCommand*(id: int, controlId: string) =
   let test = false
   var exitCode = 0
 
-  var client = newHttpClient()
+  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
   
   try:
     discard client.getContent(fmt"{parseUri(config.baseUrl) / config.deleteApi}?ControlId={controlId}")

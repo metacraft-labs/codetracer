@@ -70,4 +70,4 @@
 	url = https://github.com/cheatfate/nimcrypto.git
 [submodule "libs/zip"]
 	path = libs/zip
-	url = git@github.com:nim-lang/zip.git
+	url = https://github.com/nim-lang/zip.git
