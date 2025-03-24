@@ -7,6 +7,10 @@ nimcache/
 .venv/
 build-*/
 
+# Mac build
+*.app
+*.dmg
+
 # Direnv or shell hook + Nix Flake generated files
 .direnv/
 result
