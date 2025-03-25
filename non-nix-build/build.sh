@@ -20,9 +20,9 @@ case $platform in
     ./build_in_simple_env.sh "$platform" "$os"
     ;;
   'mac')
+    export MACOSX_DEPLOYMENT_TARGET=12.0
     ./build_in_simple_env.sh "$platform" "$os"
     ./build_mac_app.sh
-    ./install_libraries.sh
     echo Successfully built non-nix-build/CodeTracer.app
     ./build_dmg.sh
     echo Successfully built non-nix-build/CodeTracer.dmg

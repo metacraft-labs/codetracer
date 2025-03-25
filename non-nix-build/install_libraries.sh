@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 
-GIT_ROOT=$(git rev-parse --show-toplevel)
-
-LIB_DIR="${GIT_ROOT}/CodeTracer.app/Contents/Frameworks"
+LIB_DIR="${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks"
 
 mkdir -p "${LIB_DIR}"
+
+echo "DIST DIR ${DIST_DIR}" 
 
 brew install libzip
 
 HOMEBREW_LIB_DIR="/System/Volumes/Data/opt/homebrew/lib"
 
 cp "${HOMEBREW_LIB_DIR}/libzip.dylib" "${LIB_DIR}"
-
-install_name_tool -add_rpath "${LIB_DIR}" "${DIST_DIR}"/bin/ct
-install_name_tool -change /usr/lib/libzip.dylib @rpath/libzip.dylib "${DIST_DIR}"/bin/ct
-
