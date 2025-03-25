@@ -6,9 +6,13 @@
 
 set -e
 
+export GIT_ROOT=$(git rev-parse --show-toplevel)                          
+
+"${GIT_ROOT}"/non-nix-build/install_libraries.sh
+
 echo "==========="
 echo "codetracer build: build based on nim"
-echo "-----------"
+echo "==========="
 
 # TODO: The defines pointing to directories should be investigated.
 #       Such defines are reasonable only for loading resources at
@@ -18,6 +22,8 @@ echo "-----------"
 # codetracer
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
+    --dynlibOverride: "libzip" \
+    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.dylib" \
     --gc:refc --hints:on --warnings:off \
     --debugInfo --lineDir:on \
     --boundChecks:on --stacktrace:on --linetrace:on \
@@ -28,6 +34,7 @@ nim -d:release \
     -d:builtWithNix \
     -d:ctEntrypoint \
     --nimcache:nimcache \
+    -d:nimDebugDlOpen \
     --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
 
 # this works    --passL:/nix/store/f6afb4jw9g5f94ixw0jn6cl0ah4liy35-sqlite-3.45.3/lib/libsqlite3.so.0 \
