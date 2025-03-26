@@ -1,7 +1,7 @@
 import std / [os, osproc, strformat]
-import types, paths, lang, trace_index, ct_logging
+import types, paths, lang, trace_index, ct_logging, config
+import ../ct/cli/build
 
-proc startCustomBackend(traceFolder: string, recordCore: bool, callerPid: int, noOutput: bool = false): Process
 
 proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: bool = false, noOutput: bool = false): Process =
   let trace = trace_index.find(traceId, test=test)
@@ -22,46 +22,53 @@ proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: boo
     echo "warning: tried to create symlink to last, but error: ", e.msg
     echo "continuing despite that, you just won't have the special `last` symlink"
 
-  if IS_DB_BASED[trace.lang]:
-    startCustomBackend(trace.outputFolder, recordCore, callerPid, noOutput)
-  else:
-    echo "The specified recording is not compatible with the current version of CodeTracer"
-    quit 1
-
-proc startCustomBackend(traceFolder: string, recordCore: bool, callerPid: int, noOutput: bool = false): Process =
-  # echo "  custom backend path", dbBackendExe
+  let ct_config = loadConfig(folder=getCurrentDir(), inTest=false)
 
   let workdir = codetracerInstallDir
   let options: set[ProcessOption] = {poParentStreams}
-
+  let traceFolder = trace.outputFolder
   # TODO: not sure why noOutput true for
   # nix build: if not noOutput: {poParentStreams} else: {}
 
   putEnv("CODETRACER_LINKS_PATH", linksPath)
-  let process = if not recordCore:
+  if not recordCore:
     debugprint "not recordCore"
     debugprint "noOutput ", noOutput
     debugprint "options ", options
-
-    startProcess(
-      dbBackendExe,
-      workingDir = workdir,
-        args = @[
-          $callerPid,
-          traceFolder / "trace.json",
-          traceFolder / "trace_metadata.json"
-        ],
-        options=options)
-    else:
-      startProcess(
-        codetracerExe,
+    if IS_DB_BASED[trace.lang]:
+      result = startProcess(
+        dbBackendExe,
         workingDir = workdir,
         args = @[
-          "record",
-          dbBackendExe,
           $callerPid,
           traceFolder / "trace.json",
           traceFolder / "trace_metadata.json"
         ],
         options=options)
-  process
+    elif ct_config.rr_backend_enabled:
+      var env = setup_env(ct_config.rr_backend_ct_paths)
+      result = startProcess(
+        ct_config.rr_backend_path,
+        workingDir = workdir,
+        args = @[
+          "dispatcher",
+          virtualizationLayersExe,
+          $callerPid
+        ],
+        env = env,
+        options = options)
+    else:
+      echo "The specified recording is not compatible with the current version of CodeTracer"
+      quit(1)
+  else:
+    result = startProcess(
+      codetracerExe,
+      workingDir = workdir,
+      args = @[
+        "record",
+        dbBackendExe,
+        $callerPid,
+        traceFolder / "trace.json",
+        traceFolder / "trace_metadata.json"
+      ],
+      options=options)

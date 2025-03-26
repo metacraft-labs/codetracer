@@ -1,7 +1,6 @@
 include_rules
 
 : src/main.rs |> !rust_cargo_db_backend |> ../bin/db-backend
-
 # required for now only for system lang backend
 # for now not needed for db-backend
-# : src/bin/virtualization-layers.rs |> !rust_cargo_virtualization_layers |> ../bin/virtualization-layers
+: src/bin/virtualization-layers.rs |> !rust_cargo_virtualization_layers |> ../bin/virtualization-layers
