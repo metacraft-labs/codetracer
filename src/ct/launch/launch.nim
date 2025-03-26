@@ -3,7 +3,7 @@ import
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../online_sharing/trace_manager,
-  ../cli/[ logging, list, help ],
+  ../cli/[ logging, list, help, build],
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
   ../version,
@@ -122,15 +122,10 @@ proc runInitial*(conf: CodetracerConf) =
       deleteTraceCommand(conf.traceId, conf.controlId)
       # eventually enable?
       # downloadCommand(conf.traceRegistryId)
-    # of StartupCommand.build:
-    #   notSupportedCommand($conf.cmd)
-      # eventually enable if needed?
-      # build(conf.buildProgramPath, conf.buildOutputPath)
+    of StartupCommand.build:
+      build(conf.buildProgramPath, conf.buildOutputPath)
     of StartupCommand.record:
-      # TODO: maybe with more confutils
-      # enforcement of order
-      # record(conf.recordOutputFolder, conf.recordExportFile, conf.recordLang, conf.recordProgram, conf.recordProgramArgs)
-      discard record(conf.recordArgs)
+      discard record(conf.recordLang, conf.recordOutputFolder, conf.recordExportFile, conf.recordLang, conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
     of StartupCommand.start_core:
