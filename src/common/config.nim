@@ -102,13 +102,14 @@ proc findConfig*(folder: string, configPath: string): string =
         config = true
 
 proc loadConfig*(folder: string, inTest: bool): Config =
+  # ignore inTest from now: TODO eventually remove?
   var file = findConfig(folder, configPath)
   if file.len == 0:
     file = userConfigDir / configPath
     createDir(userConfigDir)
     copyFile(configDir / defaultConfigPath, userConfigDir / configPath)
-  if inTest:
-    file = codetracerTestDir / testConfigPath
+  # if inTest:
+  #   file = codetracerTestDir / testConfigPath
   var raw = ""
   try:
     raw = readFile(file)

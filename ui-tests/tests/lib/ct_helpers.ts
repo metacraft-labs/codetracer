@@ -159,6 +159,7 @@ async function replayCodetracerInElectron(
   process.env.CODETRACER_CALLER_PID = runPid.toString();
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
+  process.env.CODETRACER_TEST = "1";
   process.env.CODETRACER_WRAP_ELECTRON = "1";
   process.env.CODETRACER_START_INDEX = "1";
 
