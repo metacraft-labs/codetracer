@@ -159,6 +159,7 @@ async function replayCodetracerInElectron(
   process.env.CODETRACER_CALLER_PID = runPid.toString();
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
+  process.env.CODETRACER_TEST = "1";
   process.env.CODETRACER_WRAP_ELECTRON = "1";
   process.env.CODETRACER_START_INDEX = "1";
 
@@ -361,4 +362,43 @@ export class CodetracerTestError extends Error {
 
     Object.setPrototypeOf(this, CodetracerTestError.prototype);
   }
+}
+
+async function debugMovement(selector: string): Promise<void> {
+  await page.locator("#debug").click();
+
+  const initialText = await page.locator(".test-movement").textContent();
+  if (initialText === null) {
+    throw new Error("Initial text was null");
+  }
+
+  const initialValue = parseInt(initialText, 10);
+  if (isNaN(initialValue)) {
+    throw new Error(`Initial text was not a number: "${initialText}"`);
+  }
+
+  await page.locator(selector).click();
+  await readyOnCompleteMove(initialValue);
+}
+
+export async function clickContinue(): Promise<void> {
+  await debugMovement("#continue-debug");
+}
+
+export async function clickNext(): Promise<void> {
+  await debugMovement("#next-debug");
+}
+
+export async function readyOnCompleteMove(initialValue: number): Promise<void> {
+  const movement = page.locator(".test-movement");
+  const elementHandle = await movement.elementHandle();
+  if (elementHandle === null) throw new Error("Element not found");
+
+  await page.waitForFunction(
+    ({ el, expected }) => {
+      const current = parseInt(el.textContent ?? "", 10);
+      return !isNaN(current) && current !== expected;
+    },
+    { el: await movement.evaluateHandle((el) => el), expected: initialValue }, // pass both in an object
+  );
 }
