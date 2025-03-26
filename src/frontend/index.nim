@@ -1402,7 +1402,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
   # config <- file config combined with cli args and other setup
   # improve this code
 
-  data.config.test = data.config.test or data.startOptions.inTest
+  data.config.test = data.config.test #  or data.startOptions.inTest
   # TELEMETRY_ENABLED = false
   # data.layout = layout
   # data.helpers = helpers

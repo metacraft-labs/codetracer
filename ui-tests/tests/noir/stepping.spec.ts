@@ -4,7 +4,7 @@ import { test, expect } from "@playwright/test";
 import {
   // window,
   // page,
-  wait,
+  // wait,
   // debugCodetracer,
   readyOnEntryTest as readyOnEntry,
   clickNext,
@@ -17,7 +17,7 @@ ctRun("noir_example/");
 
 test("continue", async () => {
   await readyOnEntry();
-  await wait(5_000);
+  // await wait(5_000);
   await clickContinue();
   expect(true);
 });
