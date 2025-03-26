@@ -1253,8 +1253,9 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
       errorPrint "  to: ", fmt"{userConfigDir / configPath}"
       quit(1)
 
-  if startOptions.inTest:
-    file = nodePath.join(j(codetracerTestDir), j(testConfigPath))
+  # TODO: maybe remove config test logic?
+  # if startOptions.inTest:
+    # file = nodePath.join(j(codetracerTestDir), j(testConfigPath))
   infoPrint "index: load config ", file
   let (s, err) = await fsreadFileWithErr(file)
   if not err.isNil:
@@ -1310,8 +1311,9 @@ proc loadHelpers*(main: js, filename: string): Future[Helpers] {.async.} =
 
 proc saveConfigTheme*(main: js, theme: cstring): Future[void] {.async.} =
   var file = j(userConfigDir)
-  if data.startOptions.inTest:
-    file = j(configDir & testConfigPath)
+  # TODO: maybe remove inTest config logic?
+  # if data.startOptions.inTest:
+    # file = j(configDir & testConfigPath)
   let (s, err) = await fsReadFileWithErr(file)
   if not err.isNil:
     errorPrint "read config file for theme error: ", err
