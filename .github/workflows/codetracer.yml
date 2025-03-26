@@ -62,7 +62,7 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
+      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh --impure"
 
 
   lint-rust:
