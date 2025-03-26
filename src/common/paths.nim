@@ -83,6 +83,8 @@ let
   smallExe* = linksPath / "bin" / "small-lang"
   noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
   dbBackendExe* = linksPath / "bin" / "db-backend"
+  dbBackendRecordExe* = linksPath / "bin" / "db-backend-record"
+  virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
   ctagsExe* = linksPath / "bin" / "ctags"
 
   cargoExe* = linksPath / "bin" / "cargo"
