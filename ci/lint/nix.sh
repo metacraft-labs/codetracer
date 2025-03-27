@@ -2,4 +2,6 @@
 
 set -e
 
-nix flake check
+export NIXPKGS_ALLOW_INSECURE=1
+
+nix flake check --impure

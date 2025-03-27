@@ -175,7 +175,7 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
       - name: Build
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh"
+        run: "nix develop --impure .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh"
 
       - name: Upload artifact
         if: startsWith(github.ref, 'refs/tags/')
