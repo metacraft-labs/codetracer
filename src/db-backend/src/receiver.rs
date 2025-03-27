@@ -3,7 +3,13 @@ use std::error::Error;
 use std::fs;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
+
+#[cfg (target_os = "windows")]
+use uds_windows::{UnixListener, UnixStream};
+
+#[cfg (target_os = "linux")]
 use std::os::unix::net::{UnixListener, UnixStream};
+
 use std::path::{Path, PathBuf};
 
 use crate::core::{Core, NO_CALLER_PROCESS_PID};

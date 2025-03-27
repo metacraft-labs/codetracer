@@ -7,7 +7,13 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io::Write;
+
+#[cfg (target_os = "windows")]
+use uds_windows::{UnixListener, UnixStream};
+
+#[cfg (target_os = "linux")]
 use std::os::unix::net::{UnixListener, UnixStream};
+
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 

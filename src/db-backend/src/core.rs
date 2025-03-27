@@ -1,7 +1,13 @@
 use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::Write;
+
+#[cfg (target_os = "windows")]
+use uds_windows::UnixStream;
+
+#[cfg (target_os = "linux")]
 use std::os::unix::net::UnixStream;
+
 use std::path::PathBuf;
 
 use std::str;
