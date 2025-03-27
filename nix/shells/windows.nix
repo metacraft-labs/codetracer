@@ -17,11 +17,23 @@ let
 in
 with pkgs;
 mkShell {
+
+  hardeningDisable = [ "all" ];
+
   packages = [
 
+    # Rust cross-compilation
     windows-rust
     cargo-xwin
-    clang
+    clang_19
+
+    llvm
+
+    pkgsCross.mingwW64.buildPackages.gcc
+
+    # Nim cross-compilation
+    ourPkgs.upstream-nim-codetracer
 
   ];
+
 }
