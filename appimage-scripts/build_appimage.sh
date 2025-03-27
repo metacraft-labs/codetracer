@@ -10,6 +10,8 @@
 
 set -e
 
+export NIXPKGS_ALLOW_INSECURE=1
+
 cleanup() {
   echo "Performing cleanup..."
   rm -rf ./squashfs-root
@@ -74,8 +76,12 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip"
 LIBZIP=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip.out")
 cp -L "${LIBZIP}"/lib/libzip.so.5 "${APP_DIR}"/lib
 
-OPENSSL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl.out")
-cp -L "${OPENSSL}"/lib/libssl.so.3 "${APP_DIR}"/lib
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl_1_1"
+
+OPENSSL_1_1=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl_1_1.out" --impure)
+echo "OPENSSL_1_1: ${OPENSSL_1_1}"
+cp -L "${OPENSSL_1_1}"/lib/libssl.so.1.1 "${APP_DIR}"/lib
+cp -L "${OPENSSL_1_1}"/lib/libcrypto.so.1.1 "${APP_DIR}"/lib
 
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
