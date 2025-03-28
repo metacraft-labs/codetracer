@@ -26,14 +26,14 @@ proc setup_env*(configPath: string): StringTableRef =
 
 proc build*(program_path: string, output_path: string) =
   let ct_config = loadConfig(folder=getCurrentDir(), inTest=false)
-  if ct_config.rrBackendEnabled:
-    let configPath = ct_config.rrBackendCtPaths
+  if ct_config.rrBackend.enabled:
+    let configPath = ct_config.rrBackend.ctPaths
 
     try:
       var env = setup_env(configPath)
       let args = @["build", program_path, output_path]
       let p = startProcess(
-        ct_config.rrBackendPath,
+        ct_config.rrBackend.path,
         args = args,
         env = env,
         options = {poParentStreams, poStdErrToStdOut})
