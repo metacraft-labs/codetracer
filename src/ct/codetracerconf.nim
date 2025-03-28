@@ -15,7 +15,7 @@ type
     upload,
     download,
     cmdDelete,
-    # build,
+    build,
     record,
     console,
 
@@ -173,44 +173,49 @@ type
        abbr: "i",
        desc: "explicit flag for interactively choosing a trace"
       .}: Option[bool]
-    # of build:
-    #   buildProgramPath* {.
-    #     argument
-    #     desc: "path to program source code"
-    #   .} : string
-    #   buildOutputPath* {.
-    #     argument
-    #     defaultValue: ""
-    #     desc: "Output path: by default the program path without the extension"
-    #   .} : string
+    of build:
+      buildProgramPath* {.
+        argument
+        desc: "path to program source code"
+      .} : string
+      buildOutputPath* {.
+        argument
+        desc: "Output path: by default the program path without the extension"
+      .} : string
     of record:
-      # recordOutputFolder* {.
-      #   name: "output-folder"
-      #   abbr: "o"
-      #   defaultValue: "."
-      #   desc: "Output folder for the recording"
-      # .} : string
+      recordLang* {.
+        name: "lang"
+        defaultValue: ""
+        desc: "Language of the recording. Supported languages: c, cpp, rust, ruby, python, lua, nim ???"
+      .} : string
 
-      # recordExportFile* {.
-      #   name: "export"
-      #   abbr: "e"
-      #   defaultValue: "",
-      #   desc: "Export zip file for the recording"
-      # .} : string
+      recordOutputFolder* {.
+        name: "output-folder"
+        abbr: "o"
+        defaultValue: "."
+        desc: "Output folder for the recording"
+      .} : string
 
-      # recordLang* {.
-      #   name: "lang"
-      #   defaultValue: ""
-      #   desc: "Language of the recording. Supported languages: c, cpp, rust, ruby, python, lua, nim ???"
-      # .} : string
+      recordBackend* {.
+        name: "backend"
+        defaultValue: ""
+        desc: "Record backend"
+      .} : string
 
-      # recordProgram* {.
-      #   argument
-      #   desc: "Program to record"
-      # .} : string
+      recordExportFile* {.
+        name: "export"
+        abbr: "e"
+        defaultValue: "",
+        desc: "Export zip file for the recording"
+      .} : string
+
+      recordProgram* {.
+        argument
+        desc: "Program to record"
+      .} : string
 
       recordArgs* {.
-        restOfArgs
+        argument
         defaultValue: @[]
         desc: "Arguments for record",
         longDesc: "longer description for record"
