@@ -112,9 +112,10 @@ map:
   findSymbol: "CTRL+T"
   aRestart: "CTRL+F4"
 
-rrBackendEnabled: false
-rrBackendPath: ""
-rrBackendCtPaths: ""
+rrBackend:
+  enabled: false
+  path: ""
+  ctPaths: ""
 
 # version: not used currently: TODO
 v: "0.1alpha"
