@@ -50,8 +50,8 @@ proc record*(lang: string,
     return record_internal(dbBackendRecordExe, pargs, configPath)
   else:
     let ct_config = loadConfig(folder=getCurrentDir(), inTest=false)
-    if ct_config.rr_backend_enabled:
-      let configPath = ct_config.rr_backend_ct_paths
-      return record_internal(ct_config.rr_backend_path, concat(@["record"], pargs), configPath)
+    if ct_config.rrBackendEnabled:
+      let configPath = ct_config.rrBackendCtPaths
+      return record_internal(ct_config.rrBackendPath, concat(@["record"], pargs), configPath)
     else:
       echo "This functionality requires a codetracer-rr-backend installation"
