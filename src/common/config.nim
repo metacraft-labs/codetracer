@@ -33,9 +33,9 @@ type
     uploadApi*: string
     deleteApi*: string
     traceSharingEnabled*: bool
-    rr_backend_enabled*: bool
-    rr_backend_path*: string
-    rr_backend_ct_paths*: string
+    rrBackendEnabled*: bool
+    rrBackendPath*: string
+    rrBackendCtPaths*: string
 
   Config* = ref ConfigObject
 
