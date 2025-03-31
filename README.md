@@ -2,8 +2,8 @@
 [![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg?branch=main)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
-[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.03.2-amd64.AppImage)
-[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.03.2-arm64.dmg)
+[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.03.3-amd64.AppImage)
+[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.03.3-arm64.dmg)
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/share/applications` on Linux).

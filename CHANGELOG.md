@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 25.03.3 - 2025-03-31
+
+The second weekly release. It includes:
+
+* A linking fix for our macOS build
+* New stepping/state panel e2e test helpers
+
+
 ## 25.03.2 - 2025-03-24
 
 The first of our weekly releases. It includes some of our initial fixes and improvements
