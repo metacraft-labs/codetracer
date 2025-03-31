@@ -83,7 +83,7 @@ proc downloadTraceCommand*(traceRegistryId: string) =
     var exitCode = 0
 
     try:
-      client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?DownloadId={downloadId}", localPath)
+      client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={downloadId}", localPath)
 
       decryptZip(localPath, password, zipPath)
 

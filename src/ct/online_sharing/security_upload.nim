@@ -1,4 +1,4 @@
-import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net ]
+import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
 from stew / byteutils import toBytes
 import ../../common/[ config ]
 
@@ -49,19 +49,40 @@ proc zipFileWithEncryption*(inputFile: string, outputZip: string, password: stri
   zip.close()
   encryptZip(outputZip, password)
 
-proc uploadEncyptedZip*(file: string): (string, int) =
+proc getUploadUrl(): string =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  var client = newHttpClient()
+  var uploadUrl = ""
+
+  try:
+    uploadUrl = client.getContent(fmt"{parseUri(config.baseUrl) / config.getUploadUrlApi}")
+  except CatchableError as e:
+    echo fmt"error: can't retrieve upload URL: {e.msg}"
+    uploadUrl = ""
+
+  client.close()
+  return uploadUrl
+
+proc uploadEncryptedZip*(file: string): (string, int) =
+  let getUrlResponse = getUploadUrl()
+
+  if getUrlResponse == "":
+    echo "error: Failed to get upload URL"
+    return ("", 1)
+
+  let uploadUrl = parseJson(getUrlResponse)["UploadUrl"].getStr().strip()
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let mimes = newMimetypes()
+
   var exitCode = 0
   var response = ""
-
-  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
-  let mimes = newMimetypes()
+  var client = newHttpClient()
   var data = newMultipartData()
 
   data.addFiles({"file": file & ".enc"}, mimeDb = mimes)
 
   try:
-    response = client.postContent(fmt"{parseUri(config.baseUrl) / config.uploadApi}", multipart=data)
+    discard client.putContent(uploadUrl, multipart=data)
     exitCode = 0
   except CatchableError as e:
     echo fmt"error: can't upload to API: {e.msg}"
@@ -70,6 +91,6 @@ proc uploadEncyptedZip*(file: string): (string, int) =
   finally:
     client.close()
   
-  (response, exitCode)
+  (getUrlResponse, exitCode)
 
 export toBytes

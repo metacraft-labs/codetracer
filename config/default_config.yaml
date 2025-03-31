@@ -55,11 +55,12 @@ defaultBuild: ""
 showMinimap: true
 
 # for now local setup
-baseUrl: https://localhost:55504/api/codetracer
+baseUrl: http://localhost:55504/api/codetracer/v1
 
 downloadApi: /download
 uploadApi: /upload
 deleteApi: /delete
+getUploadUrlApi: /get/upload/url
 
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
