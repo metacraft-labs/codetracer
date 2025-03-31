@@ -127,7 +127,7 @@ c %f |> %o
 c %f |> %o
 
 !nim_tester = |> ^ %f^ $(NIM_RELEASE) \
---nimcache:/tmp/ct-nim-cache/codetracer_binary \
+--nimcache:/tmp/ct-nim-cache/tester \
 --warnings:on \
 --hints:on \
 --out:%o\
