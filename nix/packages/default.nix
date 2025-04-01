@@ -31,6 +31,8 @@
 
         openssl = pkgs.openssl;
 
+        openssl_1_1 = pkgs.openssl_1_1;
+
         chromedriver-102 = pkgs.chromedriver.overrideAttrs (old: {
           version = "102.0.5005.27";
           src = builtins.fetchurl {
