@@ -2,15 +2,14 @@
 
 import strformat, os
 import task_and_event
+import paths
 
-const codetracerTmpPath = "/tmp/codetracer" ## Temp run directory used by codetracer
-const pipeTmpPath = "/tmp/codetracer_cache" ## Temp pipe directory used by codetracer
 
-func runDirFor*(callerProcessPid: int): string =
+proc runDirFor*(callerProcessPid: int): string =
   ## Return the tmp run directory path for the given `callerProcessPid`.
   codetracerTmpPath / fmt"run-{callerProcessPid}"
 
-func pipeRunDirFor*(callerProcessPid: int): string =
+proc pipeRunDirFor*(callerProcessPid: int): string =
   ## Return the tmp pipe directory path for the given `callerProcessPid`.
   pipeTmpPath / fmt"run-{callerProcessPid}"
 

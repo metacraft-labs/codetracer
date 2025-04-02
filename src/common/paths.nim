@@ -45,16 +45,21 @@ const pathToNodeModules {.strdefine.} = ""
 # binary/lib/artifact paths
 # should be same in folder structure
 # in tup dev env, nix and packages
-let
-  linksPath* = env.get("LINKS_PATH_DIR",
-    if linksPathConst.len > 0:
-      linksPathConst
-    else:
-      when not defined(js) and defined(ctEntrypoint):
-        getAppDir().parentDir
+
+when defined(ctWindows):
+  let
+    linksPath* = getAppDir().parentDir
+else:
+  let
+    linksPath* = env.get("LINKS_PATH_DIR",
+      if linksPathConst.len > 0:
+        linksPathConst
       else:
-        ""
-  )
+        when not defined(js) and defined(ctEntrypoint):
+          getAppDir().parentDir
+        else:
+          ""
+    )
 
 # we might call this from a different process, e.g. index, so
 # getting this path is not always easy
@@ -72,36 +77,60 @@ else:
 #   echo "linksPathConst ", linksPathConst
 #   echo "codetracerExeDir ", codetracerExeDir
 
-let
-  cTraceSourcePath* = linksPath / "src" / "trace.c"
-  consoleExe* = linksPath / "bin" / "console"
-  # (additional note: it is a workaround for dev/some cases: TODO think more)
-  codetracerExe* = codetracerExeDir / "bin" / "ct"
-  bashExe* = linksPath / "bin" / "bash"
-  taskProcessExe* = linksPath / "bin" / "task_process"
-  python3Path* = linksPath / "bin" / "python3"
-  # TODO: tup/nix? => in linksPath / "bin
-  rubyExe* = linksPath / "bin" / "ruby"
-  rubyTracerPath* = linksPath / "src" / "trace.rb"
-  smallExe* = linksPath / "bin" / "small-lang"
-  noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
-  dbBackendExe* = linksPath / "bin" / "db-backend"
-  ctagsExe* = linksPath / "bin" / "ctags"
+when not defined(ctWindows):
+  let
+    cTraceSourcePath* = linksPath / "src" / "trace.c"
+    consoleExe* = linksPath / "bin" / "console"
+    # (additional note: it is a workaround for dev/some cases: TODO think more)
+    codetracerExe* = codetracerExeDir / "bin" / "ct"
+    bashExe* = linksPath / "bin" / "bash"
+    taskProcessExe* = linksPath / "bin" / "task_process"
+    python3Path* = linksPath / "bin" / "python3"
+    # TODO: tup/nix? => in linksPath / "bin
+    rubyExe* = linksPath / "bin" / "ruby"
+    rubyTracerPath* = linksPath / "src" / "trace.rb"
+    smallExe* = linksPath / "bin" / "small-lang"
+    noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
+    dbBackendExe* = linksPath / "bin" / "db-backend"
+    ctagsExe* = linksPath / "bin" / "ctags"
 
-  cargoExe* = linksPath / "bin" / "cargo"
+    cargoExe* = linksPath / "bin" / "cargo"
 
-  # TODO make it work
-  electronExe* = linksPath / "bin" / "electron"
-  electronIndexPath* = codetracerExeDir / "src" / "index.js"
-  chromedriverExe* = linksPath / "bin" / "chromedriver"
+    # TODO make it work
+    electronExe* = linksPath / "bin" / "electron"
+    electronIndexPath* = codetracerExeDir / "src" / "index.js"
+    chromedriverExe* = linksPath / "bin" / "chromedriver"
 
-  cTraceObjectFilePath* = env.get(
-    "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
-    linksPath / "lib" / "trace.o")
+    cTraceObjectFilePath* = env.get(
+      "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
+      linksPath / "lib" / "trace.o")
+else:
+  let
+    cTraceSourcePath* = linksPath / "src" / "trace.c"
+    consoleExe* = linksPath / "bin" / "console.exe"
+    # (additional note: it is a workaround for dev/some cases: TODO think more)
+    codetracerExe* = codetracerExeDir / "bin" / "ct.exe"
+    bashExe* = linksPath / "bin" / "bash.exe"
+    taskProcessExe* = linksPath / "bin" / "task_process.exe"
+    python3Path* = linksPath / "bin" / "python3.exe"
+    # TODO: tup/nix? => in linksPath / "bin
+    rubyExe* = linksPath / "bin" / "ruby.exe"
+    rubyTracerPath* = linksPath / "src" / "trace.rb"
+    smallExe* = linksPath / "bin" / "small-lang.exe"
+    noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
+    dbBackendExe* = linksPath / "bin" / "db-backend.exe"
+    ctagsExe* = linksPath / "bin" / "ctags.exe"
 
+    cargoExe* = linksPath / "bin" / "cargo.exe"
 
-let
-  localShellPreloadInstallPath* = fmt"/tmp/shell_preload_{username}.so"
+    # TODO make it work
+    electronExe* = linksPath / "bin" / "electron.exe"
+    electronIndexPath* = codetracerExeDir / "src" / "index.js"
+    chromedriverExe* = linksPath / "bin" / "chromedriver.exe"
+
+    cTraceObjectFilePath* = env.get(
+      "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
+      linksPath / "lib" / "trace.o")
 
 
 var
@@ -111,9 +140,23 @@ var
 
 # other path/exe consts:
 #  either universal, or usually development environment-specific
+when defined(ctWindows):
+  let
+    codetracerCache* = getEnv("TEMP") & "/codetracer_cache/"
+    codetracerTmpPath* = getenv("TEMP") & "/codetracer"
+    localShellPreloadInstallPath* = getEnv("TEMP") & "/tmp/shell_preload_{username}.so"
+    nimcacheDir* = getEnv("TEMP") & "/codetracer_projects/"
+    pipeTmpPath* = getEnv("TEMP") & "/codetracer_cache" ## Temp pipe directory used by codetracer
+else:
+  let
+    codetracerCache* = "/tmp/codetracer_cache/"
+    codetracerTmpPath* = "/tmp/codetracer"
+    localShellPreloadInstallPath* = fmt"/tmp/shell_preload_{username}.so"
+    nimcacheDir* = "/tmp/codetracer_projects/"
+    pipeTmpPath* = "/tmp/codetracer_cache" ## Temp pipe directory used by codetracer
+
+
 let
-  codetracerCache* = "/tmp/codetracer_cache/"
-  codetracerTmpPath* = "/tmp/codetracer"
   codetracerInstallDir* = when defined(builtWithNix):
     codetracerExeDir # e.g. result/ (from result/)
   else:
@@ -145,7 +188,7 @@ let
   rubyPath* = codetracerInstallDir / "libs" / "ruby" / "ruby"
   luaPath* = codetracerInstallDir / "libs" / "lua"
 
-  nimcacheDir* = "/tmp/codetracer_projects/"
+  # nimcacheDir* = "/tmp/codetracer_projects/"
   scriptExe* = linksPath / "bin" / "script"
   nodeExe* = linksPath / "bin" / "node"
 
