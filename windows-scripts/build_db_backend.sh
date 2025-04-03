@@ -8,4 +8,4 @@ cargo-xwin build --release --cross-compiler clang --target x86_64-pc-windows-msv
 popd || exit
 
 # TODO: Don't hardcode target
-cp "${GIT_ROOT}"/src/db-backend/target/x86_64-pc-windows-msvc/release "${APP_DIR}"/bin
+cp "${GIT_ROOT}"/src/db-backend/target/x86_64-pc-windows-msvc/release/db-backend.exe "${APP_DIR}"/bin

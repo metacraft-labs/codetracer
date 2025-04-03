@@ -27,7 +27,7 @@ nim \
     -d:builtWithNix \
     -d:ctEntrypoint \
     --nimcache:nimcache \
-    --out:ct c ../src/ct/codetracer.nim
+    --out:"${GIT_ROOT}"/windows/bin/ct c ../src/ct/codetracer.nim
 
 # --cc:"env" \
     # --os:windows --passC:"-target" --passC:"x86_64-windows" \

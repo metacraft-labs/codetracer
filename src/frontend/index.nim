@@ -1445,7 +1445,7 @@ proc isCtInstalled: bool =
     #   echo "Exec field: ", execField
     #   if fs.existsSync(execField):
     #     isDesktopOk = true;
-  
+
     fs.existsSync(ctInstalledPath) and fs.existsSync(desktopFilePath)
 
 
@@ -1520,7 +1520,7 @@ proc ready {.async.} =
   # we load helpers
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
-  
+
   # init the UI
   discard windowSetTimeout(proc = discard data.init(config, layout, helpers), 250)
 
