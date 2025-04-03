@@ -1,0 +1,10 @@
+[package]
+name = "lldb-step"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lldb = "0.0.12"
+
+[patch.crates-io]
+lldb-sys = { path = "./lldb-sys.rs/" }
