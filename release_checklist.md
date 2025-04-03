@@ -25,7 +25,11 @@ and then you can pull `main` locally, tag the new last commit in `main` with the
 [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.03.1-arm64.dmg)
 ```
 
+* check if the CI has built/uploaded the new correctly tagged artifacts! maybe at least try to download them from the updated merged README or the release notes.
+
+* only if they're already uploaded, we can publish, as the release notes also point to the new artifacts.
+
 * activate the option to make a GitHub discussion for the release, when publishing and publish!
 
-* publish in OpenCollective news for the release
+* eventually publish in OpenCollective news for the release
 
