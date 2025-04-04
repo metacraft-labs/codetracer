@@ -159,7 +159,7 @@ proc importDbTrace*(
     # for now always use FullRecord for db-backend
     # and ignore possible env var override
     calltraceMode = CalltraceMode.FullRecord,
-    downloadKey = downloadKey)
+    fileId = downloadKey)
 
 proc getFolderSize(folderPath: string): int64 =
   var totalSize: int64 = 0
@@ -183,15 +183,14 @@ proc uploadTrace*(trace: Trace) =
   try:
     zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
 
-    (output, exitCode) = uploadEncyptedZip(outputZip)
-    let jsonMessage = parseJson(output)
-    let downloadKey = trace.program & "//" & jsonMessage["DownloadId"].getStr("") & "//" & aesKey
-
-    if jsonMessage["Successful"].getBool(false):
+    (output, exitCode) = uploadEncryptedZip(outputZip)
+    if output != "":
+      let jsonMessage = parseJson(output)
+      let downloadKey = trace.program & "//" & jsonMessage["FileId"].getStr("") & "//" & aesKey
 
       updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
       updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
-      updateField(trace.id, "remoteShareExpireTime", jsonMessage["Expires"].getInt(), false)
+      updateField(trace.id, "remoteShareExpireTime", jsonMessage["FileStoredUntil"].getInt(), false)
 
       if isatty(stdout):
         echo fmt"""
@@ -206,7 +205,7 @@ Download with:
         # for parsing by `ct` index code
         echo downloadKey
         echo jsonMessage["ControlId"].getStr("")
-        echo jsonMessage["Expires"].getInt()
+        echo jsonMessage["FileStoredUntil"].getInt()
 
     else:
       exitCode = 1

@@ -123,7 +123,7 @@ proc recordTrace*(
     calltrace: bool,
     calltraceMode: CalltraceMode,
     test: bool,
-    downloadKey: string = ""): Trace =
+    fileId: string = ""): Trace =
   # TODO pass here a Trace value and instead if neeeded construct it from other helpers
 
   let currentDate: DateTime = now()
@@ -161,7 +161,7 @@ proc recordTrace*(
             sourceFolders, lowLevelFolder, outputFolder,
             $(lang.int), $(imported.int), $shellID,
             $rrPid, $exitCode,
-            ord(calltrace), $calltraceMode, $traceDate, downloadKey)
+            ord(calltrace), $calltraceMode, $traceDate, fileId)
       break
     except DbError:
       echo "error: ", getCurrentExceptionMsg()
