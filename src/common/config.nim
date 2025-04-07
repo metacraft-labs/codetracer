@@ -29,6 +29,7 @@ type
     defaultBuild*: string
     showMinimap*: bool
     baseUrl*: string
+    getUploadUrlApi*: string
     downloadApi*: string
     uploadApi*: string
     deleteApi*: string

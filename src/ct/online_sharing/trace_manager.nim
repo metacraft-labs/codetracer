@@ -1,4 +1,4 @@
-import std / [ options, strutils, os, strformat, json, httpclient, uri, terminal, net ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
+import streams, std / [ options, strutils, os, strformat, json, httpclient, uri, terminal, net ], ../trace/replay, ../codetracerconf, zip/zipfiles, nimcrypto
 import ../../common/[ config, trace_index, lang, paths ]
 import ../utilities/language_detection
 import ../trace/[ storage_and_import]
@@ -24,27 +24,50 @@ proc uploadCommand*(
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
 
-
-proc decryptZip(encryptedFile: string, password: string, outputFile: string) =
-  var encData = readFile(encryptedFile).toBytes()
-  if encData.len < 16:
-    raise newException(ValueError, "Invalid encrypted data (too short)")
-
-  if password.len < 16:
-    raise newException(ValueError, "Invalid password (too short)")
-
-  let iv = password.toBytes()[0 ..< 16]
-  let ciphertext = encData[16 .. ^1]
+proc decryptZipStream(encryptedFile: string, password: string, outputFile: string) =
+  const blockSize = 16
+  let iv = password.toBytes()[0..<blockSize]
   let key = password.toBytes()
 
   var aes: CBC[aes256]
   aes.init(key, iv)
 
-  var decrypted = newSeq[byte](encData.len)
-  aes.decrypt(encData, decrypted.toOpenArray(0, len(decrypted) - 1))
+  let inStream = newFileStream(encryptedFile, fmRead)
+  if inStream.isNil:
+    raise newException(IOError, "Failed to open encrypted file: " & encryptedFile)
 
-  var depaddedData = pkcs7Unpad(decrypted)
-  writeFile(outputFile, depaddedData)
+  let outStream = newFileStream(outputFile, fmWrite)
+  if outStream.isNil:
+    inStream.close()
+    raise newException(IOError, "Failed to create output file: " & outputFile)
+
+  var buffer = newSeq[byte](blockSize)
+  var decrypted = newSeq[byte](blockSize)
+  var lastBlock: seq[byte] = @[]
+  var isFirst = true
+
+  while true:
+    let bytesRead = inStream.readData(addr buffer[0], blockSize)
+    if bytesRead == 0:
+      break
+    if bytesRead < blockSize:
+      raise newException(IOError, "Corrupted or truncated encrypted file")
+
+    aes.decrypt(buffer, decrypted.toOpenArray(0, blockSize - 1))
+
+    if not isFirst:
+      outStream.writeData(addr lastBlock[0], blockSize)
+    else:
+      isFirst = false
+
+    lastBlock = decrypted
+
+  # Handle padding removal in last block
+  let unpadded = pkcs7Unpad(lastBlock)
+  outStream.writeData(unsafeAddr unpadded[0], unpadded.len)
+
+  inStream.close()
+  outStream.close()
 
 proc unzipFile(zipFile: string, outputDir: string): (string, int) =
   var zip: ZipArchive
@@ -61,15 +84,15 @@ proc unzipFile(zipFile: string, outputDir: string): (string, int) =
   return (outPath, traceId)
 
 proc downloadTraceCommand*(traceRegistryId: string) =
-  # We expect a traceRegistryId to have <downloadId>::<passwordKey>
+  # We expect a traceRegistryId to have <name>//<fileId>//<passwordKey>
   let stringSplit = traceRegistryId.split("//")
   if stringSplit.len() != 3:
-    echo "error: Invalid download key! Should be <program_name>//<download_id>//<encryption_password>"
+    echo "error: Invalid download key! Should be <program_name>//<file_id>//<encryption_password>"
     quit(1)
   else:
-    let downloadId = stringSplit[1]
+    let fileId = stringSplit[1]
     let password = stringSplit[2]
-    let zipPath = codetracerTmpPath / &"{downloadId}.zip"
+    let zipPath = codetracerTmpPath / &"{fileId}.zip"
     let config = loadConfig(folder=getCurrentDir(), inTest=false)
     if not config.traceSharingEnabled:
       echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
@@ -77,15 +100,15 @@ proc downloadTraceCommand*(traceRegistryId: string) =
 
     # <enabled case>:
 
-    let localPath = codetracerTmpPath / &"{downloadId}.zip.enc"
+    let localPath = codetracerTmpPath / &"{fileId}.zip.enc"
 
     var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
     var exitCode = 0
 
     try:
-      client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?DownloadId={downloadId}", localPath)
+      client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
 
-      decryptZip(localPath, password, zipPath)
+      decryptZipStream(localPath, password, zipPath)
 
       let (traceFolder, traceId) = unzipFile(zipPath, codetracerTraceDir)
       let tracePath = traceFolder / "trace.json"
