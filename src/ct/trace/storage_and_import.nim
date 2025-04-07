@@ -168,17 +168,11 @@ proc getFolderSize(folderPath: string): int64 =
       totalSize += getFileSize(path)
   return totalSize
 
-const
-  FILE_SIZE_LIMIT_EXCEETED_EXIT_CODE = 153
-
 proc uploadTrace*(trace: Trace) =
   let outputZip = trace.outputFolder / "tmp.zip"
   let aesKey = generateSecurePassword()
 
   var (output, exitCode) = ("", 0)
-  
-  if getFolderSize(trace.outputFolder) > 4_000_000_000:
-    quit(FILE_SIZE_LIMIT_EXCEETED_EXIT_CODE)
 
   try:
     zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)

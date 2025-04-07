@@ -18,7 +18,7 @@ proc pkcs7Unpad*(data: seq[byte]): seq[byte] =
     raise newException(ValueError, "Data is empty, cannot unpad")
 
   let padLen = int64(data[^1])  # Convert last byte to int64 safely
-  if padLen <= 0 or padLen > data.len:
+  if padLen < 0 or padLen > data.len:
     raise newException(ValueError, "Invalid padding")
 
   result = data[0 ..< data.len - padLen]
@@ -80,11 +80,29 @@ proc zipFileWithEncryption*(inputFile: string, outputZip: string, password: stri
   if not zip.open(outputZip, fmWrite):
     raise newException(IOError, "Failed to create zip file: " & outputZip)
 
+  const bufferSize = 100 * 1024 * 1024 # 100MB
+
   for file in walkDirRec(inputFile):
     let relPath = file.relativePath(inputFile)
-    zip.addFile(relPath, file)
+    let fileStream = newFileStream(file, fmRead)
+
+    var buffer: seq[byte] = newSeq[byte](bufferSize)
+    let dataStream = newStringStream("")
+
+    while true:
+      let bytesRead = fileStream.readData(addr buffer[0], bufferSize)
+
+      if bytesRead == 0:
+        break
+
+      dataStream.writeData(addr buffer[0], bytesRead)
+
+    fileStream.close()
+
+    zip.addFile(relPath, dataStream)
 
   zip.close()
+
   encryptZipStream(outputZip, password)
 
 proc getUploadUrl(): string =
