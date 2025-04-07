@@ -23,20 +23,6 @@ proc pkcs7Unpad*(data: seq[byte]): seq[byte] =
 
   result = data[0 ..< data.len - padLen]
 
-
-proc encryptZip(zipFile, password: string) =
-  var iv: seq[byte] = password.toBytes()[0..15]
-
-  var aes: CBC[aes256]
-  aes.init(password.toOpenArrayByte(0, len(password) - 1), iv)
-
-  var zipData = readFile(zipFile).toBytes()
-  var paddedData = pkcs7Pad(zipData, 16)
-  var encrypted = newSeq[byte](paddedData.len)
-
-  aes.encrypt(paddedData, encrypted.toOpenArray(0, len(encrypted) - 1))
-  writeFile(zipFile & ".enc", encrypted)
-
 proc encryptZipStream(zipFile, password: string) =
   const blockSize = 16
   var iv: seq[byte] = password.toBytes()[0..<blockSize]

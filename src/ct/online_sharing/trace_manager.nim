@@ -69,27 +69,6 @@ proc decryptZipStream(encryptedFile: string, password: string, outputFile: strin
   inStream.close()
   outStream.close()
 
-proc decryptZip(encryptedFile: string, password: string, outputFile: string) =
-  var encData = readFile(encryptedFile).toBytes()
-  if encData.len < 16:
-    raise newException(ValueError, "Invalid encrypted data (too short)")
-
-  if password.len < 16:
-    raise newException(ValueError, "Invalid password (too short)")
-
-  let iv = password.toBytes()[0 ..< 16]
-  let ciphertext = encData[16 .. ^1]
-  let key = password.toBytes()
-
-  var aes: CBC[aes256]
-  aes.init(key, iv)
-
-  var decrypted = newSeq[byte](encData.len)
-  aes.decrypt(encData, decrypted.toOpenArray(0, len(decrypted) - 1))
-
-  var depaddedData = pkcs7Unpad(decrypted)
-  writeFile(outputFile, depaddedData)
-
 proc unzipFile(zipFile: string, outputDir: string): (string, int) =
   var zip: ZipArchive
   if not zip.open(zipFile, fmRead):
@@ -105,10 +84,10 @@ proc unzipFile(zipFile: string, outputDir: string): (string, int) =
   return (outPath, traceId)
 
 proc downloadTraceCommand*(traceRegistryId: string) =
-  # We expect a traceRegistryId to have <fileId>::<passwordKey>
+  # We expect a traceRegistryId to have <name>//<fileId>//<passwordKey>
   let stringSplit = traceRegistryId.split("//")
   if stringSplit.len() != 3:
-    echo "error: Invalid download key! Should be <program_name>//<download_id>//<encryption_password>"
+    echo "error: Invalid download key! Should be <program_name>//<file_id>//<encryption_password>"
     quit(1)
   else:
     let fileId = stringSplit[1]
