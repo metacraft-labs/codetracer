@@ -10,7 +10,7 @@ events: true
 # history: experimental support
 history: true
 repl: true
-traceSharingEnabled: false
+traceSharingEnabled: true
 
 # === feature settings
 
