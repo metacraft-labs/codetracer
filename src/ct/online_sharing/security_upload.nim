@@ -1,4 +1,4 @@
-import nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
+import streams, nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
 from stew / byteutils import toBytes
 import ../../common/[ config ]
 
@@ -37,6 +37,44 @@ proc encryptZip(zipFile, password: string) =
   aes.encrypt(paddedData, encrypted.toOpenArray(0, len(encrypted) - 1))
   writeFile(zipFile & ".enc", encrypted)
 
+proc encryptZipStream(zipFile, password: string) =
+  const blockSize = 16
+  var iv: seq[byte] = password.toBytes()[0..<blockSize]
+
+  var aes: CBC[aes256]
+  aes.init(password.toOpenArrayByte(0, password.len - 1), iv)
+
+  let inStream = newFileStream(zipFile, fmRead)
+  if inStream.isNil:
+    raise newException(IOError, "Failed to open input ZIP file: " & zipFile)
+
+  let outFile = zipFile & ".enc"
+  let outStream = newFileStream(outFile, fmWrite)
+  if outStream.isNil:
+    inStream.close()
+    raise newException(IOError, "Failed to create output file: " & outFile)
+
+  var buffer = newSeq[byte](blockSize)
+  var encrypted = newSeq[byte](blockSize)
+
+  while true:
+    let bytesRead = inStream.readData(addr buffer[0], blockSize)
+    if bytesRead == 0:
+      break
+
+    var toEncrypt = buffer[0..<bytesRead]
+    if bytesRead < blockSize:
+      toEncrypt = pkcs7Pad(toEncrypt, blockSize)
+
+    aes.encrypt(toEncrypt, encrypted.toOpenArray(0, blockSize - 1))
+    outStream.writeData(addr encrypted[0], blockSize)
+
+    if bytesRead < blockSize:
+      break
+
+  inStream.close()
+  outStream.close()
+
 proc zipFileWithEncryption*(inputFile: string, outputZip: string, password: string) =
   var zip: ZipArchive
   if not zip.open(outputZip, fmWrite):
@@ -47,7 +85,7 @@ proc zipFileWithEncryption*(inputFile: string, outputZip: string, password: stri
     zip.addFile(relPath, file)
 
   zip.close()
-  encryptZip(outputZip, password)
+  encryptZipStream(outputZip, password)
 
 proc getUploadUrl(): string =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
