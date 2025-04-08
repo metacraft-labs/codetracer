@@ -15,6 +15,9 @@ pub struct Value {
     pub elements: Vec<Value>,
     pub msg: String,
     pub r: String,
+    pub address: i64,
+    pub ref_value: Option<Box<Value>>,
+    pub is_mutable: bool,
     pub typ: Type,
 }
 
@@ -27,6 +30,8 @@ pub struct Type {
     pub c_type: String,
     // pub elements: Vec<Type>,
     pub labels: Vec<String>,
+    pub element_type: Option<Box<Type>>,
+    pub member_types: Vec<Type>,
 }
 
 impl Value {

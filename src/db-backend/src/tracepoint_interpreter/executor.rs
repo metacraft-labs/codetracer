@@ -188,7 +188,17 @@ pub fn execute_bytecode(
                     #[allow(clippy::unwrap_used)]
                     let array = stack.pop().unwrap();
 
-                    if let ValueRecord::Sequence { elements, type_id: _ } = array {
+                    if let ValueRecord::Sequence { elements, type_id: _ , is_slice} = array {
+                        if is_slice {
+                            let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                            err_value.msg = "Slices not supported currently".to_string();
+                            locals.push(StringAndValueTuple {
+                                field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                                field1: err_value,
+                            });
+                            return locals;
+                        }
+
                         if let ValueRecord::Int { i, type_id: _ } = index {
                             if i < 0 || i >= elements.len() as i64 {
                                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());

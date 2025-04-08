@@ -11,7 +11,7 @@ use crate::value::{Type, Value};
 use log::{error, info, warn};
 use runtime_tracing::{
     CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, StepId, TypeId, TypeKind,
-    TypeRecord, TypeSpecificInfo, ValueId, ValueRecord, VariableId, NO_KEY,
+    TypeRecord, TypeSpecificInfo, Place, ValueRecord, VariableId, NO_KEY,
 };
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -29,14 +29,14 @@ pub struct Db {
     pub paths: DistinctVec<PathId, String>,
     pub variable_names: DistinctVec<VariableId, String>,
 
-    pub compound: DistinctVec<StepId, HashMap<ValueId, ValueRecord>>,
-    // pub compound_items: DistinctVec<StepId, HashMap<(ValueId, usize), ValueId>>,
-    pub cells: DistinctVec<StepId, HashMap<ValueId, ValueRecord>>,
-    pub cell_changes: HashMap<ValueId, Vec<CellChange>>,
-    pub variable_cells: DistinctVec<StepId, HashMap<VariableId, ValueId>>,
+    pub compound: DistinctVec<StepId, HashMap<Place, ValueRecord>>,
+    // pub compound_items: DistinctVec<StepId, HashMap<(Place, usize), Place>>,
+    pub cells: DistinctVec<StepId, HashMap<Place, ValueRecord>>,
+    pub cell_changes: HashMap<Place, Vec<CellChange>>,
+    pub variable_cells: DistinctVec<StepId, HashMap<VariableId, Place>>,
     // callstack level => active variables; used while postprocessing
     // to fill variable_cells
-    pub local_variable_cells: Vec<HashMap<VariableId, ValueId>>,
+    pub local_variable_cells: Vec<HashMap<VariableId, Place>>,
 
     pub step_map: DistinctVec<PathId, HashMap<usize, Vec<DbStep>>>,
     pub path_map: HashMap<String, PathId>,
@@ -289,14 +289,45 @@ impl Db {
                 res.b = *b;
                 res
             }
-            ValueRecord::Sequence { elements, type_id } => {
-                let mut res = Value::new(TypeKind::Seq, self.to_ct_type(type_id));
+            ValueRecord::Sequence { elements, type_id, is_slice } => {
+                // TODO: is_slice should be in the type kind: SLICE?
+                let typ = if !is_slice {
+                    self.to_ct_type(type_id)
+                } else {
+                    let type_record = &self.types[*type_id];
+                    Type::new(TypeKind::Slice, &type_record.lang_type)
+                };
+                let mut res = Value::new(TypeKind::Seq, typ);
                 res.elements = elements.iter().map(|e| self.to_ct_value(e)).collect();
                 res
             }
             ValueRecord::Struct { field_values, type_id } => {
                 let mut res = Value::new(TypeKind::Struct, self.to_ct_type(type_id));
                 res.elements = field_values.iter().map(|value| self.to_ct_value(value)).collect();
+                res
+            }
+            ValueRecord::Tuple { elements, type_id } => {
+                let mut res = Value::new(TypeKind::Tuple, self.to_ct_type(type_id));
+                res.elements = elements.iter().map(|value| self.to_ct_value(value)).collect();
+                res.typ.labels = elements.iter().enumerate().map(|(index, _)| format!("{index}")).collect();
+                res.typ.member_types = res.elements.iter().map(|value| value.typ.clone()).collect();
+                res
+            }
+            ValueRecord::Variant { discriminator: _, contents: _, type_id: _ } => {
+                // variant-like enums not generated yet from noir tracer:
+                //   we should support variants in general, but we'll think a bit first how
+                //   to more cleanly/generally represent them in the codetracer code, as the current
+                //   `Value` mapping doesn't seem great imo
+                //   we can improve it, or we can add a new variant case (something more similar to the runtime_tracing repr?)
+                todo!("a more suitable codetracer value/type for variants")
+            }
+            ValueRecord::Reference { dereferenced, mutable, type_id } => {
+                let mut res = Value::new(TypeKind::Pointer, self.to_ct_type(type_id));
+                let dereferenced_value = self.to_ct_value(dereferenced);
+                res.typ.element_type = Some(Box::new(dereferenced_value.typ.clone()));
+                res.address = 0; // no address info for now
+                res.ref_value = Some(Box::new(dereferenced_value));
+                res.is_mutable = *mutable;
                 res
             }
             ValueRecord::Raw { r, type_id } => {
@@ -311,7 +342,7 @@ impl Db {
             }
             ValueRecord::None { type_id } => Value::new(TypeKind::None, self.to_ct_type(type_id)),
             ValueRecord::Cell { .. } => {
-                // supposed to map to value_id in value graph
+                // supposed to map to place in value graph
                 // TODO
                 unimplemented!()
             }
@@ -320,7 +351,7 @@ impl Db {
 
     // pub fn to_compound_value(&self, record: &ValueRecord) -> CompoundValue {
     //     if let ValueRecord::Sequence { elements, .. } = record {
-    //         let value_id_list = elements.CompoundValue
+    //         let place_list = elements.CompoundValue
     //     }
     // }
     // call -> step_id -> call_key (call)
@@ -354,15 +385,15 @@ impl Db {
         &self.variable_names[variable_id]
     }
 
-    // find value_id for variable_id and step_id
-    // for value_id:
-    //   find last closest change of value_id
+    // find place for variable_id and step_id
+    // for place:
+    //   find last closest change of place
     //   if just a cell;
     //     that's the result
     //   if compound:
     //     from count, find relevant events for each index or for init:
     //     index/register/assign
-    //     and then recursively for each final item value_id, find its value
+    //     and then recursively for each final item place, find its value
     //     maybe do all of this up to some depth: for now a const, e.g. 3
     pub fn load_value(&self, variable_id: VariableId, step_id: StepId) -> ValueRecord {
         let name = self.variable_name(variable_id);
@@ -370,8 +401,8 @@ impl Db {
 
         let step_variable_cells = &self.variable_cells[step_id];
         if step_variable_cells.contains_key(&variable_id) {
-            let value_id = step_variable_cells[&variable_id];
-            self.load_value_for_id(value_id, step_id)
+            let place = step_variable_cells[&variable_id];
+            self.load_value_for_place(place, step_id)
         } else {
             error!("no record for this variable on step {step_id:?}");
             ValueRecord::Error {
@@ -382,16 +413,16 @@ impl Db {
     }
 
     #[allow(clippy::comparison_chain)]
-    pub fn load_value_for_id(&self, value_id: ValueId, step_id: StepId) -> ValueRecord {
-        info!("load_value_for_id {value_id:?} for #{step_id:?}");
-        if self.cell_changes.contains_key(&value_id) {
-            let changes = &self.cell_changes[&value_id];
+    pub fn load_value_for_place(&self, place: Place, step_id: StepId) -> ValueRecord {
+        info!("load_value_for_place {place:?} for #{step_id:?}");
+        if self.cell_changes.contains_key(&place) {
+            let changes = &self.cell_changes[&place];
             let mut i: usize = 0;
             let mut last_change_index: Option<usize> = None;
             // TODO: think of edge case: i == changes.len() - 1: last
             while i < changes.len() {
                 let change = changes[i];
-                info!("cell change {i} for {value_id:?} for {step_id:?}: {change:?}");
+                info!("cell change {i} for {place:?} for {step_id:?}: {change:?}");
                 if changes[i].step_id == step_id {
                     last_change_index = Some(i); // i is index of current change: this is the exact one
                     break;
@@ -405,40 +436,41 @@ impl Db {
             }
             if let Some(index) = last_change_index {
                 let cell_change = changes[index];
-                info!("last cell change for {value_id:?} for {step_id:?}: {cell_change:?}");
+                info!("last cell change for {place:?} for {step_id:?}: {cell_change:?}");
                 info!("==============");
                 let cells_for_step_id = &self.cells[cell_change.step_id];
-                if cells_for_step_id.contains_key(&value_id) {
+                if cells_for_step_id.contains_key(&place) {
                     // simple cell, return value record for it
-                    cells_for_step_id[&value_id].clone()
+                    cells_for_step_id[&place].clone()
                 } else {
-                    self.load_compound_value_for_id(value_id, cell_change)
+                    self.load_compound_value_for_place(place, cell_change)
                 }
             } else {
                 ValueRecord::Error {
-                    msg: format!("internal error: no cell change for value_id {value_id:?} up to step_id {step_id:?}"),
+                    msg: format!("internal error: no cell change for place {place:?} up to step_id {place:?}"),
                     type_id: TypeId(0),
                 }
             }
         } else {
             ValueRecord::Error {
-                msg: "internal error: no change found for this value_id".to_string(),
+                msg: "internal error: no change found for this place".to_string(),
                 type_id: TypeId(0),
             }
         }
     }
 
-    fn load_compound_value_for_id(&self, value_id: ValueId, cell_change: CellChange) -> ValueRecord {
-        info!("load_compound_value_for_id {value_id:?} {cell_change:?}");
+    fn load_compound_value_for_place(&self, place: Place, cell_change: CellChange) -> ValueRecord {
+        info!("load_compound_value_for_place {place:?} {cell_change:?}");
         let compound_for_step_id = &self.compound[cell_change.step_id];
-        if compound_for_step_id.contains_key(&value_id) {
-            let compound_value = &compound_for_step_id[&value_id];
-            if let ValueRecord::Sequence { elements, type_id } = compound_value {
+        if compound_for_step_id.contains_key(&place) {
+            let compound_value = &compound_for_step_id[&place];
+            if let ValueRecord::Sequence { elements, type_id, is_slice: _ } = compound_value {
+                // slices not supported currently, but it's an experimental API: TODO rework
                 let loaded_elements = elements
                     .iter()
                     .map(|element| {
-                        if let ValueRecord::Cell { value_id } = element {
-                            self.load_value_for_id(*value_id, cell_change.step_id)
+                        if let ValueRecord::Cell { place } = element {
+                            self.load_value_for_place(*place, cell_change.step_id)
                         } else {
                             element.clone()
                         }
@@ -447,6 +479,7 @@ impl Db {
                 ValueRecord::Sequence {
                     elements: loaded_elements,
                     type_id: *type_id,
+                    is_slice: false,
                 }
             } else {
                 compound_value.clone() // register or assign?
@@ -454,9 +487,9 @@ impl Db {
         } else if let Some(_index) = cell_change.index {
             if let Some(type_id) = cell_change.type_id {
                 let elements: Vec<ValueRecord> = (0..cell_change.item_count)
-                    .map(|i| self.load_value_item_by_index(value_id, i, cell_change.step_id))
+                    .map(|i| self.load_value_item_by_index(place, i, cell_change.step_id))
                     .collect();
-                ValueRecord::Sequence { elements, type_id }
+                ValueRecord::Sequence { elements, type_id, is_slice: false }
             } else {
                 ValueRecord::Error {
                     msg: "internal error: no type_id for this compound cell change".to_string(),
@@ -465,22 +498,22 @@ impl Db {
             }
         } else {
             ValueRecord::Error {
-                msg: "internal error: no cell/compound for this value_id and step_id".to_string(),
+                msg: "internal error: no cell/compound for this place and step_id".to_string(),
                 type_id: TypeId(0),
             }
         }
     }
 
-    fn load_value_item_by_index(&self, value_id: ValueId, index: usize, step_id: StepId) -> ValueRecord {
-        info!("load_value_by_index {value_id:?} index {index} #{step_id:?}");
-        if self.cell_changes.contains_key(&value_id) {
-            for cell_change in self.cell_changes[&value_id].iter().rev() {
+    fn load_value_item_by_index(&self, place: Place, index: usize, step_id: StepId) -> ValueRecord {
+        info!("load_value_by_index {place:?} index {index} #{step_id:?}");
+        if self.cell_changes.contains_key(&place) {
+            for cell_change in self.cell_changes[&place].iter().rev() {
                 if cell_change.step_id <= step_id {
                     info!("  cell change for index {index}: {cell_change:?}");
                     if let Some(change_index) = cell_change.index {
                         if change_index == index {
-                            if let Some(item_value_id) = cell_change.item_value_id {
-                                return self.load_value_for_id(item_value_id, step_id);
+                            if let Some(item_place) = cell_change.item_place {
+                                return self.load_value_for_place(item_place, step_id);
                             }
                         }
                     }
@@ -507,9 +540,9 @@ impl Db {
             }
             last_call_key = call_key;
             eprint!("  step #{} line {}:", step_id.0, self.steps[step_id].line.0);
-            for (variable_id, value_id) in step_variable_cells.iter() {
+            for (variable_id, place) in step_variable_cells.iter() {
                 let variable_name = self.variable_name(*variable_id);
-                eprint!("  {} {}: {}", variable_name, variable_id.0, value_id.0);
+                eprint!("  {} {}: {}", variable_name, variable_id.0, place.0);
             }
             eprintln!();
         }
@@ -679,7 +712,7 @@ pub struct CellChange {
     pub item_count: usize,
     pub type_id: Option<TypeId>,
     pub index: Option<usize>,
-    pub item_value_id: Option<ValueId>,
+    pub item_place: Option<Place>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -691,5 +724,5 @@ pub enum EndOfProgram {
 // #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 // pub struct VariableCell {
 //     pub step_id: StepId,
-//     pub value_id: ValueId,
+//     pub place: Place,
 // }
