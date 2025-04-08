@@ -416,6 +416,7 @@ type
     member*: seq[Value]
     refValue*: Value
     address*: langstring
+    isMutable*: bool
     strong*: int
     weak*: int
     r*: langstring
