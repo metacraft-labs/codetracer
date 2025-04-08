@@ -6,7 +6,7 @@ use std::str;
 
 // use log::info;
 use runtime_tracing::{
-    CallKey, EventLogKind, PathId, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, ValueId, ValueRecord,
+    CallKey, EventLogKind, PathId, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, Place, ValueRecord,
 };
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
@@ -25,7 +25,7 @@ pub struct TraceProcessor<'a> {
     last_started_call_key: CallKey,
     depth: usize,
     call_stack: Vec<CallKey>,
-    last_compound_infos: HashMap<ValueId, CompoundValueInfo>,
+    last_compound_infos: HashMap<Place, CompoundValueInfo>,
 }
 
 impl<'a> TraceProcessor<'a> {
@@ -107,9 +107,9 @@ impl<'a> TraceProcessor<'a> {
 
                 let step_variable_cells = &mut self.db.variable_cells[self.current_step_id];
                 let current_call_variable_cells = &self.db.local_variable_cells[self.depth - 1];
-                for (variable_id, value_id) in current_call_variable_cells.iter() {
-                    // info!("trace for step: {variable_id:?} {value_id:?}");
-                    step_variable_cells.insert(*variable_id, *value_id);
+                for (variable_id, place) in current_call_variable_cells.iter() {
+                    // info!("trace for step: {variable_id:?} {place:?}");
+                    step_variable_cells.insert(*variable_id, *place);
                 }
 
                 if step_record.line.0 >= 0 {
@@ -268,16 +268,28 @@ impl<'a> TraceProcessor<'a> {
                 // => steps is decreasing, so step id is also decreasing with 1
                 self.current_step_id = StepId(self.db.steps.len() as i64 - 1);
             }
+
+            TraceLowLevelEvent::BindVariable(_record) => {
+                unimplemented!() // experimental, not ready
+            }
+            TraceLowLevelEvent::Assignment(_record) => {
+                unimplemented!() // experimental, not ready
+            }
+            TraceLowLevelEvent::DropVariables(_record) => {
+                unimplemented!() // experimental, not ready
+            }
+
             TraceLowLevelEvent::CompoundValue(record) => {
-                self.db.compound[self.current_step_id].insert(record.value_id, record.value.clone());
-                if let ValueRecord::Sequence { elements, type_id } = &record.value {
+                self.db.compound[self.current_step_id].insert(record.place, record.value.clone());
+                if let ValueRecord::Sequence { elements, type_id, is_slice: _ } = &record.value {
+                    // for now is_slice not supported, but this is an experimental API: TODO rework it
                     let compound_info = CompoundValueInfo {
                         item_count: elements.len(),
                         type_id: *type_id,
                     };
-                    self.last_compound_infos.insert(record.value_id, compound_info);
+                    self.last_compound_infos.insert(record.place, compound_info);
                     self.register_cell_change(
-                        record.value_id,
+                        record.place,
                         compound_info.item_count,
                         Some(compound_info.type_id),
                         None,
@@ -286,15 +298,15 @@ impl<'a> TraceProcessor<'a> {
                     #[allow(clippy::needless_range_loop)]
                     for i in 0..compound_info.item_count {
                         if let ValueRecord::Cell {
-                            value_id: item_value_id,
+                            place: item_place,
                         } = &elements[i]
                         {
                             self.register_compound_cell_change(
-                                record.value_id,
+                                record.place,
                                 compound_info.item_count,
                                 compound_info.type_id,
                                 i,
-                                *item_value_id,
+                                *item_place,
                             );
                         }
                     }
@@ -303,40 +315,40 @@ impl<'a> TraceProcessor<'a> {
                 };
             }
             TraceLowLevelEvent::CellValue(record) => {
-                self.db.cells[self.current_step_id].insert(record.value_id, record.value.clone());
-                self.register_simple_cell_change(record.value_id);
+                self.db.cells[self.current_step_id].insert(record.place, record.value.clone());
+                self.register_simple_cell_change(record.place);
             }
             TraceLowLevelEvent::AssignCompoundItem(record) => {
                 let last_compound_info = self
                     .last_compound_infos
-                    .get(&record.value_id)
+                    .get(&record.place)
                     .expect("at least one register of compound value before assigning its item");
                 self.register_compound_cell_change(
-                    record.value_id,
+                    record.place,
                     last_compound_info.item_count,
                     last_compound_info.type_id,
                     record.index,
-                    record.item_value_id,
+                    record.item_place,
                 );
             }
             TraceLowLevelEvent::AssignCell(record) => {
-                self.db.cells[self.current_step_id].insert(record.value_id, record.new_value.clone());
-                self.register_simple_cell_change(record.value_id);
+                self.db.cells[self.current_step_id].insert(record.place, record.new_value.clone());
+                self.register_simple_cell_change(record.place);
             }
             TraceLowLevelEvent::VariableCell(record) => {
                 // self.depth should be >= 1 always,
                 // as a top-level-code `Call` event should be before all steps
                 // and that call should continue to end, still a bit worrying maybe
                 let current_call_variable_cells = &mut self.db.local_variable_cells[self.depth - 1];
-                current_call_variable_cells.insert(record.variable_id, record.value_id);
+                current_call_variable_cells.insert(record.variable_id, record.place);
 
                 let step_variable_cells = &mut self.db.variable_cells[self.current_step_id];
-                step_variable_cells.insert(record.variable_id, record.value_id);
+                step_variable_cells.insert(record.variable_id, record.place);
 
                 // let name = self.db.variable_name(record.variable_id);
                 // info!(
                 //     "register current call variable {:?}({}) {:?}",
-                //     record.variable_id, name, record.value_id
+                //     record.variable_id, name, record.place
                 // );
             }
             TraceLowLevelEvent::DropVariable(variable_id) => {
@@ -356,36 +368,36 @@ impl<'a> TraceProcessor<'a> {
         Ok(())
     }
 
-    fn register_simple_cell_change(&mut self, value_id: ValueId) {
-        self.register_cell_change(value_id, 0, None, None, None);
+    fn register_simple_cell_change(&mut self, place: Place) {
+        self.register_cell_change(place, 0, None, None, None);
     }
 
     fn register_compound_cell_change(
         &mut self,
-        value_id: ValueId,
+        place: Place,
         item_count: usize,
         type_id: TypeId,
         index: usize,
-        item_value_id: ValueId,
+        item_place: Place,
     ) {
-        self.register_cell_change(value_id, item_count, Some(type_id), Some(index), Some(item_value_id));
+        self.register_cell_change(place, item_count, Some(type_id), Some(index), Some(item_place));
     }
 
     fn register_cell_change(
         &mut self,
-        value_id: ValueId,
+        place: Place,
         item_count: usize,
         type_id: Option<TypeId>,
         index: Option<usize>,
-        item_value_id: Option<ValueId>,
+        item_place: Option<Place>,
     ) {
-        let value_cell_changes = &mut self.db.cell_changes.entry(value_id).or_default();
+        let value_cell_changes = &mut self.db.cell_changes.entry(place).or_default();
         value_cell_changes.push(CellChange {
             step_id: self.current_step_id,
             item_count,
             type_id,
             index,
-            item_value_id,
+            item_place,
         });
     }
 }

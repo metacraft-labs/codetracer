@@ -258,10 +258,10 @@ impl Handler {
         // TODO: fix random order here as well: ensure order(or in final locals?)
         let value_tracking_locals: Vec<Variable> = self.db.variable_cells[self.step_id]
             .iter()
-            .map(|(variable_id, value_id)| {
+            .map(|(variable_id, place)| {
                 let name = self.db.variable_name(*variable_id);
-                info!("log local {variable_id:?} {name} value id: {value_id:?}");
-                let value = self.db.load_value_for_id(*value_id, self.step_id);
+                info!("log local {variable_id:?} {name} place: {place:?}");
+                let value = self.db.load_value_for_place(*place, self.step_id);
                 Variable {
                     expression: self.db.variable_name(*variable_id).to_string(),
                     value: self.db.to_ct_value(&value),
