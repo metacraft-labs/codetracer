@@ -9,6 +9,7 @@ type
     enabled*: bool
     path*: string
     ctPaths*: string
+    debugInfoToolPath*: string
 
   ConfigObject* = object
     ## The config object is the schema for config yaml files
@@ -41,7 +42,8 @@ type
     rrBackend* {.defaultVal: RRBackendConfig(
       enabled: false,
       path: "",
-      ctPaths: ""
+      ctPaths: "",
+      debugInfoToolPath: ""
     ).}: RRBackendConfig
 
   Config* = ref ConfigObject

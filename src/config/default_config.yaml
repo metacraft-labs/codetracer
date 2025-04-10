@@ -116,6 +116,7 @@ rrBackend:
   enabled: false
   path: ""
   ctPaths: ""
+  debugInfoToolPath: ""
 
 # version: not used currently: TODO
 v: "0.1alpha"
