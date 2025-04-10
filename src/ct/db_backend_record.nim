@@ -3,7 +3,6 @@ import std/[ os, osproc, strutils, strformat, sequtils, json ],
   utilities/[ env, language_detection ],
   cli/[ logging, help ],
   globals,
-  confutils/defs,
   trace/storage_and_import,
   trace/shell
 

@@ -21,7 +21,6 @@ proc record_internal(exe: string, args: seq[string], config_path: string): Trace
       let traceId = parseInt(lastLine[8..^1])
       result = trace_index.find(traceId, test=false)
 
-
 proc record*(lang: string,
              outputFolder: string,
              backend: string,
