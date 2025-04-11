@@ -29,11 +29,13 @@ proc runWithRestart(
     if lang == LangUnknown:
       errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
       quit(1)
-    elif not lang.isDbBased:
-      errorMessage fmt"error: {lang} not supported currently!"
-      quit(1)
     else:
-      recordedTrace = record(recordArgs)
+      recordedTrace = record(lang=getExtension(lang),
+                             outputFolder="",
+                             backend="",
+                             exportFile="",
+                             program=recordArgs[0],
+                             args=recordArgs[1..^1])
     if not recordedTrace.isNil:
       let shouldRestart =
         if not afterRestart:

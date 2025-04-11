@@ -5,6 +5,12 @@ import json_serialization/std/tables, strutils, sequtils,  os, yaml, std/streams
 import .. / common / [types, paths]
 
 type
+  RRBackendConfig* = object
+    enabled*: bool
+    path*: string
+    ctPaths*: string
+    debugInfoToolPath*: string
+
   ConfigObject* = object
     ## The config object is the schema for config yaml files
 
@@ -33,6 +39,12 @@ type
     uploadApi*: string
     deleteApi*: string
     traceSharingEnabled*: bool
+    rrBackend* {.defaultVal: RRBackendConfig(
+      enabled: false,
+      path: "",
+      ctPaths: "",
+      debugInfoToolPath: ""
+    ).}: RRBackendConfig
 
   Config* = ref ConfigObject
 

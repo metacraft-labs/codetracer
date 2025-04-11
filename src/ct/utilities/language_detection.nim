@@ -1,5 +1,6 @@
-import std/[os, strutils],
-  ../../common/lang
+import
+  std/[os, osproc, strutils, tables],
+  ../../common/[lang, config]
 
 # detect the lang of the source for a binary
 #   based on folder/filename/files and if not possible on symbol patterns
@@ -21,17 +22,35 @@ proc detectFolderLang(folder: string): Lang =
 
 proc detectLang*(program: string, lang: Lang): Lang =
   # echo "detectLang ", program
+  var langs = {
+    "c": LangC,
+    "cpp": LangCpp,
+    "rs": LangRust,
+    "nim": LangNim,
+    "go": LangGo,
+    "py": LangPython,
+    "rb": LangRubyDb, # default for ruby for now
+    "nr": LangNoir,
+    "small": LangSmall,
+  }.toTable()
+
   if lang == LangUnknown:
-    if program.endsWith(".rb"):
-      LangRubyDb
-    elif program.endsWith(".nr"):
-      LangNoir
-    elif program.endsWith(".small"):
-      LangSmall
+    let absProgram = expandFileName(program)
+    if "." in program:
+      let extension = rsplit(absProgram[1..^1], ".", 1)[1].toLowerAscii()
+      if langs.hasKey(extension):
+        result = langs[extension]
     elif dirExists(program):
-      detectFolderLang(program)
+      result = detectFolderLang(program)
     else:
-      LangUnknown
-      # TODO: integrate with rr/gdb backend
+      let ct_config = loadConfig(folder=getCurrentDir(), inTest=false)
+      if ct_config.rrBackend.enabled:
+        let rawLang = execProcess(
+          ct_config.rrBackend.debuginfoToolPath,
+          args = @["lang", program],
+          options={}).strip
+        result = toLang(rawLang)
+      else:
+        result = LangUnknown
   else:
-    lang
+    result = lang
