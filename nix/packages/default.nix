@@ -561,6 +561,23 @@
               --passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0 \
               --nimcache:nimcache \
               --out:ct c ./src/ct/codetracer.nim
+
+            ${upstream-nim-codetracer.out}/bin/nim \
+              -d:debug -d:asyncBackend=asyncdispatch \
+              --gc:refc --hints:off --warnings:off \
+              --debugInfo --lineDir:on \
+              --boundChecks:on --stacktrace:on --linetrace:on \
+              -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+              -d:chronicles_timestamps=UnixTime \
+              -d:ssl \
+              -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
+              -d:linksPathConst=${runtimeDeps.outPath}/ \
+              -d:libcPath=${pkgs.glibc.out} \
+              -d:builtWithNix \
+              -d:ctEntrypoint \
+              --passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0 \
+              --nimcache:nimcache \
+              --out:db-backend-record c ./src/ct/db_backend_record.nim
           '';
 
           installPhase = ''
@@ -614,6 +631,7 @@
             # ln -sf ${codetracer-electron}/src/public/ $out/public
 
             cp ./ct $out/bin
+            cp ./db-backend-record $out/bin
 
             cp -r src/frontend/index.html $out/
             cp -r src/frontend/subwindow.html $out/
