@@ -58,5 +58,6 @@ const SQL_ALTER_TABLE_STATEMENTS: seq[string] = @[
    """ALTER TABLE traces ADD COLUMN remoteShareDownloadId text;""",
    """ALTER TABLE traces ADD COLUMN remoteShareControlId text;""",
    """ALTER TABLE traces ADD COLUMN remoteShareExpireTime INTEGER DEFAULT -1;"""
+   """ALTER TABLE traces RENAME COLUMN remoteShareDownloadKEy INTEGER DEFAULT -1;"""
    # """ALTER TABLE traces ADD COLUMN love integer;"""
 ]
