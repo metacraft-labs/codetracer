@@ -61,16 +61,16 @@ module MazeSolver
       @grid.each_with_index do |row, x|
         row.each_with_index do |cell, y|
           if [x, y] == [@start.x, @start.y]
-            p "S "
+            print "S "
           elsif [x, y] == [@end.x, @end.y]
-            p "E "
+            print "E "
           elsif path_points.include?([x, y])
-            p "* "
+            print "* "
           else
-            p cell == 1 ? "# " : ". "
+            print cell == 1 ? "# " : ". "
           end
         end
-        puts  
+        puts
       end
     end
 
