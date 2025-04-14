@@ -46,7 +46,7 @@ proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: boo
         ],
         options=options)
     elif ctConfig.rrBackend.enabled:
-      var env = setup_env(ctConfig.rrBackend.ctPaths)
+      var env = setupEnv(ctConfig.rrBackend.ctPaths)
       result = startProcess(
         ctConfig.rrBackend.path,
         workingDir = workdir,

@@ -3,7 +3,7 @@ import std/[os, osproc, strutils, sequtils],
   ../utilities/[language_detection ],
   ../cli/build
 
-proc record_internal(exe: string, args: seq[string], config_path: string): Trace =
+proc recordInternal(exe: string, args: seq[string], config_path: string): Trace =
   var env = setup_env(configPath)
   let p = startProcess(
     exe,
@@ -27,7 +27,7 @@ proc record*(lang: string,
              exportFile: string,
              program: string,
              args: seq[string]): Trace =
-  let detected_lang = detectLang(program, toLang(lang))
+  let detectedLang = detectLang(program, toLang(lang))
   var pargs: seq[string] = @[]
   if lang != "":
     pargs.add("--lang")
@@ -42,15 +42,15 @@ proc record*(lang: string,
   if args.len != 0:
     pargs = concat(pargs, args)
 
-  if detected_lang in @[LangRubyDb, LangNoir, LangSmall]:
+  if detectedLang in @[LangRubyDb, LangNoir, LangSmall]:
     let configPath = getEnv(
       "CODETRACER_CT_PATHS",
       getAppDir().parentDir.parentDir.parentDir / "ct_paths.json")
-    return record_internal(dbBackendRecordExe, pargs, configPath)
+    return recordInternal(dbBackendRecordExe, pargs, configPath)
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
       let configPath = ctConfig.rrBackend.ctPaths
-      return record_internal(ctConfig.rrBackend.path, concat(@["record"], pargs), configPath)
+      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), configPath)
     else:
       echo "This functionality requires a codetracer-rr-backend installation"
