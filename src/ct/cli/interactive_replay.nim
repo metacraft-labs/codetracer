@@ -41,7 +41,7 @@ func tracesInJson*(traces: seq[Trace]): string =
   Json.encode(traces)
 
 
-proc interactiveReplayMenu*(command: StartupCommand) =
+proc interactiveTraceSelectMenu*(command: StartupCommand) =
   let recordCore = envLoadRecordCore()
   # ordered by id
   # returns the newest(biggest id) first
@@ -68,11 +68,7 @@ proc interactiveReplayMenu*(command: StartupCommand) =
       let traceId = raw.parseInt
       let trace = trace_index.find(traceId, test=false)
       if not trace.isNil:
-        if command != StartupCommand.upload:
-          discard runRecordedTrace(trace, test=false, recordCore=recordCore)
-        else:
-          uploadTrace(trace)
-        break
+        return trace
       else:
         echo fmt"trace with id {traceId} not found in local codetracer db, please try again"
     except:

@@ -2,7 +2,6 @@ import
   std/[os, json, strutils, strformat, sets, algorithm, terminal],
   ../../common/[trace_index, lang, types, paths],
   ../utilities/git,
-  ../online_sharing/security_upload,
   json_serialization
 
 proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
@@ -167,50 +166,3 @@ proc getFolderSize(folderPath: string): int64 =
     if kind == pcFile:
       totalSize += getFileSize(path)
   return totalSize
-
-proc uploadTrace*(trace: Trace) =
-  let outputZip = trace.outputFolder / "tmp.zip"
-  let aesKey = generateSecurePassword()
-
-  var (output, exitCode) = ("", 0)
-
-  try:
-    zipFileWithEncryption(trace.outputFolder, outputZip, aesKey)
-
-    (output, exitCode) = uploadEncryptedZip(outputZip)
-    if output != "":
-      let jsonMessage = parseJson(output)
-      let downloadKey = trace.program & "//" & jsonMessage["FileId"].getStr("") & "//" & aesKey
-
-      updateField(trace.id, "remoteShareDownloadId", downloadKey, false)
-      updateField(trace.id, "remoteShareControlId", jsonMessage["ControlId"].getStr(""), false)
-      updateField(trace.id, "remoteShareExpireTime", jsonMessage["FileStoredUntil"].getInt(), false)
-
-      if isatty(stdout):
-        echo fmt"""
-OK: uploaded, you can share the link.
-NB: It's sensitive: everyone with this link can access your trace!
-
-Download with:
-`ct download {downloadKey}`
-"""
-
-      else:
-        # for parsing by `ct` index code
-        echo downloadKey
-        echo jsonMessage["ControlId"].getStr("")
-        echo jsonMessage["FileStoredUntil"].getInt()
-
-    else:
-      exitCode = 1
-
-  except CatchableError as e:
-    echo fmt"error: can't delete trace {e.msg}"
-    removeFile(outputZip)
-    removeFile(outputZip & ".enc")
-    exitCode = 1
-
-  removeFile(outputZip)
-  removeFile(outputZip & ".enc")
-
-  quit(exitCode)
