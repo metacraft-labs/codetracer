@@ -1,21 +1,41 @@
-proc downloadFile(fileId: string) =
-      client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
+import streams, nimcrypto, zip/zipfiles, std/[ enumerate, terminal, options, sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
+import ../../common/[ config, trace_index, paths, lang ]
+from stew / byteutils import toBytes
+import ../utilities/[ env, encryption, zip, language_detection ]
+import ../trace/storage_and_import, ../globals
 
-proc downloadTrace(fileId: string): string
+proc downloadFile(fileId, localPath: string, config: Config) =
+  let client = newHttpClient()
+  client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
+
+proc downloadTrace(fileId, traceDownloadKey: string, password: seq[byte], config: Config): int =
+  var key: array[32, byte]
+  var iv: array[16, byte]
+
+  var counter = 0
+  for i in password:
+    if counter < 32:
+      key[counter] = i
+      counter += 1
+
+  copyMem(addr iv, addr key, 16)
+
   let traceId = trace_index.newID(false)
 
   let downloadTarget = codetracerTmpPath / &"{fileId}.enc"
-  let unencryptedTarget = codetracerTmpPath / &"{fileId}.zip"
-  let unzippedLocation = outputDir / "trace-" & $traceId
-    downloadFile
-    decrtyptFile
-      removeFile(localPath)
-      removeFile(zipPath)
- 
-  let (traceFolder, traceId) = unzipFile(zipPath, codetracerTraceDir)
-  let tracePath = traceFolder / "trace.json"
+  let decryptedTarget = codetracerTmpPath / &"{fileId}.zip"
+  let unzippedLocation = codetracerTraceDir / "trace-" & $traceId
+
+  downloadFile(fileId, downloadTarget, config)
+  decryptFile(downloadTarget, decryptedTarget, key, iv)
+  removeFile(downloadTarget)
+
+  unzipIntoFolder(decryptedTarget, unzippedLocation)
+  removeFile(decryptedTarget)
+
+  let tracePath = unzippedLocation / "trace.json"
   let traceJson = parseJson(readFile(tracePath))
-  let traceMetadataPath = traceFolder / "trace_metadata.json"
+  let traceMetadataPath = unzippedLocation / "trace_metadata.json"
   var pathValue = ""
   for item in traceJson:
     if item.hasKey("Path"):
@@ -23,12 +43,13 @@ proc downloadTrace(fileId: string): string
       break
 
   let lang = detectLang(pathValue, LangUnknown)
-  discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceRegistryId)
+  discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
   return traceId
 
-proc downloadTraceCommand*(traceRegistryId: string) =
-  # We expect a traceRegistryId to have <name>//<fileId>//<passwordKey>
-  let stringSplit = traceRegistryId.split("//")
+proc downloadTraceCommand*(traceDownloadKey: string) =
+  # We expect a traceDownloadKey to have <name>//<fileId>//<passwordKey>
+  let stringSplit = traceDownloadKey.split("//")
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
   if not config.traceSharingEnabled:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
@@ -38,12 +59,11 @@ proc downloadTraceCommand*(traceRegistryId: string) =
 
   let fileId = stringSplit[1]
   let password = stringSplit[2]
-  let config = loadConfig(folder=getCurrentDir(), inTest=false)
 
   try:
     let fileId = stringSplit[1]
     let password = stringSplit[2]
-    let result = downloadTrace
+    let traceId = downloadTrace(fileId, traceDownloadKey, password.toBytes(), config)
     if isatty(stdout):
       echo fmt"OK: downloaded with trace id {traceId}"
     else:

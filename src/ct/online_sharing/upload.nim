@@ -1,15 +1,20 @@
-import streams, nimcrypto, zip/zipfiles, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
-from stew / byteutils import toBytes
+import std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json, sequtils ]
+import ../../common/[ trace_index, types ]
+import ../utilities/[ encryption, zip, env ]
 import ../../common/[ config ]
+import ../cli/interactive_replay
+import ../codetracerconf
+import ../trace/shell
 
-type UploadedInfo = object
+type UploadedInfo = ref object
   fileId: string
   downloadKey: string
   controlId: string
   storedUntilEpochSeconds: int
 
-proc uploadFile(file: string, config: Config): UploadedInfo =
+proc uploadFile(file: string, config: Config): UploadedInfo {.raises: [KeyError, Exception].} =
   var client = newHttpClient()
+
   try:
     let getUrlResponse = client.getContent(fmt"{parseUri(config.baseUrl) / config.getUploadUrlApi}")
     let getUrlJson = parseJson(getUrlResponse);
@@ -17,22 +22,23 @@ proc uploadFile(file: string, config: Config): UploadedInfo =
     let uploadUrl = getUrlJson["UploadUrl"].getStr("").strip()
     let fileId = getUrlJson["FileId"].getStr("").strip()
     let controlId = getUrlJson["ControlId"].getStr("")
-    let storedUntilEpochSeconds = jsonMessage["StoredUntilEpochSeconds"].getInt()
-    if downloadId == "" or uploadUrl == "" or controlId == "" or storedUntilEpochSeconds == 0:
-      raise "error: can't upload to API: {e.msg}"
+    let storedUntilEpochSeconds = getUrlJson["FileStoredUntil"].getInt()
+    if fileId == "" or uploadUrl == "" or controlId == "" or storedUntilEpochSeconds == 0:
+      raise newException(KeyError, "error: Can't parse response")
       
     var data = newMultipartData()
     data.addFiles({"file": file}) 
-    client.putContent(uploadUrl, multipart=data)
+    discard client.putContent(uploadUrl, multipart=data)
     client.close()
+
     return UploadedInfo(fileId: fileId, controlId: controlId, storedUntilEpochSeconds: storedUntilEpochSeconds)
   except CatchableError as e:
-    raise "error: can't upload to API: {e.msg}"
+    raise newException(Exception, &"error: can't upload to API: {e.msg}")
 
 proc uploadTrace(trace: Trace, config: Config): UploadedInfo =
   let outputZip = trace.outputFolder / "tmp.zip"
   let outputEncr = trace.outputFolder / "tmp.enc"
-  let (key, iv) = generateSecurePassword()
+  let (key, iv) = generateEncryptionKey()
 
   try:
     zipFolder(trace.outputFolder, outputZip)
@@ -56,22 +62,23 @@ proc uploadCommand*(
   interactive: bool
 ) =
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
-  if config.traceSharingEnabled:
-    echo const TRACE_SHARING_DISABLED_ERROR_MESSAGE = """
-trace sharing disabled in config!
-you can enable it by editing `$HOME/.config/codetracer/.config.yaml`
-and toggling `traceSharingEnabled` to true
-"""
+
+  if not config.traceSharingEnabled:
+    echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
 
-  var tracePath: string
+  var uploadInfo: UploadedInfo
+  var tracePath: Trace
+
   if interactive:
-    tracePath = interactiveTraceSelectMenu()
-  else 
+    tracePath = interactiveTraceSelectMenu(StartupCommand.upload)
+  else:
     tracePath = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+
   try:
-  let uploadInfo: UploadInfo = uploadTrace(tracePath, config)
-  except:
+    uploadInfo = uploadTrace(tracePath, config)
+  except CatchableError as e:
+    echo e.msg
     quit(1)
 
   if isatty(stdout):

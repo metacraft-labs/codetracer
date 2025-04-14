@@ -1,7 +1,6 @@
 import
   std/[strutils, strformat, sequtils, algorithm, rdstdin],
   ../../common/[ trace_index, types, lang ],
-  ../trace/[ run, storage_and_import ],
   ../utilities/[ env ],
   ../codetracerconf,
   json_serialization
@@ -41,7 +40,7 @@ func tracesInJson*(traces: seq[Trace]): string =
   Json.encode(traces)
 
 
-proc interactiveTraceSelectMenu*(command: StartupCommand) =
+proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
   let recordCore = envLoadRecordCore()
   # ordered by id
   # returns the newest(biggest id) first

@@ -1,21 +1,23 @@
-import std/[options ],
+import std/options,
   ../utilities/[ env ],
-  ../trace/[ storage_and_import, ],
   ../cli/[ interactive_replay ],
+  ../../common/[ types ],
   ../codetracerconf,
   shell,
   run
 
 
-proc replayCommand*(
+proc replay*(
   patternArg: Option[string],
   traceIdArg: Option[int],
   traceFolderArg: Option[string],
   interactive: bool
 ): bool =
-  var tracePath: string
+  let recordCore = envLoadRecordCore()
+  var trace: Trace
+
   if interactive:
-    tracePath = interactiveTraceSelectMenu();
-  else 
-    tracePath = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
-  return runRecordedTrace(tracePath, test=false, recordCore=recordCore)
+    trace = interactiveTraceSelectMenu(StartupCommand.replay);
+  else:
+    trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+  return runRecordedTrace(trace, test=false, recordCore=recordCore)
