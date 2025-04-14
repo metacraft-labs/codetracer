@@ -880,10 +880,11 @@ proc openLayoutTab*(
           data.ui.componentMapping[content][0].layoutItem)
       return
 
-  if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0:
-    let lastComponentIndex = openSimilarComponentsTabs[^1]
-    let lastComponent = similarComponents[lastComponentIndex]
-    parent = cast[GoldenContentItem](lastComponent.layoutItem.parent)
+  if similarComponents.len > 0 and openSimilarComponentsTabs.len > 0 and
+    not similarComponents[openSimilarComponentsTabs[^1]].isNil and not similarComponents[openSimilarComponentsTabs[^1]].layoutItem.isNil:
+      let lastComponentIndex = openSimilarComponentsTabs[^1]
+      let lastComponent = similarComponents[lastComponentIndex]
+      parent = cast[GoldenContentItem](lastComponent.layoutItem.parent)
 
   else:
     if (content == Content.EditorView or content == Content.NoInfo) and
