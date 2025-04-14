@@ -180,7 +180,7 @@ type
       .} : string
       buildOutputPath* {.
         argument
-        desc: "Output path: by default the program path without the extension"
+        desc: "Output path"
       .} : string
     of record:
       recordLang* {.
