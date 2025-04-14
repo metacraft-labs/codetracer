@@ -1,5 +1,5 @@
 import
-  std/[os, json, strutils, strformat, sets, algorithm, terminal],
+  std/[os, json, strutils, strformat, sets, algorithm ],
   ../../common/[trace_index, lang, types, paths],
   ../utilities/git,
   json_serialization

@@ -1,28 +1,28 @@
-import streams, std/[ sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
-
+import streams, std/os
 import zip/zipfiles
-import zip/gzipfiles
-import streams
 
-proc zipFolder*(folderPath: string) =
+proc zipFolder*(source, output: string) =
+  var z: ZipArchive
+  discard z.open(output, fmWrite)
+  var r: seq[Stream] = @[]
+  for file in walkDirRec(source):
+    let relPath = file.relativePath(source)
+    let fileStream = newFileStream(file, fmRead)
 
-proc unzipIntoFolder(zipfile, targetPath: string) =
-    
-    
-#var z: ZipArchive
-#discard z.open("/codetracer/src/ct/online_sharing/result.zip", fmWrite)
-#var r: seq[Stream] = @[]
-#for file in walkDirRec("/codetracer/src/ct/online_sharing/tozip"):
-  
-#  let relPath = file.relativePath("/codetracer/src/ct/online_sharing/tozip")
-#  echo relPath
+    r.add(fileStream)
+    z.addFile(relPath, fileStream)
 
-#  let fileStream = newFileStream(file, fmRead)
-#  r.add(fileStream)
-#  z.addFile(relPath, fileStream)
+  z.close()
 
-#echo 13
-#z.close()
-#for r1 in r:
-#  r1.close()
-#sleep (100000)
+  for r1 in r:
+    r1.close()
+
+proc unzipIntoFolder*(zipPath, targetDir: string) {.raises: [IOError, OSError, Exception].} =
+  var zip: ZipArchive
+  if not zip.open(zipPath, fmRead):
+    raise newException(IOError, "Failed to open decrypted ZIP: " & zipPath)
+
+  createDir(targetDir)
+  zip.extractAll(targetDir)
+
+  zip.close()

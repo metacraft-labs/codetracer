@@ -271,7 +271,7 @@ type
         desc: "explicit flag for interactively choosing a trace"
       .}: Option[bool]
     of download:
-      traceRegistryId* {.
+      traceDownloadKey* {.
         argument,
         desc: "the trace registry unique id: <program-name>//<downloadId>//<password> e.g. noir//1234//asd"
       .}: string

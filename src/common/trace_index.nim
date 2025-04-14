@@ -149,7 +149,7 @@ proc recordTrace*(
             sourceFolders, lowLevelFolder, outputFolder,
             lang, imported, shellID,
             rrPid, exitCode,
-            calltrace, calltraceMode, date, remoteShareDownloadId)
+            calltrace, calltraceMode, date, remoteShareDownloadKey)
           VALUES (?, ?, ?,
              ?, ?, ?, ?,
              ?, ?, ?,

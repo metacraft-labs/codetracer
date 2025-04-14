@@ -2,8 +2,8 @@ import
   std / [os, strutils ],
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
-  ../online_sharing/trace_manager,
   ../cli/[ logging, list, help, build],
+  ../online_sharing/[ upload, download, delete ],
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
   ../version,
@@ -117,7 +117,7 @@ proc runInitial*(conf: CodetracerConf) =
         conf.uploadTraceFolder,
         replayInteractive)
     of StartupCommand.download:
-      downloadTraceCommand(conf.traceRegistryId)
+      downloadTraceCommand(conf.traceDownloadKey)
     of StartupCommand.cmdDelete:
       deleteTraceCommand(conf.traceId, conf.controlId)
       # eventually enable?
