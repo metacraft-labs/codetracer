@@ -9,11 +9,10 @@ proc generateEncryptionKey*(): (array[32, byte], array[16, byte]) {.raises: [Val
     raise newException(ValueError, "Encryption problem: 0x1A")
 
   copyMem(addr iv, addr key, 16)
-
   return (key, iv)
 
 proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte]) {.raises: [IOError, OSError, Exception].} =
-  var aes: CBC[aes256]
+  var aes: CFB[aes256]
   aes.init(key, iv)
 
   let inStream = newFileStream(source, fmRead)
@@ -23,25 +22,19 @@ proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
 
   var buffer = newSeq[byte](bufferSize)
   var encrypted = newSeq[byte](bufferSize)
-  var lastBytesRead: int32 = 0
-
-  outStream.write(bufferSize)
   while true:
     let bytesRead = inStream.readData(addr buffer[0], bufferSize)
     if bytesRead == 0:
       break
 
-    aes.encrypt(encrypted, encrypted.toOpenArray(0, bufferSize - 1))
-    outStream.writeData(addr encrypted[0], bufferSize)
-    lastBytesRead = bytesRead
+    aes.encrypt(buffer, encrypted)
+    outStream.writeData(addr encrypted[0], bytesRead)
 
-  outStream.write(lastBytesRead)
   inStream.close()
   outStream.close()
-  #aes.clear()?!
 
 proc decryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte]) =
-  var aes: CBC[aes256]
+  var aes: CFB[aes256]
   aes.init(key, iv)
 
   let inStream = newFileStream(source, fmRead)
@@ -49,26 +42,16 @@ proc decryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
   if inStream.isNil or outStream.isNil:
     raise newException(IOError, "Failed to open encrypted file: " & source)
 
-  var bufferSize = cast[int](inStream.readUint64())
   var buffer = newSeq[byte](bufferSize)
   var decrypted = newSeq[byte](bufferSize)
-  var read: bool = false
 
   while true:
-    let bytesRead = inStream.readData(addr buffer[0], bufferSize)
-    if bytesRead != bufferSize and bytesRead != sizeof(int32):
-      raise newException(IOError, "Corrupted or truncated encrypted file")
+    var dataRead = inStream.readData(addr buffer[0], bufferSize)
+    if dataRead == 0:
+      break;
 
-    if bytesRead == sizeof(int32):
-      let lastBytesWritten: int32 = outStream.readInt32()
-      outStream.writeData(addr decrypted[0], lastBytesWritten)
-      break
-
-    if read:
-      outStream.writeData(addr decrypted[0], bufferSize)
-
-    aes.decrypt(buffer, decrypted.toOpenArray(0, bufferSize - 1)) # this should return somekind of error if it cant decrypt
-    read = true
+    aes.decrypt(buffer, decrypted)
+    outStream.writeData(addr decrypted[0], dataRead)
 
   inStream.close()
   outStream.close()
