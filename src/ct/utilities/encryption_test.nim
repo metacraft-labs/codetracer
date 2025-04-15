@@ -1,63 +1,76 @@
+import error_handler
 import encryption
-import filesystem
+import os
+import streams
+import std/strutils
 
-const placeholder = "wserdtfyguhijokpl;2345678"
-var createdFiles = @newSeq[string]
-proc createFile(len: int, callerName: string = instantiationInfo().name): string =
-  // getTmpPath
-  // createFile (tmoPath+callerName)
-  // for i 0..inf write i\n until len
-  // return filename
+const placeholder = "the brown fox went into the den!"
+var createdFiles = newSeq[string]()
 
-proc onExitHook() =
-  // remove all from createdFiles
+proc createFile(len: int, callerName: string): string =
+  let tmpPath = "/tmp/"
+  let filename = tmpPath & callerName
+  let file = newFileStream(filename, fmWrite)
+  if file.isNil:
+    raise newException(IOError, "Failed to create file")
 
-atexit(onExitHook)
+  file.writeLine(placeholder)
+  for i in 0..len-1:
+    file.writeLine($i)
 
-
-proc validateForFilesLargerThanBufferSize() =
-  let file = createFile(400)
-  let ecrTarget =
-  let decrTarget
-  createdFiles.add(ecrTarget)
-  createdFiles.add(decrTarget)
-  (key,iv) = generateEncryptionKey()
-  encryptFile(file, ecrTarget, key, iv, 64)
-  decryptFile(ecrTarget, decrTarget, key, iv)
-  // readfile, validate placeholder
+  file.close()
+  return filename
 
 proc validateForFilesLargerThanBufferSize() =
-  let file = createFile(18)
-  let ecrTarget =
-  let decrTarget
+  let file = createFile(400, "greater")
+  let ecrTarget = "/tmp/encrypted_400.enc"
+  let decrTarget = "/tmp/decrypted_400.zip"
   createdFiles.add(ecrTarget)
   createdFiles.add(decrTarget)
-  (key,iv) = generateEncryptionKey()
-  encryptFile(file, ecrTarget, key, iv, 128)
-  decryptFile(ecrTarget, decrTarget, key, iv)
-  try:
-  // readfile, validate placeholder
-  // if not corret or err -> errors.push("messasge")
+
+  let (key, iv) = generateEncryptionKey()
+
+  runSafe(
+    proc() =
+      encryptFile(file, ecrTarget, key, iv, 64)
+      decryptFile(ecrTarget, decrTarget, key, iv)
+
+      let decryptedContent = readFile(decrTarget)
+      if not decryptedContent.contains(placeholder):
+        pushError("Decryption failed for file: " & file),
+    proc() = 
+      removeFile(ecrTarget)
+      removeFile(decrTarget),
+    "validateForFilesLargerThanBufferSize"
+  )
+
+proc validateForFilesSmallerThanBufferSize() =
+  let file = createFile(18, "smaller")
+  let ecrTarget = "/tmp/encrypted_18.enc"
+  let decrTarget = "/tmp/decrypted_18.zip"
+  createdFiles.add(ecrTarget)
+  createdFiles.add(decrTarget)
+
+  let (key, iv) = generateEncryptionKey()
+
+  runSafe(
+    proc() =
+      encryptFile(file, ecrTarget, key, iv, 128)
+      decryptFile(ecrTarget, decrTarget, key, iv)
+
+      let decryptedContent = readFile(decrTarget)
+      if not decryptedContent.contains(placeholder):
+        pushError("Decryption failed for file: " & file),
+    proc() = 
+      removeFile(ecrTarget)
+      removeFile(decrTarget),
+    "validateForFilesSmallerThanBufferSize"
+  )
 
 proc validate*() =
-  runSafe(validateForFilesLargerThanBufferSize)
-  runSafe(validateForFilesLargerThanBufferSize)
-  throwErrorsIfAny
+  validateForFilesLargerThanBufferSize()
+  validateForFilesSmallerThanBufferSize()
+  throwErrorsIfAny()
 
 when isMainModule:
   validate()
-
-// new file somewhere
-var errors = newSeq[]string
-proc pushError*(msg: string) =
-  erros.push(msg)
-proc throwErrorsIfAny*() =
-  if errors.any:
-    raise //formated meesage
-proc runSafe*(action: proc (), cleanup: proc() = nil, string = instantiationInfo().name) =
-  try:
-    action()
-  except:
-    errors.push("formated error + caller name")
-  finally
-    cleanup?.()
