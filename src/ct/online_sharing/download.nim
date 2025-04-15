@@ -28,10 +28,11 @@ proc downloadTrace(fileId, traceDownloadKey: string, key: array[32, byte], confi
   let tracePath = unzippedLocation / "trace.json"
   let traceJson = parseJson(readFile(tracePath))
   let traceMetadataPath = unzippedLocation / "trace_metadata.json"
+  let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
   var pathValue = ""
-  for item in traceJson:
-    if item.hasKey("Path"):
-      pathValue = item["Path"].getStr("")
+  for item in tracePathsMetadata:
+    if item.getStr("") != "":
+      pathValue = item.getStr("")
       break
 
   let lang = detectLang(pathValue, LangUnknown)
