@@ -8,17 +8,9 @@ proc downloadFile(fileId, localPath: string, config: Config) =
   let client = newHttpClient()
   client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
 
-proc downloadTrace(fileId, traceDownloadKey: string, password: seq[byte], config: Config): int =
-  var key: array[32, byte]
+proc downloadTrace(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
   var iv: array[16, byte]
-
-  var counter = 0
-  for i in password:
-    if counter < 32:
-      key[counter] = i
-      counter += 1
-
-  copyMem(addr iv, addr key, 16)
+  copyMem(addr iv, unsafeAddr key, 16)
 
   let traceId = trace_index.newID(false)
 
@@ -62,8 +54,12 @@ proc downloadTraceCommand*(traceDownloadKey: string) =
 
   try:
     let fileId = stringSplit[1]
-    let password = stringSplit[2]
-    let traceId = downloadTrace(fileId, traceDownloadKey, password.toBytes(), config)
+    let passwordHex = stringSplit[2]
+
+    var password: array[32, byte]
+    hexToBytes(passwordHex, password)
+
+    let traceId = downloadTrace(fileId, traceDownloadKey, password, config)
     if isatty(stdout):
       echo fmt"OK: downloaded with trace id {traceId}"
     else:
