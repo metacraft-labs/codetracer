@@ -1,5 +1,1 @@
-
-  config = ..
-  if !ping serverAddres:
-    echo "Skipped due to.."
-    return;
+# TODO: Add online sharing test when server is up and running
