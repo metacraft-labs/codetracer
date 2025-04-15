@@ -312,8 +312,8 @@ impl<'a> CallFlowPreloader<'a> {
             );
         }
 
-        for (variable_id, value_id) in &db.variable_cells[step_id] {
-            let value_record = db.load_value_for_id(*value_id, step_id);
+        for (variable_id, place) in &db.variable_cells[step_id] {
+            let value_record = db.load_value_for_place(*place, step_id);
             let full_value_record = FullValueRecord {
                 variable_id: *variable_id,
                 value: value_record,
