@@ -1,7 +1,6 @@
 import nimcrypto, streams
 import system
 
-const bufferSize: int = 4096
 proc generateEncryptionKey*(): (array[32, byte], array[16, byte]) {.raises: [ValueError].} =
   var key: array[32, byte]
   var iv: array[16, byte]
@@ -11,7 +10,7 @@ proc generateEncryptionKey*(): (array[32, byte], array[16, byte]) {.raises: [Val
   copyMem(addr iv, addr key, 16)
   return (key, iv)
 
-proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte]) {.raises: [IOError, OSError, Exception].} =
+proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte], bufferSize: int = 4096) {.raises: [IOError, OSError, Exception].} =
   var aes: CFB[aes256]
   aes.init(key, iv)
 
@@ -33,7 +32,7 @@ proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
   inStream.close()
   outStream.close()
 
-proc decryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte]) =
+proc decryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte], bufferSize: int = 4096) =
   var aes: CFB[aes256]
   aes.init(key, iv)
 
