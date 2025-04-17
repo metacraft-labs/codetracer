@@ -1,7 +1,6 @@
 import nimcrypto, streams
 import system
 import std/os
-import progress_update
 
 proc generateEncryptionKey*(): (array[32, byte], array[16, byte]) {.raises: [ValueError].} =
   var key: array[32, byte]
@@ -12,7 +11,7 @@ proc generateEncryptionKey*(): (array[32, byte], array[16, byte]) {.raises: [Val
   copyMem(addr iv, addr key, 16)
   return (key, iv)
 
-proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte], bufferSize: int = 4096) {.raises: [IOError, OSError, Exception].} =
+proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, byte], bufferSize: int = 4096, onProgress: proc(i: int) = nil) {.raises: [IOError, OSError, Exception].} =
   var aes: CFB[aes256]
   aes.init(key, iv)
 
@@ -26,7 +25,6 @@ proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
   var processed: int64 = 0
   var buffer = newSeq[byte](bufferSize)
   var encrypted = newSeq[byte](bufferSize)
-  var lastProgress = 50
 
   while true:
     let bytesRead = inStream.readData(addr buffer[0], bufferSize)
@@ -37,12 +35,10 @@ proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
     outStream.writeData(addr encrypted[0], bytesRead)
     processed += bytesRead
 
-    let rawProgress = (processed.float / totalSize.float) * 50
-    let currentProgress = min(100, 50 + int(rawProgress))
 
-    if currentProgress > lastProgress:
-      lastProgress = currentProgress
-      logUpdate(currentProgress, "Encrypting trace zip file")
+    if not onProgress.isNil:
+      let currentProgress = int((processed.float / totalSize.float) * 100)
+      onProgress(currentProgress)
 
   inStream.close()
   outStream.close()

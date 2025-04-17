@@ -1,8 +1,7 @@
 import streams, std/[ os, tables ]
 import zip/zipfiles
-import progress_update
 
-proc zipFolder*(source, output: string) =
+proc zipFolder*(source, output: string, onProgress: proc(i: int) = nil) =
   var zip: ZipArchive
   discard zip.open(output, fmWrite)
   var streamList: seq[Stream] = @[]
@@ -15,7 +14,6 @@ proc zipFolder*(source, output: string) =
     totalBytes += size
 
   var zippedBytes = 0
-  var lastUpdatedPercent = 0
 
   for file in walkDirRec(source):
     let relPath = file.relativePath(source)
@@ -33,10 +31,9 @@ proc zipFolder*(source, output: string) =
       tempStream.writeData(addr buffer, readBytes)
       zippedBytes += readBytes
 
-      let percent = int((float(zippedBytes) / float(totalBytes)) * 49)
-      if percent > lastUpdatedPercent:
-        lastUpdatedPercent = percent
-        logUpdate(percent, "Zipping files...")
+      if not onProgress.isNil:
+        let percent = int((float(zippedBytes) / float(totalBytes)) * 100)
+        onProgress(percent)
 
     zip.addFile(relPath, newStringStream(tempStream.data))
 
