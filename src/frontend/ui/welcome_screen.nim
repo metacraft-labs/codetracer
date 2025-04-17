@@ -36,7 +36,7 @@ proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 
 method onUploadTraceProgress*(self: WelcomeScreenComponent, uploadProgress: UploadProgress) {.async.} =
   let progressBar = document.getElementById(&"progress-bar-{uploadProgress.id}")
-  progressBar.style.backgroundImage = fmt"conic-gradient(#6B6B6B {uploadProgress.progress}% 0%, #3A3A3A {uploadProgress.progress}% 100%)"
+  progressBar.style.backgroundImage = fmt"conic-gradient(#6B6B6B {uploadProgress.progress}% 0%, #2C2C2C {uploadProgress.progress}% 100%)"
 
   if uploadProgress.progress == 100:
     self.isUploading[uploadProgress.id] = false
