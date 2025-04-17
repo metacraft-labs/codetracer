@@ -1029,7 +1029,7 @@ proc loadExistingRecord(traceId: int) {.async.} =
   data.trace = trace
   data.pluginClient.trace = trace
   if data.trace.compileCommand.len == 0:
-    data.trace.compileCommand = data.config.defaultBuild
+    data.trace.compileCommand = data.config.`default-build`
 
   debugPrint "index: start ct start_core " & $traceId & " " & $callerProcessPid
   var process = child_process.spawn(
@@ -1426,7 +1426,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
       data.trace = trace
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
-        data.trace.compileCommand = data.config.defaultBuild
+        data.trace.compileCommand = data.config.`default-build`
 
   if not data.startOptions.welcomeScreen:
     debugPrint "index: start and setup core ipc"

@@ -146,7 +146,7 @@ proc delegateShortcuts*(self: EditorViewComponent, editor: MonacoEditor) =
     cdebug "editor: delegate shortcut " & sh
     self.delegateShortcut(sh, command, editor)
 
-  for action, shortcuts in data.config.shortcutMap.actionShortcuts:
+  for action, shortcuts in data.config.`shortcut-map`.actionShortcuts:
     for shortcut in shortcuts:
       let editorShortcut = shortcut.editor
       if editorShortcut notin MONACO_SHORTCUTS_WHITELIST:

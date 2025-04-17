@@ -16,7 +16,7 @@ proc uploadFile(file: string, config: Config): UploadedInfo {.raises: [KeyError,
   var client = newHttpClient()
 
   try:
-    let getUrlResponse = client.getContent(fmt"{parseUri(config.baseUrl) / config.getUploadUrlApi}")
+    let getUrlResponse = client.getContent(fmt"{parseUri(config.`base-url`) / config.`get-upload-url-api`}")
     let getUrlJson = parseJson(getUrlResponse);
 
     let uploadUrl = getUrlJson["UploadUrl"].getStr("").strip()
@@ -63,7 +63,7 @@ proc uploadCommand*(
 ) =
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
-  if not config.traceSharingEnabled:
+  if not config.`trace-sharing-enabled`:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
 

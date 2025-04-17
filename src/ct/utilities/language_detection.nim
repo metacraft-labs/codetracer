@@ -44,9 +44,9 @@ proc detectLang*(program: string, lang: Lang): Lang =
       result = detectFolderLang(program)
     else:
       let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
-      if ctConfig.rrBackend.enabled:
+      if ctConfig.`rr-backend`.enabled:
         let rawLang = execProcess(
-          ctConfig.rrBackend.debuginfoToolPath,
+          ctConfig.`rr-backend`.`debug-info-tool-path`,
           args = @["lang", program],
           options={}).strip
         result = toLang(rawLang)

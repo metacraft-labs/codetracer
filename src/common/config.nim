@@ -1,6 +1,3 @@
-## keep this in sync with types.nim Config def
-## a file with config code for the c backend, used mostly by ui_data for repl/tests
-
 import json_serialization/std/tables, strutils, sequtils,  os, yaml, std/streams
 import .. / common / [types, paths]
 
@@ -8,43 +5,43 @@ type
   RRBackendConfig* = object
     enabled*: bool
     path*: string
-    ctPaths*: string
-    debugInfoToolPath*: string
+    `ct-paths`*: string
+    `debug-info-tool-path`*: string
 
   ConfigObject* = object
     ## The config object is the schema for config yaml files
 
-    theme*:      string
-    v*:          string
-    flow*:       bool
-    callArgs*:   bool
-    history*:    bool
-    repl*:       bool
-    trace*:      bool
-    default*:    string
-    calltrace*:  bool
-    layout*:     string
-    telemetry*:  bool
-    test*:       bool
-    debug*:      bool
-    flowUI*:     string
-    realFlowUI* {.defaultVal: FlowParallel}: types.FlowUI
-    events*:     bool
-    map*:        InputShortcutMap
-    shortcutMap* {.defaultVal: ShortcutMap().}: ShortcutMap
-    defaultBuild*: string
-    showMinimap*: bool
-    baseUrl*: string
-    getUploadUrlApi*: string
-    downloadApi*: string
-    uploadApi*: string
-    deleteApi*: string
-    traceSharingEnabled*: bool
-    rrBackend* {.defaultVal: RRBackendConfig(
-      enabled: false,
-      path: "",
-      ctPaths: "",
-      debugInfoToolPath: ""
+    theme*:                   string
+    v*:                       string
+    flow*:                    bool
+    `call-args`*:             bool
+    history*:                 bool
+    repl*:                    bool
+    trace*:                   bool
+    default*:                 string
+    calltrace*:               bool
+    layout*:                  string
+    telemetry*:               bool
+    test*:                    bool
+    debug*:                   bool
+    `flow-ui`*:               string
+    `real-flow-ui`*           {.defaultVal: FlowParallel}: types.FlowUI
+    events*:                  bool
+    bindings*:                InputShortcutMap
+    `shortcut-map`*           {.defaultVal: ShortcutMap().}: ShortcutMap
+    `default-build`*:         string
+    `show-minimap`*:          bool
+    `base-url`*:              string
+    `download-api`*:          string
+    `upload-api`*:            string
+    `delete-api`*:            string
+    `get-upload-url-api`*:    string
+    `trace-sharing-enabled`*: bool
+    `rr-backend`* {.defaultVal: RRBackendConfig(
+        enabled: false,
+        path: "",
+        `ct-paths`: "",
+        `debug-info-tool-path`: ""
     ).}: RRBackendConfig
 
   Config* = ref ConfigObject
@@ -73,10 +70,10 @@ func normalize(shortcut: string): string =
   # for now we expect to write editor-style monaco shortcuts
   shortcut
 
-func initShortcutMap*(map: InputShortcutMap): ShortcutMap =
+func initShortcutMap*(bindings: InputShortcutMap): ShortcutMap =
   result = ShortcutMap()
   var conflicts = initTable[string, seq[ClientAction]]()
-  for key, value in map:
+  for key, value in bindings:
     let rawShortcuts = ($value).splitWhitespace()
     var action: ClientAction
     try:
@@ -136,7 +133,7 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     stream.close()
     var c = Config()
     c[] = config
-    c.shortcutMap = initShortcutMap(config.map)
+    c.`shortcut-map` = initShortcutMap(config.bindings)
     return c
   except Exception as e:
     raise e

@@ -28,7 +28,7 @@ v:         "0.1alpha"
 # preload: experimental support
 preload:   true
 
-callArgs:  true
+call-args:  true
 
 # history: experimental support
 history:   true
@@ -44,20 +44,20 @@ events:    true
 
 # preload flow:
 #   you can have parallel, inline or multiline
-flowUI:    parallel
+flow-ui:    parallel
 
 # project open
 default: ""
 
 # what command to use by default for build and update while editing
-defaultBuild:   ""
+default-build:   ""
 
-showMinimap: true
+show-minimap: true
 
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
 # # we'll fix it, but for now have to match to two api-s and to process it more
-map:
+bindings:
   forwardContinue: "F8 F2"
   reverseContinue: "SHIFT+F8"
   forwardNext:       "F10"

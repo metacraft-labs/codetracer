@@ -5,7 +5,7 @@ import
 const TRACE_SHARING_DISABLED_ERROR_MESSAGE* = """
 trace sharing disabled in config!
 you can enable it by editing `$HOME/.config/codetracer/.config.yaml`
-and toggling `traceSharingEnabled` to true
+and toggling `trace-sharing-enabled` to true
 """
 
 proc envLoadRecordCore*: bool =

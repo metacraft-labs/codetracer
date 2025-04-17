@@ -1446,27 +1446,31 @@ type
   Config* = ref object
     # The config object is the schema for config yaml files
     # keep it in sync with config_c.nim definition
-    theme*:      cstring
-    v*:          cstring
-    flow*:       bool
-    callArgs*:   bool
-    history*:    bool
-    repl*:       bool
-    trace*:      bool
-    default*:    cstring
-    calltrace*:  bool
-    layout*:     cstring
-    telemetry*:  bool
-    test*:       bool
-    debug*:      bool
-    flowUI*:     cstring
-    realFlowUI*: FlowUI
-    events*:     bool
-    map*:        InputShortcutMap
-    shortcutMap*: ShortcutMap
-    defaultBuild*: cstring
-    showMinimap*: bool
-    traceSharingEnabled*: bool
+    theme*:                   cstring
+    v*:                       cstring
+    flow*:                    bool
+    `call-args`*:             bool
+    history*:                 bool
+    repl*:                    bool
+    trace*:                   bool
+    default*:                 cstring
+    calltrace*:               bool
+    layout*:                  cstring
+    telemetry*:               bool
+    test*:                    bool
+    debug*:                   bool
+    `flow-ui`*:               cstring
+    `real-flow-ui`*:          FlowUI
+    events*:                  bool
+    bindings*:                InputShortcutMap
+    `shortcut-map`*:          ShortcutMap
+    `default-build`*:         cstring
+    `show-minimap`*:          bool
+    `base-url`*:              string
+    `download-api`*:          string
+    `upload-api`*:            string
+    `delete-api`*:            string
+    `trace-sharing-enabled`*: bool
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint

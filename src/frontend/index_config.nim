@@ -904,7 +904,7 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
         traceID: trace.id,
         calltrace: config.calltrace and trace.calltrace,
         preloadEnabled: config.flow and trace.lang != LangPython,
-        callArgsEnabled: config.callArgs,
+        callArgsEnabled: config.`call-args`,
         traceEnabled: config.trace,
         historyEnabled: config.history,
         eventsEnabled: config.events,
@@ -1264,7 +1264,7 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
   try:
     let config = cast[Config](yaml.load(s))
     # SILENT_LOG = not config.debug
-    config.shortcutMap = initShortcutMap(config.map)
+    config.`shortcut-map` = initShortcutMap(config.bindings)
     return config
   except:
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
