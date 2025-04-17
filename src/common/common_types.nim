@@ -1354,6 +1354,11 @@ type
     controlId*: langstring
     expireTime*: langstring
 
+  UploadProgress* = object
+    id*: int
+    progress*: int
+    msg*: langstring
+
   DeleteTraceArg* = object
     traceId*: int
     controlId*: langstring

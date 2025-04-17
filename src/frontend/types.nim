@@ -1146,6 +1146,7 @@ type
     copyMessageActive*: JsAssoc[int, bool]
     infoMessageActive*: JsAssoc[int, bool]
     errorMessageActive*: JsAssoc[int, MessageKind]
+    isUploading*: JsAssoc[int, bool]
 
   ReplComponent* = ref object of Component
     history*: seq[DebugInteraction]
@@ -1734,6 +1735,9 @@ method onUpdatedLoadStepLines*(self: Component, stepLinesUpdate: LoadStepLinesUp
   discard
 
 method refreshTrace*(self: Component) {.base.} =
+  discard
+
+method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {.base, async.} =
   discard
 
 # templates for singletons
