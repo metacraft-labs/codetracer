@@ -3,6 +3,7 @@ import
   ../../ct/version, 
   ui_imports, ../types
 import std/options
+import std/jsffi
 import std/enumerate
 import std/times except now
 
@@ -25,11 +26,20 @@ proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
     trace.downloadKey = uploadedData.downloadKey
     trace.controlId = uploadedData.controlId
     trace.onlineExpireTime = ($uploadedData.expireTime).parseInt()
+    self.isUploading[trace.id] = false
   else:
     trace.downloadKey = uploadedData.downloadKey
     self.errorMessageActive[trace.id] = UploadError
+    self.isUploading[trace.id] = false
 
   self.data.redraw()
+
+method onUploadTraceProgress*(self: WelcomeScreenComponent, uploadProgress: UploadProgress) {.async.} =
+  let progressBar = document.getElementById(&"progress-bar-{uploadProgress.id}")
+  progressBar.style.backgroundImage = fmt"conic-gradient(#6B6B6B {uploadProgress.progress}% 0%, #3A3A3A {uploadProgress.progress}% 100%)"
+
+  if uploadProgress.progress == 100:
+    self.isUploading[uploadProgress.id] = false
 
 proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   var deleted = await self.data.asyncSend(
@@ -105,7 +115,18 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
           text limitedProgramName # TODO: tippy
     if featureFlag:
       tdiv(class = "online-functionality-buttons"):
-        if (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or expireState == ExpireTraceState.Expired or trace.downloadKey == ERROR_DOWNLOAD_KEY:
+        if self.isUploading[trace.id]:
+          tdiv(class = "recent-trace-buttons", id = "upload-button"):
+            tdiv(
+              class = "recent-trace-buttons-image progress-circle",
+              id = &"progress-bar-{trace.id}"
+            )
+            tdiv(
+              class = "recent-trace-buttons-image inner-circle",
+            )
+        elif (trace.downloadKey == "" and trace.onlineExpireTime == NO_EXPIRE_TIME) or
+            expireState == ExpireTraceState.Expired or
+            trace.downloadKey == ERROR_DOWNLOAD_KEY:
           tdiv(class = "recent-trace-buttons", id = "upload-button"):
             tdiv(
               class = "recent-trace-buttons-image",
@@ -114,11 +135,12 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
                 ev.stopPropagation()
                 ev.target.focus()
                 discard self.uploadTrace(trace)
+                self.isUploading[trace.id] = true
+            ):
+              tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
+                style = style(StyleAttr.top, &"{tooltipTopPosition}px")
               ):
-                tdiv(class = fmt"custom-tooltip {uploadErrorClass}", id = &"tooltip-{trace.id}",
-                  style = style(StyleAttr.top, &"{tooltipTopPosition}px")
-                ):
-                  text "Server error or maximum file size reached (4GB)"
+                text "Server error!"
         if trace.controlId != EMPTY_STRING and expireState != Expired:
           tdiv(class = "recent-trace-buttons", id = "delete-button"):
             tdiv(

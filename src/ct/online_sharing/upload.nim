@@ -1,6 +1,6 @@
 import std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json, sequtils ]
 import ../../common/[ trace_index, types ]
-import ../utilities/[ encryption, zip, env ]
+import ../utilities/[ encryption, zip, env, progress_update ]
 import ../../common/[ config ]
 import ../cli/interactive_replay
 import ../codetracerconf
@@ -40,9 +40,12 @@ proc uploadTrace(trace: Trace, config: Config): UploadedInfo =
   let outputEncr = trace.outputFolder / "tmp.enc"
   let (key, iv) = generateEncryptionKey()
 
+  # TODO: Send from 0..100 progress and only this file needs to send logUpdates
   try:
     zipFolder(trace.outputFolder, outputZip)
+    logUpdate(50, "File zipped!")
     encryptFile(outputZip, outputEncr, key, iv)
+    logUpdate(100, "File encrypted, uploading...")
     let uploadInfo: UploadedInfo = uploadFile(outputEncr, config)
     uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt(it.toHex(2)).join("")
 
@@ -90,9 +93,7 @@ proc uploadCommand*(
       `ct download {uploadInfo.downloadKey}`
       """
   else:
-    echo uploadInfo.downloadKey
-    echo uploadInfo.controlId
-    echo uploadInfo.storedUntilEpochSeconds
+    echo fmt"""{{"downloadKey": "{uploadInfo.downloadKey}", "controlId": "{uploadInfo.controlId}", "storedUntilEpochSeconds": {uploadInfo.storedUntilEpochSeconds}}}"""
   
   quit(0)
 

@@ -421,6 +421,34 @@ when defined(ctIndex) or defined(ctTest):
     # for more info, please read the comment for `setupLdLibraryPath` there
     nodeProcess.env["LD_LIBRARY_PATH"] = nodeProcess.env["CT_LD_LIBRARY_PATH"]
 
+  proc runUploadWithStreaming*(
+      path: cstring,
+      args: seq[cstring],
+      onData: proc(data: string),
+      onDone: proc(success: bool, result: string)
+  ) =
+    setupLdLibraryPath()
+
+    let process = nodeStartProcess.spawn(path, args)
+    process.stdout.setEncoding("utf8")
+
+    var fullOutput = ""
+
+    process.stdout.toJs.on("data", proc(data: cstring) =
+      let str = $data
+      fullOutput.add(str)
+      onData(str)
+    )
+
+    process.stderr.toJs.on("data", proc(err: cstring) =
+      echo "[stderr]: ", err
+      fullOutput.add($err)
+    )
+
+    process.toJs.on("exit", proc(code: int, _: cstring) =
+      onDone(code == 0, fullOutput)
+    )
+
   proc readProcessOutput*(
       path: cstring,
       args: seq[cstring],

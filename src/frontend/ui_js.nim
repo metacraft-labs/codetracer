@@ -1107,6 +1107,7 @@ proc configureIPC(data: Data) =
     "follow-history"
 
     "upload-trace-file-received"
+    "upload-trace-progress": UploadProgress => ui
     "delete-online-trace-file-received"
 
   duration("configureIPCRun")
