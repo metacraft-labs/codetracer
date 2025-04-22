@@ -7,11 +7,11 @@ import ../codetracerconf
 import ../trace/shell
 import streams
 
-type UploadedInfo = ref object
-  fileId: string
-  downloadKey: string
-  controlId: string
-  storedUntilEpochSeconds: int
+type UploadedInfo* = ref object
+  fileId*: string
+  downloadKey*: string
+  controlId*: string
+  storedUntilEpochSeconds*: int
 
 proc uploadFile(
   file: string,
@@ -80,7 +80,7 @@ proc uploadFile(
   except CatchableError as e:
     raise newException(Exception, &"error: can't upload to API: {e.msg}")
 
-proc uploadTrace(trace: Trace, config: Config): UploadedInfo =
+proc uploadTrace*(trace: Trace, config: Config): UploadedInfo =
   let outputZip = trace.outputFolder / "tmp.zip"
   let outputEncr = trace.outputFolder / "tmp.enc"
   let (key, iv) = generateEncryptionKey()
@@ -114,7 +114,6 @@ proc uploadTrace(trace: Trace, config: Config): UploadedInfo =
   finally:
     removeFile(outputZip)
     removeFile(outputEncr)
-
 
 proc uploadCommand*(
   patternArg: Option[string],
@@ -154,4 +153,3 @@ proc uploadCommand*(
     echo fmt"""{{"downloadKey": "{uploadInfo.downloadKey}", "controlId": "{uploadInfo.controlId}", "storedUntilEpochSeconds": {uploadInfo.storedUntilEpochSeconds}}}"""
   
   quit(0)
-

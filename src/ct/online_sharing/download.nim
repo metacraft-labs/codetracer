@@ -8,7 +8,7 @@ proc downloadFile(fileId, localPath: string, config: Config) =
   let client = newHttpClient()
   client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
 
-proc downloadTrace(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
+proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
   var iv: array[16, byte]
   copyMem(addr iv, unsafeAddr key, 16)
 

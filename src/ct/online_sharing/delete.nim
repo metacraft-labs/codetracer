@@ -2,9 +2,9 @@ import std/[ os, httpclient, net, strformat, uri ]
 import ../utilities/env
 import ../../common/[ config, trace_index ]
 
-proc deleteRemoteFile(id: int, controlId: string, config: Config) {.raises: [ValueError, LibraryError, SslError, Exception].} =
+proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [ValueError, Exception].} =
   let test = false
-  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
+  var client = newHttpClient()
 
   try:
     discard client.getContent(fmt"{parseUri(config.baseUrl) / config.deleteApi}?ControlId={controlId}")
@@ -18,7 +18,6 @@ proc deleteRemoteFile(id: int, controlId: string, config: Config) {.raises: [Val
     client.close()
 
   quit(0)
-
 
 proc deleteTraceCommand*(id: int, controlId: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
