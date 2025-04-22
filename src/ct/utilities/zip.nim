@@ -4,62 +4,30 @@ import zip/zipfiles
 proc zipFolder*(source, output: string, onProgress: proc(i: int) = nil) =
   var zip: ZipArchive
   discard zip.open(output, fmWrite)
-  var streamList: seq[Stream] = @[]
 
-  var totalBytes: int64 = 0
-  var fileSizes: Table[string, int64]
+  var totalFiles: int = 0
   for file in walkDirRec(source):
-    let size = getFileSize(file)
-    fileSizes[$file] = size
-    totalBytes += size
+    inc totalFiles
 
-  var zippedBytes = 0
+  var currentFile = 0
+  var streamList: seq[Stream] = @[]
 
   for file in walkDirRec(source):
     let relPath = file.relativePath(source)
     let fileStream = newFileStream(file, fmRead)
     streamList.add(fileStream)
 
-    var countingStream = newFileStream(file, fmRead)
-    var buffer: array[4096, byte]
-    var tempStream = newStringStream("")
+    zip.addFile(relPath, fileStream)
+    inc currentFile
 
-    # Update progress for zipped files
-    while true:
-      let readBytes = countingStream.readData(addr buffer, buffer.len)
-      if readBytes == 0: break
-      tempStream.writeData(addr buffer, readBytes)
-      zippedBytes += readBytes
-
-      if not onProgress.isNil:
-        let percent = int((float(zippedBytes) / float(totalBytes)) * 100)
-        onProgress(percent)
-
-    zip.addFile(relPath, newStringStream(tempStream.data))
-
-    countingStream.close()
-    tempStream.close()
+    if onProgress != nil:
+      let percent = (currentFile.float / totalFiles.float * 100).int
+      onProgress(percent)
 
   zip.close()
 
   for stream in streamList:
     stream.close()
-
-# proc zipFolder*(source, output: string) =
-#   var zip: ZipArchive
-#   discard zip.open(output, fmWrite)
-#   var streamList: seq[Stream] = @[]
-#   for file in walkDirRec(source):
-#     let relPath = file.relativePath(source)
-#     let fileStream = newFileStream(file, fmRead)
-
-#     streamList.add(fileStream)
-#     zip.addFile(relPath, fileStream)
-
-#   zip.close()
-
-#   for stream in streamList:
-#     stream.close()
 
 proc unzipIntoFolder*(zipPath, targetDir: string) {.raises: [IOError, OSError, Exception].} =
   var zip: ZipArchive
