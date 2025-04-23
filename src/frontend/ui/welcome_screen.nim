@@ -116,7 +116,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
     if featureFlag:
       tdiv(class = "online-functionality-buttons"):
         if self.isUploading[trace.id]:
-          tdiv(class = "recent-trace-buttons", id = "upload-button"):
+          tdiv(class = "recent-trace-buttons", id = "progress-bar"):
             tdiv(
               class = "recent-trace-buttons-image progress-circle",
               id = &"progress-bar-{trace.id}"
@@ -295,6 +295,7 @@ proc renderInputRow(
   buttonText: cstring,
   buttonHandler: proc(ev: Event, tg: VNode),
   inputHandler: proc(ev: Event, tg: Vnode),
+  enterHandler: proc(ev: KeyboardEvent, tg: VNode) = nil,
   inputText: cstring = "",
   validationMessage: cstring = "",
   disabled: bool = false,
@@ -317,6 +318,7 @@ proc renderInputRow(
         name = parameterName,
         value = inputText,
         onchange = inputHandler,
+        onkeydown = enterHandler,
         placeholder = &"{label}"
       )
       if hasButton:
@@ -388,7 +390,6 @@ proc prepareArgs(self: WelcomeScreenComponent): seq[cstring] =
 proc onlineFormView(self: WelcomeScreenComponent): VNode =
   proc handler(ev: Event, tg: VNode) =
     ev.preventDefault()
-    # TODO: Implement progress bar?
     self.newDownload.status.kind = InProgress
     self.data.ipc.send(
         "CODETRACER::download-trace-file", js{
@@ -405,8 +406,11 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
       "",
       proc(ev: Event, tg: VNode) = discard,
       proc(ev: Event, tg: VNode) = 
-        self.newDownload.args = ev.target.value.split(" ")
-        handler(ev, tg),
+        self.newDownload.args = ev.target.value.split(" "),
+      proc(e: KeyboardEvent, tg: VNode) = 
+        if e.keyCode == ENTER_KEY_CODE:
+          self.newDownload.args = e.target.value.split(" ")
+          handler(cast[Event](e), tg),
       hasButton = false,
       inputText = self.newDownload.args.join(j" ")
     )

@@ -25,6 +25,7 @@ proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
   var processed: int64 = 0
   var buffer = newSeq[byte](bufferSize)
   var encrypted = newSeq[byte](bufferSize)
+  var lastPercentsSent = 0
 
   while true:
     let bytesRead = inStream.readData(addr buffer[0], bufferSize)
@@ -38,7 +39,9 @@ proc encryptFile*(source, target: string, key: array[32, byte], iv: array[16, by
 
     if not onProgress.isNil:
       let currentProgress = int((processed.float / totalSize.float) * 100)
-      onProgress(currentProgress)
+      if currentProgress > lastPercentsSent:
+        onProgress(currentProgress)
+        lastPercentsSent = currentProgress
 
   inStream.close()
   outStream.close()

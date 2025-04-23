@@ -52,6 +52,8 @@ proc uploadFile(
     var f = open(file, fmRead)
     var buf: array[4096, byte]
     var readBytes: int
+    var lastPercentsSent = 0
+    var currentProgress = 0
 
     while true:
       readBytes = f.readBuffer(addr buf[0], buf.len)
@@ -59,7 +61,10 @@ proc uploadFile(
       uploadStream.writeData(addr buf[0], readBytes)
       if not onProgress.isNil:
         sent += readBytes
-        onProgress(int((sent * 100) div totalSize))
+        currentProgress = int((sent * 100) div totalSize)
+        if currentProgress > lastPercentsSent:
+          onProgress(currentProgress)
+          lastPercentsSent = currentProgress
 
     f.close()
 
@@ -80,6 +85,9 @@ proc uploadFile(
   except CatchableError as e:
     raise newException(Exception, &"error: can't upload to API: {e.msg}")
 
+proc onProgress(i, percentRatio, minPercent: int, message: string) =
+  logUpdate(minPercent + (i * percentRatio) div 100, message)
+
 proc uploadTrace*(trace: Trace, config: Config): UploadedInfo =
   let outputZip = trace.outputFolder / "tmp.zip"
   let outputEncr = trace.outputFolder / "tmp.enc"
@@ -88,22 +96,13 @@ proc uploadTrace*(trace: Trace, config: Config): UploadedInfo =
   try:
     var lastPercentsSent = 0
     zipFolder(trace.outputFolder, outputZip, onProgress = proc(i: int) =
-      let scaled = (i * 33) div 100
-      if scaled > lastPercentsSent:
-        lastPercentsSent = scaled
-        logUpdate(scaled, "Zipping files...")
+      onProgress(i, 33, 0, "Zipping files..")
     )
     encryptFile(outputZip, outputEncr, key, iv, onProgress = proc(i: int) =
-      let scaled = 34 + (i * 33) div 100
-      if scaled > lastPercentsSent:
-        lastPercentsSent = scaled
-        logUpdate(scaled, "Encrypting zip file...")
+      onProgress(i, 33, 34, "Encrypting zip file...")
     )
     let uploadInfo: UploadedInfo = uploadFile(outputEncr, config, onProgress = proc(i: int) = 
-      let scaled = 67 + (i * 33) div 100
-      if scaled > lastPercentsSent:
-        lastPercentsSent = scaled
-        logUpdate(scaled, "Uploading file to server...")
+      onProgress(i, 33, 67, "Uploading file to server...")
     )
     uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt(it.toHex(2)).join("")
 
