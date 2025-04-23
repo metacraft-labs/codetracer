@@ -28,8 +28,8 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
   let tracePath = unzippedLocation / "trace.json"
   let traceJson = parseJson(readFile(tracePath))
   let traceMetadataPath = unzippedLocation / "trace_metadata.json"
-  let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
   var pathValue = ""
+  let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
   for item in tracePathsMetadata:
     if item.getStr("") != "":
       pathValue = item.getStr("")
@@ -49,9 +49,6 @@ proc downloadTraceCommand*(traceDownloadKey: string) =
   if stringSplit.len() != 3:
     echo "error: Invalid download key! Should be <program_name>//<file_id>//<encryption_password>"
     quit(1)
-
-  let fileId = stringSplit[1]
-  let password = stringSplit[2]
 
   try:
     let fileId = stringSplit[1]

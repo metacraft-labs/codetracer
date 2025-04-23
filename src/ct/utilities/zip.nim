@@ -11,6 +11,7 @@ proc zipFolder*(source, output: string, onProgress: proc(i: int) = nil) =
 
   var currentFile = 0
   var streamList: seq[Stream] = @[]
+  var lastPercentsSent = 0
 
   for file in walkDirRec(source):
     let relPath = file.relativePath(source)
@@ -22,7 +23,9 @@ proc zipFolder*(source, output: string, onProgress: proc(i: int) = nil) =
 
     if onProgress != nil:
       let percent = (currentFile.float / totalFiles.float * 100).int
-      onProgress(percent)
+      if percent > lastPercentsSent:
+        onProgress(percent)
+        lastPercentsSent = percent
 
   zip.close()
 
