@@ -1,10 +1,10 @@
 import std/[ os, httpclient, net, strformat, uri ]
-import ../utilities/env
+import ../utilities/types
 import ../../common/[ config, trace_index ]
 
 proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [ValueError, Exception].} =
   let test = false
-  var client = newHttpClient()
+  let client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
 
   try:
     discard client.getContent(fmt"{parseUri(config.baseUrl) / config.deleteApi}?ControlId={controlId}")
