@@ -32,6 +32,7 @@ proc detectLang*(program: string, lang: Lang): Lang =
     "rb": LangRubyDb, # default for ruby for now
     "nr": LangNoir,
     "small": LangSmall,
+    "wasm": LangNoir,
   }.toTable()
 
   if lang == LangUnknown:

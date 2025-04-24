@@ -73,15 +73,20 @@ proc recordDb(
     of LangSmall:
       @[program, "--tracing"]
     of LangNoir:
-      let backendArgs = if backend == "plonky2":
-          @["--trace-plonky2"]
-        elif backend.len > 0:
-          echo fmt"error: unsupported backend: {backend}"
-          quit(1)
-        else:
-          @[]
+      # TODO: add Lang..Wasm
+      if program.endsWith(".wasm"):
+        # wazero
+        @["run", "--trace-dir", traceFolder, program]
+      else:
+        let backendArgs = if backend == "plonky2":
+            @["--trace-plonky2"]
+          elif backend.len > 0:
+            echo fmt"error: unsupported backend: {backend}"
+            quit(1)
+          else:
+            @[]
 
-      @["trace", "--trace-dir", traceFolder].concat(backendArgs)
+        @["trace", "--trace-dir", traceFolder].concat(backendArgs)
     else:
       echo fmt"error: lang {lang} not supported for recordDb"
       quit(1)
@@ -162,6 +167,7 @@ proc record(cmd: string, args: seq[string], compileCommand: string,
       executable = foundExe
 
   let lang = detectLang(executable, langArg)
+  echo "in db ", lang, " ", executable
   if lang == LangUnknown:
     errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
     quit(1)
@@ -199,7 +205,13 @@ proc record(cmd: string, args: seq[string], compileCommand: string,
       return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, traceId)
     elif lang == LangNoir:
       recordSymbols(executable, outputFolder, lang)
-      return recordDb(LangNoir, noirExe, executable, args, backend, outputFolder, traceId)
+      var vmPath = ""
+      if executable.endsWith(".wasm"):
+        vmPath = getEnv("CODETRACER_WAZERO_EXE_PATH", "")
+        echo "wasm vm path ", vmPath
+      else:
+        vmPath = noirExe
+      return recordDb(LangNoir, vmPath, executable, args, backend, outputFolder, traceId)
     elif lang == LangSmall:
       return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, traceId)
     else:
