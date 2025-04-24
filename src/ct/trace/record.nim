@@ -41,11 +41,14 @@ proc record*(lang: string,
   pargs.add(program)
   if args.len != 0:
     pargs = concat(pargs, args)
-
+  # wazero <-> 
+  #   
+  
   if detectedLang in @[LangRubyDb, LangNoir, LangSmall]:
     let configPath = getEnv(
       "CODETRACER_CT_PATHS",
       getAppDir().parentDir.parentDir.parentDir / "ct_paths.json")
+    echo dbBackendRecordExe, " ", detectedLang
     return recordInternal(dbBackendRecordExe, pargs, configPath)
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
