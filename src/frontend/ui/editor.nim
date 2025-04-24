@@ -439,7 +439,8 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   var flow = self.flow
 
   for position, typ in flow.flow.branchesTaken[loopId][loopIteration].table:
-    if position >= flow.flow.location.functionFirst and position <= flow.flow.location.functionLast:
+    if (position >= flow.flow.location.functionFirst and position <= flow.flow.location.functionLast) or
+      (flow.flow.location.functionFirst == -1 and flow.flow.location.functionLast == -1):
       case typ:
       of Taken:
         lines.add(MonacoLineStyle(line: position, class: cstring"flow-taken"))
