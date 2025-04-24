@@ -39,10 +39,9 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
   discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
   return traceId
 
-proc downloadTraceCommand*(traceDownloadKey: string) =
+proc extractInfoFromKey*(downloadKey: string, config: Config): (string, array[32, byte]) =
   # We expect a traceDownloadKey to have <name>//<fileId>//<passwordKey>
-  let stringSplit = traceDownloadKey.split("//")
-  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let stringSplit = downloadKey.split("//")
   if not config.traceSharingEnabled:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
@@ -50,13 +49,18 @@ proc downloadTraceCommand*(traceDownloadKey: string) =
     echo "error: Invalid download key! Should be <program_name>//<file_id>//<encryption_password>"
     quit(1)
 
+  let fileId = stringSplit[1]
+  let passwordHex = stringSplit[2]
+
+  var password: array[32, byte]
+  hexToBytes(passwordHex, password)
+  (fileId, password)
+
+
+proc downloadTraceCommand*(traceDownloadKey: string) =
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let (fileId, password) = extractInfoFromKey(traceDownloadKey, config)
   try:
-    let fileId = stringSplit[1]
-    let passwordHex = stringSplit[2]
-
-    var password: array[32, byte]
-    hexToBytes(passwordHex, password)
-
     let traceId = downloadTrace(fileId, traceDownloadKey, password, config)
     if isatty(stdout):
       echo fmt"OK: downloaded with trace id {traceId}"

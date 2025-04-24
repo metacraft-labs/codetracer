@@ -1,76 +1,51 @@
-import error_handler
+import std/[unittest, os, strutils, streams]
 import encryption
-import os
-import streams
-import std/strutils
 
 const placeholder = "the brown fox went into the den!"
-var createdFiles = newSeq[string]()
+let tmpPath = "/tmp"
 
-proc createFile(len: int, callerName: string): string =
-  let tmpPath = "/tmp/"
-  let filename = tmpPath & callerName
-  let file = newFileStream(filename, fmWrite)
+proc createFile(len: int, filename: string): string =
+  let filePath = tmpPath / filename
+  let file = newFileStream(filePath, fmWrite)
   if file.isNil:
     raise newException(IOError, "Failed to create file")
 
   file.writeLine(placeholder)
-  for i in 0..len-1:
+  for i in 0..<len:
     file.writeLine($i)
-
   file.close()
-  return filename
+  return filePath
 
-proc validateForFilesLargerThanBufferSize() =
-  let file = createFile(400, "greater")
-  let ecrTarget = "/tmp/encrypted_400.enc"
-  let decrTarget = "/tmp/decrypted_400.zip"
-  createdFiles.add(ecrTarget)
-  createdFiles.add(decrTarget)
+suite "Encryption/Decryption Buffer Handling":
 
-  let (key, iv) = generateEncryptionKey()
+  test "Encrypt/Decrypt file larger than buffer size":
+    let file = createFile(400, "greater")
+    let ecrTarget = tmpPath / "encrypted_400.enc"
+    let decrTarget = tmpPath / "decrypted_400.zip"
+    let (key, iv) = generateEncryptionKey()
 
-  runSafe(
-    proc() =
-      encryptFile(file, ecrTarget, key, iv, 64)
-      decryptFile(ecrTarget, decrTarget, key, iv)
+    encryptFile(file, ecrTarget, key, iv, 64)
+    decryptFile(ecrTarget, decrTarget, key, iv)
 
-      let decryptedContent = readFile(decrTarget)
-      if not decryptedContent.contains(placeholder):
-        pushError("Decryption failed for file: " & file),
-    proc() = 
-      removeFile(ecrTarget)
-      removeFile(decrTarget),
-    "validateForFilesLargerThanBufferSize"
-  )
+    let decryptedContent = readFile(decrTarget)
+    check decryptedContent.contains(placeholder)
 
-proc validateForFilesSmallerThanBufferSize() =
-  let file = createFile(18, "smaller")
-  let ecrTarget = "/tmp/encrypted_18.enc"
-  let decrTarget = "/tmp/decrypted_18.zip"
-  createdFiles.add(ecrTarget)
-  createdFiles.add(decrTarget)
+    removeFile(ecrTarget)
+    removeFile(decrTarget)
+    removeFile(file)
 
-  let (key, iv) = generateEncryptionKey()
+  test "Encrypt/Decrypt file smaller than buffer size":
+    let file = createFile(18, "smaller")
+    let ecrTarget = tmpPath / "encrypted_18.enc"
+    let decrTarget = tmpPath / "decrypted_18.zip"
+    let (key, iv) = generateEncryptionKey()
 
-  runSafe(
-    proc() =
-      encryptFile(file, ecrTarget, key, iv, 128)
-      decryptFile(ecrTarget, decrTarget, key, iv)
+    encryptFile(file, ecrTarget, key, iv, 128)
+    decryptFile(ecrTarget, decrTarget, key, iv)
 
-      let decryptedContent = readFile(decrTarget)
-      if not decryptedContent.contains(placeholder):
-        pushError("Decryption failed for file: " & file),
-    proc() = 
-      removeFile(ecrTarget)
-      removeFile(decrTarget),
-    "validateForFilesSmallerThanBufferSize"
-  )
+    let decryptedContent = readFile(decrTarget)
+    check decryptedContent.contains(placeholder)
 
-proc validate*() =
-  validateForFilesLargerThanBufferSize()
-  validateForFilesSmallerThanBufferSize()
-  throwErrorsIfAny()
-
-when isMainModule:
-  validate()
+    removeFile(ecrTarget)
+    removeFile(decrTarget)
+    removeFile(file)
