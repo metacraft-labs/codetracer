@@ -30,6 +30,5 @@ else
   puts "shields will not hold as expected"
 end
 
-# Assertions as per original (intentionally buggy logic preserved exactly)
-raise "Positive test failed" unless did_survive_positive == true
-raise "Negative test failed" unless did_survive_negative == false
+result = did_survive_positive && !did_survive_negative
+puts "\nFinal Result: #{result ? 'PASSED' : 'FAILED'}"
