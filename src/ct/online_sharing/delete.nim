@@ -17,8 +17,6 @@ proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [Va
   finally:
     client.close()
 
-  quit(0)
-
 proc deleteTraceCommand*(id: int, controlId: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
 
