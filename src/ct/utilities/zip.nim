@@ -1,21 +1,31 @@
-import streams, std/os
+import streams, std/[ os, tables ]
 import zip/zipfiles
 
-proc zipFolder*(source, output: string) =
-  var z: ZipArchive
-  discard z.open(output, fmWrite)
-  var r: seq[Stream] = @[]
+proc zipFolder*(source, output: string, onProgress: proc(progressPercent: int) = nil) =
+  var zip: ZipArchive
+
+  var totalSize: int64 = 0
+  var totalWritten: int64 = 0
+  var lastPercentSent = 0
   for file in walkDirRec(source):
+    totalSize += getFileSize(file)
+
+  for file in walkDirRec(source):
+    totalWritten += getFileSize(file)
+    if not zip.open(output, fmReadWrite):
+      raise newException(IOError, "Failed to open ZIP: " & source)
+
     let relPath = file.relativePath(source)
     let fileStream = newFileStream(file, fmRead)
+    zip.addFile(relPath, fileStream)
+    zip.close()
+    fileStream.close()
 
-    r.add(fileStream)
-    z.addFile(relPath, fileStream)
-
-  z.close()
-
-  for r1 in r:
-    r1.close()
+    if onProgress != nil:
+      let percent = int(totalWritten * 100 div totalSize)
+      if percent > lastPercentSent:
+        onProgress(percent)
+        lastPercentSent = percent
 
 proc unzipIntoFolder*(zipPath, targetDir: string) {.raises: [IOError, OSError, Exception].} =
   var zip: ZipArchive

@@ -42,6 +42,7 @@ func tracesInJson*(traces: seq[Trace]): string =
 
 proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
   let recordCore = envLoadRecordCore()
+  let action = if command == StartupCommand.upload: "upload" else: "replay"
   # ordered by id
   # returns the newest(biggest id) first
   let traces = trace_index.all(test=false)
@@ -50,7 +51,7 @@ proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
     else:
       traces
 
-  echo "Select a trace to replay, entering its id:"
+  echo &"Select a trace to {action}, entering its id:"
   echo ""
 
   for trace in limitedTraces:
@@ -62,7 +63,7 @@ proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
   echo ""
 
   while true:
-    let raw = readLineFromStdin("replay: ")
+    let raw = readLineFromStdin(&"{action}: ")
     try:
       let traceId = raw.parseInt
       let trace = trace_index.find(traceId, test=false)

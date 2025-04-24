@@ -1,5 +1,5 @@
 
-import std / [async, jsffi, strutils, sequtils, sugar, dom, strformat, os, jsconsole]
+import std / [ async, jsffi, strutils, sequtils, sugar, dom, strformat, os, jsconsole, json ]
 import results
 import lib, types, lang, paths, index_config, config, trace_metadata
 import rr_gdb
@@ -806,41 +806,42 @@ proc onSearchProgram(sender: js, query: cstring) {.async.} =
 proc onLoadStepLines(sender: js, response: LoadStepLinesArg) {.async.} =
   discard debugger.loadStepLines(response)
 
-proc onUploadTraceFile(sender: js, response: UploadTraceArg) {.async.} =
-  let res = await readProcessOutput(
+proc onUploadTraceFile(sender: JsObject, response: UploadTraceArg) =
+  runUploadWithStreaming(
     codetracerExe.cstring,
     @[
       j"upload",
       j"--trace-folder=" & response.trace.outputFolder
-    ]
-  )
-
-  if res.isOk:
-    let splitData =  res.v.split("\n")
-    if splitData.len() == 4:
-      let uploadData = UploadedTraceData(
-        downloadKey: splitData[0],
-        controlId: splitData[1],
-        expireTime: splitData[2]
-      )
-      mainWindow.webContents.send(
-        "CODETRACER::upload-trace-file-received",
-        js{
+    ],
+    onData = proc(data: string) =
+      let jsonLine = parseJson(data.split("\n")[^2].strip())
+      if jsonLine.hasKey("progress"):
+        mainWindow.webContents.send("CODETRACER::upload-trace-progress",
+        UploadProgress(
+          id: response.trace.id,
+          progress: jsonLine["progress"].getInt(),
+          msg: jsonLine["message"].getStr("")
+        )),
+    onDone = proc(success: bool, result: string) =
+      if success:
+        let lines = result.splitLines()
+        let lastLine = lines[^2]
+        let parsed = parseJson(lastLine)
+        let uploadData = UploadedTraceData(
+          downloadKey: $parsed["downloadKey"].getStr(""),
+          controlId: $parsed["controlId"].getStr(""),
+          expireTime: $parsed["storedUntilEpochSeconds"].getInt()
+        )
+        mainWindow.webContents.send("CODETRACER::upload-trace-file-received", js{
           "argId": j(response.trace.program & ":" & $response.trace.id),
           "value": uploadData
-        }
-      )
-  else:
-    let uploadData = UploadedTraceData(
-      downloadKey: "Errored"
-    )
-    mainWindow.webContents.send(
-      "CODETRACER::uploaded-trace-received",
-      js{
-        "argId": j(response.trace.program & ":" & $response.trace.id),
-        "value": uploadData
-      }
-    )
+        })
+      else:
+        mainWindow.webContents.send("CODETRACER::uploaded-trace-file-received", js{
+          "argId": j(response.trace.program & ":" & $response.trace.id),
+          "value": UploadedTraceData(downloadKey: "Errored")
+        })
+  )
 
 proc onDownloadTraceFile(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
   let res = await readProcessOutput(

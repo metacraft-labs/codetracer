@@ -1,14 +1,14 @@
 import streams, nimcrypto, zip/zipfiles, std/[ enumerate, terminal, options, sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
 import ../../common/[ config, trace_index, paths, lang ]
 from stew / byteutils import toBytes
-import ../utilities/[ env, encryption, zip, language_detection ]
+import ../utilities/[ types, encryption, zip, language_detection ]
 import ../trace/storage_and_import, ../globals
 
 proc downloadFile(fileId, localPath: string, config: Config) =
   let client = newHttpClient()
   client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
 
-proc downloadTrace(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
+proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
   var iv: array[16, byte]
   copyMem(addr iv, unsafeAddr key, 16)
 
@@ -28,8 +28,8 @@ proc downloadTrace(fileId, traceDownloadKey: string, key: array[32, byte], confi
   let tracePath = unzippedLocation / "trace.json"
   let traceJson = parseJson(readFile(tracePath))
   let traceMetadataPath = unzippedLocation / "trace_metadata.json"
-  let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
   var pathValue = ""
+  let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
   for item in tracePathsMetadata:
     if item.getStr("") != "":
       pathValue = item.getStr("")
@@ -39,10 +39,9 @@ proc downloadTrace(fileId, traceDownloadKey: string, key: array[32, byte], confi
   discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
   return traceId
 
-proc downloadTraceCommand*(traceDownloadKey: string) =
+proc extractInfoFromKey*(downloadKey: string, config: Config): (string, array[32, byte]) =
   # We expect a traceDownloadKey to have <name>//<fileId>//<passwordKey>
-  let stringSplit = traceDownloadKey.split("//")
-  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let stringSplit = downloadKey.split("//")
   if not config.traceSharingEnabled:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
@@ -51,15 +50,17 @@ proc downloadTraceCommand*(traceDownloadKey: string) =
     quit(1)
 
   let fileId = stringSplit[1]
-  let password = stringSplit[2]
+  let passwordHex = stringSplit[2]
 
+  var password: array[32, byte]
+  hexToBytes(passwordHex, password)
+  (fileId, password)
+
+
+proc downloadTraceCommand*(traceDownloadKey: string) =
+  let config = loadConfig(folder=getCurrentDir(), inTest=false)
+  let (fileId, password) = extractInfoFromKey(traceDownloadKey, config)
   try:
-    let fileId = stringSplit[1]
-    let passwordHex = stringSplit[2]
-
-    var password: array[32, byte]
-    hexToBytes(passwordHex, password)
-
     let traceId = downloadTrace(fileId, traceDownloadKey, password, config)
     if isatty(stdout):
       echo fmt"OK: downloaded with trace id {traceId}"

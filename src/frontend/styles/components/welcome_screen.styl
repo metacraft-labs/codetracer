@@ -480,7 +480,7 @@
     background-color: DEBUG_BUTTON_BORDER_COLOR
     border-radius: 4px
     cursor: pointer
-  
+  upload
     &:hover
       outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
 
@@ -495,7 +495,29 @@
     background-size: 16px 16px
     background-position: center
     height: 28px
+
+  .progress-circle
+    width: 20px
+    height: 20px
+    border-radius: 50%
+    position: absolute
+    background-image: conic-gradient(#6B6B6B 0% 0%, #2C2C2C 0% 100%)
+    background-size: auto
+    z-index: 1
+    transform: translate(4px, 4px)
+
+  .inner-circle
+    width: 14px
+    height: 14px
+    border-radius: 50%
+    background-color: ACTIVE_ROW
+    position: absolute
+    z-index: 2
+    transform: translate(7px, 7px)
   
+  #progress-bar
+    position: relative
+
   #trace-upload-button
     background-image: WELCOME_SCREEN_UPLOAD_BUTTON
 
