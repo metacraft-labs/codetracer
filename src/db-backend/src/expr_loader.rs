@@ -33,9 +33,9 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         NodeNames {
             if_conditions: vec!["if".to_string()],
             else_conditions: vec!["elsif".to_string(), "else".to_string()],
-            loops: vec!["while".to_string()],
+            loops: vec!["while".to_string(), "until".to_string()],
             branches_body: vec!["then".to_string(), "call".to_string()],
-            branches: vec!["call".to_string()],
+            branches: vec!["then".to_string(), "call".to_string()],
             functions: vec!["method".to_string()],
             values: vec!["identifier".to_string()],
         },
@@ -413,11 +413,13 @@ impl ExprLoader {
     }
 
     fn register_loop(&mut self, _node: &Node, start: Position, end: Position, path: &PathBuf) {
+        let lang = self.get_current_language(path);
+        let offset = if lang == Lang::Ruby { 1 } else { 0 };
         if self.is_new_loop_shape(&start, &self.processed_files[path]) {
             let loop_shape = LoopShape::new(
                 LoopShapeId(self.processed_files[path].loop_shapes.len() as i64),
                 LoopShapeId(self.loop_index),
-                start,
+                Position(start.0 + offset),
                 end,
             );
             self.loop_index += 1;
@@ -431,7 +433,7 @@ impl ExprLoader {
                 .get_mut(path)
                 .unwrap()
                 .position_loops
-                .insert(start, loop_shape.base);
+                .insert(Position(start.0 + offset), loop_shape.base);
         }
     }
 
