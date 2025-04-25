@@ -48,6 +48,7 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"c", cstring"cpp", cstring"rust", cstring"nim", cstring"go",
     cstring"pascal", cstring"python", cstring"ruby", cstring"ruby",
     cstring"javascript", cstring"lua", cstring"assembler", cstring"noir",
+    cstring"rust", cstring"cpp",
     cstring"small",
     cstring"unknown"
   ]
@@ -58,7 +59,7 @@ proc toSet(names: seq[cstring]): JsAssoc[cstring, bool] =
   for name in names:
     result[name] = true
 
-let SUPPORTED_LANGS* = @[LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb, LangNoir, LangSmall]
+let SUPPORTED_LANGS* = @[LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]
 
 let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[]),
@@ -67,6 +68,8 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[j"for", j"if", j"while", j"proc"]),
   toSet(@[]),
   toSet(@[]), # LangGo: TODO
+  toSet(@[]),
+  toSet(@[]),
   toSet(@[]),
   toSet(@[]),
   toSet(@[]),
