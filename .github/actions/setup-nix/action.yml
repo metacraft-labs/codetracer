@@ -1,0 +1,46 @@
+name: Setup Nix Environment
+description: Common steps for setting up the Nix environment
+
+inputs:
+  cachix-cache:
+    description: The name of the cachix cache to use
+    required: true
+  cachix-auth-token:
+    description: Cachix auth token
+    required: true
+  trusted-public-keys:
+    description: Trusted public keys
+    required: false
+    default: ""
+  substituters:
+    description: Substituters
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+
+    - name: Configure Nix
+      shell: bash
+      run: |
+        mkdir -p $HOME/.config/nix
+
+        cat << EOF > "$HOME/.config/nix/nix.conf"
+          accept-flake-config = true
+          allow-import-from-derivation = true
+          substituters = https://cache.nixos.org ${{inputs.substituters}}
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{inputs.trusted-public-keys}}
+          netrc-file = $HOME/.config/nix/netrc"
+        EOF
+
+        cat << EOF > "$HOME/.config/nix/netrc"
+          machine ${{inputs.cachix-cache}}.cachix.org password ${{inputs.cachix-auth-token}}
+        EOF
+
+    - uses: cachix/cachix-action@v15
+      with:
+        name: ${{ inputs.cachix-cache }}
+        authToken: ${{ inputs.cachix-auth-token }}
