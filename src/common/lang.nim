@@ -47,6 +47,8 @@ proc getExtension*(lang: Lang): string =
     "lua",
     "asm",
     "nr",
+    "rs",
+    "cpp",
     "small",
     ""
   ]
