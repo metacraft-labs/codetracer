@@ -7,10 +7,12 @@
 import strutils, os
 
 type
-  Lang* = enum ## Identifies a programming language
+  Lang* = enum ## Identifies a programming language implementation
     LangC, LangCpp, LangRust, LangNim, LangGo,
     LangPascal, LangPython, LangRuby, LangRubyDb, LangJavascript,
-    LangLua, LangAsm, LangNoir, LangSmall, LangUnknown
+    LangLua, LangAsm, LangNoir,
+    LangRustWasm, LangCppWasm, # wasm
+    LangSmall, LangUnknown
 
 var CURRENT_LANG*: Lang = LangUnknown ## The current lang in the codetraces session
 
@@ -19,12 +21,14 @@ proc isVMLang*(lang: Lang): bool =
   false # lang in {LangRuby, LangPython, LangLua, LangJavascript, LangUnknown}
 
 var IS_DB_BASED*: array[Lang, bool] = [
-  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
+  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
 ]
 
 IS_DB_BASED[LangRubyDb] = true
 IS_DB_BASED[LangNoir] = true
 IS_DB_BASED[LangSmall] = true
+IS_DB_BASED[LangRustWasm] = true
+IS_DB_BASED[LangCppWasm] = true
 
 proc isDbBased*(lang: Lang): bool =
   ## return true if `lang` uses the db backend
@@ -32,12 +36,17 @@ proc isDbBased*(lang: Lang): bool =
 
 proc toCLang*(lang: Lang): string =
   ## convert Lang_ to string
-  let langs: array[Lang, string] = ["c", "cpp", "rust", "nim", "go", "pascal", "python", "ruby", "ruby", "javascript", "lua", "assembly", "noir", "small", "uknown"]
+  let langs: array[Lang, string] = ["c", "cpp", "rust", "nim", "go", "pascal", "python", "ruby", "ruby", "javascript", "lua", "assembly", "noir", "rust", "c++", "small", "uknown"]
   result = langs[lang]
 
 proc toName*(lang: Lang): string =
   ## convert Lang_ to string
-  let langs: array[Lang, string] = ["C", "C++", "Rust", "Nim", "Go", "Pascal", "Python", "Ruby", "Ruby(db)", "Javascript", "Lua", "assembly language", "Noir", "Small", "unknown"]
+  let langs: array[Lang, string] = [
+       "C", "C++", "Rust", "Nim", "Go",
+       "Pascal", "Python", "Ruby", "Ruby(db)", "Javascript", "Lua", "assembly language", "Noir",
+       "Rust(wasm)", "C++(wasm)",
+       "Small", "unknown"
+  ]
   result = langs[lang]
 
 proc toLang*(lang: string): Lang
