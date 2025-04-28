@@ -1392,6 +1392,8 @@ const
     ["{", "}", "[", "]", "[", "]"],             # LangLua
     ["{", "}", "[", "]", "[", "]"],             # LangAsm
     ["{", "}", "[", "]", "[", "]"],             # LangNoir
+    ["{", "}", "[", "]", "[", "]"],             # LangRustWasm
+    ["{", "}", "[", "]", "[", "]"],             # LangCppWasm
     ["{", "}", "[", "]", "[", "]"],             # LangSmall
     ["", "", "", "", "", ""]                    # LangUnknown
   ]
@@ -1410,6 +1412,8 @@ const
     @["write"], # LangLua
     @["write"], # LangAsm
     @["write"], # LangNoir
+    @["write"], # LangRustWasm
+    @["write"], # LangCppWasm
     @["write"], # LangSmall
     @["write"]  # LangUnknown
   ]
@@ -1428,6 +1432,8 @@ const
     @[], # LangLua
     @[], # LangAsm
     @[], # LangNoir
+    @[], # LangRustWasm
+    @[], # LangCppWasm
     @[], # LangSmall
     @[]  # LangUnknown
   ]
@@ -1450,6 +1456,8 @@ const
     @[], # LangLua
     @[], # LangAsm
     @[], # LangNoir
+    @["main"], # LangRustWasm
+    @["main"], # LangCppWasm
     @[], # LangSmall
     @[]  # LangUnknown
   ]
