@@ -96,6 +96,8 @@ proc getExtension*(lang: Lang): cstring =
     "lua",
     "asm",
     "nr",
+    "rs",
+    "cpp",
     "small",
     ""
   ]
