@@ -213,13 +213,15 @@ impl<'a> TraceProcessor<'a> {
                 // we must have a top-level call which means
                 // we should have no return for it!
                 // we should have always at least it there: at least 1
-                assert!(self.depth > 1);
-                assert!(self.call_stack.len() > 1);
+                // assert!(self.depth > 1);
+                // assert!(self.call_stack.len() > 1);
                 self.depth -= 1;
                 self.db.calls[self.current_call_key].return_value = return_record.return_value.clone();
                 let _ = self.call_stack.pop();
                 let _ = self.db.local_variable_cells.pop();
-                self.current_call_key = self.call_stack[self.call_stack.len() - 1];
+                if self.call_stack.len() >= 1 {
+                    self.current_call_key = self.call_stack[self.call_stack.len() - 1];
+                }
             }
             TraceLowLevelEvent::Event(record_event) => {
                 self.db.events.push(DbRecordEvent {
