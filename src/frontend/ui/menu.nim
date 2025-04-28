@@ -42,7 +42,7 @@ proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # if we update config it should effect it
   result = j""
 
-  for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
+  for index, shortcutValue in config.`shortcut-map`.actionShortcuts[action]:
     var shortcutName = shortcutValue.renderer.toUpperCase()
 
     if shortcutName == "CTRL+PAGEUP":

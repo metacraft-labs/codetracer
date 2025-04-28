@@ -335,7 +335,7 @@ proc switchToEdit*(data: Data) =
       if not editor.monacoEditor.isNil:
         var options = MonacoEditorOptions(
           scrollbar: js{},
-          minimap: js{ enabled: data.config.showMinimap },
+          minimap: js{ enabled: data.config.`show-minimap` },
           readOnly: false)
         editor.monacoEditor.updateOptions(options)
   redrawAll()
@@ -393,7 +393,7 @@ proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config
   # if we update config it should effect it
   result = j""
-  for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
+  for index, shortcutValue in config.`shortcut-map`.actionShortcuts[action]:
     if index == 0:
       result = result & shortcutValue.renderer.toUpperCase()
     else:
@@ -491,7 +491,7 @@ proc onInit*(
   data.homedir = response.home
   data.config = response.config
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
-  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.config.`real-flow-ui` = loadFlowUI(data.config.`flow-ui`)
   data.services.flow.enabledFlow = response.config.flow
 
   renderer.helpers = response.helpers
@@ -720,7 +720,7 @@ proc onNoTrace(
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
   data.config.layout = j"default_white"
-  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.config.`real-flow-ui` = loadFlowUI(data.config.`flow-ui`)
   data.save = response.save
   data.save.fileMap = JsAssoc[cstring, int]{}
   for i, file in data.save.files:
@@ -847,7 +847,7 @@ proc onWelcomeScreen(
   data.services.debugger.paths = @[]
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
-  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.config.`real-flow-ui` = loadFlowUI(data.config.`flow-ui`)
   data.recentTraces = response.recentTraces
   loadTheme(data.config.theme)
   configureShortcuts()

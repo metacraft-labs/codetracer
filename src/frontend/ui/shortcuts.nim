@@ -69,12 +69,12 @@ proc bindShortcut(action: ClientAction, renderer: cstring) =
     data.actions[action]()
 
 proc configureShortcuts* =
-  if data.config.shortcutMap.conflictList.len > 0:
+  if data.config.`shortcut-map`.conflictList.len > 0:
     cwarn "shortcuts: LIST OF SHORTCUT CONFLICTS"
-    for (shortcut, actions) in data.config.shortcutMap.conflictList:
+    for (shortcut, actions) in data.config.`shortcut-map`.conflictList:
       cwarn "  shortcuts: " & $shortcut & "  " & $actions
 
-  for action, shortcuts in data.config.shortcutMap.actionShortcuts:
+  for action, shortcuts in data.config.`shortcut-map`.actionShortcuts:
     for shortcut in shortcuts:
       bindShortcut(action, shortcut.renderer)
 
