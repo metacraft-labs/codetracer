@@ -406,12 +406,12 @@ impl EventDb {
         Ok((table_update, trace_values_option))
     }
 
-    pub fn register_tracepoint_values(&mut self, tracepoint_id: usize, locals: Vec<StringAndValueTuple>) {
+    pub fn register_tracepoint_values(&mut self, tracepoint_id: usize, locals: Vec<Vec<StringAndValueTuple>>) {
         let table_id = self.make_single_table_id(tracepoint_id);
         if !self.trace_list.contains(&table_id) {
             self.trace_list.push(table_id);
         }
-        self.tracepoint_values.insert(tracepoint_id, vec![locals.clone()]);
+        self.tracepoint_values.insert(tracepoint_id, locals.clone());
     }
 
     pub fn clear_single_table(&mut self, single_table_id: SingleTableId) {
