@@ -72,21 +72,21 @@ proc recordDb(
       @[rubyTracerPath, program]
     of LangSmall:
       @[program, "--tracing"]
-    of LangNoir:
+    of LangRustWasm, LangCppWasm:
       # TODO: add Lang..Wasm
-      if program.endsWith(".wasm"):
-        # wazero
-        @["run", "--trace-dir", traceFolder, program]
-      else:
-        let backendArgs = if backend == "plonky2":
-            @["--trace-plonky2"]
-          elif backend.len > 0:
-            echo fmt"error: unsupported backend: {backend}"
-            quit(1)
-          else:
-            @[]
+      #if program.endsWith(".wasm"):
+      #  # wazero
+      @["run", "--trace-dir", traceFolder, program]
+    of LangNoir:
+      let backendArgs = if backend == "plonky2":
+          @["--trace-plonky2"]
+        elif backend.len > 0:
+          echo fmt"error: unsupported backend: {backend}"
+          quit(1)
+        else:
+          @[]
 
-        @["trace", "--trace-dir", traceFolder].concat(backendArgs)
+      @["trace", "--trace-dir", traceFolder].concat(backendArgs)
     else:
       echo fmt"error: lang {lang} not supported for recordDb"
       quit(1)
@@ -109,6 +109,10 @@ proc recordDb(
     if vmExe.len == 0:
       echo "error: expected a path in `CODETRACER_NOIR_EXE_PATH`: please fill this env var"
       quit(1)
+
+  if lang in {LangRustWasm, LangCppWasm}:
+    if vmExe.len == 0:
+      echo "error: expected a path in `CODETRACER_WASM_VM_PATH`: please fill this env var"
 
   # echo vmExe, " ", startArgs.concat(args), " ", programDir
   # noir: call directly its local exe as a simple workaround for now:
@@ -203,15 +207,15 @@ proc record(cmd: string, args: seq[string], compileCommand: string,
   try:
     if lang == LangRubyDb:
       return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, traceId)
-    elif lang == LangNoir:
+    elif lang in {LangNoir, LangRustWasm, LangCppWasm}:
       recordSymbols(executable, outputFolder, lang)
       var vmPath = ""
-      if executable.endsWith(".wasm"):
-        vmPath = getEnv("CODETRACER_WAZERO_EXE_PATH", "")
+      if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
+        vmPath = getEnv("CODETRACER_WAZERO_VM_PATH", "")
         echo "wasm vm path ", vmPath
       else:
         vmPath = noirExe
-      return recordDb(LangNoir, vmPath, executable, args, backend, outputFolder, traceId)
+      return recordDb(lang, vmPath, executable, args, backend, outputFolder, traceId)
     elif lang == LangSmall:
       return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, traceId)
     else:
