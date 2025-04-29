@@ -10,7 +10,7 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
 
   var sourcePaths = paths
 
-  if lang == LangNoir:
+  if lang in {LangNoir, LangRustWasm, LangCppWasm}:
     var baseFolder = ""
     for path in paths:
       if path.len > 0 and path.startsWith('/'):
