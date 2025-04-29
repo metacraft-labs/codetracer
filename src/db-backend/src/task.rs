@@ -1567,7 +1567,7 @@ pub struct RegisterEventsArg {
 pub struct TracepointResults {
     pub session_id: usize,
     pub tracepoint_id: usize,
-    pub tracepoint_values: Vec<StringAndValueTuple>,
+    pub tracepoint_values: Vec<Vec<StringAndValueTuple>>,
     pub events: Vec<ProgramEvent>,
     pub last_in_session: bool,
     pub first_update: bool,
