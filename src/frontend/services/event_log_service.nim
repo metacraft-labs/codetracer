@@ -20,7 +20,7 @@ proc loadEvents*(self: EventLogService, update: TableData) =
         kind: row.kind,
         content: row.content,
         rrEventId: row.rrEventId,
-        filenameMetadata: row.filenameMetadata,
+        metadata: row.metadata,
         highLevelPath: row.fullPath,
         directLocationRRTicks: row.directLocationRRTicks,
         eventIndex: i,
@@ -107,7 +107,7 @@ data.services.eventLog.onUpdatedEventsContent = proc(self: EventLogService, resp
   while lineIndex < lines.len and eventsIndex < self.events.len:
     while true:
       if eventsIndex < self.events.len:
-        if self.events[eventsIndex].kind in {Write, WriteFile, Read, ReadFile}:
+        if self.events[eventsIndex].kind in {Write, WriteFile, WriteOther, Read, ReadFile, ReadOther}:
           self.events[eventsIndex].content = lines[lineIndex]
           lineIndex += 1
         eventsIndex += 1

@@ -165,7 +165,7 @@ impl EventDb {
             direct_location_rr_ticks: trace.rr_ticks as i64,
             tracepoint_result_index: trace.tracepoint_id as i64,
             event_index: trace.iteration,
-            filename_metadata: "".to_string(),
+            metadata: "".to_string(),
             bytes: 0,
             stdout: false,
             base64_encoded: false,
@@ -217,7 +217,7 @@ impl EventDb {
             self.register_in_global_table(events, SingleTableId(0));
         }
         // for event in events {
-        //     info!("filename_metadata {:?}", event.filename_metadata);
+        //     info!("metadata {:?}", event.metadata);
         // }
         // info!("self {self:?}");
     }

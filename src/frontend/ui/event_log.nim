@@ -18,8 +18,10 @@ const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
 const EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
   "write",
   "write file",
+  "write(other)",
   "read",
   "read file",
+  "read(other)",
   "read dir",
   "open dir",
   "close dir",
@@ -40,8 +42,10 @@ const EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
 let kindTags: array[EventLogKind, seq[EventTag]] = [
   @[EventWrites, EventStd],   #Write
   @[EventWrites, EventFiles], #WriteFile
+  @[EventWrites],             #WriteOther
   @[EventReads, EventStd],    #Read
   @[EventReads, EventFiles],  #ReadFile
+  @[EventReads],              #ReadOther
   @[],                        #ReadDir
   @[],                        #OpenDir
   @[],                        #CloseDir
@@ -162,14 +166,26 @@ func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
     case eventElement.kind:
     of WriteFile:
       (
-        fmt"event:write to {eventElement.filenameMetadata} #{index}",
-        toLangFromFilename(eventElement.filenameMetadata)
+        fmt"event:write to {eventElement.metadata} #{index}",
+        toLangFromFilename(eventElement.metadata)
       )
 
     of ReadFile:
       (
-        fmt"event:read from {eventElement.filenameMetadata} #{index}",
-        toLangFromFilename(eventElement.filenameMetadata)
+        fmt"event:read from {eventElement.metadata} #{index}",
+        toLangFromFilename(eventElement.metadata)
+      )
+
+    of WriteOther:
+      (
+        fmt"event:write: {eventElement.metadata} #{index}",
+        LangUnknown
+      )
+
+    of ReadOther:
+      (
+        fmt"event:read: {eventElement.metadata} #{index}",
+        LangUnknown
       )
 
     of Write:
@@ -178,7 +194,7 @@ func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
 
     of Read:
       ("event: read from stdin #{index}", LangUnknown)
-
+      
     else:
       (fmt"event: {eventElement.kind} #{index}", LangUnknown)
 
@@ -194,10 +210,16 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
       fmt"stdin: {eventElement.content}"
 
     of WriteFile:
-      fmt"write to {eventElement.filenameMetadata}: {eventElement.content}"
+      fmt"write to {eventElement.metadata}: {eventElement.content}"
 
     of ReadFile:
-      fmt"read from {eventElement.filenameMetadata}: {eventElement.content}"
+      fmt"read from {eventElement.metadata}: {eventElement.content}"
+
+    of WriteOther:
+      fmt"write: {eventElement.metadata}: {eventElement.content}"
+
+    of ReadOther:
+      fmt"read: {eventElement.metadata}: {eventElement.content}"
 
     of OpenDir, ReadDir, CloseDir:
       "eventually TODO"
@@ -206,7 +228,7 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
       fmt"socket: {eventElement.content}"
 
     of EventLogKind.Open:
-      fmt"open {eventElement.filenameMetadata}"
+      fmt"open {eventElement.metadata}"
 
     of EventLogKind.Error:
       fmt"error: {eventElement.content}"
@@ -242,7 +264,7 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
     event = cast[ProgramEvent](data)
     event.highLevelPath = location.highLevelPath
     event.highLevelLine = location.highLevelLine
-    event.fileNameMetadata = ""
+    event.metadata = ""
     event.bytes = 0
     event.tracepointResultIndex = 0
     event.eventIndex = 0
@@ -334,7 +356,8 @@ proc events(self: EventLogComponent) =
           js{
             className: j"eventLog-index eventLog-cell",
             data: j"rrEventId",
-            title: j"rr event id"},
+            title: j"rr event id"
+          },
           js{
             className: j"eventLog-event eventLog-cell",
             searchable: true,
@@ -350,7 +373,7 @@ proc events(self: EventLogComponent) =
             title: j"text",
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
-                of Write, WriteFile, Read, ReadFile,
+                of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
                    OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error:
                   cstring(eventLogDescriptionRepr(event, event.eventIndex))
 
