@@ -136,6 +136,8 @@ impl ExprLoader {
                 Lang::Ruby
             } else if extension == "small" {
                 Lang::Small
+            } else if extension == "rs" {
+                Lang::Noir // TODO RustWasm?
             } else {
                 Lang::Unknown
             }
@@ -245,6 +247,12 @@ impl ExprLoader {
         let start = self.get_first_line(node);
         let end = self.get_last_line(node);
         let lang = self.get_current_language(path);
+        // info!(
+        //    "process_node {:?} {:?} {:?}",
+        //    lang,
+        //    NODE_NAMES[&lang].values,
+        //    node.kind()
+        //);
         // extract variable names
         if NODE_NAMES[&lang].values.contains(&node.kind().to_string()) {
             let value = self.extract_expr(node, path, row);
@@ -379,6 +387,10 @@ impl ExprLoader {
     }
 
     pub fn get_loop_shape(&self, step: &DbStep, path: &PathBuf) -> Option<LoopShape> {
+        info!(
+            "get_loop_shape {} {:?}",
+            step.line.0, self.processed_files[path].position_loops
+        );
         if let Some(loop_shape_id) = self.processed_files[path].position_loops.get(&Position(step.line.0)) {
             return Some(self.processed_files[path].loop_shapes[loop_shape_id.0 as usize].clone());
         }
