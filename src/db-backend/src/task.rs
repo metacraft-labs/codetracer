@@ -605,7 +605,7 @@ pub struct ProgramEvent {
     pub rr_event_id: usize,
     pub high_level_path: String,
     pub high_level_line: i64,
-    pub filename_metadata: String,
+    pub metadata: String,
     pub bytes: usize,
     pub stdout: bool,
     #[serde(rename = "directLocationRRTicks")]
@@ -802,7 +802,7 @@ pub struct TableRow {
     pub low_level_location: String,
     pub kind: EventLogKind,
     pub content: String,
-    pub filename_metadata: String,
+    pub metadata: String,
     pub stdout: bool,
 }
 
@@ -824,7 +824,7 @@ impl TableRow {
             kind: event.kind,
             content: event.content.to_string(),
             base64_encoded: event.base64_encoded,
-            filename_metadata: event.filename_metadata.clone(),
+            metadata: event.metadata.clone(),
             stdout: event.stdout,
         }
     }
