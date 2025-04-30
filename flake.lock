@@ -168,17 +168,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1740042702,
-        "narHash": "sha256-qA43GWoM4u647PL53L15tzhhR3S5xku5ypz0VvOwRpE=",
-        "owner": "blocksense-network",
+        "lastModified": 1746011779,
+        "narHash": "sha256-W7xxGFK2XZbFK/YEI+9sfQaWLcMVfyGm5TzDqUaqo5s=",
+        "owner": "metacraft-labs",
         "repo": "noir",
-        "rev": "8584e105549d6daa29d7b2be83bd5883016cfbd7",
+        "rev": "95f1d25e340bcfeb11b16e91678b4dc85b46d4ac",
         "type": "github"
       },
       "original": {
-        "owner": "blocksense-network",
-        "ref": "blocksense",
+        "owner": "metacraft-labs",
         "repo": "noir",
+        "rev": "95f1d25e340bcfeb11b16e91678b4dc85b46d4ac",
         "type": "github"
       }
     },

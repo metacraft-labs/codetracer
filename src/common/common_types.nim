@@ -843,8 +843,10 @@ type
   EventLogKind* {.pure.} = enum ## EventLog kinds
     Write,
     WriteFile,
+    WriteOther,
     Read,
     ReadFile,
+    ReadOther,
     # not really used for now
     # we might remove them or implement them
     # in the future
@@ -866,7 +868,9 @@ type
     highLevelLine*: int
     # eventually: might be available in the future
     # lowLevelLocation*: Location
-    filenameMetadata*: langstring ## metadata for read/write file events:
+    ## metadata: file for read/write file events 
+    ## or a more general kind of key for WriteOther/ReadOther
+    metadata*: langstring 
     bytes*: int
     stdout*: bool
     directLocationRRTicks*: int
@@ -950,7 +954,7 @@ type
     lowLevelLocation*: langstring
     kind*: EventLogKind
     content*: langstring
-    filenameMetadata*: langstring
+    metadata*: langstring
     base64Encoded*: bool
     stdout*: bool
 

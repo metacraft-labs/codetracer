@@ -25,7 +25,7 @@
     };
 
     noir = {
-      url = "github:blocksense-network/noir?ref=blocksense";
+      url = "github:metacraft-labs/noir?rev=95f1d25e340bcfeb11b16e91678b4dc85b46d4ac"; # " ref=blocksense-with-new-event-log-kinds";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
       flake = true;
     };
