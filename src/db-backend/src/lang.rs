@@ -18,6 +18,8 @@ pub enum Lang {
     Lua,
     Asm,
     Noir,
+    RustWasm,
+    CppWasm,
     Small,
     Unknown,
 }
