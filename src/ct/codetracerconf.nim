@@ -209,6 +209,13 @@ type
         desc: "Export zip file for the recording"
       .} : string
 
+      recordStylusTrace* {.
+        name: "stylus-trace"
+        abbr: "t"
+        defaultValue: ""
+        desc: "Path to a stylus emv trace json file"
+      .} : string
+
       recordProgram* {.
         argument
         desc: "Program to record"

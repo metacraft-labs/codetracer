@@ -34,6 +34,7 @@ proc runWithRestart(
                              outputFolder="",
                              backend="",
                              exportFile="",
+                             stylusTrace="",
                              program=recordArgs[0],
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:
