@@ -20,27 +20,34 @@ proc detectFolderLang(folder: string): Lang =
     LangUnknown
 
 
+const LANGS = {
+  "c": LangC,
+  "cpp": LangCpp,
+  "rs": LangRust,
+  "nim": LangNim,
+  "go": LangGo,
+  "py": LangPython,
+  "rb": LangRubyDb, # default for ruby for now
+  "nr": LangNoir,
+  "small": LangSmall,
+}.toTable()
+
+proc detectFileLang*(program: string): Lang =
+  if "." in program:
+    let extension = rsplit(program[1..^1], ".", 1)[1].toLowerAscii()
+    if LANGS.hasKey(extension):
+      return LANGS[extension]
+  return LangUnknown
+
 proc detectLang*(program: string, lang: Lang): Lang =
   echo "detectLang ", program
-  var langs = {
-    "c": LangC,
-    "cpp": LangCpp,
-    "rs": LangRust,
-    "nim": LangNim,
-    "go": LangGo,
-    "py": LangPython,
-    "rb": LangRubyDb, # default for ruby for now
-    "nr": LangNoir,
-    "small": LangSmall,
-    # "wasm": LangRustWasm,
-  }.toTable()
 
   if lang == LangUnknown:
     let absProgram = expandFileName(program)
     if "." in program:
       let extension = rsplit(absProgram[1..^1], ".", 1)[1].toLowerAscii()
-      if langs.hasKey(extension):
-        result = langs[extension]
+      if LANGS.hasKey(extension):
+        result = LANGS[extension]
       elif extension == "wasm":
         result = LangRustWasm # TODO detectLangFromTrace(traceId)
     elif dirExists(program):
