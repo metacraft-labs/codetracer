@@ -25,6 +25,7 @@ proc record*(lang: string,
              outputFolder: string,
              backend: string,
              exportFile: string,
+             stylusTrace: string,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
@@ -38,6 +39,10 @@ proc record*(lang: string,
   if exportFile != "":
     pargs.add("-e")
     pargs.add(exportFile)
+  if stylusTrace != "":
+    pargs.add("--stylus-trace")
+    pargs.add(stylusTrace)
+
   pargs.add(program)
   if args.len != 0:
     pargs = concat(pargs, args)
