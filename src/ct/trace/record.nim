@@ -41,10 +41,8 @@ proc record*(lang: string,
   pargs.add(program)
   if args.len != 0:
     pargs = concat(pargs, args)
-  # wazero <-> 
-  #   
-  
-  if detectedLang in @[LangRubyDb, LangNoir, LangSmall]:
+
+  if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
     let configPath = getEnv(
       "CODETRACER_CT_PATHS",
       getAppDir().parentDir.parentDir.parentDir / "ct_paths.json")
