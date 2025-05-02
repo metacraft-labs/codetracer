@@ -152,6 +152,7 @@ fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
     match lang {
         Lang::Ruby | Lang::RubyDb => Ok("ruby".to_string()),
         Lang::Noir => Ok("noir".to_string()),
+        Lang::RustWasm => Ok("rust(wasm)".to_string()),
         _ => Err("Unsupported language".into()),
     }
 }
@@ -160,7 +161,10 @@ fn record_ruby_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
     let main_path = program_dir.join("main.rb");
     let trace_path = target_dir.join("trace.json");
     let result = Command::new("ruby")
-        .args(["../../libs/codetracer-ruby-recorder/src/trace.rb", main_path.to_str().unwrap()])
+        .args([
+            "../../libs/codetracer-ruby-recorder/src/trace.rb",
+            main_path.to_str().unwrap(),
+        ])
         .env("CODETRACER_DB_TRACE_PATH", trace_path.to_str().unwrap())
         .output()
         .unwrap();
@@ -182,10 +186,15 @@ fn record_noir_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
     }
 }
 
+fn record_rust_wasm_trace(_program_dir: &PathBuf, _target_dir: &PathBuf) {
+    todo!()
+}
+
 fn record_trace(program_dir: &PathBuf, target_dir: &PathBuf, lang: Lang) -> Result<(), Box<dyn Error>> {
     match lang {
         Lang::Ruby | Lang::RubyDb => record_ruby_trace(program_dir, target_dir),
         Lang::Noir => record_noir_trace(program_dir, target_dir),
+        Lang::RustWasm => record_rust_wasm_trace(program_dir, target_dir),
         _ => return Err("Unsupported language".into()),
     }
 
