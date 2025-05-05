@@ -38,7 +38,7 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
       pathValue = item.getStr("")
       break
 
-  let lang = detectFileLang(pathValue.split("/")[^1], isWasm)
+  let lang = detectLang(pathValue.split("/")[^1], LangUnknown, isWasm)
   discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
   return traceId
 
