@@ -28,14 +28,17 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
   let tracePath = unzippedLocation / "trace.json"
   let traceJson = parseJson(readFile(tracePath))
   let traceMetadataPath = unzippedLocation / "trace_metadata.json"
-  var pathValue = ""
+  let metadataJson = parseJson(readFile(traceMetadataPath))
   let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
+  let isWasm = metadataJson{"program"}.getStr("").split("/")[^1].split(".")[^1] == "wasm" # Check if language is wasm
+
+  var pathValue = ""
   for item in tracePathsMetadata:
     if item.getStr("") != "":
       pathValue = item.getStr("")
       break
 
-  let lang = detectFileLang(pathValue.split("/")[^1])
+  let lang = detectFileLang(pathValue.split("/")[^1], isWasm)
   discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
   return traceId
 
