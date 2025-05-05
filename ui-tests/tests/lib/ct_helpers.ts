@@ -299,12 +299,12 @@ function recordTestProgram(recordArg: string): number {
 
   const lines = ctProcess.stdout.trim().split("\n");
   const lastLine = lines[lines.length - 1]; // eslint-disable-line @typescript-eslint/no-magic-numbers
-  if (!lastLine.startsWith("> codetracer: finished with trace id: ")) {
+  if (!lastLine.startsWith("traceId:")) {
     console.log("ERROR: unexpected last line of ct record:");
     console.log(lastLine);
     process.exit(ERROR_EXIT_CODE);
   }
-  const traceIdTokenIndex = 2;
+  const traceIdTokenIndex = 1;
   const rawTraceId = lastLine.split(":")[traceIdTokenIndex].trim();
 
   // based on https://stackoverflow.com/a/23440948/438099
