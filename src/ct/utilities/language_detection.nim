@@ -37,26 +37,24 @@ const WASM_LANGS = {
   "rs": LangRustWasm,
 }.toTable()
 
-proc detectFileLang*(program: string, isWasm: bool = false): Lang =
-  if "." in program:
-    let extension = rsplit(program[1..^1], ".", 1)[1].toLowerAscii()
-    if not isWasm:
-      if LANGS.hasKey(extension):
-        return LANGS[extension]
-    else:
-      if WASM_LANGS.hasKey(extension):
-        return WASM_LANGS[extension]
-  return LangUnknown
-
-proc detectLang*(program: string, lang: Lang): Lang =
+proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
   echo "detectLang ", program
 
   if lang == LangUnknown:
-    let absProgram = expandFileName(program)
     if "." in program:
-      let extension = rsplit(absProgram[1..^1], ".", 1)[1].toLowerAscii()
-      if LANGS.hasKey(extension):
-        result = LANGS[extension] # TODO detectLangFromTrace(traceId)
+      var possiblyExpandedPath = ""
+      try:
+        possiblyExpandedPath = expandFileName(program)
+      except CatchableError:
+        possiblyExpandedPath = program
+
+      let extension = rsplit(possiblyExpandedPath[1..^1], ".", 1)[1].toLowerAscii()
+      if not isWasm:
+        if LANGS.hasKey(extension):
+          result = LANGS[extension] # TODO detectLangFromTrace(traceId)
+      else:
+        if WASM_LANGS.hasKey(extension):
+          result = WASM_LANGS[extension]        
     elif dirExists(program):
       result = detectFolderLang(program)
     else:
