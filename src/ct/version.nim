@@ -6,8 +6,8 @@ import strutils
 
 const
   CodeTracerYear* = 25
-  CodeTracerMonth* = 3
-  CodeTracerBuild* = 3
+  CodeTracerMonth* = 5
+  CodeTracerBuild* = 1
 
   CodeTracerVersionStr* = $CodeTracerYear & "." & ($CodeTracerMonth).align(2, '0') & "." & $CodeTracerBuild
 

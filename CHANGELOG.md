@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 25.05.1 - 2025-05-05
+
+The first release for a while, including our progress since March:
+
+* Fixes:
+    * Reopening closed editors bugfix
+    * Ruby support: fixing the omniscience support,
+        a rudimentary way to override the interpreter and 
+        point to a newer refactored version of the Ruby recorder
+    * Using `trace_paths.json` as part of the language detection for db-based traces
+    * Fix the db-backend support for multiple values for each tracepoint step
+* Integration with the proprietary rr backend for native languages 
+    (currently requires a separate setup for the rr backend,  and custom configuration pointing to it)
+
 ## 25.03.3 - 2025-03-31
 
 The second weekly release. It includes:
@@ -33,3 +47,4 @@ and the lite display mode of OmniScience.
 
 (Initial version 25.02.1 open sourced on 17 February, 
 after a repo/history cleanup, superseded by current initial 25.03.1 version from 4 March)
+
