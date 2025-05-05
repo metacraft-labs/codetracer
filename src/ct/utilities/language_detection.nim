@@ -30,13 +30,22 @@ const LANGS = {
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
   "small": LangSmall,
+  "wasm": LangRustWasm,
 }.toTable()
 
-proc detectFileLang*(program: string): Lang =
+const WASM_LANGS = {
+  "rs": LangRustWasm,
+}.toTable()
+
+proc detectFileLang*(program: string, isWasm: bool = false): Lang =
   if "." in program:
     let extension = rsplit(program[1..^1], ".", 1)[1].toLowerAscii()
-    if LANGS.hasKey(extension):
-      return LANGS[extension]
+    if not isWasm:
+      if LANGS.hasKey(extension):
+        return LANGS[extension]
+    else:
+      if WASM_LANGS.hasKey(extension):
+        return WASM_LANGS[extension]
   return LangUnknown
 
 proc detectLang*(program: string, lang: Lang): Lang =
@@ -47,9 +56,7 @@ proc detectLang*(program: string, lang: Lang): Lang =
     if "." in program:
       let extension = rsplit(absProgram[1..^1], ".", 1)[1].toLowerAscii()
       if LANGS.hasKey(extension):
-        result = LANGS[extension]
-      elif extension == "wasm":
-        result = LangRustWasm # TODO detectLangFromTrace(traceId)
+        result = LANGS[extension] # TODO detectLangFromTrace(traceId)
     elif dirExists(program):
       result = detectFolderLang(program)
     else:
