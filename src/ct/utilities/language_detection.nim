@@ -41,15 +41,14 @@ const WASM_LANGS = {
 
 proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
   echo "detectLang ", program
+  var possiblyExpandedPath = ""
+  try:
+    possiblyExpandedPath = expandFileName(program)
+  except CatchableError:
+    possiblyExpandedPath = program
 
   if lang == LangUnknown:
-    if "." in program:
-      var possiblyExpandedPath = ""
-      try:
-        possiblyExpandedPath = expandFileName(program)
-      except CatchableError:
-        possiblyExpandedPath = program
-
+    if "." in possiblyExpandedPath:
       let extension = rsplit(possiblyExpandedPath[1..^1], ".", 1)[1].toLowerAscii()
       if not isWasm:
         if LANGS.hasKey(extension):
