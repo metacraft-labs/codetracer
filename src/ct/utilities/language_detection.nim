@@ -35,6 +35,8 @@ const LANGS = {
 
 const WASM_LANGS = {
   "rs": LangRustWasm,
+  "cpp": LangCppWasm,
+  "c": LangCppWasm,
 }.toTable()
 
 proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
