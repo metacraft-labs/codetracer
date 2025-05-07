@@ -8,5 +8,8 @@ in
     packages = with pkgs; [
       python3Packages.flake8
       shellcheck
+      xz
+      gnutar
+      pkgs.gawk
     ];
   }

@@ -307,3 +307,37 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh"
+  create-release:
+    runs-on: [ self-hosted, nixos ]
+    needs: [ dev-build, nix-build, appimage-build, dmg-build ]
+    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: metacraft-labs/nixos-modules/.github/install-nix@main
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+      - name: Create resource tarball
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
+      - name: Get changelog text
+        id: changelog
+        run: | 
+          nix develop .#devShells.x86_64-linux.default --command bash -c "awk '/^## /{if (p) exit; p=1} p' CHANGELOG.md > release_changelog.md"
+          echo "\
+            
+          We're actively working on multiple exciting features, which are not yet fully released. Stay tuned!
+            
+          [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-amd64.AppImage)
+          [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-arm64.dmg)" >> release_changelog.md
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: "release_changelog.md"
+          draft: true
+          prerelease: false
+          files: resources.tar.xz
+          generate_release_notes: false
