@@ -803,7 +803,11 @@ proc view(
 
   var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
   var atom = if value.kind in ATOM_KINDS or not self.uiExpanded(value, expression): "value-expanded-atom-parent" else: "value-expanded-compound-parent"
-  let lang = self.data.trace.lang
+  var lang = LangUnknown
+  try:
+    lang = self.data.trace.lang
+  except:
+    lang = LangNoir
   var valueView = proc(value: Value): VNode =
     case value.kind:
     of Int, Float, String, CString, Char, Bool:
@@ -1157,7 +1161,6 @@ proc view(
 
 method render*(self: ValueComponent): VNode =
   var path: seq[SubPath] = @[]
-  echo "####### THIS IS BEFORE VALUE COMPONENT"
+
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
   result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
-  echo "####### THIS IS AFTER VALUE COMPONENT, self exrpression = ", self.baseExpression
