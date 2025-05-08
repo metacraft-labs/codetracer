@@ -54,6 +54,7 @@ STYLUS = stylus
 !nim_js = |> ^ %f^ $(NIM_RELEASE)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
+-d:ctInExtension\
 --debugInfo:on\
 --lineDir:on\
 --hotCodeReloading:on\

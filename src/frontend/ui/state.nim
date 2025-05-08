@@ -17,6 +17,36 @@ proc excerpt(self: StateComponent): VNode
 method restart*(self: StateComponent) =
   discard
 
+var stateKxiForExtension* {.exportc.}: KaraxInstance = nil
+var stateComponentForExtension* {.exportc.}: StateComponent = makeStateComponent(data, 0, inExtension = true)
+
+proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
+  if stateKxiForExtension.isNil:
+    stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
+  result = stateComponentForExtension
+
+method redrawForExtension*(self: StateComponent) {.exportc.} =
+  if self.inExtension:
+    let vNode = self.render()
+    let dom = vnodeToDom(vNode, KaraxInstance())
+    let element = document.getElementById(cast[cstring](self.kxi.toJs.rootId))
+    element.replaceChild(dom, element.children[0])
+
+proc registerLocals*(self: StateComponent, values: seq[Variable]) {.exportc.} =
+  self.locals = values
+  for localVariable in values:
+    let expression = localVariable.expression
+
+    if self.values.hasKey(expression):
+      let value = self.values[expression]
+
+      for chart in value.charts:
+        chart.replaceAllValues(expression, localVariable.value.elements)
+  self.completeMoveIndex += 1
+
+  if self.inExtension:
+    self.redrawForExtension()
+
 method render*(self: StateComponent): VNode =
   # render using value components
   # most of the stuff is separated into  watches and normal local values
@@ -43,7 +73,7 @@ method render*(self: StateComponent): VNode =
     elif self.data.services.debugger.valueHistory.hasKey(name):
       checkHistoryLocation(self.values[name], self.data.services.debugger, name)
 
-  if true:
+  try:
     proc renderFunction(value: ValueComponent): VNode =
       value.nameWidth = self.nameWidth
       value.valueWidth = self.calculateValueWidth()
@@ -84,7 +114,8 @@ method render*(self: StateComponent): VNode =
       # watchView(self) # TODO: Add later on
 
       tdiv(class = "value-components-container"):
-        if not self.service.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000:
+        echo "#### GOT A VALUE!"
+        if (not self.service.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
           self.i = 0
           for variable in self.service.locals:
             let name = variable.expression
@@ -100,6 +131,8 @@ method render*(self: StateComponent): VNode =
             self.values[name].baseValue = value
             self.values[name].i = self.i
             renderFunction(self.values[name])
+  except:
+    echo getCurrentExceptionMsg()
 
 # Show the current active debugger line on top of the search bar in the state component
 proc excerpt(self: StateComponent): VNode =
@@ -175,16 +208,8 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   var countBudget = 3000
   var minCountLimit = 50
 
-  self.locals = await self.service.loadLocals(self.rrTicks, countBudget, minCountLimit)
+  let locals = await self.service.loadLocals(self.rrTicks, countBudget, minCountLimit)
 
-  for localVariable in self.locals:
-    let expression = localVariable.expression
+  self.registerLocals(locals)
 
-    if self.values.hasKey(expression):
-      let value = self.values[expression]
-
-      for chart in value.charts:
-        chart.replaceAllValues(expression, localVariable.value.elements)
-
-  self.completeMoveIndex += 1
   self.data.redraw()
