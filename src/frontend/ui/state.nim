@@ -17,20 +17,15 @@ proc excerpt(self: StateComponent): VNode
 method restart*(self: StateComponent) =
   discard
 
-var stateKxiForExtension* {.exportc.}: KaraxInstance = nil
 var stateComponentForExtension* {.exportc.}: StateComponent = makeStateComponent(data, 0, inExtension = true)
 
 proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
-  if stateKxiForExtension.isNil:
+  if stateComponentForExtension.kxi.isNil:
     stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
   result = stateComponentForExtension
 
 method redrawForExtension*(self: StateComponent) {.exportc.} =
-  if self.inExtension:
-    let vNode = self.render()
-    let dom = vnodeToDom(vNode, KaraxInstance())
-    let element = document.getElementById(cast[cstring](self.kxi.toJs.rootId))
-    element.replaceChild(dom, element.children[0])
+  self.kxi.redraw()
 
 proc registerLocals*(self: StateComponent, values: seq[Variable]) {.exportc.} =
   self.locals = values
@@ -114,10 +109,10 @@ method render*(self: StateComponent): VNode =
       # watchView(self) # TODO: Add later on
 
       tdiv(class = "value-components-container"):
-        echo "#### GOT A VALUE!"
         if (not self.service.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
           self.i = 0
-          for variable in self.service.locals:
+          let localsList = if self.inExtension: self.locals else: self.service.locals
+          for variable in localsList:
             let name = variable.expression
             let value = variable.value
             if value.isNil:
