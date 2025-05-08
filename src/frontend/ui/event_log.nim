@@ -62,6 +62,67 @@ for kind, tags in kindTags:
   for tag in tags:
     tagKinds[tag].add(kind)
 
+var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
+
+method onUpdatedTable*(self: EventLogComponent, response: TableUpdate) {.async.}
+proc makeTableUpdate(): TableUpdate =
+  TableUpdate(
+    data: TableData(
+      draw: 2,
+      recordsTotal: 3,
+      recordsFiltered: 3,
+      data: @[
+        TableRow(
+          directLocationRRTicks: 7,
+          base64Encoded: false,
+          rrEventId: 0,
+          fullPath: "main.nr:14",
+          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
+          kind: EventLogKind.Write,
+          content: "1\n",
+          filenameMetadata: "",
+          stdout: true
+        ),
+        TableRow(
+          directLocationRRTicks: 16,
+          base64Encoded: false,
+          rrEventId: 1,
+          fullPath: "main.nr:14",
+          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
+          kind: EventLogKind.Write,
+          content: "2\n",
+          filenameMetadata: "",
+          stdout: true
+        ),
+        TableRow(
+          directLocationRRTicks: 25,
+          base64Encoded: false,
+          rrEventId: 2,
+          fullPath: "main.nr:14",
+          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
+          kind: EventLogKind.Write,
+          content: "3\n",
+          filenameMetadata: "",
+          stdout: true
+        )
+      ]
+    ),
+    isTrace: false,
+    traceId: 0
+  )
+
+method redrawForExtension*(self: EventLogComponent) {.exportc.} =
+  self.kxi.redraw()
+
+proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
+  eventLogComponentForExtension.drawId = 2
+  if eventLogComponentForExtension.kxi.isNil:
+    eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
+  result = eventLogComponentForExtension
+  # TODO: Way for hardcoded data to be displayed
+  # discard eventLogComponentForExtension.onUpdatedTable(makeTableUpdate())
+  # eventLogComponentForExtension.redrawForExtension()
+
 proc denseId*(context: EventLogComponent): cstring =
   j("eventLog-" & $context.id & "-dense-table-" & $context.index)
 
@@ -990,13 +1051,13 @@ method restart*(self: EventLogComponent) =
 
   self.eventsIndex = 0
 
-method render*(self: EventLogComponent): VNode =
-  kxiMap[j("eventLogComponent-" & $self.id)].afterRedraws.add(proc =
-    self.events()
-    let denseWrapper = j"#" & self.denseId & j"_wrapper"
-    let detailedWrapper = j"#" & self.detailedId & j"_wrapper"
-    let eventId = j"eventLogComponent-" & $self.id
+proc eventLogAfterRedraws(self: EventLogComponent) =
+  self.events()
+  let denseWrapper = j"#" & self.denseId & j"_wrapper"
+  let detailedWrapper = j"#" & self.detailedId & j"_wrapper"
+  let eventId = j"eventLogComponent-" & $self.id
 
+  if not self.inExtension:
     if not self.isDetailed:
       jq(denseWrapper).show()
       jq(detailedWrapper).hide()
@@ -1004,18 +1065,23 @@ method render*(self: EventLogComponent): VNode =
       jq(denseWrapper).hide()
       jq(detailedWrapper).show()
 
-    self.denseTable.updateTableRows(redraw = true)
-    self.detailedTable.updateTableRows(redraw = true)
+  self.denseTable.updateTableRows(redraw = true)
+  self.detailedTable.updateTableRows(redraw = true)
 
-    if self.resizeObserver.isNil:
-      let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
-      let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
-        for entry in entries:
-          let timeout = setTimeout(proc =
-            resizeEventLogHandler(self), 100))
-      resizeObserver.observe(componentTab)
-      self.resizeObserver = resizeObserver
-  )
+  if not self.inExtension and self.resizeObserver.isNil:
+    let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
+    let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
+      for entry in entries:
+        let timeout = setTimeout(proc =
+          resizeEventLogHandler(self), 100))
+    resizeObserver.observe(componentTab)
+    self.resizeObserver = resizeObserver
+
+method render*(self: EventLogComponent): VNode =
+  if not self.inExtension:
+    kxiMap[j("eventLogComponent-" & $self.id)].afterRedraws.add(proc = self.eventLogAfterRedraws())
+  else:
+    self.kxi.afterRedraws.add(proc = self.eventLogAfterRedraws())
 
   result = buildHtml(
     tdiv(
