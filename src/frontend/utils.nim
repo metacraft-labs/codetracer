@@ -172,7 +172,7 @@ proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
   data.ui.welcomeScreen = result
   data.registerComponent(result, Content.WelcomeScreen)
 
-proc makeStateComponent*(data: Data, id: int): StateComponent =
+proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateComponent =
   result = StateComponent(
     id: id,
     locals: data.services.debugger.locals,
@@ -183,7 +183,8 @@ proc makeStateComponent*(data: Data, id: int): StateComponent =
     chevronClicked: false,
     minNameWidth: 30,
     maxNameWidth: 85,
-    totalValueWidth: 95)
+    totalValueWidth: 95,
+    inExtension: inExtension)
   data.registerComponent(result, Content.State)
 
 proc makeBuildComponent*(data: Data): BuildComponent =

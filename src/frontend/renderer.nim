@@ -151,7 +151,7 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
       layout: JSON.stringify(layoutConfig.toJs)}
 
 
-var redrawIndex = 0
+var redrawIndex* = 0
 
 
 proc redrawAll* =
