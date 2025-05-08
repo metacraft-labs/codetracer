@@ -512,6 +512,7 @@ type
     content*: Content
     layoutItem*: GoldenContentItem
     kxi*: KaraxInstance
+    inExtension*: bool
 
   DataTableComponent* = ref object
     context*: js
@@ -657,7 +658,6 @@ type
     minNameWidth*: float # %
     maxNameWidth*: float # %
     totalValueWidth*: float # %
-    inExtension*: bool
 
   CallExpandedValuesComponent* = ref object of Component
     values*:        JsAssoc[cstring, ValueComponent]

@@ -15,6 +15,80 @@ proc searchCalltrace*(self: CalltraceComponent, query: cstring) {.async.}
 proc redrawCallLines(self: CalltraceComponent)
 proc loadLines(self: CalltraceComponent, fromScroll: bool)
 
+var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
+
+proc makeCallLine(depth, childrenCount: int, kind: CallLineContentKind, nonExpandedKind: CalltraceNonExpandedKind, rawName, key: cstring): CallLine =
+  CallLine(
+    depth: depth,
+    content: CallLineContent(
+      kind: kind,
+      call: Call(
+        key: key,
+        children: @[],
+        hiddenChildren: false,
+        depth: depth,
+        rawName: rawName,
+        args: @[],
+        withArgsAndReturn: false,
+        location: types.Location(highLevelFunctionName: rawName)
+      ),
+      nonExpandedKind: nonExpandedKind,
+      count: childrenCount,
+      isError: true,
+      hiddenChildren: false,
+    )
+  )
+
+proc addTestFunctions(self: CalltraceComponent) =
+  self.callLines.add(
+    makeCallLine(
+      0,
+      1,
+      CallLineContentKind.Call,
+      CalltraceNonExpandedKind.Calls,
+      "main",
+      "0"
+    )
+  )
+  self.callLines.add(
+    makeCallLine(
+      1,
+      1,
+      CallLineContentKind.Call,
+      CalltraceNonExpandedKind.Calls,
+      "a",
+      "1"
+    )
+  )
+  self.callLines.add(
+    makeCallLine(
+      2,
+      0,
+      CallLineContentKind.Call,
+      CalltraceNonExpandedKind.Calls,
+      "b",
+      "2"
+    )
+  )
+  self.callLines.add(
+    makeCallLine(
+      0,
+      0,
+      CallLineContentKind.EndOfProgramCall,
+      CalltraceNonExpandedKind.Calls,
+      "THIS IS A DUMMY END OF PROGRAM",
+      "3"
+    )
+  )
+
+proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
+  if calltraceComponentForExtension.callLines.len() == 0:
+    calltraceComponentForExtension.addTestFunctions()
+  if calltraceComponentForExtension.kxi.isNil:
+    calltraceComponentForExtension.kxi = setRenderer(proc: VNode = calltraceComponentForExtension.render(), id, proc = discard)
+    calltraceComponentForExtension.redrawCallLines()
+  result = calltraceComponentForExtension
+
 proc isAtStart(self: CalltraceComponent): bool =
   self.startCallLineIndex < START_BUFFER
 
@@ -799,7 +873,9 @@ func supportCallstackOnly(self: CalltraceComponent): bool =
   not self.data.config.calltrace or self.data.trace.lang == LangRust
 
 proc loadLines(self: CalltraceComponent, fromScroll: bool) =
-  let rrGdbBased = not self.data.trace.lang.isDbBased()
+  var rrGdbBased = false
+  if not self.inExtension:
+    rrGdbBased = not self.data.trace.lang.isDbBased()
 
   if not (rrGdbBased and fromScroll) or not self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
     let depth = self.panelDepth()
@@ -915,13 +991,14 @@ proc redrawCallLines(self: CalltraceComponent) =
   let calltraceLinesDom = cast[kdom.Element](vnodeToDom(calltraceLinesVdom, KaraxInstance()))
   let calltraceLinesElement = findElement(".calltrace-lines")
 
-  self.width =
-    if localCalltraceElement.style.width != "":
-      localCalltraceElement.style.width
-    else:
-      self.width
+  if not self.inExtension:
+    self.width =
+      if localCalltraceElement.style.width != "":
+        localCalltraceElement.style.width
+      else:
+        self.width
 
-  localCalltraceElement.style.height = self.calcScrollHeight()
+    localCalltraceElement.style.height = self.calcScrollHeight()
 
   if not localCalltraceElement.isNil:
     localCalltraceElement.replaceChild(
@@ -929,7 +1006,7 @@ proc redrawCallLines(self: CalltraceComponent) =
       calltraceLinesElement)
     self.redrawTraceLine()
 
-  if self.resizeObserver.isNil:
+  if not self.inExtension and self.resizeObserver.isNil:
     self.setCalltraceMutationObserver()
 
 proc changeLastCallSelection(self: CalltraceComponent) =
@@ -1074,11 +1151,14 @@ method render*(self: CalltraceComponent): VNode =
   self.callsByLine = @[]
   self.lineIndex = JsAssoc[cstring, int]{}
 
-  if self.data.trace.isNil:
+  if self.data.trace.isNil and not self.inExtension:
     return buildHtml(tdiv())
 
-  kxiMap["calltraceComponent-0"].afterRedraws.add(proc =
-    self.redrawCallLines())
+  if not self.inExtension:
+    kxiMap["calltraceComponent-0"].afterRedraws.add(proc = self.redrawCallLines())
+
+  if self.inExtension:
+    self.kxi.afterRedraws.add(proc = self.redrawCallLines())
 
   result = buildHtml(
     tdiv(
@@ -1093,7 +1173,7 @@ method render*(self: CalltraceComponent): VNode =
   ):
     tdiv():
       searchCalltraceView(self)
-      if not isDbBased(self.data.trace.lang):
+      if not self.inExtension and not isDbBased(self.data.trace.lang):
         filterCalltraceView(self)
     if self.service.isCalltrace:
       tdiv(
