@@ -18,6 +18,13 @@ proc view(
 
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
 
+proc intValue*(i: int): Value {.exportc.} =
+  Value(
+    kind: TypeKind.Int,
+    i: $i,
+    typ: Type(kind: TypeKind.Int, langType: "Int"),
+  )
+
 proc deleteWatch*(self: StateComponent, expression: cstring) =
   var i = self.watchExpressions.find(expression)
 
@@ -1150,7 +1157,7 @@ proc view(
 
 method render*(self: ValueComponent): VNode =
   var path: seq[SubPath] = @[]
-
+  echo "####### THIS IS BEFORE VALUE COMPONENT"
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
-  self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
-
+  result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
+  echo "####### THIS IS AFTER VALUE COMPONENT, self exrpression = ", self.baseExpression
