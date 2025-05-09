@@ -10,7 +10,7 @@ events: true
 # history: experimental support
 history: true
 repl: true
-traceSharingEnabled: false
+traceSharingEnabled: true
 
 # === feature settings
 
@@ -55,7 +55,7 @@ defaultBuild: ""
 showMinimap: true
 
 # for now local setup
-baseUrl: http://localhost:55504/api/codetracer/v1
+baseUrl: https://aware-kind-reptile.ngrok-free.app/api/codetracer/v1
 
 downloadApi: /download
 uploadApi: /upload

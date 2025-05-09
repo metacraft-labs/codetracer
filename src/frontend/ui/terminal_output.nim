@@ -26,6 +26,21 @@ proc addTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: i
   self.appendToTerminalLine(text, eventIndex)
   self.currentLine += 1
 
+var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent = makeTerminalOutputComponent(data, 0, inExtension = true)
+
+proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
+  if terminalOutputComponentForExtension.cachedLines.len() == 0:
+    terminalOutputComponentForExtension.addTerminalLine("first print event", 0)
+    terminalOutputComponentForExtension.addTerminalLine("second print event", 1)
+    terminalOutputComponentForExtension.addTerminalLine("third print event", 2)
+
+  if terminalOutputComponentForExtension.kxi.isNil:
+    terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = terminalOutputComponentForExtension.render(), id, proc = discard)
+  result = terminalOutputComponentForExtension
+
+method redrawForExtension*(self: TerminalOutputComponent) {.exportc.} =
+  self.kxi.redraw()
+
 proc getLines(self: TerminalOutputComponent) =
   self.service.loadTerminal()
 
@@ -131,7 +146,7 @@ method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.
     self.onTerminalEventClick(eventElement)
 
 proc terminalEventView(self: TerminalOutputComponent, lineEvent: TerminalEvent): VNode =
-  let eventElement = self.cachedEvents[lineEvent.eventIndex]
+  let eventElement = if not self.inExtension: self.cachedEvents[lineEvent.eventIndex] else: ProgramEvent()
   let rrTicks = eventElement.directLocationRRTicks
   let focusRRTicks = self.data.services.debugger.location.rrTicks
   let lineClass =
@@ -161,7 +176,7 @@ proc terminalLineView(self: TerminalOutputComponent, i: int, lineEvents: seq[Ter
       terminalEventView(self, lineEvent)
 
 method render*(self: TerminalOutputComponent): VNode  =
-  if self.initialUpdate:
+  if self.initialUpdate and not self.inExtension:
     self.getLines()
     self.initialUpdate = false
 
