@@ -25,6 +25,7 @@ proc record*(lang: string,
              outputFolder: string,
              backend: string,
              exportFile: string,
+             stylusTrace: string,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
@@ -38,14 +39,19 @@ proc record*(lang: string,
   if exportFile != "":
     pargs.add("-e")
     pargs.add(exportFile)
+  if stylusTrace != "":
+    pargs.add("--stylus-trace")
+    pargs.add(stylusTrace)
+
   pargs.add(program)
   if args.len != 0:
     pargs = concat(pargs, args)
 
-  if detectedLang in @[LangRubyDb, LangNoir, LangSmall]:
+  if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
     let configPath = getEnv(
       "CODETRACER_CT_PATHS",
       getAppDir().parentDir.parentDir.parentDir / "ct_paths.json")
+    echo dbBackendRecordExe, " ", detectedLang
     return recordInternal(dbBackendRecordExe, pargs, configPath)
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)

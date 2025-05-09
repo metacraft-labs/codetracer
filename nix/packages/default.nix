@@ -23,6 +23,8 @@
 
         noir = inputs.noir.packages.${system}.default;
 
+        wazero = inputs.wazero.packages.${system}.default;
+
         sqlite = pkgs.sqlite;
 
         pcre = pkgs.pcre;
@@ -210,7 +212,7 @@
           cargoLock = {
             lockFile = ../../src/db-backend/Cargo.lock;
             outputHashes = {
-              "runtime_tracing-0.6.0" = "sha256-9DoalWBiIctD6tmBjBcVlpJlLHRoFp57uuyfBB1lw0g=";
+              "runtime_tracing-0.6.1" = "sha256-wx2D7gazcW/COWG06DT8yrN13LjAARFuPsTYBencp5U=";
             };
           };
 

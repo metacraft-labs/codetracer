@@ -20,26 +20,42 @@ proc detectFolderLang(folder: string): Lang =
     LangUnknown
 
 
-proc detectLang*(program: string, lang: Lang): Lang =
-  # echo "detectLang ", program
-  var langs = {
-    "c": LangC,
-    "cpp": LangCpp,
-    "rs": LangRust,
-    "nim": LangNim,
-    "go": LangGo,
-    "py": LangPython,
-    "rb": LangRubyDb, # default for ruby for now
-    "nr": LangNoir,
-    "small": LangSmall,
-  }.toTable()
+const LANGS = {
+  "c": LangC,
+  "cpp": LangCpp,
+  "rs": LangRust,
+  "nim": LangNim,
+  "go": LangGo,
+  "py": LangPython,
+  "rb": LangRubyDb, # default for ruby for now
+  "nr": LangNoir,
+  "small": LangSmall,
+  "wasm": LangRustWasm,
+}.toTable()
+
+const WASM_LANGS = {
+  "rs": LangRustWasm,
+  "cpp": LangCppWasm,
+  "c": LangCppWasm,
+}.toTable()
+
+proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
+  echo "detectLang ", program
+  var possiblyExpandedPath = ""
+  try:
+    possiblyExpandedPath = expandFileName(program)
+  except CatchableError:
+    possiblyExpandedPath = program
 
   if lang == LangUnknown:
-    let absProgram = expandFileName(program)
-    if "." in program:
-      let extension = rsplit(absProgram[1..^1], ".", 1)[1].toLowerAscii()
-      if langs.hasKey(extension):
-        result = langs[extension]
+    if "." in possiblyExpandedPath:
+      let extension = rsplit(possiblyExpandedPath[1..^1], ".", 1)[1].toLowerAscii()
+      if not isWasm:
+        if LANGS.hasKey(extension):
+          result = LANGS[extension] # TODO detectLangFromTrace(traceId)
+      else:
+        if WASM_LANGS.hasKey(extension):
+          result = WASM_LANGS[extension]        
     elif dirExists(program):
       result = detectFolderLang(program)
     else:
@@ -54,3 +70,4 @@ proc detectLang*(program: string, lang: Lang): Lang =
         result = LangUnknown
   else:
     result = lang
+  echo "result ", result

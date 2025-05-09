@@ -151,6 +151,7 @@ impl<'a> CallFlowPreloader<'a> {
         let mut flow_view_update = FlowViewUpdate::new(self.location.clone());
         let mut step_count = 0;
         let mut first = true;
+        info!("loop");
         loop {
             let (step_id, progressing) = if first {
                 first = false;
@@ -159,10 +160,15 @@ impl<'a> CallFlowPreloader<'a> {
                 let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
                 db.next_step_id_relative_to(iter_step_id, true, step_to_different_line)
             };
+            info!(
+                "step id {:?} call_key {:?} progressing {}",
+                step_id, call_key, progressing
+            );
             iter_step_id = step_id;
             let step = db.steps[step_id];
             if call_key != step.call_key || !progressing {
                 flow_view_update = self.add_return_value(flow_view_update, db, call_key);
+                info!("break flow");
                 break;
             }
 
@@ -181,6 +187,7 @@ impl<'a> CallFlowPreloader<'a> {
             ));
             flow_view_update.relevant_step_count.push(step.line.0 as usize);
             flow_view_update.add_step_count(step.line.0, step_count);
+            info!("process loops");
             flow_view_update = self.process_loops(flow_view_update.clone(), step, path_buf, step_count);
             flow_view_update = self.log_expressions(flow_view_update.clone(), step, db, step_id);
             step_count += 1;
@@ -203,6 +210,7 @@ impl<'a> CallFlowPreloader<'a> {
         step_count: i64,
     ) -> FlowViewUpdate {
         if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(&step, path_buf) {
+            info!("loop shape");
             if loop_shape.first.0 == step.line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
@@ -323,6 +331,7 @@ impl<'a> CallFlowPreloader<'a> {
         }
 
         if let Some(var_list) = self.flow_preloader.get_var_list(step.line, &self.location) {
+            info!("var_list {:?}", var_list.clone());
             for value_name in &var_list {
                 if variable_map.contains_key(value_name) {
                     flow_view_update

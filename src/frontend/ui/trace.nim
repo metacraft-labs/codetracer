@@ -227,7 +227,7 @@ proc renderTableResults(
           rrEventId: cast[int](datatableRow.rrEventId),
           directLocationRRTicks: cast[int](datatableRow.directLocationRRTicks),
           content: cstring"",
-          filenameMetadata: cstring"",
+          metadata: cstring"",
           maxRRTicks: data.maxRRTicks,
         )
 

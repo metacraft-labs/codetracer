@@ -125,7 +125,10 @@ proc runInitial*(conf: CodetracerConf) =
     of StartupCommand.build:
       build(conf.buildProgramPath, conf.buildOutputPath)
     of StartupCommand.record:
-      discard record(conf.recordLang, conf.recordOutputFolder, conf.recordExportFile, conf.recordLang, conf.recordProgram, conf.recordArgs)
+      discard record(
+        conf.recordLang, conf.recordOutputFolder,
+        conf.recordExportFile, conf.recordLang, conf.recordStylusTrace,
+        conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
     of StartupCommand.start_core:

@@ -10,7 +10,7 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
 
   var sourcePaths = paths
 
-  if lang == LangNoir:
+  if lang in {LangNoir, LangRustWasm, LangCppWasm}:
     var baseFolder = ""
     for path in paths:
       if path.len > 0 and path.startsWith('/'):
@@ -123,7 +123,7 @@ proc importDbTrace*(
   if rawPaths.len > 0:
     paths = Json.decode(rawPaths, seq[string])
 
-  if selfContained:
+  if selfContained and downloadKey == "":
     # for now assuming it happens on the original machine
     # when the source files are still available and unchanged
     if paths.len > 0:

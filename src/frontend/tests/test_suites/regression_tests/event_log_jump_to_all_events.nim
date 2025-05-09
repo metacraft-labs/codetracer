@@ -48,6 +48,8 @@ const AFTER_INITIAL_READS_EVENT_INDEX: array[Lang, int] = [
   0, # Lua
   0, # Asm
   0, # Noir
+  0, # Rust wasm
+  0, # C++ wasm
   0, # Small
   0 # unknown
 ]

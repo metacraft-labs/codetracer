@@ -56,7 +56,8 @@ proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
 proc recordDb(
     lang: Lang, vmExe: string,
     program: string, args: seq[string],
-    backend: string, traceFolder: string, traceId: int): Trace =
+    backend: string, traceFolder: string, stylusTrace: string,
+    traceId: int): Trace =
 
   createDir(traceFolder)
   let tracePath = traceFolder / "trace.json"
@@ -72,6 +73,16 @@ proc recordDb(
       @[rubyTracerPath, program]
     of LangSmall:
       @[program, "--tracing"]
+    of LangRustWasm, LangCppWasm:
+      # TODO: add Lang..Wasm
+      #if program.endsWith(".wasm"):
+      #  # wazero
+      var vmArgs = @["run"]
+      if stylusTrace.len > 0:
+        vmArgs.add("-stylus")
+        vmArgs.add(stylusTrace)
+      vmArgs = vmArgs.concat(@["--trace-dir", traceFolder, program])
+      vmArgs
     of LangNoir:
       let backendArgs = if backend == "plonky2":
           @["--trace-plonky2"]
@@ -105,6 +116,10 @@ proc recordDb(
       echo "error: expected a path in `CODETRACER_NOIR_EXE_PATH`: please fill this env var"
       quit(1)
 
+  if lang in {LangRustWasm, LangCppWasm}:
+    if vmExe.len == 0:
+      echo "error: expected a path in `CODETRACER_WASM_VM_PATH`: please fill this env var"
+
   # echo vmExe, " ", startArgs.concat(args), " ", programDir
   # noir: call directly its local exe as a simple workaround for now:
   # (noirExe from src/common/paths.nim)
@@ -125,9 +140,11 @@ proc recordDb(
 
 
 # record a program run
-proc record(cmd: string, args: seq[string], compileCommand: string,
-            langArg: Lang, backend: string, test = false, basic = false,
-            traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = ""): Trace =
+proc record(
+    cmd: string, args: seq[string], compileCommand: string,
+    langArg: Lang, backend: string, stylusTrace: string,
+    test = false, basic = false,
+    traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = ""): Trace =
   var traceID: int
   if traceIDRecord == -1:
     traceID = trace_index.newID(test)
@@ -162,6 +179,7 @@ proc record(cmd: string, args: seq[string], compileCommand: string,
       executable = foundExe
 
   let lang = detectLang(executable, langArg)
+  echo "in db ", lang, " ", executable
   if lang == LangUnknown:
     errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
     quit(1)
@@ -196,12 +214,18 @@ proc record(cmd: string, args: seq[string], compileCommand: string,
 
   try:
     if lang == LangRubyDb:
-      return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, traceId)
-    elif lang == LangNoir:
+      return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, "", traceId)
+    elif lang in {LangNoir, LangRustWasm, LangCppWasm}:
       recordSymbols(executable, outputFolder, lang)
-      return recordDb(LangNoir, noirExe, executable, args, backend, outputFolder, traceId)
+      var vmPath = ""
+      if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
+        vmPath = wazeroExe
+        echo "wasm vm path ", vmPath
+      else:
+        vmPath = noirExe
+      return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
     elif lang == LangSmall:
-      return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, traceId)
+      return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, stylusTrace, traceId)
     else:
       echo fmt"ERROR: unsupported lang {lang}"
       quit(1)
@@ -232,6 +256,7 @@ proc main*(): Trace =
   #   [--lang <lang>] [-o/--output-folder <output-folder>]
   #   [--backend <backend>]
   #   [-e/--export <export-zip>] [-c/--cleanup-output-folder]
+  #   [-t/--stylus-trace <trace-path>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:
@@ -248,6 +273,7 @@ proc main*(): Trace =
   var cleanupOutputFolder = false
   var exportZipPath = ""
   var backend = ""
+  var stylusTrace = ""
   # for i, arg in args:
   var i = 0
   while i < args.len:
@@ -280,6 +306,12 @@ proc main*(): Trace =
         displayHelp()
         return
       backend = args[i + 1]
+      i += 2
+    elif arg == "--stylus-trace" or arg == "-t":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      stylusTrace = args[i + 1]
       i += 2
     else:
       if program == "":
@@ -356,7 +388,7 @@ proc main*(): Trace =
 
   try:
     var trace = record(
-      program, recordArgs, "", lang, backend,
+      program, recordArgs, "", lang, backend, stylusTrace,
       traceIDRecord=traceID, outputFolderArg=outputFolder)
     traceId = trace.id
     var outputPath = trace.outputFolder

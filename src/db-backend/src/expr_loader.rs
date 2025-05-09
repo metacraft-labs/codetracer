@@ -40,18 +40,20 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
             values: vec!["identifier".to_string()],
         },
     );
-    m.insert(
-        Lang::Noir,
-        NodeNames {
-            if_conditions: vec!["if_expression".to_string()],
-            else_conditions: vec!["else_clause".to_string()],
-            loops: vec!["for_expression".to_string()],
-            branches_body: vec!["block".to_string()],
-            branches: vec!["block".to_string()],
-            functions: vec!["function_item".to_string()],
-            values: vec!["identifier".to_string()],
-        },
-    );
+
+    let rust_node_names = NodeNames {
+        if_conditions: vec!["if_expression".to_string()],
+        else_conditions: vec!["else_clause".to_string()],
+        loops: vec!["for_expression".to_string()],
+        branches_body: vec!["block".to_string()],
+        branches: vec!["block".to_string()],
+        functions: vec!["function_item".to_string()],
+        values: vec!["identifier".to_string()],
+    };
+
+    m.insert(Lang::Noir, rust_node_names.clone());
+    m.insert(Lang::RustWasm, rust_node_names);
+
     m.insert(
         Lang::Small,
         NodeNames {
@@ -136,6 +138,8 @@ impl ExprLoader {
                 Lang::Ruby
             } else if extension == "small" {
                 Lang::Small
+            } else if extension == "rs" {
+                Lang::RustWasm // TODO RustWasm?
             } else {
                 Lang::Unknown
             }
@@ -149,7 +153,7 @@ impl ExprLoader {
         let lang = self.get_current_language(path);
 
         let mut parser = Parser::new();
-        if lang == Lang::Noir {
+        if lang == Lang::Noir || lang == Lang::RustWasm {
             parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
         } else if lang == Lang::Ruby {
             parser.set_language(&tree_sitter_ruby::LANGUAGE.into())?;
@@ -163,8 +167,6 @@ impl ExprLoader {
         parser
             .parse(raw, None)
             .ok_or(format!("problem with parsing {:?}", path).into())
-        //ok_or(|| Err("problem with parsing".into()));
-        //Ok(tree)
     }
 
     pub fn get_source_line(&self, path: &PathBuf, row: usize) -> String {
@@ -245,6 +247,12 @@ impl ExprLoader {
         let start = self.get_first_line(node);
         let end = self.get_last_line(node);
         let lang = self.get_current_language(path);
+        // info!(
+        //    "process_node {:?} {:?} {:?}",
+        //    lang,
+        //    NODE_NAMES[&lang].values,
+        //    node.kind()
+        //);
         // extract variable names
         if NODE_NAMES[&lang].values.contains(&node.kind().to_string()) {
             let value = self.extract_expr(node, path, row);
@@ -379,6 +387,10 @@ impl ExprLoader {
     }
 
     pub fn get_loop_shape(&self, step: &DbStep, path: &PathBuf) -> Option<LoopShape> {
+        info!(
+            "get_loop_shape {} {:?}",
+            step.line.0, self.processed_files[path].position_loops
+        );
         if let Some(loop_shape_id) = self.processed_files[path].position_loops.get(&Position(step.line.0)) {
             return Some(self.processed_files[path].loop_shapes[loop_shape_id.0 as usize].clone());
         }
