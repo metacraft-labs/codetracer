@@ -23,6 +23,8 @@
 
         noir = inputs.noir.packages.${system}.default;
 
+        wazero = inputs.wazero.packages.${system}.default;
+
         sqlite = pkgs.sqlite;
 
         pcre = pkgs.pcre;

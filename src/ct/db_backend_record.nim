@@ -219,7 +219,7 @@ proc record(
       recordSymbols(executable, outputFolder, lang)
       var vmPath = ""
       if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
-        vmPath = getEnv("CODETRACER_WAZERO_VM_PATH", "")
+        vmPath = wazeroExe
         echo "wasm vm path ", vmPath
       else:
         vmPath = noirExe
