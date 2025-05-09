@@ -24,6 +24,7 @@ include_rules
 : links/node |> !tup_preserve |> bin/node
 : links/ruby |> !tup_preserve |> bin/ruby
 : links/nargo |> !tup_preserve |> bin/nargo
+: links/wazero |> !tup_preserve |> bin/wazero
 : links/ctags |> !tup_preserve |> bin/ctags
 : links/electron |> !tup_preserve |> bin/electron
 # : links/unzip |> !tup_preserve |> bin/unzip
