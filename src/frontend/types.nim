@@ -1444,30 +1444,41 @@ type
     customFields*: seq[cstring]
     # names are in SearchSource
 
+  FlowConfigObjWrapper* = object
+    enabled*: bool
+    ui*: cstring
+    realFlowUI*: FlowUI
+
+  TraceSharingConfigObj* = object
+    enabled*:               bool
+    `base-url`*:            cstring
+    `get-upload-url-api`*:  cstring
+    `download-api`*:        cstring
+    `upload-api`*:          cstring
+    `delete-api`*:          cstring
+
   Config* = ref object
     # The config object is the schema for config yaml files
     # keep it in sync with config_c.nim definition
-    theme*:      cstring
-    v*:          cstring
-    flow*:       bool
-    callArgs*:   bool
-    history*:    bool
-    repl*:       bool
-    trace*:      bool
-    default*:    cstring
-    calltrace*:  bool
-    layout*:     cstring
-    telemetry*:  bool
-    test*:       bool
-    debug*:      bool
-    flowUI*:     cstring
-    realFlowUI*: FlowUI
-    events*:     bool
-    map*:        InputShortcutMap
-    shortcutMap*: ShortcutMap
-    defaultBuild*: cstring
-    showMinimap*: bool
-    traceSharingEnabled*: bool
+    theme*:                   cstring
+    version*:                 cstring
+    flow*:                    FlowConfigObjWrapper
+    `call-args`*:             bool
+    history*:                 bool
+    repl*:                    bool
+    trace*:                   bool
+    default*:                 cstring
+    calltrace*:               bool
+    layout*:                  cstring
+    telemetry*:               bool
+    test*:                    bool
+    debug*:                   bool
+    events*:                  bool
+    bindings*:                InputShortcutMap
+    shortcutMap*:             ShortcutMap
+    `default-build`*:         cstring
+    `show-minimap`*:          bool
+    `trace-sharing`*:         TraceSharingConfigObj
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint
