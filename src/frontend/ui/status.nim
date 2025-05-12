@@ -319,7 +319,7 @@ proc flowButtonsView(self: StatusComponent): VNode =
     var buttonText: cstring
 
     if not flow.isNil:
-      let flowType = $(flow.data.config.realFlowUI)
+      let flowType = $(flow.data.config.flow.realFlowUI)
       buttonText = flowType
     else:
       buttonText = "Loading..."

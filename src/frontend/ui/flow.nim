@@ -619,7 +619,7 @@ proc getOriginLoopIndex*(self: FlowComponent, loopIndex: int): int =
     self.getOriginLoopIndex(parentId)
 
 proc calculateFlowLineLeftOffset(self:FlowComponent, flowLine: FlowLine): int =
-  case self.data.config.realFlowUI:
+  case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     var flowLineOffset =
       self.maxFlowLineWidth +
@@ -651,7 +651,7 @@ proc prepareFlowLineContainerProps(self: FlowComponent, position: int): FlowLine
   var containerWidth: int
   var leftValue: int
 
-  case self.data.config.realFlowUI:
+  case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     leftValue = self.maxFlowLineWidth +
       self.distanceToSource +
@@ -826,7 +826,7 @@ proc clearLoopContainer(self: FlowComponent, loopIndex: int, position: int) =
 
 proc recreateLoopContainerAndSteps(self: FlowComponent, loopIndex: int, position: int) =
   let baseContainer =
-    case self.data.config.realFlowUI:
+    case self.data.config.flow.realFlowUI:
     of FlowParallel, FlowInline:
       self.flowDom[position]
 
@@ -841,7 +841,7 @@ proc recreateLoopContainerAndSteps(self: FlowComponent, loopIndex: int, position
   for stepCount in flowLine.loopStepCounts[loopIndex]:
     let step = self.flow.steps[stepCount]
 
-    case self.data.config.realFlowUI:
+    case self.data.config.flow.realFlowUI:
     of FlowParallel, FlowInline:
       self.addComplexLoopStepValues(step)
 
@@ -986,8 +986,8 @@ proc moveFlowDom(
 
 proc moveStepValuesInVisibleArea(self: FlowComponent) = # TODO: needs refeactoring
   let flowMode = 
-    ($self.data.config.realFlowUI)
-      .substr(4, ($self.data.config.realFlowUI).len - 1)
+    ($self.data.config.flow.realFlowUI)
+      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
 
   for stepKey, stepNode in self.stepNodes:
@@ -1154,8 +1154,8 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
 
 proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle): VNode =
   let flowMode =
-    ($self.data.config.realFlowUI)
-      .substr(4, ($self.data.config.realFlowUI).len - 1)
+    ($self.data.config.flow.realFlowUI)
+      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   var before = &"flow-{flowMode}-value-before-only"
 
@@ -1238,8 +1238,8 @@ proc flowSimpleValue*(
   i: int = 0,
 ): VNode =
   let flowMode =
-    ($self.data.config.realFlowUI)
-      .substr(4, ($self.data.config.realFlowUI).len - 1)
+    ($self.data.config.flow.realFlowUI)
+      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
 
@@ -1472,15 +1472,15 @@ method clear*(self: FlowComponent) =
     self.resetFlow()
 
 proc switchFlowUI*(self: FlowComponent, flowUI: FlowUI) =
-  if self.data.config.realFlowUI == flowUI:
+  if self.data.config.flow.realFlowUI == flowUI:
     return
 
   self.resetFlow()
 
   let flowUINames: array[FlowUI, cstring] = [j"parallel", j"inline", j"multiline"]
 
-  self.data.config.flowUI = flowUINames[flowUI]
-  self.data.config.realFlowUI = flowUI
+  self.data.config.flow.ui = flowUINames[flowUI]
+  self.data.config.flow.realFlowUI = flowUI
   self.data.redraw()
 
 proc addContentWidget*(
@@ -1597,8 +1597,8 @@ proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int) =
 
 proc resetShrinkedLoopIterations*(self: FlowComponent) =
   let flowMode =
-    ($self.data.config.realFlowUI)
-      .substr(4, ($self.data.config.realFlowUI).len - 1)
+    ($self.data.config.flow.realFlowUI)
+      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   let shrinkedIterations = jqAll(".flow-loop-shrinked-iteration")
 
@@ -1713,8 +1713,8 @@ proc realignPositionWidths(self: FlowComponent, loopPosition: LoopPosition) =
 
 proc flowComplexStep(self: FlowComponent, step: FlowStep): VNode =
   let flowMode =
-    ($self.data.config.realFlowUI)
-      .substr(4, ($self.data.config.realFlowUI).len - 1)
+    ($self.data.config.flow.realFlowUI)
+      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   var vNodeStyle: VStyle
   var parentId: cstring
@@ -2074,7 +2074,7 @@ proc makeComplexLoopStepView(self: FlowComponent, step: FlowStep): Node =
   return stepContainer
 
 proc makeLoopStepView(self: FlowComponent, step: FlowStep): Node =
-  case self.data.config.realFlowUI:
+  case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     makeComplexLoopStepView(self, step)
 
@@ -2160,7 +2160,7 @@ proc makeFlowLoopBackground(self: FlowComponent, loopIndex: int) =
     self.loopStates[loopIndex].background = FlowLoopBackground(
       dom: backgroundDom,
       maxWidth:
-        case self.data.config.realFlowUI:
+        case self.data.config.flow.realFlowUI:
         of FlowParallel, FlowInline:
           loopState.legendWidth + loopState.totalLoopWidth + 2*self.distanceBetweenValues
 
@@ -2329,7 +2329,7 @@ proc addStepValues*(self: FlowComponent, step: FlowStep) =
     if step.loop != 0:
       for key, _ in self.flow.loopIterationSteps[step.loop][step.iteration].table:
         self.flow.relevantStepCount.add(key)
-    case self.data.config.realFlowUI:
+    case self.data.config.flow.realFlowUI:
     of FlowParallel:
       addParallelStepValues(self, step)
 
@@ -2556,7 +2556,7 @@ proc showOrHideSlider(self: FlowComponent, position: int) =
     self.flowLines[position].sliderDom.style.display = "none"
 
 proc calculateSliderLeftOffset(self:FlowComponent, loopIndex: int): int =
-  case self.data.config.realFlowUI:
+  case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     return self.maxFlowLineWidth +
       self.distanceToSource +
@@ -2583,7 +2583,7 @@ proc updateLoopBackground(self: FlowComponent, loopIndex: int) =
   var backgroundMaxWidth =
     self.loopStates[loopIndex].totalLoopWidth + 2*self.distanceBetweenValues
 
-  if self.data.config.realFlowUI != FlowMultiline:
+  if self.data.config.flow.realFlowUI != FlowMultiline:
     backgroundMaxWidth += self.loopStates[loopIndex].legendWidth
 
   self.loopStates[loopIndex].background.maxWidth = backgroundMaxWidth
@@ -2843,8 +2843,8 @@ proc flowLoopValue*(
   style: VStyle
 ): VNode =
   let flowMode =
-    ($self.data.config.realFlowUI)
-      .substr(4, ($self.data.config.realFlowUI).len - 1)
+    ($self.data.config.flow.realFlowUI)
+      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   var iteration = step.iteration
   var width = len(intToStr(allIterations))
@@ -3424,7 +3424,7 @@ proc calculateLayout*(self: FlowComponent) =
                 let step = self.flow.steps[stepCount]
                 var valueWidth = 0.0
 
-                if self.data.config.realFlowUI != FlowMultiline:
+                if self.data.config.flow.realFlowUI != FlowMultiline:
                   for label, value in step.beforeValues:
                     let before = value
                     let after = step.afterValues[label]
@@ -3585,7 +3585,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
   var valueLines: seq[seq[cstring]] = @[]
   var loopClass = ""
 
-  if self.data.config.realFlowUI != FlowMultiline:
+  if self.data.config.flow.realFlowUI != FlowMultiline:
     for name, value in step.beforeValues:
       values.add(name)
 
@@ -3607,7 +3607,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
   result = buildHtml(tdiv(class=loopClass))
 
   for values in valueLines:
-    if self.data.config.realFlowUI == FlowMultiline and not self.multilineZones[position].variables[values[0]]:
+    if self.data.config.flow.realFlowUI == FlowMultiline and not self.multilineZones[position].variables[values[0]]:
       continue
 
     var lineClass = ""
@@ -3624,7 +3624,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
       if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
         moveButtonsView(self, visibleWidth)
 
-      if self.data.config.realFlowUI != FlowMultiline:
+      if self.data.config.flow.realFlowUI != FlowMultiline:
         iterationInfoView(self, position, values)
 
     for (loopID, loop) in loops:
@@ -3755,7 +3755,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
         if flowLine.activeIterationPosition > self.maxLoopActiveIterationOffset:
           self.maxLoopActiveIterationOffset = flowLine.activeIterationPosition
 
-    case self.data.config.realFlowUI:
+    case self.data.config.flow.realFlowUI:
     of FlowMultiline:
       # change multiline flow values
       if self.multilineValuesDoms.hasKey(line):
@@ -3835,9 +3835,9 @@ method onLoadedFlowShape*(self: Component, update: FlowShape) {.async.} =
   discard
 
 proc switchFlowType*(self: FlowComponent, flowType: FlowUI) =
-  if self.data.config.realFlowUI != flowType:
+  if self.data.config.flow.realFlowUI != flowType:
     self.resetFlow()
-    self.data.config.realFlowUI = flowType
+    self.data.config.flow.realFlowUI = flowType
     self.recalculateAndRedrawFlow()
     self.updateFlowDom()
 

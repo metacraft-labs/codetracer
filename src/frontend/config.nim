@@ -22,6 +22,20 @@ func normalize(shortcut: string): string =
   # for now we expect to write editor-style monaco shortcuts
   shortcut
 
+# Non-unicode is fine. Not used for prod strings anyway
+func kebabToCamelCase(str: string): string =
+  result = ""
+  var capitalizeNext = false
+
+  for c in str:
+    if c == '-':
+      capitalizeNext = true
+    elif capitalizeNext:
+      result.add(toUpperAscii(c))
+      capitalizeNext = false
+    else:
+      result.add(c)
+
 proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
   result = ShortcutMap(shortcutActions: JsAssoc[cstring, ClientAction]{}, conflictList: @[])
   var conflicts = JsAssoc[cstring, seq[ClientAction]]{}
@@ -29,9 +43,9 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
     let rawShortcuts = ($value).splitWhitespace()
     var action: ClientAction
     try:
-      action = parseEnum[ClientAction]($key)
+      action = parseEnum[ClientAction](kebabToCamelCase($key))
     except:
-      warnPrint "config: invalid shortcut action ", $key
+      warnPrint "config: invalid shortcut action ", kebabToCamelCase($key)
       continue
     for raw in rawShortcuts:
       let normalShortcut = normalize(raw)
