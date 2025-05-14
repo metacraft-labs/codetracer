@@ -893,7 +893,6 @@ var eventLoadOnExit*: proc(events: seq[ProgramEvent], time: int)
 
 proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.async.} =
   let binary = if "/" in $trace.program: j(($trace.program).rsplit("/", 1)[1]) else: trace.program
-  console.log(config)
   await debugger.configure(
     ConfigureArg(
       lang: trace.lang,
@@ -905,7 +904,7 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
         traceID: trace.id,
         calltrace: config.calltrace and trace.calltrace,
         preloadEnabled: config.flow.enabled and trace.lang != LangPython,
-        callArgsEnabled: config.toJs["call-args"].to(bool), # Does not convert correctly with config.`call-args`?? Nim, what the fuck!?
+        callArgsEnabled: config.toJs["call-args"].to(bool), # This has to be done because nim doesn't want to convert the member correctly when compiled to JS
         traceEnabled: config.trace,
         historyEnabled: config.history,
         eventsEnabled: config.events,
