@@ -50,7 +50,7 @@ cp $ROOT_DIR/src/frontend/*.html $DIST_DIR/src/
 cp $ROOT_DIR/src/frontend/*.html $DIST_DIR/
 rm -f $DIST_DIR/config
 rm -f $DIST_DIR/public
-cp -r $ROOT_DIR/config $DIST_DIR/config
+cp -r $ROOT_DIR/src/config $DIST_DIR/config
 cp -r $ROOT_DIR/src/public $DIST_DIR/public
 cp $BIN_DIR/nargo $DIST_DIR/bin/
 cp $BIN_DIR/wazero $DIST_DIR/bin/

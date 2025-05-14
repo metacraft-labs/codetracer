@@ -21,7 +21,6 @@ type
     `base-url`*:            string
     `get-upload-url-api`*:  string
     `download-api`*:        string
-    `upload-api`*:          string
     `delete-api`*:          string
 
   ConfigObject* = object
@@ -52,7 +51,6 @@ type
       enabled: false,
       `base-url`: "http://localhost:55504/api/codetracer/v1",
       `download-api`: "/download",
-      `upload-api`: "/upload",
       `delete-api`: "/delete",
       `get-upload-url-api`: "/get/upload/url"
     ).}: TraceSharingConfigObj

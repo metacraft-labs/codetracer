@@ -1454,7 +1454,6 @@ type
     `base-url`*:            cstring
     `get-upload-url-api`*:  cstring
     `download-api`*:        cstring
-    `upload-api`*:          cstring
     `delete-api`*:          cstring
 
   Config* = ref object

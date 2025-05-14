@@ -20,7 +20,6 @@ trace-sharing:
   # for now local setup
   base-url: http://localhost:55504/api/codetracer/v1
   download-api: /download
-  upload-api: /upload
   delete-api: /delete
   get-upload-url-api: /get/upload/url
 
