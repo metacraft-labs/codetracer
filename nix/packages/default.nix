@@ -209,9 +209,6 @@
 
           cargoLock = {
             lockFile = ../../src/db-backend/Cargo.lock;
-            outputHashes = {
-              "runtime_tracing-0.6.1" = "sha256-wx2D7gazcW/COWG06DT8yrN13LjAARFuPsTYBencp5U=";
-            };
           };
 
           checkFlags = [
