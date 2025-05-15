@@ -10,8 +10,8 @@ use crate::task::{Call, CallArg, Location, RRTicks};
 use crate::value::{Type, Value};
 use log::{error, info, warn};
 use runtime_tracing::{
-    CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, StepId, TypeId, TypeKind,
-    TypeRecord, TypeSpecificInfo, Place, ValueRecord, VariableId, NO_KEY,
+    CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, Place, StepId, TypeId, TypeKind,
+    TypeRecord, TypeSpecificInfo, ValueRecord, VariableId, NO_KEY,
 };
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -289,7 +289,11 @@ impl Db {
                 res.b = *b;
                 res
             }
-            ValueRecord::Sequence { elements, type_id, is_slice } => {
+            ValueRecord::Sequence {
+                elements,
+                type_id,
+                is_slice,
+            } => {
                 // TODO: is_slice should be in the type kind: SLICE?
                 let typ = if !is_slice {
                     self.to_ct_type(type_id)
@@ -309,11 +313,19 @@ impl Db {
             ValueRecord::Tuple { elements, type_id } => {
                 let mut res = Value::new(TypeKind::Tuple, self.to_ct_type(type_id));
                 res.elements = elements.iter().map(|value| self.to_ct_value(value)).collect();
-                res.typ.labels = elements.iter().enumerate().map(|(index, _)| format!("{index}")).collect();
+                res.typ.labels = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| format!("{index}"))
+                    .collect();
                 res.typ.member_types = res.elements.iter().map(|value| value.typ.clone()).collect();
                 res
             }
-            ValueRecord::Variant { discriminator: _, contents: _, type_id: _ } => {
+            ValueRecord::Variant {
+                discriminator: _,
+                contents: _,
+                type_id: _,
+            } => {
                 // variant-like enums not generated yet from noir tracer:
                 //   we should support variants in general, but we'll think a bit first how
                 //   to more cleanly/generally represent them in the codetracer code, as the current
@@ -321,11 +333,16 @@ impl Db {
                 //   we can improve it, or we can add a new variant case (something more similar to the runtime_tracing repr?)
                 todo!("a more suitable codetracer value/type for variants")
             }
-            ValueRecord::Reference { dereferenced, mutable, type_id } => {
+            ValueRecord::Reference {
+                dereferenced,
+                address,
+                mutable,
+                type_id,
+            } => {
                 let mut res = Value::new(TypeKind::Pointer, self.to_ct_type(type_id));
                 let dereferenced_value = self.to_ct_value(dereferenced);
                 res.typ.element_type = Some(Box::new(dereferenced_value.typ.clone()));
-                res.address = 0; // no address info for now
+                res.address = *address as i64;
                 res.ref_value = Some(Box::new(dereferenced_value));
                 res.is_mutable = *mutable;
                 res
@@ -464,7 +481,12 @@ impl Db {
         let compound_for_step_id = &self.compound[cell_change.step_id];
         if compound_for_step_id.contains_key(&place) {
             let compound_value = &compound_for_step_id[&place];
-            if let ValueRecord::Sequence { elements, type_id, is_slice: _ } = compound_value {
+            if let ValueRecord::Sequence {
+                elements,
+                type_id,
+                is_slice: _,
+            } = compound_value
+            {
                 // slices not supported currently, but it's an experimental API: TODO rework
                 let loaded_elements = elements
                     .iter()
@@ -489,7 +511,11 @@ impl Db {
                 let elements: Vec<ValueRecord> = (0..cell_change.item_count)
                     .map(|i| self.load_value_item_by_index(place, i, cell_change.step_id))
                     .collect();
-                ValueRecord::Sequence { elements, type_id, is_slice: false }
+                ValueRecord::Sequence {
+                    elements,
+                    type_id,
+                    is_slice: false,
+                }
             } else {
                 ValueRecord::Error {
                     msg: "internal error: no type_id for this compound cell change".to_string(),
