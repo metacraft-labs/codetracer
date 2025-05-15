@@ -33,7 +33,7 @@
     };
 
     wazero = {
-      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=feat-mvp-trace"; # " ref=blocksense-with-new-event-log-kinds";
+      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=feat-mvp-trace";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
       flake = true;
     };
