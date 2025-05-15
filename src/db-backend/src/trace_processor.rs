@@ -6,7 +6,7 @@ use std::str;
 
 // use log::info;
 use runtime_tracing::{
-    CallKey, EventLogKind, PathId, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, Place, ValueRecord,
+    CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, ValueRecord,
 };
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
@@ -219,7 +219,7 @@ impl<'a> TraceProcessor<'a> {
                 self.db.calls[self.current_call_key].return_value = return_record.return_value.clone();
                 let _ = self.call_stack.pop();
                 let _ = self.db.local_variable_cells.pop();
-                if self.call_stack.len() >= 1 {
+                if !self.call_stack.is_empty() {
                     self.current_call_key = self.call_stack[self.call_stack.len() - 1];
                 }
             }
@@ -283,7 +283,12 @@ impl<'a> TraceProcessor<'a> {
 
             TraceLowLevelEvent::CompoundValue(record) => {
                 self.db.compound[self.current_step_id].insert(record.place, record.value.clone());
-                if let ValueRecord::Sequence { elements, type_id, is_slice: _ } = &record.value {
+                if let ValueRecord::Sequence {
+                    elements,
+                    type_id,
+                    is_slice: _,
+                } = &record.value
+                {
                     // for now is_slice not supported, but this is an experimental API: TODO rework it
                     let compound_info = CompoundValueInfo {
                         item_count: elements.len(),
@@ -299,10 +304,7 @@ impl<'a> TraceProcessor<'a> {
                     );
                     #[allow(clippy::needless_range_loop)]
                     for i in 0..compound_info.item_count {
-                        if let ValueRecord::Cell {
-                            place: item_place,
-                        } = &elements[i]
-                        {
+                        if let ValueRecord::Cell { place: item_place } = &elements[i] {
                             self.register_compound_cell_change(
                                 record.place,
                                 compound_info.item_count,

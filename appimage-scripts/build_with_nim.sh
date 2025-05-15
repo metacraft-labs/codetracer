@@ -48,7 +48,7 @@ nim \
     -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
     -d:chronicles_timestamps=UnixTime \
     -d:ssl \
-    -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
+    -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
     -d:linksPathConst=.. \
     -d:libcPath=libc \
     -d:builtWithNix \
