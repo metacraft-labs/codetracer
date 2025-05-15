@@ -543,9 +543,9 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 
 [[package]]
 name = "runtime_tracing"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af6cf2858c5b474be12fd597b5dca533c1b917cfcf2f233ad4c75981567ba00a"
+checksum = "eafd7c2c0304ff7196100ad4b6d33ff61e27d7bdcc10efe75784364b86292451"
 dependencies = [
  "num-derive",
  "num-traits",

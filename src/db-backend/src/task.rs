@@ -14,7 +14,7 @@ use crate::lang::*;
 use crate::value::{Type, Value};
 
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
-pub const EVENT_KINDS_COUNT: usize = 11;
+pub const EVENT_KINDS_COUNT: usize = 13;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

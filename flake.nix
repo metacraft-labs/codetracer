@@ -25,7 +25,7 @@
     };
 
     noir = {
-      url = "github:blocksense-network/noir?ref=blocksense";
+      url = "github:metacraft-labs/noir?ref=codetracer-temp";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
       flake = true;
     };
