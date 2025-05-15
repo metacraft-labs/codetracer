@@ -1,20 +1,28 @@
-import std/[os, osproc, strutils, sequtils],
+import std/[os, osproc, strutils, sequtils, strtabs, tables],
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
   ../cli/build
 
-proc recordInternal(exe: string, args: seq[string], config_path: string): Trace =
-  var env = setup_env(configPath)
+proc recordInternal(exe: string, args: seq[string], configPath: string): Trace =
+  let env = if configPath.len > 0:
+      setupEnv(configPath)
+    else:
+      var env = newStringTable(modeStyleInsensitive)
+      for name, value in envPairs():
+        env[name] = value
+      env
   let p = startProcess(
     exe,
     args = args,
     env = env,
     options = {poStdErrToStdOut})
+
   let (lines, exCode) = p.readLines
   echo args
   echo exCode
   for line in lines:
     echo line
+
   if exCode == 0:
     let lastLine = lines[^1]
     if lastLine.startsWith("traceId:"):
@@ -48,11 +56,7 @@ proc record*(lang: string,
     pargs = concat(pargs, args)
 
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
-    let configPath = getEnv(
-      "CODETRACER_CT_PATHS",
-      getAppDir().parentDir.parentDir.parentDir / "ct_paths.json")
-    echo dbBackendRecordExe, " ", detectedLang
-    return recordInternal(dbBackendRecordExe, pargs, configPath)
+    return recordInternal(dbBackendRecordExe, pargs, "")
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
