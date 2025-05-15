@@ -11,11 +11,10 @@
       inherit (pkgs) stdenv;
 
       src = ../../.;
-      root = src;
     in
     {
       packages = rec {
-        upstream-nim-codetracer = pkgs.buildPackages.nim1.overrideAttrs (old: {
+        upstream-nim-codetracer = pkgs.buildPackages.nim1.overrideAttrs (_: {
           postInstallPhase = ''
             mv $out/nim $out/upstream-nim
           '';
@@ -25,15 +24,14 @@
 
         wazero = inputs.wazero.packages.${system}.default;
 
-        sqlite = pkgs.sqlite;
+        inherit (pkgs)
+          sqlite
+          pcre
+          libzip
+          openssl
+          ;
 
-        pcre = pkgs.pcre;
-
-        libzip = pkgs.libzip;
-
-        openssl = pkgs.openssl;
-
-        chromedriver-102 = pkgs.chromedriver.overrideAttrs (old: {
+        chromedriver-102 = pkgs.chromedriver.overrideAttrs (_: {
           version = "102.0.5005.27";
           src = builtins.fetchurl {
             url = "https://chromedriver.storage.googleapis.com/102.0.5005.27/chromedriver_linux64.zip";

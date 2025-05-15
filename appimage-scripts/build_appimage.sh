@@ -109,6 +109,12 @@ bash "${ROOT_PATH}"/appimage-scripts/build_db_backend.sh
 cp -Lr "${ROOT_PATH}/src/links/nargo" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/nargo"
 
+# Wazero
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.wazero"
+
+WAZERO=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.wazero.out")
+cp -L "${WAZERO}"/bin/wazero "${APP_DIR}"/bin
+
 # ctags
 cp -Lr "${ROOT_PATH}/src/links/ctags" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/ctags"
@@ -201,6 +207,7 @@ fi
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct_unwrapped
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
