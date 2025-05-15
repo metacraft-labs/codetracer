@@ -40,6 +40,27 @@ nim -d:release \
     --out:"${APP_DIR}/bin/ct_unwrapped" c ./src/ct/codetracer.nim
 
 
+nim \
+    -d:release -d:asyncBackend=asyncdispatch \
+    --gc:refc --hints:off --warnings:off \
+    --debugInfo --lineDir:on \
+    --boundChecks:on --stacktrace:on --linetrace:on \
+    -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+    -d:chronicles_timestamps=UnixTime \
+    -d:ssl \
+    -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
+    -d:linksPathConst=.. \
+    -d:libcPath=libc \
+    -d:builtWithNix \
+    -d:ctEntrypoint \
+    --dynlibOverride:"sqlite3" \
+    --dynlibOverride:"pcre" \
+    --dynlibOverride:"libzip" \
+    --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
+    --passL:"${APP_DIR}/lib/libpcre.so.1" \
+    --passL:"${APP_DIR}/lib/libzip.so.5" \
+    --nimcache:nimcache \
+    --out:"${APP_DIR}/bin/db-backend-record" c ./src/ct/db_backend_record.nim
 
     # --passL:"-lsqlite3" \
     #--passL:"${APPDIR}/lib/libcrypto.so.3" \
