@@ -49,6 +49,7 @@ proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
 
   if lang == LangUnknown:
     if "." in possiblyExpandedPath:
+      echo "in"
       let extension = rsplit(possiblyExpandedPath[1..^1], ".", 1)[1].toLowerAscii()
       if not isWasm:
         if LANGS.hasKey(extension):

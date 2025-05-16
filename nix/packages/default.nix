@@ -305,6 +305,7 @@
             uiJavascript
             upstream-nim-codetracer
             noir
+            wazero
             ruby-recorder
             pkgs.universal-ctags
           ] ++ staticDeps.paths;
@@ -527,6 +528,8 @@
           buildInputs = [
             pkgs.rustc
             pkgs.sqlite
+            pkgs.libzip
+            pkgs.openssl
             # pkgs.zip
           ];
 
@@ -573,6 +576,8 @@
               -d:builtWithNix \
               -d:ctEntrypoint \
               --passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0 \
+              --passL:${pkgs.openssl.out}/lib/libssl.so \
+              --passL:${pkgs.openssl.out}/lib/libcrypto.so \
               --nimcache:nimcache \
               --out:db-backend-record c ./src/ct/db_backend_record.nim
           '';
