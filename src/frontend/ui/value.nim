@@ -18,6 +18,13 @@ proc view(
 
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
 
+proc intValue*(i: int): Value {.exportc.} =
+  Value(
+    kind: TypeKind.Int,
+    i: $i,
+    typ: Type(kind: TypeKind.Int, langType: "Int"),
+  )
+
 proc deleteWatch*(self: StateComponent, expression: cstring) =
   var i = self.watchExpressions.find(expression)
 
@@ -796,7 +803,11 @@ proc view(
 
   var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
   var atom = if value.kind in ATOM_KINDS or not self.uiExpanded(value, expression): "value-expanded-atom-parent" else: "value-expanded-compound-parent"
-  let lang = self.data.trace.lang
+  var lang = LangUnknown
+  try:
+    lang = self.data.trace.lang
+  except:
+    lang = LangNoir
   var valueView = proc(value: Value): VNode =
     case value.kind:
     of Int, Float, String, CString, Char, Bool:
@@ -1151,5 +1162,4 @@ method render*(self: ValueComponent): VNode =
   var path: seq[SubPath] = @[]
 
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
-  self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
-
+  result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
