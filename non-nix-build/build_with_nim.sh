@@ -37,6 +37,23 @@ nim -d:release \
     -d:nimDebugDlOpen \
     --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
 
+nim -d:release \
+    -d:asyncBackend=asyncdispatch \
+    --dynlibOverride: "libzip" \
+    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.dylib" \
+    --gc:refc --hints:on --warnings:off \
+    --debugInfo --lineDir:on \
+    --boundChecks:on --stacktrace:on --linetrace:on \
+    -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+    -d:chronicles_timestamps=UnixTime \
+    -d:ctTest -d:ssl -d:testing --hint[XDeclaredButNotUsed]:off \
+    -d:libcPath=libc \
+    -d:builtWithNix \
+    -d:ctEntrypoint \
+    --nimcache:nimcache \
+    -d:nimDebugDlOpen \
+    --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct/db_backend_record.nim
+
 # this works    --passL:/nix/store/f6afb4jw9g5f94ixw0jn6cl0ah4liy35-sqlite-3.45.3/lib/libsqlite3.so.0 \
 
     # TODO conditional for nixos?--passL:$LIBSQLITE3_PATH
