@@ -11,6 +11,7 @@
 - [Tracepoints](./usage_guide/tracepoints.md)
 - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
 
+
 ## Backends
 
 - [DB backend](./backends/db_backend.md)
@@ -19,6 +20,7 @@
   - [Python](./backends/db-backend/py.md)
   - [Lua](./backends/db-backend/lua.md)
   - [small](./backends/db-backend/small.md)
+  - [Stylus and WASM](./usage_guide/stylus_and_wasm.md)
   
 - [RR backend](./backends/rr_backend.md)
   - [C & C++](./backends/rr-backend/c_and_cpp.md)
