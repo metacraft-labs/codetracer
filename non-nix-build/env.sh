@@ -57,6 +57,7 @@ fi
 
 ./install_rust.sh
 ./install_nargo.sh
+./install_wazero.sh
 ./install_nim_osx.sh
 
 if [[ "$platform" == "mac" ]]; then
