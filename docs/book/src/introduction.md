@@ -58,8 +58,12 @@ cargo test --release --bin db-backend # test most cases: non-ignored
 cargo test --release --bin db-backend -- --ignored # test the ignored cases: ignored by default as they're slower
 ```
 
-We are planning on restoring the e2e tests for db-backend: currently they don't work, 
-as they were created originally with native language test programs in our older repo targetting the rr-backend.
+some initial simple end to end playwright tests:
+
+```bash
+just test-e2e
+````
+
 We hope to write a lot more e2e tests, as we haven't covered most features/cases.
 
 ### Enabling `cachix`
