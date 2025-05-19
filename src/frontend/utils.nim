@@ -125,6 +125,10 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
     var selectedKinds: array[EventLogKind,bool]
     selectedKinds.fill(true)
 
+    # TODO: Remove hardcode bool value
+    if inExtension:
+      data.services.eventLog.updatedContent = true
+
     result = EventLogComponent(
       id: id,
       service: data.services.eventLog,
@@ -1331,3 +1335,9 @@ proc resetView*(self: WelcomeScreenComponent) =
   self.welcomeScreen = false
   self.newRecordScreen = false
   self.openOnlineTrace = false
+
+type VsCode* = ref object
+  postMessage*: proc(js: JsObject): void
+
+proc acquireVsCodeApi(): VsCode {.importc.}
+let vscode* = acquireVsCodeApi()
