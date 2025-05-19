@@ -55,6 +55,7 @@ proc record*(lang: string,
   if args.len != 0:
     pargs = concat(pargs, args)
 
+  # echo "detected lang ", detectedLang
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
     return recordInternal(dbBackendRecordExe, pargs, "")
   else:

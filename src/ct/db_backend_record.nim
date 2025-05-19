@@ -131,7 +131,6 @@ proc recordDb(
     workingDir = programDir,
     options = {poEchoCmd, poParentStreams})
   let exitCode = waitForExit(process)
-  echo exitCode
   if exitCode != 0:
     echo "error: problem with ruby trace: exit code = ", exitCode
     quit(1)
@@ -179,7 +178,7 @@ proc record(
       executable = foundExe
 
   let lang = detectLang(executable, langArg)
-  echo "in db ", lang, " ", executable
+  # echo "in db ", lang, " ", executable
   if lang == LangUnknown:
     errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
     quit(1)

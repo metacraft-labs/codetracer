@@ -30,7 +30,11 @@ proc runWithRestart(
       errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
       quit(1)
     else:
-      recordedTrace = record(lang=getExtension(lang),
+      let extension = if lang notin {LangRustWasm, LangCppWasm}:
+          getExtension(lang)
+        else:
+          "wasm"
+      recordedTrace = record(lang=extension,
                              outputFolder="",
                              backend="",
                              exportFile="",
