@@ -30,7 +30,8 @@ const LANGS = {
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
   "small": LangSmall,
-  "wasm": LangRustWasm,
+  "wasm": LangRustWasm, # TODO: can be Cpp or other as well, maybe pass
+    # explicitly or check trace/other debug info?
 }.toTable()
 
 const WASM_LANGS = {
@@ -40,7 +41,8 @@ const WASM_LANGS = {
 }.toTable()
 
 proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
-  echo "detectLang ", program
+  # TODO: under a debug print flag?
+  # echo "detectLang ", program, " ", lang, " isWasm: ", isWasm
   var possiblyExpandedPath = ""
   try:
     possiblyExpandedPath = expandFileName(program)
@@ -49,7 +51,6 @@ proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
 
   if lang == LangUnknown:
     if "." in possiblyExpandedPath:
-      echo "in"
       let extension = rsplit(possiblyExpandedPath[1..^1], ".", 1)[1].toLowerAscii()
       if not isWasm:
         if LANGS.hasKey(extension):
@@ -71,4 +72,4 @@ proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
         result = LangUnknown
   else:
     result = lang
-  echo "result ", result
+  # echo "detectLang result ", result
