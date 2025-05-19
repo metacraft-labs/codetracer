@@ -1339,5 +1339,10 @@ proc resetView*(self: WelcomeScreenComponent) =
 type VsCode* = ref object
   postMessage*: proc(js: JsObject): void
 
-proc acquireVsCodeApi(): VsCode {.importc.}
-let vscode* = acquireVsCodeApi()
+var vscode*: VsCode
+
+when defined(ctInExtension):
+  proc acquireVsCodeApi(): VsCode {.importc.}
+  vscode = acquireVsCodeApi()
+else:
+  discard
