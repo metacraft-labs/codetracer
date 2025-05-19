@@ -80,7 +80,7 @@ proc makeTableUpdate(): TableUpdate =
           lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
           kind: EventLogKind.Write,
           content: "1\n",
-          filenameMetadata: "",
+          metadata: "",
           stdout: true
         ),
         TableRow(
@@ -91,7 +91,7 @@ proc makeTableUpdate(): TableUpdate =
           lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
           kind: EventLogKind.Write,
           content: "2\n",
-          filenameMetadata: "",
+          metadata: "",
           stdout: true
         ),
         TableRow(
@@ -102,7 +102,7 @@ proc makeTableUpdate(): TableUpdate =
           lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
           kind: EventLogKind.Write,
           content: "3\n",
-          filenameMetadata: "",
+          metadata: "",
           stdout: true
         )
       ]
