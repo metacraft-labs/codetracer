@@ -74,12 +74,37 @@ proc addTestFunctions(self: CalltraceComponent) =
     makeCallLine(
       0,
       0,
+      CallLineContentKind.Call,
+      CalltraceNonExpandedKind.Calls,
+      "c",
+      "3"
+    )
+  )
+  self.callLines.add(
+    makeCallLine(
+      0,
+      0,
+      CallLineContentKind.Call,
+      CalltraceNonExpandedKind.Calls,
+      "d",
+      "4"
+    )
+  )
+  self.callLines.add(
+    makeCallLine(
+      0,
+      0,
       CallLineContentKind.EndOfProgramCall,
       CalltraceNonExpandedKind.Calls,
       "THIS IS A DUMMY END OF PROGRAM",
       "3"
     )
   )
+
+proc updateCalltrace*(self: CalltraceComponent, key: cstring) {.exportc.} =
+  self.lastSelectedCallKey = key
+  self.activeCallIndex = parseInt($key)
+  calltraceComponentForExtension.redrawCallLines()
 
 proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
   if calltraceComponentForExtension.callLines.len() == 0:
@@ -662,14 +687,18 @@ proc callView*(
         id = &"local-call-text-{key}",
         class = "call-text",
         onclick = proc =
-          clog fmt"calltrace: jump onclick call key " & $key
-          self.resetValueView()
-          self.data.services.debugger.stableBusy = true
-          self.selectedCallNumber = self.lineIndex[call.key]
-          self.lastSelectedCallKey = call.key
-          self.service.calltraceJump(call.location)
-          inc self.data.services.debugger.operationCount
-          self.redrawCallLines()):
+          if self.inExtension:
+            vscode.postMessage(js{command: "calltrace-jump", callKey: call.key})
+          else:
+            clog fmt"calltrace: jump onclick call key " & $key
+            self.resetValueView()
+            self.data.services.debugger.stableBusy = true
+            self.selectedCallNumber = self.lineIndex[call.key]
+            self.lastSelectedCallKey = call.key
+            self.service.calltraceJump(call.location)
+            inc self.data.services.debugger.operationCount
+            self.redrawCallLines()
+      ):
         if key != cstring"-1 -1 -1":
           text $call.location.highLevelFunctionName & " #" & $call.key
 
@@ -759,6 +788,7 @@ proc callLineContentView*(
 
 proc callLineView*(self: CalltraceComponent, callLine: CallLine, index: int): VNode =
   let buffer = self.getStartBufferLen()
+
   let selected =
     if self.activeCallIndex == self.startCallLineIndex + index - buffer:
       "event-selected"

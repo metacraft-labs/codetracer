@@ -51,6 +51,17 @@ build-docs:
   cd docs/book/
   mdbook build
 
+build-ui-js output:
+  nim \
+    -d:chronicles_enabled=off \
+    -d:ctRenderer \
+    -d:ctInExtension \
+    --debugInfo:on \
+    --lineDir:on \
+    --hotCodeReloading:on \
+    --out:{{output}} \
+    js src/frontend/ui_js.nim
+
 serve-docs hostname="localhost" port="3000":
   #!/usr/bin/env bash
   cd docs/book/
