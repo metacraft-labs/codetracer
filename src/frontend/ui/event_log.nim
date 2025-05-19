@@ -65,10 +65,10 @@ for kind, tags in kindTags:
 var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
 
 method onUpdatedTable*(self: EventLogComponent, response: TableUpdate) {.async.}
-proc makeTableUpdate(): TableUpdate =
+proc makeTableUpdate(self: EventLogComponent): TableUpdate =
   TableUpdate(
     data: TableData(
-      draw: 2,
+      draw: self.drawId,
       recordsTotal: 3,
       recordsFiltered: 3,
       data: @[
@@ -114,14 +114,16 @@ proc makeTableUpdate(): TableUpdate =
 method redrawForExtension*(self: EventLogComponent) {.exportc.} =
   self.kxi.redraw()
 
+proc events(self: EventLogComponent)
+proc resizeEventLogHandler(self: EventLogComponent)
+
 proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
-  eventLogComponentForExtension.drawId = 2
   if eventLogComponentForExtension.kxi.isNil:
     eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
   result = eventLogComponentForExtension
-  # TODO: Way for hardcoded data to be displayed
-  # discard eventLogComponentForExtension.onUpdatedTable(makeTableUpdate())
-  # eventLogComponentForExtension.redrawForExtension()
+  eventLogComponentForExtension.events()
+  discard setTimeout(proc = discard eventLogComponentForExtension.onUpdatedTable(makeTableUpdate(eventLogComponentForExtension)), 1000)
+  discard setTimeout(proc = resizeEventLogHandler(eventLogComponentForExtension), 1000)
 
 proc denseId*(context: EventLogComponent): cstring =
   j("eventLog-" & $context.id & "-dense-table-" & $context.index)
@@ -538,14 +540,15 @@ proc events(self: EventLogComponent) =
             mutData.draw = self.traceService.drawId
             self.drawId = mutData.draw
             self.hiddenRows = data.start
-            discard self.data.services.debugger.updateTable(
-              UpdateTableArgs(
-                tableArgs: mutData,
-                selectedKinds: self.selectedKinds,
-                isTrace: false,
-                traceId: 0,  
-              )
-            ),
+            if not self.inExtension:
+              discard self.data.services.debugger.updateTable(
+                UpdateTableArgs(
+                  tableArgs: mutData,
+                  selectedKinds: self.selectedKinds,
+                  isTrace: false,
+                  traceId: 0,  
+                )
+              ),
         }
       )
 
@@ -567,7 +570,7 @@ proc events(self: EventLogComponent) =
     context.init = true
     context.denseTable.context = jqFind(j"#" & context.denseId).DataTable()
     context.detailedTable.context = jqFind(j"#" & context.detailedId).DataTable()
-    context.redrawColumns = false
+    context.redrawColumns = context.tableCallback.isNil
     context.eventsIndex = self.service.events.len
 
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
@@ -598,7 +601,7 @@ proc events(self: EventLogComponent) =
     jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"contextmenu", j"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
-    if self.resizeObserver.isNil:
+    if not self.inExtension and self.resizeObserver.isNil:
       let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
       let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
         for entry in entries:
