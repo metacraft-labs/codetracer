@@ -15,7 +15,7 @@ cleanup() {
   rm -rf ./squashfs-root
 }
 
-trap cleanup EXIT
+# trap cleanup EXIT
 
 ROOT_PATH=$(git rev-parse --show-toplevel)
 export ROOT_PATH
@@ -78,6 +78,7 @@ OPENSSL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl.ou
 cp -L "${OPENSSL}"/lib/libssl.so.3 "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libssl.so "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libcrypto.so "${APP_DIR}"/lib
+cp -L "${OPENSSL}"/lib/libcrypto.so.3 "${APP_DIR}"/lib
 
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
@@ -208,6 +209,7 @@ fi
 # Patchelf the executable's interpreter
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct_unwrapped
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-record
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags

@@ -29,6 +29,7 @@ nim -d:release \
     --passL:"${APP_DIR}/lib/libpcre.so.1" \
     --passL:"${APP_DIR}/lib/libzip.so.5" \
     --passL:"${APP_DIR}/lib/libcrypto.so" \
+    --passL:"${APP_DIR}/lib/libcrypto.so.3" \
     --passL:"${APP_DIR}/lib/libssl.so" \
     --boundChecks:on \
     -d:useOpenssl3 \
