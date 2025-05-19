@@ -15,7 +15,7 @@ cleanup() {
   rm -rf ./squashfs-root
 }
 
-# trap cleanup EXIT
+trap cleanup EXIT
 
 ROOT_PATH=$(git rev-parse --show-toplevel)
 export ROOT_PATH
