@@ -23,10 +23,15 @@ nim -d:release \
     --dynlibOverride:"sqlite3" \
     --dynlibOverride:"pcre" \
     --dynlibOverride:"libzip" \
+    --dynlibOverride:"libcrypto" \
+    --dynlibOverride:"libssl" \
     --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
     --passL:"${APP_DIR}/lib/libpcre.so.1" \
     --passL:"${APP_DIR}/lib/libzip.so.5" \
+    --passL:"${APP_DIR}/lib/libcrypto.so" \
+    --passL:"${APP_DIR}/lib/libssl.so" \
     --boundChecks:on \
+    -d:useOpenssl3 \
     -d:ssl \
     -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
     -d:chronicles_timestamps=UnixTime \
