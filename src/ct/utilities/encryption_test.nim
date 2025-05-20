@@ -1,11 +1,12 @@
-import std/[unittest, os, strutils, streams]
-import encryption
+import
+  std/[unittest, os, strutils, streams],
+  encryption,
+  ../../common/path_utils
 
 const placeholder = "the brown fox went into the den!"
-let tmpPath = "/tmp"
 
 proc createFile(len: int, filename: string): string =
-  let filePath = tmpPath / filename
+  let filePath = codetracerTmpPath / filename
   let file = newFileStream(filePath, fmWrite)
   if file.isNil:
     raise newException(IOError, "Failed to create file")
@@ -20,8 +21,8 @@ suite "Encryption/Decryption Buffer Handling":
 
   test "Encrypt/Decrypt file larger than buffer size":
     let file = createFile(400, "greater")
-    let ecrTarget = tmpPath / "encrypted_400.enc"
-    let decrTarget = tmpPath / "decrypted_400.zip"
+    let ecrTarget = codetracerTmpPath / "encrypted_400.enc"
+    let decrTarget = codetracerTmpPath / "decrypted_400.zip"
     let (key, iv) = generateEncryptionKey()
 
     encryptFile(file, ecrTarget, key, iv, 64)
@@ -36,8 +37,8 @@ suite "Encryption/Decryption Buffer Handling":
 
   test "Encrypt/Decrypt file smaller than buffer size":
     let file = createFile(18, "smaller")
-    let ecrTarget = tmpPath / "encrypted_18.enc"
-    let decrTarget = tmpPath / "decrypted_18.zip"
+    let ecrTarget = codetracerTmpPath / "encrypted_18.enc"
+    let decrTarget = codetracerTmpPath / "decrypted_18.zip"
     let (key, iv) = generateEncryptionKey()
 
     encryptFile(file, ecrTarget, key, iv, 128)

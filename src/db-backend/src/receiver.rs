@@ -10,8 +10,7 @@ use crate::core::{Core, NO_CALLER_PROCESS_PID};
 use crate::handler::Handler;
 use crate::sender::Sender;
 use crate::task::{to_task_kind, Task, TaskId, TaskKind};
-
-const CT_SOCKET_PATH: &str = "/tmp/ct_socket";
+use crate::paths::CODETRACER_PATHS;
 
 pub struct Receiver {
     receiving_socket: Option<UnixStream>,
@@ -41,9 +40,12 @@ impl Receiver {
         //   to sender(or pass sender to the methods?)
         //var socket = newSocket(domain=Domain.AF_UNIX, sockType=SockType.SOCK_STREAM, protocol=Protocol.IPPROTO_IP)
         //socket.setSockOpt(OptReuseAddr, true)
-
-        let socket_path = PathBuf::from(format!("{CT_SOCKET_PATH}_{caller_process_pid}"));
-
+        let socket_path: PathBuf; 
+        {
+            let tmp = CODETRACER_PATHS.lock()?;
+            let path = tmp.socket_path.display();
+            socket_path = PathBuf::from(format!("{path}_{caller_process_pid}"));
+        }
         self.setup_socket(&socket_path, caller_process_pid, true)
     }
 

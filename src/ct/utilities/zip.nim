@@ -1,4 +1,4 @@
-import streams, std/[ os, tables ]
+import streams, std/os
 import zip/zipfiles
 
 proc zipFolder*(source, output: string, onProgress: proc(progressPercent: int) = nil) =

@@ -8,11 +8,9 @@ use std::str;
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-
+use crate::paths::CODETRACER_PATHS;
 // use crate::event::Event;
 use crate::task::{gen_task_id, to_task_kind_text, EventId, TaskId, TaskKind};
-
-pub const CODETRACER_TMP_PATH: &str = "/tmp/codetracer";
 
 // hopefully impossible for normal PID-s, as they start
 // from 1 for init?
@@ -56,12 +54,13 @@ impl Core {
         Ok(res)
     }
 
-    pub fn run_dir(&self) -> PathBuf {
-        PathBuf::from(CODETRACER_TMP_PATH).join(format!("run-{}", self.caller_process_pid))
+    pub fn run_dir(&self) -> Result<PathBuf, Box<dyn Error>> {
+        let path = CODETRACER_PATHS.lock()?;
+        Ok(path.tmp_path.join(format!("run-{}", self.caller_process_pid)))
     }
 
     pub fn ensure_arg_path_for(&self, task_id: &TaskId) -> Result<PathBuf, Box<dyn Error>> {
-        let run_dir = self.run_dir();
+        let run_dir = self.run_dir()?;
         let arg_dir = run_dir.join("args");
         create_dir_all(&arg_dir)?;
         let raw_task_id = task_id.as_string();
@@ -69,20 +68,20 @@ impl Core {
     }
 
     pub fn ensure_result_path_for(&self, task_id: TaskId) -> Result<PathBuf, Box<dyn Error>> {
-        let run_dir = self.run_dir();
+        let run_dir = self.run_dir()?;
         let results_dir = run_dir.join("results");
         create_dir_all(&results_dir)?;
         let raw_task_id = task_id.as_string();
         Ok(results_dir.join(format!("{raw_task_id}.json")))
     }
 
-    pub fn client_results_path(&self) -> PathBuf {
-        let run_dir = self.run_dir();
-        run_dir.join("client_results.txt")
+    pub fn client_results_path(&self) -> Result<PathBuf, Box<dyn Error>> {
+        let run_dir = self.run_dir()?;
+        Ok(run_dir.join("client_results.txt"))
     }
 
     pub fn ensure_event_path_for(&self, event_id: EventId) -> Result<PathBuf, Box<dyn Error>> {
-        let run_dir = self.run_dir();
+        let run_dir = self.run_dir()?;
         let events_dir = run_dir.join("events");
         create_dir_all(&events_dir)?;
         let raw_event_id = event_id.as_string();

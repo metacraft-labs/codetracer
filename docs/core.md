@@ -96,11 +96,11 @@ In the nim middleware (`src/core`) we log using the `chronicles` library.
 We usually generate a `dispatcher_<caller pid>.log`, and also a `task_process_<caller pid>_<group name>.log` for each task group.
 
 In the python rr/gdb scripts (`src/gdb`) we log usually using a helper called `nested_log`.
-We generate most of the logs in `/tmp/codetracer/log_<caller pid>_<group name>.log`.
+We generate most of the logs in `$TMPDIR/codetracer/log_<caller pid>_<group name>.log`.
 
 We save the `rr/gdb` raw process text in `/dev/shm/codetracer/<group name>_<caller pid>.txt`.
 
-We store the `rr/gdb` script results as a line with id and json in `/tmp/codetracer/<caller pid>_<group name>`.
+We store the `rr/gdb` script results as a line with id and json in `$TMPDIR/codetracer/<caller pid>_<group name>`.
 
 You can see some of the helper commands using `just -l`.
 Related to logs are:
