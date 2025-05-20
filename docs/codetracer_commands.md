@@ -34,7 +34,7 @@ TODO
 
 ```bash
 codetracer import trace.zip # imports trace.zip into folder `trace` and local db
-codetracer import trace.zip /tmp/trace # import trace.zip into folder `/tmp/trace` and local db
+codetracer import trace.zip $TMPDIR/trace # import trace.zip into folder `$TMPDIR/trace` and local db
 ```
 
 TODO

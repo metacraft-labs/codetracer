@@ -1,6 +1,5 @@
-import streams, nimcrypto, zip/zipfiles, std/[ enumerate, terminal, options, sequtils, strutils, strformat, os, httpclient, mimetypes, uri, net, json ]
+import streams, nimcrypto, std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json ]
 import ../../common/[ config, trace_index, paths, lang ]
-from stew / byteutils import toBytes
 import ../utilities/[ types, encryption, zip, language_detection ]
 import ../trace/storage_and_import, ../globals
 
