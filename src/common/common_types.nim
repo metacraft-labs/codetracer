@@ -1,31 +1,32 @@
 # backend agnostic code, part of the types module, should not be imported directly,
 # use common/types or frontend/types instead.
 import
-  strformat, strutils, sequtils, macros, json, times, typetraits, results
+  strformat, strutils, sequtils, macros, json, times, typetraits, results, paths
 
 import task_and_event
 
-const SHARED* = false
-const NO_INDEX*: int = -1
-const NO_EVENT*: int = -1
-const NO_OFFSET*: int = -1
-const NO_LINE*: int = -1
-const NO_STEP_COUNT*: int = -1
-const NO_POSITION*: int = -1
-const NO_KEY*: string = "-1"
-const NO_LIMIT*: int = -1
-const NO_TICKS*: int = -1
-const FLOW_ITERATION_START*: int = 0
-const RESTART_EXIT_CODE*: int = 10
-
 const
-  CT_SOCKET_PATH* = langstring("/tmp/ct_socket")
-  CT_CLIENT_SOCKET_PATH* = langstring("/tmp/ct_client_socket")
-  CT_IPC_FILE_PATH* = langstring("/tmp/ct_ipc")
-  CT_PLUGIN_SOCKET_PATH* = langstring("/tmp/codetracer_plugin_socket")
-  CT_PYTHON_LOG_PATH_BASE* = langstring("/tmp/codetracer/log")
+  SHARED* = false
+  NO_INDEX*: int = -1
+  NO_EVENT*: int = -1
+  NO_OFFSET*: int = -1
+  NO_LINE*: int = -1
+  NO_STEP_COUNT*: int = -1
+  NO_POSITION*: int = -1
+  NO_KEY*: string = "-1"
+  NO_LIMIT*: int = -1
+  NO_TICKS*: int = -1
+  FLOW_ITERATION_START*: int = 0
+  RESTART_EXIT_CODE*: int = 10
+  NO_NAME* = langstring""
 
-const NO_NAME* = langstring""
+# Raw string concatenation here because there is no path concatenation on the JS side
+let
+  CT_SOCKET_PATH* = langstring(codetracerTmpPath & "/ct_socket")
+  CT_CLIENT_SOCKET_PATH* = langstring(codetracerTmpPath & "/ct_client_socket")
+  CT_IPC_FILE_PATH* = langstring(codetracerTmpPath & "/ct_ipc")
+  CT_PLUGIN_SOCKET_PATH* = langstring(codetracerTmpPath & "/codetracer_plugin_socket")
+  CT_PYTHON_LOG_PATH_BASE* = langstring(codetracerTmpPath & "/log")
 
 proc ct_python_log_path*(callerPid: int): langstring =
   CT_PYTHON_LOG_PATH_BASE & "_" & $callerPid & ".txt"
