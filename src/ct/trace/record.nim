@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, sequtils, strtabs, tables],
+import std/[os, osproc, strutils, sequtils, strtabs],
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
   ../cli/build

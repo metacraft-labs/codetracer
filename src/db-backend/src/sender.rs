@@ -10,8 +10,7 @@ use std::io::Write;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-
-const CT_CLIENT_SOCKET_PATH: &str = "/tmp/ct_client_socket";
+use crate::paths::CODETRACER_PATHS;
 
 pub struct Sender {
     sending_socket: Option<UnixStream>,
@@ -53,8 +52,12 @@ impl Sender {
         };
 
         if with_socket {
-            let socket_path = PathBuf::from(format!("{CT_CLIENT_SOCKET_PATH}_{caller_process_pid}"));
-
+            let socket_path: PathBuf;
+            {
+                let tmp = CODETRACER_PATHS.lock()?;
+                let path = tmp.client_socket_path.display();
+                socket_path = PathBuf::from(format!("{path}_{caller_process_pid}"));
+            }
             self.setup_socket(&socket_path)
         } else {
             Ok(())

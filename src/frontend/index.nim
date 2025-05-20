@@ -912,7 +912,7 @@ var sessionId = -1
 var shellXtermProgress = -1
 
 
-const CT_DEBUG_INSTANCE_PATH_BASE*: cstring = cstring"/tmp/codetracer/ct_instance_"
+let CT_DEBUG_INSTANCE_PATH_BASE*: cstring = cstring(codetracerTmpPath) & cstring"/ct_instance_"
 
 proc newDebugInstancePipe(pid: int): Future[JsObject] {.async.} =
   var future = newPromise() do (resolve: proc(response: JsObject)):
