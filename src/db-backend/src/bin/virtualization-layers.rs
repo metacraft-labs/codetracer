@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         caller_process_pid: cli.caller_process_pid,
     };
 
-    let run_dir = core.run_dir();
+    let run_dir = core.run_dir()?;
     fs::create_dir_all(&run_dir)?;
     let log_path = run_dir.join("virtualization_virtualization_0.log");
 

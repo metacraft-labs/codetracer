@@ -1,4 +1,4 @@
-import std/[strformat, strutils, terminal, json ]
+import std/[strformat, terminal ]
 
 proc logUpdate*(progress: int, msg: string) =
   if not isatty(stdout):

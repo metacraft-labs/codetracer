@@ -99,10 +99,25 @@ let
     "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
     linksPath / "lib" / "trace.o")
 
+when defined(macosx):
+  let codetracerTmpPath* = env.get("HOME") / "Library/Caches/codetracer/codetracer"
+  let codetracerCache* = codetracerTmpPath & "_cache"
+else:
+  let tmpFolder = env.get("TMPDIR",
+                            env.get("TEMPDIR",
+                                    env.get("TEMP",
+                                            env.get("TMP",
+                                                    "/tmp"
+                                            )
+                                    )
+                            )
+  )
+  let
+    codetracerCache* = tmpFolder / "codetracer/codetracer_cache"
+    codetracerTmpPath* = tmpFolder / "codetracer/codetracer"
 
 let
-  localShellPreloadInstallPath* = fmt"/tmp/shell_preload_{username}.so"
-
+  localShellPreloadInstallPath* = codetracerTmpPath / fmt"/shell_preload_{username}.so"
 
 var
   # overrideable in local functions !:
@@ -112,8 +127,6 @@ var
 # other path/exe consts:
 #  either universal, or usually development environment-specific
 let
-  codetracerCache* = "/tmp/codetracer_cache/"
-  codetracerTmpPath* = "/tmp/codetracer"
   codetracerInstallDir* = when defined(builtWithNix):
     codetracerExeDir # e.g. result/ (from result/)
   else:
@@ -145,7 +158,7 @@ let
   rubyPath* = codetracerInstallDir / "libs" / "ruby" / "ruby"
   luaPath* = codetracerInstallDir / "libs" / "lua"
 
-  nimcacheDir* = "/tmp/codetracer_projects/"
+  nimcacheDir* = codetracerTmpPath / "codetracer_projects/"
   scriptExe* = linksPath / "bin" / "script"
   nodeExe* = linksPath / "bin" / "node"
 
