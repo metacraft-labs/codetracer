@@ -511,6 +511,8 @@ type
     readOnly*: js
     content*: Content
     layoutItem*: GoldenContentItem
+    kxi*: KaraxInstance
+    inExtension*: bool
 
   DataTableComponent* = ref object
     context*: js

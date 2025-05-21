@@ -62,6 +62,69 @@ for kind, tags in kindTags:
   for tag in tags:
     tagKinds[tag].add(kind)
 
+var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
+
+method onUpdatedTable*(self: EventLogComponent, response: TableUpdate) {.async.}
+proc makeTableUpdate(self: EventLogComponent): TableUpdate =
+  TableUpdate(
+    data: TableData(
+      draw: self.drawId,
+      recordsTotal: 3,
+      recordsFiltered: 3,
+      data: @[
+        TableRow(
+          directLocationRRTicks: 7,
+          base64Encoded: false,
+          rrEventId: 0,
+          fullPath: "main.nr:14",
+          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
+          kind: EventLogKind.Write,
+          content: "1\n",
+          metadata: "",
+          stdout: true
+        ),
+        TableRow(
+          directLocationRRTicks: 16,
+          base64Encoded: false,
+          rrEventId: 1,
+          fullPath: "main.nr:14",
+          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
+          kind: EventLogKind.Write,
+          content: "2\n",
+          metadata: "",
+          stdout: true
+        ),
+        TableRow(
+          directLocationRRTicks: 25,
+          base64Encoded: false,
+          rrEventId: 2,
+          fullPath: "main.nr:14",
+          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
+          kind: EventLogKind.Write,
+          content: "3\n",
+          metadata: "",
+          stdout: true
+        )
+      ]
+    ),
+    isTrace: false,
+    traceId: 0
+  )
+
+method redrawForExtension*(self: EventLogComponent) {.exportc.} =
+  self.kxi.redraw()
+
+proc events(self: EventLogComponent)
+proc resizeEventLogHandler(self: EventLogComponent)
+
+proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
+  if eventLogComponentForExtension.kxi.isNil:
+    eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
+  result = eventLogComponentForExtension
+  eventLogComponentForExtension.events()
+  discard setTimeout(proc = discard eventLogComponentForExtension.onUpdatedTable(makeTableUpdate(eventLogComponentForExtension)), 1000)
+  discard setTimeout(proc = resizeEventLogHandler(eventLogComponentForExtension), 1000)
+
 proc denseId*(context: EventLogComponent): cstring =
   j("eventLog-" & $context.id & "-dense-table-" & $context.index)
 
@@ -477,14 +540,15 @@ proc events(self: EventLogComponent) =
             mutData.draw = self.traceService.drawId
             self.drawId = mutData.draw
             self.hiddenRows = data.start
-            discard self.data.services.debugger.updateTable(
-              UpdateTableArgs(
-                tableArgs: mutData,
-                selectedKinds: self.selectedKinds,
-                isTrace: false,
-                traceId: 0,  
-              )
-            ),
+            if not self.inExtension:
+              discard self.data.services.debugger.updateTable(
+                UpdateTableArgs(
+                  tableArgs: mutData,
+                  selectedKinds: self.selectedKinds,
+                  isTrace: false,
+                  traceId: 0,  
+                )
+              ),
         }
       )
 
@@ -506,7 +570,7 @@ proc events(self: EventLogComponent) =
     context.init = true
     context.denseTable.context = jqFind(j"#" & context.denseId).DataTable()
     context.detailedTable.context = jqFind(j"#" & context.detailedId).DataTable()
-    context.redrawColumns = false
+    context.redrawColumns = context.tableCallback.isNil
     context.eventsIndex = self.service.events.len
 
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
@@ -537,7 +601,7 @@ proc events(self: EventLogComponent) =
     jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"contextmenu", j"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
-    if self.resizeObserver.isNil:
+    if not self.inExtension and self.resizeObserver.isNil:
       let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
       let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
         for entry in entries:
@@ -990,13 +1054,13 @@ method restart*(self: EventLogComponent) =
 
   self.eventsIndex = 0
 
-method render*(self: EventLogComponent): VNode =
-  kxiMap[j("eventLogComponent-" & $self.id)].afterRedraws.add(proc =
-    self.events()
-    let denseWrapper = j"#" & self.denseId & j"_wrapper"
-    let detailedWrapper = j"#" & self.detailedId & j"_wrapper"
-    let eventId = j"eventLogComponent-" & $self.id
+proc eventLogAfterRedraws(self: EventLogComponent) =
+  self.events()
+  let denseWrapper = j"#" & self.denseId & j"_wrapper"
+  let detailedWrapper = j"#" & self.detailedId & j"_wrapper"
+  let eventId = j"eventLogComponent-" & $self.id
 
+  if not self.inExtension:
     if not self.isDetailed:
       jq(denseWrapper).show()
       jq(detailedWrapper).hide()
@@ -1004,18 +1068,23 @@ method render*(self: EventLogComponent): VNode =
       jq(denseWrapper).hide()
       jq(detailedWrapper).show()
 
-    self.denseTable.updateTableRows(redraw = true)
-    self.detailedTable.updateTableRows(redraw = true)
+  self.denseTable.updateTableRows(redraw = true)
+  self.detailedTable.updateTableRows(redraw = true)
 
-    if self.resizeObserver.isNil:
-      let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
-      let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
-        for entry in entries:
-          let timeout = setTimeout(proc =
-            resizeEventLogHandler(self), 100))
-      resizeObserver.observe(componentTab)
-      self.resizeObserver = resizeObserver
-  )
+  if not self.inExtension and self.resizeObserver.isNil:
+    let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
+    let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
+      for entry in entries:
+        let timeout = setTimeout(proc =
+          resizeEventLogHandler(self), 100))
+    resizeObserver.observe(componentTab)
+    self.resizeObserver = resizeObserver
+
+method render*(self: EventLogComponent): VNode =
+  if not self.inExtension:
+    kxiMap[j("eventLogComponent-" & $self.id)].afterRedraws.add(proc = self.eventLogAfterRedraws())
+  else:
+    self.kxi.afterRedraws.add(proc = self.eventLogAfterRedraws())
 
   result = buildHtml(
     tdiv(
