@@ -8,43 +8,57 @@ type
   RRBackendConfig* = object
     enabled*: bool
     path*: string
-    ctPaths*: string
-    debugInfoToolPath*: string
+    `ct-paths`*: string
+    `debug-info-tool-path`*: string
+
+  FlowConfigObjWrapper* = object
+    enabled*: bool
+    ui*: string
+    FlowUI* {.defaultVal: FlowParallel}: types.FlowUI
+
+  TraceSharingConfigObj* = object
+    enabled*:               bool
+    `base-url`*:            string
+    `get-upload-url-api`*:  string
+    `download-api`*:        string
+    `delete-api`*:          string
 
   ConfigObject* = object
     ## The config object is the schema for config yaml files
-
-    theme*:      string
-    v*:          string
-    flow*:       bool
-    callArgs*:   bool
-    history*:    bool
-    repl*:       bool
-    trace*:      bool
-    default*:    string
-    calltrace*:  bool
-    layout*:     string
-    telemetry*:  bool
-    test*:       bool
-    debug*:      bool
-    flowUI*:     string
-    realFlowUI* {.defaultVal: FlowParallel}: types.FlowUI
-    events*:     bool
-    map*:        InputShortcutMap
+    theme*:                                     string
+    version*:                                   string
+    flow* {.defaultVal: FlowConfigObjWrapper(
+      enabled: true,
+      ui: "parallel",
+      FlowUI: FlowParallel
+    ).}:                                        FlowConfigObjWrapper
+    `call-args`*:                               bool
+    history*:                                   bool
+    repl*:                                      bool
+    trace*:                                     bool
+    default*:                                   string
+    calltrace*:                                 bool
+    layout*:                                    string
+    telemetry*:                                 bool
+    test*:                                      bool
+    debug*:                                     bool
+    events*:                                    bool
+    bindings*:                                  InputShortcutMap
     shortcutMap* {.defaultVal: ShortcutMap().}: ShortcutMap
-    defaultBuild*: string
-    showMinimap*: bool
-    baseUrl*: string
-    getUploadUrlApi*: string
-    downloadApi*: string
-    uploadApi*: string
-    deleteApi*: string
-    traceSharingEnabled*: bool
-    rrBackend* {.defaultVal: RRBackendConfig(
+    `default-build`*:                           string
+    `show-minimap`*:                            bool
+    `trace-sharing`* {.defaultVal: TraceSharingConfigObj(
+      enabled: false,
+      `base-url`: "http://localhost:55504/api/codetracer/v1",
+      `download-api`: "/download",
+      `delete-api`: "/delete",
+      `get-upload-url-api`: "/get/upload/url"
+    ).}: TraceSharingConfigObj
+    `rr-backend`* {.defaultVal: RRBackendConfig(
       enabled: false,
       path: "",
-      ctPaths: "",
-      debugInfoToolPath: ""
+      `ct-paths`: "",
+      `debug-info-tool-path`: ""
     ).}: RRBackendConfig
 
   Config* = ref ConfigObject
@@ -73,16 +87,30 @@ func normalize(shortcut: string): string =
   # for now we expect to write editor-style monaco shortcuts
   shortcut
 
-func initShortcutMap*(map: InputShortcutMap): ShortcutMap =
+# Non-unicode is fine. Not used for prod strings anyway
+func kebabToCamelCase(str: string): string =
+  result = ""
+  var capitalizeNext = false
+
+  for c in str:
+    if c == '-':
+      capitalizeNext = true
+    elif capitalizeNext:
+      result.add(toUpperAscii(c))
+      capitalizeNext = false
+    else:
+      result.add(c)
+
+proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
   result = ShortcutMap()
   var conflicts = initTable[string, seq[ClientAction]]()
   for key, value in map:
     let rawShortcuts = ($value).splitWhitespace()
     var action: ClientAction
     try:
-      action = parseEnum[ClientAction]($key)
+      action = parseEnum[ClientAction](kebabToCamelCase($key))
     except:
-      debugecho "config.nim: invalid action ", $key
+      debugecho "config.nim: invalid action ", kebabToCamelCase($key)
       continue
     for raw in rawShortcuts:
       let normalShortcut = normalize(raw)
@@ -136,7 +164,7 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     stream.close()
     var c = Config()
     c[] = config
-    c.shortcutMap = initShortcutMap(config.map)
+    c.shortcutMap = initShortcutMap(config.bindings)
     return c
   except Exception as e:
     raise e
