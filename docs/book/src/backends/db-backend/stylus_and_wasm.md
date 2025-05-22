@@ -16,6 +16,6 @@ TODO
 # install rustup
 # TODO: rustup add wasmi target 
 # TODO: add rustc wasm command and an example rs file
-ct record /tmp/rust_example.wasm
+ct record $TMPDIR/rust_example.wasm
 ct replay rust_example.wasm
 ```

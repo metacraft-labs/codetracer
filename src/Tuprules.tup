@@ -145,10 +145,6 @@ c %f |> %B macro_sourcemap_%B.json
 # rust
 export RUSTUP_HOME
 
-!rust_cargo_tui = |> \
-  CARGO_TARGET_DIR=/tmp/codetracer/tui_target \
-    cargo build && \
-    cp /tmp/codetracer/tui_target/debug/tui %o |> %o
 !rust_cargo_db_backend = |> \
   CARGO_TARGET_DIR=/tmp/codetracer/db_backend_target \
     cargo build --release && \
