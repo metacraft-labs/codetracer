@@ -35,6 +35,7 @@ nim -d:release \
     -d:ctEntrypoint \
     --nimcache:nimcache \
     -d:nimDebugDlOpen \
+    -d:ctmacos \
     --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
 
 nim -d:release \
@@ -52,6 +53,7 @@ nim -d:release \
     -d:ctEntrypoint \
     --nimcache:nimcache \
     -d:nimDebugDlOpen \
+    -d:ctmacos \
     --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct/db_backend_record.nim
 
 # this works    --passL:/nix/store/f6afb4jw9g5f94ixw0jn6cl0ah4liy35-sqlite-3.45.3/lib/libsqlite3.so.0 \
@@ -63,6 +65,7 @@ nim -d:release \
 nim \
     --hints:on --warnings:off --sourcemap:on \
     -d:ctIndex -d:chronicles_sinks=json \
+    -d:ctmacos \
     -d:nodejs --out:"$DIST_DIR/index.js" js src/frontend/index.nim
 cp "$DIST_DIR/index.js" "$DIST_DIR/src/index.js"
 
@@ -71,6 +74,7 @@ nim \
     --hints:off --warnings:off \
     -d:chronicles_enabled=off  \
     -d:ctRenderer \
+    -d:ctmacos \
     --out:"$DIST_DIR/ui.js" js src/frontend/ui_js.nim
 cp "$DIST_DIR/ui.js" "$DIST_DIR/src/ui.js"
 
@@ -79,6 +83,7 @@ nim \
     --hints:off --warnings:off \
     -d:chronicles_enabled=off  \
     -d:ctRenderer \
+    -d:ctmacos \
     --out:"$DIST_DIR/subwindow.js" js src/frontend/subwindow.nim
 cp "$DIST_DIR/subwindow.js" "$DIST_DIR/src/subwindow.js"
 
