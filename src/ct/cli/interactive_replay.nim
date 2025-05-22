@@ -1,7 +1,8 @@
 import
   std/[strutils, strformat, sequtils, algorithm, rdstdin],
   ../../common/[ trace_index, types, lang ],
-  ../utilities/[ env ],
+  ../launch/cleanup,
+  ../utilities/env,
   ../codetracerconf,
   json_serialization
 
@@ -63,7 +64,14 @@ proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
   echo ""
 
   while true:
-    let raw = readLineFromStdin(&"{action}: ")
+    var raw: string = ""
+    try:
+      raw = readLineFromStdin(&"{action}: ")
+    except:
+      echo "Interrupt detected. Exiting!"
+      cleanup()
+      quit(0)
+
     try:
       let traceId = raw.parseInt
       let trace = trace_index.find(traceId, test=false)
