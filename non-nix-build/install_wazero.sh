@@ -2,7 +2,6 @@
 
 set -e
 
-
 : ${DEPS_DIR:=$PWD/deps}
 cd "$DEPS_DIR"
 
@@ -10,7 +9,6 @@ out=$(PWD=$(realpath ../../) ../find_git_hash_from_lockfile.py wazero)
 commit=$(echo "${out}" | grep -v "github.com")
 repo=$(echo "${out}" | grep "github.com")
 folder="codetracer-wasm-recorder"
-
 
 mkdir "${folder}" || echo "Folder already exists"
 cd "${folder}"

@@ -99,9 +99,9 @@ let
     "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
     linksPath / "lib" / "trace.o")
 
-when defined(macosx):
-  let codetracerTmpPath* = env.get("HOME") / "Library/Caches/codetracer/codetracer"
-  let codetracerCache* = codetracerTmpPath & "_cache"
+when defined(ctmacos):
+  let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/codetracer"
+  let codetracerCache* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/codetracer_cache"
 else:
   let tmpFolder = env.get("TMPDIR",
                             env.get("TEMPDIR",
@@ -117,7 +117,7 @@ else:
     codetracerTmpPath* = tmpFolder / "codetracer/codetracer"
 
 let
-  localShellPreloadInstallPath* = codetracerTmpPath / fmt"/shell_preload_{username}.so"
+  localShellPreloadInstallPath* = codetracerTmpPath / fmt"shell_preload_{username}.so"
 
 var
   # overrideable in local functions !:
