@@ -123,19 +123,19 @@ make-quick-mr name message:
 findtmp:
   #!/usr/bin/env bash
   if [ "$(uname)" = "Darwin" ]; then
-    echo "$HOME/Library/Caches"
+    echo "$HOME/Library/Caches/com.codetracer.CodeTracer"
   else
     echo "${TEMP:-${TMP:-${TEMPDIR:-${TMPDIR:-/tmp}}}}"
   fi
 
 clean-logs:
   @TTMP=$(just findtmp) ; \
-  rm -rf $TTMP/codetracer/
+  rm -rf $TTMP/
 
 archive-logs pid_or_current_or_last:
   @TTMP=$(just findtmp) ; \
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
-  zip -r codetracer-logs-{{pid_or_current_or_last}}.zip $TTMP/codetracer/codetracer/run-${pid}
+  zip -r codetracer-logs-{{pid_or_current_or_last}}.zip $TTMP/codetracer/run-${pid}
 
 log-file pid_or_current_or_last kind process="default" instance_index="0":
   # first argument can be either `current`, `last` or a pid number
@@ -166,9 +166,9 @@ log-file pid_or_current_or_last kind process="default" instance_index="0":
   export pid=$(just pid {{pid_or_current_or_last}}); \
   @TTMP=$(just findtmp) ; \
   if [[ "{{kind}}" == "workers" ]]; then \
-    echo "$TTMP/codetracer/codetracer/run-${pid}/processes.txt"; \
+    echo "$TTMP/codetracer/run-${pid}/processes.txt"; \
   else \
-    echo "$TTMP/codetracer/codetracer/run-${pid}/{{kind}}_${actual_process}_{{instance_index}}.${ext}"; \
+    echo "$TTMP/codetracer/run-${pid}/{{kind}}_${actual_process}_{{instance_index}}.${ext}"; \
   fi;
 
 log pid_or_current_or_last kind process="default" instance_index="0":
@@ -203,7 +203,7 @@ pid pid_or_current_or_last:
     echo $(ps aux | grep src/build-debug/codetracer | head -n 1 | awk '{print $2}') ; \
   elif [[ "{{pid_or_current_or_last}}" == "last" ]]; then \
     @TTMP=$(just findtmp) ; \
-    echo $(cat $TTMP/codetracer/codetracer/last-start-pid) ; \
+    echo $(cat $TTMP/codetracer/last-start-pid) ; \
   else \
     echo {{pid_or_current_or_last}} ; \
   fi
@@ -217,19 +217,19 @@ log-event pid_or_current_or_last event-id:
   # argument can be either `current`, `last` or a pid number
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
   @TTMP=$(just findtmp) ; \
-  cat $TTMP/codetracer/codetracer/run-${pid}/events/{{event-id}}.json
+  cat $TTMP/codetracer/run-${pid}/events/{{event-id}}.json
 
 log-result pid_or_current_or_last task-id:
   # argument can be either `current`, `last` or a pid number
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
   @TTMP=$(just findtmp) ; \
-  cat $TTMP/codetracer/codetracer/run-${pid}/results/{{task-id}}.json
+  cat $TTMP/codetracer/run-${pid}/results/{{task-id}}.json
 
 log-args pid_or_current_or_last task-id:
   # argument can be either `current`, `last` or a pid number
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
   @TTMP=$(just findtmp) ; \
-  cat $TTMP/codetracer/codetracer/run-${pid}/args/{{task-id}}.json
+  cat $TTMP/codetracer/run-${pid}/args/{{task-id}}.json
 
 
 # " (artiffical comment to fix syntax highlighting)
