@@ -82,5 +82,5 @@ cargo stylus trace --endpoint='http://localhost:8547' --use-native-tracer \
 ```sh
 # Omit the --stylus-trace argument if you are tracing a non-stylus program.
 ct record target/wasm32-unknown-unknown/debug/stylus_hello_world.wasm --stylus-trace=<full path to evm_trace.json>
-ct replay hello_world_stylus.wasm
+ct replay stylus_hello_world.wasm
 ```
