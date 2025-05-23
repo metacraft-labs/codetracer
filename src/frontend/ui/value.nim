@@ -1121,7 +1121,8 @@ proc view(
             valueView(value)
           except:
             tdiv(class = "value-error"):
-              text "^ error: Can't expand value!"
+              echo "VALUE ERROR: ", getCurrentExceptionMsg()
+              text fmt"^ error: Can't show value: {getCurrentExceptionMsg()}"
       if expression == self.baseExpression and not self.uiExpanded(value, expression):
         span(
           class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",

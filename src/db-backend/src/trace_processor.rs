@@ -106,10 +106,13 @@ impl<'a> TraceProcessor<'a> {
                 self.db.local_variable_cells.push(HashMap::new());
 
                 let step_variable_cells = &mut self.db.variable_cells[self.current_step_id];
-                let current_call_variable_cells = &self.db.local_variable_cells[self.depth - 1];
-                for (variable_id, place) in current_call_variable_cells.iter() {
-                    // info!("trace for step: {variable_id:?} {place:?}");
-                    step_variable_cells.insert(*variable_id, *place);
+
+                if self.depth > 0 {
+                    let current_call_variable_cells = &self.db.local_variable_cells[self.depth - 1];
+                    for (variable_id, place) in current_call_variable_cells.iter() {
+                        // info!("trace for step: {variable_id:?} {place:?}");
+                        step_variable_cells.insert(*variable_id, *place);
+                    }
                 }
 
                 if step_record.line.0 >= 0 {
@@ -215,6 +218,7 @@ impl<'a> TraceProcessor<'a> {
                 // we should have always at least it there: at least 1
                 // assert!(self.depth > 1);
                 // assert!(self.call_stack.len() > 1);
+                assert!(self.depth > 0);
                 self.depth -= 1;
                 self.db.calls[self.current_call_key].return_value = return_record.return_value.clone();
                 let _ = self.call_stack.pop();
