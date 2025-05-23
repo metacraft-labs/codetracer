@@ -82,7 +82,7 @@ let
   rubyTracerPath* = linksPath / "src" / "trace.rb"
   smallExe* = linksPath / "bin" / "small-lang"
   noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
-  wazeroExe* = env.get("CODETRACER_WAZERO_VM_PATH", linksPath / "bin" / "wazero")
+  wazeroExe* = env.get("CODETRACER_WASM_VM_PATH", linksPath / "bin" / "wazero")
   dbBackendExe* = linksPath / "bin" / "db-backend"
   dbBackendRecordExe* = codetracerExeDir / "bin" / "db-backend-record"
   virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
