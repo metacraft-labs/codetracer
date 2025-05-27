@@ -342,7 +342,7 @@ impl Db {
                 let mut res = Value::new(TypeKind::Pointer, self.to_ct_type(type_id));
                 let dereferenced_value = self.to_ct_value(dereferenced);
                 res.typ.element_type = Some(Box::new(dereferenced_value.typ.clone()));
-                res.address = *address as i64;
+                res.address = (*address).to_string();
                 res.ref_value = Some(Box::new(dereferenced_value));
                 res.is_mutable = *mutable;
                 res
