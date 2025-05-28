@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-echo "test"
+echo "codetracer setup:"
+echo $(git rev-parse HEAD)
+echo ""
 
 git submodule update --init --recursive
 
