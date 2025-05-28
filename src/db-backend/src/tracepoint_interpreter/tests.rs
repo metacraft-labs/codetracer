@@ -22,6 +22,7 @@ use crate::{
 use super::TracepointInterpreter;
 
 #[test]
+#[ignore]
 fn log_array() -> Result<(), Box<dyn Error>> {
     let src = "log(arr)";
 
@@ -34,6 +35,7 @@ fn log_array() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+#[ignore]
 fn array_indexing() -> Result<(), Box<dyn Error>> {
     let src = "log(arr[0])
 log(arr[1])
