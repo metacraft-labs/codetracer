@@ -2,6 +2,8 @@
 
 echo "test"
 
+git submodule update --init --recursive
+
 cd src/db-backend
 cargo build
 
