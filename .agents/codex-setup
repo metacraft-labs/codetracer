@@ -2,3 +2,6 @@
 
 echo "test"
 
+cd src/db-backend
+cargo build
+
