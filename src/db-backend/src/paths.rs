@@ -13,14 +13,13 @@ impl Default for Paths
 {
     fn default() -> Self
     {
-        let tmpdir: PathBuf;
-        if cfg!(target_os = "macos")
+        let tmpdir: PathBuf = if cfg!(target_os = "macos")
         {
-            tmpdir = PathBuf::from(env::var("HOME").unwrap()).join("Library/Caches/com.codetracer.CodeTracer/codetracer");
+            PathBuf::from(env::var("HOME").unwrap_or("/".to_string())).join("Library/Caches/com.codetracer.CodeTracer/codetracer")
         }
         else
         {
-            tmpdir = PathBuf::from(env::var("TMPDIR").unwrap_or(
+            PathBuf::from(env::var("TMPDIR").unwrap_or(
                 env::var("TEMPDIR").unwrap_or(
                     env::var("TMP").unwrap_or(
                         env::var("TEMP").unwrap_or(
@@ -28,8 +27,8 @@ impl Default for Paths
                         )
                     )
                 )
-            )).join("codetracer/codetracer");
-        }
+            )).join("codetracer/codetracer")
+        };
         Self {
             tmp_path: PathBuf::from(&tmpdir),
             client_socket_path: PathBuf::from(&tmpdir).join("ct_client_socket"),
