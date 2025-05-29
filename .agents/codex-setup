@@ -4,7 +4,8 @@ echo "codetracer setup:"
 echo $(git rev-parse HEAD)
 echo ""
 
-git submodule update --init --recursive
+# TODO: research this in depth, not critical for db-backend itself for now 
+# git submodule update --init --recursive
 
 cd src/db-backend
 cargo build
