@@ -21,7 +21,8 @@ extern crate db_backend;
 use db_backend::core::Core;
 use db_backend::db::Db;
 use db_backend::handler::Handler;
-use db_backend::receiver::Receiver;
+use db_backend::receiver::{handle_task, Receiver};
+use db_backend::task::Task;
 use db_backend::response::Response;
 
 /// virtualization layers for event log/trace/calltrace(maybe others)
@@ -70,6 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut receiver = Receiver::new();
     let (tx, _rx): (mpsc::Sender<Response>, mpsc::Receiver<Response>) = mpsc::channel();
+    let (task_tx, task_rx) = mpsc::channel::<Task>();
 
     // let socket_path = cli.socket_path.clone();
 
@@ -79,7 +81,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut handler = Handler::construct(Box::new(db), tx.clone(), true);
 
-    receiver.receive_loop(&mut handler)?;
+    std::thread::spawn(move || {
+        if let Err(e) = receiver.receive_loop(task_tx) {
+            eprintln!("receiver thread error: {e:?}");
+        }
+    });
+
+    for task in task_rx {
+        handle_task(&core, &mut handler, task)?;
+    }
 
     Ok(())
 }

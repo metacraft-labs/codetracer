@@ -44,8 +44,9 @@ mod value;
 use core::Core;
 use db::Db;
 use handler::Handler;
-use receiver::Receiver;
+use receiver::{handle_task, Receiver};
 use response::Response;
+use task::Task;
 use sender::Sender;
 use trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
@@ -125,6 +126,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut sender = Sender::new();
     let (tx, rx): (mpsc::Sender<Response>, mpsc::Receiver<Response>) = mpsc::channel();
+    let (task_tx, task_rx) = mpsc::channel::<Task>();
 
     // No other threads will be using the mutex, so .lock() will never return Err()
     #[allow(clippy::unwrap_used)]
@@ -165,9 +167,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         //   each different task
         let mut handler = Handler::new(Box::new(db), tx.clone());
 
-        // TODO: possible errors?
-        let _setup_res = receiver.setup(cli.caller_process_pid);
-        let _ = receiver.receive_loop(&mut handler);
+        let core_for_handler = Core {
+            socket: None,
+            caller_process_pid: cli.caller_process_pid,
+        };
+
+        let receiver_thread = std::thread::spawn(move || {
+            let _setup_res = receiver.setup(cli.caller_process_pid);
+            if let Err(e) = receiver.receive_loop(task_tx) {
+                error!("receiver thread error: {:?}", e);
+            }
+        });
+
+        for task in task_rx {
+            let res = handle_task(&core_for_handler, &mut handler, task);
+            if let Err(handle_error) = res {
+                error!("backend: handle error: {:?}", handle_error);
+            } else if handler.indirect_send {
+                let responses = handler.get_responses_for_sending_and_clear();
+                let mut sender = Sender::new();
+                let _ = sender.setup(core_for_handler.caller_process_pid, false);
+                for response in responses {
+                    if let Err(e) = sender.send_response(response) {
+                        error!("sender couldn't send message: {:?}", e);
+                    }
+                }
+            }
+        }
+
+        let _ = receiver_thread.join();
     });
 
     sender.setup(cli.caller_process_pid, true)?;
