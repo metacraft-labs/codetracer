@@ -1,5 +1,5 @@
 # Calendar versioning: https://calver.org/
-# `YY.MM.MICRO` (for us `MICRO` means build) 
+# `YY.MM.MICRO` (for us `MICRO` means build)
 
 
 import strutils

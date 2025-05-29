@@ -40,10 +40,16 @@ proc start(args: seq[string]) =
     # don't debug/log with echo: breaks ct trace_metadata json output
     # writeFile("ct_wrapper.log", "CT WRAPPER: putting pid " & $codetracerWrapperPid)
 
+    let forwardedArgs =
+      if args.len == 1 and args[0] == "--version":
+        @["version"]
+      else:
+        args
+
     let p = startProcess(
       getAppDir() / "codetracer_depending_on_env_vars_in_tup",
       # workingDir = getAppDir().parentDir.parentDir, # repo folder
-      args = args,
+      args = forwardedArgs,
       env = env,
       options = {poParentStreams, poStdErrToStdOut})
     quit(waitForExit(p))
