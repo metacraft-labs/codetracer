@@ -1,5 +1,8 @@
 # Calendar versioning: https://calver.org/
-# `YY.MM.MICRO` (for us `MICRO` means build) 
+# `YY.MM.MICRO` (for us `MICRO` means build)
+#
+# Codex will keep these constants in sync with the latest GitHub release.
+# Do not update them manually.
 
 
 import strutils
