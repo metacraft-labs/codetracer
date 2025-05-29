@@ -125,10 +125,18 @@ proc recordDb(
   # (noirExe from src/common/paths.nim)
   #   we should try to not always depend on env var paths though
   echo "codetracer: starting language tracer with:"
+  let workdir = if lang == LangNoir:
+        # for noir, we must start in the noir project directory
+        # for the trace command to work
+        programDir
+      else:
+        # for other languages, we must start in the real inherited
+        # work dir
+        getCurrentDir()
   let process = startProcess(
     vmExe,
     args = startArgs.concat(args),
-    workingDir = programDir,
+    workingDir = workdir,
     options = {poEchoCmd, poParentStreams})
   let exitCode = waitForExit(process)
   if exitCode != 0:
