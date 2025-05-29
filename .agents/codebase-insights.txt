@@ -1,0 +1,3 @@
+# Codebase insights
+- Ruby loops were originally detected only for 'while' and 'until'.
+- 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.

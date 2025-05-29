@@ -277,6 +277,18 @@ impl ExprLoader {
             }
         } else if NODE_NAMES[&lang].loops.contains(&node.kind().to_string()) && start != end {
             self.register_loop(node, start, end, path)
+        } else if lang == Lang::Ruby && node.kind() == "call" {
+            if let Some(block_node) = node.child_by_field_name("block") {
+                if let Some(method_node) = node.child_by_field_name("method") {
+                    let row = method_node.start_position().row + 1;
+                    let method_name = self.extract_expr(&method_node, path, row);
+                    if method_name == "each" {
+                        let start = self.get_first_line(&block_node);
+                        let end = self.get_last_line(&block_node);
+                        self.register_loop(&block_node, start, end, path);
+                    }
+                }
+            }
         } else if NODE_NAMES[&lang].if_conditions.contains(&node.kind().to_string()) {
             self.extract_branches(node, &start, path, &NO_BRANCH_ID);
         }
