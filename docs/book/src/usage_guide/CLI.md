@@ -19,8 +19,7 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
    - `ct replay --trace-folder=<trace-folder>` - Opens a trace by its trace folder.
 1. `ct` - Launches the startup screen of the CodeTracer GUI.
 1. `ct help / ct --help` - Gives you a help message.
-1. `ct --version` - Prints the current CodeTracer version.
-1. `ct version` - Returns the current version of CodeTracer.
+1. `ct version` and `ct --version` - Returns the current version of CodeTracer.
 
 Unlike other debuggers, where the debugger is attached to your application process, here you have to launch your application
 through the CodeTracer CLI with commands like `ct run` or `ct record`(or through the user interface, which is documented in the next chapter).
