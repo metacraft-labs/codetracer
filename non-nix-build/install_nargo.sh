@@ -2,8 +2,6 @@
 
 set -e
 
-WANTED_NARGO_REVISION=8584e105549d6daa29d7b2be83bd5883016cfbd7
-
 if command -v nargo &> /dev/null; then
   echo nargo is already installed
   exit 0
@@ -14,10 +12,19 @@ fi
 : ${DEPS_DIR:=$PWD/deps}
 cd "$DEPS_DIR"
 
-rm -rf noir
-git clone https://github.com/blocksense-network/noir
-cd noir
-git checkout $WANTED_NARGO_REVISION
-cargo build --release
-cp ./target/release/nargo $BIN_DIR/
+out=$(PWD=$(realpath ../../) ../find_git_hash_from_lockfile.py noir)
+commit=$(echo "${out}" | grep -v "github.com")
+repo=$(echo "${out}" | grep "github.com")
+folder="noir"
 
+mkdir ${folder} || echo "Folder already exists"
+cd "${folder}"
+if [ $(git rev-parse HEAD) != "${commit}" ]; then
+  cd ../
+  rm -rf "${folder}"
+  git clone "${repo}"
+  cd "${folder}"
+  git checkout "$commit"
+  cargo build --release
+  cp ./target/release/nargo $BIN_DIR/
+fi
