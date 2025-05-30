@@ -17,7 +17,7 @@ use std::sync::{mpsc, LazyLock, Mutex};
 use std::thread;
 use std::time::Instant;
 use std::{error::Error, panic};
-
+use std::panic::PanicHookInfo;
 use clap::Parser;
 use log::{error, info};
 use task::{EventId, EventKind, Notification, NotificationKind};
@@ -66,7 +66,31 @@ struct Args {
 
 static TX2: LazyLock<Mutex<Option<mpsc::Sender<Response>>>> = LazyLock::new(|| Mutex::new(None)); // 🤮
 
+// Already panicking so the unwraps won't change anything
+#[allow(clippy::unwrap_used)]
+fn panic_handler(info: &PanicHookInfo) {
+    error!("PANIC!!! {}", info);
+
+    let guard = TX2.lock().unwrap();
+    let channel = guard.clone().unwrap();
+
+    let msg = format!("DB backend crashed! Please report this. Message: \"{}\"", info);
+
+    let notification = Notification::new(NotificationKind::Error, &msg, false);
+
+    channel
+        .send(Response::EventResponse((
+            EventKind::NewNotification,
+            EventId::new("backend-crash-0"),
+            serde_json::to_string(&notification).unwrap(),
+            false,
+        )))
+        .unwrap();
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
+    panic::set_hook(Box::new(panic_handler));
+
     let cli = Args::parse();
     let core = Core {
         socket: None,
@@ -139,27 +163,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // to remove usage of `unwrap` in Core
         // let mut sender = Sender::setup(..);
 
-        // Already panicking so the unwraps won't change anything
-        #[allow(clippy::unwrap_used)]
-        panic::set_hook(Box::new(|info| {
-            error!("PANIC!!! {}", info);
-
-            let guard = TX2.lock().unwrap();
-            let channel = guard.clone().unwrap();
-
-            let msg = format!("DB backend crashed! Please report this. Message: \"{}\"", info);
-
-            let notification = Notification::new(NotificationKind::Error, &msg, false);
-
-            channel
-                .send(Response::EventResponse((
-                    EventKind::NewNotification,
-                    EventId::new("backend-crash-0"),
-                    serde_json::to_string(&notification).unwrap(),
-                    false,
-                )))
-                .unwrap();
-        }));
+        panic::set_hook(Box::new(panic_handler));
 
         // backend-specific handler for
         //   each different task
