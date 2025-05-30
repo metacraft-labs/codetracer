@@ -9,4 +9,8 @@ echo ""
 
 cd src/db-backend
 cargo build
+cd ../..
+
+nix develop .#devShells.x86_64-linux.default -c ./codex-setup-in-nix.sh
+
 

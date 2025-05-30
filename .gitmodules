@@ -7,7 +7,7 @@
 	url = https://github.com/alehander92/poly.git
 [submodule "libs/karax"]
 	path = libs/karax
-	url = ../karax.git
+	url = https://github.com/metacraft-labs/karax.git
 	branch = new-karax
 [submodule "libs/NimYAML"]
 	path = libs/NimYAML
@@ -34,7 +34,7 @@
 	branch = master
 [submodule "libs/nim-json-serialization"]
 	path = libs/nim-json-serialization
-	url = ../nim-json-serialization.git
+	url = https://github.com/metacraft-labs/nim-json-serialization.git
 	branch = fix-track-field-name-errors
 [submodule "libs/asynctools"]
 	path = libs/asynctools
