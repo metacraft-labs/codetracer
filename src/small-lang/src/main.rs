@@ -239,6 +239,7 @@ impl Interpreter {
                     .collect();
                 ValueRecord::Sequence {
                     elements: trace_items,
+                    is_slice: false,
                     type_id,
                 }
             }
@@ -356,6 +357,7 @@ impl Interpreter {
                             place: runtime_tracing::Place((*item_value_id) as i64),
                         })
                         .collect(),
+                    is_slice: false,
                     type_id,
                 };
                 self.tracer.register_compound_value(

@@ -12,4 +12,4 @@ num-derive = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"
-runtime_tracing = { git = "https://github.com/metacraft-labs/runtime_tracing.git", tag = "0.7.0" }
+runtime_tracing = "0.10.0"
