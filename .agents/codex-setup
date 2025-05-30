@@ -18,6 +18,6 @@ echo "y\ny\ny\ny\n" > yyyy
 nix develop .#devShells.x86_64-linux.default \
   --extra-experimental-features nix-command \
   --extra-experimental-features flakes \
-  -c ./codex-setup-in-nix.sh < yyyy
+  -c ./.agents/codex-setup-in-nix.sh < yyyy
 
 
