@@ -903,8 +903,8 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
         paths: trace.sourceFolders,
         traceID: trace.id,
         calltrace: config.calltrace and trace.calltrace,
-        preloadEnabled: config.flow and trace.lang != LangPython,
-        callArgsEnabled: config.callArgs,
+        preloadEnabled: config.flow.enabled and trace.lang != LangPython,
+        callArgsEnabled: config.toJs["call-args"].to(bool), # This has to be done because nim doesn't want to convert the member correctly when compiled to JS
         traceEnabled: config.trace,
         historyEnabled: config.history,
         eventsEnabled: config.events,
@@ -1264,7 +1264,7 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
   try:
     let config = cast[Config](yaml.load(s))
     # SILENT_LOG = not config.debug
-    config.shortcutMap = initShortcutMap(config.map)
+    config.shortcutMap = initShortcutMap(config.bindings)
     return config
   except:
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
