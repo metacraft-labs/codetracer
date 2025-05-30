@@ -40,6 +40,7 @@ mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
 mod value;
+mod paths;
 
 use core::Core;
 use db::Db;
@@ -97,7 +98,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         caller_process_pid: cli.caller_process_pid,
     };
 
-    let run_dir = core.run_dir();
+    let run_dir = core.run_dir()?;
     fs::create_dir_all(&run_dir)?;
     let log_path = run_dir.join("db-backend_db-backend_0.log");
     eprintln!("{}", log_path.display());

@@ -816,7 +816,7 @@ impl TableRow {
                 event
                     .high_level_path
                     .split('/')
-                    .last()
+                    .next_back()
                     .unwrap_or(&event.high_level_path.clone()),
                 event.high_level_line
             ),

@@ -2,7 +2,7 @@
 
 set -e
 
-WANTED_NARGO_REVISION=8584e105549d6daa29d7b2be83bd5883016cfbd7
+WANTED_NARGO_REVISION=e47c24d418436e6c0cf148b16477efc31bbaad5c
 
 if command -v nargo &> /dev/null; then
   echo nargo is already installed
@@ -15,7 +15,7 @@ fi
 cd "$DEPS_DIR"
 
 rm -rf noir
-git clone https://github.com/blocksense-network/noir
+git clone https://github.com/metacraft-labs/noir
 cd noir
 git checkout $WANTED_NARGO_REVISION
 cargo build --release
