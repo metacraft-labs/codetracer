@@ -9,5 +9,6 @@ echo ""
 
 cd src/db-backend
 cargo build
-cargo clippy
+rustup component add clippy
+cd ../../
 
