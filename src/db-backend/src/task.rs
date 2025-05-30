@@ -815,9 +815,9 @@ impl TableRow {
                 "{}:{}",
                 event
                     .high_level_path
-                    .split('/')
-                    .last()
-                    .unwrap_or(&event.high_level_path.clone()),
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&event.high_level_path),
                 event.high_level_line
             ),
             low_level_location: event.high_level_path.to_string(),
