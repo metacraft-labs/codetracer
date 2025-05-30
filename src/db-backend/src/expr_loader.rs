@@ -277,6 +277,18 @@ impl ExprLoader {
             }
         } else if NODE_NAMES[&lang].loops.contains(&node.kind().to_string()) && start != end {
             self.register_loop(node, start, end, path)
+        } else if lang == Lang::Ruby && node.kind() == "call" {
+            if let Some(block_node) = node.child_by_field_name("block") {
+                if let Some(method_node) = node.child_by_field_name("method") {
+                    let row = method_node.start_position().row + 1;
+                    let method_name = self.extract_expr(&method_node, path, row);
+                    if method_name == "each" {
+                        let start = self.get_first_line(&block_node);
+                        let end = self.get_last_line(&block_node);
+                        self.register_loop(&block_node, start, end, path);
+                    }
+                }
+            }
         } else if NODE_NAMES[&lang].if_conditions.contains(&node.kind().to_string()) {
             self.extract_branches(node, &start, path, &NO_BRANCH_ID);
         }
@@ -493,3 +505,31 @@ impl ExprLoader {
 // base_iteration: Iteration
 // step_counts: List[StepCount]
 // rr_ticks_for_iterations: List[RRTicks]
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn detects_ruby_each_loop() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("each_loop_test.rb");
+        fs::write(
+            &file_path,
+            "arr = [1]\narr.each do |x|\n  puts x\nend\n",
+        )?;
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path)?;
+
+        let info = &loader.processed_files[&file_path];
+        assert_eq!(info.loop_shapes.len(), 2);
+        let shape = &info.loop_shapes[1];
+        assert_eq!(shape.first, Position(3));
+        assert_eq!(shape.last, Position(4));
+
+        fs::remove_file(&file_path)?;
+        Ok(())
+    }
+}
