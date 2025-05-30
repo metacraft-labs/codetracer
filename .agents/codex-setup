@@ -7,10 +7,17 @@ echo ""
 # TODO: research this in depth, not critical for db-backend itself for now 
 # git submodule update --init --recursive
 
-cd src/db-backend
-cargo build
-cd ../..
+# cd src/db-backend
+# cargo build
+# cd ../..
 
-nix develop .#devShells.x86_64-linux.default -c ./codex-setup-in-nix.sh
+apt-get update && apt-get install -y nix
+
+echo "y\ny\ny\ny\n" > yyyy
+
+nix develop .#devShells.x86_64-linux.default \
+  --extra-experimental-features nix-command \
+  --extra-experimental-features flakes \
+  -c ./codex-setup-in-nix.sh < yyyy
 
 
