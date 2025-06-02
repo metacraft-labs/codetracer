@@ -38,7 +38,10 @@ bash build_db_backend.sh
 
 # setup/copy/link other files
 cp $ROOT_DIR/resources/electron $DIST_DIR/bin/
-cp $(which ruby) $DIST_DIR/bin/ruby
+
+# The built-in macOS ruby binary is too old and has to be hacked around
+cp $(brew --prefix ruby)/bin/ruby $DIST_DIR/bin/ruby
+
 cp $(which ctags) $DIST_DIR/bin/ctags
 cp $ROOT_DIR/libs/codetracer-ruby-recorder/src/*.rb $DIST_DIR/src/
 cp $ROOT_DIR/src/helpers.js $DIST_DIR/src/helpers.js
