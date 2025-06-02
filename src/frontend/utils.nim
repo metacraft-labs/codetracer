@@ -117,13 +117,17 @@ proc generateId*(data: Data, content: Content): int =
   else:
     return 0
 
-proc makeEventLogComponent*(data: Data, id: int): EventLogComponent =
+proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
 
     var dropDownsInit: array[EventDropDownBox,bool]
     dropDownsInit.fill(false);
 
     var selectedKinds: array[EventLogKind,bool]
     selectedKinds.fill(true)
+
+    # TODO: Remove hardcode bool value
+    if inExtension:
+      data.services.eventLog.updatedContent = true
 
     result = EventLogComponent(
       id: id,
@@ -140,7 +144,9 @@ proc makeEventLogComponent*(data: Data, id: int): EventLogComponent =
       detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
       traceSessionID: -1,
       traceUpdateId: -1,
-      lastJumpFireTime: 0)
+      lastJumpFireTime: 0,
+      inExtension: inExtension,
+    )
     data.registerComponent(result, Content.EventLog)
 
 proc makeShellComponent*(data: Data, id: int): ShellComponent =
@@ -172,7 +178,7 @@ proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
   data.ui.welcomeScreen = result
   data.registerComponent(result, Content.WelcomeScreen)
 
-proc makeStateComponent*(data: Data, id: int): StateComponent =
+proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateComponent =
   result = StateComponent(
     id: id,
     locals: data.services.debugger.locals,
@@ -183,7 +189,8 @@ proc makeStateComponent*(data: Data, id: int): StateComponent =
     chevronClicked: false,
     minNameWidth: 30,
     maxNameWidth: 85,
-    totalValueWidth: 95)
+    totalValueWidth: 95,
+    inExtension: inExtension)
   data.registerComponent(result, Content.State)
 
 proc makeBuildComponent*(data: Data): BuildComponent =
@@ -429,7 +436,7 @@ proc ensureValueComponent*(self: CallExpandedValuesComponent, name: cstring, val
 proc ensureValueComponent*(self: ValueComponent) =
   self.data.registerComponent(self, Content.Value)
 
-proc makeCalltraceComponent*(data: Data, id: int): CalltraceComponent =
+proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): CalltraceComponent =
   result = CalltraceComponent(
     id: id,
     searchResults: @[],
@@ -450,6 +457,7 @@ proc makeCalltraceComponent*(data: Data, id: int): CalltraceComponent =
     startPositionY: -1,
     width: "300",
     callValuePosition: JsAssoc[cstring, float]{},
+    inExtension: inExtension,
   )
   data.registerComponent(result, Content.Calltrace)
 
@@ -467,10 +475,12 @@ proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
     forceRedraw: true,)
   data.registerComponent(result, Content.Filesystem)
 
-proc makeScratchpadComponent*(data: Data, id: int): ScratchpadComponent =
+proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): ScratchpadComponent =
   result = ScratchpadComponent(
     id: id,
-    service: data.services.debugger)
+    service: data.services.debugger,
+    inExtension: inExtension,
+  )
   data.registerComponent(result, Content.Scratchpad)
 
 func getId*(c: ChartComponent): int =
@@ -570,14 +580,16 @@ proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponen
     calltrace: data.services.calltrace)
   data.registerComponent(result, Content.CalltraceEditor)
 
-proc makeTerminalOutputComponent*(data: Data, id: int): TerminalOutputComponent =
+proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false): TerminalOutputComponent =
   result = TerminalOutputComponent(
     id: id,
     cachedLines: JsAssoc[int, seq[TerminalEvent]]{},
     cachedEvents: @[],
     lineEventIndices: JsAssoc[int, int]{},
     service: data.services.eventLog,
-    initialUpdate: true)
+    initialUpdate: true,
+    inExtension: inExtension,
+  )
   data.registerComponent(result, Content.TerminalOutput)
 
 proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
@@ -1323,3 +1335,14 @@ proc resetView*(self: WelcomeScreenComponent) =
   self.welcomeScreen = false
   self.newRecordScreen = false
   self.openOnlineTrace = false
+
+type VsCode* = ref object
+  postMessage*: proc(js: JsObject): void
+
+var vscode*: VsCode
+
+when defined(ctInExtension):
+  proc acquireVsCodeApi(): VsCode {.importc.}
+  vscode = acquireVsCodeApi()
+else:
+  discard
