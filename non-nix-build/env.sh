@@ -80,7 +80,7 @@ pushd ../src/links
 
   [ ! -f bash ]         && ln -sf "$(readlink -f "$(which bash)")" bash
   [ ! -f node ]         && ln -sf "$(readlink -f "$(which node)")" node
-  [ ! -f ruby ]         && ln -sf "$(readlink -f "$(which ruby)")" ruby
+  [ ! -f ruby ]         && ln -sf "$(readlink -f "$(brew --prefix ruby)/bin/ruby")" ruby
   [ ! -f nargo ]        && ln -sf "$(readlink -f "$(which nargo)")" nargo
   [ ! -f electron ]     && ln -sf "$(readlink -f "$(which electron)")" electron
 popd
