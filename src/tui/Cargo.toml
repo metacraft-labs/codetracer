@@ -19,3 +19,7 @@ serde_repr = "0.1"
 notify = "6.1.1"
 futures = "0.3.30"
 futures-timer = "3.0.3"
+
+[[bin]]
+name = "simple_tui"
+path = "src/simple_tui.rs"
