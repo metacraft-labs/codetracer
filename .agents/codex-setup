@@ -7,8 +7,18 @@ echo ""
 # TODO: research this in depth, not critical for db-backend itself for now 
 # git submodule update --init --recursive
 
+rustup component add clippy
+rustup component add rustfmt
+
 cd src/db-backend
 cargo build
-rustup component add clippy
+cd ../../
+
+cd src/tui
+cargo build
+cd ../../
+
+cd src/small-lang
+cargo build
 cd ../../
 
