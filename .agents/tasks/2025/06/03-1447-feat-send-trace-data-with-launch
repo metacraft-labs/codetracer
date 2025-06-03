@@ -1,0 +1,6 @@
+send trace metadata: path to trace folder and pid with launch as 
+implementation-specific fields; stop accepting them from command line
+
+in the DAP server: read trace metadata from the passed path and print it
+
+update the test with the new launching fields/command line API
