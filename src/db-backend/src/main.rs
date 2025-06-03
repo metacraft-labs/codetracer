@@ -13,14 +13,14 @@
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{mpsc, LazyLock, Mutex};
+
 use std::thread;
 use std::time::Instant;
 use std::{error::Error, panic};
 use std::panic::PanicHookInfo;
 use clap::Parser;
 use log::{error, info};
-use task::{EventId, EventKind, Notification, NotificationKind};
+
 
 mod calltrace;
 mod core;
@@ -43,10 +43,7 @@ mod value;
 
 use core::Core;
 use db::Db;
-use handler::Handler;
-use receiver::Receiver;
-use response::Response;
-use sender::Sender;
+
 use trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
 /// a custom backend for ruby (maybe others) support
@@ -64,28 +61,11 @@ struct Args {
     trace_metadata_file: PathBuf,
 }
 
-static TX2: LazyLock<Mutex<Option<mpsc::Sender<Response>>>> = LazyLock::new(|| Mutex::new(None)); // 🤮
 
 // Already panicking so the unwraps won't change anything
 #[allow(clippy::unwrap_used)]
 fn panic_handler(info: &PanicHookInfo) {
     error!("PANIC!!! {}", info);
-
-    let guard = TX2.lock().unwrap();
-    let channel = guard.clone().unwrap();
-
-    let msg = format!("DB backend crashed! Please report this. Message: \"{}\"", info);
-
-    let notification = Notification::new(NotificationKind::Error, &msg, false);
-
-    channel
-        .send(Response::EventResponse((
-            EventKind::NewNotification,
-            EventId::new("backend-crash-0"),
-            serde_json::to_string(&notification).unwrap(),
-            false,
-        )))
-        .unwrap();
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -145,37 +125,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     // info!("cell_changes {:#?}", db.cell_changes);
     // db.display_variable_cells();
 
-    let mut receiver = Receiver::new();
-
-    let mut sender = Sender::new();
-    let (tx, rx): (mpsc::Sender<Response>, mpsc::Receiver<Response>) = mpsc::channel();
-
-    // No other threads will be using the mutex, so .lock() will never return Err()
-    #[allow(clippy::unwrap_used)]
-    {
-        let mut guard = TX2.lock().unwrap();
-        *guard = Some(tx.clone());
-    }
-
-    thread::spawn(move || {
-        // TODO: eventually create like that
-        // so socket is always valid and not Option
-        // to remove usage of `unwrap` in Core
-        // let mut sender = Sender::setup(..);
-
-        panic::set_hook(Box::new(panic_handler));
-
-        // backend-specific handler for
-        //   each different task
-        let mut handler = Handler::new(Box::new(db), tx.clone());
-
-        // TODO: possible errors?
-        let _setup_res = receiver.setup(cli.caller_process_pid);
-        let _ = receiver.receive_loop(&mut handler);
+    let socket_path = db_backend::dap_server::socket_path_for(cli.caller_process_pid);
+    let handle = thread::spawn(move || {
+        let _ = db_backend::dap_server::run(&socket_path);
     });
-
-    sender.setup(cli.caller_process_pid, true)?;
-    sender.send_loop(rx)?;
-
-    Ok(())
+    match handle.join() {
+        Ok(_) => Ok(()),
+        Err(_) => Err("dap server thread panicked".into()),
+    }
 }
