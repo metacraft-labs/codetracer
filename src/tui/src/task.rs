@@ -279,8 +279,7 @@ pub static mut TASK_ID_MAP: &'static mut [usize] = &mut [0; 100];
 
 fn from_camel_case_to_lisp_case(text: &str) -> String {
     let mut result = String::from("");
-    let mut i = 0;
-    for c in text.chars() {
+    for (i, c) in text.chars().enumerate() {
         if c.is_ascii_uppercase() {
             if i != 0 {
                 result.push('-');
@@ -289,9 +288,8 @@ fn from_camel_case_to_lisp_case(text: &str) -> String {
         } else {
             result.push(c);
         }
-        i += 1;
     }
-    return result;
+    result
 }
 
 pub fn to_task_kind_text(task_kind: TaskKind) -> String {
