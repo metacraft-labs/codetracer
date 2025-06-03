@@ -1,0 +1,2 @@
+add a simple DAP client : ready to connect to external DAP server, so it can ask
+for source code and load it in the editor
