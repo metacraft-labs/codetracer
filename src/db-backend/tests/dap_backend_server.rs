@@ -27,11 +27,11 @@ fn test_backend_dap_server() {
     let _ = fs::remove_dir_all(&tmp_dir);
     fs::create_dir_all(&tmp_dir).unwrap();
 
-    let trace_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("loop-trace/trace.json");
-    let trace_file = tmp_dir.join("trace.json");
-    fs::copy(&trace_src, &trace_file).unwrap();
-    let metadata_file = tmp_dir.join("trace_metadata.json");
-    fs::write(&metadata_file, "{\"workdir\":\"/tmp\",\"program\":\"test\",\"args\":[]}").unwrap();
+    // TODO: if we remove the `trace` from repo: we need to either record directly trace
+    // as part of the test, or temporarily run it only when `trace` is available
+    let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
+    let trace_file = trace_dir.join("trace.json");
+    let metadata_file = trace_dir.join("trace_metadata.json");
 
     let mut child = Command::new(bin)
         .arg(pid.to_string())
@@ -54,11 +54,20 @@ fn test_backend_dap_server() {
     dap::write_message(&mut writer, &launch).unwrap();
 
     let msg1 = dap::from_reader(&mut reader).unwrap();
-    match msg1 { DapMessage::Response(r) => assert_eq!(r.command, "initialize"), _ => panic!() }
+    match msg1 {
+        DapMessage::Response(r) => assert_eq!(r.command, "initialize"),
+        _ => panic!(),
+    }
     let msg2 = dap::from_reader(&mut reader).unwrap();
-    match msg2 { DapMessage::Event(e) => assert_eq!(e.event, "initialized"), _ => panic!() }
+    match msg2 {
+        DapMessage::Event(e) => assert_eq!(e.event, "initialized"),
+        _ => panic!(),
+    }
     let msg3 = dap::from_reader(&mut reader).unwrap();
-    match msg3 { DapMessage::Response(r) => assert_eq!(r.command, "launch"), _ => panic!() }
+    match msg3 {
+        DapMessage::Response(r) => assert_eq!(r.command, "launch"),
+        _ => panic!(),
+    }
 
     drop(writer);
     drop(reader);
