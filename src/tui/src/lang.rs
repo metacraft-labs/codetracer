@@ -18,5 +18,9 @@ pub enum Lang {
     Javascript,
     Lua,
     Asm,
+    Noir,
+    RustWasm,
+    CppWasm,
+    Small,
     Unknown,
 }
