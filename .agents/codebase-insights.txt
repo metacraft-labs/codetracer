@@ -1,0 +1,4 @@
+# Codebase insights
+
+- The `tui` crate contains a sample trace under `src/tui/trace/` used for basic testing.
+- The Debug Adapter Protocol client communicates over stdio with messages framed by a `Content-Length` header, implemented in `src/tui/src/dap_client.rs`.
