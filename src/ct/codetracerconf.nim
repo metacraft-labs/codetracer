@@ -31,7 +31,6 @@ type
 
     list,
     help,
-    version,
 
     electron,
 
@@ -148,10 +147,6 @@ type
       .}: string
     of help:
       helpArgs* {.
-        ignore
-      .} : seq[string]
-    of version:
-      versionArgs* {.
         ignore
       .} : seq[string]
     of console:
@@ -428,7 +423,7 @@ proc customValidateConfig*(conf: CodetracerConf) =
         isSetTraceFolder.int + isSetInteractive.int
       if setArgsCount > 1:
         errorMessage "configuration error: expected no more than one arg to command to be passed"
-        echo "Try `codetracer --help` for more information"
+        echo "Try `ct --help` for more information"
         quit(1)
       if not isSetPattern and not isSetTraceId and not isSetTraceFolder:
         replayInteractive = true
