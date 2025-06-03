@@ -1,4 +1,6 @@
-use db_backend::dap::{from_json, to_json, DapMessage, ProtocolMessage, Response};
+use db_backend::dap::{
+    from_json, to_json, DapMessage, ProtocolMessage, Response, RequestArguments,
+};
 use serde_json::json;
 
 #[test]
@@ -9,7 +11,12 @@ fn test_parse_initialize_request() {
         DapMessage::Request(req) => {
             assert_eq!(req.base.seq, 1);
             assert_eq!(req.command, "initialize");
-            assert_eq!(req.arguments["adapterID"], "small-lang");
+            match req.arguments {
+                RequestArguments::Other(ref v) => {
+                    assert_eq!(v["adapterID"], "small-lang");
+                }
+                _ => panic!("unexpected arguments"),
+            }
         }
         _ => panic!("expected request"),
     }
