@@ -10,7 +10,7 @@ use std::str;
 
 use crossterm::{
     cursor,
-    event::{KeyCode, KeyEventKind},
+    event::KeyCode,
     execute, queue,
     style::{self, Stylize},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -110,7 +110,7 @@ impl App {
             component.render()?;
         }
 
-        let _ = stdout.flush()?;
+        stdout.flush()?;
         Ok(())
     }
 
@@ -154,7 +154,7 @@ impl App {
         let pattern_str = pattern.as_str();
         statement.bind((1, pattern_str)).unwrap();
 
-        while let Ok(sqlite::State::Row) = statement.next() {
+        if let Ok(sqlite::State::Row) = statement.next() {
             return self.parse_trace_record(&statement);
         }
         Err(Box::new(std::io::Error::new(
@@ -201,8 +201,8 @@ impl App {
         let connection = sqlite::open(&db_path)?;
 
         // check if trace already exists
-        let mut check = connection
-            .prepare("SELECT id FROM traces WHERE outputFolder = ? LIMIT 1")?;
+        let mut check =
+            connection.prepare("SELECT id FROM traces WHERE outputFolder = ? LIMIT 1")?;
         check.bind((1, self.trace.output_folder.as_str()))?;
         if let Ok(sqlite::State::Row) = check.next() {
             self.trace.id = check.read::<i64, _>(0)?;
@@ -210,16 +210,14 @@ impl App {
         }
 
         // get next id
-        let mut st = connection
-            .prepare("SELECT maxTraceID FROM trace_values LIMIT 1")?;
-        let mut new_id = if let Ok(sqlite::State::Row) = st.next() {
+        let mut st = connection.prepare("SELECT maxTraceID FROM trace_values LIMIT 1")?;
+        let new_id = if let Ok(sqlite::State::Row) = st.next() {
             st.read::<i64, _>(0)?
         } else {
             0
         } + 1;
 
-        let mut update = connection
-            .prepare("UPDATE trace_values SET maxTraceID = ? WHERE 1")?;
+        let mut update = connection.prepare("UPDATE trace_values SET maxTraceID = ? WHERE 1")?;
         update.bind((1, new_id))?;
         let _ = update.next()?;
 
@@ -544,8 +542,7 @@ mod tests {
 
     #[test]
     fn load_trace_from_folder() {
-        let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("trace");
+        let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
         let app = App::default();
         let trace = app
             .load_trace_from_folder(trace_dir.to_str().unwrap())
@@ -605,8 +602,7 @@ mod tests {
 
         env::set_var("HOME", temp_home.to_str().unwrap());
 
-        let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("trace");
+        let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
         let mut app = App::default();
         app.trace = app
             .load_trace_from_folder(trace_dir.to_str().unwrap())

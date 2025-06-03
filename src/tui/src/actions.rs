@@ -1,10 +1,10 @@
 use futures::{future::FutureExt, select, StreamExt};
-use futures_timer::Delay;
-use std::time::Duration;
+// use futures_timer::Delay;
+// use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::event::Event as TuiEvent;
-use crossterm::event::{Event, EventStream, KeyCode};
+use crossterm::event::EventStream;
 
 // copied and adapted from
 // https://github.com/crossterm-rs/crossterm/blob/master/examples/event-stream-tokio.rs
