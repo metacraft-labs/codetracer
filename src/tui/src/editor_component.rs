@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::str;
 
-use crossterm::style::{self, StyledContent, Stylize};
+use crossterm::style::Stylize;
 
 use crate::component::Component;
 use crate::panel::{height, width, Panel};
@@ -88,7 +88,7 @@ impl Component for EditorComponent {
             self.current_iteration_and_loop_for(self.line);
         self.render()?;
         let mut stdout = io::stdout();
-        let _ = stdout.flush()?;
+        stdout.flush()?;
         Ok(())
     }
 
@@ -100,7 +100,7 @@ impl Component for EditorComponent {
         self.flow_update = flow_update;
         self.render()?;
         let mut stdout = io::stdout();
-        let _ = stdout.flush()?;
+        stdout.flush()?;
         Ok(())
     }
 

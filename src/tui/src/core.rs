@@ -4,7 +4,7 @@ use std::fs::create_dir_all;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::ChildStdin;
+// use std::process::ChildStdin;
 use std::str;
 use std::time;
 
@@ -57,7 +57,7 @@ impl Core {
 
     pub fn client_results_path(&self) -> PathBuf {
         let run_dir = self.run_dir();
-        run_dir.join("client_results.txt".to_string())
+        run_dir.join("client_results.txt")
     }
 
     pub fn event_path(&self, event_id: EventId) -> PathBuf {
@@ -185,9 +185,5 @@ pub fn caller_process_pid() -> u32 {
     let res: Result<u32, _> = env::var("CODETRACER_CALLER_PROCESS_PID")
         .unwrap_or("1".to_string())
         .parse();
-    if let Ok(res_pid) = res {
-        res_pid
-    } else {
-        1
-    }
+    res.unwrap_or(1)
 }
