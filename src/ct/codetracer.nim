@@ -3,11 +3,17 @@
 import
   ../common/types,
   launch/[ launch ],
-  codetracerconf, confutils
+  codetracerconf, confutils,
+  version
 
 try:
   if not eventuallyWrapElectron():
-    let conf = CodetracerConf.load()
+    # TODO: When confutils gets updated with nim 2 make sure to improve on the copyright banner, as newer versions
+    # support having prefix and postfix banners. The banner here is only a prefix banner
+    let conf = CodetracerConf.load(
+      version="CodeTracer version: " & string(version.CodeTracerVersionStr) & string(when defined(debug): "(debug)" else: ""),
+      copyrightBanner="CodeTracer - the user-friendly time-travelling debugger"
+    )
     customValidateConfig(conf)
     runInitial(conf)
 except Exception as ex:

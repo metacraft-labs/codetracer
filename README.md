@@ -136,8 +136,8 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
    - `ct replay --id=<trace-id>` - Opens a trace by its trace id.
    - `ct replay --trace-folder=<trace-folder>` - Opens a trace by its trace folder.
 1. `ct` - Launches the startup screen of the CodeTracer GUI.
-1. `ct help / ct --help` - Gives you a help message.
-1. `ct version` - Returns the current version of CodeTracer.
+1. `ct help`/`ct --help` - Gives you a help message.
+1. `ct version`/`ct --version` - Returns the current version of CodeTracer.
 
 ## Keyboard Shortcuts
 
@@ -181,7 +181,7 @@ CodeTracer includes a miniature Lisp-like language called **small** used in some
 | `(print expr ...)` | `(print x)` | Print to stdout |
 | `(write-file path data)` | `(write-file "out.txt" "hi")` | Write a file |
 
-### runtime_tracing events
+### runtime\_tracing events
 
 | Event | Purpose |
 |-------|---------|

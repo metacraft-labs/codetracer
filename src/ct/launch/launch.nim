@@ -6,7 +6,6 @@ import
   ../online_sharing/[ upload, download, delete ],
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
-  ../version,
   ../globals,
   electron,
   results,
@@ -104,8 +103,6 @@ proc runInitial*(conf: CodetracerConf) =
       listCommand(conf.listTarget, conf.listFormat)
     of StartupCommand.help:
       displayHelp()
-    of StartupCommand.version:
-      echo "CodeTracer ", when defined(debug): "debug " else: "", CodeTracerVersionStr
     of StartupCommand.console:
       # similar to replay
       notSupportedCommand($conf.cmd)
