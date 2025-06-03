@@ -188,7 +188,7 @@ impl App {
             output_folder: folder.to_string(),
             date: String::new(),
             duration: String::new(),
-            lang: Lang::Unknown,
+            lang: Lang::RustWasm, // TODO
             imported: true,
         })
     }
@@ -331,7 +331,8 @@ impl App {
 
         if std::path::Path::new(program_pattern).is_dir() {
             self.trace = self.load_trace_from_folder(program_pattern)?;
-            self.register_trace_in_db()?;
+            // not needed for tui
+            // self.register_trace_in_db()?;
         } else {
             self.trace = self.load_trace_from_program(program_pattern)?;
         }
