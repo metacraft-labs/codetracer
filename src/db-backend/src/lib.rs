@@ -22,6 +22,7 @@ pub mod task;
 pub mod trace_processor;
 pub mod tracepoint_interpreter;
 pub mod value;
+pub mod dap;
 
 // use event_db::{DbEventKind, EventDb};
 // use task::{ProgramEvent, UpdateTableArgs};

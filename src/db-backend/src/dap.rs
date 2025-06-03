@@ -1,0 +1,120 @@
+use serde::{de::Error as SerdeError, Deserialize, Serialize};
+use serde_json::Value;
+use std::io::{BufRead, Write};
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct ProtocolMessage {
+    pub seq: i64,
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct Request {
+    #[serde(flatten)]
+    pub base: ProtocolMessage,
+    pub command: String,
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct Response {
+    #[serde(flatten)]
+    pub base: ProtocolMessage,
+    pub request_seq: i64,
+    pub success: bool,
+    pub command: String,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub body: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct Event {
+    #[serde(flatten)]
+    pub base: ProtocolMessage,
+    pub event: String,
+    #[serde(default)]
+    pub body: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum DapMessage {
+    Request(Request),
+    Response(Response),
+    Event(Event),
+}
+
+pub struct DapClient {
+    seq: i64,
+}
+
+impl Default for DapClient {
+    fn default() -> Self {
+        DapClient { seq: 1 }
+    }
+}
+
+impl DapClient {
+    pub fn request(&mut self, command: &str, arguments: Value) -> DapMessage {
+        let message = DapMessage::Request(Request {
+            base: ProtocolMessage {
+                seq: self.seq,
+                type_: "request".to_string(),
+            },
+            command: command.to_string(),
+            arguments,
+        });
+        self.seq += 1;
+        message
+    }
+}
+
+pub fn from_json(s: &str) -> Result<DapMessage, serde_json::Error> {
+    let value: Value = serde_json::from_str(s)?;
+    match value.get("type").and_then(|v| v.as_str()) {
+        Some("request") => Ok(DapMessage::Request(serde_json::from_value(value)?)),
+        Some("response") => Ok(DapMessage::Response(serde_json::from_value(value)?)),
+        Some("event") => Ok(DapMessage::Event(serde_json::from_value(value)?)),
+        _ => Err(serde_json::Error::custom("Unknown DAP message type")),
+    }
+}
+
+pub fn to_json(message: &DapMessage) -> Result<String, serde_json::Error> {
+    serde_json::to_string(message)
+}
+
+pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json::Error> {
+    let mut header = String::new();
+    reader.read_line(&mut header).map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    if !header.to_ascii_lowercase().starts_with("content-length:") {
+        return Err(serde_json::Error::custom("Missing Content-Length header"));
+    }
+    let len_part = header.split(':').nth(1).ok_or_else(|| serde_json::Error::custom("Invalid Content-Length"))?;
+    let len: usize = len_part
+        .trim()
+        .parse::<usize>()
+        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    let mut blank = String::new();
+    reader.read_line(&mut blank).map_err(|e| serde_json::Error::custom(e.to_string()))?; // consume blank line
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    let json_text = std::str::from_utf8(&buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    from_json(json_text)
+}
+
+pub fn write_message<W: Write>(writer: &mut W, message: &DapMessage) -> Result<(), serde_json::Error> {
+    let json = to_json(message)?;
+    let header = format!("Content-Length: {}\r\n\r\n", json.len());
+    writer
+        .write_all(header.as_bytes())
+        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    writer
+        .write_all(json.as_bytes())
+        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    writer.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    Ok(())
+}
