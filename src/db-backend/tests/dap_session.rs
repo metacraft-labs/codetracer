@@ -1,4 +1,4 @@
-use db_backend::dap::{self, DapClient, DapMessage, Event, ProtocolMessage, Response};
+use db_backend::dap::{self, DapClient, DapMessage, Event, ProtocolMessage, Response, LaunchRequestArguments, RequestArguments};
 use serde_json::json;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
@@ -59,10 +59,16 @@ fn test_simple_session() {
     let mut writer = client_stream;
 
     let mut client = DapClient::default();
-    let init = client.request("initialize", json!({"adapterID":"small-lang"}));
+    let init = client.request("initialize", RequestArguments::Other(json!({"adapterID":"small-lang"}))); 
     dap::write_message(&mut writer, &init).unwrap();
 
-    let launch = client.request("launch", json!({"program":"main"}));
+    let launch = client.launch(LaunchRequestArguments {
+        program: Some("main".to_string()),
+        trace_folder: None,
+        pid: None,
+        no_debug: None,
+        restart: None,
+    });
     dap::write_message(&mut writer, &launch).unwrap();
 
     let msg1 = dap::from_reader(&mut reader).unwrap();
