@@ -11,16 +11,44 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 
+mod dap_client;
+use dap_client::DapClient;
+
 struct App {
     lines: Vec<String>,
     scroll: u16,
+    dap: Option<DapClient>,
 }
 
 impl App {
-    fn new(file_path: &str) -> Result<Self, Box<dyn Error>> {
-        let content = fs::read_to_string(file_path)?;
+    /// Create a new application instance.
+    ///
+    /// `trace_dir` is the directory containing a recorded trace. The
+    /// application always opens the `trace.json` file from this directory. When
+    /// a DAP server binary is provided, the DAP client is started and a launch
+    /// request is sent containing our PID and the trace directory path.
+    fn new(trace_dir: &str, dap_bin: Option<&str>) -> Result<Self, Box<dyn Error>> {
+        let mut dap = if let Some(bin) = dap_bin {
+            Some(DapClient::start(bin)?)
+        } else {
+            None
+        };
+
+        if let Some(client) = dap.as_mut() {
+            // Inform the DAP server about the trace we want to analyze
+            client.launch(trace_dir)?;
+        }
+
+        let trace_file = format!("{}/trace.json", trace_dir);
+
+        let content = if let Some(client) = dap.as_mut() {
+            client.request_source(&trace_file)?
+        } else {
+            fs::read_to_string(&trace_file)?
+        };
+
         let lines = content.lines().map(|l| l.to_string()).collect();
-        Ok(Self { lines, scroll: 0 })
+        Ok(Self { lines, scroll: 0, dap })
     }
 
     fn scroll_up(&mut self) {
@@ -55,10 +83,11 @@ fn ui(f: &mut Frame, app: &App) {
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: simple-tui <file>");
+        eprintln!("Usage: simple-tui <trace-dir> [dap-server-path]");
         std::process::exit(1);
     }
-    let mut app = App::new(&args[1])?;
+    let dap_bin = if args.len() > 2 { Some(args[2].as_str()) } else { None };
+    let mut app = App::new(&args[1], dap_bin)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
