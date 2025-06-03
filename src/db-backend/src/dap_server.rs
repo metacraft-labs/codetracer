@@ -1,11 +1,12 @@
-use crate::dap::{self, DapMessage, Event, ProtocolMessage, Response};
+use crate::dap::{self, DapMessage, Event, ProtocolMessage, Response, RequestArguments};
+use crate::trace_processor::load_trace_metadata;
 use serde_json::json;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::error::Error;
 
-const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
+pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
 pub fn socket_path_for(pid: usize) -> PathBuf {
     PathBuf::from(format!("{DAP_SOCKET_PATH}_{}", pid))
@@ -37,6 +38,18 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                 dap::write_message(&mut writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "launch" => {
+                if let RequestArguments::Launch(args) = &req.arguments {
+                    if let Some(folder) = &args.trace_folder {
+                        let metadata_path = folder.join("trace_metadata.json");
+                        match load_trace_metadata(&metadata_path) {
+                            Ok(meta) => println!("TRACE METADATA: {:?}", meta),
+                            Err(e) => eprintln!("failed to read metadata: {}", e),
+                        }
+                    }
+                    if let Some(pid) = args.pid {
+                        println!("PID: {}", pid);
+                    }
+                }
                 let event = DapMessage::Event(Event {
                     base: ProtocolMessage { seq, type_: "event".to_string() },
                     event: "initialized".to_string(),

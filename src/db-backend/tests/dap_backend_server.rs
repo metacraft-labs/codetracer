@@ -1,7 +1,6 @@
-use db_backend::dap::{self, DapClient, DapMessage};
-use db_backend::dap_server;
+use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, RequestArguments};
+use db_backend::dap_server::{self};
 use serde_json::json;
-use std::fs;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -23,24 +22,10 @@ fn wait_for_socket(path: &Path) {
 fn test_backend_dap_server() {
     let bin = env!("CARGO_BIN_EXE_db-backend");
     let pid = std::process::id() as usize;
-    let tmp_dir = std::env::temp_dir().join(format!("dap_test_{pid}"));
-    let _ = fs::remove_dir_all(&tmp_dir);
-    fs::create_dir_all(&tmp_dir).unwrap();
-
-    // TODO: if we remove the `trace` from repo: we need to either record directly trace
-    // as part of the test, or temporarily run it only when `trace` is available
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
-    let trace_file = trace_dir.join("trace.json");
-    let metadata_file = trace_dir.join("trace_metadata.json");
 
-    let mut child = Command::new(bin)
-        .arg(pid.to_string())
-        .arg(&trace_file)
-        .arg(&metadata_file)
-        .spawn()
-        .unwrap();
-
-    let socket_path = dap_server::socket_path_for(pid);
+    let mut child = Command::new(bin).spawn().unwrap();
+    let socket_path = dap_server::socket_path_for(child.id() as usize);
     wait_for_socket(&socket_path);
 
     let stream = UnixStream::connect(&socket_path).unwrap();
@@ -48,9 +33,16 @@ fn test_backend_dap_server() {
     let mut writer = stream;
 
     let mut client = DapClient::default();
-    let init = client.request("initialize", json!({}));
+    let init = client.request("initialize", RequestArguments::Other(json!({}))); 
     dap::write_message(&mut writer, &init).unwrap();
-    let launch = client.request("launch", json!({"program":"main"}));
+    let launch_args = LaunchRequestArguments {
+        program: Some("main".to_string()),
+        trace_folder: Some(trace_dir),
+        pid: Some(pid as u64),
+        no_debug: None,
+        restart: None,
+    };
+    let launch = client.launch(launch_args);
     dap::write_message(&mut writer, &launch).unwrap();
 
     let msg1 = dap::from_reader(&mut reader).unwrap();
