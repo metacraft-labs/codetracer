@@ -141,7 +141,7 @@ impl App {
         Ok(trace)
     }
 
-    fn load_trace(&self, program_pattern: &str) -> Result<Trace, Box<dyn Error>> {
+    fn load_trace_from_program(&self, program_pattern: &str) -> Result<Trace, Box<dyn Error>> {
         let db_path = home::home_dir()
             .unwrap()
             .join(".local/share/codetracer/trace_index.db");
@@ -161,6 +161,95 @@ impl App {
             std::io::ErrorKind::Other,
             "sqlite loading trace error",
         )))
+    }
+
+    fn load_trace_from_folder(&self, folder: &str) -> Result<Trace, Box<dyn Error>> {
+        #[derive(serde::Deserialize)]
+        struct TraceMetadata {
+            program: String,
+            args: Vec<String>,
+            workdir: String,
+        }
+
+        let metadata_path = PathBuf::from(folder).join("trace_metadata.json");
+        let raw = std::fs::read_to_string(&metadata_path)?;
+        let metadata: TraceMetadata = serde_json::from_str(&raw)?;
+
+        Ok(Trace {
+            id: -1,
+            program: metadata.program,
+            args: metadata.args,
+            env: String::new(),
+            workdir: metadata.workdir,
+            output: String::new(),
+            source_folders: vec![folder.to_string()],
+            low_level_folder: String::new(),
+            compile_command: String::new(),
+            output_folder: folder.to_string(),
+            date: String::new(),
+            duration: String::new(),
+            lang: Lang::Unknown,
+            imported: true,
+        })
+    }
+
+    fn register_trace_in_db(&mut self) -> Result<(), Box<dyn Error>> {
+        let db_path = home::home_dir()
+            .ok_or("no home")?
+            .join(".local/share/codetracer/trace_index.db");
+
+        let connection = sqlite::open(&db_path)?;
+
+        // check if trace already exists
+        let mut check = connection
+            .prepare("SELECT id FROM traces WHERE outputFolder = ? LIMIT 1")?;
+        check.bind((1, self.trace.output_folder.as_str()))?;
+        if let Ok(sqlite::State::Row) = check.next() {
+            self.trace.id = check.read::<i64, _>(0)?;
+            return Ok(());
+        }
+
+        // get next id
+        let mut st = connection
+            .prepare("SELECT maxTraceID FROM trace_values LIMIT 1")?;
+        let mut new_id = if let Ok(sqlite::State::Row) = st.next() {
+            st.read::<i64, _>(0)?
+        } else {
+            0
+        } + 1;
+
+        let mut update = connection
+            .prepare("UPDATE trace_values SET maxTraceID = ? WHERE 1")?;
+        update.bind((1, new_id))?;
+        let _ = update.next()?;
+
+        let args_joined = self.trace.args.join(" ");
+        let folders_joined = self.trace.source_folders.join(" ");
+        let mut insert = connection.prepare(
+            "INSERT INTO traces (id, program, args, compileCommand, env, workdir, output, sourceFolders, lowLevelFolder, outputFolder, lang, imported, shellID, rrPid, exitCode, calltrace, calltraceMode, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )?;
+        insert.bind((1, new_id))?;
+        insert.bind((2, self.trace.program.as_str()))?;
+        insert.bind((3, args_joined.as_str()))?;
+        insert.bind((4, self.trace.compile_command.as_str()))?;
+        insert.bind((5, self.trace.env.as_str()))?;
+        insert.bind((6, self.trace.workdir.as_str()))?;
+        insert.bind((7, self.trace.output.as_str()))?;
+        insert.bind((8, folders_joined.as_str()))?;
+        insert.bind((9, self.trace.low_level_folder.as_str()))?;
+        insert.bind((10, self.trace.output_folder.as_str()))?;
+        insert.bind((11, self.trace.lang as i64))?;
+        insert.bind((12, 1i64))?;
+        insert.bind((13, 0i64))?;
+        insert.bind((14, -1i64))?;
+        insert.bind((15, -1i64))?;
+        insert.bind((16, 1i64))?;
+        insert.bind((17, "FullRecord"))?;
+        insert.bind((18, self.trace.date.as_str()))?;
+        let _ = insert.next()?;
+
+        self.trace.id = new_id;
+        Ok(())
     }
 
     fn process_incoming_messages(&mut self) {}
@@ -242,7 +331,12 @@ impl App {
 
         self.caller_process_pid = caller_process_pid();
 
-        self.trace = self.load_trace(program_pattern)?;
+        if std::path::Path::new(program_pattern).is_dir() {
+            self.trace = self.load_trace_from_folder(program_pattern)?;
+            self.register_trace_in_db()?;
+        } else {
+            self.trace = self.load_trace_from_program(program_pattern)?;
+        }
 
         // problems with start_socket and unix stream
         // for now use files
@@ -440,4 +534,93 @@ async fn main() -> Result<(), Box<dyn Error>> {
     execute!(io::stdout(), LeaveAlternateScreen)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    use std::path::PathBuf;
+    use std::{env, fs};
+
+    #[test]
+    fn load_trace_from_folder() {
+        let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("trace");
+        let app = App::default();
+        let trace = app
+            .load_trace_from_folder(trace_dir.to_str().unwrap())
+            .expect("load trace from folder");
+        assert_eq!(trace.program, "example_prog");
+        assert_eq!(trace.args, vec!["example_prog".to_string()]);
+        assert_eq!(trace.output_folder, trace_dir.to_str().unwrap().to_string());
+    }
+
+    #[test]
+    fn register_trace_in_db() {
+        let base = env::temp_dir().join("ct_tui_test_db");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let temp_home = base.join("home");
+        let db_dir = temp_home.join(".local/share/codetracer");
+        fs::create_dir_all(&db_dir).unwrap();
+        let db_path = db_dir.join("trace_index.db");
+        let connection = sqlite::open(&db_path).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS traces (
+                    id integer,
+                    program text,
+                    args text,
+                    compileCommand text,
+                    env text,
+                    workdir text,
+                    output text,
+                    sourceFolders text,
+                    lowLevelFolder text,
+                    outputFolder text,
+                    lang integer,
+                    imported integer,
+                    shellID integer,
+                    rrPid integer,
+                    exitCode integer,
+                    calltrace integer,
+                    calltraceMode string,
+                    date text);",
+                (),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS trace_values (id integer, maxTraceID integer, UNIQUE(id));",
+                (),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO trace_values (id, maxTraceID) VALUES (0, 0)",
+                (),
+            )
+            .unwrap();
+        drop(connection);
+
+        env::set_var("HOME", temp_home.to_str().unwrap());
+
+        let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("trace");
+        let mut app = App::default();
+        app.trace = app
+            .load_trace_from_folder(trace_dir.to_str().unwrap())
+            .unwrap();
+        app.register_trace_in_db().unwrap();
+
+        let connection = sqlite::open(&db_path).unwrap();
+        let mut st = connection.prepare("SELECT COUNT(*) FROM traces").unwrap();
+        let count = if let Ok(sqlite::State::Row) = st.next() {
+            st.read::<i64, _>(0).unwrap()
+        } else {
+            0
+        };
+        assert_eq!(count, 1);
+        assert_eq!(app.trace.id, 1);
+    }
 }
