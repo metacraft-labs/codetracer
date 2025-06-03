@@ -1,5 +1,6 @@
 use serde::{de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
 use std::io::{BufRead, Write};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -15,7 +16,35 @@ pub struct Request {
     pub base: ProtocolMessage,
     pub command: String,
     #[serde(default)]
-    pub arguments: Value,
+    pub arguments: RequestArguments,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchRequestArguments {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    #[serde(rename = "traceFolder", skip_serializing_if = "Option::is_none")]
+    pub trace_folder: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u64>,
+    #[serde(rename = "noDebug", skip_serializing_if = "Option::is_none")]
+    pub no_debug: Option<bool>,
+    #[serde(rename = "__restart", skip_serializing_if = "Option::is_none")]
+    pub restart: Option<Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum RequestArguments {
+    Launch(LaunchRequestArguments),
+    Other(Value),
+}
+
+impl Default for RequestArguments {
+    fn default() -> Self {
+        RequestArguments::Other(Value::Null)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -59,7 +88,7 @@ impl Default for DapClient {
 }
 
 impl DapClient {
-    pub fn request(&mut self, command: &str, arguments: Value) -> DapMessage {
+    pub fn request(&mut self, command: &str, arguments: RequestArguments) -> DapMessage {
         let message = DapMessage::Request(Request {
             base: ProtocolMessage {
                 seq: self.seq,
@@ -70,6 +99,10 @@ impl DapClient {
         });
         self.seq += 1;
         message
+    }
+
+    pub fn launch(&mut self, args: LaunchRequestArguments) -> DapMessage {
+        self.request("launch", RequestArguments::Launch(args))
     }
 }
 
