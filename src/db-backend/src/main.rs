@@ -10,12 +10,11 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
-use std::thread;
-use std::{error::Error, panic};
-use std::panic::PanicHookInfo;
 use clap::Parser;
 use log::error;
-
+use std::panic::PanicHookInfo;
+use std::thread;
+use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
@@ -36,7 +35,6 @@ mod trace_processor;
 mod tracepoint_interpreter;
 mod value;
 
-
 /// a custom backend for ruby (maybe others) support
 /// based on db-like approach based on trace instead of rr/gdb
 #[derive(Parser, Debug)]
@@ -46,7 +44,6 @@ struct Args {
     /// If omitted, a path based on the process id will be used.
     socket_path: Option<std::path::PathBuf>,
 }
-
 
 // Already panicking so the unwraps won't change anything
 #[allow(clippy::unwrap_used)]
@@ -66,6 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         db_backend::dap_server::socket_path_for(pid)
     };
 
+    println!("pid {:?}", std::process::id());
     let handle = thread::spawn(move || {
         let _ = db_backend::dap_server::run(&socket_path);
     });

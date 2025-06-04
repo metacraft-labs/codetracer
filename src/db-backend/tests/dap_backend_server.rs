@@ -25,10 +25,7 @@ fn test_backend_dap_server() {
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
 
     let socket_path = dap_server::socket_path_for(std::process::id() as usize);
-    let mut child = Command::new(bin)
-        .arg(&socket_path)
-        .spawn()
-        .unwrap();
+    let mut child = Command::new(bin).arg(&socket_path).spawn().unwrap();
     wait_for_socket(&socket_path);
 
     let stream = UnixStream::connect(&socket_path).unwrap();
@@ -36,7 +33,7 @@ fn test_backend_dap_server() {
     let mut writer = stream;
 
     let mut client = DapClient::default();
-    let init = client.request("initialize", RequestArguments::Other(json!({}))); 
+    let init = client.request("initialize", RequestArguments::Other(json!({})));
     dap::write_message(&mut writer, &init).unwrap();
     let launch_args = LaunchRequestArguments {
         program: Some("main".to_string()),
