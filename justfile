@@ -125,19 +125,22 @@ findtmp:
   if [ "$(uname)" = "Darwin" ]; then
     echo "$HOME/Library/Caches/com.codetracer.CodeTracer"
   else
-    echo "${TEMP:-${TMP:-${TEMPDIR:-${TMPDIR:-/tmp}}}}"
+    echo "${TEMP:-${TMP:-${TEMPDIR:-${TMPDIR:-/tmp}}}}/codetracer"
   fi
 
 clean-logs:
-  @TTMP=$(just findtmp) ; \
+  #!/usr/bin/env bash
+  TTMP=$(just findtmp) ; \
   rm -rf $TTMP/
 
 archive-logs pid_or_current_or_last:
-  @TTMP=$(just findtmp) ; \
+  #!/usr/bin/env bash
+  TTMP=$(just findtmp) ; \
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
   zip -r codetracer-logs-{{pid_or_current_or_last}}.zip $TTMP/codetracer/run-${pid}
 
 log-file pid_or_current_or_last kind process="default" instance_index="0":
+  #!/usr/bin/env bash
   # first argument can be either `current`, `last` or a pid number
   # `kind` can be one of
   #   task_process, scripts, index, rr_gdb_raw or dispatcher
@@ -164,7 +167,7 @@ log-file pid_or_current_or_last kind process="default" instance_index="0":
     export actual_process={{process}}; \
   fi; \
   export pid=$(just pid {{pid_or_current_or_last}}); \
-  @TTMP=$(just findtmp) ; \
+  TTMP=$(just findtmp) ; \
   if [[ "{{kind}}" == "workers" ]]; then \
     echo "$TTMP/codetracer/run-${pid}/processes.txt"; \
   else \
@@ -198,11 +201,12 @@ clear-local-traces:
   rm -rf ~/.local/share/codetracer
 
 pid pid_or_current_or_last:
+  #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   if [[ "{{pid_or_current_or_last}}" == "current" ]]; then \
     echo $(ps aux | grep src/build-debug/codetracer | head -n 1 | awk '{print $2}') ; \
   elif [[ "{{pid_or_current_or_last}}" == "last" ]]; then \
-    @TTMP=$(just findtmp) ; \
+    TTMP=$(just findtmp) ; \
     echo $(cat $TTMP/codetracer/last-start-pid) ; \
   else \
     echo {{pid_or_current_or_last}} ; \
@@ -214,21 +218,24 @@ log-task pid_or_current_or_last task-id:
   python3 src/tools/log_task.py ${pid} {{task-id}}
 
 log-event pid_or_current_or_last event-id:
+  #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
-  @TTMP=$(just findtmp) ; \
+  TTMP=$(just findtmp) ; \
   cat $TTMP/codetracer/run-${pid}/events/{{event-id}}.json
 
 log-result pid_or_current_or_last task-id:
+  #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
-  @TTMP=$(just findtmp) ; \
+  TTMP=$(just findtmp) ; \
   cat $TTMP/codetracer/run-${pid}/results/{{task-id}}.json
 
 log-args pid_or_current_or_last task-id:
+  #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   export pid=$(just pid {{pid_or_current_or_last}}) ; \
-  @TTMP=$(just findtmp) ; \
+  TTMP=$(just findtmp) ; \
   cat $TTMP/codetracer/run-${pid}/args/{{task-id}}.json
 
 
