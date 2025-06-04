@@ -123,6 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // // db.display_variable_cells();
 
     // let socket_path = db_backend::dap_server::socket_path_for(cli.caller_process_pid);
+    println!("pid {:?}", std::process::id());
     let handle = thread::spawn(move || {
         let _ = db_backend::dap_server::run(&socket_path);
     });
