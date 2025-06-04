@@ -1,7 +1,7 @@
 use serde::{de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct ProtocolMessage {
@@ -122,19 +122,29 @@ pub fn to_json(message: &DapMessage) -> Result<String, serde_json::Error> {
 
 pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json::Error> {
     let mut header = String::new();
-    reader.read_line(&mut header).map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    reader
+        .read_line(&mut header)
+        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     if !header.to_ascii_lowercase().starts_with("content-length:") {
+        println!("no content-length!");
         return Err(serde_json::Error::custom("Missing Content-Length header"));
     }
-    let len_part = header.split(':').nth(1).ok_or_else(|| serde_json::Error::custom("Invalid Content-Length"))?;
+    let len_part = header
+        .split(':')
+        .nth(1)
+        .ok_or_else(|| serde_json::Error::custom("Invalid Content-Length"))?;
     let len: usize = len_part
         .trim()
         .parse::<usize>()
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     let mut blank = String::new();
-    reader.read_line(&mut blank).map_err(|e| serde_json::Error::custom(e.to_string()))?; // consume blank line
+    reader
+        .read_line(&mut blank)
+        .map_err(|e| serde_json::Error::custom(e.to_string()))?; // consume blank line
     let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    reader
+        .read_exact(&mut buf)
+        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     let json_text = std::str::from_utf8(&buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
     from_json(json_text)
 }

@@ -1,6 +1,4 @@
-use db_backend::dap::{
-    from_json, to_json, DapMessage, ProtocolMessage, Response, RequestArguments,
-};
+use db_backend::dap::{from_json, to_json, DapMessage, ProtocolMessage, RequestArguments, Response};
 use serde_json::json;
 
 #[test]
@@ -25,7 +23,10 @@ fn test_parse_initialize_request() {
 #[test]
 fn test_serialize_initialize_response() {
     let resp = Response {
-        base: ProtocolMessage { seq: 2, type_: "response".to_string() },
+        base: ProtocolMessage {
+            seq: 2,
+            type_: "response".to_string(),
+        },
         request_seq: 1,
         success: true,
         command: "initialize".to_string(),

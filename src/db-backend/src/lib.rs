@@ -6,6 +6,8 @@
 
 pub mod calltrace;
 pub mod core;
+pub mod dap;
+pub mod dap_server;
 pub mod db;
 pub mod distinct_vec;
 pub mod event_db;
@@ -13,6 +15,7 @@ pub mod expr_loader;
 pub mod flow_preloader;
 pub mod handler;
 pub mod lang;
+pub mod paths;
 pub mod program_search_tool;
 pub mod receiver;
 pub mod response;
@@ -22,9 +25,6 @@ pub mod task;
 pub mod trace_processor;
 pub mod tracepoint_interpreter;
 pub mod value;
-pub mod paths;
-pub mod dap;
-pub mod dap_server;
 
 // use event_db::{DbEventKind, EventDb};
 // use task::{ProgramEvent, UpdateTableArgs};

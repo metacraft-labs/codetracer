@@ -1,10 +1,10 @@
-use crate::dap::{self, DapMessage, Event, ProtocolMessage, Response, RequestArguments};
+use crate::dap::{self, DapMessage, Event, ProtocolMessage, RequestArguments, Response};
 use crate::trace_processor::load_trace_metadata;
 use serde_json::json;
+use std::error::Error;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::error::Error;
 
 pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
@@ -27,7 +27,10 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage { seq, type_: "response".to_string() },
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
                     request_seq: req.base.seq,
                     success: true,
                     command: "initialize".to_string(),
@@ -51,14 +54,20 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     }
                 }
                 let event = DapMessage::Event(Event {
-                    base: ProtocolMessage { seq, type_: "event".to_string() },
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "event".to_string(),
+                    },
                     event: "initialized".to_string(),
                     body: json!({}),
                 });
                 seq += 1;
                 dap::write_message(&mut writer, &event)?;
                 let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage { seq, type_: "response".to_string() },
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
                     request_seq: req.base.seq,
                     success: true,
                     command: "launch".to_string(),
