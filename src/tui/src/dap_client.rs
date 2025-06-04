@@ -1,3 +1,4 @@
+use log::{error, info};
 use serde_json::json;
 use std::error::Error;
 use std::io::{BufReader, Read, Write};
@@ -17,9 +18,16 @@ impl DapClient {
         let socket_path = format!("/tmp/ct_dap_socket_{pid}");
         let _ = std::fs::remove_file(&socket_path);
 
-        let child = Command::new(server_bin)
-            .arg(&socket_path)
-            .spawn()?;
+        let child = if server_bin.ends_with("dlv") {
+            Command::new(server_bin)
+                .arg("dap")
+                .arg("-l")
+                .arg(format!("unix:{socket_path}"))
+                .spawn()?
+        } else {
+            // if server_bin.ends_with("db-backend") {
+            Command::new(server_bin).arg(&socket_path).spawn()?
+        };
 
         // wait for server to open socket and connect
         let mut retries = 0;
@@ -46,7 +54,7 @@ impl DapClient {
 
     /// Send a launch request to the DAP server with the current process id and
     /// the path to the trace directory as custom fields.
-    pub fn launch(&mut self, trace_path: &str) -> Result<(), Box<dyn Error>> {
+    pub fn launch(&mut self, trace_path: &str, program: &str) -> Result<(), Box<dyn Error>> {
         let seq = self.seq;
         self.seq += 1;
         let pid = std::process::id();
@@ -56,7 +64,8 @@ impl DapClient {
             "command": "launch",
             "arguments": {
                 "pid": pid,
-                "tracePath": trace_path
+                "tracePath": trace_path,
+                "program": program,
             }
         });
         self.send_message(&req)?;
@@ -67,12 +76,14 @@ impl DapClient {
         {
             return Ok(());
         }
-        Err("launch failed".into())
+        error!("client: DAP: launch request failed: resp: {:?}", resp);
+        Err("DAP: launch request failed".into())
     }
 
     fn send_message(&mut self, msg: &serde_json::Value) -> Result<(), Box<dyn Error>> {
         let data = serde_json::to_string(msg)?;
         let header = format!("Content-Length: {}\r\n\r\n", data.len());
+        info!("client: DAP: ->: {}{}", header, data);
         self.writer.write_all(header.as_bytes())?;
         self.writer.write_all(data.as_bytes())?;
         self.writer.flush()?;
@@ -94,6 +105,7 @@ impl DapClient {
         let len: usize = len_line["Content-Length:".len()..].trim().parse()?;
         let mut data = vec![0u8; len];
         self.reader.read_exact(&mut data)?;
+        info!("client: DAP: <-: {}", String::from_utf8(data.clone())?);
         Ok(serde_json::from_slice(&data)?)
     }
 
@@ -125,4 +137,3 @@ impl DapClient {
         Err("unexpected response".into())
     }
 }
-
