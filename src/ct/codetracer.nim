@@ -2,6 +2,7 @@
 
 import
   ../common/types,
+  ../common/ct_logging,
   launch/[ launch ],
   codetracerconf, confutils,
   version
@@ -19,5 +20,4 @@ try:
 except Exception as ex:
   echo "Unhandled exception"
   echo getStackTrace(ex)
-  error "error: unhandled " & ex.msg
-
+  echo "error: unhandled " & ex.msg
