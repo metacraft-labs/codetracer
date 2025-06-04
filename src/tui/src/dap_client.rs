@@ -4,6 +4,7 @@ use std::error::Error;
 use std::io::{BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command};
+use tokio::sync::mpsc;
 
 pub struct DapClient {
     child: Child,
@@ -135,5 +136,24 @@ impl DapClient {
             }
         }
         Err("unexpected response".into())
+    }
+
+    pub fn track(self, tx: mpsc::Sender<serde_json::Value>) {
+        std::thread::spawn(move || {
+            let mut client = self;
+            loop {
+                match client.read_message() {
+                    Ok(msg) => {
+                        if tx.blocking_send(msg).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("client: DAP: read error: {:?}", e);
+                        break;
+                    }
+                }
+            }
+        });
     }
 }

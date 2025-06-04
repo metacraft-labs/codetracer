@@ -1,4 +1,5 @@
 use crate::task::{EventId, EventKind};
+use serde_json::Value;
 
 #[derive(Debug)]
 pub enum Event {
@@ -13,4 +14,10 @@ pub enum Event {
     Error {
         message: String,
     },
+}
+
+#[derive(Debug)]
+pub enum CtEvent {
+    Builtin(Event),
+    Dap(Value),
 }
