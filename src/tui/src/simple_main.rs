@@ -16,6 +16,16 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use serde_json;
 
+fn with_line_numbers(lines: &[String]) -> String {
+    let max_digits = 5;
+    lines
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| format!("{:>width$} | {}", idx + 1, line, width = max_digits))
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
 mod dap_client;
 use dap_client::DapClient;
 
@@ -127,7 +137,7 @@ fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
         .split(f.area());
 
-    let text = app.lines.join("\n");
+    let text = with_line_numbers(&app.lines);
     let editor = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Editor"));
     f.render_widget(editor.scroll((app.scroll, 0)), chunks[0]);
 
