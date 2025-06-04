@@ -41,7 +41,11 @@ mod value;
 /// based on db-like approach based on trace instead of rr/gdb
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct Args {}
+struct Args {
+    /// Path to the Unix domain socket for DAP communication.
+    /// If omitted, a path based on the process id will be used.
+    socket_path: Option<std::path::PathBuf>,
+}
 
 
 // Already panicking so the unwraps won't change anything
@@ -53,10 +57,15 @@ fn panic_handler(info: &PanicHookInfo) {
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
-    let _cli = Args::parse();
+    let cli = Args::parse();
 
-    let pid = std::process::id() as usize;
-    let socket_path = db_backend::dap_server::socket_path_for(pid);
+    let socket_path = if let Some(p) = cli.socket_path {
+        p
+    } else {
+        let pid = std::process::id() as usize;
+        db_backend::dap_server::socket_path_for(pid)
+    };
+
     let handle = thread::spawn(move || {
         let _ = db_backend::dap_server::run(&socket_path);
     });
