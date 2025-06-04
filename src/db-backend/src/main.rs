@@ -40,7 +40,11 @@ mod value;
 /// based on db-like approach based on trace instead of rr/gdb
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct Args {}
+struct Args {
+    /// Path to the Unix domain socket for DAP communication.
+    /// If omitted, a path based on the process id will be used.
+    socket_path: Option<std::path::PathBuf>,
+}
 
 // Already panicking so the unwraps won't change anything
 #[allow(clippy::unwrap_used)]
@@ -51,34 +55,41 @@ fn panic_handler(info: &PanicHookInfo) {
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
-    let _cli = Args::parse();
+    let cli = Args::parse();
 
-    let run_dir = core.run_dir()?;
-    fs::create_dir_all(&run_dir)?;
-    let log_path = run_dir.join("db-backend_db-backend_0.log");
-    eprintln!("{}", log_path.display());
+    let socket_path = if let Some(p) = cli.socket_path {
+        p
+    } else {
+        let pid = std::process::id() as usize;
+        db_backend::dap_server::socket_path_for(pid)
+    };
 
-    let mut builder = env_logger::Builder::from_default_env();
-    // credit to https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
-    // and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797
-    // for file targetting code
-    #[allow(clippy::expect_used)]
-    let target = Box::new(fs::File::create(log_path).expect("Can't create file"));
+    // let run_dir = core.run_dir()?;
+    // fs::create_dir_all(&run_dir)?;
+    // let log_path = run_dir.join("db-backend_db-backend_0.log");
+    // eprintln!("{}", log_path.display());
 
-    builder
-        .target(env_logger::Target::Pipe(target))
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} - {}:{} {}",
-                record.level(),
-                record.file().unwrap_or("<unknown>"),
-                record.line().unwrap_or(0),
-                record.args()
-            )
-        })
-        .filter(None, log::LevelFilter::Info)
-        .init();
+    // let mut builder = env_logger::Builder::from_default_env();
+    // // credit to https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
+    // // and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797
+    // // for file targetting code
+    // #[allow(clippy::expect_used)]
+    // let target = Box::new(fs::File::create(log_path).expect("Can't create file"));
+
+    // builder
+    //     .target(env_logger::Target::Pipe(target))
+    //     .format(|buf, record| {
+    //         writeln!(
+    //             buf,
+    //             "{} - {}:{} {}",
+    //             record.level(),
+    //             record.file().unwrap_or("<unknown>"),
+    //             record.line().unwrap_or(0),
+    //             record.args()
+    //         )
+    //     })
+    //     .filter(None, log::LevelFilter::Info)
+    //     .init();
 
     // duration code copied from
     // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
@@ -102,8 +113,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     // // db.display_variable_cells();
 
     // let socket_path = db_backend::dap_server::socket_path_for(cli.caller_process_pid);
-    let pid = std::process::id() as usize;
-    let socket_path = db_backend::dap_server::socket_path_for(pid);
     let handle = thread::spawn(move || {
         let _ = db_backend::dap_server::run(&socket_path);
     });

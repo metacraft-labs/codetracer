@@ -24,8 +24,11 @@ fn test_backend_dap_server() {
     let pid = std::process::id() as usize;
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
 
-    let mut child = Command::new(bin).spawn().unwrap();
-    let socket_path = dap_server::socket_path_for(child.id() as usize);
+    let socket_path = dap_server::socket_path_for(std::process::id() as usize);
+    let mut child = Command::new(bin)
+        .arg(&socket_path)
+        .spawn()
+        .unwrap();
     wait_for_socket(&socket_path);
 
     let stream = UnixStream::connect(&socket_path).unwrap();
