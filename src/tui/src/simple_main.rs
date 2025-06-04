@@ -12,18 +12,19 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use serde_json;
 
-fn with_line_numbers(lines: &[String]) -> String {
+fn with_line_numbers(lines: &[String]) -> Vec<String> {
     let max_digits = 5;
     lines
         .iter()
         .enumerate()
         .map(|(idx, line)| format!("{:>width$} | {}", idx + 1, line, width = max_digits))
         .collect::<Vec<String>>()
-        .join("\n")
 }
 
 mod dap_client;
@@ -38,6 +39,7 @@ enum CtEvent {
 struct App {
     lines: Vec<String>,
     scroll: u16,
+    active_line: u16,
     dap: Option<DapClient>,
     program: String,
     status: String,
@@ -86,6 +88,7 @@ impl App {
         Ok(Self {
             lines,
             scroll: 0,
+            active_line: 0,
             dap,
             program: program.to_string(),
             status: String::new(),
@@ -93,12 +96,18 @@ impl App {
     }
 
     fn scroll_up(&mut self) {
+        if self.active_line > 0 {
+            self.active_line -= 1;
+        }
         if self.scroll > 0 {
             self.scroll -= 1;
         }
     }
 
     fn scroll_down(&mut self) {
+        if (self.active_line as usize) < self.lines.len().saturating_sub(1) {
+            self.active_line += 1;
+        }
         self.scroll = self.scroll.saturating_add(1);
     }
 
@@ -137,7 +146,20 @@ fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
         .split(f.area());
 
-    let text = with_line_numbers(&app.lines);
+    let lines_with_line_numbers = with_line_numbers(&app.lines);
+    let mut lines = Vec::with_capacity(lines_with_line_numbers.len());
+    for (idx, line) in lines_with_line_numbers.iter().enumerate() {
+        if idx as u16 == app.active_line {
+            lines.push(Line::from(Span::styled(
+                line.clone(),
+                Style::default().bg(Color::Yellow),
+            )));
+        } else {
+            lines.push(Line::from(Span::raw(line.clone())));
+        }
+    }
+    let text = Text::from(lines);
+
     let editor = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Editor"));
     f.render_widget(editor.scroll((app.scroll, 0)), chunks[0]);
 
