@@ -12,6 +12,8 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use serde_json;
@@ -28,6 +30,7 @@ enum CtEvent {
 struct App {
     lines: Vec<String>,
     scroll: u16,
+    active_line: u16,
     dap: Option<DapClient>,
     program: String,
     status: String,
@@ -76,6 +79,7 @@ impl App {
         Ok(Self {
             lines,
             scroll: 0,
+            active_line: 0,
             dap,
             program: program.to_string(),
             status: String::new(),
@@ -83,12 +87,18 @@ impl App {
     }
 
     fn scroll_up(&mut self) {
+        if self.active_line > 0 {
+            self.active_line -= 1;
+        }
         if self.scroll > 0 {
             self.scroll -= 1;
         }
     }
 
     fn scroll_down(&mut self) {
+        if (self.active_line as usize) < self.lines.len().saturating_sub(1) {
+            self.active_line += 1;
+        }
         self.scroll = self.scroll.saturating_add(1);
     }
 
@@ -127,7 +137,18 @@ fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
         .split(f.area());
 
-    let text = app.lines.join("\n");
+    let mut lines = Vec::with_capacity(app.lines.len());
+    for (idx, line) in app.lines.iter().enumerate() {
+        if idx as u16 == app.active_line {
+            lines.push(Line::from(Span::styled(
+                line.clone(),
+                Style::default().bg(Color::Yellow),
+            )));
+        } else {
+            lines.push(Line::from(Span::raw(line.clone())));
+        }
+    }
+    let text = Text::from(lines);
     let editor = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Editor"));
     f.render_widget(editor.scroll((app.scroll, 0)), chunks[0]);
 
