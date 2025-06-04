@@ -16,6 +16,7 @@ const CORE_TEST_SUPPORTED_LANGS = @[LangC, LangRust, LangNim]
 const BUILD_SUPPORTED_LANGS = @[LangC, LangCpp, LangRust, LangNim, LangGo]
 
 const ENABLED_TEST_PROGRAMS = @["fibonacci", "longer_program", "rr_gdb", "quicksort", "various_calls"]
+const GREEN_COLOR = "\x1b[32m"
 
 # not building for now:  "ui_simple" "one_hundred_iterations", "calc"
 
