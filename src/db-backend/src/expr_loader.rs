@@ -515,10 +515,7 @@ mod tests {
     fn detects_ruby_each_loop() -> Result<(), Box<dyn std::error::Error>> {
         let tmp_dir = std::env::temp_dir();
         let file_path = tmp_dir.join("each_loop_test.rb");
-        fs::write(
-            &file_path,
-            "arr = [1]\narr.each do |x|\n  puts x\nend\n",
-        )?;
+        fs::write(&file_path, "arr = [1]\narr.each do |x|\n  puts x\nend\n")?;
 
         let mut loader = ExprLoader::new(CoreTrace::default());
         loader.load_file(&file_path)?;
