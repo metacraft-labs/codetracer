@@ -1,0 +1,5 @@
+receive dap responses/events in a separate thread.
+make a new CtEvent enum type that has variants for builtin `Event` and for the dap responses/events.
+Send with a channel the DAP events wrapped in CtEvent to the main thread. 
+Send the builtin Event events wrapped as CtEvent to the main thread as well.
+In the main thread, receive them in one place and call app methods with the same name .
