@@ -3,4 +3,4 @@
 - 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.
 - Added a regression test ensuring `ExprLoader` detects Ruby `each` loops correctly.
 - The `tui` crate contains a sample trace under `src/tui/trace/` used for basic testing.
-- The Debug Adapter Protocol client communicates over stdio with messages framed by a `Content-Length` header, implemented in `src/tui/src/dap_client.rs`.
+- The Debug Adapter Protocol client communicates over a Unix domain socket using the same framing protocol, implemented in `src/tui/src/dap_client.rs`.
