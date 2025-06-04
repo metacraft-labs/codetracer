@@ -1,30 +1,45 @@
 use serde_json::json;
 use std::error::Error;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::io::{BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::process::{Child, Command};
 
 pub struct DapClient {
     child: Child,
-    reader: BufReader<ChildStdout>,
-    writer: ChildStdin,
+    reader: BufReader<UnixStream>,
+    writer: UnixStream,
     seq: i64,
 }
 
 impl DapClient {
     pub fn start(server_bin: &str) -> Result<Self, Box<dyn Error>> {
-        let mut child = Command::new(server_bin)
-            .arg("--stdio")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+        let pid = std::process::id();
+        let socket_path = format!("/tmp/ct_dap_socket_{pid}");
+        let _ = std::fs::remove_file(&socket_path);
+
+        let child = Command::new(server_bin)
+            .arg(&socket_path)
             .spawn()?;
 
-        let writer = child.stdin.take().ok_or("failed to capture stdin")?;
-        let reader = child.stdout.take().ok_or("failed to capture stdout")?;
+        // wait for server to open socket and connect
+        let mut retries = 0;
+        let stream = loop {
+            match UnixStream::connect(&socket_path) {
+                Ok(s) => break s,
+                Err(_e) if retries < 50 => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    retries += 1;
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
+        let reader_stream = stream.try_clone()?;
 
         Ok(Self {
             child,
-            reader: BufReader::new(reader),
-            writer,
+            reader: BufReader::new(reader_stream),
+            writer: stream,
             seq: 1,
         })
     }
