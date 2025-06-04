@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -18,6 +20,7 @@ struct App {
     lines: Vec<String>,
     scroll: u16,
     dap: Option<DapClient>,
+    program: String,
 }
 
 impl App {
@@ -27,7 +30,7 @@ impl App {
     /// application always opens the `trace.json` file from this directory. When
     /// a DAP server binary is provided, the DAP client is started and a launch
     /// request is sent containing our PID and the trace directory path.
-    fn new(trace_dir: &str, dap_bin: Option<&str>) -> Result<Self, Box<dyn Error>> {
+    fn new(trace_dir: &str, dap_bin: Option<&str>, program: &str) -> Result<Self, Box<dyn Error>> {
         let mut dap = if let Some(bin) = dap_bin {
             Some(DapClient::start(bin)?)
         } else {
@@ -36,7 +39,7 @@ impl App {
 
         if let Some(client) = dap.as_mut() {
             // Inform the DAP server about the trace we want to analyze
-            client.launch(trace_dir)?;
+            client.launch(trace_dir, program)?;
         }
 
         let trace_file = format!("{}/trace.json", trace_dir);
@@ -48,7 +51,12 @@ impl App {
         };
 
         let lines = content.lines().map(|l| l.to_string()).collect();
-        Ok(Self { lines, scroll: 0, dap })
+        Ok(Self {
+            lines,
+            scroll: 0,
+            dap,
+            program: program.to_string(),
+        })
     }
 
     fn scroll_up(&mut self) {
@@ -71,8 +79,7 @@ fn ui(f: &mut Frame, app: &App) {
         .split(f.area());
 
     let text = app.lines.join("\n");
-    let editor = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title("Editor"));
+    let editor = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Editor"));
     f.render_widget(editor.scroll((app.scroll, 0)), chunks[0]);
 
     let locals = Paragraph::new("a = 1\nb = 2")
@@ -81,13 +88,24 @@ fn ui(f: &mut Frame, app: &App) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: simple-tui <trace-dir> [dap-server-path]");
         std::process::exit(1);
     }
-    let dap_bin = if args.len() > 2 { Some(args[2].as_str()) } else { None };
-    let mut app = App::new(&args[1], dap_bin)?;
+    let dap_bin = if args.len() > 2 {
+        Some(args[2].as_str())
+    } else {
+        None
+    };
+    let program = if args.len() > 3 {
+        args[3].clone()
+    } else {
+        "".to_string()
+    };
+    let mut app = App::new(&args[1], dap_bin, &program)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -111,7 +129,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     Ok(())
 }
-
