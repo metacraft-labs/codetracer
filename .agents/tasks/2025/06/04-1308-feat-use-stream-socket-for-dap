@@ -1,0 +1,2 @@
+use unix domain socket, instead of stream for DAP communication: path `/tmp/ct_dap_socket`
+pass it to the dap server instead of --stdio
