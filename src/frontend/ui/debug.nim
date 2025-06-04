@@ -188,7 +188,7 @@ method render*(self: DebugComponent): VNode =
     messageView(self)
     tdiv(id="debug", class=finished):
 
-      proc debugStepButton(id: string, action: Action, reverse: bool): VNode {.closure.} =
+      proc debugStepButton(id: string, action: DebuggerAction, reverse: bool): VNode {.closure.} =
         let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
 
         var click = proc =

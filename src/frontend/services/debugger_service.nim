@@ -114,7 +114,7 @@ proc internalAddBreakpointC*(self: DebuggerService, path: cstring, line: int) =
 proc step*(
     self: DebuggerService,
     action: string,
-    actionEnum: Action,
+    actionEnum: DebuggerAction,
     reverse: bool = false,
     repeat: int = 1,
     complete: bool = true,
@@ -344,16 +344,6 @@ proc resetOperation*(self: DebuggerService, full: bool, resetLastLocation: bool 
   self.currentOperation = if not full: "canceling: interrupt" else: "canceling: replacing with new process"
   cdebug fmt"sending reset-operation to index full {full}", taskId
   self.data.ipc.send "CODETRACER::reset-operation", js{full: full, taskId: taskId, resetLastLocation: resetLastLocation}
-
-proc runToCall*(
-    self: DebuggerService,
-    path: cstring,
-    line: int,
-    functionName: cstring,
-    reverse: bool) =
-  self.data.ipc.send(
-    "CODETRACER::run-to-call",
-    RunToCallInfo(path: path, line: line, functionName: functionName, reverse: reverse))
 
 proc lineStepJump*(self: DebuggerService, lineStep: LineStep) =
   if not self.data.trace.lang.isDbBased:
