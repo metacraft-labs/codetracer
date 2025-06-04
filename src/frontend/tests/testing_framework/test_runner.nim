@@ -123,9 +123,9 @@ proc beforeTest*[Mode](self: TextReporter, test: TestDefinition[Mode]) =
     # flushFile(stdout)
 
 
-# const GREEN_COLOR* = "\x1b[92m"
-# const RED_COLOR* = "\x1b[91m"
-# const RESET* = "\x1b[0m"
+const GREEN_COLOR* = "\x1b[92m"
+const RED_COLOR* = "\x1b[91m"
+const RESET* = "\x1b[0m"
 
 proc afterTest*[Mode](self: TextReporter, test: TestDefinition[Mode], res: TestResult) =
   # stdout.write "\r" # "\e[1A" # for replacing the line
