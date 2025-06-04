@@ -3,12 +3,12 @@ use futures::{future::FutureExt, select, StreamExt};
 // use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::event::Event as TuiEvent;
+use crate::event::{CtEvent, Event as TuiEvent};
 use crossterm::event::EventStream;
 
 // copied and adapted from
 // https://github.com/crossterm-rs/crossterm/blob/master/examples/event-stream-tokio.rs
-pub fn track_keyboard_events(tx: mpsc::Sender<TuiEvent>) {
+pub fn track_keyboard_events(tx: mpsc::Sender<CtEvent>) {
     tokio::spawn(async move {
         let mut reader = EventStream::new();
         // eprintln!("track_keyboard_events");
@@ -26,7 +26,9 @@ pub fn track_keyboard_events(tx: mpsc::Sender<TuiEvent>) {
                         Some(Ok(event)) => {
                             if let crossterm::event::Event::Key(k) = event {
                                 eprintln!("Event::{:?}\r", event);
-                                let _res = tx.send(TuiEvent::Keyboard { key_event: k }).await;
+                                let _res = tx
+                                    .send(CtEvent::Builtin(TuiEvent::Keyboard { key_event: k }))
+                                    .await;
                                 // eprintln!("{res:?}");
                             }
                         }

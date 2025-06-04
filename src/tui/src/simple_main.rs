@@ -3,6 +3,8 @@ use std::fs;
 use std::io::{self};
 use std::time::Duration;
 
+use tokio::sync::mpsc;
+
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -12,15 +14,35 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
+use serde_json;
 
 mod dap_client;
 use dap_client::DapClient;
+
+#[derive(Debug)]
+enum CtEvent {
+    Keyboard(crossterm::event::KeyEvent),
+    Dap(serde_json::Value),
+}
 
 struct App {
     lines: Vec<String>,
     scroll: u16,
     dap: Option<DapClient>,
     program: String,
+    status: String,
+}
+
+fn track_keyboard_events(tx: mpsc::Sender<CtEvent>) {
+    std::thread::spawn(move || loop {
+        if event::poll(Duration::from_millis(200)).unwrap() {
+            if let Event::Key(key) = event::read().unwrap() {
+                if tx.blocking_send(CtEvent::Keyboard(key)).is_err() {
+                    break;
+                }
+            }
+        }
+    });
 }
 
 impl App {
@@ -56,6 +78,7 @@ impl App {
             scroll: 0,
             dap,
             program: program.to_string(),
+            status: String::new(),
         })
     }
 
@@ -67,6 +90,32 @@ impl App {
 
     fn scroll_down(&mut self) {
         self.scroll = self.scroll.saturating_add(1);
+    }
+
+    fn process_dap_message(&mut self, msg: serde_json::Value) {
+        if let Some(typ) = msg.get("type").and_then(|v| v.as_str()) {
+            match typ {
+                "event" => {
+                    if msg.get("event").and_then(|v| v.as_str()) == Some("initialized") {
+                        self.initialized();
+                    }
+                }
+                "response" => {
+                    if msg.get("command").and_then(|v| v.as_str()) == Some("launch") {
+                        self.launch();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn initialized(&mut self) {
+        self.status = "initialized".to_string();
+    }
+
+    fn launch(&mut self) {
+        self.status = "launched".to_string();
     }
 }
 
@@ -82,9 +131,18 @@ fn ui(f: &mut Frame, app: &App) {
     let editor = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Editor"));
     f.render_widget(editor.scroll((app.scroll, 0)), chunks[0]);
 
+    let right_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
+        .split(chunks[1]);
+
     let locals = Paragraph::new("a = 1\nb = 2")
         .block(Block::default().borders(Borders::ALL).title("Locals"));
-    f.render_widget(locals, chunks[1]);
+    f.render_widget(locals, right_chunks[0]);
+
+    let status = Paragraph::new(app.status.as_str())
+        .block(Block::default().borders(Borders::ALL).title("Status"));
+    f.render_widget(status, right_chunks[1]);
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -107,6 +165,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let mut app = App::new(&args[1], dap_bin, &program)?;
 
+    let (tx, mut rx) = mpsc::channel(100);
+    track_keyboard_events(tx.clone());
+
+    if let Some(client) = app.dap.take() {
+        let (dap_tx, mut dap_rx) = mpsc::channel(100);
+        client.track(dap_tx);
+        let tx_clone = tx.clone();
+        std::thread::spawn(move || {
+            while let Some(msg) = dap_rx.blocking_recv() {
+                if tx_clone.blocking_send(CtEvent::Dap(msg)).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -116,15 +190,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     loop {
         terminal.draw(|f| ui(f, &app))?;
 
-        if event::poll(Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
+        if let Some(event) = rx.blocking_recv() {
+            match event {
+                CtEvent::Keyboard(key) => match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Down => app.scroll_down(),
                     KeyCode::Up => app.scroll_up(),
                     _ => {}
-                }
+                },
+                CtEvent::Dap(msg) => app.process_dap_message(msg),
             }
+        } else {
+            break;
         }
     }
 
