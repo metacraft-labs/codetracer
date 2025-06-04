@@ -40,6 +40,8 @@ struct App {
     lines: Vec<String>,
     scroll: u16,
     active_line: u16,
+    calltrace: Vec<String>,
+    calltrace_scroll: u16,
     dap: Option<DapClient>,
     program: String,
     status: String,
@@ -85,10 +87,13 @@ impl App {
         };
 
         let lines = content.lines().map(|l| l.to_string()).collect();
+        let calltrace = vec!["main()".to_string()];
         Ok(Self {
             lines,
             scroll: 0,
             active_line: 0,
+            calltrace,
+            calltrace_scroll: 0,
             dap,
             program: program.to_string(),
             status: String::new(),
@@ -165,16 +170,28 @@ fn ui(f: &mut Frame, app: &App) {
 
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
+        .constraints(
+            [
+                Constraint::Min(3),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ]
+            .as_ref(),
+        )
         .split(chunks[1]);
 
     let locals = Paragraph::new("a = 1\nb = 2")
         .block(Block::default().borders(Borders::ALL).title("Locals"));
     f.render_widget(locals, right_chunks[0]);
 
+    let trace_text = app.calltrace.join("\n");
+    let calltrace =
+        Paragraph::new(trace_text).block(Block::default().borders(Borders::ALL).title("Calltrace"));
+    f.render_widget(calltrace.scroll((app.calltrace_scroll, 0)), right_chunks[1]);
+
     let status = Paragraph::new(app.status.as_str())
         .block(Block::default().borders(Borders::ALL).title("Status"));
-    f.render_widget(status, right_chunks[1]);
+    f.render_widget(status, right_chunks[2]);
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
