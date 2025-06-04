@@ -1,0 +1,1 @@
+simple-tui: store an active line for the editor and render it with a yellow background
