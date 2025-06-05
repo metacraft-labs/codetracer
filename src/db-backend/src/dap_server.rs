@@ -2,13 +2,20 @@ use crate::dap::{
     self, Breakpoint, DapMessage, Event, ProtocolMessage, RequestArguments, Response, SetBreakpointsResponseBody,
     Source,
 };
+use crate::db::Db;
+use crate::handler::Handler;
+use crate::task::{SourceLocation, Task, TaskId, TaskKind};
 use crate::trace_processor::load_trace_metadata;
+use once_cell::sync::OnceCell;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Mutex};
+
+type BreakpointResult = (i64, Result<(), Box<dyn Error>>);
 
 pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
@@ -21,6 +28,35 @@ pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     let listener = UnixListener::bind(socket_path)?;
     let (stream, _) = listener.accept()?;
     handle_client(stream)
+}
+
+static HANDLER: OnceCell<Mutex<Handler>> = OnceCell::new();
+
+fn handler() -> &'static Mutex<Handler> {
+    HANDLER.get_or_init(|| {
+        let db = Db::new(&PathBuf::from(""));
+        let (tx, _rx) = mpsc::channel();
+        Mutex::new(Handler::construct(Box::new(db), tx, true))
+    })
+}
+
+fn add_breakpoints(map: &mut HashMap<String, HashSet<i64>>, path: &str, lines: &[i64]) -> Vec<BreakpointResult> {
+    let mut handler_guard = handler().lock().unwrap();
+    let entry = map.entry(path.to_string()).or_default();
+    lines
+        .iter()
+        .map(|line| {
+            let loc = SourceLocation {
+                path: path.to_string(),
+                line: *line as usize,
+            };
+            let res = handler_guard.add_breakpoint(loc, Task::new(TaskKind::AddBreak, TaskId(String::new())));
+            if res.is_ok() {
+                entry.insert(*line);
+            }
+            (*line, res)
+        })
+        .collect()
 }
 
 fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
@@ -54,13 +90,11 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                         } else {
                             args.lines.unwrap_or_default()
                         };
-                        let entry = breakpoints.entry(path.clone()).or_default();
-                        for line in lines {
-                            entry.insert(line);
+                        for (line, res) in add_breakpoints(&mut breakpoints, &path, &lines) {
                             results.push(Breakpoint {
                                 id: None,
-                                verified: true,
-                                message: None,
+                                verified: res.is_ok(),
+                                message: res.err().map(|e| e.to_string()),
                                 source: Some(Source {
                                     name: args.source.name.clone(),
                                     path: Some(path.clone()),

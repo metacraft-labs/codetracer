@@ -1,4 +1,5 @@
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, RequestArguments};
+use db_backend::dap::{SetBreakpointsArguments, SetBreakpointsResponseBody, Source, SourceBreakpoint};
 use db_backend::dap_server::{self};
 use serde_json::json;
 use std::io::BufReader;
@@ -24,7 +25,7 @@ fn test_backend_dap_server() {
     let pid = std::process::id() as usize;
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
 
-    let socket_path = dap_server::socket_path_for(std::process::id() as usize);
+    let socket_path = dap_server::socket_path_for(std::process::id() as usize + 1);
     let mut child = Command::new(bin).arg(&socket_path).spawn().unwrap();
     wait_for_socket(&socket_path);
 
@@ -58,6 +59,51 @@ fn test_backend_dap_server() {
     let msg3 = dap::from_reader(&mut reader).unwrap();
     match msg3 {
         DapMessage::Response(r) => assert_eq!(r.command, "launch"),
+        _ => panic!(),
+    }
+
+    drop(writer);
+    drop(reader);
+    let _ = child.wait().unwrap();
+}
+
+#[test]
+fn test_set_breakpoints_server() {
+    let bin = env!("CARGO_BIN_EXE_db-backend");
+    let socket_path = dap_server::socket_path_for(std::process::id() as usize + 2);
+    let mut child = Command::new(bin).arg(&socket_path).spawn().unwrap();
+    wait_for_socket(&socket_path);
+
+    let stream = UnixStream::connect(&socket_path).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut writer = stream;
+
+    let mut client = DapClient::default();
+    let init = client.request("initialize", RequestArguments::Other(json!({})));
+    dap::write_message(&mut writer, &init).unwrap();
+    let _ = dap::from_reader(&mut reader).unwrap();
+
+    let args = SetBreakpointsArguments {
+        source: Source {
+            name: None,
+            path: Some("file.rs".to_string()),
+            source_reference: None,
+        },
+        breakpoints: Some(vec![SourceBreakpoint { line: 7, column: None }]),
+        lines: None,
+        source_modified: None,
+    };
+    let req = client.set_breakpoints(args);
+    dap::write_message(&mut writer, &req).unwrap();
+
+    let msg = dap::from_reader(&mut reader).unwrap();
+    match msg {
+        DapMessage::Response(r) => {
+            assert_eq!(r.command, "setBreakpoints");
+            let body: SetBreakpointsResponseBody = serde_json::from_value(r.body).unwrap();
+            assert_eq!(body.breakpoints.len(), 1);
+            assert!(!body.breakpoints[0].verified);
+        }
         _ => panic!(),
     }
 

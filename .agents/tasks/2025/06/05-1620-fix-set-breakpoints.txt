@@ -1,0 +1,9 @@
+You're working on a custom debugger backend (`db-backend`) that implements the Debug Adapter Protocol (DAP). You need to handle the `setBreakpoints` request by calling the internal `add_breakpoint` function to register breakpoints in the backend.
+
+**Requirements:**
+
+1. Use the provided `add_breakpoints` function to store breakpoints.
+2. Accept a request of the following structure (DAP-compliant):
+3. The test should be with our own db-backend as server
+--- FOLLOW UP TASK ---
+Please address any inline comments on the diff, as well as any additional instructions below.
