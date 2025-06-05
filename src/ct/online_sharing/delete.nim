@@ -7,7 +7,7 @@ proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [Va
   let client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
 
   try:
-    discard client.getContent(fmt"{parseUri(config.baseUrl) / config.deleteApi}?ControlId={controlId}")
+    discard client.getContent(fmt"{parseUri(config.`trace-sharing`.`base-url`) / config.`trace-sharing`.`delete-api`}?ControlId={controlId}")
 
     updateField(id, "remoteShareDownloadKey", "", test)
     updateField(id, "remoteShareControlId", "", test)
@@ -20,7 +20,7 @@ proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [Va
 proc deleteTraceCommand*(id: int, controlId: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
 
-  if not config.traceSharingEnabled:
+  if not config.`trace-sharing`.enabled:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
 

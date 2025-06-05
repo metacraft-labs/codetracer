@@ -45,10 +45,10 @@ proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: boo
           traceFolder / "trace_metadata.json"
         ],
         options=options)
-    elif ctConfig.rrBackend.enabled:
-      var env = setupEnv(ctConfig.rrBackend.ctPaths)
+    elif ctConfig.`rr-backend`.enabled:
+      var env = setupEnv(ctConfig.`rr-backend`.`ct-paths`)
       result = startProcess(
-        ctConfig.rrBackend.path,
+        ctConfig.`rr-backend`.path,
         workingDir = workdir,
         args = @[
           "dispatcher",
