@@ -1,0 +1,1 @@
+read .agents/tasks/2025/06/05-1316-feat-stop-after-launch-on-entrypoint and do it

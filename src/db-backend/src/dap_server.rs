@@ -8,6 +8,21 @@ use std::path::{Path, PathBuf};
 
 pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
+fn run_to_entry(writer: &mut UnixStream, seq: &mut i64) -> Result<(), Box<dyn Error>> {
+    // TODO: run trace to program entry once trace processing is integrated
+    let event = DapMessage::Event(Event {
+        base: ProtocolMessage {
+            seq: *seq,
+            type_: "event".to_string(),
+        },
+        event: "stopped".to_string(),
+        body: json!({"hitBreakpointIds": []}),
+    });
+    *seq += 1;
+    dap::write_message(writer, &event)?;
+    Ok(())
+}
+
 pub fn socket_path_for(pid: usize) -> PathBuf {
     PathBuf::from(format!("{DAP_SOCKET_PATH}_{}", pid))
 }
@@ -53,16 +68,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                         println!("PID: {}", pid);
                     }
                 }
-                let event = DapMessage::Event(Event {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "event".to_string(),
-                    },
-                    event: "initialized".to_string(),
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(&mut writer, &event)?;
+                run_to_entry(&mut writer, &mut seq)?;
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,

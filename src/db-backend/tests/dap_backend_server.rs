@@ -52,7 +52,10 @@ fn test_backend_dap_server() {
     }
     let msg2 = dap::from_reader(&mut reader).unwrap();
     match msg2 {
-        DapMessage::Event(e) => assert_eq!(e.event, "initialized"),
+        DapMessage::Event(e) => {
+            assert_eq!(e.event, "stopped");
+            assert_eq!(e.body["hitBreakpointIds"], json!([]));
+        }
         _ => panic!(),
     }
     let msg3 = dap::from_reader(&mut reader).unwrap();
