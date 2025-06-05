@@ -32,16 +32,16 @@ fn run_server(stream: UnixStream) {
                 dap::write_message(&mut writer, &resp).unwrap();
             }
             DapMessage::Request(req) if req.command == "launch" => {
-                let event = DapMessage::Event(Event {
+                let stop = DapMessage::Event(Event {
                     base: ProtocolMessage {
                         seq,
                         type_: "event".to_string(),
                     },
-                    event: "initialized".to_string(),
-                    body: json!({}),
+                    event: "stopped".to_string(),
+                    body: json!({"hitBreakpointIds": []}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &event).unwrap();
+                dap::write_message(&mut writer, &stop).unwrap();
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
@@ -89,7 +89,10 @@ fn test_simple_session() {
     }
     let msg2 = dap::from_reader(&mut reader).unwrap();
     match msg2 {
-        DapMessage::Event(ev) => assert_eq!(ev.event, "initialized"),
+        DapMessage::Event(ev) => {
+            assert_eq!(ev.event, "stopped");
+            assert_eq!(ev.body["hitBreakpointIds"], json!([]));
+        }
         _ => panic!("expected event"),
     }
     let msg3 = dap::from_reader(&mut reader).unwrap();
