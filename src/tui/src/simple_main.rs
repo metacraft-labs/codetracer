@@ -74,6 +74,8 @@ impl App {
         };
 
         if let Some(client) = dap.as_mut() {
+            // Initialize the DAP session before requesting the launch
+            client.initialize()?;
             // Inform the DAP server about the trace we want to analyze
             client.launch(trace_dir, program)?;
         }
