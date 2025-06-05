@@ -34,10 +34,61 @@ pub struct LaunchRequestArguments {
     pub restart: Option<Value>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(rename = "sourceReference", skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceBreakpoint {
+    pub line: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SetBreakpointsArguments {
+    pub source: Source,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breakpoints: Option<Vec<SourceBreakpoint>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines: Option<Vec<i64>>,
+    #[serde(rename = "sourceModified", skip_serializing_if = "Option::is_none")]
+    pub source_modified: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Breakpoint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    pub verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct SetBreakpointsResponseBody {
+    pub breakpoints: Vec<Breakpoint>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum RequestArguments {
     Launch(LaunchRequestArguments),
+    SetBreakpoints(SetBreakpointsArguments),
     Other(Value),
 }
 
@@ -103,6 +154,10 @@ impl DapClient {
 
     pub fn launch(&mut self, args: LaunchRequestArguments) -> DapMessage {
         self.request("launch", RequestArguments::Launch(args))
+    }
+
+    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> DapMessage {
+        self.request("setBreakpoints", RequestArguments::SetBreakpoints(args))
     }
 }
 
