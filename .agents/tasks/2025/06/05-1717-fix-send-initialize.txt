@@ -1,0 +1,1 @@
+read .agents/tasks/2025/06/05-1644-fix-send-initialize and do it

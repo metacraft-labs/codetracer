@@ -53,6 +53,29 @@ impl DapClient {
         })
     }
 
+    /// Send an initialize request to the DAP server. The server is expected to
+    /// respond with a successful response before other requests are issued.
+    pub fn initialize(&mut self) -> Result<(), Box<dyn Error>> {
+        let seq = self.seq;
+        self.seq += 1;
+        let req = json!({
+            "seq": seq,
+            "type": "request",
+            "command": "initialize",
+            "arguments": {}
+        });
+        self.send_message(&req)?;
+        let resp = self.read_message()?;
+        if resp.get("type").and_then(|v| v.as_str()) == Some("response")
+            && resp.get("command").and_then(|v| v.as_str()) == Some("initialize")
+            && resp.get("success").and_then(|v| v.as_bool()) == Some(true)
+        {
+            return Ok(());
+        }
+        error!("client: DAP: initialize request failed: resp: {:?}", resp);
+        Err("DAP: initialize request failed".into())
+    }
+
     /// Send a launch request to the DAP server with the current process id and
     /// the path to the trace directory as custom fields.
     pub fn launch(&mut self, trace_path: &str, program: &str) -> Result<(), Box<dyn Error>> {
