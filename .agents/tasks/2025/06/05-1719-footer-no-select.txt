@@ -1,0 +1,9 @@
+In the footer of CodeTracers UI it is possible to select the text of the following elements:
+
+<span id="stable-status" class="ready-status">stable: ready</span>
+
+<span class="status-inline">UTF-8</span>
+
+<span class="location-path status-inline" data-toggle="tooltip" data-placement="bottom" title="/home/franz/code/repos/codetracer/examples/noir_simple_sha/src/main.nr:4#0">/home/franz/code/repos/codetracer/examples/noir_simple_sha/src/main.nr:4#0</span>
+
+Make changes so that the text can not be selected
