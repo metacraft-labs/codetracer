@@ -1,0 +1,4 @@
+in db-backend: after receiving launch, run `run_to_entry` and instead of sending the old events,
+comment them out and send DAP `Stopped` event. It should have an empty breakpoint id list.
+Add a test for that in the session tests: that the test client receives such a Stopped event after launch.
+
