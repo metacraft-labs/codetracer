@@ -13,8 +13,13 @@
 use clap::Parser;
 use log::error;
 use std::panic::PanicHookInfo;
+use std::path::PathBuf;
+use std::sync::mpsc;
 use std::thread;
 use std::{error::Error, panic};
+
+use db_backend::db::Db;
+use db_backend::handler::Handler;
 
 mod calltrace;
 mod core;
@@ -64,8 +69,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     println!("pid {:?}", std::process::id());
+    let (tx, _rx) = mpsc::channel();
+    let db = Db::new(&PathBuf::from(""));
+    let mut handler = Handler::construct(Box::new(db), tx, true);
+
     let handle = thread::spawn(move || {
-        let _ = db_backend::dap_server::run(&socket_path);
+        let _ = db_backend::dap_server::run(&socket_path, &mut handler);
     });
     match handle.join() {
         Ok(_) => Ok(()),
