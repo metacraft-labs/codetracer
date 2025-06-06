@@ -115,6 +115,111 @@ fn run_breakpoint_server(stream: UnixStream) {
     }
 }
 
+fn sample_db() -> db_backend::db::Db {
+    use db_backend::db::Db;
+    use db_backend::trace_processor::TraceProcessor;
+    use runtime_tracing::{
+        CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent, TraceMetadata, TypeId,
+        TypeKind, TypeRecord, TypeSpecificInfo,
+    };
+    use std::path::PathBuf;
+
+    let none_type = TypeRecord {
+        kind: TypeKind::None,
+        lang_type: "None".to_string(),
+        specific_info: TypeSpecificInfo::None,
+    };
+    let struct_type = TypeRecord {
+        kind: TypeKind::Struct,
+        lang_type: "ExampleStruct".to_string(),
+        specific_info: TypeSpecificInfo::Struct {
+            fields: vec![runtime_tracing::FieldTypeRecord {
+                name: "a".to_string(),
+                type_id: TypeId(0),
+            }],
+        },
+    };
+
+    let trace: Vec<TraceLowLevelEvent> = vec![
+        TraceLowLevelEvent::Path(PathBuf::from("/test/workdir")),
+        TraceLowLevelEvent::Function(FunctionRecord {
+            path_id: PathId(0),
+            line: Line(1),
+            name: "<top-level>".to_string(),
+        }),
+        TraceLowLevelEvent::Call(CallRecord {
+            function_id: FunctionId(0),
+            args: vec![],
+        }),
+        TraceLowLevelEvent::Type(none_type),
+        TraceLowLevelEvent::Type(struct_type),
+        TraceLowLevelEvent::Step(StepRecord {
+            path_id: PathId(0),
+            line: Line(1),
+        }),
+        TraceLowLevelEvent::Step(StepRecord {
+            path_id: PathId(0),
+            line: Line(2),
+        }),
+        TraceLowLevelEvent::Step(StepRecord {
+            path_id: PathId(0),
+            line: Line(3),
+        }),
+    ];
+    let trace_metadata = TraceMetadata {
+        workdir: PathBuf::from("/test/workdir"),
+        program: "test".to_string(),
+        args: vec![],
+    };
+    let mut db = Db::new(&trace_metadata.workdir);
+    let mut trace_processor = TraceProcessor::new(&mut db);
+    trace_processor.postprocess(&trace).unwrap();
+    db
+}
+
+fn run_step_server(stream: UnixStream) {
+    use db_backend::handler::Handler;
+    use db_backend::task::{gen_task_id, Action, StepArg, Task, TaskKind};
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut writer = stream;
+    let mut seq = 1i64;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut handler = Handler::new(Box::new(sample_db()), tx);
+    loop {
+        let msg = match dap::from_reader(&mut reader) {
+            Ok(m) => m,
+            Err(_) => break,
+        };
+        match msg {
+            DapMessage::Request(req) if req.command == "stepIn" => {
+                handler
+                    .step(
+                        StepArg::new(Action::StepIn),
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    )
+                    .unwrap();
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "stepIn".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp).unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn test_simple_session() {
     let (client_stream, server_stream) = UnixStream::pair().unwrap();
@@ -189,6 +294,31 @@ fn test_set_breakpoints_roundtrip() {
             let body: SetBreakpointsResponseBody = serde_json::from_value(resp.body).unwrap();
             assert_eq!(body.breakpoints.len(), 2);
             assert!(body.breakpoints.iter().all(|b| b.verified));
+        }
+        _ => panic!("expected response"),
+    }
+
+    drop(writer);
+    drop(reader);
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_step_in_roundtrip() {
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
+    let handle = thread::spawn(move || run_step_server(server_stream));
+
+    let mut reader = BufReader::new(client_stream.try_clone().unwrap());
+    let mut writer = client_stream;
+
+    let mut client = DapClient::default();
+    let req = client.request("stepIn", RequestArguments::Other(json!({})));
+    dap::write_message(&mut writer, &req).unwrap();
+
+    let msg = dap::from_reader(&mut reader).unwrap();
+    match msg {
+        DapMessage::Response(resp) => {
+            assert_eq!(resp.command, "stepIn");
         }
         _ => panic!("expected response"),
     }
