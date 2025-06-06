@@ -2,18 +2,15 @@ use crate::dap::{
     self, Breakpoint, DapMessage, Event, ProtocolMessage, RequestArguments, Response, SetBreakpointsResponseBody,
     Source,
 };
-use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{SourceLocation, Task, TaskId, TaskKind};
 use crate::trace_processor::load_trace_metadata;
-use once_cell::sync::OnceCell;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Mutex};
 
 type BreakpointResult = (i64, Result<(), Box<dyn Error>>);
 
@@ -23,25 +20,19 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
     PathBuf::from(format!("{DAP_SOCKET_PATH}_{}", pid))
 }
 
-pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn run(socket_path: &Path, handler: &mut Handler) -> Result<(), Box<dyn Error>> {
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     let (stream, _) = listener.accept()?;
-    handle_client(stream)
+    handle_client(stream, handler)
 }
 
-static HANDLER: OnceCell<Mutex<Handler>> = OnceCell::new();
-
-fn handler() -> &'static Mutex<Handler> {
-    HANDLER.get_or_init(|| {
-        let db = Db::new(&PathBuf::from(""));
-        let (tx, _rx) = mpsc::channel();
-        Mutex::new(Handler::construct(Box::new(db), tx, true))
-    })
-}
-
-fn add_breakpoints(map: &mut HashMap<String, HashSet<i64>>, path: &str, lines: &[i64]) -> Vec<BreakpointResult> {
-    let mut handler_guard = handler().lock().unwrap();
+fn add_breakpoints(
+    handler: &mut Handler,
+    map: &mut HashMap<String, HashSet<i64>>,
+    path: &str,
+    lines: &[i64],
+) -> Vec<BreakpointResult> {
     let entry = map.entry(path.to_string()).or_default();
     lines
         .iter()
@@ -50,7 +41,7 @@ fn add_breakpoints(map: &mut HashMap<String, HashSet<i64>>, path: &str, lines: &
                 path: path.to_string(),
                 line: *line as usize,
             };
-            let res = handler_guard.add_breakpoint(loc, Task::new(TaskKind::AddBreak, TaskId(String::new())));
+            let res = handler.add_breakpoint(loc, Task::new(TaskKind::AddBreak, TaskId(String::new())));
             if res.is_ok() {
                 entry.insert(*line);
             }
@@ -59,7 +50,7 @@ fn add_breakpoints(map: &mut HashMap<String, HashSet<i64>>, path: &str, lines: &
         .collect()
 }
 
-fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
+fn handle_client(stream: UnixStream, handler: &mut Handler) -> Result<(), Box<dyn Error>> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
     let mut seq = 1i64;
@@ -90,7 +81,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                         } else {
                             args.lines.unwrap_or_default()
                         };
-                        for (line, res) in add_breakpoints(&mut breakpoints, &path, &lines) {
+                        for (line, res) in add_breakpoints(handler, &mut breakpoints, &path, &lines) {
                             results.push(Breakpoint {
                                 id: None,
                                 verified: res.is_ok(),
