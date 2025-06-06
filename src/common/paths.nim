@@ -100,8 +100,8 @@ let
     linksPath / "lib" / "trace.o")
 
 when defined(ctmacos):
-  let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/codetracer"
-  let codetracerCache* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/codetracer_cache"
+  let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/"
+  let codetracerCache* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/cache"
 else:
   let tmpFolder = env.get("TMPDIR",
                             env.get("TEMPDIR",
@@ -113,8 +113,8 @@ else:
                             )
   )
   let
-    codetracerCache* = tmpFolder / "codetracer/codetracer_cache"
-    codetracerTmpPath* = tmpFolder / "codetracer/codetracer"
+    codetracerCache* = tmpFolder / "codetracer/cache"
+    codetracerTmpPath* = tmpFolder / "codetracer"
 
 let
   localShellPreloadInstallPath* = codetracerTmpPath / fmt"shell_preload_{username}.so"
