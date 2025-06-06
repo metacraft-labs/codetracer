@@ -1,3 +1,4 @@
+use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -362,6 +363,19 @@ impl Db {
                 // supposed to map to place in value graph
                 // TODO
                 unimplemented!()
+            }
+            ValueRecord::BigInt { b, negative, type_id } => {
+                let sign = if *negative {
+                    num_bigint::Sign::Minus
+                } else {
+                    num_bigint::Sign::Plus
+                };
+
+                let num = BigInt::from_bytes_be(sign, b);
+
+                let mut res = Value::new(TypeKind::Int, self.to_ct_type(type_id));
+                res.i = num.to_string();
+                res
             }
         }
     }

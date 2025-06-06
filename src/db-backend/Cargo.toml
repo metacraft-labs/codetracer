@@ -30,8 +30,9 @@ tokio = {version = "1.37.0", features=["full", "rt", "net", "signal"]}
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
-runtime_tracing = "0.10.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", tag = "0.6.0" }
+runtime_tracing =  { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-bigint" }
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
+num-bigint = "0.4.6"
 
 [lib]
 name = "db_backend"
