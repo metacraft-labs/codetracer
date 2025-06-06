@@ -6,6 +6,8 @@
 
 pub mod calltrace;
 pub mod core;
+pub mod dap;
+pub mod dap_server;
 pub mod db;
 pub mod distinct_vec;
 pub mod event_db;

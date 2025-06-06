@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::str;
 use std::time;
 
-use crate::event::Event;
+use crate::event::{CtEvent, Event};
 use crate::task::{gen_task_id, to_event_kind, to_task_kind_text, EventId, TaskId, TaskKind};
 use serde::Serialize;
 use tokio;
@@ -146,7 +146,7 @@ fn load_response(line: &str) -> Event {
     }
 }
 
-pub fn track_responses(tx: mpsc::Sender<Event>) {
+pub fn track_responses(tx: mpsc::Sender<CtEvent>) {
     tokio::spawn(async move {
         let mut next_line_index = 0usize;
         loop {
@@ -161,7 +161,7 @@ pub fn track_responses(tx: mpsc::Sender<Event>) {
                         // eprintln!("load [{line}]");
                         let event = load_response(&line);
                         // eprintln!("send {event:?}");
-                        tx.send(event).await.unwrap();
+                        tx.send(CtEvent::Builtin(event)).await.unwrap();
                     }
                 }
                 // last_line_length = lines.len();

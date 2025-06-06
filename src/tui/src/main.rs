@@ -25,6 +25,7 @@ use num_traits::FromPrimitive;
 mod actions;
 mod component;
 mod core;
+mod dap_client;
 mod editor_component;
 mod event;
 mod lang;
@@ -35,12 +36,14 @@ mod task;
 mod value;
 mod window;
 
+use crate::dap_client::DapClient;
 use component::Component;
 use core::{caller_process_pid, Core, CODETRACER_TMP_PATH};
 use editor_component::EditorComponent;
-use event::Event;
+use event::{CtEvent, Event};
 use lang::Lang;
 use panel::{coord, panel, size};
+use serde_json::Value;
 use state_component::StateComponent;
 use status_component::StatusComponent;
 use task::{Action, EventId, EventKind, FlowUpdate, Location, MoveState, StepArg, TaskKind};
@@ -63,7 +66,7 @@ pub struct Trace {
     imported: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct App {
     location: Location,
     status: String,
@@ -76,6 +79,24 @@ pub struct App {
     core: Core,
     exit: bool,
     components: Vec<Box<dyn Component>>,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            location: Location::default(),
+            status: String::new(),
+            trace: Trace::default(),
+            receiver: None,
+            sender: None,
+            caller_process_pid: 0,
+            links_path: PathBuf::new(),
+            codetracer_exe_dir: PathBuf::new(),
+            core: Core::default(),
+            exit: false,
+            components: Vec::new(),
+        }
+    }
 }
 
 const CT_SOCKET_PATH: &str = "/tmp/ct_socket";
@@ -320,7 +341,11 @@ impl App {
         self.core.send(TaskKind::Configure, configure_arg)
     }
 
-    async fn run(&mut self, program_pattern: &str) -> Result<(), Box<dyn Error>> {
+    async fn run(
+        &mut self,
+        program_pattern: &str,
+        dap_bin: Option<&str>,
+    ) -> Result<(), Box<dyn Error>> {
         // might be hardcoded for now or just missing
         // self.load_config();
 
@@ -353,13 +378,36 @@ impl App {
 
         let (tx, mut rx) = mpsc::channel(1);
 
-        self.track_events(tx);
+        self.track_events(tx.clone());
+
+        if let Some(bin) = dap_bin {
+            let mut client = DapClient::start(bin)?;
+            client.launch(&self.trace.output_folder, &self.trace.program)?;
+            let (dap_tx, mut dap_rx) = mpsc::channel(1);
+            client.track(dap_tx);
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = dap_rx.recv().await {
+                    if tx_clone.send(CtEvent::Dap(msg)).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
 
         loop {
             if let Some(event) = rx.recv().await {
-                if let Err(e) = self.process_event(event) {
-                    eprintln!("process_event error: {:?}", e);
-                    //   break;
+                match event {
+                    CtEvent::Builtin(ev) => {
+                        if let Err(e) = self.process_event(ev) {
+                            eprintln!("process_event error: {:?}", e);
+                        }
+                    }
+                    CtEvent::Dap(msg) => {
+                        if let Err(e) = self.process_dap_message(msg) {
+                            eprintln!("dap event error: {:?}", e);
+                        }
+                    }
                 }
             }
         }
@@ -386,10 +434,10 @@ impl App {
         Ok(())
     }
 
-    fn track_events(&mut self, tx: mpsc::Sender<Event>) {
+    fn track_events(&mut self, tx: mpsc::Sender<CtEvent>) {
         let tx_actions = tx.clone();
         actions::track_keyboard_events(tx_actions);
-        core::track_responses(tx.clone());
+        core::track_responses(tx);
     }
 
     fn process_core_event(
@@ -458,6 +506,46 @@ impl App {
         }
     }
 
+    fn process_dap_message(&mut self, msg: serde_json::Value) -> Result<(), Box<dyn Error>> {
+        if let Some(typ) = msg.get("type").and_then(|v| v.as_str()) {
+            match typ {
+                "event" => {
+                    if let Some(ev) = msg.get("event").and_then(|v| v.as_str()) {
+                        match ev {
+                            "initialized" => self.initialized(),
+                            _ => Ok(()),
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+                "response" => {
+                    if let Some(cmd) = msg.get("command").and_then(|v| v.as_str()) {
+                        match cmd {
+                            "launch" => self.launch(),
+                            _ => Ok(()),
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => Ok(()),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    fn initialized(&mut self) -> Result<(), Box<dyn Error>> {
+        self.status = "initialized".to_string();
+        Ok(())
+    }
+
+    fn launch(&mut self) -> Result<(), Box<dyn Error>> {
+        self.status = "launched".to_string();
+        Ok(())
+    }
+
     fn step_in(&mut self) -> Result<(), Box<dyn Error>> {
         self.core.send(TaskKind::Step, StepArg::new(Action::StepIn))
     }
@@ -512,6 +600,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let program_pattern = args[1].clone();
+    let dap_bin = if args.len() > 2 {
+        Some(args[2].clone())
+    } else {
+        None
+    };
     let mut app = App::default();
     app.init_components();
 
@@ -521,7 +614,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     app.draw_layout()?;
 
     tokio::spawn(async move {
-        let res = app.run(&program_pattern).await;
+        let res = app.run(&program_pattern, dap_bin.as_deref()).await;
         eprintln!("run res {:?}", res);
         let _ = app.draw_layout();
     });

@@ -1,0 +1,26 @@
+You are working on a Rust-based DAP server for a database debugger.
+
+In `receiver.rs`, you've defined multiple `taskKind` variants that represent different types of backend tasks such as `SetBreakpoint`, `StepIn`, etc.
+
+### Your Task:
+
+1. Go through all the `taskKind` variants already defined in `handler.rs`.
+2. For each variant, wire up a handler in the main DAP server (e.g. in a match block or dispatch table).
+3. Each handler should:
+   - Match the corresponding DAP command (e.g., "setBreakpoints", "evaluate", etc).
+   - Call the appropriate function from `handler.rs` that implements the logic.
+   - Format and return a valid DAP-compliant response.
+4. If any variant is not yet wired into the DAP server, add the missing match arms and connect them to the existing handler function from the handler.rs.
+
+### Example:
+
+If `taskKind::Step` is implemented in `handler.rs`:
+- Add logic to your DAP server's message handler to process "step" requests.
+- Use the function from `handler.rs` to handle it.
+
+### Bonus (optional):
+
+- If the DAP command-to-taskKind mapping is repetitive, use a macro or helper trait to simplify the registration or dispatch.
+- Add comments or documentation that show which DAP messages are now supported and routed through `handler.rs`.
+
+Make sure this is modular, easy to extend, and follows Rust best practices. Also add tests for the implemented task kinds
