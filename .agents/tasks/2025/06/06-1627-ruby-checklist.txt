@@ -1,0 +1,8 @@
+# Project Specification for Ruby Checklist Programs
+
+You are tasked with creating a suite of checklist programs in Ruby to test the functionality of a Ruby debugger. These programs will serve as a comprehensive feature checklist.
+
+Create a new folder in ui-tests/programs folder and implement the checklist project there.
+
+--- FOLLOW UP TASK ---
+Remove the word "debugger" from the file names of the checklist programs
