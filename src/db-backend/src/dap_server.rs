@@ -259,6 +259,58 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                 seq += 1;
                 dap::write_message(&mut writer, &resp)?;
             }
+            DapMessage::Request(req) if req.command == "reverseContinue" => {
+                if let Some(h) = handler.as_mut() {
+                    let mut arg = StepArg::new(Action::Continue);
+                    arg.reverse = true;
+                    let _ = h.step(
+                        arg,
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    );
+                }
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "reverseContinue".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp)?;
+            }
+            DapMessage::Request(req) if req.command == "stepBack" => {
+                if let Some(h) = handler.as_mut() {
+                    let mut arg = StepArg::new(Action::Next);
+                    arg.reverse = true;
+                    let _ = h.step(
+                        arg,
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    );
+                }
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "stepBack".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp)?;
+            }
             _ => {}
         }
     }
