@@ -4,7 +4,7 @@ use crate::dap::{
 };
 use crate::db::Db;
 use crate::handler::Handler;
-use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskKind};
+use crate::task::{gen_task_id, SourceLocation, Task, TaskKind};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -165,8 +165,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
             }
             DapMessage::Request(req) if req.command == "stepIn" => {
                 if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::StepIn),
+                    let _ = h.step_in(
+                        true,
                         Task {
                             kind: TaskKind::Step,
                             id: gen_task_id(TaskKind::Step),
@@ -189,8 +189,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
             }
             DapMessage::Request(req) if req.command == "next" => {
                 if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::Next),
+                    let _ = h.next(
+                        true,
                         Task {
                             kind: TaskKind::Step,
                             id: gen_task_id(TaskKind::Step),
@@ -213,8 +213,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
             }
             DapMessage::Request(req) if req.command == "stepOut" => {
                 if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::StepOut),
+                    let _ = h.step_out(
+                        true,
                         Task {
                             kind: TaskKind::Step,
                             id: gen_task_id(TaskKind::Step),
@@ -237,8 +237,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
             }
             DapMessage::Request(req) if req.command == "continue" => {
                 if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::Continue),
+                    let _ = h.step_continue(
+                        true,
                         Task {
                             kind: TaskKind::Step,
                             id: gen_task_id(TaskKind::Step),
@@ -261,10 +261,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
             }
             DapMessage::Request(req) if req.command == "reverseContinue" => {
                 if let Some(h) = handler.as_mut() {
-                    let mut arg = StepArg::new(Action::Continue);
-                    arg.reverse = true;
-                    let _ = h.step(
-                        arg,
+                    let _ = h.step_continue(
+                        false,
                         Task {
                             kind: TaskKind::Step,
                             id: gen_task_id(TaskKind::Step),
@@ -287,10 +285,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
             }
             DapMessage::Request(req) if req.command == "stepBack" => {
                 if let Some(h) = handler.as_mut() {
-                    let mut arg = StepArg::new(Action::Next);
-                    arg.reverse = true;
-                    let _ = h.step(
-                        arg,
+                    let _ = h.next(
+                        false,
                         Task {
                             kind: TaskKind::Step,
                             id: gen_task_id(TaskKind::Step),

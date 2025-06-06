@@ -6,3 +6,4 @@
 - The Debug Adapter Protocol client communicates over a Unix domain socket using the same framing protocol, implemented in `src/tui/src/dap_client.rs`.
 - Added initial SetBreakpoints handling in db-backend DAP server.
 
+- DAP server step commands now directly invoke Handler step functions.
