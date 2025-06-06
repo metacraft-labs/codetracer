@@ -2,13 +2,17 @@ use crate::dap::{
     self, Breakpoint, DapMessage, Event, ProtocolMessage, RequestArguments, Response, SetBreakpointsResponseBody,
     Source,
 };
-use crate::trace_processor::load_trace_metadata;
+use crate::db::Db;
+use crate::handler::Handler;
+use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskKind};
+use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
@@ -28,6 +32,8 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
     let mut writer = stream;
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
+    let (tx, _rx) = mpsc::channel();
+    let mut handler: Option<Handler> = None;
     while let Ok(msg) = dap::from_reader(&mut reader) {
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
@@ -57,6 +63,18 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                         let entry = breakpoints.entry(path.clone()).or_default();
                         for line in lines {
                             entry.insert(line);
+                            if let Some(h) = handler.as_mut() {
+                                let _ = h.add_breakpoint(
+                                    SourceLocation {
+                                        path: path.clone(),
+                                        line: line as usize,
+                                    },
+                                    Task {
+                                        kind: TaskKind::AddBreak,
+                                        id: gen_task_id(TaskKind::AddBreak),
+                                    },
+                                );
+                            }
                             results.push(Breakpoint {
                                 id: None,
                                 verified: true,
@@ -106,9 +124,15 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                 if let RequestArguments::Launch(args) = &req.arguments {
                     if let Some(folder) = &args.trace_folder {
                         let metadata_path = folder.join("trace_metadata.json");
-                        match load_trace_metadata(&metadata_path) {
-                            Ok(meta) => println!("TRACE METADATA: {:?}", meta),
-                            Err(e) => eprintln!("failed to read metadata: {}", e),
+                        let trace_path = folder.join("trace.json");
+                        if let (Ok(meta), Ok(trace)) =
+                            (load_trace_metadata(&metadata_path), load_trace_data(&trace_path))
+                        {
+                            let mut db = Db::new(&meta.workdir);
+                            let mut proc = TraceProcessor::new(&mut db);
+                            proc.postprocess(&trace)?;
+                            handler = Some(Handler::new(Box::new(db), tx.clone()));
+                            println!("TRACE METADATA: {:?}", meta);
                         }
                     }
                     if let Some(pid) = args.pid {
@@ -133,6 +157,102 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     request_seq: req.base.seq,
                     success: true,
                     command: "launch".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp)?;
+            }
+            DapMessage::Request(req) if req.command == "stepIn" => {
+                if let Some(h) = handler.as_mut() {
+                    let _ = h.step(
+                        StepArg::new(Action::StepIn),
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    );
+                }
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "stepIn".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp)?;
+            }
+            DapMessage::Request(req) if req.command == "next" => {
+                if let Some(h) = handler.as_mut() {
+                    let _ = h.step(
+                        StepArg::new(Action::Next),
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    );
+                }
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "next".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp)?;
+            }
+            DapMessage::Request(req) if req.command == "stepOut" => {
+                if let Some(h) = handler.as_mut() {
+                    let _ = h.step(
+                        StepArg::new(Action::StepOut),
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    );
+                }
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "stepOut".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp)?;
+            }
+            DapMessage::Request(req) if req.command == "continue" => {
+                if let Some(h) = handler.as_mut() {
+                    let _ = h.step(
+                        StepArg::new(Action::Continue),
+                        Task {
+                            kind: TaskKind::Step,
+                            id: gen_task_id(TaskKind::Step),
+                        },
+                    );
+                }
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "continue".to_string(),
                     message: None,
                     body: json!({}),
                 });
