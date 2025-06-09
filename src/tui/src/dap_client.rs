@@ -70,10 +70,19 @@ impl DapClient {
             && resp.get("command").and_then(|v| v.as_str()) == Some("initialize")
             && resp.get("success").and_then(|v| v.as_bool()) == Some(true)
         {
-            return Ok(());
+            let resp_event = self.read_message()?;
+            if resp_event.get("type").and_then(|v| v.as_str()) == Some("event")
+                && resp_event.get("event").and_then(|v| v.as_str()) == Some("initialized")
+            {
+                Ok(())
+            } else {
+                error!("client: DAP: initialize request didn't receive initialized event; resp_event: {:?}", resp_event);
+                Err("DAP: initialize request failed: didn't receive initialized event".into())
+            }
+        } else {
+            error!("client: DAP: initialize request failed: resp: {:?}", resp,);
+            Err("DAP: initialize request failed".into())
         }
-        error!("client: DAP: initialize request failed: resp: {:?}", resp);
-        Err("DAP: initialize request failed".into())
     }
 
     /// Send a launch request to the DAP server with the current process id and
