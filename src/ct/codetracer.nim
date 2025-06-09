@@ -1,7 +1,6 @@
 # Thank you, Lord and GOD Jesus!
 
 import
-  ../common/types,
   ../common/ct_logging,
   launch/[ launch ],
   codetracerconf, confutils,
@@ -18,6 +17,6 @@ try:
     customValidateConfig(conf)
     runInitial(conf)
 except Exception as ex:
-  echo "Unhandled exception"
-  echo getStackTrace(ex)
-  echo "error: unhandled " & ex.msg
+  errorPrint "Unhandled exception"
+  errorPrint getStackTrace(ex)
+  errorPrint "Unhandled " & ex.msg

@@ -31,6 +31,7 @@ type
     path*: langstring
     line*: int
 
+  # An abstaract location in the code
   Location* = object
     path*: langstring
     line*: int

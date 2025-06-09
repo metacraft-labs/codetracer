@@ -95,15 +95,15 @@ proc createContextMenuItems(self: CallArg, ev: js): seq[ContextMenuItem] =
 
 proc `$`*(c: CallCount): string =
   case c.kind:
-  of Eq:
+  of Equal:
     $c.i
-  of GtOrEq:
+  of GreaterOrEqual:
     &">= {c.i}"
-  of LsOrEq:
+  of LessOrEqual:
     &"<= {c.i}"
-  of Gt:
+  of Greater:
     &"> {c.i}"
-  of Ls:
+  of Less:
     &"< {c.i}"
 
 proc panelDepth*(self: CalltraceComponent): int =

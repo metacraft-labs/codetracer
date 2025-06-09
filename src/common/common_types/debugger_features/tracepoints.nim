@@ -42,9 +42,7 @@ type
     id*: int
     locals*: seq[seq[(langstring, Value)]]
 
-  # TODO QA NOTE: Why not TracepointId = int?
-  TracepointId* = object
-    id*: int
+  TracepointId* = int
 
   TraceResult* = object
     i*: int
@@ -71,6 +69,7 @@ type
     FollowHistory,
     NoEvent
 
+  # An object that represents a tracepoint stop location
   Stop* = ref object
     tracepointId*: int ## set to -1 for stops that are not assigned to a tracepoint
     time*: BiggestInt
