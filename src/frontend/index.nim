@@ -532,6 +532,32 @@ proc onViewerMenu(sender: js, response: jsobject(coords=MenuLocation, location=t
   else:
     warnPrint "not applicable, should work in frontend for browser version"
 
+when defined(ctmacos):
+  proc menuNodeToItem(node: MenuNode): js =
+    if node.kind == MenuFolder:
+      var items: seq[js] = @[]
+      for child in node.elements:
+        items.add(menuNodeToItem(child))
+        if child.isBeforeNextSubGroup:
+          items.add(js{type: cstring"separator"})
+      js{label: node.name, enabled: node.enabled, submenu: cast[js](items)}
+    else:
+      js{
+        label: node.name,
+        enabled: node.enabled,
+        click: proc(menuItem: js, win: js) =
+          mainWindow.webContents.send("CODETRACER::menu-action", js{action: node.action})
+      }
+
+  proc onRegisterMenu(sender: js, response: jsobject(menu=MenuNode)) =
+    var elements: seq[js] = @[]
+    for child in response.menu.elements:
+      elements.add(menuNodeToItem(child))
+      if child.isBeforeNextSubGroup:
+        elements.add(js{type: cstring"separator"})
+    let menu = Menu.buildFromTemplate(cast[js](elements))
+    Menu.setApplicationMenu(menu)
+
 
 proc onUpdateExpansion(sender: js, response: jsobject(path=cstring, line=int, update=MacroExpansionLevelUpdate)) {.async.} =
   await updateExpand(response.path, response.line, -1, response.update) # TODO expansionFirstLine ?
@@ -1378,6 +1404,8 @@ proc configureIpcMain =
     "upload-trace-file"
     "download-trace-file"
     "delete-online-trace-file"
+
+    "register-menu"
 
     "restart"
 
