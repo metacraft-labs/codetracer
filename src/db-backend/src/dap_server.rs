@@ -58,6 +58,17 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                 });
                 seq += 1;
                 dap::write_message(writer, &resp)?;
+
+                let event = DapMessage::Event(Event {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "event".to_string(),
+                    },
+                    event: "initialized".to_string(),
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(writer, &event)?;
             }
             DapMessage::Request(req) if req.command == "setBreakpoints" => {
                 let mut results = Vec::new();
@@ -147,16 +158,6 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                         eprintln!("PID: {}", pid);
                     }
                 }
-                let event = DapMessage::Event(Event {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "event".to_string(),
-                    },
-                    event: "initialized".to_string(),
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &event)?;
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
