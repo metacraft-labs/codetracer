@@ -199,6 +199,7 @@ impl Handler {
         let call_key = self.db.call_key_for_step(self.step_id);
         let reset_flow = is_main || call_key != self.last_call_key;
         self.last_call_key = call_key;
+        info!("complete move: TODO: send stopped; step_id: {:?}", self.step_id);
         let move_state = MoveState {
             status: "".to_string(),
             location: self.db.load_location(self.step_id, call_key, &mut self.expr_loader),

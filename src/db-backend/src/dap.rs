@@ -20,7 +20,7 @@ pub struct Request {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
+// #[serde(deny_unknown_fields)]
 pub struct LaunchRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
