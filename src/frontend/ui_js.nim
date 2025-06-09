@@ -94,7 +94,7 @@ macro defineMenu(code: untyped): untyped =
       registerMenu(m)
     m
 
-func webTechMenu(data: Data, program: cstring): MenuNode =
+proc webTechMenu(data: Data, program: cstring): MenuNode =
   let config = data.config
   if not data.startOptions.shellUi:
     defineMenu:
