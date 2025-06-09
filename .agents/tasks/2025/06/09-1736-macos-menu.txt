@@ -3,3 +3,8 @@ In ui_js.nim we currently have the defineMenuImpl function and the defineMenu ma
 --- FOLLOW UP TASK ---
 Please address any inline comments on the diff, as well as any additional instructions below. This code does not build in CI with the following error:  /var/lib/private/github-runner-work/mcl-001/codetracer/codetracer/src/frontend/index.nim:1314:19 template/generic instantiation of `indexIpcHandlers` from here
 /var/lib/private/github-runner-work/mcl-001/codetracer/codetracer/src/frontend/index_config.nim:169:21 Error: undeclared identifier: 'onRegisterMenu'
+
+--- FOLLOW UP TASK ---
+Now a differend build error: /var/lib/private/github-runner-work/mcl-002/codetracer/codetracer/src/frontend/index_config.nim(173, 13) indexIpcHandlers
+/var/lib/private/github-runner-work/mcl-002/codetracer/codetracer/src/frontend/index.nim:1317:19 template/generic instantiation of `indexIpcHandlers` from here
+/var/lib/private/github-runner-work/mcl-002/codetracer/codetracer/src/frontend/index.nim:1411:5 Error: unexpected message
