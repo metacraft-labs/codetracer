@@ -1,11 +1,10 @@
 type
-  # TODO QA Note: use normal words!
   CallCountKind* = enum
-    Eq,
-    GtOrEq,
-    LsOrEq,
-    Gt,
-    Ls
+    Equal,
+    GreaterOrEqual,
+    LessOrEqual,
+    Greater,
+    Less
 
   CallCount* = object
     i*: int64
@@ -61,9 +60,7 @@ type
     scrollPosition*: int
     maxDepth*: int
 
-  # TODO QA NOTE: Why not CallSearchArg = langstring?
-  CallSearchArg* = object
-    value*: langstring
+  CallSearchArg* = langstring
 
   CalltraceMode* {.pure.} = enum NoInstrumentation, CallKeyOnly, RawRecordNoValues, FullRecord
 
