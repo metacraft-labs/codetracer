@@ -4,8 +4,9 @@ use crate::dap::{
 };
 use crate::db::Db;
 use crate::handler::Handler;
-use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskKind};
+use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskId, TaskKind};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
+use log::info;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -37,11 +38,34 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
+fn launch(trace_folder: &Path, tx: mpsc::Sender<crate::response::Response>) -> Result<Handler, Box<dyn Error>> {
+    info!("run launch() for {:?}", trace_folder);
+    let metadata_path = trace_folder.join("trace_metadata.json");
+    let trace_path = trace_folder.join("trace.json");
+    if let (Ok(meta), Ok(trace)) = (load_trace_metadata(&metadata_path), load_trace_data(&trace_path)) {
+        let mut db = Db::new(&meta.workdir);
+        let mut proc = TraceProcessor::new(&mut db);
+        proc.postprocess(&trace)?;
+        eprintln!("TRACE METADATA: {:?}", meta);
+        let mut handler = Handler::new(Box::new(db), tx.clone());
+        handler.run_to_entry(Task {
+            kind: TaskKind::RunToEntry,
+            id: TaskId("run-to-entry-0".to_string()),
+        })?;
+        Ok(handler)
+    } else {
+        Err("problem with reading metadata or path trace files".into())
+    }
+}
+
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
     let (tx, _rx) = mpsc::channel();
     let mut handler: Option<Handler> = None;
+    let mut received_launch = false;
+    let mut launch_trace_folder = PathBuf::from("");
+    let mut received_configuration_done = false;
     while let Ok(msg) = dap::from_reader(reader) {
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
@@ -140,24 +164,20 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                 dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "launch" => {
+                received_launch = true;
                 if let RequestArguments::Launch(args) = &req.arguments {
                     if let Some(folder) = &args.trace_folder {
-                        let metadata_path = folder.join("trace_metadata.json");
-                        let trace_path = folder.join("trace.json");
-                        if let (Ok(meta), Ok(trace)) =
-                            (load_trace_metadata(&metadata_path), load_trace_data(&trace_path))
-                        {
-                            let mut db = Db::new(&meta.workdir);
-                            let mut proc = TraceProcessor::new(&mut db);
-                            proc.postprocess(&trace)?;
-                            handler = Some(Handler::new(Box::new(db), tx.clone()));
-                            eprintln!("TRACE METADATA: {:?}", meta);
+                        launch_trace_folder = folder.clone();
+                        info!("stored launch trace folder: {launch_trace_folder:?}");
+                        if received_configuration_done {
+                            handler = Some(launch(&launch_trace_folder, tx.clone())?);
+                        }
+                        if let Some(pid) = args.pid {
+                            eprintln!("PID: {}", pid);
                         }
                     }
-                    if let Some(pid) = args.pid {
-                        eprintln!("PID: {}", pid);
-                    }
                 }
+                info!("received launch; configuration done? {received_configuration_done}; req: {req:?}");
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
@@ -174,6 +194,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "configurationDone" => {
                 // TODO: run to entry/continue here, after setting the `launch` field
+                received_configuration_done = true;
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
@@ -187,6 +208,11 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                 });
                 seq += 1;
                 dap::write_message(writer, &resp)?;
+
+                info!("configuration done sent response; received_launch: {received_launch}");
+                if received_launch {
+                    handler = Some(launch(&launch_trace_folder, tx.clone())?);
+                }
             }
             DapMessage::Request(req) if req.command == "stepIn" => {
                 if let Some(h) = handler.as_mut() {

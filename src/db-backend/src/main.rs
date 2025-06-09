@@ -10,8 +10,12 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
+use chrono::Local;
 use clap::Parser;
-use log::error;
+use log::LevelFilter;
+use log::{error, info};
+use std::fs::File;
+use std::io::Write;
 use std::panic::PanicHookInfo;
 use std::thread;
 use std::{error::Error, panic};
@@ -58,7 +62,30 @@ fn panic_handler(info: &PanicHookInfo) {
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
+    // env_logger setup based and adapted from
+    //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
+    //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
+    // TODO: restore old version or make it compatible with our logging format again
+    let target = Box::new(File::create("/tmp/codetracer/db-backend.log").expect("Can't create file"));
+
+    env_logger::Builder::new()
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{}:{} {} [{}] - {}",
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
+                record.level(),
+                record.args()
+            )
+        })
+        .target(env_logger::Target::Pipe(target))
+        .filter(None, LevelFilter::Info)
+        .init();
+
     let cli = Args::parse();
+    info!("logging from db-backend");
 
     eprintln!("pid {:?}", std::process::id());
     let handle = if cli.stdio {
