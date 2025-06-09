@@ -35,7 +35,15 @@ fn test_backend_dap_server_stdio() {
 
     let msg1 = dap::from_reader(&mut reader).unwrap();
     match msg1 {
-        DapMessage::Response(r) => assert_eq!(r.command, "initialize"),
+        DapMessage::Response(r) => {
+            assert_eq!(r.command, "initialize");
+            assert!(r.body["supportsLoadedSourcesRequest"].as_bool().unwrap());
+            assert!(r.body["supportsStepBack"].as_bool().unwrap());
+            assert!(r.body["supportsConfigurationDoneRequest"].as_bool().unwrap());
+            assert!(r.body["supportsDisassembleRequest"].as_bool().unwrap());
+            assert!(r.body["supportsLogPoints"].as_bool().unwrap());
+            assert!(r.body["supportsRestartRequest"].as_bool().unwrap());
+        }
         _ => panic!(),
     }
     let msg2 = dap::from_reader(&mut reader).unwrap();

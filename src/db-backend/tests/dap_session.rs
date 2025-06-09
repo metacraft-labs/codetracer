@@ -1,6 +1,6 @@
 use db_backend::dap::{
-    self, Breakpoint, DapClient, DapMessage, Event, LaunchRequestArguments, ProtocolMessage, RequestArguments,
-    Response, SetBreakpointsArguments, SetBreakpointsResponseBody, Source, SourceBreakpoint,
+    self, Breakpoint, Capabilities, DapClient, DapMessage, Event, LaunchRequestArguments, ProtocolMessage,
+    RequestArguments, Response, SetBreakpointsArguments, SetBreakpointsResponseBody, Source, SourceBreakpoint,
 };
 use serde_json::json;
 use std::io::BufReader;
@@ -18,6 +18,14 @@ fn run_server(stream: UnixStream) {
         };
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
+                let capabilities = Capabilities {
+                    supports_loaded_sources_request: Some(true),
+                    supports_step_back: Some(true),
+                    supports_configuration_done_request: Some(true),
+                    supports_disassemble_request: Some(true),
+                    supports_log_points: Some(true),
+                    supports_restart_request: Some(true),
+                };
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
@@ -27,7 +35,7 @@ fn run_server(stream: UnixStream) {
                     success: true,
                     command: "initialize".to_string(),
                     message: None,
-                    body: json!({}),
+                    body: serde_json::to_value(capabilities).unwrap(),
                 });
                 seq += 1;
                 dap::write_message(&mut writer, &resp).unwrap();
@@ -243,7 +251,15 @@ fn test_simple_session() {
 
     let msg1 = dap::from_reader(&mut reader).unwrap();
     match msg1 {
-        DapMessage::Response(resp) => assert_eq!(resp.command, "initialize"),
+        DapMessage::Response(resp) => {
+            assert_eq!(resp.command, "initialize");
+            assert!(resp.body["supportsLoadedSourcesRequest"].as_bool().unwrap());
+            assert!(resp.body["supportsStepBack"].as_bool().unwrap());
+            assert!(resp.body["supportsConfigurationDoneRequest"].as_bool().unwrap());
+            assert!(resp.body["supportsDisassembleRequest"].as_bool().unwrap());
+            assert!(resp.body["supportsLogPoints"].as_bool().unwrap());
+            assert!(resp.body["supportsRestartRequest"].as_bool().unwrap());
+        }
         _ => panic!("expected response"),
     }
     let msg2 = dap::from_reader(&mut reader).unwrap();
