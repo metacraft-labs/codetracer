@@ -2,7 +2,7 @@ use expanduser::expanduser;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use std::str;
 
 // use log::info;
@@ -417,18 +417,19 @@ impl<'a> TraceProcessor<'a> {
 }
 
 #[allow(clippy::panic)]
-pub fn load_trace_data(trace_file: &PathBuf, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+pub fn load_trace_data(trace_file: &Path, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
     let mut trace_reader = runtime_tracing::create_trace_reader(file_format); 
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
-    let path = expanduser(&trace_file.display().to_string())?;
-    trace_reader.load_trace_events(&path)?;
-    Ok(trace_reader.events)
+    let path = expanduser(trace_file.display().to_string())?;
+    let trace_events = trace_reader.load_trace_events(&path)?;
+    Ok(trace_events)
 }
 
+
 #[allow(clippy::panic)]
-pub fn load_trace_metadata(trace_metadata_file: &PathBuf) -> Result<TraceMetadata, Box<dyn Error>> {
+pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
-    let path = expanduser(&trace_metadata_file.display().to_string())?;
+    let path = expanduser(trace_metadata_file.display().to_string())?;
     let raw_bytes = fs::read(&path).unwrap_or_else(|_| panic!("metadata file {path:?} read error"));
     let raw = str::from_utf8(&raw_bytes)?;
 
