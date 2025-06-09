@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{error, info, warn};
 use serde_json::json;
 use std::error::Error;
 use std::io::{BufReader, Read, Write};
@@ -70,15 +70,16 @@ impl DapClient {
             && resp.get("command").and_then(|v| v.as_str()) == Some("initialize")
             && resp.get("success").and_then(|v| v.as_bool()) == Some(true)
         {
-            let resp_event = self.read_message()?;
-            if resp_event.get("type").and_then(|v| v.as_str()) == Some("event")
-                && resp_event.get("event").and_then(|v| v.as_str()) == Some("initialized")
-            {
-                Ok(())
-            } else {
-                error!("client: DAP: initialize request didn't receive initialized event; resp_event: {:?}", resp_event);
-                Err("DAP: initialize request failed: didn't receive initialized event".into())
-            }
+            // let resp_event = self.read_message()?;
+            // if resp_event.get("type").and_then(|v| v.as_str()) == Some("event")
+            // && resp_event.get("event").and_then(|v| v.as_str()) == Some("initialized")
+            // {
+            // Ok(())
+            // } else {
+            // error!("client: DAP: initialize request didn't receive initialized event; resp_event: {:?}", resp_event);
+            // Err("DAP: initialize request failed: didn't receive initialized event".into())
+            // }
+            Ok(())
         } else {
             error!("client: DAP: initialize request failed: resp: {:?}", resp,);
             Err("DAP: initialize request failed".into())
@@ -102,15 +103,25 @@ impl DapClient {
             }
         });
         self.send_message(&req)?;
-        let resp = self.read_message()?;
-        if resp.get("type").and_then(|v| v.as_str()) == Some("response")
-            && resp.get("command").and_then(|v| v.as_str()) == Some("launch")
-            && resp.get("success").and_then(|v| v.as_bool()) == Some(true)
-        {
-            return Ok(());
+        loop {
+            let resp = self.read_message()?;
+            if resp.get("type").and_then(|v| v.as_str()) == Some("response")
+                && resp.get("command").and_then(|v| v.as_str()) == Some("launch")
+                && resp.get("success").and_then(|v| v.as_bool()) == Some(true)
+            {
+                return Ok(());
+            } else {
+                // TODO: check if initialized: if so, store in a field, to know that
+                // it's safe to send breakpoints/other configuration
+                // TODO: if db-backend: so after end of `launch` we immediately send
+                // configuration-done so it can start and we receive stopped/location etc
+                warn!(
+                    "client: DAP: launch request expects response: resp: {:?}",
+                    resp
+                );
+            }
         }
-        error!("client: DAP: launch request failed: resp: {:?}", resp);
-        Err("DAP: launch request failed".into())
+        // Err("DAP: launch request failed".into())
     }
 
     fn send_message(&mut self, msg: &serde_json::Value) -> Result<(), Box<dyn Error>> {
