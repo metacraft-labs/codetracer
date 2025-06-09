@@ -1,6 +1,6 @@
 use crate::dap::{
-    self, Breakpoint, DapMessage, Event, ProtocolMessage, RequestArguments, Response, SetBreakpointsResponseBody,
-    Source,
+    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, RequestArguments,
+    Response, SetBreakpointsResponseBody, Source,
 };
 use crate::db::Db;
 use crate::handler::Handler;
@@ -75,6 +75,14 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     while let Ok(msg) = dap::from_reader(reader) {
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
+                let capabilities = Capabilities {
+                    supports_loaded_sources_request: Some(true),
+                    supports_step_back: Some(true),
+                    supports_configuration_done_request: Some(true),
+                    supports_disassemble_request: Some(true),
+                    supports_log_points: Some(true),
+                    supports_restart_request: Some(true),
+                };
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
@@ -84,7 +92,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     success: true,
                     command: "initialize".to_string(),
                     message: None,
-                    body: json!({}),
+                    body: serde_json::to_value(capabilities)?,
                 });
                 seq += 1;
                 dap::write_message(writer, &resp)?;
