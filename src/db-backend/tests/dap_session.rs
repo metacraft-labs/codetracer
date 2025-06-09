@@ -250,6 +250,7 @@ fn test_simple_session() {
     let launch = client.launch(LaunchRequestArguments {
         program: Some("main".to_string()),
         trace_folder: None,
+        trace_file: None,
         pid: None,
         no_debug: None,
         restart: None,

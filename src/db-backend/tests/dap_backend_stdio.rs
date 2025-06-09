@@ -26,6 +26,7 @@ fn test_backend_dap_server_stdio() {
     let launch_args = LaunchRequestArguments {
         program: Some("main".to_string()),
         trace_folder: Some(trace_dir),
+        trace_file: None,
         pid: Some(pid as u64),
         no_debug: None,
         restart: None,
