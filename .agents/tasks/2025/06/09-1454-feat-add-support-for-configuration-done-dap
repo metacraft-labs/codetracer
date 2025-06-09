@@ -1,0 +1,6 @@
+db-backend: dap: using spec_dap.md add support for receiving
+the `configurationDone` request. Send a response for it and add
+a `TODO` comment that we will run to entry/continue here, after
+setting the `launch` field
+
+add a test that we receive it to the existing session tests
