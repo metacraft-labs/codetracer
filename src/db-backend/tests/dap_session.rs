@@ -57,6 +57,21 @@ fn run_server(stream: UnixStream) {
                 seq += 1;
                 dap::write_message(&mut writer, &resp).unwrap();
             }
+            DapMessage::Request(req) if req.command == "configurationDone" => {
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "configurationDone".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(&mut writer, &resp).unwrap();
+            }
             _ => {}
         }
     }
@@ -251,9 +266,16 @@ fn test_simple_session() {
         DapMessage::Event(ev) => assert_eq!(ev.event, "initialized"),
         _ => panic!("expected event"),
     }
+    let conf_done = client.request("configurationDone", RequestArguments::Other(json!({})));
+    dap::write_message(&mut writer, &conf_done).unwrap();
     let msg3 = dap::from_reader(&mut reader).unwrap();
     match msg3 {
         DapMessage::Response(resp) => assert_eq!(resp.command, "launch"),
+        _ => panic!("expected response"),
+    }
+    let msg4 = dap::from_reader(&mut reader).unwrap();
+    match msg4 {
+        DapMessage::Response(resp) => assert_eq!(resp.command, "configurationDone"),
         _ => panic!("expected response"),
     }
 

@@ -8,3 +8,5 @@
 - When using the DAP stdio transport, all diagnostic output must go to stderr
   to avoid corrupting the message stream.
 
+
+- The db-backend DAP server now responds to the `configurationDone` request.
