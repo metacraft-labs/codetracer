@@ -3,9 +3,7 @@ type
     location*: SourceLocation
     enabled*: bool
 
-  # TODO QA Note: why not BreakpointSetup = seq[BreakpointState]?
-  BreakpointSetup* = object ## State of a sequence of breakpoints
-    breakpoints*: seq[BreakpointState]
+  BreakpointSetup* = seq[BreakpointState]
 
   BreakpointInfo* = object
     path*: langstring

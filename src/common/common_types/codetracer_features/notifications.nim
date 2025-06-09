@@ -1,12 +1,12 @@
 type
-  NotificationKind* = enum ## Notification kinds.
+  NotificationKind* = enum
     NotificationInfo,
     NotificationWarning,
     NotificationError,
     NotificationSuccess
 
 
-  Notification* = ref object ## Notification object.
+  Notification* = ref object
     kind*: NotificationKind
     time*: int64
     text*: langstring
@@ -29,7 +29,6 @@ type
         handler*: proc: void
 
 proc newNotification*(kind: NotificationKind, text: string, isOperationStatus: bool = false, actions: seq[NotificationAction] = @[]): Notification =
-  ## Init new notification
   Notification(
     kind: kind,
     text: text,
