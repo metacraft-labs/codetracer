@@ -8,3 +8,10 @@ Please address any inline comments on the diff, as well as any additional instru
 Now a differend build error: /var/lib/private/github-runner-work/mcl-002/codetracer/codetracer/src/frontend/index_config.nim(173, 13) indexIpcHandlers
 /var/lib/private/github-runner-work/mcl-002/codetracer/codetracer/src/frontend/index.nim:1317:19 template/generic instantiation of `indexIpcHandlers` from here
 /var/lib/private/github-runner-work/mcl-002/codetracer/codetracer/src/frontend/index.nim:1411:5 Error: unexpected message
+\n--- FOLLOW UP TASK ---
+Now it fails on macos with the following error: 142194 lines; 0.674s; 182.336MiB peakmem; proj: /Users/runner/work/codetracer/codetracer/src/frontend/index.nim; out: /Users/runner/work/codetracer/codetracer/non-nix-build/CodeTracer.app/Contents/MacOS/index.js [SuccessX]
+/Users/runner/work/codetracer/codetracer/src/frontend/ui_js.nim(97, 6) Error: 'webTechMenu' can have side effects
+> /Users/runner/work/codetracer/codetracer/src/frontend/ui_js.nim(94, 19) Hint: 'webTechMenu' calls `.sideEffect` 'registerMenu'
+>> /Users/runner/work/codetracer/codetracer/src/frontend/ui_js.nim(27, 8) Hint: 'registerMenu' called by 'webTechMenu'
+>>> /Users/runner/work/codetracer/codetracer/non-nix-build/deps/nim/lib/js/jsffi.nim(287, 12) Hint: 'registerMenu' accesses global state 'ipc'
+>>>> /Users/runner/work/codetracer/codetracer/src/frontend/renderer.nim(18, 5) Hint: 'ipc' accessed by 'registerMenu'
