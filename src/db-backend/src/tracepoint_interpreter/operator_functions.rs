@@ -1,4 +1,25 @@
+use num_bigint::{BigInt, Sign};
+use num_traits::ToPrimitive;
 use runtime_tracing::{TypeKind, ValueRecord, NONE_TYPE_ID};
+
+fn bigint_from_valuerecord(record: &ValueRecord) -> BigInt {
+    if let ValueRecord::BigInt { b, negative, .. } = record {
+        let sign = if *negative { Sign::Minus } else { Sign::Plus };
+        BigInt::from_bytes_be(sign, b)
+    } else {
+        unreachable!("Expected BigInt value record")
+    }
+}
+
+fn valuerecord_from_bigint(value: BigInt) -> ValueRecord {
+    let (sign, bytes) = value.to_bytes_be();
+    let negative = sign == Sign::Minus;
+    ValueRecord::BigInt {
+        b: bytes,
+        negative,
+        type_id: NONE_TYPE_ID,
+    }
+}
 
 use crate::value::{Type, Value};
 
@@ -35,6 +56,11 @@ pub fn operator_negation(v: ValueRecord, eval_error_type: &Type) -> Result<Value
             f: -f,
             type_id: NONE_TYPE_ID,
         }),
+
+        bi @ ValueRecord::BigInt { .. } => {
+            let res = -bigint_from_valuerecord(&bi);
+            Ok(valuerecord_from_bigint(res))
+        }
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -106,6 +132,47 @@ pub fn operator_plus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
             type_id: NONE_TYPE_ID,
         }),
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            let res = bigint_from_valuerecord(&bi1) + bigint_from_valuerecord(&bi2);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            let res = bigint_from_valuerecord(&bi) + BigInt::from(i);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            let res = BigInt::from(i) + bigint_from_valuerecord(&bi);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: b + f,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "+ not defined for these values".to_string();
+                Err(err_value)
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: f + b,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "+ not defined for these values".to_string();
+                Err(err_value)
+            }
+        }
+
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "+ not defined for these values".to_string();
@@ -140,6 +207,47 @@ pub fn operator_minus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) 
             type_id: NONE_TYPE_ID,
         }),
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            let res = bigint_from_valuerecord(&bi1) - bigint_from_valuerecord(&bi2);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            let res = bigint_from_valuerecord(&bi) - BigInt::from(i);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            let res = BigInt::from(i) - bigint_from_valuerecord(&bi);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: b - f,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "- not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: f - b,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "- not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "- not defined for these values".to_string();
@@ -169,6 +277,47 @@ pub fn operator_mult(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
             f: i as f64 * f,
             type_id: NONE_TYPE_ID,
         }),
+
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            let res = bigint_from_valuerecord(&bi1) * bigint_from_valuerecord(&bi2);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            let res = bigint_from_valuerecord(&bi) * BigInt::from(i);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            let res = BigInt::from(i) * bigint_from_valuerecord(&bi);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: b * f,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "* not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: f * b,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "* not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -204,6 +353,47 @@ pub fn operator_div(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             type_id: NONE_TYPE_ID,
         }),
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            let res = bigint_from_valuerecord(&bi1) / bigint_from_valuerecord(&bi2);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            let res = bigint_from_valuerecord(&bi) / BigInt::from(i);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            let res = BigInt::from(i) / bigint_from_valuerecord(&bi);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: b / f,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "/ not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: f / b,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "/ not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "/ not defined for these values".to_string();
@@ -238,6 +428,47 @@ pub fn operator_rem(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             type_id: NONE_TYPE_ID,
         }),
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            let res = bigint_from_valuerecord(&bi1) % bigint_from_valuerecord(&bi2);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            let res = bigint_from_valuerecord(&bi) % BigInt::from(i);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            let res = BigInt::from(i) % bigint_from_valuerecord(&bi);
+            Ok(valuerecord_from_bigint(res))
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: b % f,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "% not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                Ok(ValueRecord::Float {
+                    f: f % b,
+                    type_id: NONE_TYPE_ID,
+                })
+            } else {
+                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                err_value.msg = "% not defined for these values".to_string();
+                return Err(err_value);
+            }
+        }
+
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "% not defined for these values".to_string();
@@ -254,11 +485,39 @@ pub fn operator_equal(v1: ValueRecord, v2: ValueRecord, _eval_error_type: &Type)
 
         (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => i1 == i2,
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            bigint_from_valuerecord(&bi1) == bigint_from_valuerecord(&bi2)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            bigint_from_valuerecord(&bi) == BigInt::from(i)
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            BigInt::from(i) == bigint_from_valuerecord(&bi)
+        }
+
         (ValueRecord::String { text: s1, type_id: _ }, ValueRecord::String { text: s2, type_id: _ }) => s1 == s2,
 
         (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) == f,
 
         (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f == i as f64,
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                b == f
+            } else {
+                false
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                f == b
+            } else {
+                false
+            }
+        }
 
         (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => f1 == f2,
 
@@ -306,6 +565,34 @@ pub fn operator_less(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
 
         (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f < i as f64,
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            bigint_from_valuerecord(&bi1) < bigint_from_valuerecord(&bi2)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            bigint_from_valuerecord(&bi) < BigInt::from(i)
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            BigInt::from(i) < bigint_from_valuerecord(&bi)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                b < f
+            } else {
+                false
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                f < b
+            } else {
+                false
+            }
+        }
+
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "< not defined for these values".to_string();
@@ -331,6 +618,34 @@ pub fn operator_less_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type: &T
         (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) <= f,
 
         (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f <= i as f64,
+
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            bigint_from_valuerecord(&bi1) <= bigint_from_valuerecord(&bi2)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            bigint_from_valuerecord(&bi) <= BigInt::from(i)
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            BigInt::from(i) <= bigint_from_valuerecord(&bi)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                b <= f
+            } else {
+                false
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                f <= b
+            } else {
+                false
+            }
+        }
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -358,6 +673,34 @@ pub fn operator_greater(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type
 
         (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f > i as f64,
 
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            bigint_from_valuerecord(&bi1) > bigint_from_valuerecord(&bi2)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            bigint_from_valuerecord(&bi) > BigInt::from(i)
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            BigInt::from(i) > bigint_from_valuerecord(&bi)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                b > f
+            } else {
+                false
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                f > b
+            } else {
+                false
+            }
+        }
+
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "> not defined for these values".to_string();
@@ -383,6 +726,34 @@ pub fn operator_greater_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type:
         (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) >= f,
 
         (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f >= i as f64,
+
+        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
+            bigint_from_valuerecord(&bi1) >= bigint_from_valuerecord(&bi2)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
+            bigint_from_valuerecord(&bi) >= BigInt::from(i)
+        }
+
+        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            BigInt::from(i) >= bigint_from_valuerecord(&bi)
+        }
+
+        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                b >= f
+            } else {
+                false
+            }
+        }
+
+        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
+            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+                f >= b
+            } else {
+                false
+            }
+        }
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());

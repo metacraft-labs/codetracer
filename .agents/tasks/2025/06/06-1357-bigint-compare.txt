@@ -1,0 +1,3 @@
+In `src/tracepoint_interpreter/operator_functions.rs` there aren't cases that handle ValueRecord::BigInt. Implement them for the comparison functions.
+
+In order for the code to be more readable, implement a function that accepts ValueRecord::BigInt as parameter and returns num_bigint::BigInt.
