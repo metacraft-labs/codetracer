@@ -1,5 +1,3 @@
-const FLOW_ITERATION_START*: int = 0
-
 type
   LoopID* = int
 
