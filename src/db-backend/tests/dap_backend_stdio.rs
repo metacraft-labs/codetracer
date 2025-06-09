@@ -43,9 +43,16 @@ fn test_backend_dap_server_stdio() {
         DapMessage::Event(e) => assert_eq!(e.event, "initialized"),
         _ => panic!(),
     }
+    let conf_done = client.request("configurationDone", RequestArguments::Other(json!({})));
+    dap::write_message(&mut writer, &conf_done).unwrap();
     let msg3 = dap::from_reader(&mut reader).unwrap();
     match msg3 {
         DapMessage::Response(r) => assert_eq!(r.command, "launch"),
+        _ => panic!(),
+    }
+    let msg4 = dap::from_reader(&mut reader).unwrap();
+    match msg4 {
+        DapMessage::Response(r) => assert_eq!(r.command, "configurationDone"),
         _ => panic!(),
     }
 
