@@ -2865,7 +2865,7 @@ proc flowLoopValue*(
     span(class = &"flow-loop-value-name", style=style):
       span(class = &"flow-parallel-loop-iteration-start"): text "iteration "
       textarea(class = &"flow-loop-textarea",
-        placeholder = fmt"{iteration}",
+        value = $(iteration),
         maxlength = $width,
         oninput = proc(ev: Event, v: VNode) =
           let value = parseInt($ev.target.value)
