@@ -23,6 +23,12 @@ const TAB_LIMIT = 20
 const MIN_FONTSIZE = 10
 const MAX_FONTSIZE = 18
 
+when defined(ctmacos):
+  proc registerMenu*(menu: MenuNode) =
+    ipc.send("CODETRACER::register-menu", js{menu: menu})
+else:
+  proc registerMenu*(menu: MenuNode) = discard
+
 proc defineMenuImpl(node: NimNode): (NimNode, bool) =
   # echo node.treerepr
   case node.kind:
@@ -74,14 +80,19 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
     #   macros.error "expect command or prefix ", $node.kind
 
 macro defineMenu(code: untyped): untyped =
-  # defineMenu:
-  #   folder "menu":
-  #     element name, action, [enabled=MEnabled] or false or name of check
-  # =>
-  # MenuNode(
-  #   kind: MenuFolder, name: "menu", elements: @[
-  #    MenuNode(kind: MenuElement, name: name, action: action, enabled: true)])
-  result = defineMenuImpl(code[0])[0]
+  ## defineMenu:
+  ##   folder "menu":
+  ##     element name, action, [enabled=MEnabled] or false or name of check
+  ## =>
+  ## MenuNode(
+  ##   kind: MenuFolder, name: "menu", elements: @[
+  ##     MenuNode(kind: MenuElement, name: name, action: action, enabled: true)])
+  let menuNode = defineMenuImpl(code[0])[0]
+  result = quote do:
+    var m = `menuNode`
+    when defined(ctmacos):
+      registerMenu(m)
+    m
 
 func webTechMenu(data: Data, program: cstring): MenuNode =
   let config = data.config
@@ -618,6 +629,11 @@ proc onSymbolsLoaded(
 
   data.redraw()
 
+proc onMenuAction(sender: js, response: jsobject(action=ClientAction)) =
+  let f = data.actions[response.action]
+  if not f.isNil:
+    f()
+
 
 proc onFilesystemLoaded(
   sender: js,
@@ -1109,6 +1125,7 @@ proc configureIPC(data: Data) =
     "upload-trace-file-received"
     "upload-trace-progress": UploadProgress => ui
     "delete-online-trace-file-received"
+    "menu-action"
 
   duration("configureIPCRun")
 
