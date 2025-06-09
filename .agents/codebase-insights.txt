@@ -5,4 +5,6 @@
 - The `tui` crate contains a sample trace under `src/tui/trace/` used for basic testing.
 - The Debug Adapter Protocol client communicates over a Unix domain socket using the same framing protocol, implemented in `src/tui/src/dap_client.rs`.
 - Added initial SetBreakpoints handling in db-backend DAP server.
+- When using the DAP stdio transport, all diagnostic output must go to stderr
+  to avoid corrupting the message stream.
 
