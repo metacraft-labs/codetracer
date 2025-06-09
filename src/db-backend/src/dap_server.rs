@@ -9,8 +9,8 @@ use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcesso
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::io::BufReader;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -24,17 +24,25 @@ pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     let (stream, _) = listener.accept()?;
-    handle_client(stream)
-}
-
-fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
+    handle_client(&mut reader, &mut writer)
+}
+
+pub fn run_stdio() -> Result<(), Box<dyn Error>> {
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut reader = BufReader::new(stdin.lock());
+    let mut writer = stdout.lock();
+    handle_client(&mut reader, &mut writer)
+}
+
+fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
     let (tx, _rx) = mpsc::channel();
     let mut handler: Option<Handler> = None;
-    while let Ok(msg) = dap::from_reader(&mut reader) {
+    while let Ok(msg) = dap::from_reader(reader) {
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let resp = DapMessage::Response(Response {
@@ -49,7 +57,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "setBreakpoints" => {
                 let mut results = Vec::new();
@@ -118,7 +126,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: serde_json::to_value(body)?,
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "launch" => {
                 if let RequestArguments::Launch(args) = &req.arguments {
@@ -132,11 +140,11 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                             let mut proc = TraceProcessor::new(&mut db);
                             proc.postprocess(&trace)?;
                             handler = Some(Handler::new(Box::new(db), tx.clone()));
-                            println!("TRACE METADATA: {:?}", meta);
+                            eprintln!("TRACE METADATA: {:?}", meta);
                         }
                     }
                     if let Some(pid) = args.pid {
-                        println!("PID: {}", pid);
+                        eprintln!("PID: {}", pid);
                     }
                 }
                 let event = DapMessage::Event(Event {
@@ -148,7 +156,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &event)?;
+                dap::write_message(writer, &event)?;
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,
@@ -161,7 +169,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "stepIn" => {
                 if let Some(h) = handler.as_mut() {
@@ -185,7 +193,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "next" => {
                 if let Some(h) = handler.as_mut() {
@@ -209,7 +217,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "stepOut" => {
                 if let Some(h) = handler.as_mut() {
@@ -233,7 +241,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "continue" => {
                 if let Some(h) = handler.as_mut() {
@@ -257,7 +265,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "reverseContinue" => {
                 if let Some(h) = handler.as_mut() {
@@ -283,7 +291,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             DapMessage::Request(req) if req.command == "stepBack" => {
                 if let Some(h) = handler.as_mut() {
@@ -309,7 +317,7 @@ fn handle_client(stream: UnixStream) -> Result<(), Box<dyn Error>> {
                     body: json!({}),
                 });
                 seq += 1;
-                dap::write_message(&mut writer, &resp)?;
+                dap::write_message(writer, &resp)?;
             }
             _ => {}
         }
