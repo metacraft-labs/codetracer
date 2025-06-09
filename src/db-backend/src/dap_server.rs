@@ -172,6 +172,22 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                 seq += 1;
                 dap::write_message(writer, &resp)?;
             }
+            DapMessage::Request(req) if req.command == "configurationDone" => {
+                // TODO: run to entry/continue here, after setting the `launch` field
+                let resp = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: true,
+                    command: "configurationDone".to_string(),
+                    message: None,
+                    body: json!({}),
+                });
+                seq += 1;
+                dap::write_message(writer, &resp)?;
+            }
             DapMessage::Request(req) if req.command == "stepIn" => {
                 if let Some(h) = handler.as_mut() {
                     let _ = h.step(
