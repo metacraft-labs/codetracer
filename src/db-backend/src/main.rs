@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
     //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
     // TODO: restore old version or make it compatible with our logging format again
-    let target = Box::new(File::create("/tmp/codetracer/db-backend.log").expect("Can't create file"));
+    let target = Box::new(File::create("/tmp/codetracer/db-backend.log")?);
 
     env_logger::Builder::new()
         .format(|buf, record| {
