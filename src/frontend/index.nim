@@ -1408,9 +1408,11 @@ proc configureIpcMain =
     "download-trace-file"
     "delete-online-trace-file"
 
-    when defined(ctmacos):
+  when defined(ctmacos):
+    indexIpcHandlers("CODETRACER::"):
       "register-menu"
 
+  indexIpcHandlers("CODETRACER::"):
     "restart"
 
     # "debug-gdb"
