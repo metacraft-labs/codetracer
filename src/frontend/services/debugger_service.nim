@@ -34,7 +34,7 @@ proc loadParsedExprs*(self: DebuggerService, line: int, path: cstring) {.async.}
       self.expressionMap[key] = item
 
 proc calltraceSearch*(self: DebuggerService, response: CallSearchArg): Future[seq[Call]] {.async.} =
-  let calls = await self.data.asyncSend("calltrace-search", response, &"{response.value}", seq[Call])
+  let calls = await self.data.asyncSend("calltrace-search", response, &"{response}", seq[Call])
   return calls
 
 proc updateTable*(self: DebuggerService, args: UpdateTableArgs) {.async.} =
@@ -53,14 +53,14 @@ proc tracepointDelete*(self: DebuggerService, tracepointId: TracepointId) {.asyn
   discard await self.data.asyncSend(
     "tracepoint-delete",
     tracepointId,
-    "tracepoint-delete-" & fmt"{tracepointId.id}",
+    "tracepoint-delete-" & fmt"{tracepointId}",
     Future[void])
 
 proc tracepointToggle*(self: DebuggerService, tracepointId: TracepointId) {.async.} =
   discard await self.data.asyncSend(
     "tracepoint-toggle",
     tracepointId,
-    "tracpeoint-toggle-" & fmt"{now()}-{tracepointId.id}",
+    "tracpeoint-toggle-" & fmt"{now()}-{tracepointId}",
     Future[void]
   )
 

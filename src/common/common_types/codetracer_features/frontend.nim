@@ -1,5 +1,5 @@
 type
-  DebuggerAction* = enum ## Debugger action
+  DebuggerAction* = enum
     StepIn,
     StepOut,
     Next,
@@ -12,7 +12,8 @@ type
     CoNext,
     NonAction
 
-  ClientAction* = enum ## Client Action enum.
+  # Each member of this enum maps to some kind of frontend interaction. It is used to route events, set/get shortcuts, etc for a given frontend interaction
+  ClientAction* = enum
     forwardContinue,
     reverseContinue,
     forwardNext,
@@ -169,7 +170,7 @@ type
     aRestart,
     findSymbol
 
-  InputShortcutMap* = TableLike[langstring, langstring] ## Input Shortcut map
+  InputShortcutMap* = TableLike[langstring, langstring]
 
   ShortcutMap* = object
     actionShortcuts*: array[ClientAction, seq[Shortcut]]
@@ -199,6 +200,7 @@ type
     backendSocket*: SocketAddressInfo
     rawTestStrategy*: langstring
 
+  # The contents of a window in the frontend
   Content* {.pure.} = enum
     History = 0,
     Trace = 1,

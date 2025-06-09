@@ -11,11 +11,11 @@ type
     WhitespaceSpaces,
     WhitespaceTabs
 
-  Whitespace* = ref object ## Whitespace object
+  Whitespace* = ref object
     character*: WhitespaceCharacter
     width*: int
 
-  TokenKind* = enum ## Token kinds
+  TokenKind* = enum
     EmptySymbol,
     TkSymbol,
     TkRegister,
@@ -31,7 +31,7 @@ type
     TkIndent,
     TkWhitespace
 
-  Token* = object ## Token object
+  Token* = object
     kind*: TokenKind
     tokenName*: cstring
     raw*: langstring
@@ -39,7 +39,7 @@ type
     column*: int
 
   # support bytecode in general
-  AssemblyToken* = ref object ## Assembly token
+  AssemblyToken* = ref object
     offset*:          int
     highLevelLine*:   int
     opcode*:          cstring

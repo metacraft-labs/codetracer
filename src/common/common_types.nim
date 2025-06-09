@@ -13,12 +13,15 @@ import task_and_event
 # currently a lot of app data is saved in data: Data and it's accessed as a global object in renderer.nim and ui_js.nim
 
 include
-  common_types/[ notifications, tokens, graveyard ],
-  common_types/debugger_features/events,
-  common_types/language_features/[ code, "type", "value", value_history, "macro" ],
-  common_types/debugger_features/[ breakpoint, call, trace, debugger, flow, frontend, jumps, shell, stepping, tracepoints ]
+  common_types/graveyard,
+  common_types/codetracer_features/[ notifications, events ],
+  common_types/utils/constants,
+  common_types/language_features/[ tokens, code, "type", "value", value_history, "macro" ],
+  common_types/debugger_features/[ breakpoint, call, trace, debugger, jumps],
+  common_types/codetracer_features/[ flow, frontend, shell ],
+  common_types/debugger_features/[ stepping, tracepoints ]
 
 export task_and_event
 
 include
-  common_types/utils/[ errors, constants, meta, text_representation, timer ]
+  common_types/utils/[ errors, meta, text_representation, timer ]
