@@ -559,6 +559,9 @@ when defined(ctmacos):
     Menu.setApplicationMenu(menu)
 
 
+else:
+  proc onRegisterMenu(sender: js, response: jsobject(menu=MenuNode)) = discard
+
 proc onUpdateExpansion(sender: js, response: jsobject(path=cstring, line=int, update=MacroExpansionLevelUpdate)) {.async.} =
   await updateExpand(response.path, response.line, -1, response.update) # TODO expansionFirstLine ?
 
@@ -1405,7 +1408,8 @@ proc configureIpcMain =
     "download-trace-file"
     "delete-online-trace-file"
 
-    "register-menu"
+    when defined(ctmacos):
+      "register-menu"
 
     "restart"
 
