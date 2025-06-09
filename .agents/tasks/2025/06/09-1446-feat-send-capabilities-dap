@@ -1,0 +1,13 @@
+Make the initialized response well typed (add types for it and its fields)
+using spec_dap.md
+
+Send also capabilites in it, set explicitly those fields to true:
+
+supportsLoadedSourcesRequest
+supportsStepBack
+supportsConfigurationDoneRequest
+supportsDisassembleRequest
+supportsLogPoints
+supportsRestartRequest
+
+add to the existing tests that the client receives capabilites
