@@ -44,6 +44,9 @@ struct Args {
     /// Path to the Unix domain socket for DAP communication.
     /// If omitted, a path based on the process id will be used.
     socket_path: Option<std::path::PathBuf>,
+    /// Use stdio transport for DAP communication instead of a Unix socket.
+    #[arg(long)]
+    stdio: bool,
 }
 
 // Already panicking so the unwraps won't change anything
@@ -57,11 +60,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let cli = Args::parse();
 
-    let socket_path = if let Some(p) = cli.socket_path {
-        p
+    eprintln!("pid {:?}", std::process::id());
+    let handle = if cli.stdio {
+        thread::spawn(move || {
+            let _ = db_backend::dap_server::run_stdio();
+        })
     } else {
-        let pid = std::process::id() as usize;
-        db_backend::dap_server::socket_path_for(pid)
+        let socket_path = if let Some(p) = cli.socket_path {
+            p
+        } else {
+            let pid = std::process::id() as usize;
+            db_backend::dap_server::socket_path_for(pid)
+        };
+        thread::spawn(move || {
+            let _ = db_backend::dap_server::run(&socket_path);
+        })
     };
 
     // let run_dir = core.run_dir()?;
@@ -113,10 +126,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     // // db.display_variable_cells();
 
     // let socket_path = db_backend::dap_server::socket_path_for(cli.caller_process_pid);
-    println!("pid {:?}", std::process::id());
-    let handle = thread::spawn(move || {
-        let _ = db_backend::dap_server::run(&socket_path);
-    });
     match handle.join() {
         Ok(_) => Ok(()),
         Err(_) => Err("dap server thread panicked".into()),
