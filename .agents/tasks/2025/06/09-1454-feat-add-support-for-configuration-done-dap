@@ -4,3 +4,6 @@ a `TODO` comment that we will run to entry/continue here, after
 setting the `launch` field
 
 add a test that we receive it to the existing session tests
+
+--- FOLLOW UP TASK ---
+add a test for configurationDone to the dap_backend_stdio.rs and dap_backend_server.rs
