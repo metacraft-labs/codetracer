@@ -23,13 +23,13 @@ export class StatePanel {
     return this.page.locator("#code-state-line-0");
   }
 
-  async values(name: string): Promise<Record<string, StatePanelNamedValue>> {
+  async values(): Promise<Record<string, StatePanelNamedValue>> {
     // TODO: what about non-atom/non-expanded?
     const valueLocators = await this.page
       .locator(".value-expanded-atom-parent")
       .all();
 
-    const values = {};
+    const values: Record<string, StatePanelNamedValue> = {};
     for (const valueLocator of valueLocators) {
       const rawExpr =
         (await valueLocator.locator(".value-name").textContent()) ?? "";
@@ -40,10 +40,12 @@ export class StatePanel {
 
       if (expr.length > 0) {
         values[expr] = {
-          text: await valueLocator
-            .locator(".value-expanded-text")
-            .textContent(),
-          typeText: await valueLocator.locator(".value-type").textContent(),
+          text:
+            (await valueLocator
+              .locator(".value-expanded-text")
+              .textContent()) ?? "",
+          typeText:
+            (await valueLocator.locator(".value-type").textContent()) ?? "",
         };
       }
     }
