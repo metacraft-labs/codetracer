@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+# Script to update or add key-value pairs in tup.config files
+# Usage: update-tup-config [config_path] [key] [value]
+
+set -euo pipefail
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <config_path> <key> <value>"
+    echo "Example: $0 src/build-debug/tup.config WITHOUT_DB_BACKEND 1"
+    exit 1
+fi
+
+CONFIG_PATH="$1"
+KEY="$2"
+VALUE="$3"
+
+# If config_path is relative, make it relative to repository root
+if [[ ! "$CONFIG_PATH" = /* ]]; then
+    ROOT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    CONFIG_PATH="$ROOT_PATH/$CONFIG_PATH"
+fi
+
+echo "Updating config file: $CONFIG_PATH"
+echo "Setting: $KEY=$VALUE"
+
+# Update or add the key-value pair in the config file
+if [ -f "$CONFIG_PATH" ]; then
+    # File exists, update the key if it exists, otherwise append
+    if grep -q "^$KEY=" "$CONFIG_PATH"; then
+        # Key exists, update it
+        sed -i "s/^$KEY=.*/$KEY=$VALUE/" "$CONFIG_PATH"
+        echo "Updated existing $KEY in $CONFIG_PATH"
+    else
+        # Key doesn't exist, append it
+        echo "$KEY=$VALUE" >> "$CONFIG_PATH"
+        echo "Added $KEY to $CONFIG_PATH"
+    fi
+else
+    # File doesn't exist, create directory and file
+    mkdir -p "$(dirname "$CONFIG_PATH")"
+    echo "$KEY=$VALUE" > "$CONFIG_PATH"
+    echo "Created $CONFIG_PATH with $KEY=$VALUE"
+fi

@@ -144,6 +144,7 @@ c %f |> %B macro_sourcemap_%B.json
 
 # rust
 export RUSTUP_HOME
+export WITHOUT_DB_BACKEND
 
 !rust_cargo_tui = |> \
   CARGO_TARGET_DIR=/tmp/codetracer/tui_target \
