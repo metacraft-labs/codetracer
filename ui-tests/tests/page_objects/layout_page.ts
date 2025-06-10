@@ -205,6 +205,20 @@ export class EditorTab extends TabObject {
     return -1;
   }
 
+  /**
+   * Jump to the provided line number using the global `gotoLine` helper from
+   * the application. Mirrors the Nim implementation:
+   *
+   * ```nim
+   * proc gotoLine*(editorTab: EditorTab, line: int): Future[void]
+   * ```
+   */
+  async gotoLine(line: number): Promise<void> {
+    await this.root.focus();
+    // gotoLine is a helper exposed globally by the application
+    await this.page.evaluate((ln) => (window as any).gotoLine(ln), line);
+  }
+
   async visibleTextRows(): Promise<TextRow[]> {
     const locators = await this.root.locator(".view-line").all();
     return locators.map((l) => new TextRow(this.page, l));
