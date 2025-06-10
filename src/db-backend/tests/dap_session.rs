@@ -259,6 +259,7 @@ fn test_simple_session() {
         program: Some("main".to_string()),
         trace_folder: None,
         pid: None,
+        cwd: None,
         no_debug: None,
         restart: None,
     });
