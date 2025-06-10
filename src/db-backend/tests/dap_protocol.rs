@@ -9,6 +9,7 @@ fn test_parse_initialize_request() {
         DapMessage::Request(req) => {
             assert_eq!(req.base.seq, 1);
             assert_eq!(req.command, "initialize");
+            println!("{:?}", req);
             match req.arguments {
                 RequestArguments::Other(ref v) => {
                     assert_eq!(v["adapterID"], "small-lang");

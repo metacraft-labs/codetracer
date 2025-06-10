@@ -27,6 +27,7 @@ fn test_backend_dap_server_stdio() {
         program: Some("main".to_string()),
         trace_folder: Some(trace_dir),
         pid: Some(pid as u64),
+        cwd: None,
         no_debug: None,
         restart: None,
     };

@@ -15,6 +15,7 @@ fn wait_for_socket(path: &Path) {
         }
         thread::sleep(Duration::from_millis(100));
     }
+    // println!("{path:?}");
     panic!("socket not created");
 }
 
@@ -39,6 +40,7 @@ fn test_backend_dap_server() {
         program: Some("main".to_string()),
         trace_folder: Some(trace_dir),
         pid: Some(pid as u64),
+        cwd: None,
         no_debug: None,
         restart: None,
     };
