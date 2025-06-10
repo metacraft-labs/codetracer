@@ -20,7 +20,7 @@ pub struct Request {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-// #[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct LaunchRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
@@ -30,6 +30,8 @@ pub struct LaunchRequestArguments {
     pub trace_file: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     #[serde(rename = "noDebug", skip_serializing_if = "Option::is_none")]
     pub no_debug: Option<bool>,
     #[serde(rename = "__restart", skip_serializing_if = "Option::is_none")]
@@ -89,29 +91,17 @@ pub struct SetBreakpointsResponseBody {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
-    #[serde(
-        rename = "supportsLoadedSourcesRequest",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "supportsLoadedSourcesRequest", skip_serializing_if = "Option::is_none")]
     pub supports_loaded_sources_request: Option<bool>,
     #[serde(rename = "supportsStepBack", skip_serializing_if = "Option::is_none")]
     pub supports_step_back: Option<bool>,
-    #[serde(
-        rename = "supportsConfigurationDoneRequest",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "supportsConfigurationDoneRequest", skip_serializing_if = "Option::is_none")]
     pub supports_configuration_done_request: Option<bool>,
-    #[serde(
-        rename = "supportsDisassembleRequest",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "supportsDisassembleRequest", skip_serializing_if = "Option::is_none")]
     pub supports_disassemble_request: Option<bool>,
     #[serde(rename = "supportsLogPoints", skip_serializing_if = "Option::is_none")]
     pub supports_log_points: Option<bool>,
-    #[serde(
-        rename = "supportsRestartRequest",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "supportsRestartRequest", skip_serializing_if = "Option::is_none")]
     pub supports_restart_request: Option<bool>,
 }
 
@@ -208,7 +198,15 @@ impl DapClient {
 pub fn from_json(s: &str) -> Result<DapMessage, serde_json::Error> {
     let value: Value = serde_json::from_str(s)?;
     match value.get("type").and_then(|v| v.as_str()) {
-        Some("request") => Ok(DapMessage::Request(serde_json::from_value(value)?)),
+        Some("request") => {
+            // if value.get("kind").and_then(|v| v.as_str()) == Some("launch") {
+            // Ok(DapMessage::Request(dap::Request::Launch(serde_json::from_value::<LaunchRequestArguments>(
+            // value,
+            // )?))
+            // } else {
+            Ok(DapMessage::Request(serde_json::from_value(value)?))
+            // }
+        }
         Some("response") => Ok(DapMessage::Response(serde_json::from_value(value)?)),
         Some("event") => Ok(DapMessage::Event(serde_json::from_value(value)?)),
         _ => Err(serde_json::Error::custom("Unknown DAP message type")),

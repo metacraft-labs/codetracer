@@ -260,6 +260,7 @@ fn test_simple_session() {
         trace_folder: None,
         trace_file: None,
         pid: None,
+        cwd: None,
         no_debug: None,
         restart: None,
     });
