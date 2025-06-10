@@ -92,6 +92,7 @@ impl DapClient {
         let seq = self.seq;
         self.seq += 1;
         let pid = std::process::id();
+        let mut initialized = false;
         let req = json!({
             "seq": seq,
             "type": "request",
@@ -109,19 +110,39 @@ impl DapClient {
                 && resp.get("command").and_then(|v| v.as_str()) == Some("launch")
                 && resp.get("success").and_then(|v| v.as_bool()) == Some(true)
             {
-                return Ok(());
+                break;
             } else {
                 // TODO: check if initialized: if so, store in a field, to know that
                 // it's safe to send breakpoints/other configuration
                 // TODO: if db-backend: so after end of `launch` we immediately send
                 // configuration-done so it can start and we receive stopped/location etc
+                if resp.get("type").and_then(|v| v.as_str()) == Some("event")
+                    && resp.get("event").and_then(|v| v.as_str()) == Some("initialized")
+                {
+                    initialized = true;
+                }
                 warn!(
                     "client: DAP: launch request expects response: resp: {:?}",
                     resp
                 );
             }
         }
-        // Err("DAP: launch request failed".into())
+        if initialized {
+            self.send_configuration_done()?;
+        }
+        Ok(())
+    }
+
+    fn send_configuration_done(&mut self) -> Result<(), Box<dyn Error>> {
+        let req = json!({
+            "seq": self.seq,
+            "type": "request",
+            "kind": "configurationDone",
+            "arguments": {},
+        });
+        self.seq += 1;
+        self.send_message(&req)?;
+        Ok(())
     }
 
     fn send_message(&mut self, msg: &serde_json::Value) -> Result<(), Box<dyn Error>> {
