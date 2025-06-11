@@ -28,10 +28,13 @@ const
   STACK_WIDTH = 300
 
 proc updateDefaultDimensions(layout: GoldenLayout) =
-  ## Update GoldenLayout default minimum item dimensions based on
-  ## the number of tabs in the current layout.  The width and height
-  ## are derived from ``STACK_WIDTH`` and ``STACK_HEIGHT`` divided by
-  ## the largest number of children found in a stack or a row/column.
+  ## Adjust each stack or row/column to have minimum dimensions based on
+  ## the number of contained tabs. ``STACK_HEIGHT`` is used for stacks and
+  ## ``STACK_WIDTH`` for rows or columns. Additionally update the layout
+  ## manager default dimensions to the smallest calculated values.
+
+  if layout.isNil or layout.groundItem.contentItems.len == 0:
+    return
 
   var
     maxStackTabs = 0
@@ -39,22 +42,26 @@ proc updateDefaultDimensions(layout: GoldenLayout) =
 
   proc traverse(item: GoldenContentItem) =
     if item.isStack:
-      if item.contentItems.len > maxStackTabs:
-        maxStackTabs = item.contentItems.len
+      let tabs = max(1, item.contentItems.len)
+      if tabs > maxStackTabs:
+        maxStackTabs = tabs
+      try:
+        item.toJs.config.minHeight = STACK_HEIGHT div tabs
+      except:
+        cerror "updateDefaultDimensions: failed to set stack height"
     elif not item.isComponent:
       # Rows or columns
-      if item.contentItems.len > maxRowCols:
-        maxRowCols = item.contentItems.len
+      let cols = max(1, item.contentItems.len)
+      if cols > maxRowCols:
+        maxRowCols = cols
+      try:
+        item.toJs.config.minWidth = STACK_WIDTH div cols
+      except:
+        cerror "updateDefaultDimensions: failed to set row/column width"
     for child in item.contentItems:
       traverse(child)
 
-  if not layout.isNil and layout.groundItem.contentItems.len > 0:
-    traverse(layout.groundItem.contentItems[0])
-
-  if maxStackTabs == 0:
-    maxStackTabs = 1
-  if maxRowCols == 0:
-    maxRowCols = 1
+  traverse(layout.groundItem.contentItems[0])
 
   let newHeight = STACK_HEIGHT div maxStackTabs
   let newWidth = STACK_WIDTH div maxRowCols
@@ -62,8 +69,8 @@ proc updateDefaultDimensions(layout: GoldenLayout) =
   try:
     let lm = layout.toJs.layoutManager
     if not lm.isNil:
-      lm.layoutConfig.dimensions.defaultMinItemHeight = newHeight
-      lm.layoutConfig.dimensions.defaultMinItemWidth = newWidth
+      lm.layoutConfig.dimensions.minItemHeight = newHeight
+      lm.layoutConfig.dimensions.minItemWidth = newWidth
   except:
     cerror "updateDefaultDimensions: failed to set dimensions"
 
