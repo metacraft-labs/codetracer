@@ -207,6 +207,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
     newElement.appendChild(hiddenDropdown)
     tabContainer.appendChild(newElement)
 
+    # Ensure new stacks have reasonable minimum size independent of
+    # their tabbed components. Without this the minimum dimensions are
+    # calculated from the contained components which can make the stack
+    # difficult to shrink when many tabs define their own limits.
+    ev.toJs.target.element.style.minWidth = j"200px"
+    ev.toJs.target.element.style.minHeight = j"100px"
+
   data.ui.layout = layout
   data.ui.layoutConfig = cast[GoldenLayoutConfigClass](window.toJs.LayoutConfig)
   data.ui.contentItemConfig = cast[GoldenLayoutItemConfigClass](window.toJs.ItemConfig)
@@ -393,6 +400,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
 
   layout.on(cstring"stackCreated") do (event: js):
     cdebug "layout event: stackCreated"
+
+    # set reasonable minimum dimensions for the new stack so that
+    # it can always be resized down without being affected by the
+    # minimum sizes of the tabbed components it contains.
+    let stack = cast[GoldenContentItem](event.target)
+    stack.element.style.minWidth = j"200px"
+    stack.element.style.minHeight = j"100px"
 
     # prepare layout to be saved on upcoming stateChanged event
     data.ui.saveLayout = true

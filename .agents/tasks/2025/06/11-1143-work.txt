@@ -1,0 +1,1 @@
+I want in layout.nim, when a stack is created to set it's minimum height and width to around 100 or 200 px, but without the stack to accumulate all of the tabbed components minimum height and width
