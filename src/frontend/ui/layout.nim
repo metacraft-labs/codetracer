@@ -23,6 +23,50 @@ proc onSearchSubmit(ev: Event, v: VNode) =
 
 const RESULT_LIMIT = 20
 
+const
+  STACK_HEIGHT = 200
+  STACK_WIDTH = 300
+
+proc updateDefaultDimensions(layout: GoldenLayout) =
+  ## Update GoldenLayout default minimum item dimensions based on
+  ## the number of tabs in the current layout.  The width and height
+  ## are derived from ``STACK_WIDTH`` and ``STACK_HEIGHT`` divided by
+  ## the largest number of children found in a stack or a row/column.
+
+  var
+    maxStackTabs = 0
+    maxRowCols = 0
+
+  proc traverse(item: GoldenContentItem) =
+    if item.isStack:
+      if item.contentItems.len > maxStackTabs:
+        maxStackTabs = item.contentItems.len
+    elif not item.isComponent:
+      # Rows or columns
+      if item.contentItems.len > maxRowCols:
+        maxRowCols = item.contentItems.len
+    for child in item.contentItems:
+      traverse(child)
+
+  if not layout.isNil and layout.groundItem.contentItems.len > 0:
+    traverse(layout.groundItem.contentItems[0])
+
+  if maxStackTabs == 0:
+    maxStackTabs = 1
+  if maxRowCols == 0:
+    maxRowCols = 1
+
+  let newHeight = STACK_HEIGHT div maxStackTabs
+  let newWidth = STACK_WIDTH div maxRowCols
+
+  try:
+    let lm = layout.toJs.layoutManager
+    if not lm.isNil:
+      lm.layoutConfig.dimensions.defaultMinItemHeight = newHeight
+      lm.layoutConfig.dimensions.defaultMinItemWidth = newWidth
+  except:
+    cerror "updateDefaultDimensions: failed to set dimensions"
+
 # FIND
 
 proc historyFind*(tab: js, args: seq[string]) =
@@ -372,6 +416,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
 
   layout.on(cstring"stateChanged") do (event: js):
     cdebug "layout event: stateChanged"
+
+    updateDefaultDimensions(data.ui.layout)
 
     # check if only one tab is left and prevent user from close/drag it
     let mainContainer = data.ui.layout.groundItem.contentItems[0]

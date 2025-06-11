@@ -1,0 +1,1 @@
+write me a function in layout.nim when i get on("stateChanged") it goes through all of the components and sets the width and height to be a constant (STACK_HEIGHT = 200, STACK_WIDTH = 300) / number of tabs in the stack or the RowOrColumn this needs to be set in the layoutManager.layoutConfig.dimensions.defaultMinItemHeight and defaultMinItemWidth
