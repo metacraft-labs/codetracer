@@ -482,7 +482,7 @@ proc updateLineNumbersOnly*(self: EditorViewComponent) =
   editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
 
 proc toggleTraceState*(self: TraceComponent) =
-  discard self.data.services.debugger.tracepointToggle(TracepointId(id: self.id))
+  discard self.data.services.debugger.tracepointToggle(self.id)
 
   self.isDisabled = not self.isDisabled
   self.forceReload = true
@@ -968,9 +968,7 @@ method onError*(self: TraceComponent, error: DebuggerError) {.async.} =
 
 proc closeTrace*(self: TraceComponent) =
   if self.isRan:
-    discard self.data.services.debugger.tracepointDelete(
-      TracepointId(id: self.id)
-    )
+    discard self.data.services.debugger.tracepointDelete(self.id)
 
   if self.editorUI.tabInfo.isNil:
     return
