@@ -1453,6 +1453,21 @@ proc commandSelectNext* =
     data.ui.commandPalette.selected += 1
     redrawAll()
 
+proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
+  if isForward:
+    if self.service.jumpHistory.len != 0 and self.service.jumpHistory.len - self.service.historyIndex > 0:
+      self.service.historyIndex += 1
+      let location = self.service.jumpHistory[^self.service.historyIndex].location
+
+      self.service.currentOperation = HISTORY_JUMP_VALUE
+      data.services.history.historyJump(location)
+  else:
+    if self.service.jumpHistory.len != 0 and self.service.historyIndex >= 2:
+      self.service.historyIndex -= 1
+      let location = self.service.jumpHistory[^self.service.historyIndex].location
+
+      self.service.currentOperation = HISTORY_JUMP_VALUE
+      data.services.history.historyJump(location)
 
 proc setOpen* =
   ipc.send "CODETRACER::set-open"
