@@ -78,7 +78,12 @@ proc configureShortcuts* =
     for shortcut in shortcuts:
       bindShortcut(action, shortcut.renderer)
 
-
+  kdom.document.addEventListener("mousedown", proc(e: Event) =
+    if cast[int](e.toJs.button) == 3:
+      cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = true)
+    elif cast[int](e.toJs.button) == 4:
+      cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = false)
+  )
 
   Mousetrap.`bind`("f1") do ():
     discard

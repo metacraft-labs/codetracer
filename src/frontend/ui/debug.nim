@@ -59,20 +59,10 @@ proc action(self: DebugComponent, id: string) =
   of "run-to-entry": self.runToEntry()
 
   of "history-back":
-    if self.service.jumpHistory.len != 0 and self.service.jumpHistory.len - self.service.historyIndex > 0:
-      let location = self.service.jumpHistory[^self.service.historyIndex].location
-
-      self.service.currentOperation = HISTORY_JUMP_VALUE
-      self.service.historyIndex += 1
-      self.data.services.history.historyJump(location)
+    self.handleHistoryJump(isForward = true)
 
   of "history-forward":
-    if self.service.jumpHistory.len != 0 and self.service.historyIndex >= 2:
-      let location = self.service.jumpHistory[^self.service.historyIndex].location
-
-      self.service.currentOperation = HISTORY_JUMP_VALUE
-      self.service.historyIndex -= 1
-      self.data.services.history.historyJump(location)
+    self.handleHistoryJump(isForward = false)
 
   else:
     discard
