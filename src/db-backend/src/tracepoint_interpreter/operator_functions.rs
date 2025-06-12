@@ -231,7 +231,7 @@ pub fn operator_minus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) 
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "- not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -244,7 +244,7 @@ pub fn operator_minus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) 
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "- not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -302,7 +302,7 @@ pub fn operator_mult(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "* not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -315,7 +315,7 @@ pub fn operator_mult(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "* not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -377,7 +377,7 @@ pub fn operator_div(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "/ not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -390,7 +390,7 @@ pub fn operator_div(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "/ not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -452,7 +452,7 @@ pub fn operator_rem(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "% not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
@@ -465,7 +465,7 @@ pub fn operator_rem(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "% not defined for these values".to_string();
-                return Err(err_value);
+                Err(err_value)
             }
         }
 
