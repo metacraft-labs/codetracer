@@ -3,7 +3,17 @@ import std/[sequtils, os, osproc, strutils, strtabs ],
   ../globals,
   cleanup
 
-proc launchElectron*(args: seq[string] = @[], trace: Trace = nil, recordCore: bool = false, test: bool = false): bool =
+enum
+  ElectronLaunchMode* {.pure.} = enum
+    None
+    ArbExplorer = "arb.explorer"
+
+proc launchElectron*(
+    args: seq[string] = @[],
+    trace: Trace = nil,
+    mode = ElectronLaunchMode.None,
+    recordCore: bool = false,
+    test: bool = false): bool =
   createDir codetracerCache
   let saveDir = codetracerShareFolder / "saves/"
   let workdir = getCurrentDir()
@@ -12,6 +22,9 @@ proc launchElectron*(args: seq[string] = @[], trace: Trace = nil, recordCore: bo
   # sometimes things like "--no-sandbox" are useful e.g. for now for
   # experimenting with appimage
   let optionalElectronArgs = getEnv("CODETRACER_ELECTRON_ARGS", "").splitWhitespace()
+
+  if mode != ElectronLaunchMode.None:
+    ENV["CODETRACER_LAUNCH_MODE"] = $mode
 
   var env = newStringTable(modeStyleInsensitive)
   for name, value in envPairs():
@@ -73,7 +86,7 @@ proc launchElectron*(args: seq[string] = @[], trace: Trace = nil, recordCore: bo
   return false
 
 when defined(posix):
-  import std / posix 
+  import std / posix
 
   proc wrapElectron*(args: seq[string]) =
     let startIndex = getEnv("CODETRACER_START_INDEX", "") == "1"
@@ -90,16 +103,16 @@ when defined(posix):
     execvArgs[0] = electronExe.cstring
     for i, arg in args:
       execvArgs[i + 1] = arg.cstring
-    
+
     if startIndex:
       execvArgs[execvArgsCount - 1] = electronIndexPath.cstring
-    
+
     execvArgs[execvArgsCount] = nil
 
     discard execv(
       electronExe.cstring,
       execvArgs)
-    
+
     #   options = {poParentStreams})
     # let code = waitForExit(process)
     # quit(code)
