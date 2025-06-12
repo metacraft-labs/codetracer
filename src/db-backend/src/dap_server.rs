@@ -56,7 +56,7 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(trace_folder: &Path, tx: mpsc::Sender<crate::response::Response>) -> Result<Handler, Box<dyn Error>> {
+fn launch(trace_folder: &Path, seq: i64, tx: mpsc::Sender<crate::response::Response>) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let metadata_path = trace_folder.join("trace_metadata.json");
     let trace_path = trace_folder.join("trace.json");
@@ -77,6 +77,7 @@ fn launch(trace_folder: &Path, tx: mpsc::Sender<crate::response::Response>) -> R
 
         eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db), tx.clone());
+        handler.dap_client.seq = seq;
         handler.run_to_entry(Task {
             kind: TaskKind::RunToEntry,
             id: TaskId("run-to-entry-0".to_string()),
@@ -87,16 +88,20 @@ fn launch(trace_folder: &Path, tx: mpsc::Sender<crate::response::Response>) -> R
     }
 }
 
-fn write_dap_messages<W: Write>(writer: &mut W, handler: &mut Option<Handler>) -> Result<(), Box<dyn Error>> {
+fn write_dap_messages<W: Write>(writer: &mut W, handler: &mut Option<Handler>, seq: &mut i64) -> Result<(), Box<dyn Error>> {
     if let Some(h) = handler {
         for message in &h.resulting_dap_messages {
             dap::write_message(writer, &message)?;
         }
         h.reset_dap();
+        *seq = h.dap_client.seq;
     }
     Ok(())
 }
 
+// fn handle_threads<W: Write>(handler: &mut Handler, writer: &mut W) -> Result<(), Box<dyn Error>> {
+//     handler.threads
+// }
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
@@ -106,6 +111,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     let mut launch_trace_folder = PathBuf::from("");
     let mut received_configuration_done = false;
     while let Ok(msg) = dap::from_reader(reader) {
+        info!("DAP <- {:?}", msg);
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let capabilities = Capabilities {
@@ -217,8 +223,8 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                         launch_trace_folder = folder.clone();
                         info!("stored launch trace folder: {launch_trace_folder:?}");
                         if received_configuration_done {
-                            handler = Some(launch(&launch_trace_folder, tx.clone())?);
-                            write_dap_messages(writer, &mut handler)?;
+                            handler = Some(launch(&launch_trace_folder, seq, tx.clone())?);
+                            write_dap_messages(writer, &mut handler, &mut seq)?;
                         }
                         if let Some(pid) = args.pid {
                             eprintln!("PID: {}", pid);
@@ -259,8 +265,17 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
 
                 info!("configuration done sent response; received_launch: {received_launch}");
                 if received_launch {
-                    handler = Some(launch(&launch_trace_folder, tx.clone())?);
-                    write_dap_messages(writer, &mut handler)?;
+                    handler = Some(launch(&launch_trace_folder, seq, tx.clone())?);
+                    write_dap_messages(writer, &mut handler, &mut seq)?;
+                }
+            }
+            DapMessage::Request(req) if req.command == "threads" => {
+                if let Some(h) = handler.as_mut() {
+                    if let RequestArguments::Threads(args) = req.arguments.clone() {
+                        h.dap_client.seq = seq;
+                        h.threads(req, args)?;
+                        write_dap_messages(writer, &mut handler, &mut seq)?;
+                    }
                 }
             }
             DapMessage::Request(req) if req.command == "stepIn" => {

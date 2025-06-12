@@ -210,6 +210,22 @@ impl Handler {
         Ok(())
     }
 
+    fn respond_dap<T: Serialize>(&mut self, request: dap::Request, value: T) -> Result<(), Box<dyn Error>> {
+        let response = DapMessage::Response(dap::Response {
+                base: dap::ProtocolMessage {
+                    seq: self.dap_client.seq,
+                    type_: "response".to_string(),
+                },
+                request_seq: request.base.seq,
+                success: true,
+                command: request.command.clone(),
+                message: None,
+                body: serde_json::to_value(value)?,
+            });
+        self.dap_client.seq += 1;
+        self.send_dap(response)
+    }
+
     fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         let call_key = self.db.call_key_for_step(self.step_id);
         let reset_flow = is_main || call_key != self.last_call_key;
@@ -264,6 +280,7 @@ impl Handler {
         self.return_void(task)?;
         Ok(())
     }
+    
 
     pub fn load_locals(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
@@ -1404,6 +1421,11 @@ impl Handler {
     fn serialize<T: Serialize>(&self, value: &T) -> Result<String, Box<dyn Error>> {
         let res = serde_json::to_string(value)?;
         Ok(res)
+    }
+
+    pub fn threads(&mut self, request: dap::Request, arguments: dap::ThreadsArguments) -> Result<(), Box<dyn Error>> {
+        self.respond_dap(request, vec![dap::Thread { id: arguments.thread_id, name: "<thread 1>".to_string() }])?;
+        Ok(())
     }
 }
 
