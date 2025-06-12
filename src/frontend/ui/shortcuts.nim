@@ -3,6 +3,8 @@ import
   karax, ui_imports
 
 const NO_CODE: int = -1
+const BROWSER_FORWARD: int = 3
+const BROWSER_BACK: int = 4
 
 proc shortcut*(shortcut: string): int =
   let tokens = shortcut.split("+", 2)
@@ -79,9 +81,9 @@ proc configureShortcuts* =
       bindShortcut(action, shortcut.renderer)
 
   kdom.document.addEventListener("mousedown", proc(e: Event) =
-    if cast[int](e.toJs.button) == 3:
+    if cast[int](e.toJs.button) == BROWSER_FORWARD:
       cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = true)
-    elif cast[int](e.toJs.button) == 4:
+    elif cast[int](e.toJs.button) == BROWSER_BACK:
       cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = false)
   )
 
