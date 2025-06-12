@@ -130,6 +130,14 @@ proc runInitial*(conf: CodetracerConf) =
       run(conf.runTracePathOrId, conf.runArgs)
     of StartupCommand.start_core:
       startCore(conf.coreTraceArg, conf.coreCallerPid, conf.coreInTest)
+    of StartupCommand.arb:
+      case conf.arbCommand:
+      of ArbCommand.explorer:
+        # Launch CodeTracer in arb explorer mode
+        launchElectron(mode = ElectronLaunchMode.ArbExplorer)
+      of ArbCommand.replay:
+        # Launch CodeTracer in arb replay mode with transaction
+        launchElectron(args = @[conf.arbReplayTransaction & ".arbtx"])
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,
