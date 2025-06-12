@@ -47,6 +47,9 @@ mkShell {
       rustc
       capnproto
 
+      # stylus
+      ourPkgs.cargo-stylus
+
       yarn
       yarn2nix
 
