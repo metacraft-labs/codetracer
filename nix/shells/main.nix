@@ -43,6 +43,9 @@ mkShell {
 
       ourPkgs.noir
 
+      # stylus
+      ourPkgs.cargo-stylus
+
       yarn
       yarn2nix
 

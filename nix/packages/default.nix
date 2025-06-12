@@ -24,6 +24,9 @@
 
         wazero = inputs.wazero.packages.${system}.default;
 
+        cargo-stylus =
+          inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus;
+
         inherit (pkgs)
           sqlite
           pcre
@@ -294,6 +297,7 @@
           name = "runtime-deps";
 
           paths = [
+            cargo-stylus
             resources-derivation
             db-backend
             codetracer-electron
