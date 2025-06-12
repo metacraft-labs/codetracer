@@ -2,15 +2,16 @@ use serde::{de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use log::info;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
     pub seq: i64,
     #[serde(rename = "type")]
     pub type_: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Request {
     #[serde(flatten)]
     pub base: ProtocolMessage,
@@ -19,7 +20,7 @@ pub struct Request {
     pub arguments: RequestArguments,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,7 +50,14 @@ pub struct Source {
     pub source_reference: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Thread {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SourceBreakpoint {
     pub line: i64,
@@ -57,7 +65,7 @@ pub struct SourceBreakpoint {
     pub column: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SetBreakpointsArguments {
     pub source: Source,
@@ -69,7 +77,7 @@ pub struct SetBreakpointsArguments {
     pub source_modified: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Breakpoint {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,12 +91,12 @@ pub struct Breakpoint {
     pub line: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct SetBreakpointsResponseBody {
     pub breakpoints: Vec<Breakpoint>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
     #[serde(rename = "supportsLoadedSourcesRequest", skip_serializing_if = "Option::is_none")]
@@ -105,11 +113,20 @@ pub struct Capabilities {
     pub supports_restart_request: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadsArguments {
+    #[serde(rename = "threadId")]
+    pub thread_id: i64,
+}
+
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum RequestArguments {
     Launch(LaunchRequestArguments),
     SetBreakpoints(SetBreakpointsArguments),
+    Threads(ThreadsArguments),
     Other(Value),
 }
 
@@ -176,7 +193,7 @@ pub enum DapMessage {
 
 #[derive(Debug, Clone)]
 pub struct DapClient {
-    seq: i64,
+    pub seq: i64,
 }
 
 impl Default for DapClient {
@@ -294,5 +311,6 @@ pub fn write_message<W: Write>(writer: &mut W, message: &DapMessage) -> Result<(
         .write_all(json.as_bytes())
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     writer.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    info!("DAP -> {:?}", message);
     Ok(())
 }
