@@ -93,7 +93,7 @@ proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string) =
   echo "Debug executable for ", deploymentAddr, " saved at ", currFile
 
 
-proc deploy*() =
+proc deployStylus*() =
   let deploymentAddr = doDeploy()
   let wasmWithDebug = doDebugBuild()
 
