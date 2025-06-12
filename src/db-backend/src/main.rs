@@ -10,16 +10,16 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
+use clap::Parser;
+use log::{error, info};
 use std::fs;
 use std::io::Write;
+use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::sync::{mpsc, LazyLock, Mutex};
 use std::thread;
 use std::time::Instant;
 use std::{error::Error, panic};
-use std::panic::PanicHookInfo;
-use clap::Parser;
-use log::{error, info};
 use task::{EventId, EventKind, Notification, NotificationKind};
 
 mod calltrace;
