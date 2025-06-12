@@ -11,6 +11,7 @@ use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, N
 
 use crate::calltrace::Calltrace;
 use crate::dap;
+use crate::dap::{DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
@@ -46,6 +47,8 @@ pub struct Handler {
     pub calltrace: Calltrace,
     pub step_lines_loader: StepLinesLoader,
     pub trace: CoreTrace,
+    pub dap_client: DapClient,
+    pub resulting_dap_messages: Vec<DapMessage>,
 
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
@@ -102,6 +105,8 @@ impl Handler {
             trace,
             calltrace,
             step_lines_loader,
+            dap_client: DapClient::default(),
+            resulting_dap_messages: vec![],
         }
     }
     // TODO
@@ -196,6 +201,15 @@ impl Handler {
         )
     }
 
+    pub fn reset_dap(&mut self) {
+        self.resulting_dap_messages = vec![];
+    }
+
+    fn send_dap(&mut self, dap_message: DapMessage) -> Result<(), Box<dyn Error>> {
+        self.resulting_dap_messages.push(dap_message);
+        Ok(())
+    }
+
     fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         let call_key = self.db.call_key_for_step(self.step_id);
         let reset_flow = is_main || call_key != self.last_call_key;
@@ -219,13 +233,8 @@ impl Handler {
             false,
         ))?;
         let reason = if is_main { "entry" } else { "step" };
-        let raw_event = dap::DapClient::default().stopped(reason)?;
-        self.send_event((
-            EventKind::MissingEventKind,
-            gen_event_id(EventKind::MissingEventKind),
-            dap::to_json(&raw_event)?,
-            true,
-        ))?;
+        let raw_event = self.dap_client.stopped(reason)?;
+        self.send_dap(raw_event)?;
         // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 
         let exact = false; // or for now try as flow // true just for this exact step
