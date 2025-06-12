@@ -7,6 +7,10 @@ import
 # TODO check if the values with special characters are parsed correctly by confutils
 # and consider a fix if not
 type
+  ArbCommand* {.pure.} = enum
+    explorer,
+    replay
+
   StartupCommand* {.pure.} = enum
     noCommand,
     replay,
@@ -18,6 +22,7 @@ type
     build,
     record,
     console,
+    arb,
 
     # `g++`,
     # gcc,
@@ -300,6 +305,23 @@ type
         defaultValue: false
         desc: "Is it in test mode"
       .}: bool
+    of arb:
+      arbitrumRpcUrl* {.
+        name: "arbitrum-rpc-url"
+        desc: "Arbitrum Node JSON-RPC URL"
+        defaultValue: "localhost"
+      .}: string
+      case arbCommand* {.
+        command,
+        defaultValue: explorer
+      .}: ArbCommand
+      of explorer:
+        discard
+      of replay:
+        arbReplayTransaction* {.
+          argument
+          desc: "Hex-encoded transaction hash"
+        .}: string
     # of `import`:
     #   importTraceZipPath* {.
     #     argument
