@@ -2867,6 +2867,7 @@ proc flowLoopValue*(
       textarea(class = &"flow-loop-textarea",
         value = $(iteration),
         maxlength = $width,
+        onblur = proc() = self.onEnter(),
         oninput = proc(ev: Event, v: VNode) =
           let value = parseInt($ev.target.value)
           if value >= 0 and value <= allIterations:
