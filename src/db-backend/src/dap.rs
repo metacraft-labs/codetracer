@@ -155,6 +155,18 @@ pub struct Event {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StoppedEventBody {
+    pub reason: String,
+    #[serde(rename = "threadId")]
+    pub thread_id: i64,
+    #[serde(rename = "allThreadsStopped")]
+    pub all_threads_stopped: bool,
+    #[serde(rename = "hitBreakpointIds", skip_serializing_if = "Option::is_none")]
+    pub hit_breakpoint_ids: Option<Vec<i64>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum DapMessage {
     Request(Request),
@@ -174,16 +186,14 @@ impl Default for DapClient {
 
 impl DapClient {
     pub fn request(&mut self, command: &str, arguments: RequestArguments) -> DapMessage {
-        let message = DapMessage::Request(Request {
+        DapMessage::Request(Request {
             base: ProtocolMessage {
-                seq: self.seq,
+                seq: self.next_seq(),
                 type_: "request".to_string(),
             },
             command: command.to_string(),
             arguments,
-        });
-        self.seq += 1;
-        message
+        })
     }
 
     pub fn launch(&mut self, args: LaunchRequestArguments) -> DapMessage {
@@ -192,6 +202,29 @@ impl DapClient {
 
     pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> DapMessage {
         self.request("setBreakpoints", RequestArguments::SetBreakpoints(args))
+    }
+
+    pub fn stopped(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {
+        let body = StoppedEventBody {
+            reason: reason.to_string(),
+            thread_id: 1,
+            all_threads_stopped: true,
+            hit_breakpoint_ids: Some(vec![]),
+        };
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "stopped".to_string(),
+            body: serde_json::to_value(body)?,
+        }))
+    }
+
+    fn next_seq(&mut self) -> i64 {
+        let current = self.seq;
+        self.seq += 1;
+        current
     }
 }
 
