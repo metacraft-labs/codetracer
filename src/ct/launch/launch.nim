@@ -7,6 +7,7 @@ import
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
   ../globals,
+  ../stylus/deploy,
   electron,
   results,
   backends
@@ -134,10 +135,12 @@ proc runInitial*(conf: CodetracerConf) =
       case conf.arbCommand:
       of ArbCommand.explorer:
         # Launch CodeTracer in arb explorer mode
-        launchElectron(mode = ElectronLaunchMode.ArbExplorer)
+        discard launchElectron(mode = ElectronLaunchMode.ArbExplorer)
       of ArbCommand.replay:
         # Launch CodeTracer in arb replay mode with transaction
-        launchElectron(args = @[conf.arbReplayTransaction & ".arbtx"])
+        discard launchElectron(args = @[conf.arbReplayTransaction & ".arbtx"])
+      of ArbCommand.deploy:
+        deployStylus()
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,

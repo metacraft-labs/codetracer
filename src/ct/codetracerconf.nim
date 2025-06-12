@@ -9,7 +9,8 @@ import
 type
   ArbCommand* {.pure.} = enum
     explorer,
-    replay
+    replay,
+    deploy
 
   StartupCommand* {.pure.} = enum
     noCommand,
@@ -227,7 +228,7 @@ type
         desc: "Arguments for record",
         longDesc: "longer description for record"
       .} : seq[string]
-    of replay:
+    of StartupCommand.replay:
      replayTraceId* {.
         name: "id",
         desc: "a trace id"
@@ -317,11 +318,13 @@ type
       .}: ArbCommand
       of explorer:
         discard
-      of replay:
+      of ArbCommand.replay:
         arbReplayTransaction* {.
           argument
           desc: "Hex-encoded transaction hash"
         .}: string
+      of deploy:
+        discard
     # of `import`:
     #   importTraceZipPath* {.
     #     argument

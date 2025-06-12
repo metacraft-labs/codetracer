@@ -3,7 +3,7 @@ import std/[sequtils, os, osproc, strutils, strtabs ],
   ../globals,
   cleanup
 
-enum
+type
   ElectronLaunchMode* {.pure.} = enum
     None
     ArbExplorer = "arb.explorer"
@@ -23,12 +23,13 @@ proc launchElectron*(
   # experimenting with appimage
   let optionalElectronArgs = getEnv("CODETRACER_ELECTRON_ARGS", "").splitWhitespace()
 
-  if mode != ElectronLaunchMode.None:
-    ENV["CODETRACER_LAUNCH_MODE"] = $mode
-
   var env = newStringTable(modeStyleInsensitive)
   for name, value in envPairs():
     env[name] = value
+
+  if mode != ElectronLaunchMode.None:
+    env["CODETRACER_LAUNCH_MODE"] = $mode
+
   env["ELECTRON_ENABLE_LOGGING"] = "1"
 
   when defined(builtWithNix):
