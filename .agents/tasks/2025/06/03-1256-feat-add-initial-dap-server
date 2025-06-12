@@ -1,0 +1,6 @@
+Implement integration test for db-backend itself, not a separate binary, acting as DAP server: starting it in separate process and communicating with it 
+using unix streams(sockets); implement DAP server directly in a thread of db-backend, which should run instead of the current protocol (and receive/send messages);
+for now support several very simple messages.
+
+db-backend should receive DAP messages, and respond with simple responses
+
