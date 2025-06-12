@@ -174,6 +174,7 @@ pub enum DapMessage {
     Event(Event),
 }
 
+#[derive(Debug, Clone)]
 pub struct DapClient {
     seq: i64,
 }
@@ -225,6 +226,10 @@ impl DapClient {
         let current = self.seq;
         self.seq += 1;
         current
+    }
+
+    pub fn with_seq(seq: i64) -> DapClient {
+        DapClient { seq }
     }
 }
 
