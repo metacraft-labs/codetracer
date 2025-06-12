@@ -4,7 +4,8 @@ use crate::dap::{
 };
 use crate::db::Db;
 use crate::handler::Handler;
-use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskId, TaskKind};
+use crate::response::Response as BackendResponse;
+use crate::task::{gen_task_id, Action, EventKind, SourceLocation, StepArg, Task, TaskId, TaskKind};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::info;
 use serde_json::json;
@@ -15,6 +16,23 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
+
+fn forward_raw_events<W: Write>(
+    rx: &mpsc::Receiver<BackendResponse>,
+    writer: &mut W,
+    seq: &mut i64,
+) -> Result<(), Box<dyn Error>> {
+    while let Ok(BackendResponse::EventResponse((kind, _id, payload, raw))) = rx.try_recv() {
+        if raw && matches!(kind, EventKind::MissingEventKind) {
+            if let Ok(DapMessage::Event(mut ev)) = dap::from_json(&payload) {
+                ev.base.seq = *seq;
+                *seq += 1;
+                dap::write_message(writer, &DapMessage::Event(ev))?;
+            }
+        }
+    }
+    Ok(())
+}
 
 pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
@@ -73,7 +91,7 @@ fn launch(trace_folder: &Path, tx: mpsc::Sender<crate::response::Response>) -> R
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
-    let (tx, _rx) = mpsc::channel();
+    let (tx, rx) = mpsc::channel();
     let mut handler: Option<Handler> = None;
     let mut received_launch = false;
     let mut launch_trace_folder = PathBuf::from("");
@@ -384,6 +402,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             _ => {}
         }
+        forward_raw_events(&rx, writer, &mut seq)?;
     }
     Ok(())
 }
