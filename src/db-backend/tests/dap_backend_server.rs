@@ -77,6 +77,14 @@ fn test_backend_dap_server() {
         DapMessage::Response(r) => assert_eq!(r.command, "configurationDone"),
         _ => panic!(),
     }
+    let msg5 = dap::from_reader(&mut reader).unwrap();
+    match msg5 {
+        DapMessage::Event(e) => {
+            assert_eq!(e.event, "stopped");
+            assert_eq!(e.body["reason"], "entry");
+        }
+        _ => panic!(),
+    }
 
     drop(writer);
     drop(reader);

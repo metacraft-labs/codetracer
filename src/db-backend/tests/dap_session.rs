@@ -295,6 +295,14 @@ fn test_simple_session() {
         DapMessage::Response(resp) => assert_eq!(resp.command, "configurationDone"),
         _ => panic!("expected response"),
     }
+    let msg5 = dap::from_reader(&mut reader).unwrap();
+    match msg5 {
+        DapMessage::Event(ev) => {
+            assert_eq!(ev.event, "stopped");
+            assert_eq!(ev.body["reason"], "entry");
+        }
+        _ => panic!("expected event"),
+    }
 
     drop(writer);
     drop(reader);
