@@ -1,6 +1,8 @@
-import httpclient, json, strformat, strutils, sequtils, parseutils, times
+import std/[httpclient, json, strformat, strutils, sequtils, parseutils, times, sets, os]
 
 const rpcUrl = "https://arb1.arbitrum.io/rpc"
+
+const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode =
   let payload = %*{
@@ -27,6 +29,31 @@ proc getBlockByNumber(n: int): JsonNode =
   let hexNum = "0x" & strippedNum
   return jsonRpcRequest("eth_getBlockByNumber", %[%hexNum, %true])
 
+proc getPermittedToHashes(): HashSet[string] =
+  
+  var toHashes: HashSet[string]
+  init(toHashes)
+
+  for file in walkDir(CONTRACT_WASM_PATH):
+
+    if file.kind == pcDir:
+      let toAddr = splitPath(file.path)[1]
+      toHashes.incl(toAddr)
+
+proc filterTransactionsByToHash(transactions: seq[JsonNode], tos: HashSet[string]): seq[JsonNode] =
+  
+  var transactions: seq[JsonNode]
+
+  for t in transactions:
+    let toAddr = t["to"].getStr()
+    if tos.contains(toAddr):
+      transactions.add(t)
+
+  return transactions
+
+proc getValidTransactions(transactions: seq[JsonNode]): seq[JsonNode] =
+  let toHashes = getPermittedToHashes()
+  return filterTransactionsByToHash(transactions, toHashes)
 
 # Returns the transactions for the last `t` seconds
 proc getBlocksByTimestamp(t: int): seq[JsonNode] =
