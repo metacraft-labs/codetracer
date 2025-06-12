@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
+use crate::dap;
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
@@ -199,7 +200,7 @@ impl Handler {
         let call_key = self.db.call_key_for_step(self.step_id);
         let reset_flow = is_main || call_key != self.last_call_key;
         self.last_call_key = call_key;
-        info!("complete move: TODO: send stopped; step_id: {:?}", self.step_id);
+        info!("complete move: step_id: {:?}", self.step_id);
         let move_state = MoveState {
             status: "".to_string(),
             location: self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
@@ -216,6 +217,14 @@ impl Handler {
             gen_event_id(EventKind::CompleteMove),
             serde_json::to_string(&move_state)?,
             false,
+        ))?;
+        let reason = if is_main { "entry" } else { "step" };
+        let raw_event = dap::DapClient::default().stopped(reason)?;
+        self.send_event((
+            EventKind::MissingEventKind,
+            gen_event_id(EventKind::MissingEventKind),
+            dap::to_json(&raw_event)?,
+            true,
         ))?;
         // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 

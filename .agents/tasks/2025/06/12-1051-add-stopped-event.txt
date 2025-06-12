@@ -1,0 +1,4 @@
+Run get-task and follow the provided instructions for adding a stopped event to the DAP protocol
+
+--- FOLLOW UP TASK ---
+Follow the instructions: add the stopped event support as specified in get-task, send it only in Handler::complete_move and not from DAP server
