@@ -66,6 +66,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
     //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
     // TODO: restore old version or make it compatible with our logging format again
+
+    // let run_dir = core.run_dir()?;
+    // fs::create_dir_all(&run_dir)?;
+    // let log_path = run_dir.join("db-backend_db-backend_0.log");
+    // eprintln!("{}", log_path.display());
+
     let target = Box::new(File::create("/tmp/codetracer/db-backend.log")?);
 
     env_logger::Builder::new()
@@ -104,55 +110,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
     };
 
-    // let run_dir = core.run_dir()?;
-    // fs::create_dir_all(&run_dir)?;
-    // let log_path = run_dir.join("db-backend_db-backend_0.log");
-    // eprintln!("{}", log_path.display());
-
-    // let mut builder = env_logger::Builder::from_default_env();
-    // // credit to https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
-    // // and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797
-    // // for file targetting code
-    // #[allow(clippy::expect_used)]
-    // let target = Box::new(fs::File::create(log_path).expect("Can't create file"));
-
-    // builder
-    //     .target(env_logger::Target::Pipe(target))
-    //     .format(|buf, record| {
-    //         writeln!(
-    //             buf,
-    //             "{} - {}:{} {}",
-    //             record.level(),
-    //             record.file().unwrap_or("<unknown>"),
-    //             record.line().unwrap_or(0),
-    //             record.args()
-    //         )
-    //     })
-    //     .filter(None, log::LevelFilter::Info)
-    //     .init();
-
-    // duration code copied from
-    // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-
-    // // loading trace and metadata
-    // let start = Instant::now();
-    // let trace = load_trace_data(&cli.trace_file)?;
-    // let trace_metadata = load_trace_metadata(&cli.trace_metadata_file)?;
-    // let duration = start.elapsed();
-    // info!("loading trace: duration: {:?}", duration);
-
-    // // post processing
-    // let start2 = Instant::now();
-    // let mut db = Db::new(&trace_metadata.workdir);
-    // let mut trace_processor = TraceProcessor::new(&mut db);
-    // trace_processor.postprocess(&trace)?;
-    // let duration2 = start2.elapsed();
-    // info!("postprocessing trace: duration: {:?}", duration2);
-    // // info!("{:#?}", &db.variables);
-    // // info!("cell_changes {:#?}", db.cell_changes);
-    // // db.display_variable_cells();
-
-    // let socket_path = db_backend::dap_server::socket_path_for(cli.caller_process_pid);
     match handle.join() {
         Ok(_) => Ok(()),
         Err(_) => Err("dap server thread panicked".into()),

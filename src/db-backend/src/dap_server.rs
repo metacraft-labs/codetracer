@@ -1,6 +1,6 @@
 use crate::dap::{
-    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, RequestArguments,
-    Response, SetBreakpointsResponseBody, Source,
+    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, RequestArguments, Response,
+    SetBreakpointsResponseBody, Source,
 };
 use crate::db::Db;
 use crate::handler::Handler;
@@ -14,6 +14,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Instant;
 
 pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
@@ -42,10 +43,21 @@ fn launch(trace_folder: &Path, tx: mpsc::Sender<crate::response::Response>) -> R
     info!("run launch() for {:?}", trace_folder);
     let metadata_path = trace_folder.join("trace_metadata.json");
     let trace_path = trace_folder.join("trace.json");
+    // duration code copied from
+    // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
+    let start = Instant::now();
     if let (Ok(meta), Ok(trace)) = (load_trace_metadata(&metadata_path), load_trace_data(&trace_path)) {
+        let duration = start.elapsed();
+        info!("loading trace: duration: {:?}", duration);
+
+        let start2 = Instant::now();
         let mut db = Db::new(&meta.workdir);
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
+
+        let duration2 = start2.elapsed();
+        info!("postprocessing trace: duration: {:?}", duration2);
+
         eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db), tx.clone());
         handler.run_to_entry(Task {
