@@ -278,7 +278,7 @@ pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json:
         .read_line(&mut header)
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     if !header.to_ascii_lowercase().starts_with("content-length:") {
-        println!("no content-length!");
+        // println!("no content-length!");
         return Err(serde_json::Error::custom("Missing Content-Length header"));
     }
     let len_part = header

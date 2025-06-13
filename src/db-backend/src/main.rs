@@ -17,8 +17,6 @@ use log::{error, info};
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
-
-use std::thread;
 use std::{error::Error, panic};
 
 mod calltrace;
@@ -96,11 +94,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Args::parse();
     info!("logging from db-backend");
 
-    eprintln!("pid {:?}", std::process::id());
-    let handle = if cli.stdio {
-        thread::spawn(move || {
-            let _ = db_backend::dap_server::run_stdio();
-        })
+    info!("pid {:?}", std::process::id());
+    // let handle = 
+    if cli.stdio {
+        // thread::spawn(move || {
+        let _ = db_backend::dap_server::run_stdio();
+        // })
     } else {
         let socket_path = if let Some(p) = cli.socket_path {
             p
@@ -108,13 +107,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             let pid = std::process::id() as usize;
             db_backend::dap_server::socket_path_for(pid)
         };
-        thread::spawn(move || {
+        // thread::spawn(move || {
             let _ = db_backend::dap_server::run(&socket_path);
-        })
+        // })
     };
 
-    match handle.join() {
-        Ok(_) => Ok(()),
-        Err(_) => Err("dap server thread panicked".into()),
-    }
+    // match handle.join() {
+    //     Ok(_) => Ok(()),
+    //     Err(err) => Err(format!("dap server thread panicked {err:?}").into()),
+    // }
+    Ok(())
 }

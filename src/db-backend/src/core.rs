@@ -100,7 +100,7 @@ impl Core {
     #[allow(clippy::unwrap_used)]
     fn send_task_message(&self, task_kind: TaskKind, task_id: TaskId) -> Result<(), Box<dyn Error>> {
         let raw = format!("{} {}\n", to_task_kind_text(task_kind), task_id.as_string());
-        eprintln!("send socket {raw}");
+        // info!("send socket {raw}");
         self.socket.as_ref().unwrap().write_all(raw.as_bytes())?;
         Ok(())
     }
