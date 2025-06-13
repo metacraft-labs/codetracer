@@ -1421,11 +1421,11 @@ impl Handler {
         Ok(res)
     }
 
-    pub fn threads(&mut self, request: dap::Request, arguments: dap::ThreadsArguments) -> Result<(), Box<dyn Error>> {
+    pub fn threads(&mut self, request: dap::Request) -> Result<(), Box<dyn Error>> {
         self.respond_dap(
             request,
             vec![dap::Thread {
-                id: arguments.thread_id,
+                id: 1,
                 name: "<thread 1>".to_string(),
             }],
         )?;

@@ -115,7 +115,7 @@ pub struct Capabilities {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(deny_unknown_fields)]
-pub struct ThreadsArguments {
+pub struct StackTraceArguments {
     #[serde(rename = "threadId")]
     pub thread_id: i64,
 }
@@ -125,7 +125,7 @@ pub struct ThreadsArguments {
 pub enum RequestArguments {
     Launch(LaunchRequestArguments),
     SetBreakpoints(SetBreakpointsArguments),
-    Threads(ThreadsArguments),
+    // Threads(Value),
     Other(Value),
 }
 
@@ -297,6 +297,7 @@ pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json:
         .read_exact(&mut buf)
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     let json_text = std::str::from_utf8(&buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    info!("DAP raw <- {json_text}");
     from_json(json_text)
 }
 
