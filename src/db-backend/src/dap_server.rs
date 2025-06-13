@@ -56,7 +56,11 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(trace_folder: &Path, seq: i64, tx: mpsc::Sender<crate::response::Response>) -> Result<Handler, Box<dyn Error>> {
+fn launch(
+    trace_folder: &Path,
+    seq: i64,
+    tx: mpsc::Sender<crate::response::Response>,
+) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let metadata_path = trace_folder.join("trace_metadata.json");
     let trace_path = trace_folder.join("trace.json");
@@ -88,10 +92,14 @@ fn launch(trace_folder: &Path, seq: i64, tx: mpsc::Sender<crate::response::Respo
     }
 }
 
-fn write_dap_messages<W: Write>(writer: &mut W, handler: &mut Option<Handler>, seq: &mut i64) -> Result<(), Box<dyn Error>> {
+fn write_dap_messages<W: Write>(
+    writer: &mut W,
+    handler: &mut Option<Handler>,
+    seq: &mut i64,
+) -> Result<(), Box<dyn Error>> {
     if let Some(h) = handler {
         for message in &h.resulting_dap_messages {
-            dap::write_message(writer, &message)?;
+            dap::write_message(writer, message)?;
         }
         h.reset_dap();
         *seq = h.dap_client.seq;
@@ -227,7 +235,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                             write_dap_messages(writer, &mut handler, &mut seq)?;
                         }
                         // if let Some(pid) = args.pid {
-                            // eprintln!("PID: {}", pid);
+                        // eprintln!("PID: {}", pid);
                         // }
                     }
                 }
