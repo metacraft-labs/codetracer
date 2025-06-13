@@ -80,7 +80,7 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64, tx: mpsc::Sender<cra
         let duration2 = start2.elapsed();
         info!("postprocessing trace: duration: {:?}", duration2);
 
-        eprintln!("TRACE METADATA: {:?}", meta);
+        // eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db), tx.clone());
         handler.dap_client.seq = seq;
         handler.run_to_entry(Task {
@@ -237,9 +237,9 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                             handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq, tx.clone())?);
                             write_dap_messages(writer, &mut handler, &mut seq)?;
                         }
-                        if let Some(pid) = args.pid {
-                            eprintln!("PID: {}", pid);
-                        }
+                        // if let Some(pid) = args.pid {
+                            // eprintln!("PID: {}", pid);
+                        // }
                     }
                 }
                 info!("received launch; configuration done? {received_configuration_done}; req: {req:?}");
