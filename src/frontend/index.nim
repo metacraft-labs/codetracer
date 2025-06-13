@@ -56,6 +56,7 @@ proc parseArgs =
   data.startOptions.screen = true
   data.startOptions.loading = false
   data.startOptions.record = false
+  data.startOptions.stylusExplorer = true #TODO: Set this with args
 
   data.startOptions.folder = electronprocess.cwd()
 
