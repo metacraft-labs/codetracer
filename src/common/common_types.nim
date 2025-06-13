@@ -130,6 +130,13 @@ type
     value*:           seq[Token]
     help*:            cstring
 
+  StylusTransaction* = ref object
+    txHash*: cstring
+    isSuccessful*: bool
+    fromAddress*: cstring
+    toAddress*: cstring
+    time*: cstring
+
   Trace* = ref object ## Trace object
     id*: int
     program*: langstring
@@ -367,6 +374,7 @@ type
     name*: langstring
     folder*: langstring
     welcomeScreen*: bool
+    stylusExplorer*: bool
     app*: langstring
     shellUi*: bool
     address*: langstring
