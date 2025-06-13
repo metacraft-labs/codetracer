@@ -29,6 +29,8 @@ mkShell {
       # general dependencies
       git
 
+      rustup
+
       gcc
       binutils
 

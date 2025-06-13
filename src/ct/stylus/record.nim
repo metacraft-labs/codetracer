@@ -1,4 +1,7 @@
 import std/[httpclient, json, os, osproc, times, streams]
+import arb_node_utils
+import ../../common/types
+import ../trace/record
 
 # TODO: get name from config? Maybe use SQLite?
 const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
@@ -38,33 +41,13 @@ proc getEvmTrace(hash: string): string =
 
   return outputFile
 
-proc getTransactionContractAddress(hash: string): string =
-  let id = $now().toTime().toUnix() & "_" & hash
-  let rpcPayload = %*{
-    "jsonrpc": "2.0",
-    "method": "eth_getTransactionByHash",
-    "params": [hash],
-    "id": id
-  }
-
-  let client = newHttpClient()
-  client.headers = newHttpHeaders({"Content-Type": "application/json"})
-  let response = client.request("http://localhost:8547", httpMethod = HttpPost, body = $rpcPayload)
-  let parsed = parseJson(response.body)
-
-  # TODO: validate response id
-  let rpcResult = parsed["result"]
-
-  return rpcResult["to"].getStr()
-
 proc getContractWasmPath(deploymentAddr: string): string =
   return CONTRACT_WASM_PATH / deploymentAddr / "debug.wasm"
 
-proc record*(hash: string) =
-  let wasm = getContractWasmPath(hash)
+proc recordStylus*(hash: string): Trace =
+  let wasm = getContractWasmPath(getTransactionContractAddress(hash))
   let evmTrace = getEvmTrace(hash)
 
   echo "WASM: ", wasm, " EVM: ", evmTrace
 
-  # TODO: create codetrace trace
-
+  return record("", ".", "", "", evmTrace, wasm, @[])
