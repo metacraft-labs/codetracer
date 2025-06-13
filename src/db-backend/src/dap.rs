@@ -1,8 +1,8 @@
+use log::info;
 use serde::{de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use log::info;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
@@ -119,7 +119,6 @@ pub struct ThreadsArguments {
     #[serde(rename = "threadId")]
     pub thread_id: i64,
 }
-
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
