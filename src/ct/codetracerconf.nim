@@ -9,6 +9,7 @@ import
 type
   ArbCommand* {.pure.} = enum
     explorer,
+    record,
     replay,
     deploy
 
@@ -183,7 +184,7 @@ type
         argument
         desc: "Output path"
       .} : string
-    of record:
+    of StartupCommand.record:
       recordLang* {.
         name: "lang"
         defaultValue: ""
@@ -318,6 +319,11 @@ type
       .}: ArbCommand
       of explorer:
         discard
+      of ArbCommand.record:
+        arbRecordTransaction* {.
+          argument
+          desc: "Hex-encoded transaction hash"
+        .}: string
       of ArbCommand.replay:
         arbReplayTransaction* {.
           argument

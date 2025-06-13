@@ -1,23 +1,34 @@
 import std/[httpclient, json, strformat, strutils, sequtils, parseutils, times, sets, os]
 
-const rpcUrl = "https://arb1.arbitrum.io/rpc"
+const DEFAULT_NODE_URL* = "http://localhost:8547"
 
 const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode =
+  # TODO: add random/uniqie stuff to id
+
+  let id = $now().toTime().toUnix()
   let payload = %*{
     "jsonrpc": "2.0",
     "method": methodParam,
     "params": params,
-    "id": 1
+    "id": id
   }
 
   let client = newHttpClient()
   client.headers = newHttpHeaders({"Content-Type": "application/json"})
-  let response = client.request(rpcUrl, httpMethod = HttpPost, body = $payload)
+  let response = client.request(DEFAULT_NODE_URL, httpMethod = HttpPost, body = $payload)
+
+  # TODO: verofy id
+
   let parsed = parseJson(response.body)
 
   return parsed["result"]
+
+proc getTransactionContractAddress*(hash: string): string =
+  let response = jsonRpcRequest("eth_getTransactionByHash", %[hash])
+  echo response
+  return response["to"].getStr()
 
 proc getBlockNumber(): int =
   let rpcResult = jsonRpcRequest("eth_blockNumber", %[])
@@ -30,7 +41,7 @@ proc getBlockByNumber(n: int): JsonNode =
   return jsonRpcRequest("eth_getBlockByNumber", %[%hexNum, %true])
 
 proc getPermittedToHashes(): HashSet[string] =
-  
+
   var toHashes: HashSet[string]
   init(toHashes)
 
@@ -41,7 +52,7 @@ proc getPermittedToHashes(): HashSet[string] =
       toHashes.incl(toAddr)
 
 proc filterTransactionsByToHash(transactions: seq[JsonNode], tos: HashSet[string]): seq[JsonNode] =
-  
+
   var transactions: seq[JsonNode]
 
   for t in transactions:
