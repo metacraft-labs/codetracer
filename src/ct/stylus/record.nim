@@ -1,6 +1,6 @@
 import std/[httpclient, json, os, osproc, times, streams]
 import arb_node_utils
-import ../../common/types
+import ../../common/[paths, types]
 import ../trace/record
 
 # TODO: get name from config? Maybe use SQLite?
@@ -51,3 +51,10 @@ proc recordStylus*(hash: string): Trace =
   echo "WASM: ", wasm, " EVM: ", evmTrace
 
   return record("", ".", "", "", evmTrace, wasm, @[])
+
+proc replayStylus*(hash: string) =
+  # TODO: don't rerecord transactions
+  let recordedTrace = recordStylus(hash)
+
+  let process = startProcess(codetracerExe, args = @["replay", "--id=" & $recordedTrace.id], options = {poParentStreams})
+  discard process.waitForExit()
