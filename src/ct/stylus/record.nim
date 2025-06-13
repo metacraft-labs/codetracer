@@ -1,6 +1,6 @@
 import std/[httpclient, json, os, osproc, times, streams]
 import arb_node_utils
-import ../../common/[paths, types]
+import ../../common/[paths, trace_index, types]
 import ../trace/record
 
 proc getEvmTrace(hash: string): string =
@@ -46,7 +46,9 @@ proc recordStylus*(hash: string): Trace =
 
   echo "WASM: ", wasm, " EVM: ", evmTrace
 
-  return record("", ".", "", "", evmTrace, wasm, @[])
+  result = record("", ".", "", "", evmTrace, wasm, @[])
+  updateField(result.id, "program", hash, false)
+  result.program = hash
 
 proc replayStylus*(hash: string) =
   # TODO: don't rerecord transactions
