@@ -1375,6 +1375,7 @@ type
     keyPlugins*:            array[Content, JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]]
     recentProjects*:        seq[Project]
     recentTraces*:          seq[Trace]
+    stylusTransactions*:    seq[StylusTransaction]
     pointList*:             PointListData
     minRRTicks*:            int
     maxRRTicks*:            int

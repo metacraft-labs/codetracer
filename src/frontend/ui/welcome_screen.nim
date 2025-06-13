@@ -60,6 +60,22 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 
   self.data.redraw()
 
+proc recentTransactionView(self: WelcomeScreenComponent, trace: StylusTransaction, position: int): VNode =
+  let successId = if trace.isSuccessful: "tx-success" else: "tx-unsuccess"
+  buildHtml(
+    tdiv(class = "recent-transactions-container")
+  ): 
+    tdiv(class = "recent-transaction"):
+      span(): text trace.txHash
+      span(id = successId): text if trace.isSuccessful: "Successful" else: "Not"
+      span(): text trace.fromAddress
+      span(): text trace.toAddress
+      span(): text trace.time
+      tdiv(
+        class = "action-transaction-button",
+        onclick = proc() = echo "#### HIIIIII"
+      )
+
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
   let featureFlag = data.config.traceSharing.enabled
   let tooltipTopPosition = (position + 1) * 36 - self.recentTracesScroll
@@ -223,6 +239,31 @@ proc recentProjectsView(self: WelcomeScreenComponent): VNode =
       else:
         tdiv(class = "no-recent-traces"):
           text "No traces yet."
+
+proc recentTransactionsView(self: WelcomeScreenComponent): VNode =
+  buildHtml(
+    tdiv(class = "recent-transactions")
+  ):
+    tdiv(class = "recent-transaction-title"):
+      text "Stylus Transaction explorer"
+    tdiv(class = "table-column-names"):
+      span(id = "tx-hash"): text "TX Hash"
+      span(id = "tx-status"): text "Status"
+      span(id = "tx-from"): text "From"
+      span(id = "tx-to"): text "To"
+      span(id = "tx-when"): text "When"
+      span(id = "tx-action"): text "Action"
+    tdiv(
+      class = "recent-traces-list",
+      onscroll = proc(ev: Event, tg: VNode) =
+        self.recentTracesScroll = cast[int](ev.target.scrollTop)
+    ):
+      if self.data.stylusTransactions.len > 0:
+        for (i, trace) in enumerate(self.data.stylusTransactions):
+          recentTransactionView(self, trace, i)
+      else:
+        tdiv(class = "no-recent-traces"):
+          text "No transactions yet."
 
 proc renderOption(self: WelcomeScreenComponent, option: WelcomeScreenOption): VNode =
   let optionClass = toLowerAscii($(option.name)).split().join("-")
@@ -554,6 +595,16 @@ proc newRecordFormView(self: WelcomeScreenComponent): VNode =
 
 proc dirExist(self: WelcomeScreenComponent, path: cstring): bool = discard
 
+proc stylusExplorer(self: WelcomeScreenComponent): VNode =
+  buildHtml(
+    tdiv(class = "new-record-screen")
+  ):
+    tdiv(class = "new-record-screen-content"):
+      tdiv(class = "welcome-logo")
+      tdiv(class = "new-record-title transactions"):
+        tdiv(class = "welcome-content"):
+          recentTransactionsView(self)
+
 proc newRecordView(self: WelcomeScreenComponent): VNode =
   buildHtml(
     tdiv(class = "new-record-screen")
@@ -666,12 +717,15 @@ method render*(self: WelcomeScreenComponent): VNode =
     if self.welcomeScreen or self.newRecordScreen or self.openOnlineTrace:
       tdiv(class = "welcome-screen-wrapper"):
         windowMenu(data, true)
-        if self.welcomeScreen:
-          welcomeScreenView(self)
-        elif self.newRecordScreen:
-          newRecordView(self)
-        elif self.openOnlineTrace:
-          onlineTraceView(self)
+        if data.startOptions.stylusExplorer:
+          stylusExplorer(self)
+        else:
+          if self.welcomeScreen:
+            welcomeScreenView(self)
+          elif self.newRecordScreen:
+            newRecordView(self)
+          elif self.openOnlineTrace:
+            onlineTraceView(self)
 
       if self.loading:
         loadingOverlay(self)
