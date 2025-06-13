@@ -296,6 +296,15 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     write_dap_messages(writer, &mut handler, &mut seq)?;
                 }
             }
+            DapMessage::Request(req) if req.command == "stackTrace" => {
+                if let Some(h) = handler.as_mut() {
+                    if let RequestArguments::StackTrace(args) = req.arguments.clone() {
+                        h.dap_client.seq = seq;
+                        h.stack_trace(req, args)?;
+                        write_dap_messages(writer, &mut handler, &mut seq)?;
+                    }
+                } 
+            }
             DapMessage::Request(req) if req.command == "stepIn" => {
                 if let Some(h) = handler.as_mut() {
                     let _ = h.step(

@@ -1,4 +1,4 @@
-use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, RequestArguments};
+use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, RequestArguments, StackTraceArguments};
 use db_backend::dap_server::{self};
 use serde_json::json;
 use std::io::BufReader;
@@ -90,7 +90,18 @@ fn test_backend_dap_server() {
     dap::write_message(&mut writer, &threads_request).unwrap();
     let msg_threads = dap::from_reader(&mut reader).unwrap();
     match msg_threads {
-        DapMessage::Response(r) => assert_eq!(r.command, "threads"),
+        DapMessage::Response(r) => {
+            assert_eq!(r.command, "threads");
+            assert_eq!(r.body["threads"][0]["id"], 1);
+        },
+        _ => panic!(),
+    }
+
+    let stack_trace_request = client.request("stackTrace", RequestArguments::StackTrace(StackTraceArguments { thread_id: 1}));
+    dap::write_message(&mut writer, &stack_trace_request).unwrap();
+    let msg_stack_trace = dap::from_reader(&mut reader).unwrap();
+    match msg_stack_trace {
+        DapMessage::Response(r) => assert_eq!(r.command, "stackTrace"), // TODO: test stackFrames / totalFrames ?
         _ => panic!(),
     }
 

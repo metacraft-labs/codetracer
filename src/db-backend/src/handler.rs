@@ -1421,13 +1421,59 @@ impl Handler {
         Ok(res)
     }
 
+    pub fn to_stack_frame(&mut self, call_record: &DbCall) -> dap::StackFrame {
+        let call = self.db.to_call(call_record, &mut self.expr_loader);
+        dap::StackFrame {
+            id: call_record.key.0,
+            name: call.location.function_name,
+            source: Some(dap::Source { 
+                name: Some("".to_string()), 
+                path: Some(call.location.path), 
+                source_reference: None 
+            }),
+            line: if call.location.line >= 0 { call.location.line as usize } else { 0 },
+            column: 1,
+            end_line: None,
+            end_column: None,
+            instruction_pointer_reference: None,
+            module_id: None,
+            presentation_hint: None,
+        }
+    }
     pub fn threads(&mut self, request: dap::Request) -> Result<(), Box<dyn Error>> {
         self.respond_dap(
             request,
-            vec![dap::Thread {
-                id: 1,
-                name: "<thread 1>".to_string(),
-            }],
+            dap::ThreadsResponseBody {
+                threads: vec![dap::Thread {
+                    id: 1,
+                    name: "<thread 1>".to_string(),
+                }],
+            },
+        )?;
+        Ok(())
+    }
+
+    pub fn stack_trace(&mut self, request: dap::Request, args: dap::StackTraceArguments) -> Result<(), Box<dyn Error>> {
+        let stack_frames: Vec<dap::StackFrame> = if args.thread_id == 1 {
+            self
+                .calltrace
+                .load_callstack(self.step_id, &self.db)
+                .iter()
+                .map(|call_record| {
+                    // expanded children count not relevant in raw callstack
+                    self.to_stack_frame(call_record)
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        let total_frames = stack_frames.len();
+        self.respond_dap(
+            request,
+            dap::StackTraceResponseBody {
+                stack_frames,
+                total_frames,
+            }
         )?;
         Ok(())
     }
