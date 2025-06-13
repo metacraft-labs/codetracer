@@ -555,3 +555,78 @@
   input
     padding-left: 8px
     background-image: none
+
+.recent-transactions
+  display: flex
+  text-align: left
+  font-size: 18px
+  font-weight: 700
+  background-color: SECONDARY_BASE
+  border-radius: 6px
+  padding: 16px
+  flex-direction: column
+
+.table-column-names
+  display: flex
+  text-align: left
+  justify-content: space-between
+  font-size: 14px
+  font-weight: 400
+  font-family: "FiraCode"
+
+  #tx-hash
+    width: 140px
+  #tx-status
+    width: 58px
+  #tx-from
+    width: 124px
+    padding-left: 22px
+  #tx-to
+    width: 140px
+    padding-left: 16px
+  #tx-when
+    width: 68px
+    padding-left: 10px
+  #tx-action
+    width: 50px 
+
+.recent-transactions-container
+  display: flex
+  justify-content: space-between
+  font-size: 14px
+  font-style: normal
+  font-weight: 400
+
+.recent-transactions
+  max-height: 360px
+  overflow: scroll
+
+.recent-transaction
+  display: flex
+  justify-content: space-between
+  text-align: center
+  align-items: center
+  width: -webkit-fill-available
+  color: WELCOME_SCREEN_RECENT_TRACE_COLOR
+
+  #tx-success
+    color: TX_STATUS_SUCCESS
+
+.action-transaction-button
+  margin-left: 8px
+  margin-top: 2px
+  margin-bottom: 6px
+  height: 28px
+  width: 28px
+  background-color: DEBUG_BUTTON_BORDER_COLOR
+  border-radius: 4px
+  cursor: pointer
+  background-image: RECENT_TRANSACTION_ACTION_BUTTON
+  background-repeat: no-repeat
+  background-position: center
+
+.recent-transaction-title
+  margin-bottom: 16px
+
+.transactions
+  margin-bottom: 0px !important
