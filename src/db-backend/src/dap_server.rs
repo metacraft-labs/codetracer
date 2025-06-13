@@ -279,11 +279,9 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "threads" => {
                 if let Some(h) = handler.as_mut() {
-                    if let RequestArguments::Threads(args) = req.arguments.clone() {
-                        h.dap_client.seq = seq;
-                        h.threads(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
-                    }
+                    h.dap_client.seq = seq;
+                    h.threads(req)?;
+                    write_dap_messages(writer, &mut handler, &mut seq)?;
                 }
             }
             DapMessage::Request(req) if req.command == "stepIn" => {
