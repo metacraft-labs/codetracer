@@ -1,0 +1,11 @@
+[language.debugger]
+name = "rust"
+transport = "stdio"
+command = "db-backend"
+args = ["--stdio"]
+
+[[language.debugger.templates]]
+name = "codetracer: db-backend trace folder"
+request = "launch"
+completion = [ { name = "traceFolder", completion = "filename" } ]
+args = { traceFolder = "{0}" }
