@@ -44,7 +44,7 @@ pub struct Source {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(rename = "sourceReference", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "sourceReference")] // skip_serializing_if = "Option::is_none")]
     pub source_reference: Option<i64>,
 }
 
@@ -112,10 +112,37 @@ pub struct Capabilities {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(deny_unknown_fields)]
+pub struct ThreadsResponseBody {
+    pub threads: Vec<Thread>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+// #[serde(deny_unknown_fields)]
 pub struct StackTraceArguments {
     #[serde(rename = "threadId")]
     pub thread_id: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StackFrame {
+    pub id: i64,
+    pub name: String,
+    pub source: Option<Source>,
+    pub line: usize,
+    pub column: usize,
+    pub end_line: Option<usize>,
+    pub end_column: Option<usize>,
+    pub instruction_pointer_reference: Option<String>,
+    pub module_id: Option<Value>, // number | string;
+    pub presentation_hint: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StackTraceResponseBody {
+    pub stack_frames: Vec<StackFrame>,
+    pub total_frames: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -123,7 +150,7 @@ pub struct StackTraceArguments {
 pub enum RequestArguments {
     Launch(LaunchRequestArguments),
     SetBreakpoints(SetBreakpointsArguments),
-    // Threads(Value),
+    StackTrace(StackTraceArguments),
     Other(Value),
 }
 
@@ -158,6 +185,7 @@ pub struct InitializeResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<Capabilities>,
 }
+
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct Event {
