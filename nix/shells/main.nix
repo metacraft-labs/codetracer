@@ -66,10 +66,7 @@ mkShell {
       # https://github.com/casey/just
       just
 
-      cargo
-      rustfmt
       # ourPkgs.codetracer-rust-wrapped
-      clippy
 
       # For inspecting our deb packages
       dpkg
@@ -166,6 +163,9 @@ mkShell {
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
   shellHook = ''
+    rustup override set 1.87
+    rustup target add wasm32-unknown-unknown
+
     # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
     ROOT_PATH=$(git rev-parse --show-toplevel)
 
