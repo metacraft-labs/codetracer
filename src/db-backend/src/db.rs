@@ -579,15 +579,14 @@ impl Db {
             if last_call_key != call_key {
                 let function_name = &self.functions[self.calls[call_key].function_id].name;
                 let call_key_int = call_key.0;
-                eprintln!("call {function_name} {call_key_int}:");
+                info!("call {function_name} {call_key_int}:");
             }
             last_call_key = call_key;
-            eprint!("  step #{} line {}:", step_id.0, self.steps[step_id].line.0);
+            info!("  step #{} line {}:", step_id.0, self.steps[step_id].line.0);
             for (variable_id, place) in step_variable_cells.iter() {
                 let variable_name = self.variable_name(*variable_id);
-                eprint!("  {} {}: {}", variable_name, variable_id.0, place.0);
+                info!("  {} {}: {}", variable_name, variable_id.0, place.0);
             }
-            eprintln!();
         }
     }
 
