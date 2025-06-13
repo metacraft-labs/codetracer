@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
-    // let handle = 
+    // let handle =
     if cli.stdio {
         // thread::spawn(move || {
         let _ = db_backend::dap_server::run_stdio();
@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             db_backend::dap_server::socket_path_for(pid)
         };
         // thread::spawn(move || {
-            let _ = db_backend::dap_server::run(&socket_path);
+        let _ = db_backend::dap_server::run(&socket_path);
         // })
     };
 

@@ -6,9 +6,9 @@ use std::path::PathBuf;
 
 use std::str;
 
+use crate::paths::CODETRACER_PATHS;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use crate::paths::CODETRACER_PATHS;
 // use crate::event::Event;
 use crate::task::{gen_task_id, to_task_kind_text, EventId, TaskId, TaskKind};
 
