@@ -1,4 +1,5 @@
 import std/[json, os, osproc, streams, strutils]
+import arb_node_utils
 
 # TODO: get name from config? Maybe use SQLite?
 const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
@@ -7,7 +8,12 @@ proc doDeploy(): string =
   # TODO: get endpoint and private key and other params from args
   let process = startProcess(
     "cargo",
-    args=["stylus", "deploy", "--endpoint=http://localhost:8547", "--private-key=0xb6b15c8cb491557369f3c7d2c287b053eb229daa9c22138887752191c9520659"],
+    args=[
+      "stylus", "deploy",
+      "--endpoint=" & DEFAULT_NODE_URL,
+      "--private-key=0xb6b15c8cb491557369f3c7d2c287b053eb229daa9c22138887752191c9520659",
+      "--no-verify" # Don't run in docker container
+    ],
     options={poEchoCmd, poUsePath, poStdErrToStdOut}
   )
   defer: process.close()
@@ -31,6 +37,10 @@ proc doDeploy(): string =
   for line in lines:
     if not line.contains("deployed code at address:"):
       continue
+
+    echo ""
+    echo line
+    echo ""
 
     let addrStartInd = line.find("0x")
     return line[addrStartInd .. addrStartInd + 41]
@@ -94,7 +104,7 @@ proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string) =
 
 
 proc deployStylus*() =
-  let deploymentAddr = doDeploy()
   let wasmWithDebug = doDebugBuild()
+  let deploymentAddr = doDeploy()
 
   saveContractDebugWasm(deploymentAddr, wasmWithDebug)

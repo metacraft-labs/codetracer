@@ -111,6 +111,7 @@
             pkgs.tree
 
             pkgs.gcc # gcc, g++
+            pkgs.rustup
             # pkgs.rustc
             # pkgs.go
             upstream-nim-codetracer
