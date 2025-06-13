@@ -21,16 +21,11 @@ proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode =
   client.headers = newHttpHeaders({"Content-Type": "application/json"})
   let response = client.request(DEFAULT_NODE_URL, httpMethod = HttpPost, body = $payload)
 
-  # TODO: verofy id
+  # TODO: verify id
 
   let parsed = parseJson(response.body)
 
   return parsed["result"]
-
-proc getTransactionContractAddress*(hash: string): string =
-  let response = jsonRpcRequest("eth_getTransactionByHash", %[hash])
-  echo response
-  return response["to"].getStr()
 
 proc getBlockNumber(): int =
   let rpcResult = jsonRpcRequest("eth_blockNumber", %[])
@@ -38,44 +33,44 @@ proc getBlockNumber(): int =
 
 proc getBlockByNumber(n: int): JsonNode =
   var num = toHex(n)
-  let strippedNum = num.strip(leading = true, trailing = false, chars = {'0'})
-  let hexNum = "0x" & strippedNum
+  num = num.strip(leading = true, trailing = false, chars = {'0'})
+
+  if num == "":
+    num = "0"
+
+  let hexNum = "0x" & num
   return jsonRpcRequest("eth_getBlockByNumber", %[%hexNum, %true])
 
 proc getPermittedToHashes(): HashSet[string] =
-
   var toHashes: HashSet[string]
   init(toHashes)
 
   for file in walkDir(CONTRACT_WASM_PATH):
-
     if file.kind == pcDir:
       let toAddr = splitPath(file.path)[1]
       toHashes.incl(toAddr)
 
-proc filterTransactionsByToHash(transactions: seq[JsonNode], tos: HashSet[string]): seq[JsonNode] =
+  return toHashes
 
-  var transactions: seq[JsonNode]
+proc filterTransactionsByToHash(transactions: seq[JsonNode], tos: HashSet[string]): seq[JsonNode] =
+  result = @[]
 
   for t in transactions:
     let toAddr = t["to"].getStr()
     if tos.contains(toAddr):
-      transactions.add(t)
+      result.add(t)
 
-  return transactions
+  return result
 
 proc getValidTransactions(transactions: seq[JsonNode]): seq[JsonNode] =
   let toHashes = getPermittedToHashes()
   return filterTransactionsByToHash(transactions, toHashes)
 
-# Returns the transactions for the last `t` seconds
-proc getBlocksByTimestamp(t: int): seq[JsonNode] =
+proc getTransactions(maxAge: int): seq[JsonNode] =
   var collected: seq[JsonNode] = @[]
   var blockNum = getBlockNumber()
 
-  # const secondsInAnHour = 3600
-
-  let threshold = int(epochTime()) - t
+  let threshold = int(epochTime()) - maxAge
 
   while blockNum >= 0:
     let transactionsBlock = getBlockByNumber(blockNum)
@@ -92,3 +87,15 @@ proc getBlocksByTimestamp(t: int): seq[JsonNode] =
     blockNum -= 1
 
   return collected
+
+proc getTransactionContractAddress*(hash: string): string =
+  let response = jsonRpcRequest("eth_getTransactionByHash", %[hash])
+  return response["to"].getStr()
+
+# Returns the transactions, that can be replayed and are not older than `maxAge` seconds
+proc getTracableTransactions*(maxAge: int = 3600): seq[JsonNode] =
+  # TODO: return custom struct
+  var transactions = getTransactions(maxAge)
+  transactions = getValidTransactions(transactions)
+
+  return transactions
