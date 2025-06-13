@@ -3,10 +3,6 @@ import arb_node_utils
 import ../../common/[paths, types]
 import ../trace/record
 
-# TODO: get name from config? Maybe use SQLite?
-const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
-const EVM_TRACE_DIR_PATH = getTempDir() / "codetracer"
-
 proc getEvmTrace(hash: string): string =
   # TODO: get endpoint and private key and other params from args
   let process = startProcess(

@@ -1,9 +1,6 @@
 import std/[json, os, osproc, streams, strutils]
 import arb_node_utils
 
-# TODO: get name from config? Maybe use SQLite?
-const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
-
 proc doDeploy(): string =
   # TODO: get endpoint and private key and other params from args
   let process = startProcess(

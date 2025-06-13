@@ -2,7 +2,9 @@ import std/[httpclient, json, strformat, strutils, sequtils, parseutils, times, 
 
 const DEFAULT_NODE_URL* = "http://localhost:8547"
 
-const CONTRACT_WASM_PATH = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
+# TODO: get name from config? Maybe use SQLite?
+const CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
+const EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode =
   # TODO: add random/uniqie stuff to id
