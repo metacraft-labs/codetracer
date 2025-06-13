@@ -86,6 +86,13 @@ fn test_backend_dap_server() {
         }
         _ => panic!(),
     }
+    let threads_request = client.request("threads", RequestArguments::Other(json!({})));
+    dap::write_message(&mut writer, &threads_request).unwrap();
+    let msg_threads = dap::from_reader(&mut reader).unwrap();
+    match msg_threads {
+        DapMessage::Response(r) => assert_eq!(r.command, "threads"),
+        _ => panic!(),
+    }
 
     drop(writer);
     drop(reader);
