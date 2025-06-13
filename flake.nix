@@ -38,6 +38,12 @@
       flake = true;
     };
 
+    nix-blockchain-development = {
+      url = "github:metacraft-labs/nix-blockchain-development?ref=stylus-tools";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      flake = true;
+    };
+
   };
 
   # outputs = {

@@ -12,7 +12,7 @@ proc runRecordedTrace*(
   recordCore: bool = false
 ): bool =
   let args = if test: @[$trace.id, "--test"] else: @[$trace.id]
-  return launchElectron(args, trace, recordCore, test)
+  return launchElectron(args, trace, ElectronLaunchMode.None, recordCore, test)
 
 
 proc runWithRestart(
