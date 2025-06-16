@@ -47,6 +47,10 @@ proc findRecentTracesWithCodetracer*(app: ElectronApp, limit: int): Future[seq[T
   var emptyTraces: seq[Trace] = @[]
   return emptyTraces
 
+proc findRecentTransactions*(app: ElectronApp, limit: int): Future[seq[StylusTransaction]] {.async.} =
+  #TODO: ADD IMPLEMENTATION FOR THIS!
+  discard
+
 proc findTraceByRecordProcessId*(app: ElectronApp, pid: int): Future[Trace] {.async.} =
   let res = await readProcessOutput(
     codetracerExe.cstring, 
