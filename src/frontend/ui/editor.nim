@@ -421,7 +421,7 @@ proc flowStyleLines(self: EditorViewComponent, conditionFlowLines: seq[MonacoLin
     for position in flow.flow.location.functionFirst + 1 .. flow.flow.location.functionLast:
       if not flow.flow.branchesTaken[0][0].table.hasKey(position):
         let lineFlowKind = toLineFlowKind(flow.flow, position, finished)
-        if isLineStyleSet(conditionFlowLines, position):
+        if isLineStyleSet(conditionFlowLines, position) and position notin flow.flow.commentLines:
           case lineFlowKind:
           of LineFlowHit:
               lines.add(MonacoLineStyle(line: position, inlineClass: cstring"line-flow-hit"))

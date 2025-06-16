@@ -66,6 +66,7 @@ type
     branchesTaken*: seq[seq[BranchesTaken]]
     loopIterationSteps*: seq[seq[LoopIterationSteps]]
     relevantStepCount*: seq[int]
+    commentLines*: seq[int]
 
   FlowViewUpdate* = ref FlowViewUpdateObject ## FlowViewUpdate obejct ref
 
