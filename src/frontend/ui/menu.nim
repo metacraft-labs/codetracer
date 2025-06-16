@@ -394,14 +394,15 @@ proc navigationMenuView*(self: MenuComponent): VNode =
             self.activePathOffsets[0] = 0
 
             for i, element in menu.elements:
-              menuNodeView(
-                self,
-                element,
-                i,
-                0,
-                menu.elements.len,
-                nameAndShortcutWidths.name,
-                nameAndShortcutWidths.shortcut)
+              if element.menuOs != ord(MenuNodeOSMacOS):
+                menuNodeView(
+                  self,
+                  element,
+                  i,
+                  0,
+                  menu.elements.len,
+                  nameAndShortcutWidths.name,
+                  nameAndShortcutWidths.shortcut)
           # For now disable search input
           # tdiv(
           #   id="menu-search",
@@ -457,14 +458,15 @@ proc navigationMenuView*(self: MenuComponent): VNode =
             style = menuNestedStyle(self, sum, depth + 1, separators, submenuWidth)
           ):
             for i2, element in current.elements:
-              menuNodeView(
-                self,
-                element,
-                i2,
-                depth + 1,
-                current.elements.len,
-                nameAndShortcutWidths.name,
-                nameAndShortcutWidths.shortcut)
+              if element.menuOs != ord(MenuNodeOSMacOS):
+                menuNodeView(
+                  self,
+                  element,
+                  i2,
+                  depth + 1,
+                  current.elements.len,
+                  nameAndShortcutWidths.name,
+                  nameAndShortcutWidths.shortcut)
 
 proc prepareSearch*(node: MenuNode): seq[js] =
   result = @[]
