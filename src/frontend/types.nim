@@ -1247,6 +1247,11 @@ type
 
   # MenuEnabled* = enum enabled, Disabled, MCalltrace
 
+  MenuNodeOS* = enum
+    MenuNodeOSAny,
+    MenuNodeOSMacOS,
+    MenuNodeOSNonMacOS
+
   MenuNodeKind* = enum MenuFolder, MenuElement
 
   MenuNode* = ref object
@@ -1256,6 +1261,7 @@ type
     kind*:    MenuNodeKind
     elements*: seq[MenuNode]
     isBeforeNextSubGroup*: bool
+    menuOs*: int
 
   StatusComponent* = ref object of Component
     build*: BuildComponent
