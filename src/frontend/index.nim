@@ -996,6 +996,10 @@ proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=int)) {.async.} =
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
+proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
+  #TODO: Implement the transaction recording
+  discard
+
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await app.findTraceByRecordProcessId(pid)
   await prepareForLoadingTrace(trace.id, pid)
@@ -1223,6 +1227,7 @@ proc configureIpcMain =
     "load-codetracer-shell"
     "load-recent-trace"
     "open-local-trace"
+    "load-recent-transaction"
 
     "tab-load"
     "asm-load"
@@ -1421,12 +1426,14 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
     }
   else:
     let recentTraces = await app.findRecentTracesWithCodetracer(limit=NO_LIMIT)
+    let recentTransactions = await app.findRecentTransactions(limit=NO_LIMIT)
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,
       startOptions: data.startOptions,
       config: data.config,
-      recentTraces: recentTraces
+      recentTraces: recentTraces,
+      recentTransactions: recentTransactions
     }
 
 when not defined(ctRepl) and not defined(server):
