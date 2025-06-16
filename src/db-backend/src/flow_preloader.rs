@@ -192,6 +192,7 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update = self.log_expressions(flow_view_update.clone(), step, db, step_id);
             step_count += 1;
         }
+        flow_view_update.comment_lines = self.flow_preloader.expr_loader.get_comment_positions(path_buf);
         flow_view_update.add_branches(
             0,
             self.flow_preloader

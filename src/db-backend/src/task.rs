@@ -517,6 +517,7 @@ pub struct FlowViewUpdate {
     pub branches_taken: Vec<Vec<BranchesTaken>>,
     pub loop_iteration_steps: Vec<Vec<LoopIterationSteps>>,
     pub relevant_step_count: Vec<usize>,
+    pub comment_lines: Vec<Position>,
 }
 
 impl FlowViewUpdate {
@@ -529,6 +530,7 @@ impl FlowViewUpdate {
             branches_taken: vec![vec![BranchesTaken::default()]],
             loop_iteration_steps: vec![vec![LoopIterationSteps::default()]],
             relevant_step_count: vec![],
+            comment_lines: vec![],
         }
     }
 

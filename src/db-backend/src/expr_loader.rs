@@ -24,6 +24,7 @@ pub struct NodeNames {
     functions: Vec<String>,
     branches: Vec<String>,
     values: Vec<String>,
+    comments: Vec<String>,
 }
 
 static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
@@ -38,6 +39,7 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
             branches: vec!["then".to_string(), "call".to_string()],
             functions: vec!["method".to_string()],
             values: vec!["identifier".to_string()],
+            comments: vec!["comment".to_string()],
         },
     );
 
@@ -49,6 +51,7 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         branches: vec!["block".to_string()],
         functions: vec!["function_item".to_string()],
         values: vec!["identifier".to_string()],
+        comments: vec!["//".to_string()],
     };
 
     m.insert(Lang::Noir, rust_node_names.clone());
@@ -64,6 +67,7 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
             branches: vec!["block".to_string()],
             functions: vec!["defun".to_string()],
             values: vec!["symbol".to_string()],
+            comments: vec!["".to_string()],
         },
     );
     m
@@ -80,6 +84,7 @@ pub struct FileInfo {
     branch: Vec<Branch>,
     position_branches: HashMap<Position, Branch>,
     active_loops: Vec<Position>,
+    comment_lines: Vec<Position>,
 }
 
 impl FileInfo {
@@ -94,6 +99,7 @@ impl FileInfo {
             branch: vec![],
             position_branches: HashMap::default(),
             active_loops: vec![],
+            comment_lines: vec![],
         }
     }
 }
@@ -242,6 +248,10 @@ impl ExprLoader {
         }
     }
 
+    fn count_leading_spaces(&mut self, line: &str) -> usize {
+        line.chars().take_while(|c| c.is_whitespace()).count()
+    }
+
     fn process_node(&mut self, node: &Node, path: &PathBuf) -> Result<(), Box<dyn Error>> {
         let row = node.start_position().row + 1;
         let start = self.get_first_line(node);
@@ -291,6 +301,11 @@ impl ExprLoader {
             }
         } else if NODE_NAMES[&lang].if_conditions.contains(&node.kind().to_string()) {
             self.extract_branches(node, &start, path, &NO_BRANCH_ID);
+        } else if NODE_NAMES[&lang].comments.contains(&node.kind().to_string()) {
+            let source_line = self.get_source_line(path, row);
+            if self.count_leading_spaces(&source_line) == node.start_position().column {
+                self.processed_files.get_mut(path).unwrap().comment_lines.push(start);
+            }
         }
         // } else if lang == Lang::Small {
         //     // info!("node kind {:?}", node.kind().to_string());
@@ -499,6 +514,10 @@ impl ExprLoader {
             .and_then(|file| file.variables.get(&Position(line.0)).cloned())
     }
     // pub fn load_loops(&mut self, )
+
+    pub fn get_comment_positions(&self, path: &PathBuf) -> Vec<Position> {
+        self.processed_files.get(path).unwrap().comment_lines.clone()
+    }
 }
 
 //     iteration: Iteration
