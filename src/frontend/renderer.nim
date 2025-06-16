@@ -1295,65 +1295,6 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
   except:
     discard
 
-# proc onContextMenu*(path: cstring, line: int, expansionFirstLine: int, times: int) {.used.} =
-#   # we build the menu in index
-
-#   let selection = getSelectionText()
-
-#   let expression = selection #if selection.len == 0: e.target.innerHTML else: selection
-#   # data.currentExpression = expression
-
-#   # kout js{
-#   #   coords: js{
-#   #     x: data.mouseCoords.x,
-#   #     y: data.mouseCoords.y},
-#   #   location: js{
-#   #     expression: expression,
-#   #     line: line,
-#   #     path: path
-#   #   },
-#   #   times: times
-#   # }
-#   ipc.send "CODETRACER::viewer-menu", js{
-#     coords: js{
-#       x: data.mouseCoords.x,
-#       y: data.mouseCoords.y},
-#     location: js{
-#       expression: expression,
-#       line: line,
-#       path: path,
-#       expansionFirstLine: expansionFirstLine,
-#       expansionParents: cast[seq[(cstring, int)]](@[])
-#     },
-#     times: times
-#   }
-
-
-# proc onValueContextMenu*(eventObj: Stop, expression: cstring) =
-#   # we are smart, so we autodetect if we need history/trace by event
-#   # we need action if we're not in its results already: if we are, you already have the results
-#   if eventObj.eventType == StopType.NoEvent:
-#     return
-
-#   var children: seq[cstring] = @[]
-#   if eventObj.eventType != StopType.Trace:
-#     children.add(j"Trace")
-#   if eventObj.eventType != StopType.History:
-#     # if there is existing history, leave it there, reset on contextStartHistory
-#     if not data.stateHistory.hasKey(expression):
-#       data.stateHistory[expression] = @[]
-#       data.stateHistoryGraphics[expression] = GraphicText
-#     children.add(j"Load history")
-
-#   ipc.send "CODETRACER::value-menu", js{
-#     x: data.mouseCoords.x,
-#     y: data.mouseCoords.y,
-#     children: children,
-#     expression: expression,
-#     "event": eventObj
-#   }
-
-
 proc gotoDefinition*(e: Event, v: VNode) =
   let line = getLine(e.target)
   let column = getColumn(e.target)
@@ -1364,21 +1305,7 @@ proc gotoDefinition*(e: Event, v: VNode) =
     column: column
   }
 
-# proc expandValue*(eventObj: Stop, expression: cstring) =
-#   ipc.send "CODETRACER::expand-value", js{
-#     path: eventObj.path,
-#     line: eventObj.line,
-#     # codeID: eventObj.codeID,
-#     # functionID: eventObj.functionID,
-#     # callID: eventObj.callID,
-#     expression: expression
-#   }
-
-
 # DEBUGGER
-
-
-
 
 proc debugProgram(command: cstring) {.exportc.} =
   ipc.send "CODETRACER::debug-program", command
@@ -1473,21 +1400,8 @@ proc setOpen* =
   ipc.send "CODETRACER::set-open"
 
 
-var telemetryBackupIndex = 0
-
-var scrollAssembly* = -1
-
-# proc updateTelemetryLog* =
-#   if TELEMETRY_ENABLED:
-#     discard
-
-# proc onGlobalClick*(event: js) =
-#   # TODO in menu?
-#   let target = event.target
-#   domwindow.toJs.target = target
-#   if event.target.isNil or cast[int](jqueryFind("#menu").has(target).length) == 0:
-#     if data.ui.menu.active:
-#       data.ui.menu.active = false
-#       data.redraw()
+var
+  telemetryBackupIndex = 0
+  scrollAssembly* = -1
 
 export event_log_service, debugger_service, editor_service, calltrace_service, history_service, flow_service, search_service, shell_service, utils

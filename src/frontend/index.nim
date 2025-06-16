@@ -338,131 +338,6 @@ proc onExpandCalls(sender: js, response: CollapseCallsArgs) =
 proc updateExpand(path: cstring, line: int, expansionFirstLine: int, update: MacroExpansionLevelUpdate) {.async.} =
   warnPrint "update expansion disabled for now: needs a more stabilized version"
 
-  # let res = await debugger.updateExpansionLevel(path, line, update)
-  # mainWindow.webContents.send "CODETRACER::open-location", res
-  # case update.kind:
-  # of MacroUpdateCollapse:
-  #   mainWindow.webContents.send "CODETRACER::collapse-expansion", js{path: path, line: line, expansionFirstLine: expansionFirstLine, update: update}
-  # of MacroUpdateCollapseAll:
-  #   mainWindow.webContents.send "CODETRACER::collapse-all-expansion", js{path: path, line: line, expansionFirstLine: expansionFirstLine, update: update}
-  # else:
-  #   discard
-
-when not defined(server):
-  proc viewerMenu(location: types.Location, times: int): js =
-    # advanced menu is for cases where we want to filter the shape of the variable
-    var submenus: seq[JsObject] = @[]
-    submenus.add(js{
-        label: cstring"Expand macro invocation at this line",
-        click: proc(menuItem: js, win: js) {.async.} =
-          await updateExpand(location.path, location.line, location.expansionFirstLine, MacroExpansionLevelUpdate(kind: MacroUpdateExpand, times: times))
-      })
-    submenus.add(js{
-        label: cstring"Expand all macro invocations at this line",
-        click: proc(menuItem: js, win: js) {.async.} =
-          await updateExpand(location.path, location.line, location.expansionFirstLine, MacroExpansionLevelUpdate(kind: MacroUpdateExpandAll))
-      })
-    submenus.add(js{
-        label: cstring"Collapse macro invocation at this line",
-        click: proc(menuItem: js, win: js) {.async.} =
-          await updateExpand(location.path, location.line, location.expansionFirstLine, MacroExpansionLevelUpdate(kind: MacroUpdateCollapse, times: times))
-      })
-    submenus.add(js{
-        label: cstring"Collapse all macro invocation at this line",
-        click: proc(menuItem: js, win: js) {.async.} =
-          await updateExpand(location.path, location.line, location.expansionFirstLine, MacroExpansionLevelUpdate(kind: MacroUpdateCollapseAll))
-      })
-
-    #@[
-      # js{
-      #   label: j"Jump to def",
-      #   click: proc(menuItem, win: js) = mainWindow.webContents.send "CODETRACER::jump-def", location
-      # },
-      # js{
-      #   label: j"Advanced trace",
-      #   click: (proc(menuItem, win: js) =
-      #     discard com.poolFindShape(expression, depth, path, line))
-      # },
-      # js{
-      #   label: j"Advanced history",
-      #   click: (proc(menuItem, win: js) =
-      #     discard com.poolFindShape(expression, depth, path, line))
-
-      # },
-      # js{
-      #   label: j"Trace",
-      #   click: (proc(menuItem, win: js) =
-      #     let tracepoints = @[Tracepoint(
-      #       mode: TracExpandable,
-      #       path: location.path,
-      #       line: location.line,
-      #       expression: location.expression,
-      #       shape: NIL_TYPE,
-      #       recipe: @[],
-      #       query: nil)]
-      #     mainWindow.webContents.send "CODETRACER::context-start-trace", tracepoints
-
-      #     discard debugger.trace(TraceSession(tracepoints: tracepoints), -1))
-      # }
-      # js{
-      #   label: j"History",
-      #   click: (proc(menuItem, win: js) =
-      #     discard com.poolFastHistory(js{expression: expression, depth: depth, path: path, line: line, codeID: codeID, functionID: functionID, callID: callID, optimized: false}))
-      # },
-      # js{
-      #   label: j"Optimized history",
-      #   click: (proc(menuItem, win: js) =
-      #     discard com.poolFastHistory(js{expression: expression, depth: depth, path: path, line: line, codeID: codeID, functionID: functionID, callID: callID, optimized: true}))
-      # },
-      # js{
-      #   label: j"Semantic History",
-      #   click: (proc(menuItem, win: js) =
-      #     discard loadSemanticHistory(expression, path, line))}
-    # ]
-    # if running:
-    #   submenus.add(js{
-    #     label: j"Load history",
-    #     click: proc(menuItem: js, win: js) =
-    #       mainWindow.webContents.send "CODETRACER::context-start-history", js{inState: false, expression: location.expression}
-    #       discard debugger.loadHistory(location.expression, location)
-    #   })
-    var menu = Menu.buildFromTemplate(cast[js](submenus))
-    return menu
-
-
-# proc valueMenu(children: seq[cstring], event: Stop, expression: cstring): js =
-#   var elements: seq[js] = @[]
-#   for child in children:
-#     if child == j"Trace":
-#       elements.add(js{
-#         label: child,
-#         click: proc(menuItem: js, win: js) =
-#           let tracepoints = @[Tracepoint(
-#             mode: TracExpandable,
-#             name: event.name,
-#             line: event.line,
-#             expression: expression,
-#             shape: NIL_TYPE,
-#             recipe: @[],
-#             query: nil,
-#             lang: # TODO)]
-#           mainWindow.webContents.send "CODETRACER::context-start-trace", tracepoints
-
-#           discard debugger.trace(TraceSession(tracepoints: tracepoints), -1)
-#       })
-
-#     elif child == j"Load history":
-#       elements.add(js{
-#         label: child,
-#         click: proc(menuItem: js, win: js) =
-#           mainWindow.webContents.send "CODETRACER::context-start-history", js{inState: true, expression: expression}
-
-#           # TODO discard readHistory(event, expression)
-#       })
-
-#   Menu.buildFromTemplate(cast[js](elements)).toJs
-
-
 type
   FileFilter = ref object
     name*: cstring
@@ -524,27 +399,42 @@ proc onLoadLowLevelTab(sender: js, response: jsobject(pathOrName=cstring, lang=L
 #   else:
 #     discard
 
-
-proc onViewerMenu(sender: js, response: jsobject(coords=MenuLocation, location=types.Location, times=int)) {.async.} =
-  when not defined(server):
-    let menu = viewerMenu(response.location, response.times)
-    menu.popup(mainWindow, js{x: response.coords.x, y: response.coords.y, async: true})
-  else:
-    warnPrint "not applicable, should work in frontend for browser version"
-
 when defined(ctmacos):
+  let modMap* : JsAssoc[cstring, cstring] = JsAssoc[cstring, cstring]{
+    $"ctrl":    $"cmdorctrl",
+    $"meta":    $"cmd",
+    $"super":   $"cmd",
+    $"shift":   $"shift",
+    $"alt":     $"option",
+  }
+
+  proc lookup(map: JsAssoc[cstring,cstring], tok: string): string =
+    let v = map[tok.cstring]
+    if v.isNil: tok else: $v
+
+  proc toAccelerator* (raw: cstring): string =
+    let s = $raw
+    result = s
+      .split({'+'})
+      .mapIt(lookup(modMap, it.toLowerAscii))
+      .join("+")
+
   proc menuNodeToItem(node: MenuNode): js =
     if node.kind == MenuFolder:
       var items: seq[js] = @[]
       for child in node.elements:
-        items.add(menuNodeToItem(child))
-        if child.isBeforeNextSubGroup:
-          items.add(js{type: cstring"separator"})
+        if child.menuOs != ord(MenuNodeOSNonMacOS):
+          items.add(menuNodeToItem(child))
+          if child.isBeforeNextSubGroup:
+            items.add(js{type: cstring"separator"})
       js{label: node.name, enabled: node.enabled, submenu: cast[js](items)}
     else:
+      let binding = data.config.shortcutMap.actionShortcuts[node.action]
+      let resultBinding = if binding.len == 0: "" else: toAccelerator($binding[0].renderer)
       js{
         label: node.name,
         enabled: node.enabled,
+        accelerator: cstring(resultBinding),
         click: proc(menuItem: js, win: js) =
           mainWindow.webContents.send("CODETRACER::menu-action", js{action: node.action})
       }
@@ -552,9 +442,10 @@ when defined(ctmacos):
   proc onRegisterMenu(sender: js, response: jsobject(menu=MenuNode)) =
     var elements: seq[js] = @[]
     for child in response.menu.elements:
-      elements.add(menuNodeToItem(child))
-      if child.isBeforeNextSubGroup:
-        elements.add(js{type: cstring"separator"})
+      if child.menuOs != ord(MenuNodeOSNonMacOS):
+        elements.add(menuNodeToItem(child))
+        if child.isBeforeNextSubGroup:
+          elements.add(js{type: cstring"separator"})
     let menu = Menu.buildFromTemplate(cast[js](elements))
     Menu.setApplicationMenu(menu)
 
@@ -1035,14 +926,6 @@ when not defined(server):
     if electronProcess.platform != "darwin":
       app.quit(0)
 
-
-  # app.on("activate") do ():
-    # if mainWindow == nil:
-      # mainWindow = createMainWindow()
-      # mainWindow.setMenuBarVisibility(false)
-      # mainWindow.setMenu(jsNull)
-
-
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):
     if startedFuture.isNil:
@@ -1340,7 +1223,6 @@ proc configureIpcMain =
     "tab-load"
     "asm-load"
     "load-low-level-tab"
-    "viewer-menu"
     "update-expansion"
     "load-tokens"
     "load-locals"
@@ -1668,7 +1550,7 @@ proc matchRegex(text: string, pattern: string): JsObject {.importjs: "#.match(ne
 when not defined(server):
   app.on("ready") do ():
     app.js.setName "CodeTracer"
-    app.js.setAppUserModelId "com.codetracer"
+    app.js.setAppUserModelId "com.codetracer.CodeTracer"
     discard ready()
 else:
   readyVar = functionAsJs(ready)
