@@ -133,6 +133,9 @@ proc runInitial*(conf: CodetracerConf) =
       startCore(conf.coreTraceArg, conf.coreCallerPid, conf.coreInTest)
     of StartupCommand.arb:
       case conf.arbCommand:
+      of ArbCommand.noCommand:
+        echo "No subcommand provded!"
+        quit 1
       of ArbCommand.explorer:
         # Launch CodeTracer in arb explorer mode
         discard launchElectron(mode = ElectronLaunchMode.ArbExplorer)

@@ -1,7 +1,8 @@
-import std/[json, os, osproc, streams, strutils]
+import std/[os, osproc, streams, strutils]
 import arb_node_utils
 
-proc doDeploy(): string =
+# NOTE: remove CatchableError if using custom exception
+proc doDeploy(): string {.raises: [OSError, IOError, CatchableError, Exception].} =
   # TODO: get endpoint and private key and other params from args
   let process = startProcess(
     "cargo",
@@ -46,8 +47,8 @@ proc doDeploy(): string =
   # TODO: maybe specific exception
   raise newException(CatchableError, "Stylus deployment failed!")
 
-
-proc doDebugBuild(): string =
+# NOTE: remove CatchableError if using custom exception
+proc doDebugBuild(): string {.raises: [OSError, IOError, CatchableError, Exception].} =
   # TODO: get endpoint and private key and other params from args
   let process = startProcess(
     "cargo",
@@ -90,7 +91,7 @@ proc doDebugBuild(): string =
 
   return possibleFiles[0]
 
-proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string) =
+proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string) {.raises: [OSError, IOError].} =
   let currDir = CONTRACT_WASM_PATH / deploymentAddr
   let currFile = currDir / "debug.wasm"
 
@@ -99,8 +100,8 @@ proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string) =
 
   echo "Debug executable for ", deploymentAddr, " saved at ", currFile
 
-
-proc deployStylus*() =
+# NOTE: remove CatchableError if using custom exception
+proc deployStylus*() {.raises: [OSError, IOError, CatchableError, Exception].} =
   let wasmWithDebug = doDebugBuild()
   let deploymentAddr = doDeploy()
 

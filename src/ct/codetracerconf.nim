@@ -8,6 +8,7 @@ import
 # and consider a fix if not
 type
   ArbCommand* {.pure.} = enum
+    noCommand,
     explorer,
     record,
     replay,
@@ -56,9 +57,9 @@ type
   CodetracerConf* = object
     case cmd* {.
       command,
-      defaultValue: noCommand
+      defaultValue: StartUpCommand.noCommand
     .}: StartUpCommand
-    of noCommand:
+    of StartUpCommand.noCommand:
       noCmdArgs* {.
         ignore
       .}: string
@@ -315,8 +316,10 @@ type
       .}: string
       case arbCommand* {.
         command,
-        defaultValue: explorer
+        defaultValue: ArbCommand.noCommand
       .}: ArbCommand
+      of ArbCommand.noCommand:
+        discard
       of explorer:
         discard
       of ArbCommand.record:
