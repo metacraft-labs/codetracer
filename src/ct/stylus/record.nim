@@ -1,9 +1,10 @@
-import std/[httpclient, json, os, osproc, times, streams]
+import std/[os, osproc, streams]
 import arb_node_utils
 import ../../common/[paths, trace_index, types]
 import ../trace/record
 
-proc getEvmTrace(hash: string): string =
+# NOTE: remove CatchableError if using custom exception
+proc getEvmTrace(hash: string): string {.raises: [OSError, IOError, CatchableError, Exception].} =
   # TODO: get endpoint and private key and other params from args
   let process = startProcess(
     "cargo",
@@ -37,10 +38,11 @@ proc getEvmTrace(hash: string): string =
 
   return outputFile
 
-proc getContractWasmPath(deploymentAddr: string): string =
+proc getContractWasmPath(deploymentAddr: string): string {.raises: [].} =
   return CONTRACT_WASM_PATH / deploymentAddr / "debug.wasm"
 
-proc recordStylus*(hash: string): Trace =
+# NOTE: remove CatchableError if using custom exception
+proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError, CatchableError, Exception].} =
   let wasm = getContractWasmPath(getTransactionContractAddress(hash))
   let evmTrace = getEvmTrace(hash)
 
@@ -50,7 +52,8 @@ proc recordStylus*(hash: string): Trace =
   updateField(result.id, "program", hash, false)
   result.program = hash
 
-proc replayStylus*(hash: string) =
+# NOTE: remove CatchableError if using custom exception
+proc replayStylus*(hash: string) {.raises: [IOError, ValueError, OSError, CatchableError, Exception].} =
   # TODO: don't rerecord transactions
   let recordedTrace = recordStylus(hash)
 

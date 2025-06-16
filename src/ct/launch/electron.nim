@@ -5,13 +5,13 @@ import std/[sequtils, os, osproc, strutils, strtabs ],
 
 type
   ElectronLaunchMode* {.pure.} = enum
-    None
+    Default
     ArbExplorer = "arb.explorer"
 
 proc launchElectron*(
     args: seq[string] = @[],
     trace: Trace = nil,
-    mode = ElectronLaunchMode.None,
+    mode = ElectronLaunchMode.Default,
     recordCore: bool = false,
     test: bool = false): bool =
   createDir codetracerCache
@@ -27,7 +27,7 @@ proc launchElectron*(
   for name, value in envPairs():
     env[name] = value
 
-  if mode != ElectronLaunchMode.None:
+  if mode != ElectronLaunchMode.Default:
     env["CODETRACER_LAUNCH_MODE"] = $mode
 
   env["ELECTRON_ENABLE_LOGGING"] = "1"
