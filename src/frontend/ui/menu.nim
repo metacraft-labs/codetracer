@@ -498,7 +498,7 @@ method render*(self: MenuComponent): VNode =
       self.prepared = prepareSearch(self.data.ui.menuNode)
       self.nameMap = generateNameMap(self.data.ui.menuNode)
   buildHtml(tdiv()):
-    if not self.data.ui.menuNode.isNil:
+    if not self.data.ui.menuNode.isNil and not defined(ctmacos):
       navigationMenuView(self)
 
     if not self.data.startOptions.shellUi:

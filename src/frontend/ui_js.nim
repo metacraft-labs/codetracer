@@ -30,15 +30,13 @@ else:
   proc registerMenu*(menu: MenuNode) = discard
 
 proc defineMenuImpl(node: NimNode): (NimNode, bool) =
-  # echo node.treerepr
   case node.kind:
   of nnkCommand:
-    # echo "error"
-    # return (node, false)
     let kindOriginal = node[0]
     let nameNode = node[1]
     var currentParent: MenuNode
-    if kindOriginal.repr == "folder":
+
+    if kindOriginal.repr == "folder" or kindOriginal.repr == "macexclude_folder" or kindOriginal.repr == "macfolder":
       var elementsNode: NimNode = quote do: @[]
       if node.len > 2:
         for element in node[2]:
@@ -47,27 +45,48 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
             elementsNode[1].add(element)
           else:
             elementsNode[1][^1].add(nnkExprColonExpr.newTree(ident"isBeforeNextSubGroup", newLit(true)))
+
+      let os =
+        if kindOriginal.repr == "macfolder":
+          MenuNodeOs.MenuNodeOSMacOS
+        elif kindOriginal.repr == "macexclude_folder":
+          MenuNodeOs.MenuNodeOSNonMacOS
+        else:
+          MenuNodeOs.MenuNodeOSAny
+
       var r = quote:
         MenuNode(
           kind: MenuFolder,
           name: `nameNode`,
           elements: `elementsNode`,
-          enabled: true)
+          enabled: true,
+          menuOs: `os`
+        )
       result = (r, false)
-    else:
+    elif kindOriginal.repr == "element" or kindOriginal.repr == "macexclude_element" or kindOriginal.repr == "macelement":
       if node.len < 3:
         macros.error "no action " & node.repr & " "
 
       let actionNode = node[2]
-      # if node.len >
       let last = if node.len == 3: newLit(true) else: node[^1]
+
+      let os =
+        if kindOriginal.repr == "macelement":
+          MenuNodeOs.MenuNodeOSMacOS
+        elif kindOriginal.repr == "macexclude_element":
+          MenuNodeOs.MenuNodeOSNonMacOS
+        else:
+          MenuNodeOs.MenuNodeOSAny
+
       var r = quote:
         MenuNode(
           kind: MenuElement,
           name: `nameNode`,
           action: `actionNode`,
           elements: @[],
-          enabled: `last`)
+          enabled: `last`,
+          menuOs: `os`
+        )
       result = (r, false)
   of nnkPrefix:
     if node.repr == "--sub":
@@ -75,9 +94,6 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
       return
   else:
     echo "menu: expect command or prefix " & $node.kind
-    # # echo "expect command"
-    # static:
-    #   macros.error "expect command or prefix ", $node.kind
 
 macro defineMenu(code: untyped): untyped =
   ## defineMenu:
@@ -99,11 +115,13 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
   if not data.startOptions.shellUi:
     defineMenu:
       folder program:
+        macfolder "CodeTracer":
+          macelement "Quit CodeTracer", aExit
         folder "File":
           # element "New File", newTab, false
           # element "Preferences", preferences
           # --sub
-          # element "Open File", ClientAction.openFile
+          # element "Open File", openFile
           # element "Open Folder", openFolder, false
           # element "Open Recent", openRecent, false
           # --sub
@@ -115,10 +133,10 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Reopen File", reopenTab
           element "Next File", switchTabRight
           element "Previous File", switchTabLeft
-          element "Switch File", ClientAction.switchTabHistory
+          element "Switch File", switchTabHistory
           --sub
           # element "Close All Documents", closeAllDocuments
-          element "Exit", aExit
+          macexclude_element "Exit CodeTracer", aExit
         folder "Edit":
           # element "Undo", aUndo, false
           # element "Redo", aRedo, false
@@ -247,15 +265,15 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # element "Options", aOptions, false
           # --sub
           # element "Start Debugging", aDebug, false
-          element "Continue", ClientAction.forwardContinue
-          element "Step Over", ClientAction.forwardNext
-          element "Step In", ClientAction.forwardStep
-          element "Step Out", ClientAction.forwardStepOut
-          element "Reverse Continue", ClientAction.reverseContinue
-          element "Reverse Step Over", ClientAction.reverseNext
-          element "Reverse Step In", ClientAction.reverseStep
-          element "Reverse Step Out", ClientAction.reverseStepOut
-          # element "Stop Debugging", ClientAction.stop
+          element "Continue", forwardContinue
+          element "Step Over", forwardNext
+          element "Step In", forwardStep
+          element "Step Out", forwardStepOut
+          element "Reverse Continue", reverseContinue
+          element "Reverse Step Over", reverseNext
+          element "Reverse Step In", reverseStep
+          element "Reverse Step Out", reverseStepOut
+          # element "Stop Debugging", stop
           # TODO dynamic name
           # element "Pause (currently using stop shortcut?)", stop, false
           --sub
@@ -282,13 +300,16 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
   else:
     defineMenu:
       folder program:
+        macfolder "CodeTracer":
+          macelement "Quit CodeTracer", aExit, true
         # element "New Terminal", aTheme0, false
         folder "Themes":
           element "Mac Classic Theme", aTheme0
           element "Default White Theme", aTheme1
           element "Default Black Theme", aTheme2
           element "Default Dark Theme", aTheme3
-        element "Close", aExit, true
+        macexclude_element "Exit CodeTracer", aExit, true
+
 
 proc update*(self: Data, build: bool = false) =
   if build:
