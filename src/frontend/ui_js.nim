@@ -853,8 +853,10 @@ proc onWelcomeScreen(
     layout=js,
     startOptions=StartOptions,
     config=Config,
-    recentTraces=seq[Trace])) =
-
+    recentTraces=seq[Trace],
+    recentTransactions=seq[StylusTransaction]
+  )
+) =
   clog "welcome_screen: on welcome screen"
   # TODO: remove unnecessary rows
   data.trace = nil
@@ -866,7 +868,7 @@ proc onWelcomeScreen(
   data.config = response.config
   data.config.realFlowUI = loadFlowUI(data.config.flowUI)
   data.recentTraces = response.recentTraces
-  data.stylusTransactions = makeDummyTransactions(20)
+  data.stylusTransactions = makeDummyTransactions(20) #TODO: Add the recentTransactions here!
   loadTheme(data.config.theme)
   configureShortcuts()
 

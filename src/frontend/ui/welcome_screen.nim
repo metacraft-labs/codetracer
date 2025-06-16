@@ -60,20 +60,23 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 
   self.data.redraw()
 
-proc recentTransactionView(self: WelcomeScreenComponent, trace: StylusTransaction, position: int): VNode =
-  let successId = if trace.isSuccessful: "tx-success" else: "tx-unsuccess"
+proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, position: int): VNode =
+  let successId = if tx.isSuccessful: "tx-success" else: "tx-unsuccess"
   buildHtml(
     tdiv(class = "recent-transactions-container")
   ): 
     tdiv(class = "recent-transaction"):
-      span(): text trace.txHash
-      span(id = successId): text if trace.isSuccessful: "Successful" else: "Not"
-      span(): text trace.fromAddress
-      span(): text trace.toAddress
-      span(): text trace.time
+      span(): text tx.txHash
+      span(id = successId): text if tx.isSuccessful: "Successful" else: "Not"
+      span(): text tx.fromAddress
+      span(): text tx.toAddress
+      span(): text tx.time
       tdiv(
         class = "action-transaction-button",
-        onclick = proc() = echo "#### HIIIIII"
+        onclick = proc() =
+          self.loading = true
+          # self.loadingTrace = tx TODO: Add maybe the transaction to trace converted
+          self.data.ipc.send "CODETRACER::load-recent-transaction", js{ traceId: tx.txHash }
       )
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
