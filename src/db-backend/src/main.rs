@@ -130,7 +130,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // loading trace and metadata
     let start = Instant::now();
-    let trace = load_trace_data(&cli.trace_file)?;
+    let trace_file_format = if cli.trace_file.ends_with(".json") {
+        runtime_tracing::TraceEventsFileFormat::Json
+    } else {
+        runtime_tracing::TraceEventsFileFormat::Binary
+    };
+    let trace = load_trace_data(&cli.trace_file, trace_file_format)?;
     let trace_metadata = load_trace_metadata(&cli.trace_metadata_file)?;
     let duration = start.elapsed();
     info!("loading trace: duration: {:?}", duration);
