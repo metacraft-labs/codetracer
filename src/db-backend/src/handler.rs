@@ -1743,9 +1743,14 @@ mod tests {
         }
     }
     fn load_db_for_trace(path: &Path) -> Db {
-        let trace_file = path.join("trace.json");
+        let mut trace_file = path.join("trace.bin");
+        let mut trace_file_format = runtime_tracing::TraceEventsFileFormat::Binary;
+        if !trace_file.exists() {
+            trace_file = path.join("trace.json");
+            trace_file_format = runtime_tracing::TraceEventsFileFormat::Json;
+        }
         let trace_metadata_file = path.join("trace_metadata.json");
-        let trace = load_trace_data(&trace_file).expect("expected that it can load the trace file");
+        let trace = load_trace_data(&trace_file, trace_file_format).expect("expected that it can load the trace file");
         let trace_metadata =
             load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
         let mut db = Db::new(&trace_metadata.workdir);
