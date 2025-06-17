@@ -1,0 +1,9 @@
+[package]
+name = "stylus_vesting"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+stylus-sdk = "0.4"
+alloy-primitives = "0.6"
+
