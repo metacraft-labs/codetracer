@@ -56,7 +56,7 @@ proc parseArgs =
   data.startOptions.screen = true
   data.startOptions.loading = false
   data.startOptions.record = false
-  data.startOptions.stylusExplorer = true #TODO: Set this with args
+  data.startOptions.stylusExplorer = electronProcess.env[cstring"CODETRACER_LAUNCH_MODE"] == cstring"arb.explorer"
 
   data.startOptions.folder = electronprocess.cwd()
 
@@ -68,7 +68,7 @@ proc parseArgs =
   else:
     discard
 
-  
+
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TEST_STRATEGY"):
     data.startOptions.rawTestStrategy = electronProcess.env[cstring"CODETRACER_TEST_STRATEGY"]
@@ -1077,13 +1077,20 @@ proc prepareForLoadingTrace(traceId: int, pid: int) {.async.} =
     codetracerExe.cstring,
     @[cstring"start_core", cstring($traceId), cstring($pid)])
 
+proc replayTx(txHash: cstring, pid: int) {.async.} =
+  callerProcessPid = pid
+  let process = await startProcess(
+    codetracerExe.cstring,
+    @[cstring"arb", cstring"replay", txHash]
+  )
+  discard setTimeout(proc() = app.quit(0), 1000) #TODO: Find a better way to init the backend instead of killing Electron - only a workaround for now
+
 proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=int)) {.async.} =
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
-  #TODO: Implement the transaction recording
-  discard
+  await replayTx(response.txHash, nodeProcess.pid.to(int))
 
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await app.findTraceByRecordProcessId(pid)
@@ -1537,7 +1544,7 @@ proc isCtInstalled: bool =
     #   echo "Exec field: ", execField
     #   if fs.existsSync(execField):
     #     isDesktopOk = true;
-  
+
     fs.existsSync(ctInstalledPath) and fs.existsSync(desktopFilePath)
 
 
@@ -1612,7 +1619,7 @@ proc ready {.async.} =
   # we load helpers
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
-  
+
   # init the UI
   discard windowSetTimeout(proc = discard data.init(config, layout, helpers), 250)
 

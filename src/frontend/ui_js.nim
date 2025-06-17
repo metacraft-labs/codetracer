@@ -829,23 +829,6 @@ proc onSuccessfulDownload(
   data.ui.welcomeScreen.newDownload.status.kind = RecordSuccess
   redrawAll()
 
-proc makeDummyTransactions(num: int): seq[StylusTransaction] =
-  var res: seq[StylusTransaction] = @[]
-
-  proc makeOne(): StylusTransaction =
-    StylusTransaction(
-      txHash: "0x8c3faf74...547e",
-      isSuccessful: true,
-      fromAddress: "0x51084d...d27f",
-      toAddress: "718c3faf74...7380",
-      time: "just now",
-    )
-
-  for i in 0..num:
-    res.add(makeOne())
-
-  res
-
 proc onWelcomeScreen(
   sender: js,
   response: jsobject(
@@ -868,7 +851,7 @@ proc onWelcomeScreen(
   data.config = response.config
   data.config.realFlowUI = loadFlowUI(data.config.flowUI)
   data.recentTraces = response.recentTraces
-  data.stylusTransactions = makeDummyTransactions(20) #TODO: Add the recentTransactions here!
+  data.stylusTransactions = response.recentTransactions
   loadTheme(data.config.theme)
   configureShortcuts()
 

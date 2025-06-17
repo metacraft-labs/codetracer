@@ -1,6 +1,6 @@
 import
   ../ui_helpers,
-  ../../ct/version, 
+  ../../ct/version,
   ui_imports, ../types
 import std/options
 import std/jsffi
@@ -64,7 +64,7 @@ proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, 
   let successId = if tx.isSuccessful: "tx-success" else: "tx-unsuccess"
   buildHtml(
     tdiv(class = "recent-transactions-container")
-  ): 
+  ):
     tdiv(class = "recent-transaction"):
       span(): text tx.txHash
       span(id = successId): text if tx.isSuccessful: "Successful" else: "Not"
@@ -76,7 +76,7 @@ proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, 
         onclick = proc() =
           self.loading = true
           # self.loadingTrace = tx TODO: Add maybe the transaction to trace converted
-          self.data.ipc.send "CODETRACER::load-recent-transaction", js{ traceId: tx.txHash }
+          self.data.ipc.send "CODETRACER::load-recent-transaction", js{ txHash: tx.txHash }
       )
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
@@ -120,7 +120,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
         data.redraw()
         self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: trace.id }
     ):
-      let programLimitName = PROGRAM_NAME_LIMIT 
+      let programLimitName = PROGRAM_NAME_LIMIT
       let limitedProgramName = if trace.program.len > programLimitName:
           ".." & ($trace.program)[^programLimitName..^1]
         else:
@@ -264,6 +264,9 @@ proc recentTransactionsView(self: WelcomeScreenComponent): VNode =
       if self.data.stylusTransactions.len > 0:
         for (i, trace) in enumerate(self.data.stylusTransactions):
           recentTransactionView(self, trace, i)
+          echo "#### CHECK THE TRACE HJHERE!"
+          kout trace.txHash
+
       else:
         tdiv(class = "no-recent-traces"):
           text "No transactions yet."
@@ -449,9 +452,9 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
       "Download ID with password",
       "",
       proc(ev: Event, tg: VNode) = discard,
-      proc(ev: Event, tg: VNode) = 
+      proc(ev: Event, tg: VNode) =
         self.newDownload.args = ev.target.value.split(" "),
-      proc(e: KeyboardEvent, tg: VNode) = 
+      proc(e: KeyboardEvent, tg: VNode) =
         if e.keyCode == ENTER_KEY_CODE:
           self.newDownload.args = e.target.value.split(" ")
           handler(cast[Event](e), tg),
@@ -663,7 +666,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     WelcomeScreenOption(
       name: "Open online trace",
       inactive: not data.config.traceSharingEnabled,
-      command: proc = 
+      command: proc =
         self.openOnlineTrace = true
         self.welcomeScreen = false
         self.newDownload = NewDownloadRecord(

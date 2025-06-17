@@ -12,7 +12,8 @@ type
     explorer,
     record,
     replay,
-    deploy
+    deploy,
+    listRecentTx
 
   StartupCommand* {.pure.} = enum
     noCommand,
@@ -333,6 +334,8 @@ type
           desc: "Hex-encoded transaction hash"
         .}: string
       of deploy:
+        discard
+      of listRecentTx:
         discard
     # of `import`:
     #   importTraceZipPath* {.

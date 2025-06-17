@@ -1,4 +1,5 @@
 import std/[httpclient, json, net, strutils, parseutils, times, sets, os]
+import ../../common/[types]
 
 const DEFAULT_NODE_URL* = "http://localhost:8547"
 
@@ -110,9 +111,20 @@ proc getTransactionContractAddress*(hash: string): string {.raises: [IOError, Va
     raise newException(ValueError, "Inalid RPC response: " & getCurrentExceptionMsg())
 
 # Returns the transactions, that can be replayed and are not older than `maxAge` seconds
-proc getTracableTransactions*(maxAge: int = 3600): seq[JsonNode] {.raises: [IOError, ValueError].} =
+proc getTracableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.raises: [IOError, ValueError].} =
   # TODO: return custom struct
   var transactions = getTransactions(maxAge)
   transactions = getValidTransactions(transactions)
 
-  return transactions
+  result = @[]
+
+  for tx in transactions:
+    result.add(StylusTransaction(
+      txHash: tx["hash"].getStr().cstring,
+      isSuccessful: true, # TODO: discuss this
+      fromAddress: tx["from"].getStr().cstring,
+      toAddress: tx["to"].getStr().cstring,
+      time: now().format("yyyy-MM-dd hh:mm:ss").cstring, # TODO
+    ))
+
+  return result

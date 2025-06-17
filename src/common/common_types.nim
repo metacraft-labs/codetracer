@@ -878,9 +878,9 @@ type
     highLevelLine*: int
     # eventually: might be available in the future
     # lowLevelLocation*: Location
-    ## metadata: file for read/write file events 
+    ## metadata: file for read/write file events
     ## or a more general kind of key for WriteOther/ReadOther
-    metadata*: langstring 
+    metadata*: langstring
     bytes*: int
     stdout*: bool
     directLocationRRTicks*: int
@@ -1358,7 +1358,7 @@ type
   BugReportArg* = object ## BugReport arg
     title*: langstring
     description*: langstring
-  
+
   UploadTraceArg* = object
     trace*: Trace
     programName*: langstring
