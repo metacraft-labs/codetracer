@@ -1,5 +1,5 @@
 import
-  std/[ os, strutils ],
+  std/[ json, os, strutils ],
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],
@@ -7,7 +7,7 @@ import
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
   ../globals,
-  ../stylus/[deploy, record],
+  ../stylus/[deploy, record, arb_node_utils],
   electron,
   results,
   backends
@@ -145,6 +145,19 @@ proc runInitial*(conf: CodetracerConf) =
         replayStylus(conf.arbReplayTransaction)
       of ArbCommand.deploy:
         deployStylus()
+      of ArbCommand.listRecentTx:
+        let res = %*[]
+
+        for tx in getTracableTransactions():
+          res.add(%*{
+            "txHash": $tx.txHash,
+            "isSuccessful": $tx.isSuccessful,
+            "fromAddress": $tx.fromAddress,
+            "toAddress": $tx.toAddress,
+            "time": $tx.time,
+          })
+
+        echo res
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,
