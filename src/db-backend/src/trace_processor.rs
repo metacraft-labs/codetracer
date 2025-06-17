@@ -411,13 +411,11 @@ impl<'a> TraceProcessor<'a> {
 }
 
 #[allow(clippy::panic)]
-pub fn load_trace_data(trace_file: &PathBuf) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let raw_bytes = fs::read(trace_file).unwrap_or_else(|_| panic!("trace file {trace_file:?} read error"));
-    let raw = str::from_utf8(&raw_bytes)?;
+pub fn load_trace_data(trace_file: &PathBuf, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+    let mut tracer = runtime_tracing::Tracer::new("", &[]);
+    tracer.load_trace_events(trace_file, file_format)?;
 
-    let trace: Vec<TraceLowLevelEvent> = serde_json::from_str(raw)?;
-
-    Ok(trace)
+    Ok(tracer.events)
 }
 
 #[allow(clippy::panic)]
