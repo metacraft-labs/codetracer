@@ -5,9 +5,9 @@ import ../common/ct_logging
 
 proc findRawTraceWithCodetracer(app: ElectronApp, traceId: int): Future[cstring] {.async.} =
   let res = await readProcessOutput(
-    codetracerExe.cstring, 
+    codetracerExe.cstring,
     @[cstring"trace-metadata", cstring(fmt"--id={traceId}")])
-  
+
   let isOk = res.isOk
 
   debugPrint "raw trace-metadata result ", res
@@ -30,7 +30,7 @@ proc findTraceWithCodetracer*(app: ElectronApp, traceId: int): Future[Trace] {.a
 
 proc findRecentTracesWithCodetracer*(app: ElectronApp, limit: int): Future[seq[Trace]] {.async.} =
   let res = await readProcessOutput(
-    codetracerExe.cstring, 
+    codetracerExe.cstring,
     @[cstring"trace-metadata", cstring"--recent", cstring(fmt"--limit={limit}")])
 
   if res.isOk:
@@ -48,12 +48,27 @@ proc findRecentTracesWithCodetracer*(app: ElectronApp, limit: int): Future[seq[T
   return emptyTraces
 
 proc findRecentTransactions*(app: ElectronApp, limit: int): Future[seq[StylusTransaction]] {.async.} =
-  #TODO: ADD IMPLEMENTATION FOR THIS!
-  discard
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[cstring"arb",  cstring"listRecentTx"])
+
+  if res.isOk:
+    let raw = res.value
+    let traces = cast[seq[StylusTransaction]](JSON.parse(raw))
+    return traces
+  else:
+    echo "error: trying to run the codetracer arb listRecentTx command: ", res.error
+    app.quit(1)
+
+  # should be an unreachable default..
+  # otherwise it doesn't compiler, maybe because of my async
+  # template/macro, sorry
+  var emptyTraces: seq[StylusTransaction] = @[]
+  return emptyTraces
 
 proc findTraceByRecordProcessId*(app: ElectronApp, pid: int): Future[Trace] {.async.} =
   let res = await readProcessOutput(
-    codetracerExe.cstring, 
+    codetracerExe.cstring,
     @[cstring"trace-metadata", cstring(fmt"--record-pid={pid}")])
 
   if res.isOk:
@@ -68,7 +83,7 @@ proc findByPath*(app: ElectronApp, path: cstring): Future[Trace] {.async.} =
   # expects folder with a trailing slash currently, so we should make sure
   # we're passign such to `findByPath`, otherwise it doesn't find a trace
   let res = await readProcessOutput(
-    codetracerExe.cstring, 
+    codetracerExe.cstring,
     @[cstring"trace-metadata", cstring(fmt("--path=\"{path}\""))])
 
   if res.isOk:
@@ -81,7 +96,7 @@ proc findByPath*(app: ElectronApp, path: cstring): Future[Trace] {.async.} =
 
 proc findByProgram*(app: ElectronApp, program: cstring, test: bool): Future[Trace] {.async.} =
   let res = await readProcessOutput(
-    codetracerExe.cstring, 
+    codetracerExe.cstring,
     @[cstring"trace-metadata", "--test", cstring(fmt("--program=\"{program}\""))])
 
   if res.isOk:
@@ -91,4 +106,3 @@ proc findByProgram*(app: ElectronApp, program: cstring, test: bool): Future[Trac
   else:
     echo "error: trying to run the codetracer trace metadata command: ", res.error
     app.quit(1)
-  
