@@ -124,7 +124,7 @@ proc getTracableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.rais
       isSuccessful: true, # TODO: discuss this
       fromAddress: tx["from"].getStr().cstring,
       toAddress: tx["to"].getStr().cstring,
-      time: now().format("yyyy-MM-dd hh:mm:ss").cstring, # TODO
+      time: now().format("MM-dd hh:mm").cstring, # TODO
     ))
 
   return result
