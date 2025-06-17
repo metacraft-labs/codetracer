@@ -60,16 +60,30 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
 
   self.data.redraw()
 
+proc truncateMiddle(cstr: cstring, head: int, tail: int): cstring =
+  var buffer = ""
+
+  for i in 0..<min(head, cstr.len):
+    buffer.add(cstr[i])
+
+  buffer.add("...")
+
+  let startTail = max(cstr.len - tail, 0)
+  for i in startTail..<cstr.len:
+    buffer.add(cstr[i])
+
+  result = cstring(buffer)
+
 proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, position: int): VNode =
   let successId = if tx.isSuccessful: "tx-success" else: "tx-unsuccess"
   buildHtml(
     tdiv(class = "recent-transactions-container")
   ):
     tdiv(class = "recent-transaction"):
-      span(): text tx.txHash
+      span(): text truncateMiddle(tx.txHash, 10, 4)
       span(id = successId): text if tx.isSuccessful: "Successful" else: "Not"
-      span(): text tx.fromAddress
-      span(): text tx.toAddress
+      span(): text truncateMiddle(tx.fromAddress, 10, 4)
+      span(): text truncateMiddle(tx.toAddress, 10, 4)
       span(): text tx.time
       tdiv(
         class = "action-transaction-button",
@@ -255,7 +269,7 @@ proc recentTransactionsView(self: WelcomeScreenComponent): VNode =
       span(id = "tx-from"): text "From"
       span(id = "tx-to"): text "To"
       span(id = "tx-when"): text "When"
-      span(id = "tx-action"): text "Action"
+      span(id = "tx-action"): text "Play"
     tdiv(
       class = "recent-traces-list",
       onscroll = proc(ev: Event, tg: VNode) =
@@ -264,9 +278,6 @@ proc recentTransactionsView(self: WelcomeScreenComponent): VNode =
       if self.data.stylusTransactions.len > 0:
         for (i, trace) in enumerate(self.data.stylusTransactions):
           recentTransactionView(self, trace, i)
-          echo "#### CHECK THE TRACE HJHERE!"
-          kout trace.txHash
-
       else:
         tdiv(class = "no-recent-traces"):
           text "No transactions yet."
@@ -605,7 +616,7 @@ proc stylusExplorer(self: WelcomeScreenComponent): VNode =
   buildHtml(
     tdiv(class = "new-record-screen")
   ):
-    tdiv(class = "new-record-screen-content"):
+    tdiv(class = "new-record-screen-content stylus-content"):
       tdiv(class = "welcome-logo")
       tdiv(class = "new-record-title transactions"):
         tdiv(class = "welcome-content"):

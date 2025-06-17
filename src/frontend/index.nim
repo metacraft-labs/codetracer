@@ -1514,7 +1514,9 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
     }
   else:
     let recentTraces = await app.findRecentTracesWithCodetracer(limit=NO_LIMIT)
-    let recentTransactions = await app.findRecentTransactions(limit=NO_LIMIT)
+    var recentTransactions: seq[StylusTransaction] = @[]
+    if data.startOptions.stylusExplorer:
+      recentTransactions = await app.findRecentTransactions(limit=NO_LIMIT)
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,
