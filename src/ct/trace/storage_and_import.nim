@@ -97,7 +97,11 @@ proc importDbTrace*(
 
   let traceFolder = traceMetadataPath.parentDir
   let tracePathsPath = traceFolder / "trace_paths.json"
-  let tracePath = traceFolder / "trace.json"
+  var traceFileName = "trace.bin"
+  var tracePath = traceFolder / traceFileName
+  if not fileExists(tracePath):
+    traceFileName = "trace.json"
+    tracePath = traceFolder / traceFileName
 
   let outputFolder = fmt"{codetracerTraceDir}/trace-{traceID}/"
   if traceIdArg == NO_TRACE_ID:
@@ -109,7 +113,7 @@ proc importDbTrace*(
       echo "WARNING: probably no trace_paths.json: no self-contained support in this case:"
       echo "  ", e.msg
       echo "  skipping trace_paths file"
-    copyFile(tracePath, outputFolder / "trace.json")
+    copyFile(tracePath, outputFolder / traceFileName)
 
   var rawPaths: string
   try:
