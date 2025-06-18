@@ -1,0 +1,29 @@
+[package]
+name = "stylus_vesting"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+alloy-primitives = "=0.8.20"
+alloy-sol-types = "=0.8.20"
+mini-alloc = "0.9.0"
+stylus-sdk = "0.9.0"
+
+[features]
+export-abi = ["stylus-sdk/export-abi"]
+debug = ["stylus-sdk/debug"]
+
+[[bin]]
+name = "stylusvesting"
+path = "src/main.rs"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[profile.release]
+codegen-units = 1
+strip = true
+lto = true
+panic = "abort"
+opt-level = "s"
