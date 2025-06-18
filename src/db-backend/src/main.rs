@@ -130,7 +130,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // loading trace and metadata
     let start = Instant::now();
-    let trace_file_format = if cli.trace_file.ends_with(".json") {
+    let trace_file_format = if cli.trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
     } else {
         runtime_tracing::TraceEventsFileFormat::Binary
