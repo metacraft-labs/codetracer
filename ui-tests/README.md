@@ -7,7 +7,7 @@ This directory contains small Stylus programs for integration tests and examples
 To build the vesting example, make sure the `wasm32-unknown-unknown` target is installed:
 
 ```bash
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32-unknown-unknown --toolchain stable
 ```
 
 Then build the contract:
