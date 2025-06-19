@@ -15,7 +15,7 @@ export-abi = ["stylus-sdk/export-abi"]
 debug = ["stylus-sdk/debug"]
 
 [[bin]]
-name = "stylus_vesting"
+name = "stylus_vesting_bin"
 path = "src/main.rs"
 
 [lib]
