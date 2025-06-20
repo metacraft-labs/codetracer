@@ -491,8 +491,8 @@ proc onInit*(
   data.homedir = response.home
   data.config = response.config
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
-  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
-  data.services.flow.enabledFlow = response.config.flow
+  data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
+  data.services.flow.enabledFlow = response.config.flow.enabled
 
   renderer.helpers = response.helpers
 
@@ -720,7 +720,7 @@ proc onNoTrace(
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
   data.config.layout = j"default_white"
-  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.save = response.save
   data.save.fileMap = JsAssoc[cstring, int]{}
   for i, file in data.save.files:
@@ -847,7 +847,7 @@ proc onWelcomeScreen(
   data.services.debugger.paths = @[]
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
-  data.config.realFlowUI = loadFlowUI(data.config.flowUI)
+  data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.recentTraces = response.recentTraces
   loadTheme(data.config.theme)
   configureShortcuts()

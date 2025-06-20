@@ -1285,7 +1285,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       if self.isExpansion:
         var zoneNode = cast[Node](self.viewZone.domNode)
 
-      if not self.flow.isNil and self.data.config.flow and self.data.ui.mode == DebugMode:
+      if not self.flow.isNil and self.data.config.flow.enabled and self.data.ui.mode == DebugMode:
         self.redrawFlow()
       else:
         if not self.flow.isNil and not self.flow.flow.isNil:
@@ -1395,7 +1395,7 @@ func multilineFlowLines*: JsAssoc[int, KaraxInstance] =
   JsAssoc[int, KaraxInstance]{}
 
 func supportsFlow*(self: EditorViewComponent): bool =
-  self.data.config.flow
+  self.data.config.flow.enabled
 
 method onFindOrFilter*(self: EditorViewComponent) {.async.} =
   self.monacoEditor.trigger("keyboard".cstring, "actions.find".cstring)

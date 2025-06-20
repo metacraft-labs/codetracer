@@ -142,7 +142,7 @@ cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/src/subwindow.html"
 
 rm -rf "${APP_DIR}/config"
 rm -rf "${APP_DIR}/public"
-cp -Lr "${ROOT_PATH}/config" "${APP_DIR}/config"
+cp -Lr "${ROOT_PATH}/src/config" "${APP_DIR}/config"
 
 cp -Lr "${ROOT_PATH}/src/public" "${APP_DIR}/public"
 chmod -R +wr "${APP_DIR}/public"
