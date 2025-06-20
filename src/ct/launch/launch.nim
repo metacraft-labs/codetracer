@@ -1,5 +1,5 @@
 import
-  std/[ os, strutils ],
+  std/[ json, os, strutils ],
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],
@@ -7,6 +7,7 @@ import
   ../trace/[ replay, record, run, metadata ],
   ../codetracerconf,
   ../globals,
+  ../stylus/[deploy, record, arb_node_utils],
   electron,
   results,
   backends
@@ -130,6 +131,33 @@ proc runInitial*(conf: CodetracerConf) =
       run(conf.runTracePathOrId, conf.runArgs)
     of StartupCommand.start_core:
       startCore(conf.coreTraceArg, conf.coreCallerPid, conf.coreInTest)
+    of StartupCommand.arb:
+      case conf.arbCommand:
+      of ArbCommand.noCommand:
+        echo "No subcommand provded!"
+        quit 1
+      of ArbCommand.explorer:
+        # Launch CodeTracer in arb explorer mode
+        discard launchElectron(mode = ElectronLaunchMode.ArbExplorer)
+      of ArbCommand.record:
+        discard recordStylus(conf.arbRecordTransaction)
+      of ArbCommand.replay:
+        replayStylus(conf.arbReplayTransaction)
+      of ArbCommand.deploy:
+        deployStylus()
+      of ArbCommand.listRecentTx:
+        let res = %*[]
+
+        for tx in getTracableTransactions():
+          res.add(%*{
+            "txHash": $tx.txHash,
+            "isSuccessful": $tx.isSuccessful,
+            "fromAddress": $tx.fromAddress,
+            "toAddress": $tx.toAddress,
+            "time": $tx.time,
+          })
+
+        echo res
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,
