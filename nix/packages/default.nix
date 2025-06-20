@@ -454,7 +454,7 @@
             mv views/* $out/views/
 
             mkdir -p $out/config
-            mv config/* $out/config/
+            mv src/config/* $out/config/
           '';
         };
 
@@ -613,7 +613,7 @@
             cp -Lr ${codetracer-electron}/src/frontend/styles/* $out/frontend/styles/
 
             # Config files
-            cp -Lr ${codetracer-electron}/config/* $out/config
+            cp -Lr ${codetracer-electron}/src/config/* $out/config
 
             # The UI itself
             cp -Lr ${uiJavascript}/bin/ui.js $out/

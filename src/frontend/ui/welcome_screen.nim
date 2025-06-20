@@ -61,7 +61,7 @@ proc deleteUploadedTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   self.data.redraw()
 
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
-  let featureFlag = data.config.traceSharingEnabled
+  let featureFlag = data.config.traceSharing.enabled
   let tooltipTopPosition = (position + 1) * 36 - self.recentTracesScroll
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
   let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
@@ -608,7 +608,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     ),
     WelcomeScreenOption(
       name: "Open online trace",
-      inactive: not data.config.traceSharingEnabled,
+      inactive: not data.config.traceSharing.enabled,
       command: proc = 
         self.openOnlineTrace = true
         self.welcomeScreen = false

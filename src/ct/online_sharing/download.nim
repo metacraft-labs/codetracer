@@ -5,7 +5,7 @@ import ../trace/storage_and_import, ../globals
 
 proc downloadFile(fileId, localPath: string, config: Config) =
   let client = newHttpClient()
-  client.downloadFile(fmt"{parseUri(config.baseUrl) / config.downloadApi}?FileId={fileId}", localPath)
+  client.downloadFile(fmt"{parseUri(config.traceSharing.baseUrl) / config.traceSharing.downloadApi}?FileId={fileId}", localPath)
 
 proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
   var iv: array[16, byte]
@@ -44,7 +44,7 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
 proc extractInfoFromKey*(downloadKey: string, config: Config): (string, array[32, byte]) =
   # We expect a traceDownloadKey to have <name>//<fileId>//<passwordKey>
   let stringSplit = downloadKey.split("//")
-  if not config.traceSharingEnabled:
+  if not config.traceSharing.enabled:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
   if stringSplit.len() != 3:

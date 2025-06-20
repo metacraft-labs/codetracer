@@ -17,7 +17,7 @@ proc uploadFile(
   let totalSize = getFileSize(file)
 
   try:
-    let getUrlResponse = client.getContent(fmt"{parseUri(config.baseUrl) / config.getUploadUrlApi}")
+    let getUrlResponse = client.getContent(fmt"{parseUri(config.traceSharing.baseUrl) / config.traceSharing.getUploadUrlApi}")
     let getUrlJson = parseJson(getUrlResponse)
 
     let uploadUrl = getUrlJson[UPLOAD_URL_FIELD].getStr("").strip()
@@ -114,7 +114,7 @@ proc uploadCommand*(
 ) =
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
-  if not config.traceSharingEnabled:
+  if not config.traceSharing.enabled:
     echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
     quit(1)
 
