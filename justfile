@@ -254,12 +254,12 @@ stop:
 reset-config:
   rm --force  ~/.config/codetracer/.config.yaml && \
     mkdir -p ~/.config/codetracer/ && \
-    cp -r config/default_config.yaml ~/.config/codetracer/.config.yaml
+    cp -r src/config/default_config.yaml ~/.config/codetracer/.config.yaml
 
 reset-layout:
   rm --force  ~/.config/codetracer/default_layout.json && \
     mkdir -p ~/.config/codetracer/ && \
-    cp -r config/default_layout.json ~/.config/codetracer/default_layout.json
+    cp -r src/config/default_layout.json ~/.config/codetracer/default_layout.json
 
 # originally by Pavel/Dimo in ci.sh
 test-nimsuggest:

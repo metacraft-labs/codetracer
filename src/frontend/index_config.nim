@@ -310,10 +310,6 @@ proc mapAssemblyFunctions(data: ServerData, functions: seq[tuple[name: string, l
   res[functionName] = tokens
   return res
 
-
-proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send: bool = false): Future[Config] {.async.}
-
-
 proc basename(filename: cstring): cstring =
   var t = ($filename).rsplit("/", 1)[1]
   return j(t)
@@ -618,38 +614,6 @@ when false:
   # updateExpansionLevel is proc(path: cstring, line: int, update: MacroExpansionLevelUpdate): Future[Location]
   # --
 
-
-var base = ""
-var started = false
-
-
-proc onDebuggerEvent*(status: cstring, path: cstring, line: int, event: int, functionID: uint16, callID: uint, values: js, callstack: seq[cstring]) =
-  case $status:
-    of "breakpoint-hit":
-      mainWindow.webContents.send "CODETRACER::break-happened", js{filename: path, line: line, values: values, event: event, functionID: functionID, callID: callID, callstack: callstack}
-    of "exited-normally":
-      mainWindow.webContents.send "CODETRACER::exit-normally", js{}
-    of "end-stepping-range":
-      mainWindow.webContents.send "CODETRACER::step-happened", js{filename: path, line: line, values: values, event: event, functionID: functionID, callID: callID, callstack: callstack}
-    of "signal-received":
-      mainWindow.webContents.send "CODETRACER::exit-normally", js{} # oh well, ok for now
-    else: discard
-
-proc onDebuggerEvent*(data: MoveState) =
-  case $data.status:
-    of "breakpoint-hit":
-      mainWindow.webContents.send "CODETRACER::break-happened", data
-    of "function-finished":
-      mainWindow.webContents.send "CODETRACER::break-happened", data
-    of "exited-normally":
-      mainWindow.webContents.send "CODETRACER::exit-normally", js{}
-    of "end-stepping-range":
-      mainWindow.webContents.send "CODETRACER::step-happened", data
-    of "signal-received":
-      mainWindow.webContents.send "CODETRACER::exit-normally", js{} # oh well, ok for now
-    else: discard
-
-
 proc onError*(error: DebuggerError) =
   errorPrint error.kind, " ", error.msg
   mainWindow.webContents.send "CODETRACER::error", error
@@ -775,37 +739,6 @@ proc persistConfig*(main: js, name: cstring, layout: cstring): Future[void] {.as
     if layoutErr.isNone and not main.isNil:
       main.webContents.send "CODETRACER::saved-config"
 
-
-proc parseTags(base: string, source: string): JsAssoc[cstring, seq[Tag]] =
-  result = JsAssoc[cstring, seq[Tag]]{}
-  let lines = source.splitLines()
-  if lines.len == 0:
-    return
-  let tokens = lines[0].split("\t", 2)
-  if tokens[0] != "!_TAG_FILE_FORMAT" or tokens[1] != "2":
-    return
-  for line in lines:
-    let tokens = line.split("\t", 2)
-    if tokens.len < 3:
-      continue
-    let name = j(tokens[0])
-    if name.len == 0 or name[0] == '!':
-      continue
-    let path = j(&"{base}/{tokens[1]}")
-    let location = tokens[2]
-    var tag: Tag
-    if location.allIt(it.isDigit):
-      tag = Tag(kind: TagLine, path: path, line: parseInt(location))
-    else:
-      # thanks to https://stackoverflow.com/questions/3446170/escape-string-for-use-in-javascript-regex
-      tag = Tag(kind: TagRegex, path: path, regex: j"^" & j(location[2 ..< ^6]).replace(regex("[.*+?^${}()|[\\]\\\\]"), j("\\$&")))
-    if not result.hasKey(name):
-      result[name] = @[]
-    var names = result[name]
-    names.add(tag)
-    result[name] = names
-
-
 proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bool): Future[seq[string]] {.async.} =
   # debug "filenames", paths=paths
   var res: seq[string] = @[]
@@ -874,23 +807,6 @@ proc sendSymbols*(main: js, traceFolder: cstring) {.async.} =
   except:
     errorPrint "loading symbols: ", getCurrentExceptionMsg()
 
-
-proc loadTags(path: cstring): Future[JsAssoc[cstring, seq[Tag]]] {.async.} =
-  let (source, err) = await fsReadFileWithErr(j(&"{path}/tags"))
-  var res = JsAssoc[cstring, seq[Tag]]{}
-  if err.isNone:
-    res = parseTags($path, $source)
-  return res
-
-
-proc onDefinition(main: js, path: cstring, line: int) =
-  main.webContents.send "CODETRACER::definition-calculated", js{path: path, line: line}
-
-
-var eventLoadOnMain*: proc(path: cstring, line: int)
-var eventLoadOnExit*: proc(events: seq[ProgramEvent], time: int)
-
-
 proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.async.} =
   let binary = if "/" in $trace.program: j(($trace.program).rsplit("/", 1)[1]) else: trace.program
   await debugger.configure(
@@ -903,7 +819,7 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
         paths: trace.sourceFolders,
         traceID: trace.id,
         calltrace: config.calltrace and trace.calltrace,
-        preloadEnabled: config.flow and trace.lang != LangPython,
+        preloadEnabled: config.flow.enabled and trace.lang != LangPython,
         callArgsEnabled: config.callArgs,
         traceEnabled: config.trace,
         historyEnabled: config.history,
@@ -920,20 +836,6 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
   debugPrint "========================"
   debugPrint ""
   main.webContents.send "CODETRACER::debugger-started", js{}
-
-  # for name, helper in helpers:
-  #   let node = await parseExpression(helper.source, helper.lang)
-  #   debug "parsed"
-  #   await debugger.registerHelper(name, helper, node)
-  # await debugger.saveHelpers()
-
-
-
-# Grace
-
-
-
-const DEPTH_LIMIT = 5
 
 let fileIcons = require("@exuanbo/file-icons-js")
 
@@ -1192,7 +1094,6 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
   discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
   discard sendSymbols(main, trace.outputFolder)
 
-  # let tags = await loadTags(".")
   var functions = await loadFunctions(cstring($trace.outputFolder / "function_index.json"))
   var save = await getSave(trace.sourceFolders, config.test)
   data.save = save
@@ -1263,8 +1164,7 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
     quit(1)
   try:
     let config = cast[Config](yaml.load(s))
-    # SILENT_LOG = not config.debug
-    config.shortcutMap = initShortcutMap(config.map)
+    config.shortcutMap = initShortcutMap(config.bindings)
     return config
   except:
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
@@ -1308,18 +1208,3 @@ proc loadHelpers*(main: js, filename: string): Future[Helpers] {.async.} =
     return JsAssoc[cstring, Helper]{}
   var res = cast[Helpers](yaml.load(raw)[j"helpers"])
   return res
-
-proc saveConfigTheme*(main: js, theme: cstring): Future[void] {.async.} =
-  var file = j(userConfigDir)
-  # TODO: maybe remove inTest config logic?
-  # if data.startOptions.inTest:
-    # file = j(configDir & testConfigPath)
-  let (s, err) = await fsReadFileWithErr(file)
-  if not err.isNil:
-    errorPrint "read config file for theme error: ", err
-  var config = cast[Config](yaml.load(s))
-  config.theme = theme
-  let newConfig = yaml.dump(config, 4)
-  let writeErr = await fsWriteFileWithErr(file, newConfig)
-  if not writeErr.isNil:
-    errorPrint "update config file with theme error: ", err

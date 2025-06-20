@@ -6,46 +6,64 @@ import .. / common / [types, paths]
 
 type
   RRBackendConfig* = object
-    enabled*: bool
-    path*: string
-    ctPaths*: string
+    enabled*:           bool
+    path*:              string
+    ctPaths*:           string
     debugInfoToolPath*: string
+
+  FlowConfigObjWrapper* = object
+    enabled*:                             bool
+    ui*:                                  string
+    FlowUI* {.defaultVal: FlowParallel}:  types.FlowUI
+
+  TraceSharingConfigObj* = object
+    enabled*:               bool
+    baseUrl*:               string
+    getUploadUrlApi*:       string
+    downloadApi*:           string
+    deleteApi*:             string
 
   ConfigObject* = object
     ## The config object is the schema for config yaml files
+    theme*:                                               string
+    version*:                                             string
 
-    theme*:      string
-    v*:          string
-    flow*:       bool
-    callArgs*:   bool
-    history*:    bool
-    repl*:       bool
-    trace*:      bool
-    default*:    string
-    calltrace*:  bool
-    layout*:     string
-    telemetry*:  bool
-    test*:       bool
-    debug*:      bool
-    flowUI*:     string
-    realFlowUI* {.defaultVal: FlowParallel}: types.FlowUI
-    events*:     bool
-    map*:        InputShortcutMap
-    shortcutMap* {.defaultVal: ShortcutMap().}: ShortcutMap
-    defaultBuild*: string
-    showMinimap*: bool
-    baseUrl*: string
-    getUploadUrlApi*: string
-    downloadApi*: string
-    uploadApi*: string
-    deleteApi*: string
-    traceSharingEnabled*: bool
+    flow* {.defaultVal: FlowConfigObjWrapper(
+      enabled: true,
+      ui: "parallel",
+      FlowUI: FlowParallel
+    ).}:                                                  FlowConfigObjWrapper
+
+    callArgs*:                                            bool
+    history*:                                             bool
+    repl*:                                                bool
+    trace*:                                               bool
+    default*:                                             string
+    calltrace*:                                           bool
+    layout*:                                              string
+    telemetry*:                                           bool
+    test*:                                                bool
+    debug*:                                               bool
+    events*:                                              bool
+    bindings*:                                            InputShortcutMap
+    shortcutMap* {.defaultVal: ShortcutMap().}:           ShortcutMap
+    defaultBuild*:                                        string
+    showMinimap*:                                         bool
+
+    traceSharing* {.defaultVal: TraceSharingConfigObj(
+      enabled: false,
+      baseUrl: "http://localhost:55504/api/codetracer/v1",
+      downloadApi: "/download",
+      deleteApi: "/delete",
+      getUploadUrlApi: "/get/upload/url"
+    ).}:                                                  TraceSharingConfigObj
+
     rrBackend* {.defaultVal: RRBackendConfig(
       enabled: false,
       path: "",
       ctPaths: "",
       debugInfoToolPath: ""
-    ).}: RRBackendConfig
+    ).}:                                                  RRBackendConfig
 
   Config* = ref ConfigObject
 
@@ -136,7 +154,7 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     stream.close()
     var c = Config()
     c[] = config
-    c.shortcutMap = initShortcutMap(config.map)
+    c.shortcutMap = initShortcutMap(config.bindings)
     return c
   except Exception as e:
     raise e

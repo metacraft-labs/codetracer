@@ -1,7 +1,7 @@
 const TRACE_SHARING_DISABLED_ERROR_MESSAGE* = """
 trace sharing disabled in config!
 you can enable it by editing `$HOME/.config/codetracer/.config.yaml`
-and toggling `traceSharingEnabled` to true
+and toggling the `enabled` field of the `traceSharing` object to true
 """
 
 const UPLOAD_URL_FIELD* = "UploadUrl"

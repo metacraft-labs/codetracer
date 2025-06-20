@@ -1,5 +1,34 @@
+# === mode
+test: false
+
+# === features
+
 calltrace: true
-test:      true
+flow:
+  enabled: true
+  # preload flow:
+  #   you can have parallel, inline or multiline
+  ui: "parallel"
+trace: true
+events: true
+# history: experimental support
+history: true
+repl: true
+
+traceSharing:
+  enabled: false
+  # for now local setup
+  baseUrl: "http://localhost:55504/api/codetracer/v1"
+  downloadApi: "/download"
+  deleteApi: "/delete"
+  getUploadUrlApi: "/get/upload/url"
+
+# === feature settings
+
+# orthogonal to calltrace:
+#   should we load args/return values for
+#   callstack/calltrace
+callArgs: true
 
 # enable or disable telemetry:
 # if you enable it, it will collect colored logs
@@ -12,90 +41,81 @@ test:      true
 telemetry: false
 
 # debug message
-debug:     true
+debug: true
 
 # layout:
 #   currently we miss the changed layout: TODO
-layout:    default_layout
+layout: "default_layout"
 
 # theme:
-#   you can also choose default_white or default_black
-theme:     default_white
-
-# version: not used currently: TODO
-v:         "0.1alpha"
-
-# preload: experimental support
-preload:   true
-
-callArgs:  true
-
-# history: experimental support
-history:   true
-
-# trace:
-#   for big projects you might need to
-#   disable it for less memory currently
-trace:     true
-
-# events:
-#   enabling events
-events:    true
-
-# preload flow:
-#   you can have parallel, inline or multiline
-flowUI:    parallel
+#   you can also choose default_white or default_dark
+theme: "default_dark"
 
 # project open
 default: ""
 
 # what command to use by default for build and update while editing
-defaultBuild:   ""
+defaultBuild: ""
 
+# === editor/shortcut settings
 showMinimap: true
 
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
-# # we'll fix it, but for now have to match to two api-s and to process it more
-map:
+# # we'll fix it, but for now have to match to two apis and to process it more
+bindings:
   forwardContinue: "F8 F2"
   reverseContinue: "SHIFT+F8"
-  forwardNext:       "F10"
-  reverseNext:     "SHIFT+F10"
-  forwardStep:     "F11"
-  reverseStep:     "SHIFT+F11"
-  forwardStepOut:  "F12"
-  reverseStepOut:  "SHIFT+F12"
-  stop:            "SHIFT+F5"
-  build:           "CTRL+B"
-  switchTabLeft:   "CTRL+PageUp"
-  switchTabRight:  "CTRL+PageDown"
+  forwardNext: "F10"
+  reverseNext: "SHIFT+F10"
+  forwardStep: "F11"
+  reverseStep: "SHIFT+F11"
+  forwardStepOut: "F12"
+  reverseStepOut: "SHIFT+F12"
+  stop: "SHIFT+F5"
+  build: "CTRL+B"
+  switchTabLeft: "CTRL+PageUp"
+  switchTabRight: "CTRL+PageDown"
   switchTabHistory: "CTRL+Tab"
-  openTab:         "CTRL+O"
-  newTab:          "CTRL+N"
-  reopenTab:       "CTRL+SHIFT+T"
-  closeTab:        "CTRL+W"
-  goUp:            "Up"
-  goDown:          "Down"
-  pageUp:          "PageUp"
-  pageDown:        "PageDown"
-  switchDebug:     "CTRL+D"
-  switchEdit:      "CTRL+E"
-  fileSearch:      "CTRL+P"
-  commandSearch:   "ALT+P"
-  fixedSearch:     "CTRL+SHIFT+P"
-  del:             "Delete"
-  goRight:         "Right"
-  goLeft:          "Left"
-  aEnter:          "Enter"
-  aEscape:         "Esc"
-  zoomIn:          "CTRL+="
-  zoomOut:         "CTRL+-"
-  example:         "CTRL+L"
-  aMenu:            "CTRL+M"
-  switchFocusedLoopLevelUp:  "CTRL+SHIFT+Q"
-  switchFocusedLoopLevelDown:  "CTRL+SHIFT+A"
-  switchFocusedLoopLevelAtPosition:  "CTRL+SHIFT+F"
-  setFlowTypeToMultiline:  "ALT+SHIFT+M"
-  setFlowTypeToParallel:  "ALT+SHIFT+P"
-  setFlowTypeToInline:  "ALT+SHIFT+I"
+  openFile: "CTRL+O"
+  newTab: "CTRL+N"
+  reopenTab: "CTRL+SHIFT+T"
+  closeTab: "CTRL+W"
+  goUp: "Up"
+  goDown: "Down"
+  pageUp: "PageUp"
+  pageDown: "PageDown"
+  switchDebug: "CTRL+D"
+  switchEdit: "CTRL+E"
+  fileSearch: "CTRL+P"
+  commandSearch: "ALT+P"
+  fixedSearch: "CTRL+SHIFT+P"
+  goRight: "Right"
+  goLeft: "Left"
+  gotoStart: "Home"
+  gotoEnd: "End"
+  aEnter: "Enter"
+  aEscape: "Esc"
+  findOrFilter: "CTRL+F"
+  zoomIn: "CTRL+="
+  zoomOut: "CTRL+-"
+  example: "CTRL+L"
+  aMenu: "CTRL+M"
+  aLowLevel1: "ALT+1"
+  switchFocusedLoopLevelUp: "CTRL+SHIFT+Q"
+  switchFocusedLoopLevelDown: "CTRL+SHIFT+A"
+  setFlowTypeToMultiline: "ALT+SHIFT+M"
+  setFlowTypeToParallel: "ALT+SHIFT+P"
+  setFlowTypeToInline: "ALT+SHIFT+I"
+  findInFiles: "CTRL+SHIFT+F"
+  findSymbol: "CTRL+T"
+  aRestart: "CTRL+F4"
+
+rrBackend:
+  enabled: false
+  path: ""
+  ctPaths: ""
+  debugInfoToolPath: ""
+
+# TODO: Use this somehow
+version: "0.1alpha"
