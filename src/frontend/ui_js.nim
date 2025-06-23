@@ -37,14 +37,17 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
     var currentParent: MenuNode
 
     if kindOriginal.repr == "folder" or kindOriginal.repr == "macexclude_folder" or kindOriginal.repr == "macfolder":
+      let bMacFolder: bool = kindOriginal.repr == "macfolder"
       var elementsNode: NimNode = quote do: @[]
       if node.len > 2:
-        for element in node[2]:
-          let (element, isSeparator) = defineMenuImpl(element)
-          if not isSeparator:
-            elementsNode[1].add(element)
-          else:
-            elementsNode[1][^1].add(nnkExprColonExpr.newTree(ident"isBeforeNextSubGroup", newLit(true)))
+        let index = if bMacFolder: 3 else: 2
+        if node.len > index:
+          for element in node[index]:
+            let (element, isSeparator) = defineMenuImpl(element)
+            if not isSeparator:
+              elementsNode[1].add(element)
+            else:
+              elementsNode[1][^1].add(nnkExprColonExpr.newTree(ident"isBeforeNextSubGroup", newLit(true)))
 
       let os =
         if kindOriginal.repr == "macfolder":
@@ -54,24 +57,34 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
         else:
           MenuNodeOs.MenuNodeOSAny
 
+      let tmpcstr = quote do: cast[cstring]("")
+      let roleExpr: NimNode =
+        if bMacFolder:
+          node[2]
+        else:
+          tmpcstr
+
       var r = quote:
         MenuNode(
           kind: MenuFolder,
           name: `nameNode`,
           elements: `elementsNode`,
           enabled: true,
-          menuOs: `os`
+          menuOs: `os`,
+          role: `roleExpr`
         )
       result = (r, false)
-    elif kindOriginal.repr == "element" or kindOriginal.repr == "macexclude_element" or kindOriginal.repr == "macelement":
-      if node.len < 3:
+    elif kindOriginal.repr == "element" or kindOriginal.repr == "macexclude_element" or kindOriginal.repr == "macelement" or kindOriginal.repr == "macrole":
+      let bMacRole: bool = kindOriginal.repr == "macrole"
+      if node.len < 3 and not bMacRole:
         macros.error "no action " & node.repr & " "
 
-      let actionNode = node[2]
-      let last = if node.len == 3: newLit(true) else: node[^1]
+      # If it's a role, insert a random action. It will not get used anyway
+      let actionNode = if not bMacRole: node[2] else: newLit(ClientAction.forwardContinue)
+      let last = if node.len == 3 or bMacRole: newLit(true) else: node[^1]
 
       let os =
-        if kindOriginal.repr == "macelement":
+        if kindOriginal.repr == "macelement" or kindOriginal.repr == "macrole":
           MenuNodeOs.MenuNodeOSMacOS
         elif kindOriginal.repr == "macexclude_element":
           MenuNodeOs.MenuNodeOSNonMacOS
@@ -85,7 +98,8 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
           action: `actionNode`,
           elements: @[],
           enabled: `last`,
-          menuOs: `os`
+          menuOs: `os`,
+          role: if bool(`bMacRole`): `nameNode` else: cast[cstring]("")
         )
       result = (r, false)
   of nnkPrefix:
@@ -115,8 +129,17 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
   if not data.startOptions.shellUi:
     defineMenu:
       folder program:
-        macfolder "CodeTracer":
-          macelement "Quit CodeTracer", aExit
+        # Needed for compliance on macOS
+        macfolder "CodeTracer", "":
+          macrole "about"
+          --sub
+          macrole "services"
+          --sub
+          macrole "hide"
+          macrole "hideOthers"
+          macrole "unhide"
+          --sub
+          macrole "quit"
         folder "File":
           # element "New File", newTab, false
           # element "Preferences", preferences
@@ -292,22 +315,43 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Disable Tracepoint", aDisableTracepoint
           element "Disable All Tracepoints", aDisableAllTracepoints
           element "Run All Tracepoints", aCollectEnabledTracepointResults
-        # folder "Help":
-        #   element "User Manual (TODO)", aUserManual, false
-        #   element "Report a Problem (TODO)", aReportProblem, false
-        #   element "Suggest a Feature", aSuggestFeature, false
-        #   element "About (TODO)", aAbout, false
+
+        # The standard macOS Window menu
+        macfolder "Window", "window"
+        # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
+        # generated automatically
+        macfolder "Help", "help"
   else:
     defineMenu:
       folder program:
-        macfolder "CodeTracer":
-          macelement "Quit CodeTracer", aExit, true
+        macfolder "CodeTracer", "":
+          macrole "about"
+          --sub
+          macrole "services"
+          --sub
+          macrole "hide"
+          macrole "hideOthers"
+          macrole "unhide"
+          --sub
+          macrole "quit"
         # element "New Terminal", aTheme0, false
         folder "Themes":
           element "Mac Classic Theme", aTheme0
           element "Default White Theme", aTheme1
           element "Default Black Theme", aTheme2
           element "Default Dark Theme", aTheme3
+
+        # The standard macOS Window menu
+        macfolder "Window", "window":
+          macrole "minimize"
+          macrole "zoom"
+          --sub
+          macrole "front"
+          --sub
+          macrole "window"
+        # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
+        # generated automatically
+        macfolder "Help", "help"
         macexclude_element "Exit CodeTracer", aExit, true
 
 
