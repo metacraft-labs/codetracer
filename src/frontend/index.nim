@@ -427,17 +427,20 @@ when defined(ctmacos):
           items.add(menuNodeToItem(child))
           if child.isBeforeNextSubGroup:
             items.add(js{type: cstring"separator"})
-      js{label: node.name, enabled: node.enabled, submenu: cast[js](items)}
+      js{ label: node.name, enabled: node.enabled, submenu: cast[js](items), role: node.role }
     else:
       let binding = data.config.shortcutMap.actionShortcuts[node.action]
       let resultBinding = if binding.len == 0: "" else: toAccelerator($binding[0].renderer)
-      js{
-        label: node.name,
-        enabled: node.enabled,
-        accelerator: cstring(resultBinding),
-        click: proc(menuItem: js, win: js) =
-          mainWindow.webContents.send("CODETRACER::menu-action", js{action: node.action})
-      }
+      if node.role != "":
+        js{ role: node.role }
+      else:
+        js{
+          label: node.name,
+          enabled: node.enabled,
+          accelerator: cstring(resultBinding),
+          click: proc(menuItem: js, win: js) =
+            mainWindow.webContents.send("CODETRACER::menu-action", js{action: node.action})
+        }
 
   proc onRegisterMenu(sender: js, response: jsobject(menu=MenuNode)) =
     var elements: seq[js] = @[]

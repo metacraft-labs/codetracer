@@ -1255,13 +1255,14 @@ type
   MenuNodeKind* = enum MenuFolder, MenuElement
 
   MenuNode* = ref object
-    name*:    cstring
-    action*:  ClientAction
-    enabled*: bool
-    kind*:    MenuNodeKind
-    elements*: seq[MenuNode]
-    isBeforeNextSubGroup*: bool
-    menuOs*: int
+    name*:                  cstring
+    action*:                ClientAction
+    enabled*:               bool
+    kind*:                  MenuNodeKind
+    elements*:              seq[MenuNode]
+    isBeforeNextSubGroup*:  bool
+    menuOs*:                int
+    role*:                  cstring
 
   StatusComponent* = ref object of Component
     build*: BuildComponent
