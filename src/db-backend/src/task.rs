@@ -1759,10 +1759,10 @@ impl LoopId {
 }
 
 impl StepArg {
-    pub fn new(action: Action) -> StepArg {
+    pub fn new(action: Action, reverse: bool) -> StepArg {
         StepArg {
             action,
-            reverse: false,
+            reverse,
             repeat: 1,
             complete: true,
             skip_internal: false,

@@ -80,11 +80,14 @@ fn test_backend_dap_server_stdio() {
         DapMessage::Response(r) => {
             assert_eq!(r.command, "threads");
             assert_eq!(r.body["threads"][0]["id"], 1);
-        },
+        }
         _ => panic!(),
     }
 
-    let stack_trace_request = client.request("stackTrace", RequestArguments::StackTrace(StackTraceArguments { thread_id: 1}));
+    let stack_trace_request = client.request(
+        "stackTrace",
+        RequestArguments::StackTrace(StackTraceArguments { thread_id: 1 }),
+    );
     dap::write_message(&mut writer, &stack_trace_request).unwrap();
     let msg_stack_trace = dap::from_reader(&mut reader).unwrap();
     match msg_stack_trace {

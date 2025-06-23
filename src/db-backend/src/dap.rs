@@ -4,14 +4,14 @@ use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
     pub seq: i64,
     #[serde(rename = "type")]
     pub type_: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct Request {
     #[serde(flatten)]
     pub base: ProtocolMessage,
@@ -185,7 +185,6 @@ pub struct InitializeResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<Capabilities>,
 }
-
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct Event {
