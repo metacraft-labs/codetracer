@@ -248,7 +248,9 @@ impl Handler {
             false,
         ))?;
         let reason = if is_main { "entry" } else { "step" };
+        info!("generate stopped event");
         let raw_event = self.dap_client.stopped(reason)?;
+        info!("raw stopped event: {:?}", raw_event);
         self.send_dap(raw_event)?;
         // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 
@@ -463,9 +465,10 @@ impl Handler {
         Ok((call, count))
     }
 
-    pub fn step_in(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
+        info!("before step in forward: {}, step_id: {:?}", forward, self.step_id);
         self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
-
+        info!("after step in forward: {}, step_id: {:?}", forward, self.step_id);
         Ok(())
     }
 
@@ -495,7 +498,7 @@ impl Handler {
         }
     }
 
-    pub fn next(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         let step_to_different_line = true; // which is better/should be let the user configure it?
         (self.step_id, _) = self
             .db
@@ -503,13 +506,13 @@ impl Handler {
         Ok(())
     }
 
-    pub fn step_out(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         (self.step_id, _) = self.db.step_out_step_id_relative_to(self.step_id, forward);
         Ok(())
     }
 
     #[allow(clippy::expect_used)]
-    pub fn step_continue(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step_continue(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         for step in self.db.step_from(self.step_id, forward) {
             if !self.breakpoint_list.is_empty() {
                 if let Some(is_active) = self.breakpoint_list[step.path_id.0]
@@ -550,17 +553,17 @@ impl Handler {
         Ok(())
     }
 
-    pub fn step(&mut self, arg: StepArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step(&mut self, request: dap::Request, arg: StepArg) -> Result<(), Box<dyn Error>> {
         // for now not supporting repeat/skip_internal: TODO
         // TODO: reverse
         let original_step_id = self.step_id;
         // let original_step = self.db.steps[original_step_id];
         // let original_depth = self.db.calls[original_step.call_key].depth;
         match arg.action {
-            Action::StepIn => self.step_in(!arg.reverse, task.clone())?,
-            Action::Next => self.next(!arg.reverse, task.clone())?,
-            Action::StepOut => self.step_out(!arg.reverse, task.clone())?,
-            Action::Continue => self.step_continue(!arg.reverse, task.clone())?,
+            Action::StepIn => self.step_in(!arg.reverse)?,
+            Action::Next => self.next(!arg.reverse)?,
+            Action::StepOut => self.step_out(!arg.reverse)?,
+            Action::Continue => self.step_continue(!arg.reverse)?,
             _ => error!("action {:?} not implemented", arg.action),
         }
         if arg.complete && arg.action != Action::Continue {
@@ -592,7 +595,7 @@ impl Handler {
         //     }
         // }
 
-        self.return_void(task)?;
+        self.respond_dap(request, 0)?;
         Ok(())
     }
 
@@ -878,6 +881,11 @@ impl Handler {
         inner_map.remove(&loc.line);
         self.return_void(task)?;
         Ok(())
+    }
+
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_list.clear();
+        self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
     }
 
     pub fn toggle_breakpoint(&mut self, loc: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
@@ -1421,17 +1429,37 @@ impl Handler {
         Ok(res)
     }
 
-    pub fn to_stack_frame(&mut self, call_record: &DbCall) -> dap::StackFrame {
+    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> dap::StackFrame {
+        // for this simplified scenario:
+        // step 1: call 1
+        // step 2: call 1
+        // step 3: call 2
+        // step 4: call 2
+        // we were returning the function-entry locations: equivalent of steps [3, 1]
+        // now with a workaround, we return the correct current frame(call) step(location), but keep
+        //   returning the function-entry locations for upper frames(calls), so with DAP
+        //   we can at least return the correct current location
+        //   the equivalent of [4, 1]
+        // eventually: TODO: return the current upper frame location/steps as well:
+        //   the equivalent of [4, 2]
+        //   how to do it efficiently is a non-trivial question: maybe by iterating through previous steps,
+        //   or a new kind of index?
         let call = self.db.to_call(call_record, &mut self.expr_loader);
+        let location = if call_record.key == self.db.steps[self.step_id].call_key {
+            self.db
+                .load_location(self.step_id, call_record.key, &mut self.expr_loader)
+        } else {
+            call.location
+        };
         dap::StackFrame {
             id: call_record.key.0,
-            name: call.location.function_name,
-            source: Some(dap::Source { 
-                name: Some("".to_string()), 
-                path: Some(call.location.path), 
-                source_reference: None 
+            name: location.function_name,
+            source: Some(dap::Source {
+                name: Some("".to_string()),
+                path: Some(location.path),
+                source_reference: None,
             }),
-            line: if call.location.line >= 0 { call.location.line as usize } else { 0 },
+            line: if location.line >= 0 { location.line as usize } else { 0 },
             column: 1,
             end_line: None,
             end_column: None,
@@ -1455,13 +1483,12 @@ impl Handler {
 
     pub fn stack_trace(&mut self, request: dap::Request, args: dap::StackTraceArguments) -> Result<(), Box<dyn Error>> {
         let stack_frames: Vec<dap::StackFrame> = if args.thread_id == 1 {
-            self
-                .calltrace
+            self.calltrace
                 .load_callstack(self.step_id, &self.db)
                 .iter()
                 .map(|call_record| {
                     // expanded children count not relevant in raw callstack
-                    self.to_stack_frame(call_record)
+                    self.produce_stack_frame(call_record)
                 })
                 .collect()
         } else {
@@ -1473,7 +1500,7 @@ impl Handler {
             dap::StackTraceResponseBody {
                 stack_frames,
                 total_frames,
-            }
+            },
         )?;
         Ok(())
     }
@@ -1684,13 +1711,8 @@ mod tests {
 
         // Act: Create a new Handler instance
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.step(
-            make_step_in(),
-            Task {
-                kind: TaskKind::Step,
-                id: TaskId("0".to_string()),
-            },
-        )?;
+        let request = dap::Request::default();
+        handler.step(request, make_step_in())?;
         assert_eq!(handler.step_id, StepId(1_i64));
         Ok(())
     }
@@ -1810,7 +1832,7 @@ mod tests {
     fn test_step_in_scenario(handler: &mut Handler, path: &PathBuf) {
         for i in 0..handler.db.steps.len() - 1 {
             // eprintln!("doing step-in {i}");
-            handler.step_in(true, gen_task(TaskKind::Step)).unwrap();
+            handler.step_in(true).unwrap();
             assert_eq!(handler.step_id, StepId(i as i64 + 1));
             test_load_locals(handler);
             test_load_callstack(handler);
