@@ -6,10 +6,11 @@ use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskId, TaskKind};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
-use log::info;
+use log::{error, info};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -113,6 +114,38 @@ fn write_dap_messages<W: Write>(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct CtDapError {
+    message: String,
+}
+
+impl CtDapError {
+    pub fn new(message: &str) -> Self {
+        CtDapError {
+            message: message.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for CtDapError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "Ct dap error: {}", self.message)
+    }
+}
+
+type IsReverseAction = bool;
+
+fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction), CtDapError> {
+    match command {
+        "stepIn" => Ok((Action::StepIn, false)),
+        "stepOut" => Ok((Action::StepOut, false)),
+        "next" => Ok((Action::Next, false)),
+        "continue" => Ok((Action::Continue, false)),
+        "reverseContinue" => Ok((Action::Continue, true)),
+        _ => Err(CtDapError::new(&format!("not a recognized dap step action: {command}"))),
+    }
+}
+
 // fn handle_threads<W: Write>(handler: &mut Handler, writer: &mut W) -> Result<(), Box<dyn Error>> {
 //     handler.threads
 // }
@@ -172,9 +205,10 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                             args.lines.unwrap_or_default()
                         };
                         let entry = breakpoints.entry(path.clone()).or_default();
-                        for line in lines {
-                            entry.insert(line);
-                            if let Some(h) = handler.as_mut() {
+                        if let Some(h) = handler.as_mut() {
+                            h.clear_breakpoints();
+                            for line in lines {
+                                entry.insert(line);
                                 let _ = h.add_breakpoint(
                                     SourceLocation {
                                         path: path.clone(),
@@ -185,18 +219,18 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                                         id: gen_task_id(TaskKind::AddBreak),
                                     },
                                 );
+                                results.push(Breakpoint {
+                                    id: None,
+                                    verified: true,
+                                    message: None,
+                                    source: Some(Source {
+                                        name: args.source.name.clone(),
+                                        path: Some(path.clone()),
+                                        source_reference: args.source.source_reference,
+                                    }),
+                                    line: Some(line),
+                                });
                             }
-                            results.push(Breakpoint {
-                                id: None,
-                                verified: true,
-                                message: None,
-                                source: Some(Source {
-                                    name: args.source.name.clone(),
-                                    path: Some(path.clone()),
-                                    source_reference: args.source.source_reference,
-                                }),
-                                line: Some(line),
-                            });
                         }
                     } else {
                         let lines = args
@@ -303,155 +337,24 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                         h.stack_trace(req, args)?;
                         write_dap_messages(writer, &mut handler, &mut seq)?;
                     }
-                } 
-            }
-            DapMessage::Request(req) if req.command == "stepIn" => {
-                if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::StepIn),
-                        Task {
-                            kind: TaskKind::Step,
-                            id: gen_task_id(TaskKind::Step),
-                        },
-                    );
                 }
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "stepIn".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
             }
-            DapMessage::Request(req) if req.command == "next" => {
-                if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::Next),
-                        Task {
-                            kind: TaskKind::Step,
-                            id: gen_task_id(TaskKind::Step),
-                        },
-                    );
+            DapMessage::Request(req) => {
+                match dap_command_to_step_action(&req.command) {
+                    Ok((action, is_reverse)) => {
+                        if let Some(h) = handler.as_mut() {
+                            h.dap_client.seq = seq;
+                            let _ = h.step(req, StepArg::new(action, is_reverse));
+                            write_dap_messages(writer, &mut handler, &mut seq)?;
+                        }
+                    }
+                    Err(_e) => {
+                        // TODO: eventually support? or if this is the last  branch
+                        // in the top `match`
+                        // assume all request left here are unsupported
+                        error!("unsupported dap command: {}", req.command);
+                    }
                 }
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "next".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-            }
-            DapMessage::Request(req) if req.command == "stepOut" => {
-                if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::StepOut),
-                        Task {
-                            kind: TaskKind::Step,
-                            id: gen_task_id(TaskKind::Step),
-                        },
-                    );
-                }
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "stepOut".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-            }
-            DapMessage::Request(req) if req.command == "continue" => {
-                if let Some(h) = handler.as_mut() {
-                    let _ = h.step(
-                        StepArg::new(Action::Continue),
-                        Task {
-                            kind: TaskKind::Step,
-                            id: gen_task_id(TaskKind::Step),
-                        },
-                    );
-                }
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "continue".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-            }
-            DapMessage::Request(req) if req.command == "reverseContinue" => {
-                if let Some(h) = handler.as_mut() {
-                    let mut arg = StepArg::new(Action::Continue);
-                    arg.reverse = true;
-                    let _ = h.step(
-                        arg,
-                        Task {
-                            kind: TaskKind::Step,
-                            id: gen_task_id(TaskKind::Step),
-                        },
-                    );
-                }
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "reverseContinue".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-            }
-            DapMessage::Request(req) if req.command == "stepBack" => {
-                if let Some(h) = handler.as_mut() {
-                    let mut arg = StepArg::new(Action::Next);
-                    arg.reverse = true;
-                    let _ = h.step(
-                        arg,
-                        Task {
-                            kind: TaskKind::Step,
-                            id: gen_task_id(TaskKind::Step),
-                        },
-                    );
-                }
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "stepBack".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
             }
             _ => {}
         }

@@ -179,7 +179,8 @@ impl Receiver {
             TaskKind::ExpandCalls => handler.expand_calls(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadCallArgs => handler.load_call_args(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadFlow => handler.load_flow(self.core.read_arg(&task.id)?, task),
-            TaskKind::Step => handler.step(self.core.read_arg(&task.id)?, task),
+            // superseded by dap_server
+            // TaskKind::Step => handler.step(self.core.read_arg(&task.id)?, task),
             TaskKind::EventLoad => handler.event_load(task),
             TaskKind::EventJump => handler.event_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::CalltraceJump => handler.calltrace_jump(self.core.read_arg(&task.id)?, task),
