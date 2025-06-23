@@ -327,6 +327,15 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     }
                 }
             }
+            DapMessage::Request(req) if req.command == "scopes" => {
+                if let Some(h) = handler.as_mut() {
+                    if let RequestArguments::Scope(args) = req.arguments.clone() {
+                        h.dap_client.seq = seq;
+                        h.scopes(req, args)?;
+                        write_dap_messages(writer, &mut handler, &mut seq)?;
+                    }
+                }
+            }
             DapMessage::Request(req) => {
                 match dap_command_to_step_action(&req.command) {
                     Ok((action, is_reverse)) => {

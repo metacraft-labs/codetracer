@@ -1505,6 +1505,27 @@ impl Handler {
         )?;
         Ok(())
     }
+
+    pub fn scopes(&mut self, request: dap::Request, arg: dap::ScopeArguments) -> Result<(), Box<dyn Error>> {
+        let call = &self.db.calls[CallKey(arg.frame_id)];
+        let function = &self.db.functions[call.function_id];
+        let scope = dap::Scope {
+            name: function.name.clone(),
+            presentation_hint: Some("locals".to_string()),
+            variables_reference: arg.frame_id,
+            named_variables: Some(0),
+            indexed_variables: Some(0),
+            expensive: false,
+            source: None,
+            line: Some(function.line.0 as usize),
+            column: Some(1),
+            end_line: None,
+            end_column: None,
+        };
+        self.respond_dap(request, dap::ScopeResponseBody { scopes: vec![scope] })?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
