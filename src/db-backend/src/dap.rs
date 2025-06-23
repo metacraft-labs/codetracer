@@ -147,12 +147,49 @@ pub struct StackTraceResponseBody {
     pub total_frames: usize,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopeArguments {
+    pub frame_id: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Scope {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation_hint: Option<String>,
+    pub variables_reference: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub named_variables: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexed_variables: Option<i64>,
+    pub expensive: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopeResponseBody {
+    pub scopes: Vec<Scope>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum RequestArguments {
     Launch(LaunchRequestArguments),
     SetBreakpoints(SetBreakpointsArguments),
     StackTrace(StackTraceArguments),
+    Scope(ScopeArguments),
     Other(Value),
 }
 
