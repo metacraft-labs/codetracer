@@ -48,6 +48,7 @@ pub struct Handler {
     pub trace: CoreTrace,
     pub dap_client: DapClient,
     pub resulting_dap_messages: Vec<DapMessage>,
+    pub previous_step_id: StepId,
 
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
@@ -105,6 +106,7 @@ impl Handler {
             calltrace,
             step_lines_loader,
             dap_client: DapClient::default(),
+            previous_step_id: StepId(0),
             resulting_dap_messages: vec![],
         }
     }
@@ -204,8 +206,8 @@ impl Handler {
         self.resulting_dap_messages = vec![];
     }
 
-    fn send_dap(&mut self, dap_message: DapMessage) -> Result<(), Box<dyn Error>> {
-        self.resulting_dap_messages.push(dap_message);
+    fn send_dap(&mut self, dap_message: &DapMessage) -> Result<(), Box<dyn Error>> {
+        self.resulting_dap_messages.push(dap_message.clone());
         Ok(())
     }
 
@@ -222,7 +224,7 @@ impl Handler {
             body: serde_json::to_value(value)?,
         });
         self.dap_client.seq += 1;
-        self.send_dap(response)
+        self.send_dap(&response)
     }
 
     fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
@@ -249,9 +251,38 @@ impl Handler {
         ))?;
         let reason = if is_main { "entry" } else { "step" };
         info!("generate stopped event");
-        let raw_event = self.dap_client.stopped(reason)?;
+        let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
-        self.send_dap(raw_event)?;
+        self.send_dap(&raw_event)?;
+
+        if self.step_id.0 > self.previous_step_id.0 {
+            let mut raw_output_events: Vec<dap::DapMessage> = vec![];
+            for event in self.db.events.iter() {
+                if event.step_id.0 > self.previous_step_id.0 && event.step_id.0 <= self.step_id.0 {
+                    // different kind of if-s:
+                    //   upper if the event is in the range of the move
+                    //   this internal one: for which kinds do we produce dap events
+                    #[allow(clippy::collapsible_if)]
+                    if event.kind == EventLogKind::Write {
+                        let step = self.db.steps[event.step_id];
+                        info!("generate output event");
+                        let raw_output_event = self.dap_client.output_event(
+                            "stdout",
+                            &self.db.paths[step.path_id],
+                            step.line.0 as usize,
+                            &event.content,
+                        )?;
+                        info!("raw output event: {:?}", raw_output_event);
+                        raw_output_events.push(raw_output_event);
+                    }
+                }
+            }
+            for raw_output_event in raw_output_events.iter() {
+                self.send_dap(raw_output_event)?;
+            }
+        }
+        self.previous_step_id = self.step_id;
+
         // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 
         let exact = false; // or for now try as flow // true just for this exact step
