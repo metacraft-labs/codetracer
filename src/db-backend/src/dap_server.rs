@@ -135,6 +135,7 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
         "stepOut" => Ok((Action::StepOut, false)),
         "next" => Ok((Action::Next, false)),
         "continue" => Ok((Action::Continue, false)),
+        "stepBack" => Ok((Action::Next, true)),
         "reverseContinue" => Ok((Action::Continue, true)),
         _ => Err(CtDapError::new(&format!("not a recognized dap step action: {command}"))),
     }
@@ -350,6 +351,9 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     Ok((action, is_reverse)) => {
                         if let Some(h) = handler.as_mut() {
                             h.dap_client.seq = seq;
+                            // for now ignoring arguments: they contain threadId, but
+                            // we assume we have a single thread here for now
+                            // we also don't use the other args currently
                             let _ = h.step(req, StepArg::new(action, is_reverse));
                             write_dap_messages(writer, &mut handler, &mut seq)?;
                         }
