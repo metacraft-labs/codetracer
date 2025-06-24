@@ -1526,6 +1526,32 @@ impl Handler {
 
         Ok(())
     }
+
+    pub fn to_dap_variable(&self, ct_variable: &Variable) -> dap::Variable {
+        let dap_value_text = ct_variable.value.text_repr();
+        dap::Variable::new(&ct_variable.expression, &dap_value_text, 0)
+    }
+
+    pub fn variables(&mut self, request: dap::Request, _arg: dap::VariablesArguments) -> Result<(), Box<dyn Error>> {
+        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
+            .iter()
+            .map(|v| Variable {
+                expression: self.db.variable_name(v.variable_id).to_string(),
+                value: self.db.to_ct_value(&v.value),
+            })
+            .collect();
+
+        let dap_variables = full_value_locals.iter().map(|v| self.to_dap_variable(v)).collect();
+
+        self.respond_dap(
+            request,
+            dap::VariablesResponseBody {
+                variables: dap_variables,
+            },
+        )?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

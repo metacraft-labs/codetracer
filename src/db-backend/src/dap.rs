@@ -189,6 +189,93 @@ pub struct ScopeResponseBody {
     pub scopes: Vec<Scope>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VariablesArguments {
+    pub variables_reference: i64,
+
+    // 'indexed' or 'named' or null(None)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    count: Option<usize>,
+    // TODO: eventually add ValueFormat if we need,
+    // but for now we don't set
+    // `supportsValueFormattingOptions` capability
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Variable {
+    pub name: String,
+
+    pub value: String,
+
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub typ: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation_hint: Option<VariablePresentationHint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evaluate_name: Option<String>,
+
+    pub variables_reference: i64,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub named_variables: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexed_variables: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_reference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declaration_location_reference: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_location_reference: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VariablePresentationHint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lazy: Option<bool>,
+}
+
+impl Variable {
+    pub fn new(name: &str, value: &str, variables_reference: i64) -> Variable {
+        Variable {
+            name: name.to_string(),
+            value: value.to_string(),
+            variables_reference,
+            typ: None,
+            presentation_hint: None,
+            evaluate_name: None,
+            named_variables: None,
+            indexed_variables: None,
+            memory_reference: None,
+            declaration_location_reference: None,
+            value_location_reference: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+pub struct VariablesResponseBody {
+    pub variables: Vec<Variable>,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum RequestArguments {
@@ -196,6 +283,7 @@ pub enum RequestArguments {
     SetBreakpoints(SetBreakpointsArguments),
     StackTrace(StackTraceArguments),
     Scope(ScopeArguments),
+    Variables(VariablesArguments),
     Other(Value),
 }
 

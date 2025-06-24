@@ -66,7 +66,7 @@ impl Value {
         }
         res
     }
-    #[allow(dead_code)]
+
     pub fn text_repr(&self) -> String {
         match self.kind {
             TypeKind::Int => self.i.to_string(),
