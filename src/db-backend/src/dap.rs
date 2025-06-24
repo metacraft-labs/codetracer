@@ -308,7 +308,7 @@ impl Default for RequestArguments {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Response {
     #[serde(flatten)]
     pub base: ProtocolMessage,
@@ -321,7 +321,7 @@ pub struct Response {
     pub body: Value,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct InitializeResponse {
     #[serde(flatten)]
     pub base: ProtocolMessage,
@@ -334,7 +334,7 @@ pub struct InitializeResponse {
     pub body: Option<Capabilities>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Event {
     #[serde(flatten)]
     pub base: ProtocolMessage,
@@ -343,7 +343,7 @@ pub struct Event {
     pub body: Value,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct StoppedEventBody {
     pub reason: String,
@@ -355,7 +355,38 @@ pub struct StoppedEventBody {
     pub hit_breakpoint_ids: Option<Vec<i64>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputEventBody {
+    // 'console' | 'important' | 'stdout' | 'stderr' | 'telemetry' | string;
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+
+    pub output: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variable_reference: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location_reference: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum DapMessage {
     Request(Request),
@@ -394,7 +425,7 @@ impl DapClient {
         self.request("setBreakpoints", RequestArguments::SetBreakpoints(args))
     }
 
-    pub fn stopped(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {
+    pub fn stopped_event(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {
         let body = StoppedEventBody {
             reason: reason.to_string(),
             thread_id: 1,
@@ -407,6 +438,38 @@ impl DapClient {
                 type_: "event".to_string(),
             },
             event: "stopped".to_string(),
+            body: serde_json::to_value(body)?,
+        }))
+    }
+
+    pub fn output_event(
+        &mut self,
+        category: &str,
+        path: &str,
+        line: usize,
+        output: &str,
+    ) -> Result<DapMessage, serde_json::Error> {
+        let body = OutputEventBody {
+            category: Some(category.to_string()),
+            output: output.to_string(),
+            group: None,
+            variable_reference: None,
+            source: Some(Source {
+                name: Some("".to_string()),
+                path: Some(path.to_string()),
+                source_reference: None,
+            }),
+            line: Some(line),
+            column: Some(1),
+            data: None,
+            location_reference: None,
+        };
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "output".to_string(),
             body: serde_json::to_value(body)?,
         }))
     }
