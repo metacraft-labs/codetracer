@@ -35,6 +35,14 @@ pub struct LaunchRequestArguments {
     pub no_debug: Option<bool>,
     #[serde(rename = "__restart", skip_serializing_if = "Option::is_none")]
     pub restart: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub typ: Option<String>,
+    #[serde(rename = "__sessionId", skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
