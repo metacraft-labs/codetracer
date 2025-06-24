@@ -1552,6 +1552,16 @@ impl Handler {
 
         Ok(())
     }
+
+    pub fn respond_to_disconnect(
+        &mut self,
+        request: dap::Request,
+        _arg: dap::DisconnectArguments,
+    ) -> Result<(), Box<dyn Error>> {
+        self.respond_dap(request, dap::DisconnectResponseBody {})?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

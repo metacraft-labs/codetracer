@@ -276,6 +276,20 @@ pub struct VariablesResponseBody {
     pub variables: Vec<Variable>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectArguments {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminate_debuggee: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suspend_debuggee: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+pub struct DisconnectResponseBody {}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum RequestArguments {
@@ -284,6 +298,7 @@ pub enum RequestArguments {
     StackTrace(StackTraceArguments),
     Scope(ScopeArguments),
     Variables(VariablesArguments),
+    Disconnect(DisconnectArguments),
     Other(Value),
 }
 

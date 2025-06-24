@@ -346,6 +346,26 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     }
                 }
             }
+            DapMessage::Request(req) if req.command == "disconnect" => {
+                if let Some(h) = handler.as_mut() {
+                    if let RequestArguments::Disconnect(args) = req.arguments.clone() {
+                        h.dap_client.seq = seq;
+                        h.respond_to_disconnect(req, args)?;
+                        write_dap_messages(writer, &mut handler, &mut seq)?;
+
+                        // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
+                        // > and then to shut down itself (the debug adapter).
+                        // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
+                        // we don't have a debuggee process, just a db, so we just stop db-backend for now
+                        // (and before that, we respond to the request, acknowledging it)
+                        //
+                        // we allow it for now here, but if additional cleanup is needed, maybe we'd need
+                        // to return to upper functions
+                        #[allow(clippy::exit)]
+                        std::process::exit(0);
+                    }
+                }
+            }
             DapMessage::Request(req) => {
                 match dap_command_to_step_action(&req.command) {
                     Ok((action, is_reverse)) => {
