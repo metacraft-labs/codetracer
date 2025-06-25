@@ -1,5 +1,8 @@
 # Should have been in value.nim but is needed to fix a circular dependency
 type
+  CtLoadHistoryArguments* = ref object
+    expression*: langstring
+
   HistoryResult* = object ## HistoryResult object
     location*: Location
     value*: Value
