@@ -36,12 +36,15 @@ proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: boo
     debugprint "noOutput ", noOutput
     debugprint "options ", options
     if IS_DB_BASED[trace.lang]:
+      var traceFile = traceFolder / "trace.bin"
+      if not fileExists(traceFile):
+        traceFile = traceFolder / "trace.json"
       result = startProcess(
         dbBackendExe,
         workingDir = workdir,
         args = @[
           $callerPid,
-          traceFolder / "trace.json",
+          traceFile,
           traceFolder / "trace_metadata.json"
         ],
         options=options)

@@ -1,5 +1,6 @@
 {
   pkgs,
+  inputs,
   inputs',
   self',
 }:
@@ -43,11 +44,8 @@ mkShell {
 
       ourPkgs.noir
 
-      cargo
-      rustc
-      capnproto
-
-      yarn
+      # yarn
+      inputs.nixpkgs.legacyPackages.aarch64-linux.yarn
       yarn2nix
 
       gnugrep

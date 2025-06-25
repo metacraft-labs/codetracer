@@ -207,6 +207,8 @@
 
           src = ../../src/db-backend;
 
+          nativeBuildInputs = [ pkgs.capnproto ];
+
           cargoLock = {
             lockFile = ../../src/db-backend/Cargo.lock;
           };

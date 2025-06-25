@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use std::str;
 
 // use log::info;
@@ -411,17 +411,15 @@ impl<'a> TraceProcessor<'a> {
 }
 
 #[allow(clippy::panic)]
-pub fn load_trace_data(trace_file: &PathBuf) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let raw_bytes = fs::read(trace_file).unwrap_or_else(|_| panic!("trace file {trace_file:?} read error"));
-    let raw = str::from_utf8(&raw_bytes)?;
+pub fn load_trace_data(trace_file: &Path, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+    let mut tracer = runtime_tracing::Tracer::new("", &[]);
+    tracer.load_trace_events(trace_file, file_format)?;
 
-    let trace: Vec<TraceLowLevelEvent> = serde_json::from_str(raw)?;
-
-    Ok(trace)
+    Ok(tracer.events)
 }
 
 #[allow(clippy::panic)]
-pub fn load_trace_metadata(trace_metadata_file: &PathBuf) -> Result<TraceMetadata, Box<dyn Error>> {
+pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     let raw_bytes =
         fs::read(trace_metadata_file).unwrap_or_else(|_| panic!("metadata file {trace_metadata_file:?} read error"));
     let raw = str::from_utf8(&raw_bytes)?;
