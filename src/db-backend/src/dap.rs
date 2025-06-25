@@ -294,7 +294,7 @@ pub struct VariablesResponseBody {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisconnectArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart: Option<bool>,
