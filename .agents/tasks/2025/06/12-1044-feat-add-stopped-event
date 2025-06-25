@@ -2,3 +2,5 @@ db-backend: Add support for 'stopped' event for the dap protocol so after we hav
 We have added an info! message with a TODO: in complete_move function in handler.rs when we need the event to be sent
 Thread id should be always 1 in the stopped event for now. If is_main is true reason in stopped event should be 'entry', otherwise it should be 'step'. hitBreakpointsIds for now should be empty as later on we will add the logic for it.
 allThreadsStopped should be true in the stopped event that is sent. Add a stopped event in the test cases after the configuration is done.
+--- FOLLOW UP TASK ---
+add handling for load-locals message that uses handler.load_locals() in dap server to send variables to the frontend
