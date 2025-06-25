@@ -14,7 +14,9 @@ fn test_parse_initialize_request() {
                 RequestArguments::Other(ref v) => {
                     assert_eq!(v["adapterID"], "small-lang");
                 }
-                _ => panic!("unexpected arguments"),
+                other => {
+                    panic!("unexpected arguments object: {:?}", other)
+                }
             }
         }
         _ => panic!("expected request"),
