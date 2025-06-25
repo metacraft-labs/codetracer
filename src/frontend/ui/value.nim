@@ -1,4 +1,4 @@
-import ui_imports, ../types, ../renderer
+import ui_imports, ../types, ../renderer, ../utils
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -17,6 +17,9 @@ proc view(
 ): VNode
 
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
+
+proc loadHistory(self: ValueComponent, expression: cstring) =
+  discard dapSendRequest("ct/load-history", CtLoadHistoryArguments(expression: expression), void)
 
 proc intValue*(i: int): Value {.exportc.} =
   Value(
@@ -290,6 +293,7 @@ proc ensure*(self: ChartComponent) =
   var label = if self.viewKind == ViewLine: "ensureLine" else: "ensurePie"
 
   if self.stateID != -1:
+    # TODO: think how this would work in extension
     kxiMap[j("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
       discard windowSetTimeout(proc = self.ensureBase(), 500)
     )
@@ -614,10 +618,10 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
     let chart = self.addChart(expression)
 
     chart.tableView = tableView
-    chart.ensure()
-    self.ensureValueComponent()
+    # chart.ensure()
+    # self.ensureValueComponent()
 
-    await self.service.loadHistory(expression)
+    self.loadHistory(expression)
   else:
     self.showInline[expression] = not self.showInline[expression]
 
@@ -782,6 +786,7 @@ proc compoundOrPointsToCompound(value: Value): bool =
   return value.kind notin ATOM_KINDS and
     (value.kind != Pointer or
     (not value.refValue.isNil and value.refValue.kind notin ATOM_KINDS))
+
 
 proc view(
   self: ValueComponent,

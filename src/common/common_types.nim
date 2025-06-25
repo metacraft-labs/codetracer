@@ -840,6 +840,9 @@ type
     expression*: langstring
     value*: Value
 
+  CtLoadHistoryArguments* = ref object
+    expression*: langstring
+
   # IMPORTANT: must update `pub const EVENT_KINDS_COUNT` in db-backend/src/task.rs
   # on changes here!
   # also must update codetracer-ruby-tracer trace.rb `EVENT_KIND_..` consts
