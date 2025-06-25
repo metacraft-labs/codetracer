@@ -30,6 +30,10 @@ fn test_backend_dap_server_stdio() {
         cwd: None,
         no_debug: None,
         restart: None,
+        name: None,
+        request: None,
+        typ: None,
+        session_id: None,
     };
     let launch = client.launch(launch_args);
     dap::write_message(&mut writer, &launch).unwrap();
