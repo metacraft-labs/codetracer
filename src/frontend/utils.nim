@@ -1361,13 +1361,53 @@ proc adjustEditorWidth*(self: EditorViewComponent) =
   options.scrollBeyondLastColumn = floor(scrollBeyondLastColumn.float / charWidth)
   self.monacoEditor.updateOptions(options)
 
-type VsCode* = ref object
-  postMessage*: proc(js: JsObject): void
+type 
+  VsCode* = ref object
+    postMessage*: proc(js: JsObject): void
+    # valid only in extension-level, not webview context probably
+    debug: VsCodeDebugApi
+
+  VsCodeDebugApi* = ref object
+    activeDebugSession*: VsCodeDebugSession
+
+  VsCodeDebugSession* = ref object
+    customRequest*: proc(command: cstring, value: JsObject): Future[JsObject]
 
 var vscode*: VsCode
+
+type
+  DapRequest = ref object
+    command: cstring
+    value: JsObject
+
 
 when defined(ctInExtension):
   proc acquireVsCodeApi(): VsCode {.importc.}
   vscode = acquireVsCodeApi()
+
+  proc dapSendRequest*[T](command: cstring, value: T, ReturnType: type): Future[ReturnType] =
+    # no: this is for the extension layer
+    # we just send it with postMessage..
+    vscode.postMessage(DapRequest(command: command, value: value.toJs).toJs)
+    # somehow attach to an event that returns when it's ready similar to other case
+    # this logic is the extension layer, but might be in typescript?
+    # when ReturnType is not void:
+    #   return cast[ReturnType](await vscode.debug.activeDebugSession.customRequest(command, value.toJs))
+    # else:
+    #   await vscode.debug.activeDebugSession.customRequest(command, value)
+
 else:
+  
+  var ipc: JsObject
+
+  proc dapSendRequest*[T](command: cstring, value: T, ReturnType: type): Future[ReturnType] =
+    ipc.send "CODETRACER::dap-request", DapRequest(command: command, value: value.toJs)
+    # on resolve send here somehow??
+    # probably requires us to track seq of requests/responses!
+    when ReturnType is not void:
+      var r: ReturnType
+      return r
+    else:
+      return
+  
   discard
