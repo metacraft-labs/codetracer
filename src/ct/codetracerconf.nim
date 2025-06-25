@@ -7,6 +7,13 @@ import
 # TODO check if the values with special characters are parsed correctly by confutils
 # and consider a fix if not
 type
+  ArbCommand* {.pure.} = enum
+    noCommand,
+    explorer,
+    record,
+    replay,
+    deploy
+
   StartupCommand* {.pure.} = enum
     noCommand,
     replay,
@@ -18,6 +25,7 @@ type
     build,
     record,
     console,
+    arb,
 
     # `g++`,
     # gcc,
@@ -49,9 +57,9 @@ type
   CodetracerConf* = object
     case cmd* {.
       command,
-      defaultValue: noCommand
+      defaultValue: StartUpCommand.noCommand
     .}: StartUpCommand
-    of noCommand:
+    of StartUpCommand.noCommand:
       noCmdArgs* {.
         ignore
       .}: string
@@ -177,7 +185,7 @@ type
         argument
         desc: "Output path"
       .} : string
-    of record:
+    of StartupCommand.record:
       recordLang* {.
         name: "lang"
         defaultValue: ""
@@ -222,7 +230,7 @@ type
         desc: "Arguments for record",
         longDesc: "longer description for record"
       .} : seq[string]
-    of replay:
+    of StartupCommand.replay:
      replayTraceId* {.
         name: "id",
         desc: "a trace id"
@@ -300,6 +308,32 @@ type
         defaultValue: false
         desc: "Is it in test mode"
       .}: bool
+    of arb:
+      arbitrumRpcUrl* {.
+        name: "arbitrum-rpc-url"
+        desc: "Arbitrum Node JSON-RPC URL"
+        defaultValue: "localhost"
+      .}: string
+      case arbCommand* {.
+        command,
+        defaultValue: ArbCommand.noCommand
+      .}: ArbCommand
+      of ArbCommand.noCommand:
+        discard
+      of explorer:
+        discard
+      of ArbCommand.record:
+        arbRecordTransaction* {.
+          argument
+          desc: "Hex-encoded transaction hash"
+        .}: string
+      of ArbCommand.replay:
+        arbReplayTransaction* {.
+          argument
+          desc: "Hex-encoded transaction hash"
+        .}: string
+      of deploy:
+        discard
     # of `import`:
     #   importTraceZipPath* {.
     #     argument
