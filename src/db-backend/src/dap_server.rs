@@ -346,7 +346,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     }
                 }
             }
-            DapMessage::Request(req) if req.command == "load-locals" => {
+            DapMessage::Request(req) if req.command == "ct/load-locals" => {
                 if let Some(h) = handler.as_mut() {
                     if let RequestArguments::CtLoadLocals(args) = req.arguments.clone() {
                         h.dap_client.seq = seq;
