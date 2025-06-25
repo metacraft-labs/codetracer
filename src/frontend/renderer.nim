@@ -95,7 +95,7 @@ proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.expor
 proc lowAsm*(data: Data): bool
 proc highlightLine*(path: cstring, line: int)
 proc saveFiles*(data: Data, path: cstring = j"", saveAs: bool = false)
-proc step*(data: Data, action: string, actionEnum: Action, reverse: bool = false, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
+proc step*(data: Data, action: string, actionEnum: DebuggerAction, reverse: bool = false, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
 proc openLocation*(data: Data, path: cstring, line: int) {.async.}
 
 # UTILS
@@ -560,10 +560,6 @@ proc onCollapseAllExpansion*(sender: js, response: jsobject(path=cstring, line=i
 proc onFollowHistory*(sender: js, response: jsobject(address=cstring)) =
   redrawAll()
 
-proc onSegfaultRoots*(sender: js, response: jsobject(roots=seq[SegfaultRoot])) =
-  discard
-
-
 proc expand*(path: cstring, line: int) {.exportc, used.} =
   ipc.send "CODETRACER::update-expansion", js{
     path: path,
@@ -652,7 +648,7 @@ proc traceJump*(eventObj: ProgramEvent) =
 proc step*(
     data: Data,
     action: string,
-    actionEnum: Action,
+    actionEnum: DebuggerAction,
     reverse: bool = false,
     repeat: int = 1,
     fromShortcutArg: bool = false,
@@ -679,7 +675,7 @@ proc step*(
     editorView=editorView,
     taskId=taskId)
 
-proc stepReverse*(data: Data, action: string, actionEnum: Action, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID) =
+proc stepReverse*(data: Data, action: string, actionEnum: DebuggerAction, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID) =
   data.step(action, actionEnum, reverse=true, repeat=repeat, fromShortcutArg=fromShortcutArg, taskId=taskId)
 
 template forwardContinue*(fromShortcut: bool) =
