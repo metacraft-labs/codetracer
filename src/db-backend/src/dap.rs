@@ -1,3 +1,4 @@
+use crate::task;
 use log::info;
 use serde::{de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
@@ -193,6 +194,12 @@ pub struct ScopeResponseBody {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsResponseBody {
+    pub locals: Vec<task::Variable>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct VariablesArguments {
     pub variables_reference: i64,
 
@@ -208,6 +215,14 @@ pub struct VariablesArguments {
     // `supportsValueFormattingOptions` capability
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsArguments {
+    pub rr_ticks: i64,
+    pub count_budget: i64,
+    pub min_count_limit: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
@@ -300,6 +315,7 @@ pub enum RequestArguments {
     StackTrace(StackTraceArguments),
     Scope(ScopeArguments),
     Variables(VariablesArguments),
+    CtLoadLocals(CtLoadLocalsArguments),
     Disconnect(DisconnectArguments),
     Other(Value),
 }
