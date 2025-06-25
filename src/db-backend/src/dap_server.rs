@@ -153,7 +153,7 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
-    let (tx, rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::channel();
     let mut handler: Option<Handler> = None;
     let mut received_launch = false;
     let mut launch_trace_folder = PathBuf::from("");
@@ -360,32 +360,11 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "load-locals" => {
                 if let Some(h) = handler.as_mut() {
-                    let task = Task {
-                        kind: TaskKind::LoadLocals,
-                        id: gen_task_id(TaskKind::LoadLocals),
-                    };
-                    h.load_locals(task)?;
-                    let mut locals = json!({});
-                    while let Ok(response) = rx.try_recv() {
-                        if let crate::response::Response::TaskResponse((_t, payload)) = response {
-                            if let Ok(value) = serde_json::from_str(&payload) {
-                                locals = value;
-                            }
-                        }
+                    if let RequestArguments::CtLoadLocals(args) = req.arguments.clone() {
+                        h.dap_client.seq = seq;
+                        h.load_locals(req, args)?;
+                        write_dap_messages(writer, &mut handler, &mut seq)?;
                     }
-                    let resp = DapMessage::Response(Response {
-                        base: ProtocolMessage {
-                            seq,
-                            type_: "response".to_string(),
-                        },
-                        request_seq: req.base.seq,
-                        success: true,
-                        command: "load-locals".to_string(),
-                        message: None,
-                        body: locals,
-                    });
-                    seq += 1;
-                    dap::write_message(writer, &resp)?;
                 }
             }
             DapMessage::Request(req) if req.command == "disconnect" => {

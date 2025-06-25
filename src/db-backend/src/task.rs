@@ -59,7 +59,7 @@ pub struct StepArg {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EmptyArg {}
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Variable {
     pub expression: String,
