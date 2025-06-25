@@ -1928,10 +1928,11 @@ mod tests {
         }
     }
 
-    // TODO: Fix test case
-    // fn test_load_locals(handler: &mut Handler) {
-    //     handler.load_locals(gen_task(TaskKind::LoadLocals)).unwrap();
-    // }
+    fn test_load_locals(handler: &mut Handler) {
+        handler
+            .load_locals(dap::Request::default(), dap::CtLoadLocalsArguments::default())
+            .unwrap();
+    }
 
     fn test_load_callstack(handler: &mut Handler) {
         handler.load_callstack(gen_task(TaskKind::LoadCallstack)).unwrap();
