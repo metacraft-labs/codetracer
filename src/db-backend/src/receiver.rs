@@ -173,7 +173,7 @@ impl Receiver {
             TaskKind::Configure => handler.configure(self.core.read_arg(&task.id)?, task),
             TaskKind::Start => handler.start(task),
             TaskKind::RunToEntry => handler.run_to_entry(task),
-            TaskKind::LoadLocals => handler.load_locals(task),
+            // TaskKind::LoadLocals => handler.load_locals(task),
             TaskKind::LoadCallstack => handler.load_callstack(task),
             TaskKind::CollapseCalls => handler.collapse_calls(self.core.read_arg(&task.id)?, task),
             TaskKind::ExpandCalls => handler.expand_calls(self.core.read_arg(&task.id)?, task),
