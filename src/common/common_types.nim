@@ -833,6 +833,9 @@ type
     key*: langstring
     lang*: Lang
 
+  CtLoadLocalsResponseBody* = ref object
+    locals*: seq[Variable]
+
   Variable* = ref object
     expression*: langstring
     value*: Value

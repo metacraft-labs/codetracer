@@ -27,9 +27,9 @@ proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
 method redrawForExtension*(self: StateComponent) {.exportc.} =
   self.kxi.redraw()
 
-proc registerLocals*(self: StateComponent, values: seq[Variable]) {.exportc.} =
-  self.locals = values
-  for localVariable in values:
+proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
+  self.locals = response.locals
+  for localVariable in response.locals:
     let expression = localVariable.expression
 
     if self.values.hasKey(expression):
@@ -205,6 +205,6 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
 
   let locals = await self.service.loadLocals(self.rrTicks, countBudget, minCountLimit)
 
-  self.registerLocals(locals)
+  self.registerLocals(CtLoadLocalsResponseBody(locals: locals))
 
   self.data.redraw()
