@@ -4394,7 +4394,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stylus-hello-world"
+name = "stylus-fund-tracking-demo"
 version = "0.1.11"
 dependencies = [
  "alloy-primitives",
