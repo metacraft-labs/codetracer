@@ -1,3 +1,5 @@
+import std / jsffi
+
 type
   Transport* = ref object of RootObj
 
@@ -7,14 +9,46 @@ method emit*[T](t: Transport, event: T) {.base.} =
 method subscribe*[T](t: Transport, eventKind: CtEventKind, callback: proc(value: T): Future[void]) {.base.} =
   raise newException("not implemented")
 
+method connectViewModelServer*(t: Transport, server: ViewModelServer) {.base.} =
+  discard
+
 type
   LocalTransport* = ref object of Transport
+    handlers: array[CtEventKind, proc(value: JsObject): void]
+    server: ViewModelServer
+    subscriber: LocalSubscriber
 
-method emit*[T](t: LocalTransport, event: T) =
-  t.events.add(event.toJs)
-  if not t.serverHandle.isNil:
-    t.serverHandle(event)
-method subsc
+  LocalSubscriber* = ref object of Subscriber
+    transport*: LocalTransport
 
-# ViewModelServer: local transport: init with the same transport;
-# it will delegate to it its own handle call
+    
+# === LocalTransport:
+
+method emit*[T](t: LocalTransport, eventKind: CtEventKind, value: T) =
+  t.server.receive(t.server, eventKind, value, t.subscriber)
+
+method subscribe*[T](t: LocalTransport, eventKind: CtEventKind, callback: proc(value: T): Future[void]) =
+  t.server.register(eventKind, t.subscriber)
+  t.handlers[eventKind].add(proc(value: JsObject) = discard callback(cast[T](value))
+
+method call*[T](t: LocalTransport, eventKind: CtEventKind, value: T) =
+  for handler in t.handlers[event.kind]:
+    handler(value.toJs)
+
+
+# method connectViewModelServer*(t: Transport, server: ViewModelServer) =
+  # t.server = server
+
+proc newLocalTransport(server: ViewModelServer): LocalTransport =
+  result = LocalTransport(server: server)
+  result.subscriber = LocalSubscriber(transport: result)
+
+# ViewModelServer: connect to this with the constructor: `newLocalTransport`
+
+
+# === LocalSubscriber:
+
+method emit*[T](l: LocalSubscriber, eventKind: CtEventKind, value: T) =
+  l.transport.call(eventKind, value)
+
+  
