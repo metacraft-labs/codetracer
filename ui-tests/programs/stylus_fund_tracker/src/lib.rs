@@ -71,11 +71,13 @@ impl Counter {
     pub fn large_incomes(&self, treshold: U256) -> U256 {
         let mut res = U256::ZERO;
 
-        for idx in 0..self.funds.len() {
+        let n = self.funds.len();
+
+        for idx in 0..n {
             let fund = self.funds.get(idx).expect("fund exists");
             let amount = fund.amount.get();
 
-            if fund.incoming.get() && amount >= threshold {
+            if fund.incoming.get() && amount >= treshold {
                 res += amount;
             }
         }
