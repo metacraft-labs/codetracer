@@ -57,9 +57,6 @@ sol! {
 #[public]
 impl Counter {
     pub fn fund(&mut self, pari: U256) {
-        // evm::log(Pari {
-        //     pari: msg::value(),
-        // });
         let mut new_fund = self.funds.grow();
         new_fund.incoming.set(true);
         new_fund.amount.set(pari);
@@ -71,16 +68,18 @@ impl Counter {
         new_fund.amount.set(pari);
     }
 
-    pub fn large_incomes(&mut self, treshold: U256) -> U256 {
-        let mut tally = U256::ZERO;
-        for i in 0..self.funds.len() {
-            let fund = self.funds.get(i).unwrap();
+    pub fn large_incomes(&self, treshold: U256) -> U256 {
+        let mut res = U256::ZERO;
+
+        for idx in 0..self.funds.len() {
+            let fund = self.funds.get(idx).expect("fund exists");
             let amount = fund.amount.get();
-            if fund.incoming.get() && amount >= treshold {
-                tally += amount;
+
+            if fund.incoming.get() && amount >= threshold {
+                res += amount;
             }
         }
-        tally
+        res
     }
 }
 
