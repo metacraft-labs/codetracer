@@ -42,6 +42,11 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   if self.inExtension:
     self.redrawForExtension()
 
+method register*(self: StateComponent, api: Mediator) =
+  self.api = api
+  api.subscribe(CtLoadedLocals, self.registerLocals)
+  # api.subscribe(CtCompleteMove, self.onCompleteMove)
+  
 method render*(self: StateComponent): VNode =
   # render using value components
   # most of the stuff is separated into  watches and normal local values
@@ -198,6 +203,14 @@ proc watchView(self: StateComponent): VNode =
     ):
       input(`type`="text", placeholder="Enter a watch expression", id="watch")
 
+method onStopped*(self: StateComponent, arg: DapStopped) {.async.} =
+  var countBudget = 3000
+  var minCountLimit = 50
+
+  self.api.emit(CtLoadLocals, LoadLocalsArg(rrTicks: self.rrTicks, countBudget: countBudget, minCountLimit: minCountLimit))
+  # can still be loadLocals(..) which hides this
+
+  
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.rrTicks = response.location.rrTicks
   var countBudget = 3000

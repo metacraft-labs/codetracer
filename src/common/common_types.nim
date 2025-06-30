@@ -17,7 +17,7 @@ include
   common_types/codetracer_features/[ notifications, events ],
   common_types/utils/constants,
   common_types/language_features/[ tokens, code, "type", "value", value_history, "macro" ],
-  common_types/debugger_features/[ breakpoint, call, trace, debugger, jumps],
+  common_types/debugger_features/[ breakpoint, call, dap_types, trace, debugger, jumps],
   common_types/codetracer_features/[ flow, frontend, shell, stylus ],
   common_types/debugger_features/[ stepping, tracepoints ]
 
