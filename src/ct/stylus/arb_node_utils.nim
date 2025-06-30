@@ -98,10 +98,20 @@ proc getTransactions(maxAge: int): seq[JsonNode] {.raises: [IOError, ValueError]
       break
 
     let txs = transactionsBlock["transactions"].getElems()
+    for tx in txs:
+      tx["timestamp"] = %timestampDecimal
+      
     collected.add(txs)
     blockNum -= 1
 
   return collected
+
+proc getTransactionSuccessStatus(hash: string): bool {.raises: [IOError, ValueError].} =
+  try:
+    let response = jsonRpcRequest("eth_getTransactionReceipt", %[hash])
+    return response["status"].getStr() == "0x1"
+  except KeyError:
+    raise newException(ValueError, "Inalid RPC response: " & getCurrentExceptionMsg())
 
 proc getTransactionContractAddress*(hash: string): string {.raises: [IOError, ValueError].} =
   try:
@@ -112,7 +122,6 @@ proc getTransactionContractAddress*(hash: string): string {.raises: [IOError, Va
 
 # Returns the transactions, that can be replayed and are not older than `maxAge` seconds
 proc getTracableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.raises: [IOError, ValueError].} =
-  # TODO: return custom struct
   var transactions = getTransactions(maxAge)
   transactions = getValidTransactions(transactions)
 
@@ -121,10 +130,10 @@ proc getTracableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.rais
   for tx in transactions:
     result.add(StylusTransaction(
       txHash: tx["hash"].getStr().cstring,
-      isSuccessful: true, # TODO: discuss this
+      isSuccessful: getTransactionSuccessStatus(tx["hash"].getStr()),
       fromAddress: tx["from"].getStr().cstring,
       toAddress: tx["to"].getStr().cstring,
-      time: now().format("MM-dd hh:mm").cstring, # TODO
+      time: fromUnix(tx["timestamp"].getInt()).format("MM-dd hh:mm").cstring,
     ))
 
   return result
