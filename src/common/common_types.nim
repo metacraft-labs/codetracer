@@ -843,6 +843,10 @@ type
   CtLoadHistoryArguments* = ref object
     expression*: langstring
 
+  DapStoppedEvent* = ref object
+    # TODO
+    threadId*: int
+
   # IMPORTANT: must update `pub const EVENT_KINDS_COUNT` in db-backend/src/task.rs
   # on changes here!
   # also must update codetracer-ruby-tracer trace.rb `EVENT_KIND_..` consts

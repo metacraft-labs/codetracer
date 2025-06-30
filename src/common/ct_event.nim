@@ -1,5 +1,11 @@
 type
   CtEventKind* = enum
-    CtExample
+    CtExample,
+    CtSubscribe,
+    CtLoadLocals,
+    CtLoadLocalsResponse,
+    DapStopped,
+    
+    
 
 
