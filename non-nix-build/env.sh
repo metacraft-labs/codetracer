@@ -52,7 +52,7 @@ fi
 export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build-debug/bin:$PATH
 
 if [ "$os" == "mac" ]; then
-  brew install sqlite3 ruby node universal-ctags go
+  brew install sqlite3 ruby node universal-ctags go capnp
 fi
 
 ./install_rust.sh
