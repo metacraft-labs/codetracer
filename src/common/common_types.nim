@@ -131,11 +131,11 @@ type
     help*:            cstring
 
   StylusTransaction* = ref object
-    txHash*: cstring
+    txHash*: langstring
     isSuccessful*: bool
-    fromAddress*: cstring
-    toAddress*: cstring
-    time*: cstring
+    fromAddress*: langstring
+    toAddress*: langstring
+    time*: langstring
 
   Trace* = ref object ## Trace object
     id*: int

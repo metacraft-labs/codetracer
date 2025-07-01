@@ -10,7 +10,8 @@ import
   ../stylus/[deploy, record, arb_node_utils],
   electron,
   results,
-  backends
+  backends,
+  json_serialization
 
 proc eventuallyWrapElectron*: bool =
   if getEnv("CODETRACER_WRAP_ELECTRON", "") == "1":
@@ -146,17 +147,7 @@ proc runInitial*(conf: CodetracerConf) =
       of ArbCommand.deploy:
         deployStylus()
       of ArbCommand.listRecentTx:
-        let res = %*[]
-
-        for tx in getTracableTransactions():
-          res.add(%*{
-            "txHash": $tx.txHash,
-            "isSuccessful": $tx.isSuccessful,
-            "fromAddress": $tx.fromAddress,
-            "toAddress": $tx.toAddress,
-            "time": $tx.time,
-          })
-
+        let res = Json.encode(getTrackableTransactions())
         echo res
     # of StartupCommand.host:
     #   host(
