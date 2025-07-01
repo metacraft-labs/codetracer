@@ -688,7 +688,9 @@ proc callView*(
         class = "call-text",
         onclick = proc =
           if self.inExtension:
-            vscode.postMessage(js{command: "calltrace-jump", callKey: call.key})
+            # TODO: api emitvscode.postMessage(js{command: "calltrace-jump", callKey: call.key})
+            # self.api.emit(CtCallTraceJump, call.key)
+            echo "TODO emit with api"
           else:
             clog fmt"calltrace: jump onclick call key " & $key
             self.resetValueView()

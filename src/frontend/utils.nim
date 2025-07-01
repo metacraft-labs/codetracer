@@ -1335,26 +1335,4 @@ proc resetView*(self: WelcomeScreenComponent) =
   self.welcomeScreen = false
   self.newRecordScreen = false
   self.openOnlineTrace = false
-
-
-when defined(ctInExtension):
-  proc acquireVsCodeApi(): VsCode {.importc.}
-  vscode = acquireVsCodeApi()
-
-  let viewModel* = newViewModelClient(newVsCodeTransport(vscode, domwindow))
-else:
-  let viewModel* = newViewModelClient(newLocalTransport())
-  
-proc dapSendRequest*[T](eventKind: CtEventKind, value: T) = # : Future[ReturnType] =
-    # no: this is for the extension layer
-    # we just send it with postMessage..
-  viewModel.emit(CtRawEvent(kind: eventKind, value: value))
-    # vscode.postMessage(DapRequest(command: command, value: value.toJs).toJs)
-    # somehow attach to an event that returns when it's ready similar to other case
-    # this logic is the extension layer, but might be in typescript?
-    # when ReturnType is not void:
-    #   return cast[ReturnType](await vscode.debug.activeDebugSession.customRequest(command, value.toJs))
-    # else:
-    #   await vscode.debug.activeDebugSession.customRequest(command, value)
-
-  
+ 
