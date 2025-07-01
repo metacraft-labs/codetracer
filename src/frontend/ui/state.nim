@@ -2,7 +2,9 @@ import
   ../ui_helpers,
   ui_imports,
   show_code,
-  value
+  value,
+  .. / communication, 
+  .. / .. / common / ct_event
 
 # let MIN_NAME_WIDTH: float = 15 #%
 # let MAX_NAME_WIDTH: float = 85 #%
@@ -44,7 +46,8 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
 
 method register*(self: StateComponent, api: Mediator) =
   self.api = api
-  api.subscribe(CtLoadedLocals, self.registerLocals)
+  api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
+    self.registerLocals(response))
   # api.subscribe(CtCompleteMove, self.onCompleteMove)
   
 method render*(self: StateComponent): VNode =
@@ -203,7 +206,7 @@ proc watchView(self: StateComponent): VNode =
     ):
       input(`type`="text", placeholder="Enter a watch expression", id="watch")
 
-method onStopped*(self: StateComponent, arg: DapStopped) {.async.} =
+method onStopped*(self: StateComponent, arg: DapStoppedEvent) {.async.} =
   var countBudget = 3000
   var minCountLimit = 50
 
