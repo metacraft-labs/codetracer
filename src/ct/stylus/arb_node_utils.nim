@@ -121,7 +121,7 @@ proc getTransactionContractAddress*(hash: string): string {.raises: [IOError, Va
     raise newException(ValueError, "Inalid RPC response: " & getCurrentExceptionMsg())
 
 # Returns the transactions, that can be replayed and are not older than `maxAge` seconds
-proc getTracableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.raises: [IOError, ValueError].} =
+proc getTrackableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.raises: [IOError, ValueError].} =
   var transactions = getTransactions(maxAge)
   transactions = getValidTransactions(transactions)
 
@@ -129,11 +129,11 @@ proc getTracableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.rais
 
   for tx in transactions:
     result.add(StylusTransaction(
-      txHash: tx["hash"].getStr().cstring,
+      txHash: tx["hash"].getStr(),
       isSuccessful: getTransactionSuccessStatus(tx["hash"].getStr()),
-      fromAddress: tx["from"].getStr().cstring,
-      toAddress: tx["to"].getStr().cstring,
-      time: fromUnix(tx["timestamp"].getInt()).format("MM-dd hh:mm").cstring,
+      fromAddress: tx["from"].getStr(),
+      toAddress: tx["to"].getStr(),
+      time: fromUnix(tx["timestamp"].getInt()).format("MM-dd hh:mm"),
     ))
 
   return result
