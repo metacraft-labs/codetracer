@@ -1,5 +1,5 @@
 import jsffi, dom, vdom, karax, kdom, async, typetraits, tables
-import lib, lang
+import lib, lang, communication
 
 import rr_gdb
 
@@ -513,6 +513,7 @@ type
     layoutItem*: GoldenContentItem
     kxi*: KaraxInstance
     inExtension*: bool
+    api*: Mediator
 
   DataTableComponent* = ref object
     context*: js

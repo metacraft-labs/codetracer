@@ -19,7 +19,9 @@ proc view(
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
 
 proc loadHistory(self: ValueComponent, expression: cstring) =
-  discard dapSendRequest("ct/load-history", CtLoadHistoryArguments(expression: expression), void)
+  # TODO: self.api.emit(CtLoadHistory, ..)
+  # discard dapSendRequest("ct/load-history", CtLoadHistoryArguments(expression: expression), void)
+  discard
 
 proc intValue*(i: int): Value {.exportc.} =
   Value(
