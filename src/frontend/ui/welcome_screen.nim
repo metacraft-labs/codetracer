@@ -81,7 +81,7 @@ proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, 
   ):
     tdiv(class = "recent-transaction"):
       span(): text truncateMiddle(tx.txHash, 10, 4)
-      span(id = successId): text if tx.isSuccessful: "Successful" else: "Not"
+      span(id = successId): text if tx.isSuccessful: "Successful" else: "Failed"
       span(): text truncateMiddle(tx.fromAddress, 10, 4)
       span(): text truncateMiddle(tx.toAddress, 10, 4)
       span(): text tx.time
