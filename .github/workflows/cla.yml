@@ -2,7 +2,6 @@
 
 
 name: "CLA Assistant"
-uses: contributor-assistant/github-action@v2.6.1
 on:
   issue_comment:
     types: [created]
