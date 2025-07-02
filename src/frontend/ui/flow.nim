@@ -1196,22 +1196,23 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       style=style
     )
   ):
-    span(
-      class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
-      style = style,
-      onmousedown = proc(e: Event, v: VNode) =
-        let targetId = &"flow-{flowMode}-value-box-{stepCount}"
-        let target = document.getElementById(targetId)
-        if not target.isNil:
-          if target.style.maxWidth != "none":
-            target.style.maxWidth = "none"
-            e.target.toJs.classList.remove("flow-hide-content")
-            e.target.toJs.classList.add("flow-show-content")
-          else:
-            e.target.toJs.classList.remove("flow-show-content")
-            e.target.toJs.classList.add("flow-hide-content")
-            target.style.maxWidth = "200px"
-    )
+    if event.text.len() > 20:
+      span(
+        class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
+        style = style,
+        onmousedown = proc(e: Event, v: VNode) =
+          let targetId = &"flow-{flowMode}-value-box-{stepCount}"
+          let target = document.getElementById(targetId)
+          if not target.isNil:
+            if target.style.maxWidth != "none":
+              target.style.maxWidth = "none"
+              e.target.toJs.classList.remove("flow-hide-content")
+              e.target.toJs.classList.add("flow-show-content")
+            else:
+              e.target.toJs.classList.remove("flow-show-content")
+              e.target.toJs.classList.add("flow-hide-content")
+              target.style.maxWidth = "20ch"
+      )
     span(
       class = &"flow-{flowMode}-value-name {klass}-name",
       onmousedown = proc(e: Event, v: VNode) =
@@ -1262,6 +1263,26 @@ proc flowSimpleValue*(
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
 
+  proc renderViewOption(): VNode =
+    buildHtml(
+      span(
+        class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
+        style = style,
+        onmousedown = proc(e: Event, v: VNode) =
+          let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+          let target = document.getElementById(targetId)
+          if not target.isNil:
+            if target.style.maxWidth != "none":
+              target.style.maxWidth = "none"
+              e.target.toJs.classList.remove("flow-hide-content")
+              e.target.toJs.classList.add("flow-show-content")
+            else:
+              e.target.toJs.classList.remove("flow-show-content")
+              e.target.toJs.classList.add("flow-hide-content")
+              target.style.maxWidth = "20ch"
+      )
+    )
+
   proc onMouseDown(e: Event, v: VNode, value: Value) =
     e.stopPropagation()
 
@@ -1287,22 +1308,16 @@ proc flowSimpleValue*(
       style=style
     )
   ):
-    span(
-      class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
-      style = style,
-      onmousedown = proc(e: Event, v: VNode) =
-        let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-        let target = document.getElementById(targetId)
-        if not target.isNil:
-          if target.style.maxWidth != "none":
-            target.style.maxWidth = "none"
-            e.target.toJs.classList.remove("flow-hide-content")
-            e.target.toJs.classList.add("flow-show-content")
-          else:
-            e.target.toJs.classList.remove("flow-show-content")
-            e.target.toJs.classList.add("flow-hide-content")
-            target.style.maxWidth = "200px"
-    )
+    case flowValueMode:
+      of BeforeValueMode:
+        if beforeValue.textRepr(compact=true).len() > 20:
+          renderViewOption()
+      of AfterValueMode:
+        if afterValue.textRepr(compact=true).len() > 20:
+          renderViewOption()
+      of BeforeAndAfterValueMode:
+        if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > 20:
+          renderViewOption()
     if showName:
       span(
         class = &"flow-{flowMode}-value-name",
