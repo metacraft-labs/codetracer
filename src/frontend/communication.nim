@@ -2,6 +2,8 @@ import std / [ async, jsffi, strformat ]
 import .. / common / ct_event
 
 type
+  # CommunicationApi ?
+  # Communication?
   Mediator* = ref object of RootObj
     name: string
     transport*: Transport
