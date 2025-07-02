@@ -38,11 +38,26 @@
   // height: 17px
   // line-height: 17px
   display: inline-block
+  // border-radius: 0px !important
+  // border-top-left-radius: 4px !important
+  // border-bottom-left-radius: 4px !important
+  box-sizing: border-box
+  white-space: nowrap
+
+.flow-view-more-button
   border-radius: 0px !important
   border-top-left-radius: 4px !important
   border-bottom-left-radius: 4px !important
-  box-sizing: border-box
-  white-space: nowrap
+  background-position: center !important
+  background-repeat: no-repeat !important
+  min-width: 3.5ch
+  max-width: 3.5ch
+  
+.flow-hide-content
+  background-image: FLOW_HIDE_ICON !important
+
+.flow-show-content
+  background-image: FLOW_SHOW_ICON !important
 
 .flow-error-name
   background: FLOW_PARALLEL_ERROR_NAME !important
@@ -76,8 +91,8 @@
   border-bottom-right-radius: 4px
   font-family: "FiraCode"
   white-space: nowrap
-  max-width: 400px
-  min-width: fit-content
+  max-width: 200px
+  min-width: auto
   overflow: hidden
   text-overflow: ellipsis
 
