@@ -31,12 +31,14 @@ when defined(ctInExtension):
 
   proc acquireVsCodeApi(): VsCode {.importc.}
 
-  var vscode* = acquireVsCodeApi()
+  {.emit: "const vscode = require(\"vscode\");"}
+  
+  var vscode* {.importc.}: VsCode # = acquireVsCodeApi()
 
 
   ### VsCodeDapApi:
 
-  proc newVsCodeDap*(context: VsCodeContext): VsCodeDapApi {.exportc.} =
+  proc newVsCodeDap*(vscode: VsCode, context: VsCodeContext): VsCodeDapApi {.exportc.} =
     VsCodeDapApi(vscode: vscode, context: context)
 
 
@@ -105,18 +107,15 @@ when defined(ctInExtension):
 
   # backend <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 
-  # backend
-  # views
-
   type
     VsCodeBackendTransport* = ref object of Transport
       vscode*: VsCode
       dapApi*: VsCodeDapApi
 
   proc newVsCodeBackendTransport(dapApi: VsCodeDapApi): VsCodeBackendTransport =
-    VsCodeBackendTransport(vscode: vscode, dapApi: dapApi)
+    VsCodeBackendTransport(vscode: dapApi.vscode, dapApi: dapApi)
 
-  proc setupMiddlewareToBackendApi*(backendApi: Mediator, viewsApi: Mediator) =
+  proc setupMiddlewareToBackendApi*(backendApi: MediatorWithSubscribers, viewsApi: MediatorWithSubscribers) =
     backendApi.subscribe(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent, sub: Subscriber) = viewsApi.emit(kind, value))
     backendApi.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody, sub: Subscriber) = viewsApi.emit(kind, value))
     # maybe somehow a more proxy-like/macro way
@@ -125,7 +124,7 @@ when defined(ctInExtension):
     viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = backendApi.emit(kind, value))
 
 
-  proc setupVsCodeBackendApi*(name: cstring, dapApi: VsCodeDapApi, viewsApi: Mediator): MediatorWithSubscribers {.exportc.}=
+  proc setupVsCodeBackendApi*(name: cstring, dapApi: VsCodeDapApi, viewsApi: MediatorWithSubscribers): MediatorWithSubscribers {.exportc.}=
     var transport = newVsCodeBackendTransport(dapApi)
     result = newMediatorWithSubscribers($name, transport)
     # for event in FirstDapEvent..LastDapEvent:
@@ -141,6 +140,9 @@ when defined(ctInExtension):
     let transport = VsCodeExtensionToViewsTransport() # TODO
     newMediatorWithSubscribers($name, transport)
 
+  {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
+  {.emit: "module.exports.newVsCodeDap = newVsCodeDap;".}
+  {.emit: "module.exports.setupVsCodeBackendApi = setupVsCodeBackendApi;"}
   
 # vscode backend api
 # method emit ..:
@@ -189,13 +191,8 @@ when defined(ctInExtension):
 # other differences might be in coordinating updates to components/editor: those might be
 # overriden as well differently in vscode and in electron
 
-# vscode:
-# newVsCodeViewModelServer(vscode)
 
-# electron:
-# newViewModelServer(receive: .. receive)
 # 
-# newViewModelClient(newLocalTransport(server))
 
     # self.api.emit(CtLoadLocals, "")
 
