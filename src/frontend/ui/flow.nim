@@ -1197,6 +1197,22 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     )
   ):
     span(
+      class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
+      style = style,
+      onmousedown = proc(e: Event, v: VNode) =
+        let targetId = &"flow-{flowMode}-value-box-{stepCount}"
+        let target = document.getElementById(targetId)
+        if not target.isNil:
+          if target.style.maxWidth != "none":
+            target.style.maxWidth = "none"
+            e.target.toJs.classList.remove("flow-hide-content")
+            e.target.toJs.classList.add("flow-show-content")
+          else:
+            e.target.toJs.classList.remove("flow-show-content")
+            e.target.toJs.classList.add("flow-hide-content")
+            target.style.maxWidth = "200px"
+    )
+    span(
       class = &"flow-{flowMode}-value-name {klass}-name",
       onmousedown = proc(e: Event, v: VNode) =
         self.jumpToLocalStep(stepCount),
@@ -1211,6 +1227,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     ):
       text &"<{name}>"
     span(
+      id = &"flow-{flowMode}-value-box-{stepCount}",
       style = style,
       iteration = $(self.flow.steps[stepCount].iteration),
       class = &"flow-{flowMode}-value-box {klass}-box " & before,
@@ -1276,8 +1293,7 @@ proc flowSimpleValue*(
       onmousedown = proc(e: Event, v: VNode) =
         let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
         let target = document.getElementById(targetId)
-        if target != nil:
-          kout e
+        if not target.isNil:
           if target.style.maxWidth != "none":
             target.style.maxWidth = "none"
             e.target.toJs.classList.remove("flow-hide-content")
@@ -1351,8 +1367,8 @@ proc flowSimpleValue*(
 
     else:
       var before = &"flow-{flowMode}-value-dual"
-      let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before"
-      let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after"
+      let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+      let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
 
       span(
         id = idBefore,
