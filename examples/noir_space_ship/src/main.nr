@@ -10,7 +10,7 @@ mod shield;
 // The space pirates can track our course but our shield technology remains a well guarded secret
 
 fn main(initial_shield: Field, shield_regen_percentage: Field, asteroid_masses_positive: pub [Field; 8], asteroid_masses_negative: pub [Field; 8]) -> pub bool {
-    println("Positive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\nPositive Test Case\n");
+    println("Positive Test Case");
 
     let did_survive_positive = shield::iterate_asteroids(initial_shield, shield_regen_percentage , asteroid_masses_positive);
     if(did_survive_positive){
