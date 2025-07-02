@@ -1270,6 +1270,23 @@ proc flowSimpleValue*(
       style=style
     )
   ):
+    span(
+      class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
+      style = style,
+      onmousedown = proc(e: Event, v: VNode) =
+        let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+        let target = document.getElementById(targetId)
+        if target != nil:
+          kout e
+          if target.style.maxWidth != "none":
+            target.style.maxWidth = "none"
+            e.target.toJs.classList.remove("flow-hide-content")
+            e.target.toJs.classList.add("flow-show-content")
+          else:
+            e.target.toJs.classList.remove("flow-show-content")
+            e.target.toJs.classList.add("flow-hide-content")
+            target.style.maxWidth = "200px"
+    )
     if showName:
       span(
         class = &"flow-{flowMode}-value-name",
@@ -1739,7 +1756,8 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): VNode =
     var style = style(
       (StyleAttr.fontSize, cstring($(self.fontSize) & "px")),
       (StyleAttr.lineHeight, cstring($self.lineHeight & "px")),
-      (StyleAttr.height, cstring($self.lineHeight & "px"))
+      (StyleAttr.height, cstring($self.lineHeight & "px")),
+      (StyleAttr.backgroundSize, cstring($(self.fontSize + 2) & "px"))
     )
     for event in step.events:
       flowEventValue(self, event, step.stepCount, style)
