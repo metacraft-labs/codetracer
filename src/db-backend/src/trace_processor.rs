@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -52,11 +52,7 @@ impl<'a> TraceProcessor<'a> {
         // let paths = index_paths(&trace.paths);
 
         for event in events {
-            info!("!!!!Processing event: {:?}", event);
             self.process_event(event)?;
-            if let Some(x) = self.db.steps.get(StepId(8)) {
-                info!("LINE 74 CALL KEY: {:?}", x);
-            }
         }
 
         while self.db.variables.len() > self.db.steps.len() {
@@ -102,8 +98,6 @@ impl<'a> TraceProcessor<'a> {
                 };
 
                 // info!("step with #{} and call key {:?}", db_step.step_id.0, db_step.call_key);
-
-                info!("Processed step with line: {:?} for call key {:?}", step_record.line, db_step.call_key);
 
                 self.db.steps.push(db_step);
                 self.db.variables.push(vec![]);
@@ -181,8 +175,6 @@ impl<'a> TraceProcessor<'a> {
                     CallKey(-1)
                 };
 
-                info!("WE HAVE A NEW CALL: {:?}", self.db.functions[call_record.function_id]);
-
                 self.current_call_key = CallKey(self.db.calls.len() as i64);
                 self.last_started_call_key = self.current_call_key;
 
@@ -210,7 +202,6 @@ impl<'a> TraceProcessor<'a> {
 
                 let current_step_id_usize = self.current_step_id.0 as usize;
                 if current_step_id_usize > 0 && current_step_id_usize < self.db.steps.len() {
-
                     // not true for 0 sometimes: no step for first top-level call:
                     self.db.steps[self.current_step_id].call_key = self.current_call_key;
                     self.db.steps[self.current_step_id].global_call_key = self.current_call_key;
