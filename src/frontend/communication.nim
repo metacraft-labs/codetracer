@@ -1,21 +1,13 @@
-import std / [ async, jsffi, strformat ]
+import std / [ jsffi, strformat, jsconsole ]
 import .. / common / ct_event
 
 type
-  # CommunicationApi ?
-  # Communication?
-  Mediator* = ref object of RootObj
-    name: string
-    transport*: Transport
-    asSubscriber*: Subscriber
-    # handlers*: array[CtEventKind, proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)]
-
   # can be in the same process
   # can be a vscode webview
   # can be an electron subwindow
   # can be a seprate browser client
   Subscriber* = ref object of RootObj
-    name*: string
+    name*: cstring
 
   Transport* = ref object of RootObj
     receiveHandlers*: seq[proc(raw: JsObject, subscriber: Subscriber)]
@@ -33,6 +25,7 @@ type
 
 type
   NotImplementedError* = object of CatchableError
+
 ### Transport:
 
 method send*(t: Transport, data: JsObject, subscriber: Subscriber) {.base.} =
@@ -42,7 +35,7 @@ method onRawReceive*(t: Transport, callback: proc(raw: JsObject, subscriber: Sub
   t.receiveHandlers.add(callback)
   # raise newException("not implemented")
 
-method internalRawReceive*(t: Transport, raw: JsObject, subscriber: Subscriber) =
+method internalRawReceive*(t: Transport, raw: JsObject, subscriber: Subscriber) {.base.}=
   for handler in t.receiveHandlers:
     try:
       handler(raw, subscriber)
@@ -55,52 +48,69 @@ method internalRawReceive*(t: Transport, raw: JsObject, subscriber: Subscriber) 
 # webview/component(mediator with vscode-view-transport OR same-process-local-transport) <-> (mediator with vscode-central-transport; OR same-process-central-transport)central context (renderer.nim / extension context / some other process);
 # central context (mediator central-backend-transport) <-> (dap) backend;
 
-method emit*[T](v: Mediator, eventKind: CtEventKind, value: T) {.base.} =
-  v.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, Subscriber(name: v.name))
+# method emit*[T](v: Mediator, eventKind: CtEventKind, value: T) {.base.} =
+#   v.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, Subscriber(name: v.name))
 
-method subscribe*[T](v: Mediator, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) {.base.} =
-  # v.transport.emit(SubscribeEvent(eventKind: eventKind))
-  # v.transport.subscribe(eventKind, callback, subscriber)
-  raise newException(NotImplementedError, "not implemented")
+# method subscribe*[T](v: Mediator, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) {.base.} =
+#   # v.transport.emit(SubscribeEvent(eventKind: eventKind))
+#   # v.transport.subscribe(eventKind, callback, subscriber)
+#   raise newException(NotImplementedError, "not implemented")
 
-method receive*(m: Mediator, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.base.} =
-  raise newException(NotImplementedError, "not implemented")
+# method receive*(m: Mediator, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.base.} =
+#   raise newException(NotImplementedError, "not implemented")
 
 # === Subscriber:
 
-method emit*[T](subscriber: Subscriber, eventKind: CtEventKind, value: T, sourceSubscriber: Subscriber) {.base.} =
+method emitRaw*(subscriber: Subscriber, eventKind: CtEventKind, value: JsObject, sourceSubscriber: Subscriber) {.base.} =
   raise newException(NotImplementedError, "not implemented")
 
 
 # === MediatorWithSubscribers:
 
 type
-  MediatorWithSubscribers* = ref object of Mediator
+  # reimplementing methods/repeating fields from Mediator
+  #   in order to not use inheritance, but to support geneirc methods
+  #   as otherwise we get
+  #   `generic methods are deprecated` warning
+  MediatorWithSubscribers* = ref object # of Mediator
+    name*: cstring
+    transport*: Transport
+    asSubscriber*: Subscriber
     subscribers*: array[CtEventKind, seq[Subscriber]]
     handlers*: array[CtEventKind, seq[proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)]]
+    isRemote*: bool
     # receive*: proc(t: TransportWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)
 
-method emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
+proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
+  echo "emit ", eventKind
+  console.log value
+  echo "subscribers: ", m.subscribers[eventKind].len
   for subscriber in m.subscribers[eventKind]:
-    subscriber.emit(eventKind, value, m.asSubscriber)
+    subscriber.emitRaw(eventKind, value.toJs, m.asSubscriber)
 
-method subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) =
+proc subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) =
   m.handlers[eventKind].add(proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
-    callback(eventKind, cast[T](rawValue), subscriber))
+    callback(eventKind, rawValue.to(T), subscriber))
+  if m.isRemote:
+    m.emit(CtSubscribe, eventKind)
 
-method registerSubscriber*(m: MediatorWithSubscribers, eventKind: CtEventKind, subscriber: Subscriber) =
-  m.subscribers[eventKind].add(subscriber) # callbacks for the vent kind are actually preserved in the mediator on the other side
+proc registerSubscriber*(m: MediatorWithSubscribers, eventKind: CtEventKind, subscriber: Subscriber) =
+  m.subscribers[eventKind].add(subscriber) # callbacks for the event kind are actually preserved in the mediator on the other side
 
-method receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
+proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
   for handler in m.handlers[eventKind]:
     try:
-      handler(eventKind, rawValue, subscriber)
+      if eventKind != CtSubscribe:
+        handler(eventKind, rawValue, subscriber)
+      else:
+        m.registerSubscriber(cast[CtEventKind](rawValue), subscriber)
     except:
       echo fmt"mediator {m.name} handler error: {getCurrentExceptionMsg()}"
 
-proc newMediatorWithSubscribers*(name: string, transport: Transport): MediatorWithSubscribers =
+proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, transport: Transport): MediatorWithSubscribers =
   result = MediatorWithSubscribers(
     name: name,
+    isRemote: isRemote,
     transport: transport,
     asSubscriber: Subscriber(name: name))
   transport.onRawReceive(proc(data: JsObject, subscriber: Subscriber) = # eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =

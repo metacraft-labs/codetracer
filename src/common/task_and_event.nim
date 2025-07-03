@@ -128,7 +128,7 @@ when not defined(js):
   type
     langstring = string ## compatibility type between native and javascript backends
 else:
-  import jsffi
+  # import jsffi
 
   type
     langstring = cstring ## compatibility type between native and javascript backends

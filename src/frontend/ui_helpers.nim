@@ -85,7 +85,6 @@ proc onClicks*(e: kdom.Event, onClick: proc (ev: kdom.Event, et: VNode), onDoubl
       windowClearTimeout(currentId)
       id = 0
     onDoubleClick(e,nil)
-    kout cstring"onclicks 2 end ", id
   else:
     discard
 
