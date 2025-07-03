@@ -295,7 +295,22 @@ proc events(self: EventLogComponent) =
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()
     self.lastJumpFireTime = currentTime
-    if not self.service.debugger.stableBusy:
+    let isAction = cast[bool](e.target.classList[0] == "row-expander".toJs)
+    if isAction:
+      let textElement = e.currentTarget.childNodes[3]
+      if textElement.classList[0] == "eventLog-text".toJs:
+        if textElement.style.toJs.maxHeight == "24px".toJs:
+          textElement.style.overflow = "auto"
+          textElement.style.maxHeight = "20ch".toJs
+          kout textElement.style
+          e.target.classList.remove("flow-hide-content")
+          e.target.classList.add("flow-show-content")
+        else:
+          textElement.style.overflow = ""
+          textElement.style.maxHeight = "24px".toJs
+          e.target.classList.remove("flow-show-content")
+          e.target.classList.add("flow-hide-content")
+    elif not self.service.debugger.stableBusy:
       self.jump(table, e)
 
   proc handlerMouseover(table: js, e: js) =
@@ -371,8 +386,13 @@ proc events(self: EventLogComponent) =
             searchable: true,
             data: j"kind",
             title: j"event-image",
-            render: proc(event: EventLogKind): cstring =
-              cstring""
+            render: proc(kind: EventLogKind, t: js, event: ProgramEvent): cstring =
+              if event.content.split("\n").len() == 2 and event.content.split("\n")[^1] == "":
+                cstring""
+              elif event.content.split("\n").len() > 1:
+                cstring"""<span class="row-expander flow-hide-content flow-view-more-button"/>"""
+              else:
+                cstring""
           },
           js{
             className: j"eventLog-text eventLog-cell",
