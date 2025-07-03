@@ -513,7 +513,7 @@ type
     layoutItem*: GoldenContentItem
     kxi*: KaraxInstance
     inExtension*: bool
-    api*: Mediator
+    api*: MediatorWithSubscribers
 
   DataTableComponent* = ref object
     context*: js
@@ -1605,9 +1605,6 @@ proc duration*(call: nil Call): int64 =
   # else:
   #   0
 
-template ttArray(a: array[7, string]): array[TokenText, string] =
-  cast[array[TokenText, string]](a)
-
 proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
@@ -1739,11 +1736,11 @@ method onAddBreakCResponse(self: Component, response: BreakpointInfo) {.base, as
 method onOutputJumpFromShellUi*(self: Component, response: int) {.base, async.} =
   discard
 
-method increaseWhitespaceWidth*(self: EditorViewComponent) =
+method increaseWhitespaceWidth*(self: EditorViewComponent) {.base.} =
   if self.whitespace.width < MAX_WHITESPACE_WIDTH:
     self.whitespace.width += 1
 
-method decreaseWhitespaceWidth*(self: EditorViewComponent) =
+method decreaseWhitespaceWidth*(self: EditorViewComponent) {.base.} =
   if self.whitespace.width > 1:
     self.whitespace.width -= 1
 

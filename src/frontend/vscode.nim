@@ -1,5 +1,5 @@
 when defined(ctInExtension):
-  import std / [async, strformat, jsffi]
+  import std / [async, strformat, jsffi, jsconsole]
   import lib
   import .. / common / ct_event
   import .. / frontend / types
@@ -28,7 +28,7 @@ when defined(ctInExtension):
       event*: cstring
       body*: JsObject 
       
-  proc acquireVsCodeApi(): VsCode {.importc.}
+  # proc acquireVsCodeApi(): VsCode {.importc.}
 
   {.emit: "const vscode = require(\"vscode\");"}
   
@@ -40,9 +40,9 @@ when defined(ctInExtension):
     WebviewSubscriber* = ref object of Subscriber
       webview*: VsCodeWebview
 
-  method emit*[T](w: WebviewSubscriber, kind: CtEventKind, value: T, sourceSubscriber: Subscriber) =
+  method emitRaw*(w: WebviewSubscriber, kind: CtEventKind, value: JsObject, sourceSubscriber: Subscriber) =
     # on receive the other transport should set the actual subscriber: for now always vscode extension context (middleware)
-    w.webview.postMessage(CtRawEvent(kind: kind, value: value.toJs).toJs)
+    w.webview.postMessage(CtRawEvent(kind: kind, value: value).toJs)
 
   ### VsCodeViewTransport:
 
@@ -52,21 +52,20 @@ when defined(ctInExtension):
       onVsCodeMesssage*: proc(t: VsCodeViewTransport, event: JsObject)
 
 
-  method send*(t: VsCodeViewTransport, eventKind: CtEventKind, value: JsObject, subscriber: Subscriber) =
-    t.vscode.postMessage(CtRawEvent(kind: eventKind, value: value).toJs)
+  method send*(t: VsCodeViewTransport, data: JsObject, subscriber: Subscriber)  =
+    t.vscode.postMessage(data)
 
-
-  method onVsCodeMessage*(t: VsCodeViewTransport, event: CtRawEvent) =
-    t.internalRawReceive(event.toJs, Subscriber(name: "vscode extenson context"))
+  method onVsCodeMessage*(t: VsCodeViewTransport, event: CtRawEvent) {.base.}=
+    t.internalRawReceive(event.toJs, Subscriber(name: cstring"vscode extenson context"))
 
   proc newVsCodeViewTransport*(vscode: VsCode, vscodeWindow: JsObject): VsCodeViewTransport =
     result = VsCodeViewTransport(vscode: vscode)
     vscodeWindow.addEventListener(cstring"message", proc(event: CtRawEvent) =
       result.onVsCodeMessage(event))
 
-  proc newVsCodeViewApi*(name: string, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers =
+  proc newVsCodeViewApi*(name: cstring, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers =
     let transport = newVsCodeViewTransport(vscode, vscodeWindow)
-    newMediatorWithSubscribers(name, transport)
+    newMediatorWithSubscribers(name, isRemote=true, transport=transport)
 
 
   # proc newVsCodeViewModelServer*(vscode: VsCode): ViewModelServer {.exportc.}=
@@ -78,24 +77,32 @@ when defined(ctInExtension):
   #         dap.sendCtRequest(kind, rawValue)
   #    newViewModelServer(receive)
 
-type
-  DapApi* = ref object of RootObj
-    handlers*: array[CtEventKind, proc(kind: CtEventKind, raw: JsObject)]
+when not defined(ctInExtension):
+  type
+    DapApi* = ref object
+      handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]    
+else:
+  type
+    DapApi* = ref object
+      handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]
+      vscode*: VsCode
+      context*: VsCodeContext
 
+type
   DapRequest* = ref object
     command*: cstring
     value*: JsObject
 
 const CT_EVENT_DAP_TRACKING_RESPONSE_KINDS = {CtLoadLocals}
 
-func toCtDapResponseEventKind(kind: CtEventKind): CtEventKind =
+func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # TODO: based on $kind? or mapping?
   case kind:
   of CtLoadLocals: CtLoadLocalsResponse
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
-method toDapCommandOrEvent(dap: DapApi, kind: CtEventKind): cstring =
+func toDapCommandOrEvent(kind: CtEventKind): cstring =
   # TODO
   # eventually auto mapping using $kind and tokenization?
   case kind:
@@ -105,26 +112,29 @@ method toDapCommandOrEvent(dap: DapApi, kind: CtEventKind): cstring =
   else: raise newException(ValueError, fmt"not mapped to request command yet: {kind}")
 
 
-func commandToCtResponseEventKind(dap: Dap, command: cstring): CtEventKind =
+func commandToCtResponseEventKind(command: cstring): CtEventKind =
   # based on parseEnum[CtEventKind](command) and toCtDapResponseEventKind?
   # or some common mapping?
-  case command:
+  case $command:
   of "load-locals": CtLoadLocalsResponse
-  else: raise newException(ValueError, fmt"no ct event kind response for command {command} defined")
+  else: raise newException(
+    ValueError, 
+    "no ct event kind response for command: \"" & $command & "\" defined")
 
+func dapEventToCtEventKind(event: cstring): CtEventKind =
+  case $event:
+  of "stopped": DapStopped
+  of "initialized": DapInitialized
+  of "output": DapOutput
+  else: raise newException(
+    ValueError,
+    "no ct event kind for this string: \"" & $event & "\" defined")
 
-method sendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
-  discard dap.asyncSendCtRequest(kind, rawValue)
-
-
-method asyncSendCtRequest(dap: DapVsCodeApi, kind: CtEventKind, rawValue: JsObject) {.async, base.} =
-  raise newException(NotImplementedError, "asyncSendCtRequest not implemented")
-
-method on*[T](dap: DapApi, kind: CtEventKind, handler: proc(kind: CtEventKind, value: T)) =
+proc on*[T](dap: DapApi, kind: CtEventKind, handler: proc(kind: CtEventKind, value: T)) =
   dap.handlers[kind].add(proc(kind: CtEventKind, rawValue: JsObject) =
     handler(kind, cast[T](rawValue)))
 
-method receive*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
+proc receive*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
   for handler in dap.handlers[kind]:
     try:
       handler(kind, rawValue)
@@ -133,36 +143,38 @@ method receive*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
       echo "   kind: ", kind
       console.log cstring"rawValue: ", rawValue
 
-method receiveRequest*(dap: DapApi, command: cstring, rawValue: JsObject) =
-  dap.receive(commandToResponseEventKind(command))
+proc receiveResponse*(dap: DapApi, command: cstring, rawValue: JsObject) =
+  dap.receive(commandToCtResponseEventKind(command), rawValue)
 
-method 
-when defined(ctInExtension):
-  type
-    DapVsCodeApi* = ref object of DapApi
-      vscode*: VsCode
-      context*: VsCodeContext
-
-  method asyncSendCtRequest(dap: DapVsCodeApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-    let response = await dap.vscode.debug.activeDebugSession.customRequest(dap.toDapRequestCommand(kind), rawValue)
+proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
+  dap.receive(dapEventToCtEventKind(event), rawValue)
+ 
+when not defined(ctInExtension):
+  proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
+    raise newException(NotImplementedError, "asyncSendCtRequest not implemented")
+else:
+  proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
+    let response = await dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
     if kind in CT_EVENT_DAP_TRACKING_RESPONSE_KINDS:
-      dap.receiveRequest(toCtDapResponseEventKind(kind), response.value)
+      dap.receiveResponse(cast[cstring](response.command), response.value)
 
-  proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapVsCodeApi {.exportc.} =
-    result = DapVsCodeApi(vscode: vscode, context: context)
+  proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
+    result = DapApi(vscode: vscode, context: context)
     proc onDidSendMessage(message: VsCodeDapMessage) =
-      if message["type"] == cstring"event":
+      if message.`type` == cstring"event":
         result.receiveEvent(message.event, message.body)
 
-    context.subscriptions.add(
-      vscode.debug.registerDebugAdapterTrackerFactory(cstring"*"", js{
+    context.subscriptions.push(
+      vscode.debug.toJs.registerDebugAdapterTrackerFactory(cstring"*", js{
         createDebugAdapterTracker: proc(session: VsCodeDebugSession): JsObject =
           JsObject{
             onDidSendMessage: onDidSendMessage,
           }
         }
       ))
-  
+
+proc sendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
+  discard dap.asyncSendCtRequest(kind, rawValue)
 
 
   # backend <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
@@ -179,15 +191,15 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # backendApi.dapApi.onAll(proc(kind: CtEventKind, rawValue: JsObject) =
       # viewsApi.emit(kind, rawValue))
 
-    dapApi.on(DapStopped, proc(value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
-    dapApi.on(CtLoadLocalsResponse, proc(value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
+    dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
+    dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
     
     # backendApi.subscribe(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent, sub: Subscriber) = viewsApi.emit(kind, value))
     # backendApi.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody, sub: Subscriber) = viewsApi.emit(kind, value))
     # maybe somehow a more proxy-like/macro way
 
     # setupDapEventHandlers(backendApi)
-    viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.requestOrEvent(kind, value))
+    viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     # some kind of loop or more raw subscribe, that directly sends for many cases
     # for dap events:
     #   viewsApi.subscribeRaw(CtLoadLocals, proc(kind: CtEventKind, rawValue: JsObject, sub: Subscriber) =
@@ -195,25 +207,25 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # for others(view/frontend communication) maybe different schema
 
 
-  proc setupVsCodeBackendApi*(name: cstring, dapApi: VsCodeDapApi, viewsApi: MediatorWithSubscribers): MediatorWithSubscribers {.exportc.}=
-    var transport = newVsCodeBackendTransport(dapApi)
-    result = newMediatorWithSubscribers($name, transport)
+  # proc setupVsCodeBackendApi*(name: cstring, dapApi: VsCodeDapApi, viewsApi: MediatorWithSubscribers): MediatorWithSubscribers {.exportc.}=
+    # var transport = newVsCodeBackendTransport(dapApi)
+    # result = newMediatorWithSubscribers($name, isRemote=true, transport=transport)
     # for event in FirstDapEvent..LastDapEvent:
       # transport.rawSubscribe(event, proc(kind: CtEventKind, rawValue: JsObject) 
-    setupMiddlewareApis(result, viewsApi)
+    # setupMiddlewareApis(result, viewsApi)
 
-
+when defined(ctInExtension):
   type
     VsCodeExtensionToViewsTransport* = ref object of Transport
 
 
   proc setupVsCodeExtensionViewsApi*(name: cstring): MediatorWithSubscribers {.exportc.} =
     let transport = VsCodeExtensionToViewsTransport() # TODO
-    newMediatorWithSubscribers($name, transport)
+    newMediatorWithSubscribers(name, isRemote=true, transport=transport)
 
   {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
   {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
-  {.emit: "module.exports.setupVsCodeBackendApi = setupVsCodeBackendApi;".}
+  # {.emit: "module.exports.setupVsCodeBackendApi = setupVsCodeBackendApi;".}
   {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
 
 # vscode backend api
