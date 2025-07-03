@@ -91,7 +91,7 @@
   border-bottom-right-radius: 4px
   font-family: "FiraCode"
   white-space: nowrap
-  max-width: 200px
+  max-width: 30ch
   min-width: auto
   overflow: hidden
   text-overflow: ellipsis
@@ -386,13 +386,13 @@
   font-size: 14px
   // height: 40px
   min-width: 50px
-  max-width: fit-content !important
+  max-width: 100ch !important
   padding-right: 8px
   position: relative
   // width: fit-content
   // margin-top: 16px
   z-index: 20
-  padding-left: 8px
+  // padding-left: 8px
   top: 1.2ch
 
   &::before
@@ -464,9 +464,10 @@
     position: relative
     // top: 13px
     font-weight: 400
-    overflow: visible
+    overflow: auto
     white-space: nowrap
     max-width: 100%
+    padding-left: 1ch
   }
 
 .line-flow-hit
