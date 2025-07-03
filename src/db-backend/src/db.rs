@@ -749,6 +749,7 @@ pub struct DbRecordEvent {
     pub kind: EventLogKind,
     pub content: String,
     pub step_id: StepId,
+    pub metadata: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

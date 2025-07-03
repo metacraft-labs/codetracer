@@ -12,7 +12,8 @@ const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
   "network:",
   "trace:",
   "file:",
-  "errors:"
+  "errors:",
+  "evm events:"
 ]
 
 const EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
@@ -29,7 +30,8 @@ const EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
   "open",
   "error",
 
-  "trace log event"
+  "trace log event",
+  "messages",
 ]
 
 const EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
@@ -53,7 +55,8 @@ let kindTags: array[EventLogKind, seq[EventTag]] = [
   @[EventFiles],              #Open
   @[EventErrorEvents],        #Error
 
-  @[EventTrace]               #TraceLogEvent
+  @[EventTrace],               #TraceLogEvent
+  @[EventEvm]
 ]
 
 var tagKinds: array[EventTag, seq[EventLogKind]]
@@ -233,6 +236,11 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
     of EventLogKind.Error:
       fmt"error: {eventElement.content}"
 
+    of EventLogKind.EvmEvent:
+      if eventElement.metadata != "":
+        fmt"{eventElement.metadata}: {eventElement.content}"
+      else:
+        fmt"{eventElement.content}"
     else:
       fmt"event {eventElement.kind}"
 
@@ -374,7 +382,7 @@ proc events(self: EventLogComponent) =
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
                 of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
-                   OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error:
+                   OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error, EventLogKind.EvmEvent:
                   cstring(eventLogDescriptionRepr(event, event.eventIndex))
 
                 of TraceLogEvent:

@@ -239,7 +239,9 @@ impl<'a> TraceProcessor<'a> {
                     kind: record_event.kind,
                     content: record_event.content.clone(),
                     step_id: self.current_step_id,
+                    metadata: record_event.metadata.clone(),
                 });
+                info!("----- CHECK ME BI$ {:?}", self.db.events.last().unwrap());
             }
             TraceLowLevelEvent::DropLastStep => {
                 assert!(self.current_step_id.0 > 0);

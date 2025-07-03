@@ -283,6 +283,7 @@ impl<'a> CallFlowPreloader<'a> {
             kind: event.kind,
             text: event.content.clone(),
             rr_ticks: event.step_id.0,
+            metadata: event.metadata.clone(),
         }
     }
 

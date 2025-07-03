@@ -28,7 +28,6 @@ proc removeClasses(index: int, class: cstring, name: string)
 proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
-proc adjustEditorWidth(self: EditorViewComponent)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
@@ -1518,21 +1517,6 @@ method onEnter*(self: EditorViewComponent) {.async.} =
       1
     )
     data.ui.activeFocus = self.traces[line]
-
-proc adjustEditorWidth(self: EditorViewComponent) =
-  let path = self.tabInfo.name
-  let options = cast[MonacoEditorOptions](self.monacoEditor.getOptions())
-
-  for flowDom in self.flow.flowDom:
-    if not flowDom.firstChild.isNil and not flowDom.firstChild.toJs.firstElementChild.isNil:
-      self.flow.calculateMaxWidth(cast[Element](flowDom.firstChild.toJs.firstElementChild).clientWidth)
-
-  let charWidth = data.ui.fontSize.float * 0.55
-  let scrollBeyondLastColumn =
-    self.flow.maxWidth
-
-  options.scrollBeyondLastColumn = floor(scrollBeyondLastColumn.float / charWidth)
-  self.monacoEditor.updateOptions(options)
 
 method onUpdatedFlow*(self: EditorViewComponent, update: FlowUpdate) {.async.} =
   if not self.flow.isNil:
