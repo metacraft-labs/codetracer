@@ -23,7 +23,8 @@ proc makeSlider(self: FlowComponent, position: int)
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int)
 
 const SLIDER_OFFSET = 6 # in px
-const FLOW_VALUE_MAX_WIDTH = "30ch"
+const FLOW_VALUE_LIMIT = 30
+const FLOW_VALUE_MAX_WIDTH = fmt"{FLOW_VALUE_LIMIT}ch"
 
 proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value): ValueMode =
   if testEq(beforeValue, afterValue):
@@ -1199,7 +1200,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       style=style
     )
   ):
-    if event.text.len() > 20:
+    if event.text.len() > FLOW_VALUE_LIMIT:
       span(
         class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
         style = style,
@@ -1317,13 +1318,13 @@ proc flowSimpleValue*(
   ):
     case flowValueMode:
       of BeforeValueMode:
-        if beforeValue.textRepr(compact=true).len() > 20:
+        if beforeValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
           renderViewOption()
       of AfterValueMode:
-        if afterValue.textRepr(compact=true).len() > 20:
+        if afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
           renderViewOption()
       of BeforeAndAfterValueMode:
-        if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > 20:
+        if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
           renderViewOption()
     if showName:
       span(
