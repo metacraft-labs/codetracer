@@ -8,7 +8,7 @@ when defined(ctInExtension):
   type
     VsCode* = ref object
       postMessage*: proc(raw: JsObject): void
-      # valid only in extension-level, not webview context probably
+      # valid only in extension-level, not webview context
       debug: VsCodeDebugApi
 
     VsCodeDebugApi* = ref object
@@ -30,9 +30,9 @@ when defined(ctInExtension):
       
   # proc acquireVsCodeApi(): VsCode {.importc.}
 
-  {.emit: "const vscode = require(\"vscode\");"}
-  
-  var vscode* {.importc.}: VsCode # = acquireVsCodeApi()
+  {.emit: "var vscode = null; try { vscode = require(\"vscode\"); } catch { vscode = acquireVsCodeApi(); }".}
+
+  var vscode* {.importc.}: VsCode # vscode in extension central context; acquireVsCodeApi() in webview;
 
   ### WebviewSubscriber:
 
@@ -49,8 +49,7 @@ when defined(ctInExtension):
   type
     VsCodeViewTransport* = ref object of Transport
       vscode: VsCode
-      onVsCodeMesssage*: proc(t: VsCodeViewTransport, event: JsObject)
-
+      # onVsCodeMesssage*: proc(t: VsCodeViewTransport, event: JsObject)
 
   method send*(t: VsCodeViewTransport, data: JsObject, subscriber: Subscriber)  =
     t.vscode.postMessage(data)
@@ -59,23 +58,13 @@ when defined(ctInExtension):
     t.internalRawReceive(event.toJs, Subscriber(name: cstring"vscode extenson context"))
 
   proc newVsCodeViewTransport*(vscode: VsCode, vscodeWindow: JsObject): VsCodeViewTransport =
-    result = VsCodeViewTransport(vscode: vscode)
+    result = VsCodeViewTransport(vscode: vscode) # , onVsCodeMessage: onVsCodeMessage)
     vscodeWindow.addEventListener(cstring"message", proc(event: CtRawEvent) =
       result.onVsCodeMessage(event))
-
-  proc newVsCodeViewApi*(name: cstring, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers =
+  
+  proc newVsCodeViewApi*(name: cstring, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers {.exportc.} =
     let transport = newVsCodeViewTransport(vscode, vscodeWindow)
-    newMediatorWithSubscribers(name, isRemote=true, transport=transport)
-
-
-  # proc newVsCodeViewModelServer*(vscode: VsCode): ViewModelServer {.exportc.}=
-  #    var dap = Dap(vscode: vscode)
-  #    let receive = proc(v: ViewModelServer, kind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
-  #       if kind == CtSubscribe:
-  #         v.register(kind, subscriber)
-  #       elif true: # TODO: dap check
-  #         dap.sendCtRequest(kind, rawValue)
-  #    newViewModelServer(receive)
+    newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
 
 when not defined(ctInExtension):
   type
@@ -198,8 +187,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # backendApi.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody, sub: Subscriber) = viewsApi.emit(kind, value))
     # maybe somehow a more proxy-like/macro way
 
-    # setupDapEventHandlers(backendApi)
     viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+
     # some kind of loop or more raw subscribe, that directly sends for many cases
     # for dap events:
     #   viewsApi.subscribeRaw(CtLoadLocals, proc(kind: CtEventKind, rawValue: JsObject, sub: Subscriber) =
@@ -220,55 +209,16 @@ when defined(ctInExtension):
 
 
   proc setupVsCodeExtensionViewsApi*(name: cstring): MediatorWithSubscribers {.exportc.} =
-    let transport = VsCodeExtensionToViewsTransport() # TODO
-    newMediatorWithSubscribers(name, isRemote=true, transport=transport)
+    let transport = VsCodeExtensionToViewsTransport() # for now not used for sending;
+    # viewsApi.receive called in message handler in `getOrCreatePanel` in initPanels.ts
+    newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
 
-  {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
-  {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
-  # {.emit: "module.exports.setupVsCodeBackendApi = setupVsCodeBackendApi;".}
-  {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
-
-# vscode backend api
-# method emit ..:
-  # discard v.emitAsync(..)
-
-# method emitAsync ..:
-  # let response = await self.dap.sendCtRequest(kind, value.toJs)
-  # if response?
-    # self.receive(self, self.dap.toCtEventKind(response.command), response.value, self.backendSubscriber)
-
-
-# method subscribe ..:
-  # add to handlers later called by receive
-
-# proc setupDapEventHandlers ..:
-  # backendApi.dap().onEvent(proc(rawMessage: DapRawMessage) =
-    # backendApi.receive(backendApi, backendApi.dap.toCtEventKind(rawMessage.event), rawMessage.value, backendApi.backendSubscriber))
-
-# method onMessage for vscode and for other dap:
-
-# method onEvent*(dap: VsCodeDap, handler: ..) =
-  # dap.context.sub.. 
-    # dap.debug.registerDebugAdapterTrackerFactory..
-      # createDebugAdapterTracker..
-        # return {
-          # onDidSendMessage: ..
-            # if type == "event":
-              # handler(msg)
-      # }
-        # ..
-
-# method onEvent*(dap: CtDap, handler: ..) =
-  # dap.internal.onEvent(..)
-  # or directly CtDap being the impl
-
-# 
-# TODO: vscode/dap specific wrappers if needed for receiving and emitting:
-# dap incoming responses/events calling `emit()` and 
-# panel-incoming events calling `receive`
-
-# for normal frontend: dap code also calling `emit()`
-# panel-incoming events would already call `receive`
+  when defined(ctInCentralExtensionContext):
+    # we don't want this in webview
+    {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
+    {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
+    {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
+    {.emit: "module.exports.receive = receive;".}
 
 # receive might become the same! at least for javascript-based code
 # but with different dap instances: one wrapping vscode and one custom in our electron
