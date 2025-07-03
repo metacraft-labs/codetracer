@@ -1714,11 +1714,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1749809764,
-        "narHash": "sha256-Q52nKVHi0LrypuuTmKyC7Tp4aJ7b8D8AbBmUxfA2+bo=",
+        "lastModified": 1751535369,
+        "narHash": "sha256-IWbMDG7eq7wFhagUJHCXFof0WUQXarBZ6mcD5u0ZSZg=",
         "owner": "metacraft-labs",
         "repo": "codetracer-wasm-recorder",
-        "rev": "29536e5348b711b6c2a721f8adbbea0c0a6d71d8",
+        "rev": "5a10d0389748fc0e3ef77ff6fc6f04ad52e893b8",
         "type": "github"
       },
       "original": {

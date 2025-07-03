@@ -146,6 +146,9 @@ mkShell {
       # ui-test dependencies
       playwright-driver.browsers
       playwright
+
+      # runtime_tracing build dependency
+      capnproto
     ]
     ++ pkgs.lib.optionals (!stdenv.isDarwin) [
       # Building AppImage
