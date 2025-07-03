@@ -1,7 +1,7 @@
 # backend agnostic code, part of the types module, should not be imported directly,
 # use common/types or frontend/types instead.
 import
-  strformat, strutils, sequtils, macros, json, times, typetraits, results, paths
+  strformat, strutils, sequtils, macros, json, times, results, paths
 
 import task_and_event
 
@@ -29,10 +29,10 @@ let
   CT_PYTHON_LOG_PATH_BASE* = langstring(codetracerTmpPath & "/log")
 
 proc ct_python_log_path*(callerPid: int): langstring =
-  CT_PYTHON_LOG_PATH_BASE & "_" & $callerPid & ".txt"
+  langstring($CT_PYTHON_LOG_PATH_BASE & "_" & $callerPid & ".txt")
 
 proc ct_python_json_log_path*(callerPid: int): langstring =
-  CT_PYTHON_LOG_PATH_BASE & "_" & $callerPid & ".jsonl"
+  langstring($CT_PYTHON_LOG_PATH_BASE & "_" & $callerPid & ".jsonl")
 
 # this module is used in codetracer and core and in the nim plugin so
 # it needs to support both C and JavaScript
@@ -1857,7 +1857,6 @@ func textReprDefault(value: Value, depth: int = 10): string =
         res.add(fmt"{value.activeFields[i+1]}: {v}")
       fmt"""{value.typ.langType}::{textReprDefault(value.elements[0])}({res.join(", ")})"""
     else:
-      var elements = value.elements
       res = value.elements.mapIt(textReprDefault(it, depth - 1))
       fmt"""{value.typ.langType}::{value.activeVariant}({res.join(", ")})"""
   of Html:

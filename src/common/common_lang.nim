@@ -4,7 +4,7 @@
 # backend agnostic code, part of the lang module, should not be imported directly,
 # use common/lang or frontend/lang instead.
 
-import strutils, os
+import os
 
 type
   Lang* = enum ## Identifies a programming language implementation
