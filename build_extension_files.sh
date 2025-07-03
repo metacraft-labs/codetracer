@@ -13,5 +13,6 @@ nim \
 
 nim \
   -d:ctInExtension \
+  -d:ctInCentralExtensionContext \
   --out:"$2" \
   js src/frontend/vscode.nim

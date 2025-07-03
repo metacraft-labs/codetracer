@@ -49,7 +49,10 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response))
   # api.subscribe(CtCompleteMove, self.onCompleteMove)
-  
+
+proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
+
 method render*(self: StateComponent): VNode =
   # render using value components
   # most of the stuff is separated into  watches and normal local values

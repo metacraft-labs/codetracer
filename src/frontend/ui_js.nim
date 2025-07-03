@@ -10,6 +10,9 @@ import
   lib, types, lang, renderer, config,
   property_test / test
 
+when defined(ctInExtension):
+  import vscode
+
 import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
