@@ -1154,7 +1154,7 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
       isTooltipValue: true,
     )
 
-proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle): VNode =
+proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle, i: int): VNode =
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
@@ -1201,7 +1201,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
         class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
         style = style,
         onmousedown = proc(e: Event, v: VNode) =
-          let targetId = &"flow-{flowMode}-value-box-{stepCount}"
+          let targetId = &"flow-{flowMode}-value-box-{stepCount}-{i}"
           let target = document.getElementById(targetId)
           if not target.isNil:
             if target.style.maxWidth != "none":
@@ -1228,7 +1228,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     ):
       text &"<{name}>"
     span(
-      id = &"flow-{flowMode}-value-box-{stepCount}",
+      id = &"flow-{flowMode}-value-box-{stepCount}-{i}",
       style = style,
       iteration = $(self.flow.steps[stepCount].iteration),
       class = &"flow-{flowMode}-value-box {klass}-box " & before,
@@ -1790,8 +1790,8 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): VNode =
       (StyleAttr.height, cstring($self.lineHeight & "px")),
       (StyleAttr.backgroundSize, cstring($(self.fontSize + 2) & "px"))
     )
-    for event in step.events:
-      flowEventValue(self, event, step.stepCount, style)
+    for i, event in step.events:
+      flowEventValue(self, event, step.stepCount, style, i)
 
     for i, expression in step.exprOrder:
       let beforeValue = step.beforeValues[expression]
