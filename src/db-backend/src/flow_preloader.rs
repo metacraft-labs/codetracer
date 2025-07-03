@@ -153,7 +153,6 @@ impl<'a> CallFlowPreloader<'a> {
         let mut first = true;
         info!("loop");
         loop {
-            info!("Processed step: {:?}", db.steps[iter_step_id]);
             let (step_id, progressing) = if first {
                 first = false;
                 (iter_step_id, true)
@@ -161,10 +160,6 @@ impl<'a> CallFlowPreloader<'a> {
                 let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
                 db.next_step_id_relative_to(iter_step_id, true, step_to_different_line)
             };
-            info!(
-                "step id {:?} call_key {:?} progressing {}",
-                step_id, call_key, progressing
-            );
             iter_step_id = step_id;
             let step = db.steps[step_id];
             if call_key != step.call_key || !progressing {
@@ -210,10 +205,7 @@ impl<'a> CallFlowPreloader<'a> {
         path_buf: &PathBuf,
         step_count: i64,
     ) -> FlowViewUpdate {
-        info!("Processing step {:?} for loop", step.line);
         if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(&step, path_buf) {
-            info!("loop shape {:?}", loop_shape.first);
-            info!("active loops: {:?}", self.active_loops);
             if loop_shape.first.0 == step.line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
@@ -252,13 +244,6 @@ impl<'a> CallFlowPreloader<'a> {
             }
         }
 
-        
-        info!("---------- THIS ARE THE FLOW_VIEW_UPDATE LOOPS = {:?}", flow_view_update.loops);
-        info!("SANITY CHECK: [{:?} - {:?}] for step line: {:?}",
-        flow_view_update.loops.last().unwrap().first.0,
-        flow_view_update.loops.last().unwrap().last.0,
-        step.line.0
-    );
         if flow_view_update.loops.last().unwrap().first.0 <= step.line.0
             && flow_view_update.loops.last().unwrap().last.0 >= step.line.0
         {
@@ -266,9 +251,7 @@ impl<'a> CallFlowPreloader<'a> {
                 Iteration(flow_view_update.loops.last().unwrap().iteration.0);
             flow_view_update.steps.last_mut().unwrap().r#loop = flow_view_update.loops.last().unwrap().base.clone();
             let index = (flow_view_update.loops.last().unwrap().base.0) as usize;
-            info!("Checking whether we can insert step with line: {:?} in loop", step.line);
             if index < flow_view_update.loop_iteration_steps.len() {
-                info!("Inserting step with line: {:?} in loop", step.line);
                 flow_view_update
                     .loops
                     .last_mut()
