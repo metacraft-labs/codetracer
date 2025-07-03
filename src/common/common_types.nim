@@ -694,6 +694,7 @@ type
     text*: langstring
     # contains step_id for db-backend
     rrTicks*: int64
+    metadata*: langstring
 
   FlowStep* = object ## Flow Step object
     position*: int
@@ -868,7 +869,10 @@ type
     Error,
 
     # used for trace log events
-    TraceLogEvent
+    TraceLogEvent,
+
+    # used for stylus evm events
+    EvmEvent,
 
   ProgramEvent* = object ## Program event object
     kind*: EventLogKind

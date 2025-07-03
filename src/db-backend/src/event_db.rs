@@ -180,7 +180,6 @@ impl EventDb {
                 self.trace_list.push(table_id);
             }
             let event = self.convert_stop_to_program_event(result);
-            info!("----- WANT TO CHECK THE REGISTERED TRACEPOINT Event {:?}", event);
             self.register_in_global_table(&[event.clone()], table_id);
             // sort global?
             self.insert_in_single_table(event, table_id.0);
@@ -189,7 +188,6 @@ impl EventDb {
             self.tracepoint_values
                 .entry(result.tracepoint_id)
                 .and_modify(|e| e.push(result.locals.clone()));
-            info!("----- CHECK THE TRACEPOINT_VALUES {:?}", self.tracepoint_values);
         }
         self.refresh_global();
         // self.sort_global_table();
