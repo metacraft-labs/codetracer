@@ -23,6 +23,7 @@ proc makeSlider(self: FlowComponent, position: int)
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int)
 
 const SLIDER_OFFSET = 6 # in px
+const FLOW_VALUE_MAX_WIDTH = "30ch"
 
 proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value): ValueMode =
   if testEq(beforeValue, afterValue):
@@ -1211,7 +1212,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
             else:
               e.target.toJs.classList.remove("flow-show-content")
               e.target.toJs.classList.add("flow-hide-content")
-              target.style.maxWidth = "20ch"
+              target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
       )
     span(
       class = &"flow-{flowMode}-value-name {klass}-name",
@@ -1279,7 +1280,7 @@ proc flowSimpleValue*(
             else:
               e.target.toJs.classList.remove("flow-show-content")
               e.target.toJs.classList.add("flow-hide-content")
-              target.style.maxWidth = "20ch"
+              target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
       )
     )
 
