@@ -5,6 +5,8 @@ type
     CtLoadLocals,
     CtLoadLocalsResponse,
     DapStopped,
+    DapInitialized,
+    DapOutput,
     
     
 

@@ -1,7 +1,7 @@
 # backend agnostic code, part of the types module, should not be imported directly,
 # use common/types or frontend/types instead.
 import
-  strformat, strutils, sequtils, macros, json, times, typetraits, results, paths
+  strformat, strutils, sequtils, macros, json, times, results, paths
 
 import task_and_event
 

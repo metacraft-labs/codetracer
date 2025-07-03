@@ -44,7 +44,7 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   if self.inExtension:
     self.redrawForExtension()
 
-method register*(self: StateComponent, api: Mediator) =
+method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response))

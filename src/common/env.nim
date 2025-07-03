@@ -5,7 +5,7 @@ when not defined(js):
   proc get*(a: string, default: string = ""): string =
     os.getEnv(a, default)
 else:
-  import jsffi
+  # import jsffi
 
   type
     NodePath* = ref object

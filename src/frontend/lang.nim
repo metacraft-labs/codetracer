@@ -24,8 +24,8 @@ proc toLang*(lang: cstring): Lang =
     small: LangSmall,
     noir: LangNoir
   }
-  if langs.hasKey(cstring(lang)):
-    result = langs[cstring(lang)]
+  if langs.hasKey(lang):
+    result = langs[lang]
   else:
     result = LangUnknown
 

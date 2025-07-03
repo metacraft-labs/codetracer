@@ -6,7 +6,7 @@ when not defined(js):
 
 import
   macros, dom, jsffi, typetraits, strutils, strformat, os, async,
-  karax, kdom, sugar, jsconsole, results, task_and_event, paths
+  kdom, sugar, jsconsole, results, task_and_event, paths
 import ../common/ct_logging
 
 type
@@ -595,7 +595,7 @@ else:
 
 proc `$`*(a: js): string {.importcpp: "cstrToNimstr(JSON.stringify(#))".}
 
-proc jsGetEnv(a: cstring): cstring {.importcpp: "process.env[#]".}
+proc jsGetEnv*(a: cstring): cstring {.importcpp: "process.env[#]".}
 
 
 if inElectron:
@@ -891,7 +891,7 @@ proc kout2*[T](a: T): void {.importcpp: "console.log(#)".}
 proc kout2*[T](a: T, b: T): void {.importcpp: "console.log(#, #)".}
 
 
-template taskLog(taskId: TaskId): cstring =
+template taskLog*(taskId: TaskId): cstring =
   let taskIdString = taskId.cstring
   if taskIdString.len > 0:
     # for compat with codetracer_output for chronicles
@@ -1136,4 +1136,4 @@ proc mapPairs*[K, V](a: JsAssoc[K, V]): seq[(K, V)] =
     result.add((k, v))
 
 
-export kout, sugar, task_and_event
+export sugar, task_and_event

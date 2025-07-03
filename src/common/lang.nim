@@ -1,4 +1,5 @@
 include common_lang
+import strutils
 import tables
 
 proc toLang*(lang: string): Lang =
