@@ -1323,3 +1323,28 @@ proc resetView*(self: WelcomeScreenComponent) =
   self.welcomeScreen = false
   self.newRecordScreen = false
   self.openOnlineTrace = false
+
+proc calculateMaxWidth*(self: FlowComponent, stepNodeWidth: int) =
+  let editor = self.editorUI.monacoEditor
+  let editorLayout = editor.config.layoutInfo
+  let minimapWidth = editorLayout.minimapWidth
+
+  self.maxWidth = max(
+    self.maxWidth,
+    stepNodeWidth
+  )
+
+proc adjustEditorWidth*(self: EditorViewComponent) =
+  let path = self.tabInfo.name
+  let options = cast[MonacoEditorOptions](self.monacoEditor.getOptions())
+
+  for flowDom in self.flow.flowDom:
+    if not flowDom.firstChild.isNil and not flowDom.firstChild.toJs.firstElementChild.isNil:
+      self.flow.calculateMaxWidth(cast[Element](flowDom.firstChild.toJs.firstElementChild).clientWidth)
+
+  let charWidth = data.ui.fontSize.float * 0.55
+  let scrollBeyondLastColumn =
+    self.flow.maxWidth
+
+  options.scrollBeyondLastColumn = floor(scrollBeyondLastColumn.float / charWidth)
+  self.monacoEditor.updateOptions(options)

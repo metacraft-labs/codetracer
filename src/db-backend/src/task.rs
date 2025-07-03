@@ -14,7 +14,7 @@ use crate::lang::*;
 use crate::value::{Type, Value};
 
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
-pub const EVENT_KINDS_COUNT: usize = 13;
+pub const EVENT_KINDS_COUNT: usize = 14;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -417,6 +417,7 @@ pub struct FlowEvent {
     // TODO: generalize this type/name as it is rr ticks for the system backend
     // and step id for db-backend
     pub rr_ticks: i64,
+    pub metadata: String,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

@@ -1174,6 +1174,8 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       ("flow-std-default", "stdin")
     of EventLogKind.ReadFile:
       ("flow-std-default", "stdin")
+    of EventLogKind.EvmEvent:
+      ("flow-std-default", $event.metadata)
     else:
       ("", "")
   # let klass = 
@@ -1213,6 +1215,8 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
               e.target.toJs.classList.remove("flow-show-content")
               e.target.toJs.classList.add("flow-hide-content")
               target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
+            self.maxWidth = 0
+            self.editorUI.adjustEditorWidth()
       )
     span(
       class = &"flow-{flowMode}-value-name {klass}-name",
@@ -1281,6 +1285,8 @@ proc flowSimpleValue*(
               e.target.toJs.classList.remove("flow-show-content")
               e.target.toJs.classList.add("flow-hide-content")
               target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
+          self.maxWidth = 0
+          self.editorUI.adjustEditorWidth()
       )
     )
 
@@ -2227,16 +2233,6 @@ proc ensureFlowLineContainer(self: FlowComponent, step: FlowStep) =
   if not self.flowDom.haskey(step.position):
     cwarn fmt"flow: cannot create flow widget at {step.position} line"
     return
-
-proc calculateMaxWidth*(self: FlowComponent, stepNodeWidth: int) =
-  let editor = self.editorUI.monacoEditor
-  let editorLayout = editor.config.layoutInfo
-  let minimapWidth = editorLayout.minimapWidth
-
-  self.maxWidth = max(
-    self.maxWidth,
-    stepNodeWidth
-  )
 
 proc addParallelRegularStepValues(self: FlowComponent, step: FlowStep) =
   # check if there is a widget and container for this step
