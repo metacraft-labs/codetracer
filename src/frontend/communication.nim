@@ -79,14 +79,20 @@ type
     subscribers*: array[CtEventKind, seq[Subscriber]]
     handlers*: array[CtEventKind, seq[proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)]]
     isRemote*: bool
+    singleSubscriber*: bool
     # receive*: proc(t: TransportWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)
 
 proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
   echo "emit ", eventKind
   console.log value
-  echo "subscribers: ", m.subscribers[eventKind].len
-  for subscriber in m.subscribers[eventKind]:
-    subscriber.emitRaw(eventKind, value.toJs, m.asSubscriber)
+  if m.singleSubscriber:
+    echo "-> using transport"
+    m.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, m.asSubscriber)
+  else:
+    echo "subscribers: ", m.subscribers[eventKind].len
+    for subscriber in m.subscribers[eventKind]:
+      echo fmt"-> subscriber {subscriber.name}"
+      subscriber.emitRaw(eventKind, value.toJs, m.asSubscriber)
 
 proc subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) =
   m.handlers[eventKind].add(proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
@@ -97,7 +103,7 @@ proc subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback:
 proc registerSubscriber*(m: MediatorWithSubscribers, eventKind: CtEventKind, subscriber: Subscriber) =
   m.subscribers[eventKind].add(subscriber) # callbacks for the event kind are actually preserved in the mediator on the other side
 
-proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
+proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.exportc.} =
   for handler in m.handlers[eventKind]:
     try:
       if eventKind != CtSubscribe:
@@ -107,10 +113,11 @@ proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsOb
     except:
       echo fmt"mediator {m.name} handler error: {getCurrentExceptionMsg()}"
 
-proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, transport: Transport): MediatorWithSubscribers =
+proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber: bool, transport: Transport): MediatorWithSubscribers =
   result = MediatorWithSubscribers(
     name: name,
     isRemote: isRemote,
+    singleSubscriber: singleSubscriber,
     transport: transport,
     asSubscriber: Subscriber(name: name))
   transport.onRawReceive(proc(data: JsObject, subscriber: Subscriber) = # eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
@@ -119,7 +126,6 @@ proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, transport: Trans
       let rawValue = data.value
       result.receive(eventKind, rawValue, subscriber))
 
-    
 ###
 
 # vscode extension(central)
