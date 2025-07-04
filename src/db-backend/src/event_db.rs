@@ -2,7 +2,7 @@ use std::cmp::min;
 use std::collections::HashMap;
 use std::error::Error;
 
-use log::{error, info};
+use log::error;
 use runtime_tracing::{EventLogKind, StepId, TypeKind};
 
 use crate::task::{
