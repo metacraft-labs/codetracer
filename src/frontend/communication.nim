@@ -83,15 +83,15 @@ type
     # receive*: proc(t: TransportWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)
 
 proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
-  echo "emit ", eventKind
-  console.log value
+  echo "api for ", m.name, " emit: ", eventKind
+  console.log cstring"  value: ", value
   if m.singleSubscriber:
-    echo "-> using transport"
+    echo "  -> using transport"
     m.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, m.asSubscriber)
   else:
-    echo "subscribers: ", m.subscribers[eventKind].len
+    echo "  subscribers: ", m.subscribers[eventKind].len
     for subscriber in m.subscribers[eventKind]:
-      echo fmt"-> subscriber {subscriber.name}"
+      console.log cstring"    -> subscriber: ", subscriber
       subscriber.emitRaw(eventKind, value.toJs, m.asSubscriber)
 
 proc subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) =
@@ -104,14 +104,14 @@ proc registerSubscriber*(m: MediatorWithSubscribers, eventKind: CtEventKind, sub
   m.subscribers[eventKind].add(subscriber) # callbacks for the event kind are actually preserved in the mediator on the other side
 
 proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.exportc.} =
-  for handler in m.handlers[eventKind]:
-    try:
-      if eventKind != CtSubscribe:
-        handler(eventKind, rawValue, subscriber)
-      else:
-        m.registerSubscriber(cast[CtEventKind](rawValue), subscriber)
-    except:
-      echo fmt"mediator {m.name} handler error: {getCurrentExceptionMsg()}"
+  if eventKind != CtSubscribe:
+    for handler in m.handlers[eventKind]:
+      try:
+        handler(eventKind, rawValue, subscriber)  
+      except:
+        echo fmt"mediator {m.name} handler error: {getCurrentExceptionMsg()}"
+  else:
+    m.registerSubscriber(cast[CtEventKind](rawValue), subscriber)
 
 proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber: bool, transport: Transport): MediatorWithSubscribers =
   result = MediatorWithSubscribers(

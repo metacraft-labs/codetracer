@@ -44,12 +44,28 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   if self.inExtension:
     self.redrawForExtension()
 
+method onDapStopped(self: StateComponent, response: DapStoppedEvent) =
+  # TODO: maybe move to onCompleteMove again when it's working
+  # fixing rr ticks
+  # self.rrTicks = response.location.rrTicks
+  let countBudget = 3000
+  let minCountLimit = 50
+  let arguments = CtLoadLocalsArguments(
+    rrTicks: self.rrTicks,
+    countBudget: countBudget,
+    minCountLimit: 50
+  )
+  self.api.emit(CtLoadLocals, arguments)
+
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
+  api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
+    self.onDapStopped(response))
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response))
   # api.subscribe(CtCompleteMove, self.onCompleteMove)
 
+# think if it's possible to directly exportc in this way the method
 proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
 
@@ -209,19 +225,13 @@ proc watchView(self: StateComponent): VNode =
     ):
       input(`type`="text", placeholder="Enter a watch expression", id="watch")
 
-method onStopped*(self: StateComponent, arg: DapStoppedEvent) {.async.} =
-  var countBudget = 3000
-  var minCountLimit = 50
-
-  self.api.emit(CtLoadLocals, LoadLocalsArg(rrTicks: self.rrTicks, countBudget: countBudget, minCountLimit: minCountLimit))
-  # can still be loadLocals(..) which hides this
-
   
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.rrTicks = response.location.rrTicks
   var countBudget = 3000
   var minCountLimit = 50
 
+  
   let locals = await self.service.loadLocals(self.rrTicks, countBudget, minCountLimit)
 
   self.registerLocals(CtLoadLocalsResponseBody(locals: locals))
