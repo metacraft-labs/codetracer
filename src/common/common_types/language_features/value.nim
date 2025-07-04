@@ -68,9 +68,14 @@ type
     startIndex*: int
     count*: int
 
+  CtLoadLocalsArguments* = ref object
+    rrTicks*: int
+    countBudget*: int
+    minCountLimit*: int
+    
   CtLoadLocalsResponseBody* = ref object
     locals*: seq[Variable]
-    
+
   Variable* = ref object
     expression*: langstring
     value*: Value

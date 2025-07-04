@@ -42,7 +42,12 @@ when defined(ctInExtension):
 
   method emitRaw*(w: WebviewSubscriber, kind: CtEventKind, value: JsObject, sourceSubscriber: Subscriber) =
     # on receive the other transport should set the actual subscriber: for now always vscode extension context (middleware)
+    console.log cstring"webview subscriber emitRaw: ", $kind, cstring" ", value
     w.webview.postMessage(CtRawEvent(kind: kind, value: value).toJs)
+    echo cstring"  after postMessage"
+
+  proc newWebviewSubscriber*(webview: VsCodeWebview): WebviewSubscriber {.exportc.}=
+    WebviewSubscriber(webview: webview)
 
   ### VsCodeViewTransport:
 
@@ -59,8 +64,9 @@ when defined(ctInExtension):
 
   proc newVsCodeViewTransport*(vscode: VsCode, vscodeWindow: JsObject): VsCodeViewTransport =
     result = VsCodeViewTransport(vscode: vscode) # , onVsCodeMessage: onVsCodeMessage)
-    vscodeWindow.addEventListener(cstring"message", proc(event: CtRawEvent) =
-      result.onVsCodeMessage(event))
+    vscodeWindow.addEventListener(cstring"message", proc(event: JsObject) = # TODO? vscode event
+      console.log cstring"vscode view received new message in event listener: ", event.toJs
+      result.onVsCodeMessage(event.data))
   
   proc newVsCodeViewApi*(name: cstring, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers {.exportc.} =
     let transport = newVsCodeViewTransport(vscode, vscodeWindow)
@@ -182,7 +188,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
 
     dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
     dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
-    
+
     # backendApi.subscribe(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent, sub: Subscriber) = viewsApi.emit(kind, value))
     # backendApi.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody, sub: Subscriber) = viewsApi.emit(kind, value))
     # maybe somehow a more proxy-like/macro way
@@ -195,13 +201,6 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     #     dapApi.requestOrEvent(kind, rawValue))
     # for others(view/frontend communication) maybe different schema
 
-
-  # proc setupVsCodeBackendApi*(name: cstring, dapApi: VsCodeDapApi, viewsApi: MediatorWithSubscribers): MediatorWithSubscribers {.exportc.}=
-    # var transport = newVsCodeBackendTransport(dapApi)
-    # result = newMediatorWithSubscribers($name, isRemote=true, transport=transport)
-    # for event in FirstDapEvent..LastDapEvent:
-      # transport.rawSubscribe(event, proc(kind: CtEventKind, rawValue: JsObject) 
-    # setupMiddlewareApis(result, viewsApi)
 
 when defined(ctInExtension):
   type
@@ -219,6 +218,7 @@ when defined(ctInExtension):
     {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
     {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
     {.emit: "module.exports.receive = receive;".}
+    {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
 
 # receive might become the same! at least for javascript-based code
 # but with different dap instances: one wrapping vscode and one custom in our electron
