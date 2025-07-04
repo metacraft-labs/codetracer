@@ -4,8 +4,6 @@ use std::fs;
 use std::path::Path;
 use std::str;
 
-use log::info;
-
 // use log::info;
 use runtime_tracing::{
     CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, ValueRecord,
@@ -141,7 +139,6 @@ impl<'a> TraceProcessor<'a> {
                     lines_for_path_and_line.push(db_step);
                 }
                 self.current_step_id = StepId(self.db.steps.len() as i64 - 1);
-                info!("Current step id: {:?}", self.current_step_id);
             }
             TraceLowLevelEvent::Path(path) => {
                 let path_string = path.display().to_string();
@@ -241,7 +238,6 @@ impl<'a> TraceProcessor<'a> {
                     step_id: self.current_step_id,
                     metadata: record_event.metadata.clone(),
                 });
-                info!("----- CHECK ME BI$ {:?}", self.db.events.last().unwrap());
             }
             TraceLowLevelEvent::DropLastStep => {
                 assert!(self.current_step_id.0 > 0);
