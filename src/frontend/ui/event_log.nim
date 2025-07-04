@@ -5,6 +5,8 @@ import
 
 var arg: js
 
+const CLICK_DELAY_TIMER = 5
+
 const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
   "std streams:",
   "read events:",
@@ -294,24 +296,24 @@ proc events(self: EventLogComponent) =
 
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()
-    self.lastJumpFireTime = currentTime
-    let isAction = cast[bool](e.target.classList[0] == "row-expander".toJs)
-    if isAction:
-      let textElement = e.currentTarget.childNodes[3]
-      if textElement.classList[0] == "eventLog-text".toJs:
-        if textElement.style.toJs.maxHeight == "24px".toJs:
-          textElement.style.overflow = "auto"
-          textElement.style.maxHeight = "20ch".toJs
-          kout textElement.style
-          e.target.classList.remove("flow-hide-content")
-          e.target.classList.add("flow-show-content")
-        else:
-          textElement.style.overflow = ""
-          textElement.style.maxHeight = "24px".toJs
-          e.target.classList.remove("flow-show-content")
-          e.target.classList.add("flow-hide-content")
-    elif not self.service.debugger.stableBusy:
-      self.jump(table, e)
+    if currentTime - self.lastJumpFireTime > CLICK_DELAY_TIMER:
+      self.lastJumpFireTime = currentTime
+      let isAction = cast[bool](e.target.classList[0] == "row-expander".toJs)
+      if isAction:
+        let textElement = e.currentTarget.childNodes[3]
+        if textElement.classList[0] == "eventLog-text".toJs:
+          if textElement.style.toJs.maxHeight == "24px".toJs:
+            textElement.style.overflow = "auto"
+            textElement.style.maxHeight = "20ch".toJs
+            e.target.classList.remove("flow-hide-content")
+            e.target.classList.add("flow-show-content")
+          else:
+            textElement.style.overflow = ""
+            textElement.style.maxHeight = "24px".toJs
+            e.target.classList.remove("flow-show-content")
+            e.target.classList.add("flow-hide-content")
+      elif not self.service.debugger.stableBusy:
+        self.jump(table, e)
 
   proc handlerMouseover(table: js, e: js) =
     discard
