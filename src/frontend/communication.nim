@@ -83,8 +83,7 @@ type
     # receive*: proc(t: TransportWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)
 
 proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
-  echo "api for ", m.name, " emit: ", eventKind
-  console.log cstring"  value: ", value
+  console.log cstring"api for ", m.name, " emit: ", cstring($eventKind), value
   if m.singleSubscriber:
     echo "  -> using transport"
     m.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, m.asSubscriber)
@@ -95,22 +94,29 @@ proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
       subscriber.emitRaw(eventKind, value.toJs, m.asSubscriber)
 
 proc subscribe*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) =
+  console.log cstring"api for ", m.name, " subscribe: ", cstring($eventKind)
   m.handlers[eventKind].add(proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
     callback(eventKind, rawValue.to(T), subscriber))
   if m.isRemote:
+    echo "  remote: emit CtSubscribe"
     m.emit(CtSubscribe, eventKind)
 
 proc registerSubscriber*(m: MediatorWithSubscribers, eventKind: CtEventKind, subscriber: Subscriber) =
   m.subscribers[eventKind].add(subscriber) # callbacks for the event kind are actually preserved in the mediator on the other side
 
 proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.exportc.} =
+  console.log cstring"api for ", m.name, cstring" receive: ", cstring($eventKind), rawValue, subscriber
   if eventKind != CtSubscribe:
+    console.log cstring"  handlers: ", m.handlers[eventKind].len
     for handler in m.handlers[eventKind]:
       try:
+        console.log cstring"  handler: call"
         handler(eventKind, rawValue, subscriber)  
       except:
         echo fmt"mediator {m.name} handler error: {getCurrentExceptionMsg()}"
   else:
+    console.log cstring"  register subscriber for event kind(raw: ", rawValue, ")"
+    echo "    event kind: ", cast[CtEventKind](rawValue) # if this doesn't appear, maybe the value isn't valid CtEventKind!
     m.registerSubscriber(cast[CtEventKind](rawValue), subscriber)
 
 proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber: bool, transport: Transport): MediatorWithSubscribers =
@@ -120,9 +126,9 @@ proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber
     singleSubscriber: singleSubscriber,
     transport: transport,
     asSubscriber: Subscriber(name: name))
-  transport.onRawReceive(proc(data: JsObject, subscriber: Subscriber) = # eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) =
-    if not data.eventKind.isNil and not data.value.isNil:
-      let eventKind = cast[CtEventKind](data.eventKind)
+  transport.onRawReceive(proc(data: JsObject, subscriber: Subscriber) =
+    if not data.kind.isNil and not data.value.isNil:
+      let eventKind = cast[CtEventKind](data.kind)
       let rawValue = data.value
       result.receive(eventKind, rawValue, subscriber))
 
