@@ -22,3 +22,5 @@ type
     line*: int
 
   DebuggerError* = ref DebuggerErrorObject
+
+  NotImplementedError* = object of CatchableError
