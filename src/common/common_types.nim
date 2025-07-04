@@ -1392,6 +1392,8 @@ type
 
   EmptyArg* = object ## Empty arg
 
+  NotImplementedError* = object of CatchableError
+  
 
 const VOID_RESULT*: langstring = langstring("{}")
 
