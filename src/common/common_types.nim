@@ -843,6 +843,11 @@ type
   CtLoadHistoryArguments* = ref object
     expression*: langstring
 
+  CtLoadLocalsArguments* = ref object
+    rrTicks*: int
+    countBudget*: int
+    minCountLimit*: int
+
   DapStoppedEvent* = ref object
     # TODO
     threadId*: int
