@@ -1,30 +1,17 @@
 import std / [ jsffi, strformat, jsconsole ]
 import .. / common / ct_event
+import types
 
 type
   # can be in the same process
   # can be a vscode webview
   # can be an electron subwindow
-  # can be a seprate browser client
+  # can be a separate browser client
   Subscriber* = ref object of RootObj
     name*: cstring
 
   Transport* = ref object of RootObj
     receiveHandlers*: seq[proc(raw: JsObject, subscriber: Subscriber)]
-    # direct field to make it easier to access from JavaScript/TypeScript
-    receive*: proc(t: Transport, raw: JsObject, subscriber: Subscriber)
-
-type
-  CtRawEvent* = ref object
-    kind*: CtEventKind
-    value*: JsObject
-
-  CtEvent*[T] = ref object
-    kind*: CtEventKind
-    value: T
-
-type
-  NotImplementedError* = object of CatchableError
 
 ### Transport:
 
@@ -33,7 +20,6 @@ method send*(t: Transport, data: JsObject, subscriber: Subscriber) {.base.} =
 
 method onRawReceive*(t: Transport, callback: proc(raw: JsObject, subscriber: Subscriber)) {.base.} =
   t.receiveHandlers.add(callback)
-  # raise newException("not implemented")
 
 method internalRawReceive*(t: Transport, raw: JsObject, subscriber: Subscriber) {.base.}=
   for handler in t.receiveHandlers:
@@ -42,22 +28,6 @@ method internalRawReceive*(t: Transport, raw: JsObject, subscriber: Subscriber) 
     except:
       echo "transport receive handler error: ", getCurrentExceptionMsg()
 
-
-### Mediator:
-
-# webview/component(mediator with vscode-view-transport OR same-process-local-transport) <-> (mediator with vscode-central-transport; OR same-process-central-transport)central context (renderer.nim / extension context / some other process);
-# central context (mediator central-backend-transport) <-> (dap) backend;
-
-# method emit*[T](v: Mediator, eventKind: CtEventKind, value: T) {.base.} =
-#   v.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, Subscriber(name: v.name))
-
-# method subscribe*[T](v: Mediator, eventKind: CtEventKind, callback: proc(eventKind: CtEventKind, value: T, subscriber: Subscriber)) {.base.} =
-#   # v.transport.emit(SubscribeEvent(eventKind: eventKind))
-#   # v.transport.subscribe(eventKind, callback, subscriber)
-#   raise newException(NotImplementedError, "not implemented")
-
-# method receive*(m: Mediator, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber) {.base.} =
-#   raise newException(NotImplementedError, "not implemented")
 
 # === Subscriber:
 
@@ -68,11 +38,17 @@ method emitRaw*(subscriber: Subscriber, eventKind: CtEventKind, value: JsObject,
 # === MediatorWithSubscribers:
 
 type
-  # reimplementing methods/repeating fields from Mediator
-  #   in order to not use inheritance, but to support geneirc methods
-  #   as otherwise we get
+  # using a single type with all flags/cases needed for now
+  #   in order to not use inheritance and methods, but to support generic api
+  #   as otherwise if we use generic methods, we get
   #   `generic methods are deprecated` warning
-  MediatorWithSubscribers* = ref object # of Mediator
+  #   
+  #   some field types do use internally inheritance: can be overriden:
+  #     Subscriber and Transport (but they represent values/data as raw JsObject-s,
+  #       so their methods are not generic)
+  #
+  # maybe rename to CommunicationApi?
+  MediatorWithSubscribers* = ref object
     name*: cstring
     transport*: Transport
     asSubscriber*: Subscriber
@@ -80,7 +56,6 @@ type
     handlers*: array[CtEventKind, seq[proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)]]
     isRemote*: bool
     singleSubscriber*: bool
-    # receive*: proc(t: TransportWithSubscribers, eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)
 
 proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
   console.log cstring"api for ", m.name, " emit: ", cstring($eventKind), value
@@ -132,52 +107,7 @@ proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber
       let rawValue = data.value
       result.receive(eventKind, rawValue, subscriber))
 
-###
-
-# vscode extension(central)
-# vscode view (webviews with components)
-# electron central process (central)
-# electron separate subwindow (components)
-# same-process central
-# same-process view (components)
-
-# central context 1 <-> N components
-# Transport
-#   TransportWithSubscribers
-#     VscodeCentralTransport
-#     VscodeViewTransport
-#     LocalTransport
-#     ElectronCentralTransport
-#     ElectronViewTransport
-# 
-#
- 
-
-# loadLocals()
-
-# step(..)
-
-# onCompleteMove
-
-# await loadLocals()
-
-# MVVM
-
-# view 
-# viewmodel 
-# (middleware: mediator) 
-# model
-
+# usecases:
 # -> load locals --send event to the central context -> does stuff; <-> backend; -> send us back loaded locals event or response;
 # -> update status/notification --send event .. -> does stuff; -> send event to another component/webview;
-
-# api.emit(CtLoadLocals, {..})
-
-# await api.emit(..)
-
-# api.subscribe(CtOnLoadedLocals, self.onLoadedLocals)
-
-
-
-# <-> viewmodel;
-# 
+ 

@@ -1,0 +1,34 @@
+import std / [strformat, jsffi, jsconsole]
+import .. / common / ct_event
+import types
+import communication, dap
+
+# backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
+
+proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
+    # backendApi.dapApi.onAll(proc(kind: CtEventKind, rawValue: JsObject) =
+      # viewsApi.emit(kind, rawValue))
+
+    dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
+    dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
+
+    viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+
+    # maybe somehow a more proxy-like/macro way
+    # some kind of loop or more raw subscribe, that directly sends for many cases
+    # for dap events:
+    #   viewsApi.subscribeRaw(CtLoadLocals, proc(kind: CtEventKind, rawValue: JsObject, sub: Subscriber) =
+    #     dapApi.requestOrEvent(kind, rawValue))
+    # for others(view/frontend communication) maybe different schema
+      
+when defined(ctInExtension):
+  import vscode
+
+  when defined(ctInCentralExtensionContext):
+    # we don't want this in webview
+    {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
+    {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
+    {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
+    {.emit: "module.exports.receive = receive;".}
+    {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
+
