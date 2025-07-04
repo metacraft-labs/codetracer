@@ -637,8 +637,9 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "runtime_tracing"
-version = "0.12.1"
-source = "git+https://github.com/metacraft-labs/runtime_tracing.git?branch=feat-add-evm-event#633d8cddd7d760f5f9216eca75f4976928514a2e"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39742b6740382f844a1326d86f0840d8b14353a0b1c6ca4692e32c7d27ae4ee3"
 dependencies = [
  "base64",
  "capnp",
