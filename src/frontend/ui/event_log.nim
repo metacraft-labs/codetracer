@@ -116,9 +116,6 @@ proc makeTableUpdate(self: EventLogComponent): TableUpdate =
     traceId: 0
   )
 
-method redrawForExtension*(self: EventLogComponent) {.exportc.} =
-  self.kxi.redraw()
-
 proc events(self: EventLogComponent)
 proc resizeEventLogHandler(self: EventLogComponent)
 

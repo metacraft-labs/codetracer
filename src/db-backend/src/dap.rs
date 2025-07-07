@@ -316,6 +316,7 @@ pub enum RequestArguments {
     Scope(ScopeArguments),
     Variables(VariablesArguments),
     CtLoadLocals(CtLoadLocalsArguments),
+    CtLoadCalltraceSection(task::CalltraceLoadArgs),
     Disconnect(DisconnectArguments),
     Other(Value),
 }
@@ -457,6 +458,31 @@ impl DapClient {
             },
             event: "stopped".to_string(),
             body: serde_json::to_value(body)?,
+        }))
+    }
+
+    pub fn updated_calltrace_event(
+        &mut self,
+        update: &task::CallArgsUpdateResults,
+    ) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-calltrace".to_string(),
+            body: serde_json::to_value(update)?,
+        }))
+    }
+
+    pub fn complete_move_event(&mut self, state: &task::MoveState) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/complete-move".to_string(),
+            body: serde_json::to_value(state)?,
         }))
     }
 

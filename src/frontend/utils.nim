@@ -458,6 +458,8 @@ proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): Ca
     width: "300",
     callValuePosition: JsAssoc[cstring, float]{},
     inExtension: inExtension,
+    config: Config(calltrace: true), #TODO: For now hardcoded
+    isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
   data.registerComponent(result, Content.Calltrace)
 

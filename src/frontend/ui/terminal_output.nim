@@ -38,9 +38,6 @@ proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputCompon
     terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = terminalOutputComponentForExtension.render(), id, proc = discard)
   result = terminalOutputComponentForExtension
 
-method redrawForExtension*(self: TerminalOutputComponent) {.exportc.} =
-  self.kxi.redraw()
-
 proc getLines(self: TerminalOutputComponent) =
   self.service.loadTerminal()
 

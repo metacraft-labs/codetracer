@@ -26,9 +26,6 @@ proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
     stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
   result = stateComponentForExtension
 
-method redrawForExtension*(self: StateComponent) {.exportc.} =
-  self.kxi.redraw()
-
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
   self.locals = response.locals
   for localVariable in response.locals:
@@ -41,8 +38,7 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
         chart.replaceAllValues(expression, localVariable.value.elements)
   self.completeMoveIndex += 1
 
-  if self.inExtension:
-    self.redrawForExtension()
+  self.redrawForExtension()
 
 method onDapStopped(self: StateComponent, response: DapStoppedEvent) =
   # TODO: maybe move to onCompleteMove again when it's working
