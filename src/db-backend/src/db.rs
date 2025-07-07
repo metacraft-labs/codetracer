@@ -212,8 +212,6 @@ impl Db {
         let initial_call_depth = initial_call.depth;
         let mut current_step_id = start_step_id;
 
-        info!("LINE 74 CALL KEY: {:?}", self.steps[StepId(8)]);
-
         for new_step in self.step_from(start_step_id, forward) {
             // while !self.on_step_id_limit(i, forward) {
             // info!("next:i: {}", i);
