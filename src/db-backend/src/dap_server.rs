@@ -367,6 +367,18 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     }
                 }
             }
+            DapMessage::Request(req) if req.command == "ct/load-calltrace-section" => {
+                if let Some(h) = handler.as_mut() {
+                    info!("----- GOT TO THE IF");
+                    if let RequestArguments::CtLoadCalltraceSection(args) = req.arguments.clone() {
+                        info!("----- GOT TO AFTER THE IF?");
+                        h.dap_client.seq = seq;
+                        h.load_calltrace_section(req, args)?;
+                        write_dap_messages(writer, &mut handler, &mut seq)?;
+                        info!("----- GOT TO AFTER THE DAP MESSAGE WRITE");
+                    }
+                }
+            }
             DapMessage::Request(req) if req.command == "disconnect" => {
                 if let Some(h) = handler.as_mut() {
                     if let RequestArguments::Disconnect(args) = req.arguments.clone() {

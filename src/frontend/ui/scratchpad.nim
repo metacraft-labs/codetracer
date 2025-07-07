@@ -7,9 +7,6 @@ proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.ex
     scratchpadComponentForExtension.kxi = setRenderer(proc: VNode = scratchpadComponentForExtension.render(), id, proc = discard)
   result = scratchpadComponentForExtension
 
-method redrawForExtension*(self: StateComponent) {.exportc.} =
-  self.kxi.redraw()
-
 proc removeValue*(self: ScratchpadComponent, i: int) =
   self.programValues.delete(i, i)
   self.values.delete(i, i)
