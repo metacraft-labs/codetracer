@@ -1,6 +1,6 @@
 import std / [ jsffi, strformat, jsconsole ]
 import .. / common / ct_event
-import types
+import errors
 
 type
   # can be in the same process
