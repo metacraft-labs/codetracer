@@ -184,7 +184,7 @@ type
     # current*:     int64
     # callNames*: JsAssoc[cstring, cstring]
     loadingArgs*: JsSet[cstring]
-    onUpdatedCallArgs*: proc(self: CalltraceService, response: CallArgsUpdateResults): Future[void]
+    # onUpdatedCallArgs*: proc(self: CalltraceService, response: CallArgsUpdateResults): Future[void]
 
   TabService* = ref object of Service
     tabs*:          JsAssoc[cstring, TabInfo]
@@ -505,6 +505,8 @@ type
 
   Component* = ref object of RootObj
     data*: Data
+    isDbBasedTrace*: bool
+    config*: Config
     id*: int
     rendered*: bool
     rrTicks*: int
@@ -681,6 +683,7 @@ type
     lastChange*: BiggestInt
     lastSearch*: BiggestInt
     lastQuery*: cstring
+    location*: Location
     expandedValues*: JsAssoc[cstring, CallExpandedValuesComponent]
     callLines*: seq[CallLine]
     originalCallLines*: seq[CallLine]
@@ -1590,6 +1593,13 @@ proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
 
+method redrawForExtension*(self: Component) {.base.} =
+  if self.inExtension:
+    self.kxi.redraw()
+
+method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
+  discard
+
 method restart*(self: Component) {.base.} =
   discard
 
@@ -1693,7 +1703,7 @@ method onBuildStderr*(self: Component, response: BuildOutput) {.base, async.} =
 method onBuildCode*(self: Component, response: BuildCode) {.base, async.} =
   discard
 
-method onUpdatedCallArgs*(self: Component, response: CallArgsUpdateResults) {.base, async.} =
+method onUpdatedCalltrace*(self: Component, response: CtUpdatedCalltraceResponseBody) {.base, async.} =
   discard
 
 method onUpdatedShell*(self: Component, response: ShellUpdate) {.base, async.} =

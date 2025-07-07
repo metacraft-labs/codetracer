@@ -34,6 +34,9 @@ func toDapCommandOrEvent(kind: CtEventKind): cstring =
   case kind:
   of CtLoadLocals: "ct/load-locals"
   of CtLoadLocalsResponse: "ct/load-locals-response"
+  of CtCompleteMove: "ct/complete-move"
+  of CtLoadCalltraceSection: "ct/load-calltrace-section"
+  of CtUpdatedCalltrace: "ct/updated-calltrace"
   of DapStopped: "stopped"
   else: raise newException(ValueError, fmt"not mapped to request command yet: {kind}")
 
@@ -53,6 +56,8 @@ func dapEventToCtEventKind(event: cstring): CtEventKind =
   of "stopped": DapStopped
   of "initialized": DapInitialized
   of "output": DapOutput
+  of "ct/updated-calltrace": CtUpdatedCalltrace
+  of "ct/complete-move": CtCompleteMove
   else: raise newException(
     ValueError,
     "no ct event kind for this string: \"" & $event & "\" defined")
@@ -93,7 +98,7 @@ else:
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     result = DapApi(vscode: vscode, context: context)
     proc onDidSendMessage(message: VsCodeDapMessage) =
-      console.log cstring"<- dap message:", message
+      console.log cstring"<- dap message:", message.`type`, message.command, message.event, message
       if message.`type` == cstring"event":
         result.receiveEvent(message.event, message.body)
       elif message.`type` == cstring"response":

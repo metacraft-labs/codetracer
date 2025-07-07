@@ -573,7 +573,7 @@ type
     content*: CallLineContent
     depth*: int
 
-  CallArgsUpdateResults* = object ## CallArgs Update results object
+  CtUpdatedCalltraceResponseBody* = object ## CallArgs Update results object
     finished*: bool
     args*: TableLike[langstring, seq[CallArg]] # TODO int64 .. on javascript
     returnValues*: TableLike[langstring, Value]

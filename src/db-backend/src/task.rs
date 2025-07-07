@@ -173,7 +173,7 @@ pub struct CodeSnippet {
     pub source: String,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Location {
     pub path: String,
@@ -1065,7 +1065,7 @@ pub struct CallArg {
     pub value: Value,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct CalltraceLoadArgs {
     pub location: Location,
@@ -1075,6 +1075,7 @@ pub struct CalltraceLoadArgs {
     pub raw_ignore_patterns: String,
     pub auto_collapsing: bool,
     pub optimize_collapse: bool,
+    pub render_call_line_index: usize,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

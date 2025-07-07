@@ -244,18 +244,13 @@ impl Handler {
         };
 
         // info!("move_state {:?}", move_state);
-        self.send_event((
-            EventKind::CompleteMove,
-            gen_event_id(EventKind::CompleteMove),
-            serde_json::to_string(&move_state)?,
-            false,
-        ))?;
         let reason = if is_main { "entry" } else { "step" };
         info!("generate stopped event");
         let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
         self.send_dap(&raw_event)?;
-
+        let raw_complete_move_event = self.dap_client.complete_move_event(&move_state)?;
+        self.send_dap(&raw_complete_move_event)?;
         if self.step_id.0 > self.previous_step_id.0 {
             let mut raw_output_events: Vec<dap::DapMessage> = vec![];
             for event in self.db.events.iter() {
@@ -392,7 +387,7 @@ impl Handler {
         Ok(())
     }
 
-    fn load_local_calltrace(&mut self, args: CalltraceLoadArgs, _task: &Task) -> Result<Vec<CallLine>, Box<dyn Error>> {
+    fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
         let call_key = self.db.call_key_for_step(self.step_id);
         self.calltrace.optimize_collapse = args.optimize_collapse;
         if call_key != self.calltrace.start_call_key {
@@ -412,9 +407,9 @@ impl Handler {
         self.db.calls.len() - collapsed_count
     }
 
-    pub fn load_call_args(&mut self, args: CalltraceLoadArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_calltrace_section(&mut self, req: dap::Request, args: CalltraceLoadArgs) -> Result<(), Box<dyn Error>> {
         let start_call_line_index = args.start_call_line_index;
-        let call_lines = self.load_local_calltrace(args, &task)?;
+        let call_lines = self.load_local_calltrace(args)?;
         let total_count = self.calc_total_calls();
         let position = self.calltrace.calc_scroll_position();
         let update = CallArgsUpdateResults::finished_update_call_lines(
@@ -424,13 +419,9 @@ impl Handler {
             position,
             self.calltrace.depth_offset,
         );
-        self.return_task((task, VOID_RESULT.to_string()))?;
-        self.send_event((
-            EventKind::UpdatedCallArgs,
-            gen_event_id(EventKind::UpdatedCallArgs),
-            self.serialize(&update)?,
-            false,
-        ))?;
+        // self.return_task((task, VOID_RESULT.to_string()))?;
+        let raw_event = self.dap_client.updated_calltrace_event(&update)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
@@ -498,9 +489,7 @@ impl Handler {
     }
 
     pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        info!("before step in forward: {}, step_id: {:?}", forward, self.step_id);
         self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
-        info!("after step in forward: {}, step_id: {:?}", forward, self.step_id);
         Ok(())
     }
 
@@ -1300,20 +1289,12 @@ impl Handler {
                 for step in steps {
                     if step.call_key == call_key {
                         if !list.contains_key(&line) {
-                            info!(
-                                "----- Not a loop here enter Line({:?}) and StepId - {:?}",
-                                line, step.step_id
-                            );
                             list.insert(line, step.step_id);
                         } else if step.step_id >= self.step_id {
                             list.entry(line)
                                 .and_modify(|e| *e = step.step_id)
                                 .or_insert(step.step_id);
                             // We change the line entry and break because we have found the next closest
-                            info!(
-                                "----- because of the loop we change here Line({:?}) with StepId - {:?}",
-                                line, step.step_id
-                            );
                             break;
                         }
                     }
