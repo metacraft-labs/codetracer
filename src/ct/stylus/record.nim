@@ -46,7 +46,7 @@ proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError,
   let wasm = getContractWasmPath(getTransactionContractAddress(hash))
   let evmTrace = getEvmTrace(hash)
 
-  echo "WASM: ", wasm, " EVM: ", evmTrace
+  echo "WASM with debug info: ", wasm, " EVM trace: ", evmTrace
 
   result = record("", ".", "", "", evmTrace, wasm, @[])
   updateField(result.id, "program", hash, false)
