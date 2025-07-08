@@ -1,4 +1,4 @@
-import std / [strformat, jsffi, jsconsole]
+import std / [jsffi, jsconsole]
 import .. / common / ct_event
 import types
 import communication, dap
@@ -25,8 +25,6 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # for others(view/frontend communication) maybe different schema
       
 when defined(ctInExtension):
-  import vscode
-
   when defined(ctInCentralExtensionContext):
     # we don't want this in webview
     {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}

@@ -1,5 +1,6 @@
 import std / [jsffi, jsconsole, strformat, async]
 import .. / common / ct_event
+import lib
 
 when not defined(ctInExtension):
   type
@@ -19,7 +20,27 @@ type
     command*: cstring
     value*: JsObject
 
-const CT_EVENT_DAP_TRACKING_RESPONSE_KINDS = {CtLoadLocals}
+# From CtEventKind to DAP request commands and dap events
+# empty strings represent two kind of situations:
+# 1. Response CtEventKinds
+# 2. Non backend related events
+const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
+  CtSubscribe: "",
+  CtLoadLocals: "ct/load-locals",
+  CtLoadLocalsResponse: "",
+  CtUpdatedCalltrace: "ct/updated-calltrace",
+  CtLoadCalltraceSection: "ct/load-calltrace-section",
+  CtCompleteMove: "ct/complete-move",
+  DapStopped: "stopped",
+  DapInitialized: "initialized",
+  DapOutput: "output",
+]
+
+var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
+
+for kind, command in EVENT_KIND_TO_DAP_MAPPING:
+  if command != "":
+    DAP_TO_EVENT_KIND_MAPPING[command] = kind
 
 func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # TODO: based on $kind? or mapping?
@@ -29,16 +50,10 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
 
 
 func toDapCommandOrEvent(kind: CtEventKind): cstring =
-  # TODO
-  # eventually auto mapping using $kind and tokenization?
-  case kind:
-  of CtLoadLocals: "ct/load-locals"
-  of CtLoadLocalsResponse: "ct/load-locals-response"
-  of CtCompleteMove: "ct/complete-move"
-  of CtLoadCalltraceSection: "ct/load-calltrace-section"
-  of CtUpdatedCalltrace: "ct/updated-calltrace"
-  of DapStopped: "stopped"
-  else: raise newException(ValueError, fmt"not mapped to request command yet: {kind}")
+  if EVENT_KIND_TO_DAP_MAPPING[kind] != "":
+    EVENT_KIND_TO_DAP_MAPPING[kind]
+  else:
+    raise newException(ValueError, fmt"not mapped to request command yet: {kind}")
 
 
 func commandToCtResponseEventKind(command: cstring): CtEventKind =
@@ -51,22 +66,20 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
     "no ct event kind response for command: \"" & $command & "\" defined")
 
 
-func dapEventToCtEventKind(event: cstring): CtEventKind =
-  case $event:
-  of "stopped": DapStopped
-  of "initialized": DapInitialized
-  of "output": DapOutput
-  of "ct/updated-calltrace": CtUpdatedCalltrace
-  of "ct/complete-move": CtCompleteMove
-  else: raise newException(
-    ValueError,
-    "no ct event kind for this string: \"" & $event & "\" defined")
+proc dapEventToCtEventKind(event: cstring): CtEventKind =
+  if DAP_TO_EVENT_KIND_MAPPING.hasKey(event):
+    DAP_TO_EVENT_KIND_MAPPING[event]
+  else:
+    raise newException(
+      ValueError,
+      "no ct event kind for this string: \"" & $event & "\" defined"
+    )
 
 ### DapApi procedures:
 
 proc on*[T](dap: DapApi, kind: CtEventKind, handler: proc(kind: CtEventKind, value: T)) =
   dap.handlers[kind].add(proc(kind: CtEventKind, rawValue: JsObject) =
-    handler(kind, cast[T](rawValue)))
+    handler(kind, rawValue.to(T)))
 
 proc receive*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
   for handler in dap.handlers[kind]:
@@ -89,11 +102,7 @@ when not defined(ctInExtension):
 else:
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
     console.log cstring"-> dap request: ", toDapCommandOrEvent(kind), rawValue
-    # let response = 
     discard dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
-    # console.log cstring"<- dap response(or undefined if timeout): ", response
-    # if kind in CT_EVENT_DAP_TRACKING_RESPONSE_KINDS and not response.isNil:
-    #   dap.receiveResponse(cast[cstring](response.command), response.value)
 
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     result = DapApi(vscode: vscode, context: context)

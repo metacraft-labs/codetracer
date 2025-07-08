@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-# build_extension_files.sh <ui_js_output_path> <ct_vscode_js_output_path>
+# build_for_extension.sh <ui_js_output_path> <ct_vscode_js_output_path> <db_backend_path>
+set -e
+
 nim \
     -d:chronicles_enabled=off \
     -d:ctRenderer \
@@ -16,3 +18,8 @@ nim \
   -d:ctInCentralExtensionContext \
   --out:"$2" \
   js src/frontend/middleware.nim
+
+cd ./src/db-backend
+cargo build
+cd ../..
+mv ./src/db-backend/target/debug/db-backend "$3"
