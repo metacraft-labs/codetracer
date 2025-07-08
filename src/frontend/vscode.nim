@@ -1,8 +1,6 @@
 when defined(ctInExtension):
-  import std / [async, strformat, jsffi, jsconsole]
-  import lib
+  import std / [async, jsffi, jsconsole]
   import .. / common / ct_event
-  import .. / frontend / types
   import communication
 
   type
@@ -46,7 +44,7 @@ when defined(ctInExtension):
 
   method emitRaw*(w: WebviewSubscriber, kind: CtEventKind, value: JsObject, sourceSubscriber: Subscriber) =
     # on receive the other transport should set the actual subscriber: for now always vscode extension context (middleware)
-    if logging: console.log cstring"webview subscriber emitRaw: ", $kind, cstring" ", value
+    if logging: console.log cstring"webview subscriber emitRaw: ", cstring($kind), cstring" ", value
     w.webview.postMessage(CtRawEvent(kind: kind, value: value).toJs)
     if logging: echo cstring"  after postMessage"
 
