@@ -406,7 +406,11 @@ impl Handler {
         self.db.calls.len() - collapsed_count
     }
 
-    pub fn load_calltrace_section(&mut self, req: dap::Request, args: CalltraceLoadArgs) -> Result<(), Box<dyn Error>> {
+    pub fn load_calltrace_section(
+        &mut self,
+        _req: dap::Request,
+        args: CalltraceLoadArgs,
+    ) -> Result<(), Box<dyn Error>> {
         let start_call_line_index = args.start_call_line_index;
         let call_lines = self.load_local_calltrace(args)?;
         let total_count = self.calc_total_calls();

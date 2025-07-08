@@ -1,10 +1,10 @@
 use crate::dap::{
-    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, RequestArguments, Response,
+    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, Response, SetBreakpointsArguments,
     SetBreakpointsResponseBody, Source,
 };
 use crate::db::Db;
 use crate::handler::Handler;
-use crate::task::{gen_task_id, Action, SourceLocation, StepArg, Task, TaskId, TaskKind};
+use crate::task::{gen_task_id, Action, CalltraceLoadArgs, SourceLocation, StepArg, Task, TaskId, TaskKind};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
 use serde_json::json;
@@ -99,18 +99,12 @@ fn launch(
     }
 }
 
-fn write_dap_messages<W: Write>(
-    writer: &mut W,
-    handler: &mut Option<Handler>,
-    seq: &mut i64,
-) -> Result<(), Box<dyn Error>> {
-    if let Some(h) = handler {
-        for message in &h.resulting_dap_messages {
-            dap::write_message(writer, message)?;
-        }
-        h.reset_dap();
-        *seq = h.dap_client.seq;
+fn write_dap_messages<W: Write>(writer: &mut W, handler: &mut Handler, seq: &mut i64) -> Result<(), Box<dyn Error>> {
+    for message in &handler.resulting_dap_messages {
+        dap::write_message(writer, message)?;
     }
+    handler.reset_dap();
+    *seq = handler.dap_client.seq;
     Ok(())
 }
 
@@ -147,9 +141,43 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
     }
 }
 
-// fn handle_threads<W: Write>(handler: &mut Handler, writer: &mut W) -> Result<(), Box<dyn Error>> {
-//     handler.threads
-// }
+fn handle_request<W: Write>(
+    handler: &mut Handler,
+    req: dap::Request,
+    seq: &mut i64,
+    writer: &mut W,
+) -> Result<(), Box<dyn Error>> {
+    handler.dap_client.seq = *seq;
+    match req.command.as_str() {
+        "scopes" => handler.scopes(req.clone(), req.load_args::<dap::ScopeArguments>()?)?,
+        "threads" => handler.threads(req.clone())?,
+        "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap::StackTraceArguments>()?)?,
+        "variables" => handler.variables(req.clone(), req.load_args::<dap::VariablesArguments>()?)?,
+        "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<dap::CtLoadLocalsArguments>()?)?,
+        "ct/load-calltrace-section" => {
+            handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
+        }
+        _ => {
+            match dap_command_to_step_action(&req.command) {
+                Ok((action, is_reverse)) => {
+                    // for now ignoring arguments: they contain threadId, but
+                    // we assume we have a single thread here for now
+                    // we also don't use the other args currently
+                    handler.step(req, StepArg::new(action, is_reverse))?;
+                }
+                Err(_e) => {
+                    // TODO: eventually support? or if this is the last  branch
+                    // in the top `match`
+                    // assume all request left here are unsupported
+                    error!("unsupported dap command: {}", req.command);
+                    return Err(format!("command {} not supported here", req.command).into());
+                }
+            }
+        }
+    }
+    write_dap_messages(writer, handler, seq)
+}
+
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
@@ -198,57 +226,56 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "setBreakpoints" => {
                 let mut results = Vec::new();
-                if let RequestArguments::SetBreakpoints(args) = req.arguments {
-                    if let Some(path) = args.source.path.clone() {
-                        let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
-                            bps.into_iter().map(|b| b.line).collect()
-                        } else {
-                            args.lines.unwrap_or_default()
-                        };
-                        let entry = breakpoints.entry(path.clone()).or_default();
-                        if let Some(h) = handler.as_mut() {
-                            h.clear_breakpoints();
-                            for line in lines {
-                                entry.insert(line);
-                                let _ = h.add_breakpoint(
-                                    SourceLocation {
-                                        path: path.clone(),
-                                        line: line as usize,
-                                    },
-                                    Task {
-                                        kind: TaskKind::AddBreak,
-                                        id: gen_task_id(TaskKind::AddBreak),
-                                    },
-                                );
-                                results.push(Breakpoint {
-                                    id: None,
-                                    verified: true,
-                                    message: None,
-                                    source: Some(Source {
-                                        name: args.source.name.clone(),
-                                        path: Some(path.clone()),
-                                        source_reference: args.source.source_reference,
-                                    }),
-                                    line: Some(line),
-                                });
-                            }
-                        }
+                let args = req.load_args::<SetBreakpointsArguments>()?;
+                if let Some(path) = args.source.path.clone() {
+                    let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
+                        bps.into_iter().map(|b| b.line).collect()
                     } else {
-                        let lines = args
-                            .breakpoints
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|b| b.line)
-                            .collect::<Vec<_>>();
+                        args.lines.unwrap_or_default()
+                    };
+                    let entry = breakpoints.entry(path.clone()).or_default();
+                    if let Some(h) = handler.as_mut() {
+                        h.clear_breakpoints();
                         for line in lines {
+                            entry.insert(line);
+                            let _ = h.add_breakpoint(
+                                SourceLocation {
+                                    path: path.clone(),
+                                    line: line as usize,
+                                },
+                                Task {
+                                    kind: TaskKind::AddBreak,
+                                    id: gen_task_id(TaskKind::AddBreak),
+                                },
+                            );
                             results.push(Breakpoint {
                                 id: None,
-                                verified: false,
-                                message: Some("missing source path".to_string()),
-                                source: None,
+                                verified: true,
+                                message: None,
+                                source: Some(Source {
+                                    name: args.source.name.clone(),
+                                    path: Some(path.clone()),
+                                    source_reference: args.source.source_reference,
+                                }),
                                 line: Some(line),
                             });
                         }
+                    }
+                } else {
+                    let lines = args
+                        .breakpoints
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|b| b.line)
+                        .collect::<Vec<_>>();
+                    for line in lines {
+                        results.push(Breakpoint {
+                            id: None,
+                            verified: false,
+                            message: Some("missing source path".to_string()),
+                            source: None,
+                            line: Some(line),
+                        });
                     }
                 }
                 let body = SetBreakpointsResponseBody { breakpoints: results };
@@ -268,23 +295,24 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "launch" => {
                 received_launch = true;
-                if let RequestArguments::Launch(args) = &req.arguments {
-                    if let Some(folder) = &args.trace_folder {
-                        launch_trace_folder = folder.clone();
-                        if let Some(trace_file) = &args.trace_file {
-                            launch_trace_file = trace_file.clone();
-                        } else {
-                            launch_trace_file = "trace.json".into();
-                        }
-                        info!("stored launch trace folder: {launch_trace_folder:?}");
-                        if received_configuration_done {
-                            handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq, tx.clone())?);
-                            write_dap_messages(writer, &mut handler, &mut seq)?;
-                        }
-                        // if let Some(pid) = args.pid {
-                        // eprintln!("PID: {}", pid);
-                        // }
+                let args = req.load_args::<dap::LaunchRequestArguments>()?;
+                if let Some(folder) = &args.trace_folder {
+                    launch_trace_folder = folder.clone();
+                    if let Some(trace_file) = &args.trace_file {
+                        launch_trace_file = trace_file.clone();
+                    } else {
+                        launch_trace_file = "trace.json".into();
                     }
+                    info!("stored launch trace folder: {launch_trace_folder:?}");
+                    if received_configuration_done {
+                        handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq, tx.clone())?);
+                        if let Some(h) = handler.as_mut() {
+                            write_dap_messages(writer, h, &mut seq)?;
+                        }
+                    }
+                    // if let Some(pid) = args.pid {
+                    // eprintln!("PID: {}", pid);
+                    // }
                 }
                 info!("received launch; configuration done? {received_configuration_done}; req: {req:?}");
                 let resp = DapMessage::Response(Response {
@@ -321,102 +349,33 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                 info!("configuration done sent response; received_launch: {received_launch}");
                 if received_launch {
                     handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq, tx.clone())?);
-                    write_dap_messages(writer, &mut handler, &mut seq)?;
-                }
-            }
-            DapMessage::Request(req) if req.command == "threads" => {
-                if let Some(h) = handler.as_mut() {
-                    h.dap_client.seq = seq;
-                    h.threads(req)?;
-                    write_dap_messages(writer, &mut handler, &mut seq)?;
-                }
-            }
-            DapMessage::Request(req) if req.command == "stackTrace" => {
-                if let Some(h) = handler.as_mut() {
-                    if let RequestArguments::StackTrace(args) = req.arguments.clone() {
-                        h.dap_client.seq = seq;
-                        h.stack_trace(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
-                    }
-                }
-            }
-            DapMessage::Request(req) if req.command == "scopes" => {
-                if let Some(h) = handler.as_mut() {
-                    if let RequestArguments::Scope(args) = req.arguments.clone() {
-                        h.dap_client.seq = seq;
-                        h.scopes(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
-                    }
-                }
-            }
-            DapMessage::Request(req) if req.command == "variables" => {
-                if let Some(h) = handler.as_mut() {
-                    if let RequestArguments::Variables(args) = req.arguments.clone() {
-                        h.dap_client.seq = seq;
-                        h.variables(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
-                    }
-                }
-            }
-            DapMessage::Request(req) if req.command == "ct/load-locals" => {
-                if let Some(h) = handler.as_mut() {
-                    if let RequestArguments::CtLoadLocals(args) = req.arguments.clone() {
-                        h.dap_client.seq = seq;
-                        h.load_locals(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
-                    }
-                }
-            }
-            DapMessage::Request(req) if req.command == "ct/load-calltrace-section" => {
-                if let Some(h) = handler.as_mut() {
-                    info!("----- GOT TO THE IF");
-                    if let RequestArguments::CtLoadCalltraceSection(args) = req.arguments.clone() {
-                        info!("----- GOT TO AFTER THE IF?");
-                        h.dap_client.seq = seq;
-                        h.load_calltrace_section(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
-                        info!("----- GOT TO AFTER THE DAP MESSAGE WRITE");
+                    if let Some(h) = handler.as_mut() {
+                        write_dap_messages(writer, h, &mut seq)?;
                     }
                 }
             }
             DapMessage::Request(req) if req.command == "disconnect" => {
                 if let Some(h) = handler.as_mut() {
-                    if let RequestArguments::Disconnect(args) = req.arguments.clone() {
-                        h.dap_client.seq = seq;
-                        h.respond_to_disconnect(req, args)?;
-                        write_dap_messages(writer, &mut handler, &mut seq)?;
+                    let args = req.load_args::<dap::DisconnectArguments>()?;
+                    h.dap_client.seq = seq;
+                    h.respond_to_disconnect(req, args)?;
+                    write_dap_messages(writer, h, &mut seq)?;
 
-                        // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
-                        // > and then to shut down itself (the debug adapter).
-                        // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
-                        // we don't have a debuggee process, just a db, so we just stop db-backend for now
-                        // (and before that, we respond to the request, acknowledging it)
-                        //
-                        // we allow it for now here, but if additional cleanup is needed, maybe we'd need
-                        // to return to upper functions
-                        #[allow(clippy::exit)]
-                        std::process::exit(0);
-                    }
+                    // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
+                    // > and then to shut down itself (the debug adapter).
+                    // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
+                    // we don't have a debuggee process, just a db, so we just stop db-backend for now
+                    // (and before that, we respond to the request, acknowledging it)
+                    //
+                    // we allow it for now here, but if additional cleanup is needed, maybe we'd need
+                    // to return to upper functions
+                    #[allow(clippy::exit)]
+                    std::process::exit(0);
                 }
             }
             DapMessage::Request(req) => {
-                match dap_command_to_step_action(&req.command) {
-                    Ok((action, is_reverse)) => {
-                        if let Some(h) = handler.as_mut() {
-                            h.dap_client.seq = seq;
-                            // for now ignoring arguments: they contain threadId, but
-                            // we assume we have a single thread here for now
-                            // we also don't use the other args currently
-                            let _ = h.step(req, StepArg::new(action, is_reverse));
-                            write_dap_messages(writer, &mut handler, &mut seq)?;
-                        }
-                    }
-                    Err(_e) => {
-                        // TODO: eventually support? or if this is the last  branch
-                        // in the top `match`
-                        // assume all request left here are unsupported
-                        error!("unsupported dap command: {}", req.command);
-                    }
+                if let Some(h) = handler.as_mut() {
+                    handle_request(h, req, &mut seq, writer)?;
                 }
             }
             _ => {}
