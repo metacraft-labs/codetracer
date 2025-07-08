@@ -305,25 +305,25 @@ pub struct DisconnectArguments {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 pub struct DisconnectResponseBody {}
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(untagged)]
-pub enum RequestArguments {
-    Launch(LaunchRequestArguments),
-    SetBreakpoints(SetBreakpointsArguments),
-    StackTrace(StackTraceArguments),
-    Scope(ScopeArguments),
-    Variables(VariablesArguments),
-    CtLoadLocals(CtLoadLocalsArguments),
-    CtLoadCalltraceSection(task::CalltraceLoadArgs),
-    Disconnect(DisconnectArguments),
-    Other(Value),
-}
+// #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+// #[serde(untagged)]
+// pub enum RequestArguments {
+//     Launch(LaunchRequestArguments),
+//     SetBreakpoints(SetBreakpointsArguments),
+//     StackTrace(StackTraceArguments),
+//     Scope(ScopeArguments),
+//     Variables(VariablesArguments),
+//     CtLoadLocals(CtLoadLocalsArguments),
+//     CtLoadCalltraceSection(task::CalltraceLoadArgs),
+//     Disconnect(DisconnectArguments),
+//     Other(Value),
+// }
 
-impl Default for RequestArguments {
-    fn default() -> Self {
-        RequestArguments::Other(Value::Null)
-    }
-}
+// impl Default for RequestArguments {
+//     fn default() -> Self {
+//         RequestArguments::Other(Value::Null)
+//     }
+// }
 
 impl Request {
     pub fn load_args<T: DeserializeOwned>(&self) -> Result<T, Box<dyn std::error::Error>> {
@@ -429,23 +429,23 @@ impl Default for DapClient {
 }
 
 impl DapClient {
-    pub fn request(&mut self, command: &str, arguments: RequestArguments) -> DapMessage {
+    pub fn request(&mut self, command: &str, arguments: Value) -> DapMessage {
         DapMessage::Request(Request {
             base: ProtocolMessage {
                 seq: self.next_seq(),
                 type_: "request".to_string(),
             },
             command: command.to_string(),
-            arguments: serde_json::to_value(arguments).unwrap(),
+            arguments,
         })
     }
 
-    pub fn launch(&mut self, args: LaunchRequestArguments) -> DapMessage {
-        self.request("launch", RequestArguments::Launch(args))
+    pub fn launch(&mut self, args: LaunchRequestArguments) -> Result<DapMessage, Box<dyn std::error::Error>> {
+        Ok(self.request("launch", serde_json::to_value(args)?))
     }
 
-    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> DapMessage {
-        self.request("setBreakpoints", RequestArguments::SetBreakpoints(args))
+    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> Result<DapMessage, Box<dyn std::error::Error>> {
+        Ok(self.request("setBreakpoints", serde_json::to_value(args)?))
     }
 
     pub fn stopped_event(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {

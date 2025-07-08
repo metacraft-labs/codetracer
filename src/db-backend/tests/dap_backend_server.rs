@@ -1,4 +1,4 @@
-use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, RequestArguments, StackTraceArguments};
+use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, StackTraceArguments};
 use db_backend::dap_server::{self};
 use serde_json::json;
 use std::io::BufReader;
@@ -34,7 +34,7 @@ fn test_backend_dap_server() {
     let mut writer = stream;
 
     let mut client = DapClient::default();
-    let init = client.request("initialize", RequestArguments::Other(json!({})));
+    let init = client.request("initialize", json!({}));
     dap::write_message(&mut writer, &init).unwrap();
     let launch_args = LaunchRequestArguments {
         program: Some("main".to_string()),
@@ -48,7 +48,7 @@ fn test_backend_dap_server() {
         typ: None,
         session_id: None,
     };
-    let launch = client.launch(launch_args);
+    let launch = client.launch(launch_args).unwrap();
     dap::write_message(&mut writer, &launch).unwrap();
 
     let msg1 = dap::from_reader(&mut reader).unwrap();
@@ -69,7 +69,7 @@ fn test_backend_dap_server() {
         DapMessage::Event(e) => assert_eq!(e.event, "initialized"),
         _ => panic!(),
     }
-    let conf_done = client.request("configurationDone", RequestArguments::Other(json!({})));
+    let conf_done = client.request("configurationDone", json!({}));
     dap::write_message(&mut writer, &conf_done).unwrap();
     let msg3 = dap::from_reader(&mut reader).unwrap();
     match msg3 {
@@ -81,15 +81,25 @@ fn test_backend_dap_server() {
         DapMessage::Response(r) => assert_eq!(r.command, "configurationDone"),
         _ => panic!(),
     }
+
     let msg5 = dap::from_reader(&mut reader).unwrap();
     match msg5 {
         DapMessage::Event(e) => {
             assert_eq!(e.event, "stopped");
             assert_eq!(e.body["reason"], "entry");
         }
-        _ => panic!(),
+        _ => panic!("expected a stopped event, but got {:?}", msg5),
     }
-    let threads_request = client.request("threads", RequestArguments::Other(json!({})));
+
+    let msg_complete_move = dap::from_reader(&mut reader).unwrap();
+    match msg_complete_move {
+        DapMessage::Event(e) => {
+            assert_eq!(e.event, "ct/complete-move");
+        }
+        _ => panic!("expected a complete move events, but got {:?}", msg_complete_move),
+    }
+
+    let threads_request = client.request("threads", json!({}));
     dap::write_message(&mut writer, &threads_request).unwrap();
     let msg_threads = dap::from_reader(&mut reader).unwrap();
     match msg_threads {
@@ -97,12 +107,15 @@ fn test_backend_dap_server() {
             assert_eq!(r.command, "threads");
             assert_eq!(r.body["threads"][0]["id"], 1);
         }
-        _ => panic!(),
+        _ => panic!(
+            "expected a Response DapMessage after a threads request, but got {:?}",
+            msg_threads
+        ),
     }
 
     let stack_trace_request = client.request(
         "stackTrace",
-        RequestArguments::StackTrace(StackTraceArguments { thread_id: 1 }),
+        serde_json::to_value(StackTraceArguments { thread_id: 1 }).unwrap(),
     );
     dap::write_message(&mut writer, &stack_trace_request).unwrap();
     let msg_stack_trace = dap::from_reader(&mut reader).unwrap();

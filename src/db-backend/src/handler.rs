@@ -1852,14 +1852,9 @@ mod tests {
             raw_ignore_patterns: "".to_string(),
             auto_collapsing: true,
             optimize_collapse: true,
+            render_call_line_index: 0,
         };
-        let _call_lines = handler.load_local_calltrace(
-            calltrace_load_args,
-            &Task {
-                kind: TaskKind::LoadCallArgs,
-                id: TaskId("load-call-args-0".to_string()),
-            },
-        )?;
+        let _call_lines = handler.load_local_calltrace(calltrace_load_args)?;
 
         // assert_eq!(parent_key, CallKey(0));
         // assert_eq!(calltrace.location.key, "1".to_string());
