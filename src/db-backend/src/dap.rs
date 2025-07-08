@@ -1,6 +1,6 @@
 use crate::task;
 use log::info;
-use serde::{de::Error as SerdeError, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ pub struct Request {
     pub base: ProtocolMessage,
     pub command: String,
     #[serde(default)]
-    pub arguments: RequestArguments,
+    pub arguments: Value, //RequestArguments,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -327,6 +327,12 @@ impl Default for RequestArguments {
     }
 }
 
+impl Request {
+    pub fn load_args<T: DeserializeOwned>(&self) -> Result<T, Box<dyn std::error::Error>> {
+        Ok(serde_json::from_value::<T>(self.arguments.clone())?)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Response {
     #[serde(flatten)]
@@ -432,7 +438,7 @@ impl DapClient {
                 type_: "request".to_string(),
             },
             command: command.to_string(),
-            arguments,
+            arguments: serde_json::to_value(arguments).unwrap(),
         })
     }
 
