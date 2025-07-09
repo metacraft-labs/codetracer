@@ -41,6 +41,7 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
 }
 
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
+    info!("dap_server::run {:?}", socket_path);
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     let (stream, _) = listener.accept()?;
