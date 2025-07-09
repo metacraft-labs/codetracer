@@ -35,14 +35,13 @@ proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: boo
     debugprint "not recordCore"
     debugprint "noOutput ", noOutput
     debugprint "options ", options
+    let socketPath = CT_DAP_SOCKET_PATH_BASE & "_" & $callerPid
     if IS_DB_BASED[trace.lang]:
       result = startProcess(
         dbBackendExe,
         workingDir = workdir,
         args = @[
-          $callerPid,
-          traceFolder / "trace.json",
-          traceFolder / "trace_metadata.json"
+          socketPath
         ],
         options=options)
     elif ctConfig.rrBackend.enabled:

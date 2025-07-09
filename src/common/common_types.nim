@@ -24,6 +24,7 @@ const
 let
   CT_SOCKET_PATH* = langstring(codetracerTmpPath & "/ct_socket")
   CT_CLIENT_SOCKET_PATH* = langstring(codetracerTmpPath & "/ct_client_socket")
+  CT_DAP_SOCKET_PATH_BASE* = langstring(codetracerTmpPath & "/ct_dap_socket")
   CT_IPC_FILE_PATH* = langstring(codetracerTmpPath & "/ct_ipc")
   CT_PLUGIN_SOCKET_PATH* = langstring(codetracerTmpPath & "/codetracer_plugin_socket")
   CT_PYTHON_LOG_PATH_BASE* = langstring(codetracerTmpPath & "/log")

@@ -1061,7 +1061,7 @@ proc loadExistingRecord(traceId: int) {.async.} =
     await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
   try:
-    let instanceClient = await startSocket(debugger, CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid))
+    let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid))
     instanceClient.on(cstring"data") do (data: cstring):
       let outputLine = data.trim.parseJsInt
       debugPrint "index: ===> output line ", outputLine
@@ -1309,68 +1309,70 @@ proc configureIpcMain =
     "open-local-trace"
 
     "tab-load"
-    "asm-load"
+    # "asm-load"
     "load-low-level-tab"
     "viewer-menu"
-    "update-expansion"
-    "load-tokens"
-    "load-locals"
-    "evaluate-expression"
-    "load-parsed-exprs"
-    "expand-value"
+
+    "dap-raw-message"
+
+    # "update-expansion"
+    # "load-tokens"
+    # "load-locals"
+    # "evaluate-expression"
+    # "load-parsed-exprs"
+    # "expand-value"
     # "expand-values"
     "save-config"
-    "run-tracepoints"
-    "event-jump"
-    "event-load"
-    "load-terminal"
+    # "run-tracepoints"
+    # "event-jump"
+    # "event-load"
+    # "load-terminal"
     # "callstack-jump"
-    "calltrace-jump"
-    "trace-jump"
-    "history-jump"
-    "add-break"
-    "delete-break"
+    # "calltrace-jump"
+    # "trace-jump"
+    # "history-jump"
+    # "add-break"
+    # "delete-break"
     # "add-break-c"
-    "delete-break-c"
-    "delete-all-breakpoints"
-    "source-line-jump"
-    "source-call-jump"
-    "enable"
-    "disable"
-    "search-calltrace"
-    "update-table"
-    "tracepoint-delete"
-    "tracepoint-toggle"
-    "load-callstack"
-    "load-call-args"
-    "collapse-calls"
-    "expand-calls"
+    # "delete-break-c"
+    # "delete-all-breakpoints"
+    # "source-line-jump"
+    # "source-call-jump"
+    # "enable"
+    # "disable"
+    # "search-calltrace"
+    # "update-table"
+    # "tracepoint-delete"
+    # "tracepoint-toggle"
+    # "load-callstack"
+    # "load-call-args"
+    # "collapse-calls"
+    # "expand-calls"
     # "updated-calltrace-args"
-    "reset-operation"
+    # "reset-operation"
     "exit-error"
-    "update-watches"
-    "save-file"
-    "save-untitled"
-    "update"
-    "save-new"
-    "save-close"
-    "load-history"
-    "load-flow"
-    "load-flow-shape"
-    "setup-trace-session"
+    # "update-watches"
+    # "save-file"
+    # "save-untitled"
+    # "update"
+    # "save-new"
+    # "save-close"
+    # "load-history"
+    # "load-flow"
+    # "load-flow-shape"
+    # "setup-trace-session"
     "started"
     "open-tab"
-    "reload-file"
-    "no-reload-file"
+    # "reload-file"
+    # "no-reload-file"
     "close-app"
-    "run-to-entry"
-    "search"
-    "search-program"
-    "load-step-lines"
-    "step"
-    "local-step-jump"
-    # "send-to-shell"
-    "open-trace"
+    # "run-to-entry"
+    # "search"
+    # "search-program"
+    # "load-step-lines"
+    # "step"
+    # "local-step-jump"
+    # "open-trace"
     "show-in-debug-instance"
     "send-bug-report-and-logs"
 
@@ -1418,6 +1420,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
     await started()
     return
 
+  # TODO: leave this to backend/DAP if possible
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     if bypass:
       let trace = await app.findTraceWithCodetracer(data.startOptions.traceID)
@@ -1458,7 +1461,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
         await data.loadTrace(mainWindow, data.trace, data.config, helpers)
 
     try:
-      let instanceClient = await startSocket(debugger, CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid), expectPossibleFail=true)
+      let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid), expectPossibleFail=true)
       instanceClient.on(cstring"data") do (data: cstring):
         let outputLine = data.trim.parseJsInt
         debugPrint "=> output line ", outputLine
