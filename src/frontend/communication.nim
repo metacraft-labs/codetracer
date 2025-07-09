@@ -51,7 +51,7 @@ type
   MediatorWithSubscribers* = ref object
     name*: cstring
     transport*: Transport
-    asSubscriber*: Subscriber
+    asSubscriber*: Subscriber # can be overriden
     subscribers*: array[CtEventKind, seq[Subscriber]]
     handlers*: array[CtEventKind, seq[proc(eventKind: CtEventKind, rawValue: JsObject, subscriber: Subscriber)]]
     isRemote*: bool

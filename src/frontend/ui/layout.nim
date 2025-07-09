@@ -177,7 +177,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
   )
 
   # Create nested buttons in header
-  layout.on(j"stackCreated") do (ev: Event):
+  layout.on(cstring"stackCreated") do (ev: Event):
     let newElement = kdom.document.createElement("div")
     let hiddenDropdown = vnodeToDom(makeNestedButton(layout, ev), KaraxInstance())
     newElement.classList.add("layout-buttons-container")
@@ -216,18 +216,18 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
   kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
   kxiMap["search-results"] = setRenderer(proc: VNode = data.ui.searchResults.render(), "search-results", proc = discard)
 
-  layout.registerComponent(j"editorComponent") do (container: GoldenContainer, state: GoldenItemState):
+  layout.registerComponent(cstring"editorComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:
       return
 
-    let componentLabel = j(&"editorComponent-{state.id}")
+    let componentLabel = cstring(fmt"editorComponent-{state.id}")
 
     var element = container.getElement()
-    element.innerHTML = cstring(&"<div id={componentLabel} class=\"component-container\"></div>")
+    element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
 
-    cdebug &"layout: registering editor component {componentLabel}"
+    cdebug fmt"layout: registering editor component {componentLabel}"
 
-    container.on(j"tab") do (tab: GoldenTab):
+    container.on(cstring"tab") do (tab: GoldenTab):
       data.ui.saveLayout = true
       #componentMapping -> all registered components in data
       #content -> enum {TERMINAL, TRACELOG etc..}
@@ -274,7 +274,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
 
         if data.ui.openComponentIds[state.content].len == 1:
           # add activeContentItemChanged event handler
-          editorPanel.toJs.on(j"activeContentItemChanged") do (event:  GoldenContentItem):
+          editorPanel.toJs.on(cstring"activeContentItemChanged") do (event:  GoldenContentItem):
             let config = event.toConfig()
             let componentState = config.componentState
 
@@ -297,7 +297,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
               data.services.editor.eventuallyUpdateTabHistory(tab)
 
     var containerId: cstring
-    containerId = j(&"editorComponent-{state.id}")
+    containerId = cstring(fmt"editorComponent-{state.id}")
 
     discard windowSetTimeout((proc =
       if not data.ui.componentMapping[state.content][state.id].isNil:
@@ -314,16 +314,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
 
       discard windowSetTimeout((proc = redrawAll()), 200)), 200)
 
-  layout.registerComponent(j"genericUiComponent") do (container: GoldenContainer, state: GoldenItemState):
+  layout.registerComponent(cstring"genericUiComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:
       return
     let editorLabel = state.label
     var element = container.getElement()
-    element.innerHTML = cstring(&"<div id={editorLabel} class=\"component-container\"></div>")
+    element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
 
     cdebug "layout: register " & state.label
 
-    container.on(j"tab") do (tab: GoldenTab):
+    container.on(cstring"tab") do (tab: GoldenTab):
       # prepare layout to be saved on upcoming stateChanged event
       data.ui.saveLayout = true
 

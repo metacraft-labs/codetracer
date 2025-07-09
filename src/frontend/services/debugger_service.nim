@@ -161,6 +161,13 @@ proc step*(
       " reverse: " & $reverse & " repeat: " & $repeat &
       " complete: " & $complete
     # StepArg + taskId
+    # TODO: move this to a more general handler
+    # that e.g. does both (or optionally both)
+    #   a normal dap step operation
+    #   and a custom ct ct/step operation
+    #   and maybe base it on a custom mediator
+    #   so it can be easily called from various components
+    #   without depending on a service/shared context
     self.data.ipc.send(
       &"CODETRACER::step", js{
         action: realActionEnum,
