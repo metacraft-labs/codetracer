@@ -1,8 +1,9 @@
 ## keep this in sync with types.nim Config def
 ## a file with config code for the c backend, used mostly by ui_data for repl/tests
 
-import json_serialization/std/tables, strutils, sequtils,  os, yaml, std / [streams, strformat]
-import .. / common / [types, paths]
+import std / [ strutils, sequtils, streams, strformat, os ]
+import json_serialization/std/tables, yaml
+import .. / common / [paths, types]
 
 type
   RRBackendConfig* = object

@@ -12,12 +12,12 @@ proc loadCallstack*(self: CalltraceService, codeID: int64, withArgs: bool): Futu
   return await self.data.asyncSend("load-callstack", js{codeID: codeID, withArgs: withArgs}, id, seq[Call])
 
 
-proc calltraceJump*(self: CalltraceService, location: Location) = # location: Location) = # codeID: int64, functionID: FunctionID, callID: int64) = #: Future[void] =
+proc calltraceJump*(self: CalltraceService, location: Location) = 
   var debugger = self.data.services.debugger
   self.nonLocalJump = false # TODO non-local jumps
-  debugger.currentOperation = &"calltrace jump {location.functionName} {location.key}"
+  debugger.currentOperation = cstring(fmt"calltrace jump {location.functionName} {location.key}")
   #debugger.stableBusy = true
-  self.calltraceJumps.add(j(debugger.currentOperation))
+  self.calltraceJumps.add(debugger.currentOperation)
   self.data.ipc.send "CODETRACER::calltrace-jump", location
   avgTimePerRRTick(debugger, location.rrTicks)
 
@@ -27,7 +27,7 @@ proc callstackJump*(self: CalltraceService, index: int, functionName: cstring) =
     self.inCalltraceJump = false
     self.data.services.debugger.stableBusy =true
     inc self.data.services.debugger.operationCount
-    self.data.services.debugger.currentOperation = &"callstack jump {index} {functionName}"
+    self.data.services.debugger.currentOperation = cstring(fmt"callstack jump {index} {functionName}")
     self.data.ipc.send "CODETRACER::callstack-jump", js{index: index, functionName: functionName}
 
 proc searchCalltrace*(self: CalltraceService, query: cstring): Future[seq[Call]] {.async.} =

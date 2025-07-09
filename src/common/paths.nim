@@ -1,4 +1,4 @@
-import std / [os, sequtils, strformat]
+import std / [os, strformat]
 import env
 
 when not defined(js):
@@ -10,8 +10,6 @@ when not defined(js):
 
   var inUiTest = false
 else:
-  import jsffi
-
   type
     NodePath* = ref object
       join*: proc: cstring {.varargs.}
@@ -20,6 +18,8 @@ else:
       basename*: proc(path: cstring): cstring
 
   when not defined(ctRenderer):
+    import std / jsffi
+
     let nodeOs = require("os")
     # copied and adapted from https://stackoverflow.com/a/40424568/438099
     let username = cast[cstring](nodeOs.userInfo().username)
@@ -33,6 +33,9 @@ else:
     inUiTest = false
   else:
     inUiTest = env.get("CODETRACER_IN_UI_TEST", "") == "1"
+
+when not defined(ctRenderer):
+  import std / sequtils
 
 const linksPathConst {.strdefine.} = ""
 

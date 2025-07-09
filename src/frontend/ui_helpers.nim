@@ -102,4 +102,4 @@ proc convertStringToHtmlClass*(input : cstring): cstring =
 
   normalString = ($(matches.mapIt(it[0]).join(j"-"))).toLowerAscii()
 
-  return normalString
+  return normalString.cstring

@@ -1,6 +1,7 @@
 import
-  strformat, strutils, kdom, vdom, karax, karaxdsl, jsffi,
-  ../types, ../lib, ../types, ../ui_helpers
+  std / [strformat, strutils, jsffi],
+  kdom, vdom, karax, karaxdsl,
+  ../types, ../lib, ../ui_helpers
 
 proc rowTimestamp*(row: Element, event: ProgramEvent, rrTicks: int) =
   let currentDebuggerLocation = rrTicks
@@ -13,7 +14,7 @@ proc rowTimestamp*(row: Element, event: ProgramEvent, rrTicks: int) =
 
 proc renderRRTicksLine*(rrTicks: int64, minRRTicks: int64, maxRRTicks: int64, className: string): cstring =
   var percent = 0.0
-  let rrTicksSymbols = ($(rrTicks)).len
+  # let rrTicksSymbols = ($(rrTicks)).len
 
   if maxRRTicks == minRRTicks:
     if rrTicks == minRRTicks:
@@ -26,7 +27,7 @@ proc renderRRTicksLine*(rrTicks: int64, minRRTicks: int64, maxRRTicks: int64, cl
     percent = 0.0
   else:
     let diff = maxRRTicks - minRRTicks
-    percent = (cast[float](rrTicks.toJs - minRRTicks.toJs) * 100.0) / (diff.float)
+    percent = ((rrTicks.toJs - minRRTicks.toJs).to(float) * 100.0) / (diff.float)
 
   let remainingPercent = 101.0 - percent
 
@@ -48,10 +49,10 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
     let scrollArea = cast[Node](container.findNodeInElement(".dataTables_scroll"))
     let scrollBody = cast[Node](scrollArea.findNodeInElement(".dataTables_scrollBody"))
 
-    scrollArea.style.height = &"{containerHeight}px"
-    scrollArea.style.maxHeight = &"{containerHeight}px"
-    scrollBody.style.height = &"{containerHeight}px"
-    scrollBody.style.maxHeight = &"{containerHeight}px"
+    scrollArea.style.height = cstring(fmt"{containerHeight}px")
+    scrollArea.style.maxHeight = cstring(fmt"{containerHeight}px")
+    scrollBody.style.height = cstring(fmt"{containerHeight}px")
+    scrollBody.style.maxHeight = cstring(fmt"{containerHeight}px")
     self.scrollAreaHeight = containerHeight
     self.context.scroller.measure()
 
@@ -98,7 +99,7 @@ proc scrollTable*(table: DataTableComponent, position: cstring) =
     cerror getCurrentExceptionMsg()
 
 proc tableFooter*(table: DataTableComponent): VNode =
-  let class = &"data-tables-footer {table.startRow}to{table.endRow}"
+  let class = cstring(fmt"data-tables-footer {table.startRow}to{table.endRow}")
 
   buildHtml(
     tdiv(class = class)
@@ -114,7 +115,7 @@ proc tableFooter*(table: DataTableComponent): VNode =
           else:
             table.inputFieldChange = true
             ev.stopPropagation(),
-        value = $(table.startRow)
+        value = cstring($(table.startRow))
       )
       text "to"
       tdiv(class="data-tables-footer-end-row"):

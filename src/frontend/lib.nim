@@ -670,8 +670,8 @@ template safeString*(a: cstring): string =
   else:
     ""
 
-template componentContainerClass*(class: string = ""): string =
-  "component-container " & class
+template componentContainerClass*(class: string = ""): cstring =
+  cstring("component-container " & class)
 
 var d3* {.importc.}: D3
 var Mousetrap* {.importc.}: js
@@ -908,7 +908,7 @@ template withDebugInfo*(a: cstring, taskId: TaskId, level: string): cstring =
   # in chronicles and with the rr/gdb scripts logs:
   # <time:18> | <level:5> | <task-id:17> | <file:line:28> | ([<indentation space>]<message>:50)[<args>()]
   cstring(
-    ($(cast[float](now()) / 1_000)).alignLeft(18) & cstring" | " & # time
+    ($(cast[float](now()) / 1_000)).alignLeft(18) & " | " & # time
     level.alignLeft(5) & " | " &
     ($taskId).alignLeft(17) & " | " &
     locationInfo().alignLeft(28) & " | " &
