@@ -481,6 +481,7 @@ proc onAsmLoad(sender: js, response: FunctionLocation) {.async.} =
   mainWindow.webContents.send "CODETRACER::asm-load-received", js{argId: cstring(fmt"{response.path}:{response.name}:{response.key}"), value: res.instructions}
 
 proc onTabLoad(sender: js, response: jsobject(location=types.Location, name=cstring, editorView=EditorView, lang=Lang)) {.async.} =
+  console.log response
   case response.lang:
   of LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb:
     if response.editorView in {ViewSource, ViewTargetSource, ViewCalltrace}:

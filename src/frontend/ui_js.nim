@@ -523,6 +523,8 @@ proc onTraceLoaded(
     save=Save,
     dontAskAgain=bool)) {.async.} =
 
+  clog "trace loaded"
+
   data.trace = response.trace
   data.ui.readOnly = true
   data.services.debugger.functions = response.functions
@@ -1024,6 +1026,7 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
           `handlers`
       # echo messageCode.repr
     result.add(messageCode)
+  # echo result.repr
 
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
@@ -1631,6 +1634,98 @@ if inElectron:
   once:
     configureIPC(data)
     configure(data)
+
+when not defined(ctInExtension):
+  import 
+    communication, middleware, dap,
+    .. / common / ct_event
+
+  var dapApi {.exportc.}: DapApi
+
+  const logging = true # TODO: maybe overridable dynamically
+  
+  # === LocalToViewTransport
+
+  type
+    LocalToViewsTransport* = ref object of Transport
+      data*: Data
+
+  proc newLocalToViewsTransport(data: Data): LocalToViewsTransport =
+    LocalToViewsTransport(data: data)
+
+  # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
+  # as there are many subscribers
+  # IMPORTANT:
+  # internalRawReceive for it is called by the LocalViewToMiddlewareTransport when
+  # a local view emits
+
+  # === end of LocalToViewsTransport
+
+  # === LocalViewSubscriber:
+
+  type
+    LocalViewSubscriber* = ref object of Subscriber
+      # viewApi*: MediatorWithSubscriber
+      viewTransport*: Transport
+
+  method emitRaw*(l: LocalViewSubscriber, kind: CtEventKind, value: JsObject, subscriber: Subscriber) =
+    if logging: console.log cstring"webview subscriber emitRaw: ", cstring($kind), cstring" ", value
+    l.viewTransport.internalRawReceive(CtRawEvent(kind: kind, value: value).toJs, subscriber)
+
+  proc newLocalViewSubscriber(viewTransport: Transport): LocalViewSubscriber =
+    LocalViewSubscriber(viewTransport: viewTransport)
+
+  # === end
+
+  proc setupSinglePageViewsApi(name: cstring, data: Data): MediatorWithSubscribers =
+    let transport = newLocalToViewsTransport(data)
+    newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
+
+  # LocalViewToMiddlewareTransport:
+
+  type
+    LocalViewToMiddlewareTransport* = ref object of Transport
+      # component*: JsObject
+      middlewareToViewsTransport*: Transport
+
+  method send*(l: LocalViewToMiddlewareTransport, data: JsObject, subscriber: Subscriber) =
+    l.middlewareToViewsTransport.internalRawReceive(data, subscriber)
+
+  # internalRawReceive for this is called by the subscriber in the middleware
+
+  proc newLocalViewToMiddlewareTransport(middlewareToViewsTransport: Transport): LocalViewToMiddlewareTransport =
+    LocalViewToMiddlewareTransport(middlewareToViewsTransport: middlewareToViewsTransport)
+    
+  proc setupLocalViewToMiddlewareApi(name: cstring, middlewareToViewsApi: MediatorWithSubscribers): MediatorWithSubscribers =
+    let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
+    result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
+    result.asSubscriber = newLocalViewSubscriber(transport)
+
+  # === end
+
+  proc configureMiddleware =
+    echo "middleware"
+    middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
+    dapApi = newExampleDapApi() # TODO: replace with real DAP client
+
+    setupMiddlewareApis(dapApi, middlewareToViewsApi)
+
+    # additional handler, so for now editor service can keep working
+    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
+      discard data.services.editor.onCompleteMove(data.services.editor, value))
+
+    for content, components in data.ui.componentMapping:
+      for i, component in components:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+        component.register(componentToMiddlewareApi)
+
+    discard windowSetTimeout(proc =
+      dapApi.exampleDap.receiveOnMove(), 1_000)
+
+  once:
+    configureMiddleware()
+
 # else:
   # configureIPC = functionAsJs(configureIPCRun)
 

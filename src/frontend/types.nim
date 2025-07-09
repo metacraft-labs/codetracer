@@ -1552,9 +1552,17 @@ when defined(ctRenderer):
   var domwindow {.importc: "window".}: JsObject
   domwindow.data = data
 
+  var middlewareToViewsApi* {.exportc.}: MediatorWithSubscribers = nil
+  domwindow.middlewareToViewsApi = middlewareToViewsApi
+
+  method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
+    self.api = api
+
   proc registerComponent*(data: Data, component: Component, content: Content) =
     component.data = data
     component.content = content
+    if not middlewareToViewsApi.isNil:
+      component.register(middlewareToViewsApi)
     data.ui.componentMapping[content][component.id] = component
 
   proc projectPath*(project: cstring, path: string): cstring =
@@ -1596,9 +1604,6 @@ proc toCamelCase*(name: string): string =
 method redrawForExtension*(self: Component) {.base.} =
   if self.inExtension:
     self.kxi.redraw()
-
-method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
-  discard
 
 method restart*(self: Component) {.base.} =
   discard

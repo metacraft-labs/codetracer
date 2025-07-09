@@ -712,17 +712,19 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
     # source = j"<file missing>!"
     # filename = j"<file missing: " & filename & j">"
     # missing = true
-
+    console.log "error reading file directly ", filename, " ", err
     if data.trace.imported:
       # try original filename if
       # it was first tried with a trace copy path
       (source, err) = await fsReadFileWithErr(filename)
 
       if not err.isNil:
+        console.log "error reading file from trace ", filename, " ", err
         return
     else:
       # we tried the original filename if not imported:
       # directly stop
+      console.log "error: trace not imported, but file couldn't be read ", filename
       return
     # bug "file missing " & $filename
 
@@ -745,6 +747,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
 
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
 
+  echo "index_config open: file read succesfully"
   var sourceLines = source.split(jsNl)
 
   var name = cstring""

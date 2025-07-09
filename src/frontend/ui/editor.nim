@@ -1151,6 +1151,9 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         var lang = fromPath(self.data.services.debugger.location.path)
         if lang == LangNoir:
           lang = LangRust
+
+        cdebug lang
+  
         tabInfo.monacoEditor = monaco.editor.create(
           jq(selector),
           MonacoEditorOptions(

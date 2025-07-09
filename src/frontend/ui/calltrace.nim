@@ -846,7 +846,7 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool) =
       optimizeCollapse: true,
       autoCollapsing: not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse
     )
-    
+
     self.api.emit(CtLoadCalltraceSection, calltraceLoadArgs)
 
     self.loadedCallKeys = JsAssoc[cstring, int]{}
