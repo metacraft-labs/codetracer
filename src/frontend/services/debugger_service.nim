@@ -226,7 +226,7 @@ proc deleteBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool 
     # TODO move point list
     for i, b in data.pointList.breakpoints:
       if b == self.breakpointTable[path][line]:
-        data.pointList.breakpoints.delete(i, i)
+        delete(data.pointList.breakpoints, i..i)
         data.pointList.redrawBreakpoints = true
       break
     self.breakpointTable[path].del(line)
@@ -249,7 +249,6 @@ proc toggleBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool 
 
 
 proc isEnabled*(self: DebuggerService, path: cstring, line: int): bool =
-  var found = false
   if self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line):
     return self.breakpointTable[path][line].enabled
   else:
@@ -307,7 +306,7 @@ proc onAddBreakResponse*(self: DebuggerService, response: BreakpointInfo, c: boo
 proc deleteAllBreakpoints*(self: DebuggerService, editor: EditorViewComponent) =
   let breakpointsCopy = data.pointList.breakpoints
   for i, b in breakpointsCopy:
-    data.pointList.breakpoints.delete(i, i)
+    delete(data.pointList.breakpoints, i..i)
     data.services.debugger.breakpointTable[b.path].del(b.line)
     editor.refreshEditorLine(b.line)
   data.pointList.redrawBreakpoints = true

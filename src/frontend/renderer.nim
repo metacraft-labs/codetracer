@@ -1,20 +1,26 @@
 # Praise Lord Jesus!
 
 import
-  karax, karaxdsl, kdom, vdom, jsffi, strformat, strutils, sequtils, sugar, macros, json, kdom,
-  algorithm, tables, async, jsconsole,
-  lib, ui_helpers, types, config, utils, lang,
+  std / [
+    jsffi, strformat, strutils, sequtils, sugar,
+    async, jsconsole
+  ],
+  # third party
+  karax, karaxdsl, kdom, vdom, 
+  # internal
+  lib, ui_helpers, types, utils, lang,
   services / [
     event_log_service, debugger_service, editor_service, calltrace_service,
-    history_service, flow_service, search_service, shell_service],
-  ui / datatable
+    history_service, flow_service, search_service, shell_service]
+  # ui / datatable
 
-from dom import Element, getAttribute, Node, preventDefault, document, window,
+# (alexander): if i remember correctly: to prevent clashes with other dom-related modules 
+from std / dom import Element, getAttribute, Node, preventDefault, document, window,
                 Document, getElementById, querySelectorAll, querySelector,
                 getElementsByClassName, contains, add
 
 
-var configureUIIPC*: js
+var configureUiIPC*: js
 var ipc*: js
 var socketdebug*: js
 
@@ -45,7 +51,7 @@ escapeHandler = nil
 
 const TRACEDEPTH* = 2
 const HISTORYDEPTH* = 2
-const STATEDEPTH = 2
+# const STATEDEPTH = 2
 
 const OLD_SESSION_RESULTS_KEY = -1
 
@@ -183,19 +189,19 @@ proc redrawAll* =
 data.redraw = redrawAll
 
 
-proc getSelectionText: cstring =
-  var text = cstring""
-  let window = cast[JsObject](dom.window)
-  let document = cast[JsObject](dom.document)
-  let documentSelection = document.selection
-  if not window.getSelection.isNil:
-    let selection = window.getSelection()
-    text = cast[cstring](selection.toString())
-  elif not documentSelection.isNil:
-    let selectionRange = documentSelection.createRange()
-    text = cast[cstring](selectionRange.text)
-  # kout text
-  return text
+# proc getSelectionText: cstring =
+#   var text = cstring""
+#   let window = cast[JsObject](dom.window)
+#   let document = cast[JsObject](dom.document)
+#   let documentSelection = document.selection
+#   if not window.getSelection.isNil:
+#     let selection = window.getSelection()
+#     text = cast[cstring](selection.toString())
+#   elif not documentSelection.isNil:
+#     let selectionRange = documentSelection.createRange()
+#     text = cast[cstring](selectionRange.text)
+#   # kout text
+#   return text
 
 proc langs*: string =
   result = ""
@@ -214,7 +220,7 @@ proc maybeRedrawTraces*(length: int) =
     traceTime = newTime
     redrawAll()
   else:
-    log &"wait: {(newTime - traceTime)} {20 * traceRedrawLimit}"
+    log cstring(fmt"wait: {(newTime - traceTime)} {20 * traceRedrawLimit}")
 
 
   # TODO tabInfo.lowLevelMap = map
@@ -234,17 +240,6 @@ proc getColumn*(element: kdom.Node): int =
   parseInt($eattr(e, "line")) + 1
 
 # INIT
-
-
-
-
-proc historyTab: js =
-  discard
-  # for panel in sys.panels:
-  #   for tab in panel.tabs:
-  #     # many have content History for some reason: check name too
-  #     if tab.content == Content.History and tab.name == "History":
-  #       return tab
 
 proc loadFlowUI*(ui: cstring): FlowUI =
   if ui == j"parallel":
@@ -292,11 +287,11 @@ proc createUIComponents*(data: Data) =
   if not data.ui.resolvedConfig.isNil:
     createUILayoutComponents(data.ui.resolvedConfig.root)
 
-proc saveNew(data: Data, file: SaveFile) =
-  ipc.send "CODETRACER::save-new", file
+# proc saveNew(data: Data, file: SaveFile) =
+#   ipc.send "CODETRACER::save-new", file
 
-proc saveClose(data: Data, index: int) =
-  ipc.send "CODETRACER::save-close", index
+# proc saveClose(data: Data, index: int) =
+#   ipc.send "CODETRACER::save-close", index
 
 proc onTabReloaded*(sender: js, response: jsobject(argId=cstring, value=TabInfo)) =
   var tab = data.services.editor.open[response.value.path]
@@ -364,16 +359,16 @@ proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
   self.editorUI.monacoEditor.changeViewZones do (view: js):
     self.zoneId = cast[int](view.addZone(self.viewZone))
   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
-  let traceMain = kdom.document.getElementById(fmt"trace-{self.id}")
+  let traceMain = kdom.document.getElementById(cstring(fmt"trace-{self.id}"))
   let editor = self.editorUI.monacoEditor
   let editorLayout = editor.config.layoutInfo
   let editorWidth = editorLayout.width
   let contentLeft = editorLayout.contentLeft
   let minimapWidth = editorLayout.minimapWidth
   self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
-  traceMain.style.width = fmt"{self.traceWidth}px"
+  traceMain.style.width = cstring(fmt"{self.traceWidth}px")
   self.resultsHeight = 210
-  jq(&"#trace-{self.id} .editor-traces").style.height = fmt"{self.resultsHeight}px"
+  jq(cstring(fmt"#trace-{self.id} .editor-traces")).style.height = cstring(fmt"{self.resultsHeight}px")
   discard setTimeout(proc() =
     self.monacoEditor.toJs.getDomNode().querySelector("textarea").focus(),
     1
@@ -546,7 +541,7 @@ proc onOpenLocation*(sender: js, response: types.Location) =
     discard data.openLocation(response.highLevelPath, response.highLevelLine)
 
 proc onCollapseExpansion*(sender: js, response: jsobject(path=cstring, line=int, expansionFirstLine=int, update=MacroExpansionLevelUpdate))  =
-  let expandEditorId = &"expanded-{response.expansionFirstLine}"
+  let expandEditorId = cstring(fmt"expanded-{response.expansionFirstLine}")
   if data.ui.editors.hasKey(expandEditorId):
     var editor = data.ui.editors[expandEditorId]
     editor.isExpanded = false
@@ -636,7 +631,7 @@ proc traceJump*(eventObj: ProgramEvent) =
     data.services.debugger.stableBusy = true
     inc data.services.debugger.operationCount
     data.services.debugger.currentOperation =
-      fmt"jump to trace on {eventObj.highLevelPath}:{eventObj.highLevelLine}"
+      cstring(fmt"jump to trace on {eventObj.highLevelPath}:{eventObj.highLevelLine}")
     # debug "operation", operation=data.services.debugger.currentOperation
 
     ipc.send "CODETRACER::trace-jump", eventObj
@@ -719,11 +714,11 @@ proc stopAction* {.locks: 0.}=
 
 proc loadTheme*(name: cstring) =
   var link = jq("#theme")
-  let currentTheme = cast[js](link).dataset.theme.to(cstring)
+  let currentTheme = cast[JsObject](link).dataset.theme.to(cstring)
   if currentTheme != name:
-    let linkValue = &"frontend/styles/{name}_theme.css?theme={now()}"
-    cast[js](link).href = j(linkValue)
-    cast[js](link).dataset.theme = j(name)
+    let linkValue = cstring(fmt"frontend/styles/{name}_theme.css?theme={now()}")
+    cast[js](link).href = linkValue
+    cast[js](link).dataset.theme = name
 
 
 let monacoThemeNames* = JsAssoc[cstring, cstring]{"mac classic": j"codetracerWhite", # TODO
@@ -756,7 +751,7 @@ proc loadThemeForIndex*(index: int) =
   loadThemeFromName(name)
 
 
-var resizedLowLevel = false
+# var resizedLowLevel = false
 
 
 proc openInstructions*(data: Data, name: cstring) =
@@ -907,8 +902,7 @@ proc reopenLastTab*(data: Data) {.locks: 0.} =
 # openNewTab is used only to open a new empty file
 # for open any other kind of tab - use openLayoutTab !
 proc openNewTab*(data: Data) {.locks: 0.} =
-  var panel = data.editorPanel(ViewSource)
-  let path = &"#untitled{data.services.editor.untitledIndex}"
+  let path = cstring(fmt"#untitled{data.services.editor.untitledIndex}")
   data.services.editor.untitledIndex += 1
 
   let lang = fromPath(path)
@@ -1082,7 +1076,7 @@ proc onCommandSearch*(query: cstring) {.async.} =
     if it.obj.isNil:
       SearchResult(path: it.target, text: it.target)
     else:
-      let function = cast[Function](it.obj)
+      let function = it.obj.to(Function)
       SearchResult(text: it.target, path: function.path, line: function.line))
   data.redraw()
 
@@ -1232,7 +1226,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
       let itemContainer = kdom.document.createElement("div")
       itemContainer.classList.add("context-menu-item-container")
       newElement.classList.add("context-menu-item")
-      newElement.id = &"menu-item-{i}"
+      newElement.id = cstring(fmt"menu-item-{i}")
       newElement.innerHTML = option.name
       newElement.onclick = proc(ev: Event) {.nimcall.} =
         option.handler(ev)
@@ -1240,7 +1234,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
       if option.hint != "":
         let hint = kdom.document.createElement("div")
         hint.classList.add("context-menu-hint")
-        hint.id = &"menu-hint-{i}"
+        hint.id = cstring(fmt"menu-hint-{i}")
         hint.innerHTML = option.hint
         cast[dom.Element](newElement).append(cast[dom.Element](hint))
       cast[dom.Element](itemContainer).append(cast[dom.Element](newElement))
@@ -1260,8 +1254,8 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
       y - ((y + contextHeight + 10) - clientHeight)
     else:
       y
-  container.style.top = $topPos & "px"
-  container.style.left = $leftPos & "px"
+  container.style.top = cstring(fmt"{topPos}px")
+  container.style.left = cstring(fmt"{leftPos}px") 
 
   kdom.document.addEventListener("click", proc(e: Event) =
     container.style.display = "none")
@@ -1396,8 +1390,6 @@ proc setOpen* =
   ipc.send "CODETRACER::set-open"
 
 
-var
-  telemetryBackupIndex = 0
-  scrollAssembly* = -1
+var scrollAssembly* = -1
 
 export event_log_service, debugger_service, editor_service, calltrace_service, history_service, flow_service, search_service, shell_service, utils

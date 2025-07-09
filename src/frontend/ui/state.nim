@@ -11,8 +11,8 @@ import
 # let TOTAL_VALUE_COMPONENT_WIDTH: float = 95 #%
 
 proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - self.nameWidth
-proc watchView(self: StateComponent): VNode
-proc headerView(self: StateComponent): VNode
+# proc watchView(self: StateComponent): VNode
+# proc headerView(self: StateComponent): VNode
 proc excerpt(self: StateComponent): VNode
 
 
@@ -40,7 +40,7 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
 
   self.redrawForExtension()
 
-method onDapStopped(self: StateComponent, response: DapStoppedEvent) =
+method onDapStopped(self: StateComponent, response: DapStoppedEvent) {.async.} =
   # TODO: maybe move to onCompleteMove again when it's working
   # fixing rr ticks
   # self.rrTicks = response.location.rrTicks
@@ -49,14 +49,14 @@ method onDapStopped(self: StateComponent, response: DapStoppedEvent) =
   let arguments = CtLoadLocalsArguments(
     rrTicks: self.rrTicks,
     countBudget: countBudget,
-    minCountLimit: 50
+    minCountLimit: minCountLimit,
   )
   self.api.emit(CtLoadLocals, arguments)
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
-    self.onDapStopped(response))
+    discard self.onDapStopped(response))
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response))
   # api.subscribe(CtCompleteMove, self.onCompleteMove)
@@ -100,9 +100,9 @@ method render*(self: StateComponent): VNode =
     var initialPosition: float
 
     proc resizeColumns(ev: Event, tg:VNode) =
-      let mouseEvent = cast[MouseEvent](ev)
-      let containerWidth = cast[float](jq(".active-state #chevron-container").offsetWidth)
-      let currentPosition = cast[float](mouseEvent.screenX)
+      let mouseEvent = cast[MouseEvent](ev) 
+      let containerWidth = jq(".active-state #chevron-container").offsetWidth.toJs.to(float)
+      let currentPosition = mouseEvent.screenX.toJs.to(float) 
       let movementX = (currentPosition-initialPosition) * 100 / containerWidth
       let newPosition = self.nameWidth + movementX
 
@@ -122,7 +122,7 @@ method render*(self: StateComponent): VNode =
             resizeColumns(ev,tg),
         onmousedown = proc(ev: Event, tg:VNode) =
           if self.chevronClicked:
-            initialPosition = cast[float](cast[MouseEvent](ev).screenX),
+            initialPosition = cast[MouseEvent](ev).screenX.toJs.to(float), 
         onmouseup = proc =
           self.chevronClicked = false,
         onmouseleave = proc = self.chevronClicked = false
@@ -155,7 +155,7 @@ method render*(self: StateComponent): VNode =
 # Show the current active debugger line on top of the search bar in the state component
 proc excerpt(self: StateComponent): VNode =
   let path = data.services.debugger.location.path
-  let id = fmt"code-state-line-{self.id}"
+  let id = cstring(fmt"code-state-line-{self.id}")
 
   if data.ui.editors.hasKey(path):
     let editor = data.ui.editors[path]
@@ -168,7 +168,7 @@ proc excerpt(self: StateComponent): VNode =
         class = "code-state-line"
       )
     ):
-      span(): text &"{codeLine} | {sourceCode}"
+      span(): text cstring(fmt"{codeLine} | {sourceCode}")
       showCode(id, path, codeLine-3, codeLine+5, codeLine)
   else:
     result = buildHtml(
@@ -179,47 +179,47 @@ proc excerpt(self: StateComponent): VNode =
     ):
       span(): text ""
 
-proc headerView(self:StateComponent): VNode =
-  result = buildHtml(
-    tdiv(
-      id = "chevron-container"
-    )
-  ):
-    span(
-      class = fmt"chevron chevron-width-{(self.nameWidth * 100).floor.int}",
-      style = style(StyleAttr.left, $(self.nameWidth) & "%"),
-      onmousedown = proc(ev:Event, tg:VNode) =
-      self.chevronClicked = true,
-      onmouseup = proc =
-      self.chevronClicked = false
-    )
+# proc headerView(self: StateComponent): VNode =
+#   result = buildHtml(
+#     tdiv(
+#       id = "chevron-container"
+#     )
+#   ):
+#     span(
+#       class = cstring(fmt"chevron chevron-width-{(self.nameWidth * 100).floor.int}"),
+#       style = style(StyleAttr.left, cstring(fmt"{self.nameWidth}%")),
+#       onmousedown = proc(ev:Event, tg:VNode) =
+#       self.chevronClicked = true,
+#       onmouseup = proc =
+#       self.chevronClicked = false
+#     )
 
-proc watchView(self: StateComponent): VNode =
-  result = buildHtml(
-    tdiv(id = "gdb-evaluate")
-  ):
-    form(
-      onsubmit = proc(ev: Event, v: VNode) =
-      ev.stopPropagation()
-      ev.preventDefault()
+# proc watchView(self: StateComponent): VNode =
+#   result = buildHtml(
+#     tdiv(id = "gdb-evaluate")
+#   ):
+#     form(
+#       onsubmit = proc(ev: Event, v: VNode) =
+#       ev.stopPropagation()
+#       ev.preventDefault()
 
-      if not self.service.stableBusy:
-        var e = jq("#watch").toJs.value.to(cstring)
+#       if not self.service.stableBusy:
+#         var e = jq("#watch").toJs.value.to(cstring)
 
-        if ($e).find("\n") != NO_INDEX:
-          errorMessage(cstring"newlines forbidden in watch expressions: not registered")
-        else:
-          self.watchExpressions.add(e)
-          self.data.services.debugger.watchExpressions.add(e)
-          discard self.data.services.debugger.updateWatches(proc(service: DebuggerService, locals: seq[Variable]) =
-            self.locals = locals
-            service.locals = locals
-            self.data.redraw())
-          jq("#watch").toJs.value = j"",
-      onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
-      onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()
-    ):
-      input(`type`="text", placeholder="Enter a watch expression", id="watch")
+#         if ($e).find("\n") != NO_INDEX:
+#           errorMessage(cstring"newlines forbidden in watch expressions: not registered")
+#         else:
+#           self.watchExpressions.add(e)
+#           self.data.services.debugger.watchExpressions.add(e)
+#           discard self.data.services.debugger.updateWatches(proc(service: DebuggerService, locals: seq[Variable]) =
+#             self.locals = locals
+#             service.locals = locals
+#             self.data.redraw())
+#           jq("#watch").toJs.value = j"",
+#       onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
+#       onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()
+#     ):
+#       input(`type`="text", placeholder="Enter a watch expression", id="watch")
 
   
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =

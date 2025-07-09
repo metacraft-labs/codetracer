@@ -4,7 +4,7 @@ proc eventJump*(self: EventLogService, event: ProgramEvent) =
   # we use codeID to determine if we need to reset flow
   self.debugger.stableBusy = true
   inc self.debugger.operationCount
-  self.debugger.currentOperation = &"event jump {event.rrEventId}"
+  self.debugger.currentOperation = cstring(fmt"event jump {event.rrEventId}")
   echo fmt"event jump {event.rrEventId}"
   self.data.ipc.send "CODETRACER::event-jump", event
   self.data.redraw()
@@ -34,40 +34,40 @@ proc loadEvents*(self: EventLogService, update: TableData) =
 proc loadTerminal*(self: EventLogService) =
   self.data.ipc.send "CODETRACER::load-terminal", js{}
 
-proc escapeAnsiSequences(content: cstring): cstring =
-  var escapedString = ""
-  var i = 0
-  while i < content.len:
-    var c = content[i]
-    if c == '[':
-      var nextIndex = i + 1
-      while nextIndex < content.len - 1 and (content[nextIndex].isDigit() or content[nextIndex] == ';'):
-        nextIndex += 1
-      if nextIndex < content.len - 1 and content[nextIndex] == 'm':
-        i = nextIndex + 1
-        # ignore \[[digit|;]*m as ansi escape sequence
-      else:
-        for internalIndex in i + 1 .. nextIndex - 1:
-          escapedString.add(content[internalIndex])
-        i = nextIndex
-    elif c == '\\':
-      if i < content.len - 1:
-        if content[i + 1] == 'n':
-          escapedString.add("\n")
-        elif content[i + 1] == 't':
-          escapedString.add("\t")
-        else:
-          escapedString.add("\\")
-          escapedString.add(c)
-        i += 2
-      else:
-        escapedString.add("\\")
-        i += 1
-    else:
-      escapedString.add(c)
-      i += 1
-  let escaped = cstring(escapedString)
-  return escaped
+# proc escapeAnsiSequences(content: cstring): cstring =
+#   var escapedString = ""
+#   var i = 0
+#   while i < content.len:
+#     var c = content[i]
+#     if c == '[':
+#       var nextIndex = i + 1
+#       while nextIndex < content.len - 1 and (content[nextIndex].isDigit() or content[nextIndex] == ';'):
+#         nextIndex += 1
+#       if nextIndex < content.len - 1 and content[nextIndex] == 'm':
+#         i = nextIndex + 1
+#         # ignore \[[digit|;]*m as ansi escape sequence
+#       else:
+#         for internalIndex in i + 1 .. nextIndex - 1:
+#           escapedString.add(content[internalIndex])
+#         i = nextIndex
+#     elif c == '\\':
+#       if i < content.len - 1:
+#         if content[i + 1] == 'n':
+#           escapedString.add("\n")
+#         elif content[i + 1] == 't':
+#           escapedString.add("\t")
+#         else:
+#           escapedString.add("\\")
+#           escapedString.add(c)
+#         i += 2
+#       else:
+#         escapedString.add("\\")
+#         i += 1
+#     else:
+#       escapedString.add(c)
+#       i += 1
+#   let escaped = cstring(escapedString)
+#   return escaped
 
 # data.services.eventLog.onUpdatedTrace = proc(self: EventLogService, response: TraceUpdate) {.async.} = 
 #   let id = data.ui.activeFocus.id
