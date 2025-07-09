@@ -101,6 +101,9 @@ HERE=${HERE:-$(dirname "$(readlink -f "${0}")")}
 # TODO: This includes references to x86_64. What about aarch64?
 export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
 
+export CARGO_HOME="${HERE}/usr"
+export RUSTUP_HOME="${CARGO_HOME}/rustup"
+
 exec "${HERE}"/bin/ct_unwrapped "$@"
 
 EOF
@@ -130,6 +133,9 @@ chmod +x "${APP_DIR}/bin/ctags"
 # We want splitting
 # shellcheck disable=SC2046
 cp $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+
+# Install rust toolchain
+bash "${ROOT_PATH}"/appimage-scripts/install_rustup.sh
 
 chmod -R +x "${APP_DIR}/bin"
 chmod -R +x "${APP_DIR}/electron"
@@ -164,6 +170,9 @@ export HERE=$(dirname "$(readlink -f "${0}")")
 # TODO: This includes references to x86_64. What about aarch64?
 export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
 export LINKS_PATH_DIR=$HERE
+
+export CARGO_HOME="${HERE}/usr"
+export RUSTUP_HOME="${CARGO_HOME}/rustup"
 
 exec ${HERE}/bin/ct "$@"
 EOF
