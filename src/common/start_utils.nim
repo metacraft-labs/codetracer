@@ -35,17 +35,18 @@ proc startCoreProcess*(traceId: int, recordCore: bool, callerPid: int, test: boo
     debugprint "not recordCore"
     debugprint "noOutput ", noOutput
     debugprint "options ", options
+    let socketPath = CT_DAP_SOCKET_PATH_BASE & "_" & $callerPid
     if IS_DB_BASED[trace.lang]:
       var traceFile = traceFolder / "trace.bin"
       if not fileExists(traceFile):
         traceFile = traceFolder / "trace.json"
+      # TODO: add again a way to pass the format directly,
+      # not only through protocol
       result = startProcess(
         dbBackendExe,
         workingDir = workdir,
         args = @[
-          $callerPid,
-          traceFile,
-          traceFolder / "trace_metadata.json"
+          socketPath
         ],
         options=options)
     elif ctConfig.rrBackend.enabled:
