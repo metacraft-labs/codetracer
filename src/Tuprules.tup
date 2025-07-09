@@ -56,6 +56,8 @@ STYLUS = stylus
 -d:ctRenderer\
 --debugInfo:on\
 --lineDir:on\
+--hints:off \
+--warnings:off \
 --hotCodeReloading:on\
 --out:%o\
 js %f |> %B.js

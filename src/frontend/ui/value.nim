@@ -4,8 +4,6 @@ let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
   types.Error, TypeKind.Raw, FunctionKind, TypeKind.None} # temp Function
 
-var default = 0
-
 proc view(
   self: ValueComponent,
   value: Value,
@@ -26,7 +24,7 @@ proc loadHistory(self: ValueComponent, expression: cstring) =
 proc intValue*(i: int): Value {.exportc.} =
   Value(
     kind: TypeKind.Int,
-    i: $i,
+    i: cstring($i),
     typ: Type(kind: TypeKind.Int, langType: "Int"),
   )
 
@@ -34,8 +32,8 @@ proc deleteWatch*(self: StateComponent, expression: cstring) =
   var i = self.watchExpressions.find(expression)
 
   if i != -1:
-    self.watchExpressions.delete(i, i)
-    self.data.services.debugger.watchExpressions.delete(i, i)
+    delete(self.watchExpressions, i..i)
+    delete(self.data.services.debugger.watchExpressions, i..i)
     self.locals = self.locals.filterIt(it.expression != expression)
     self.data.services.debugger.locals = self.data.services.
       debugger.locals.
@@ -131,13 +129,13 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
 
 proc switchChartKindView*(self: ChartComponent): VNode =
   # based on https://getbootstrap.com/docs/4.3/components/dropdowns/ : good to use
-  var kindSelectorClass = "select-view-kind-button"
-  var dropdownClass = "kind-dropdown-menu"
+  var kindSelectorClass = cstring"select-view-kind-button"
+  var dropdownClass = cstring"kind-dropdown-menu"
 
   if not self.kindSelectorIsClicked:
-    dropdownClass = dropdownClass & " hidden"
+    dropdownClass = dropdownClass & cstring" hidden"
   else:
-    kindSelectorClass = kindSelectorClass & " active"
+    kindSelectorClass = kindSelectorClass & cstring" active"
 
   buildHtml(
     tdiv(
@@ -152,10 +150,10 @@ proc switchChartKindView*(self: ChartComponent): VNode =
       )
     ):
       tdiv(
-        class = fmt"dropdown-toggle {kindSelectorClass}",
+        class = cstring(fmt"dropdown-toggle {kindSelectorClass}"),
         id = "dropdownMenuButton"
       ):
-        let kind = ($self.viewKind)[4..^1].toLowerAscii()
+        let kind = ($self.viewKind)[4..^1].toLowerAscii().cstring
         text kind
       tdiv(
         class = dropdownClass,
@@ -195,9 +193,9 @@ proc switchChartKindView*(self: ChartComponent): VNode =
 
 proc ensureLine*(self: ChartComponent) =
   if self.line.isNil and self.viewKind == ViewLine:
-    var canvasElement = jq(j"#chart-line-canvas-" & $self.getId).toJs
+    var canvasElement = jq(cstring(fmt"#chart-line-canvas-{self.getId}")).toJs
     try:
-      var canvasCtx = canvasElement.getContext(j"2d")
+      var canvasCtx = canvasElement.getContext(cstring"2d")
 
       # based on MDN docs : https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/createLinearGradient#filling_a_rectangle_with_a_linear_gradient
       var gradient = canvasCtx.createLinearGradient(276.0 / 2.0, 0, 276.0 / 2.0, 552.0)
@@ -260,13 +258,13 @@ proc ensurePie*(self: ChartComponent) =
           },
       }
     try:
-      var canvas = jq(j"#chart-pie-canvas-" & $self.getId).toJs.getContext(j"2d")
+      var canvas = jq(cstring(fmt"#chart-pie-canvas-{self.getId}")).toJs.getContext(cstring"2d")
       let containerWidth = jq(".trace .editor-traces").toJs.offsetWidth.to(float)
       
       self.pie = newChart(canvas, self.pieConfig)
       self.trace.traceHeight = containerWidth/2
 
-      jq(".trace .trace-main").style.height = $(self.trace.traceHeight + 30) & "px"
+      jq(".trace .trace-main").style.height = cstring($(self.trace.traceHeight + 30) & "px")
 
       let additionalHeightInLines = Math.ceil((self.trace.traceHeight + 30 - 210)/20)
 
@@ -315,11 +313,11 @@ proc renderLine*(self: ChartComponent): VNode =
 
   result = buildHtml(
     tdiv(
-      class = &"chart-line{hidden}",
-      id = "chart-line-" & $self.getId
+      class = cstring(fmt"chart-line{hidden}"),
+      id = cstring(fmt"chart-line-{self.getId}"),
     )
   ):
-    canvas(id = "chart-line-canvas-" & $self.getId)
+    canvas(id = cstring(fmt"chart-line-canvas-{self.getId}"))
 
 
 proc lineData*(self: ChartComponent, values: seq[Value]): seq[float] =
@@ -377,17 +375,18 @@ proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
   for (label, value) in zip(self.pieLabels, self.pieValues):
     values[label] = value
 
-  for val in lineData:
-    if values.hasKey($val):
-      values[$val] = values[$val] + 1.0
+  for value in lineData:
+    let valueText = cstring($value)
+    if values.hasKey(valueText):
+      values[valueText] = values[valueText] + 1.0
     else:
-      values[$val] = 1.0
+      values[valueText] = 1.0
 
   self.pieLabels = @[]
   self.pieValues = @[]
 
   for label, value in values:
-    self.pieLabels.add($label)
+    self.pieLabels.add(label)
     self.pieValues.add(value)
 
   if not self.pie.isNil:
@@ -397,7 +396,7 @@ proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
 
 proc replaceAllValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
   if self.lineDatasetIndices.hasKey(expression):
-    let lineData = self.lineData(values)
+    # let lineData = self.lineData(values)
     let dataset = cast[seq[JsObject]](self.datasets)[self.lineDatasetIndices[expression]]
     var datasetData = cast[seq[int]](dataset.data)
 
@@ -425,11 +424,12 @@ proc update*(self: ChartComponent, values: seq[Value], replace: bool) =
     for (label, value) in zip(self.pieLabels, self.pieValues):
       values[label] = value
 
-  for val in lineData:
-    if values.hasKey($val):
-      values[$val] = values[$val] + 1.0
+  for value in lineData:
+    let valueText = cstring($value)
+    if values.hasKey(valueText):
+      values[valueText] = values[valueText] + 1.0
     else:
-      values[$val] = 1.0
+      values[valueText] = 1.0
 
   self.pieLabels = @[]
   self.pieValues = @[]
@@ -457,11 +457,11 @@ proc renderPie*(self: ChartComponent): VNode =
 
   result = buildHtml(
     tdiv(
-      class = &"chart-pie{hidden}",
-      id = "chart-pie-" & $self.getId
+      class = cstring(fmt"chart-pie{hidden}"),
+      id = cstring(fmt"chart-pie-{self.getId}"),
     )
   ):
-    canvas(id = "chart-pie-canvas-" & $self.getId)
+    canvas(id = cstring(fmt"chart-pie-canvas-{self.getId}"))
 
 method render*(self: ChartComponent): VNode =
   var table = self.tableView()
@@ -483,7 +483,7 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
 
   if self.stateID != -1:
     kxiMap[&"stateComponent-{self.stateID}"].afterRedraws.add(proc =
-      let container = document.getElementById(fmt"history-{expression}")
+      let container = document.getElementById(cstring(fmt"history-{expression}"))
       if not container.isNil:
         container.toJs.scrollTop = chart.historyScrollTop
     ) # TODO: Handle multiple state components
@@ -493,7 +493,7 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
   ):
     tdiv(
       class = "inline-history",
-      id = fmt"history-{expression}",
+      id = cstring(fmt"history-{expression}"),
       onscroll = proc(e: Event, tg: VNode) =
         chart.historyScrollTop = cast[int](e.target.scrollTop),
     ):
@@ -562,9 +562,9 @@ method ensureCollectionElementsChart*(
   value: Value,
   expression: cstring,
   valueView: proc(value: Value): VNode
-) =
+) {.base.} =
   let tableView = proc: VNode =
-    let kl = if self.charts[expression].viewKind == ViewTable: "view-active" else: "view-inactive"
+    let kl = if self.charts[expression].viewKind == ViewTable: cstring"view-active" else: cstring"view-inactive"
     buildHtml(tdiv(class=kl)):
       valueView(value)
   if not self.charts.hasKey(expression):
@@ -606,9 +606,7 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
         else:
           "view-inactive"
 
-      buildHtml(
-        tdiv(class = "history-text " & kl)
-      ):
+      buildHtml(tdiv(class = cstring(fmt"history-text {kl}"))):
         tdiv(class = "history-text-element"):
           tdiv(class = "history-location-element"):
             for event in self.data.services.debugger.valueHistory[expression].results:
@@ -681,7 +679,7 @@ proc atomValueView(self: ValueComponent, valueText: string, expression: cstring,
       ""
 
   result = buildHtml(
-    tdiv(class = &"value-expanded-atom atom-{klass} {klassNumber} {defaultClass}")
+    tdiv(class = cstring(fmt"value-expanded-atom atom-{klass} {klassNumber} {defaultClass}"))
   ):
     if not self.uiExpanded(value, expression) or not self.charts.hasKey(expression):
       span(class = "value-expanded-text"):
@@ -702,7 +700,7 @@ proc expandValueView(self: ValueComponent, value: Value, expression: cstring, le
   self.i += 1
 
   result = buildHtml(
-    span(class = &"value-expand {klass}")
+    span(class = cstring(fmt"value-expand {klass}"))
   ):
     text(&"{left}{list}{right}")
 
@@ -723,7 +721,7 @@ proc expandedCompoundView*(
 ): VNode =
   result = buildHtml(
     tdiv(
-      class = &"value-expanded-compound depth-{depth}",
+      class = cstring(fmt"value-expanded-compound depth-{depth}"),
       style = style(StyleAttr.marginLeft, cstring"17px")
     )
   ):
@@ -751,9 +749,9 @@ proc expandedCompoundView*(
           )
 
           if name in value.activeFields:
-            view(self, element, fmt"{expression} {name}", name, path, depth + 1)
+            view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
         else:
-          view(self, element, fmt"{expression} {name}", name, path, depth + 1)
+          view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
 
         if depth + 1 < path.len:
           discard path.pop()
@@ -774,15 +772,15 @@ proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[
 
   return contextMenu
 
-proc historyButtonView(self: ValueComponent, expression: cstring): VNode =
-  buildHtml(
-    tdiv(
-      class = "value-history-button",
-      onclick = proc =
-        discard self.showHistory(expression)
-    )
-  ):
-    fa "search"
+# proc historyButtonView(self: ValueComponent, expression: cstring): VNode =
+#   buildHtml(
+#     tdiv(
+#       class = "value-history-button",
+#       onclick = proc =
+#         discard self.showHistory(expression)
+#     )
+#   ):
+#     fa "search"
 
 proc compoundOrPointsToCompound(value: Value): bool =
   return value.kind notin ATOM_KINDS and
@@ -808,7 +806,7 @@ proc view(
   if self.uiExpanded(value, expression):
     discard self.expandNewValues(value, path)
 
-  var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
+  # var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
   var atom = if value.kind in ATOM_KINDS or not self.uiExpanded(value, expression): "value-expanded-atom-parent" else: "value-expanded-compound-parent"
   var lang = LangUnknown
   try:
@@ -945,82 +943,82 @@ proc view(
       ):
         text("")
 
-  var selectRow = proc =
-    if value.isWatch:
-      if self.selected:
-        self.selected = false
-      else:
-        let state = self.data.stateComponent(self.stateID)
+  # var selectRow = proc =
+  #   if value.isWatch:
+  #     if self.selected:
+  #       self.selected = false
+  #     else:
+  #       let state = self.data.stateComponent(self.stateID)
 
-        for name, valueComponent in state.values:
-          valueComponent.selected = false
-          self.selected = true
-          self.data.focusComponent(self)
+  #       for name, valueComponent in state.values:
+  #         valueComponent.selected = false
+  #         self.selected = true
+  #         self.data.focusComponent(self)
 
-          kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
-            discard windowSetTimeout(proc =
-              jq(j".value-name-selected").focus(), 50)
-          )
+  #         kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
+  #           discard windowSetTimeout(proc =
+  #             jq(j".value-name-selected").focus(), 50)
+  #         )
 
-      self.data.redraw()
+  #     self.data.redraw()
 
-  var nameEdit = proc =
-    if value.isWatch:
-      if not self.selected:
-        let state = self.data.stateComponent(self.stateID)
+  # var nameEdit = proc =
+  #   if value.isWatch:
+  #     if not self.selected:
+  #       let state = self.data.stateComponent(self.stateID)
 
-        for name, valueComponent in state.values:
-          valueComponent.selected = false
-          self.selected = true
-          self.data.focusComponent(self)
+  #       for name, valueComponent in state.values:
+  #         valueComponent.selected = false
+  #         self.selected = true
+  #         self.data.focusComponent(self)
 
-          kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
-            discard windowSetTimeout(proc =
-              jq(j".value-name-selected").focus(), 50)
-          )
+  #         kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
+  #           discard windowSetTimeout(proc =
+  #             jq(j".value-name-selected").focus(), 50)
+  #         )
 
-        self.data.redraw()
+  #       self.data.redraw()
 
-  var renameWatch = proc(e: Event, v: VNode) =
-    var element = e.target
-    let state = self.data.stateComponent(self.stateID)
-    var text = cast[cstring](cast[js](element).innerText)
+  # var renameWatch = proc(e: Event, v: VNode) =
+  #   var element = e.target
+  #   let state = self.data.stateComponent(self.stateID)
+  #   var text = cast[cstring](cast[js](element).innerText)
 
-    if text.len > 0:
-      state.renameWatch(expression, text)
-    else:
-      state.deleteWatch(expression)
+  #   if text.len > 0:
+  #     state.renameWatch(expression, text)
+  #   else:
+  #     state.deleteWatch(expression)
 
-    self.data.redraw()
+  #   self.data.redraw()
 
   var isWatch = if value.isWatch: j"value-watch" else: j""
   var isSelected = if self.selected: j"value-selected" else: j""
-  var nameSelected = if self.selected: j"value-name-selected" else: j""
+  # var nameSelected = if self.selected: j"value-name-selected" else: j""
   var fresh = if self.fresh: j("value-fresh-" & $self.freshIndex) else: j""
 
-  let ensureCollectionElementsChart = proc: VNode =
-    if isExpandedCompoundParent:
-      self.ensureCollectionElementsChart(
-        value,
-        expression,
-        proc(value: Value): VNode =
-          buildHtml(tdiv()):
-            valueView(value)
-      )
-    else:
-      raise newException(ValueError, "chart not in right context")
+  # let ensureCollectionElementsChart = proc: VNode =
+  #   if isExpandedCompoundParent:
+  #     self.ensureCollectionElementsChart(
+  #       value,
+  #       expression,
+  #       proc(value: Value): VNode =
+  #         buildHtml(tdiv()):
+  #           valueView(value)
+  #     )
+  #   else:
+  #     raise newException(ValueError, "chart not in right context")
 
-  let renderSelectedView = proc: VNode =
-    if isExpandedCompoundParent:
-      if self.charts.hasKey(expression):
-        let chart = self.charts[expression]
+  # let renderSelectedView = proc: VNode =
+  #   if isExpandedCompoundParent:
+  #     if self.charts.hasKey(expression):
+  #       let chart = self.charts[expression]
 
-        result = chart.render()
-        chart.ensure()
-      else:
-        result = nil
-    else:
-      raise newException(ValueError, "chart not in right context")
+  #       result = chart.render()
+  #       chart.ensure()
+  #     else:
+  #       result = nil
+  #   else:
+  #     raise newException(ValueError, "chart not in right context")
 
   proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
     var expand: bool = value.kind == NonExpanded
@@ -1074,10 +1072,10 @@ proc view(
   self.isOperationRunning = false
 
   result = buildHtml(
-    tdiv(class = &"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name")
+    tdiv(class = cstring(fmt"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name"))
   ):
     tdiv(
-      class = &"{atom}",
+      class = cstring(fmt"{atom}"),
       onContextMenu = proc(ev: Event, v: VNode) =
       let contextMenu = self.createContextMenuItems(value, ev)
       let e = ev.toJs

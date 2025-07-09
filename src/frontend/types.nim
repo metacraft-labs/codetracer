@@ -1718,15 +1718,18 @@ method onDebugOutput*(self: Component, response: DebugOutput) {.base, async.} =
 method onError*(self: Component, error: DebuggerError) {.base, async.} =
   discard
 
-method onAddBreakResponse(self: Component, response: BreakpointInfo) {.base, async.} =
+method onAddBreakResponse*(self: Component, response: BreakpointInfo) {.base, async.} =
   discard
 
-method onAddBreakCResponse(self: Component, response: BreakpointInfo) {.base, async.} =
+method onAddBreakCResponse*(self: Component, response: BreakpointInfo) {.base, async.} =
   discard
 
 method onOutputJumpFromShellUi*(self: Component, response: int) {.base, async.} =
   discard
 
+method onDapStopped*(self: Component, response: DapStoppedEvent) {.base, async.} =
+  discard
+ 
 method increaseWhitespaceWidth*(self: EditorViewComponent) {.base.} =
   if self.whitespace.width < MAX_WHITESPACE_WIDTH:
     self.whitespace.width += 1

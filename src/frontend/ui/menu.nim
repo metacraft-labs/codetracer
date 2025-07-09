@@ -1,5 +1,5 @@
-import ui_imports, ../ui_helpers, debug, macros
-from dom import Document
+from std / dom import Document
+import ui_imports, ../ui_helpers, debug
 
 const FONT_UPPERCASE_WIDTH_FACTOR = 1.5
 
@@ -30,17 +30,17 @@ proc menuNestedStyle*(self: MenuComponent, value: int, depth: int, separators: i
 
   if depth != 1:
     for i in 1..<depth:
-      left += cast[int](jq("#menu-nested-elements-" & $i).toJs.clientWidth)
+      left += cast[int](jq(cstring(fmt"#menu-nested-elements-{i}")).toJs.clientWidth)
 
   result = style(
-    (StyleAttr.top, j(&"{value * 28 + separators * 28 - 28}px")),
-    (StyleAttr.left, j(&"calc({left}px + {2 * depth}px)"))
+    (StyleAttr.top, cstring(fmt"{value * 28 + separators * 28 - 28}px")),
+    (StyleAttr.left, cstring(fmt"calc({left}px + {2 * depth}px)"))
   )
 
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config
   # if we update config it should effect it
-  result = j""
+  result = cstring""
 
   for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
     var shortcutName = shortcutValue.renderer.toUpperCase()
@@ -66,14 +66,13 @@ proc menuElementView*(
   nameWidth: int,
   shortcutWidth: int): VNode =
 
-  let name = node.name
   let enabledClass = if node.enabled: "menu-enabled" else: "menu-disabled"
   let shortcut = loadShortcut(node.action, self.data.config)
 
   buildHtml(
     tdiv(
-      id = "menu-element-" & $depth & " " & $i,
-      class = "menu-element menu-node " & enabledClass,
+      id = cstring(fmt"menu-element-{depth} {i}"),
+      class = cstring(fmt"menu-element menu-node {enabledClass}"),
       onmouseover = proc =
         if not self.keyNavigation:
           self.activeIndex = i
@@ -92,8 +91,8 @@ proc menuElementView*(
   ):
     span(class = "menu-node-icon"):
       text ""
-    span(class = &"menu-node-name menu-element-{convertStringToHtmlClass(node.name)}",
-         style = style(StyleAttr.width, &"{nameWidth}ch")):
+    span(class = cstring(fmt"menu-node-name menu-element-{convertStringToHtmlClass(node.name)}"),
+         style = style(StyleAttr.width, cstring(fmt"{nameWidth}ch"))):
       text node.name
     if shortcut != "":
       span(class = "menu-node-shortcut"):
@@ -108,11 +107,10 @@ proc menuFolderView*(
   nameWidth: int
 ): VNode =
   let enabledClass = if node.enabled: "menu-enabled" else: "menu-disabled"
-  let name = node.name
 
   buildHtml(
     tdiv(
-      class = "menu-folder menu-node " & enabledClass,
+      class = cstring(fmt"menu-folder menu-node {enabledClass}"),
       onmouseover = proc =
         if node.enabled and not self.keyNavigation:
           if node.elements.len > 0:
@@ -131,8 +129,8 @@ proc menuFolderView*(
   ):
     span(class = "menu-node-icon"):
       tdiv(class = "icon " & iconClass(node.name))
-    span(class = &"menu-node-name menu-folder-{convertStringToHtmlClass(node.name)}",
-         style = style(StyleAttr.width, &"{nameWidth}ch")):
+    span(class = cstring(fmt"menu-node-name menu-folder-{convertStringToHtmlClass(node.name)}"),
+         style = style(StyleAttr.width, cstring(fmt"{nameWidth}ch"))):
       text node.name
       if node.elements.len > 0:
         span(class = "menu-expand")
@@ -291,10 +289,10 @@ proc countSeparators(node: MenuNode, i: int): int =
     if n.isBeforeNextSubGroup:
       result += 1
 
-let MENU_FUZZY_OPTIONS = FuzzyOptions(
-  limit: 20,
-  allowTypo: true,
-  threshold: -10000)
+# let MENU_FUZZY_OPTIONS = FuzzyOptions(
+#   limit: 20,
+#   allowTypo: true,
+#   threshold: -10000)
 
 proc toggle*(self: MenuComponent) =
   if self.active:
@@ -334,10 +332,10 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
 proc navigationMenuView*(self: MenuComponent): VNode =
   let menu = self.data.ui.menuNode
 
-  proc search(value: cstring) {.async.} =
-    self.searchQuery = value
-    self.data.redraw()
-    jq("#menu-search-text").focus()
+  # proc search(value: cstring) {.async.} =
+  #   self.searchQuery = value
+  #   self.data.redraw()
+  #   jq("#menu-search-text").focus()
 
   result = buildHtml(
     tdiv(
@@ -435,8 +433,6 @@ proc navigationMenuView*(self: MenuComponent): VNode =
 
         var current = menu
         var sum = 0
-        var separators = 0
-        var leftOffset = 0
         for depth, i in self.activePath:
           var separators = countSeparators(current, i)
           current = current.elements[i]
@@ -452,8 +448,8 @@ proc navigationMenuView*(self: MenuComponent): VNode =
             self.activePathOffsets[depth] + self.activePathWidths[depth]
 
           tdiv(
-            class = "menu-nested-elements" & " menu-top-" & $sum & " " & $separators,
-            id = "menu-nested-elements-" & $(depth + 1),
+            class = cstring(fmt"menu-nested-elements menu-top-{sum} {separators}"),
+            id = cstring(fmt"menu-nested-elements-{depth + 1}"),
             style = menuNestedStyle(self, sum, depth + 1, separators, submenuWidth)
           ):
             for i2, element in current.elements:

@@ -1,6 +1,10 @@
 import
-  async, strformat, strutils, sequtils, sugar, dom, os, jsconsole,
-  karax, karaxdsl, vstyles, jsffi, algorithm, lookuptables,
+  std / [
+    async, strformat, strutils, sequtils, sugar, os, jsconsole,
+    algorithm, jsffi
+  ],
+  # third party
+  karax, karaxdsl, vstyles, lookuptables, # lookuptables is from karax 
   ../lib, ../types, ../renderer, ../config, ../ui_helpers, ../utils, ../lang,
   ../ services / [event_log_service, debugger_service, editor_service, calltrace_service, history_service, flow_service, search_service, shell_service]
 
@@ -10,7 +14,7 @@ import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document, getElementById, querySelectorAll, querySelector, focus
 
 proc fa*(typ: string, kl: string = ""): VNode =
-  result = buildHtml(italic(class = "fa fa-$1 $2" % [$typ, kl]))
+  result = buildHtml(italic(class = cstring(fmt"fa fa-{typ} {kl}")))
 
 proc jqFind*(a: cstring): js {.importcpp: "jQuery(#)".}
 

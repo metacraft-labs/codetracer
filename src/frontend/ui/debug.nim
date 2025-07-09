@@ -9,7 +9,7 @@ proc messageView(self: DebugComponent): VNode =
   if self.message.message.len == 0 or self.message.time == -1:
     buildHtml(tdiv())
   else:
-    let kl = "message-" & ($self.message.level)[3 .. ^1].toLowerAscii
+    let kl = cstring("message-" & ($self.message.level)[3 .. ^1].toLowerAscii)
 
     buildHtml(
       tdiv(id = "message", class = kl)
@@ -122,7 +122,7 @@ proc buildListItem(self: DebugComponent, history: JumpHistory, id: int): VNode =
   buildHtml(
     tdiv(class="history-list-item-wrapper")
   ):
-    span(class=fmt"history-list-item {active}",
+    span(class=cstring(fmt"history-list-item {active}"),
       onmousedown = proc (ev: Event, et: VNode) =
         ev.preventDefault(),
       onclick = proc(ev: Event, v: VNode) =
@@ -138,7 +138,7 @@ proc buildListItem(self: DebugComponent, history: JumpHistory, id: int): VNode =
 proc buildFullHistory(self: DebugComponent): VNode =
   var hidden = if not self.service.fullHistory: "hidden" else: ""
   return buildHtml(
-    tdiv(class = fmt"full-history-list {hidden}")
+    tdiv(class = cstring(fmt"full-history-list {hidden}"))
   ):
     for id, history in self.service.jumpHistory.reversed():
       buildListItem(self, history, id)
@@ -160,7 +160,7 @@ proc buildHistoryMenu(self: DebugComponent): VNode =
           buildListItem(self, history, id)
           if id > 30: break
     tdiv(class = "history-list-item-wrapper"):
-      span(class = fmt"history-list-item full-history-item",
+      span(class = cstring(fmt"history-list-item full-history-item"),
         id = "history-focus-id",
         tabIndex = "0",
         onblur = proc() =
@@ -179,8 +179,8 @@ proc buildHistoryMenu(self: DebugComponent): VNode =
 
 
 method render*(self: DebugComponent): VNode =
-  let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
-  let finished = if self.service.finished: "debug-finished-background" else: ""
+  # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
+  let finished = if self.service.finished: cstring"debug-finished-background" else: cstring""
 
   result = buildHtml(
     tdiv()
@@ -189,7 +189,10 @@ method render*(self: DebugComponent): VNode =
     tdiv(id="debug", class=finished):
 
       proc debugStepButton(id: string, action: Action, reverse: bool): VNode {.closure.} =
-        let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
+        # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000:
+        #       cstring"debug-button busy"
+        #     else:
+        #       cstring"debug-button"
 
         var click = proc =
           let taskId = genTaskId(Step)
@@ -198,7 +201,7 @@ method render*(self: DebugComponent): VNode =
 
         buildHtml(tdiv(class="debug-button-container")):
           span(
-            id = id & "-debug",
+            id = cstring(fmt"{id}-debug"),
             class = "debug-button",
             onclick = click
           ):
@@ -206,20 +209,20 @@ method render*(self: DebugComponent): VNode =
             tdiv(
               class = "custom-tooltip",
             ):
-              text tooltipText[id] & fmt" ({shortcuts[id]})"
+              text tooltipText[id] & cstring(fmt" ({shortcuts[id]})")
 
       proc debugButton(id: string, disabled: bool = false): VNode {.closure.} =
         let disabledClass = if disabled: "disabled" else: ""
-        let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
+        # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
         var click = proc = action(self, id)
 
         if not self.service.usingContextMenu:
           self.service.activeHistory = ""
 
-        buildHtml(tdiv(class=fmt"debug-button-container {disabledClass}")):
+        buildHtml(tdiv(class=cstring(fmt"debug-button-container {disabledClass}"))):
           span(
-            id = id & "-debug",
-            class = fmt"debug-button",
+            id = cstring(fmt"{id}-debug"),
+            class = "debug-button",
             onclick = proc() =
               if not disabled:
                 click()
@@ -244,8 +247,8 @@ method render*(self: DebugComponent): VNode =
                   100
                 )
           ):
-            tdiv(class=fmt"{disabledClass}"):
-              buttons[j(id)]
+            tdiv(class=cstring(fmt"{disabledClass}")):
+              buttons[cstring(id)]
             tdiv(
               class = "custom-tooltip",
             ):

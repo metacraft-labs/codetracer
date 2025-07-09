@@ -943,7 +943,7 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
     raise newException(Exception, "There is not any component with the given id.")
 
   # get editor component
-  let component = data.ui.componentMapping[content][id]
+  # let component = data.ui.componentMapping[content][id]
 
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
@@ -1148,7 +1148,7 @@ proc openTab*(
     noInfoMessage: cstring = cstring"",
     line: int = NO_LINE) = #  lang: Lang = LangUnknown) =
   cdebug "editor: openTab: " & $name & " " & $editorView
-  let tabName = if name != "unknown": name else: "NO SOURCE"
+  # let tabName = if name != "unknown": name else: "NO SOURCE"
   # singleton no info page?
   if not data.services.editor.open.hasKey(name):
     discard data.openNewEditorView(name, editorView, noInfoMessage=noInfoMessage, line=line)
@@ -1165,14 +1165,14 @@ proc openTab*(
   #   data.showTab(id)
 
 proc convertTracepointEventToProgramEvent*(tracepointEvent: Stop): ProgramEvent =
-  var res: string
+  var res: cstring
   if tracepointEvent.errorMessage == "":
     for (name, value) in tracepointEvent.locals:
       if value.kind != types.Error:
         if value.isLiteral and value.kind == types.String:
           res.add(value.text & cstring" ")
         else:
-          res.add(name & j"=" & textRepr(value) & cstring"; ")
+          res.add(name & j"=" & textRepr(value).cstring & cstring"; ")
       else:
         res.add(name & j"=" & j"<span class=error-trace>" & value.msg & j"</span>")
         res.add(j" ")
@@ -1228,7 +1228,7 @@ proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCac
     data.network.futures[j(id)][j(argId)] = functionAsJs(proc(value: JsObject): U =
       discard jsdelete data.asyncSendCache[j(id)][j(argId)]
       discard jsdelete data.network.futures[j(id)][j(argId)]
-      resolve(cast[U](value)))
+      resolve(value.to(U)))
 
     data.ipc.send j("CODETRACER::" & id), arg
     echo "<- sent: ", "CODETRACER::" & id
@@ -1310,7 +1310,7 @@ proc findTRNode*(node: js): js =
     node else: findTRNode(node.parentNode)
 
 proc convertNotificationKind*(notificationKind: NotificationKind): cstring =
-  return ($notificationKind)["Notification".len .. ^1]
+  return cstring(($notificationKind)["Notification".len .. ^1])
 
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig =
   domwindow.editor = editor
