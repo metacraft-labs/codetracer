@@ -1,8 +1,7 @@
 import
-  json, strutils, sequtils, os, jsffi,
-  karax,
-  lib, paths, types
-import ../common/ct_logging
+  std / [json, strutils, sequtils, jsffi],
+  lib, types,
+  .. / common / ct_logging
 
 let configPath* = ".config.yaml"
 
@@ -13,6 +12,10 @@ let defaultConfigPath* = "default_config.yaml"
 let defaultLayoutPath* = "default_layout.json"
 
 when not defined(ctRenderer):
+  import 
+    std / os,
+    paths
+
   let configDir* = linksPath / "config"
   let userConfigDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
   let userLayoutDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
@@ -34,7 +37,7 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
       warnPrint "config: invalid shortcut action ", $key
       continue
     for raw in rawShortcuts:
-      let normalShortcut = normalize(raw)
+      let normalShortcut = normalize(raw).cstring
       var l = j""
       if normalShortcut == j"Delete":
         l = j"del"

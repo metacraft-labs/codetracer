@@ -1,4 +1,4 @@
-import service_imports, jsconsole
+import service_imports
 
 proc loadFlow*(self: FlowService, taskId: TaskId) {.async.} =
   # cdebug "flow_service: loadFlow enabled:" & $self.enabledFlow, taskId
