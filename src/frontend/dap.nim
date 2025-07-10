@@ -76,6 +76,31 @@ when not defined(ctInExtension):
     of "ct/load-locals":
       # TODO?
       discard
+    of "ct/update-table":
+      dap.receive(ExampleDapMessage(`type`: "event", event: "ct/updated-table", body: CtUpdatedTableResponseBody(
+        tableUpdate: TableUpdate(
+          data: TableData(
+            draw: 0,
+            recordsTotal: 0,
+            recordsFiltered: 0,
+            data: @[
+              TableRow(
+                directLocationRRTicks: 0,
+                rrEventId: 0,
+                fullPath: dap.location.path,
+                lowLevelLocation: dap.location.lowLevelPath,
+                kind: EventLogKind.Write,
+                content: "-".cstring,
+                metadata: "-".cstring,
+                base64Encoded: true,
+                stdout: true,
+              )
+            ]
+          ),
+          isTrace: false,
+          traceId: 0,
+        )
+      ).toJs))
     of "ct/load-calltrace-section":
       dap.receive(ExampleDapMessage(`type`: "event", event: "ct/updated-calltrace", body: CtUpdatedCalltraceResponseBody(
         callLines: @[
@@ -117,6 +142,9 @@ type
 # 1. Response CtEventKinds
 # 2. Non backend related events
 const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
+  CtUpdateTable: "ct/update-table",
+  CtUpdatedTable: "ct/updated-table",
+  CtUpdateTableResponse: "",
   CtSubscribe: "",
   CtLoadLocals: "ct/load-locals",
   CtLoadLocalsResponse: "",
