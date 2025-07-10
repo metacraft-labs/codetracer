@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
-use crate::dap::{self, DapClient, DapMessage};
+use crate::dap::{self, CtUpdatedTableResponseBody, DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
@@ -423,6 +423,7 @@ impl Handler {
             self.calltrace.depth_offset,
         );
         // self.return_task((task, VOID_RESULT.to_string()))?;
+        info!("-------- This is the calltrace");
         let raw_event = self.dap_client.updated_calltrace_event(&update)?;
         self.send_dap(&raw_event)?;
         Ok(())
@@ -1254,25 +1255,21 @@ impl Handler {
         Ok(())
     }
 
-    pub fn update_table(&mut self, args: UpdateTableArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn update_table(&mut self, req: dap::Request, args: UpdateTableArgs) -> Result<(), Box<dyn Error>> {
+        info!("------- GETTING TO THE TABLE UPDATE FUNC?");
         let (table_update, trace_values_option) = self.event_db.update_table(args)?;
-        if let Some(trace_values) = trace_values_option {
-            self.send_event((
-                EventKind::TracepointLocals,
-                gen_event_id(EventKind::TracepointLocals),
-                self.serialize(&trace_values)?,
-                false,
-            ))?;
-        }
+        // TODO: For now no trace values are available
+        // if let Some(trace_values) = trace_values_option {
+        //     self.send_event((
+        //         EventKind::TracepointLocals,
+        //         gen_event_id(EventKind::TracepointLocals),
+        //         self.serialize(&trace_values)?,
+        //         false,
+        //     ))?;
+        // }
         // info!("table update {:?}", table_update);
-
-        self.send_event((
-            EventKind::UpdatedTable,
-            gen_event_id(EventKind::UpdatedTable),
-            self.serialize(&table_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let raw_event = self.dap_client.updated_table_event(&CtUpdatedTableResponseBody{table_update})?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
