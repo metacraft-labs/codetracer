@@ -76,6 +76,9 @@ type
   CtLoadLocalsResponseBody* = ref object
     locals*: seq[Variable]
 
+  CtUpdatedTableResponseBody* = ref object
+    tableUpdate*: TableUpdate
+
   Variable* = ref object
     expression*: langstring
     value*: Value

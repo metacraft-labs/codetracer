@@ -146,6 +146,7 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
       traceUpdateId: -1,
       lastJumpFireTime: 0,
       inExtension: inExtension,
+      drawId: 0,
     )
     data.registerComponent(result, Content.EventLog)
 

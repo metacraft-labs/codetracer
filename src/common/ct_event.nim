@@ -1,5 +1,8 @@
 type
   CtEventKind* = enum
+    CtUpdateTable
+    CtUpdatedTable,
+    CtUpdateTableResponse
     CtSubscribe,
     CtLoadLocals,
     CtLoadLocalsResponse,

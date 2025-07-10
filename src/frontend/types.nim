@@ -1727,6 +1727,9 @@ method onBuildStderr*(self: Component, response: BuildOutput) {.base, async.} =
 method onBuildCode*(self: Component, response: BuildCode) {.base, async.} =
   discard
 
+method onUpdatedTable*(self: Component, response: CtUpdatedTableResponseBody) {.base, async.} =
+  discard
+
 method onUpdatedCalltrace*(self: Component, response: CtUpdatedCalltraceResponseBody) {.base, async.} =
   discard
 
