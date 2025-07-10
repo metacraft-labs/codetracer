@@ -1,3 +1,5 @@
 include_rules
 
+ifndef CONFIG_WITHOUT_DB_BACKEND
 : src/main.rs |> !rust_cargo_small_lang |> ../bin/small-lang
+endif

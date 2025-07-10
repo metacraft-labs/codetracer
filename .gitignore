@@ -6,6 +6,8 @@ nimcache/
 .tup/
 .venv/
 build-*/
+src/build-*/
+result-*
 
 # Mac build
 *.app
