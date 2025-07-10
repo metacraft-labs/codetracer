@@ -1,4 +1,4 @@
-use crate::task;
+use crate::task::{self, TableUpdate};
 use log::info;
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
@@ -194,6 +194,12 @@ pub struct ScopeResponseBody {
 #[serde(rename_all = "camelCase")]
 pub struct CtLoadLocalsResponseBody {
     pub locals: Vec<task::Variable>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CtUpdatedTableResponseBody {
+    pub table_update: task::TableUpdate,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
@@ -475,6 +481,20 @@ impl DapClient {
                 type_: "event".to_string(),
             },
             event: "ct/updated-calltrace".to_string(),
+            body: serde_json::to_value(update)?,
+        }))
+    }
+
+    pub fn updated_table_event(
+        &mut self,
+        update: &CtUpdatedTableResponseBody
+    ) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-table".to_string(),
             body: serde_json::to_value(update)?,
         }))
     }

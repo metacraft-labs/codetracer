@@ -3,6 +3,8 @@ import
   ui_imports, colors, events, trace, typetraits, strutils, jsconsole,
   datatable, strutils, base64
 
+import ../communication, ../../common/ct_event
+
 var arg: js
 
 const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
@@ -64,53 +66,6 @@ for kind, tags in kindTags:
 
 var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
 
-method onUpdatedTable*(self: EventLogComponent, response: TableUpdate) {.async.}
-proc makeTableUpdate(self: EventLogComponent): TableUpdate =
-  TableUpdate(
-    data: TableData(
-      draw: self.drawId,
-      recordsTotal: 3,
-      recordsFiltered: 3,
-      data: @[
-        TableRow(
-          directLocationRRTicks: 7,
-          base64Encoded: false,
-          rrEventId: 0,
-          fullPath: "main.nr:14",
-          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
-          kind: EventLogKind.Write,
-          content: "1\n",
-          metadata: "",
-          stdout: true
-        ),
-        TableRow(
-          directLocationRRTicks: 16,
-          base64Encoded: false,
-          rrEventId: 1,
-          fullPath: "main.nr:14",
-          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
-          kind: EventLogKind.Write,
-          content: "2\n",
-          metadata: "",
-          stdout: true
-        ),
-        TableRow(
-          directLocationRRTicks: 25,
-          base64Encoded: false,
-          rrEventId: 2,
-          fullPath: "main.nr:14",
-          lowLevelLocation: "/home/nedy/codetracer-github/examples/noir_test/src/main.nr",
-          kind: EventLogKind.Write,
-          content: "3\n",
-          metadata: "",
-          stdout: true
-        )
-      ]
-    ),
-    isTrace: false,
-    traceId: 0
-  )
-
 proc events(self: EventLogComponent)
 proc resizeEventLogHandler(self: EventLogComponent)
 
@@ -118,9 +73,6 @@ proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.export
   if eventLogComponentForExtension.kxi.isNil:
     eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
   result = eventLogComponentForExtension
-  eventLogComponentForExtension.events()
-  discard setTimeout(proc = discard eventLogComponentForExtension.onUpdatedTable(makeTableUpdate(eventLogComponentForExtension)), 1000)
-  discard setTimeout(proc = resizeEventLogHandler(eventLogComponentForExtension), 1000)
 
 proc denseId*(context: EventLogComponent): cstring =
   j("eventLog-" & $context.id & "-dense-table-" & $context.index)
@@ -341,8 +293,8 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
 proc events(self: EventLogComponent) =
   var context = self
 
-  if not self.service.updatedContent:
-    return
+  # if not self.service.updatedContent:
+  #   return
 
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()
@@ -533,19 +485,18 @@ proc events(self: EventLogComponent) =
           ) =
             var mutData = data
             self.tableCallback = callback
-            self.traceService.drawId += 1
-            mutData.draw = self.traceService.drawId
+            self.drawId += 1
+            mutData.draw = self.drawId
             self.drawId = mutData.draw
             self.hiddenRows = data.start
-            if not self.inExtension:
-              discard self.data.services.debugger.updateTable(
-                UpdateTableArgs(
-                  tableArgs: mutData,
-                  selectedKinds: self.selectedKinds,
-                  isTrace: false,
-                  traceId: 0,  
-                )
-              ),
+            let updateTableArgs =
+              UpdateTableArgs(
+                tableArgs: mutData,
+                selectedKinds: self.selectedKinds,
+                isTrace: false,
+                traceId: 0,  
+              )
+            self.api.emit(CtUpdateTable, updateTableArgs),
         }
       )
 
@@ -1001,7 +952,10 @@ proc eventLogHeaderView*(self: EventLogComponent): VNode =
     tdiv(class = local("categories")):
       eventLogCategoryButtonView(self, EventDropDownBox.Filter)
 
-method onUpdatedTable*(self: EventLogComponent, response: TableUpdate) {.async.} =
+method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
+  echo "##### GOT A RESPONSE :?"
+  let response = res.tableUpdate
+  kout response
   if not response.isTrace and self.drawId == response.data.draw:
     let dt = self.denseTable
 
@@ -1117,21 +1071,21 @@ proc afterMove(self: EventLogComponent) =
     self.isFlowUpdate = false
 
 method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
-  if self.data.ui.activeFocus != self:
-    let currentTime: int64 = now()
+  # if self.data.ui.activeFocus != self:
+  let currentTime: int64 = now()
 
-    self.activeRowTicks = response.location.rrTicks
-    self.lastJumpFireTime = currentTime
-    if self.isFlowUpdate:
-      self.findActiveRow(self.activeRowTicks, false)
+  self.activeRowTicks = response.location.rrTicks
+  self.lastJumpFireTime = currentTime
+  if self.isFlowUpdate:
+    self.findActiveRow(self.activeRowTicks, false)
 
-      discard windowSetTimeout(
-        proc =
-          self.afterMove(),
-          cast[int](MOVE_DELAY)
-      )
-    else:
-      self.findActiveRow(self.activeRowTicks, true)
+    discard windowSetTimeout(
+      proc =
+        self.afterMove(),
+        cast[int](MOVE_DELAY)
+    )
+    # else:
+    #   self.findActiveRow(self.activeRowTicks, true)
 
 method onUp*(self: EventLogComponent) {.async.} =
   if self.rowSelected != 0:
@@ -1162,3 +1116,13 @@ method onFindOrFilter*(self: EventLogComponent) {.async.} =
 method onEnter*(self: EventLogComponent) {.async.} =
   let event = cast[ProgramEvent](self.service.events[self.rowSelected - self.hiddenRows])
   self.programEventJump(event)
+
+method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response))
+  api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
+    discard self.onUpdatedTable(response))
+
+proc registerEventLogComponent*(component: EventLogComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)

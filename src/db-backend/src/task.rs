@@ -790,7 +790,7 @@ pub struct OrdValue {
     pub dir: String,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableRow {
     #[serde(rename = "directLocationRRTicks")]
@@ -830,7 +830,7 @@ impl TableRow {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableData {
     pub draw: usize,
@@ -839,7 +839,7 @@ pub struct TableData {
     pub data: Vec<TableRow>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableUpdate {
     pub data: TableData,
