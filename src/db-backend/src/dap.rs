@@ -1,4 +1,4 @@
-use crate::task;
+use crate::task::{self, TableUpdate};
 use log::info;
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
@@ -194,6 +194,12 @@ pub struct ScopeResponseBody {
 #[serde(rename_all = "camelCase")]
 pub struct CtLoadLocalsResponseBody {
     pub locals: Vec<task::Variable>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CtUpdatedTableResponseBody {
+    pub table_update: task::TableUpdate,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
@@ -465,6 +471,28 @@ impl DapClient {
         }))
     }
 
+    pub fn updated_events(&mut self, first_events: Vec<task::ProgramEvent>) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-events".to_string(),
+            body: serde_json::to_value(first_events)?,
+        }))
+    }
+
+    pub fn updated_events_content(&mut self, contents: String) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-events_content".to_string(),
+            body: serde_json::to_value(contents)?,
+        }))
+    }
+
     pub fn updated_calltrace_event(
         &mut self,
         update: &task::CallArgsUpdateResults,
@@ -479,6 +507,20 @@ impl DapClient {
         }))
     }
 
+    pub fn updated_table_event(
+        &mut self,
+        update: &CtUpdatedTableResponseBody,
+    ) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-table".to_string(),
+            body: serde_json::to_value(update)?,
+        }))
+    }
+
     pub fn complete_move_event(&mut self, state: &task::MoveState) -> Result<DapMessage, serde_json::Error> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
@@ -487,6 +529,17 @@ impl DapClient {
             },
             event: "ct/complete-move".to_string(),
             body: serde_json::to_value(state)?,
+        }))
+    }
+
+    pub fn loaded_terminal_event(&mut self, events: Vec<task::ProgramEvent>) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/loaded-terminal".to_string(),
+            body: serde_json::to_value(events)?,
         }))
     }
 

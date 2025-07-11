@@ -1,5 +1,8 @@
 type
   CtEventKind* = enum
+    CtUpdateTable,
+    CtUpdatedTable,
+    CtUpdateTableResponse
     CtSubscribe,
     CtLoadLocals,
     CtLoadLocalsResponse,
@@ -9,6 +12,13 @@ type
     DapStopped,
     DapInitialized,
     DapOutput,
+    CtEventLoad,
+    CtUpdatedEvents,
+    CtUpdatedEventsContent,
+    CtLoadTerminal,
+    CtLoadedTerminal,
+    CtCollapseCalls,
+    CtExpandCalls,
     
 when defined(js):
   import std / jsffi

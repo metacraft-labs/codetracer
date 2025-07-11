@@ -560,6 +560,9 @@ type
     hiddenRows*: int
     lastJumpFireTime*: int64
     isFlowUpdate*: bool
+    started*: bool
+    ignoreOutput*: bool
+    programEvents*: seq[ProgramEvent]
 
 
   DebugComponent* = ref object of Component
@@ -1706,6 +1709,9 @@ method onBuildStderr*(self: Component, response: BuildOutput) {.base, async.} =
   discard
 
 method onBuildCode*(self: Component, response: BuildCode) {.base, async.} =
+  discard
+
+method onUpdatedTable*(self: Component, response: CtUpdatedTableResponseBody) {.base, async.} =
   discard
 
 method onUpdatedCalltrace*(self: Component, response: CtUpdatedCalltraceResponseBody) {.base, async.} =

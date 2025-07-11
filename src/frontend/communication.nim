@@ -60,7 +60,7 @@ type
 proc emit*[T](m: MediatorWithSubscribers, eventKind: CtEventKind, value: T) =
   console.log cstring"api for ", m.name, " emit: ", cstring($eventKind), value
   if m.singleSubscriber:
-    echo "  -> using transport"
+    echo "  -> single sub using transport"
     m.transport.send(CtRawEvent(kind: eventKind, value: value.toJs).toJs, m.asSubscriber)
   else:
     echo "  subscribers: ", m.subscribers[eventKind].len
