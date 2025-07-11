@@ -3,7 +3,7 @@
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
 [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.05.1-amd64.AppImage)
-[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.05.1-arm64.dmg)
+<!-- FIXME! Temporary disabled due to broken image [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.05.1-arm64.dmg) -->
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/share/applications` on Linux).
