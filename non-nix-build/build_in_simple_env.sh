@@ -40,8 +40,10 @@ export HERE=$(dirname "$(readlink -f "${0}")")
 export CARGO_HOME="${HERE}/.."
 export RUSTUP_HOME="${CARGO_HOME}/rustup"
 
-exec ${HERE}/bin/ct_unwrapped "$@"
+exec ${HERE}/ct_unwrapped "$@"
 EOF
+
+chmod +x "${DIST_DIR}/bin/ct"
 
 # for now just put them in src/
 #   not great, but much easier for now as the public/static files
