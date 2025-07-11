@@ -6,7 +6,7 @@
 
 set -e
 
-export GIT_ROOT=$(git rev-parse --show-toplevel)                          
+export GIT_ROOT=$(git rev-parse --show-toplevel)
 
 "${GIT_ROOT}"/non-nix-build/install_libraries.sh
 
@@ -36,7 +36,7 @@ nim -d:release \
     --nimcache:nimcache \
     -d:nimDebugDlOpen \
     -d:ctmacos \
-    --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
+    --out:"$DIST_DIR/bin/ct_unwrapped" c ./src/ct/codetracer.nim
 
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
