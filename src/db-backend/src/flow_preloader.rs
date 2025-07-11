@@ -160,10 +160,6 @@ impl<'a> CallFlowPreloader<'a> {
                 let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
                 db.next_step_id_relative_to(iter_step_id, true, step_to_different_line)
             };
-            info!(
-                "step id {:?} call_key {:?} progressing {}",
-                step_id, call_key, progressing
-            );
             iter_step_id = step_id;
             let step = db.steps[step_id];
             if call_key != step.call_key || !progressing {
@@ -211,7 +207,6 @@ impl<'a> CallFlowPreloader<'a> {
         step_count: i64,
     ) -> FlowViewUpdate {
         if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(&step, path_buf) {
-            info!("loop shape");
             if loop_shape.first.0 == step.line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
@@ -288,6 +283,7 @@ impl<'a> CallFlowPreloader<'a> {
             kind: event.kind,
             text: event.content.clone(),
             rr_ticks: event.step_id.0,
+            metadata: event.metadata.clone(),
         }
     }
 

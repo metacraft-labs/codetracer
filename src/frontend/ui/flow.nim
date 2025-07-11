@@ -23,6 +23,8 @@ proc makeSlider(self: FlowComponent, position: int)
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int)
 
 const SLIDER_OFFSET = 6 # in px
+const FLOW_VALUE_LIMIT = 30
+const FLOW_VALUE_MAX_WIDTH = fmt"{FLOW_VALUE_LIMIT}ch"
 
 proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value): ValueMode =
   if testEq(beforeValue, afterValue):
@@ -1154,7 +1156,7 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
       isTooltipValue: true,
     )
 
-proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle): VNode =
+proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle, i: int): VNode =
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
@@ -1173,6 +1175,8 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       ("flow-std-default", "stdin")
     of EventLogKind.ReadFile:
       ("flow-std-default", "stdin")
+    of EventLogKind.EvmEvent:
+      ("flow-std-default", $event.metadata)
     else:
       ("", "")
   # let klass = 
@@ -1196,6 +1200,25 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       style=style
     )
   ):
+    if event.text.len() > FLOW_VALUE_LIMIT:
+      span(
+        class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
+        style = style,
+        onmousedown = proc(e: Event, v: VNode) =
+          let targetId = &"flow-{flowMode}-value-box-{stepCount}-{i}"
+          let target = document.getElementById(targetId)
+          if not target.isNil:
+            if target.style.maxWidth != "none":
+              target.style.maxWidth = "none"
+              e.target.toJs.classList.remove("flow-hide-content")
+              e.target.toJs.classList.add("flow-show-content")
+            else:
+              e.target.toJs.classList.remove("flow-show-content")
+              e.target.toJs.classList.add("flow-hide-content")
+              target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
+            self.maxWidth = 0
+            self.editorUI.adjustEditorWidth()
+      )
     span(
       class = &"flow-{flowMode}-value-name {klass}-name",
       onmousedown = proc(e: Event, v: VNode) =
@@ -1211,6 +1234,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     ):
       text &"<{name}>"
     span(
+      id = &"flow-{flowMode}-value-box-{stepCount}-{i}",
       style = style,
       iteration = $(self.flow.steps[stepCount].iteration),
       class = &"flow-{flowMode}-value-box {klass}-box " & before,
@@ -1245,6 +1269,28 @@ proc flowSimpleValue*(
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
 
+  proc renderViewOption(): VNode =
+    buildHtml(
+      span(
+        class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
+        style = style,
+        onmousedown = proc(e: Event, v: VNode) =
+          let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+          let target = document.getElementById(targetId)
+          if not target.isNil:
+            if target.style.maxWidth != "none":
+              target.style.maxWidth = "none"
+              e.target.toJs.classList.remove("flow-hide-content")
+              e.target.toJs.classList.add("flow-show-content")
+            else:
+              e.target.toJs.classList.remove("flow-show-content")
+              e.target.toJs.classList.add("flow-hide-content")
+              target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
+          self.maxWidth = 0
+          self.editorUI.adjustEditorWidth()
+      )
+    )
+
   proc onMouseDown(e: Event, v: VNode, value: Value) =
     e.stopPropagation()
 
@@ -1270,6 +1316,16 @@ proc flowSimpleValue*(
       style=style
     )
   ):
+    case flowValueMode:
+      of BeforeValueMode:
+        if beforeValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+          renderViewOption()
+      of AfterValueMode:
+        if afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+          renderViewOption()
+      of BeforeAndAfterValueMode:
+        if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+          renderViewOption()
     if showName:
       span(
         class = &"flow-{flowMode}-value-name",
@@ -1334,8 +1390,8 @@ proc flowSimpleValue*(
 
     else:
       var before = &"flow-{flowMode}-value-dual"
-      let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before"
-      let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after"
+      let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+      let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
 
       span(
         id = idBefore,
@@ -1739,10 +1795,11 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): VNode =
     var style = style(
       (StyleAttr.fontSize, cstring($(self.fontSize) & "px")),
       (StyleAttr.lineHeight, cstring($self.lineHeight & "px")),
-      (StyleAttr.height, cstring($self.lineHeight & "px"))
+      (StyleAttr.height, cstring($self.lineHeight & "px")),
+      (StyleAttr.backgroundSize, cstring($(self.fontSize + 2) & "px"))
     )
-    for event in step.events:
-      flowEventValue(self, event, step.stepCount, style)
+    for i, event in step.events:
+      flowEventValue(self, event, step.stepCount, style, i)
 
     for i, expression in step.exprOrder:
       let beforeValue = step.beforeValues[expression]
@@ -2177,16 +2234,6 @@ proc ensureFlowLineContainer(self: FlowComponent, step: FlowStep) =
   if not self.flowDom.haskey(step.position):
     cwarn fmt"flow: cannot create flow widget at {step.position} line"
     return
-
-proc calculateMaxWidth*(self: FlowComponent, stepNodeWidth: int) =
-  let editor = self.editorUI.monacoEditor
-  let editorLayout = editor.config.layoutInfo
-  let minimapWidth = editorLayout.minimapWidth
-
-  self.maxWidth = max(
-    self.maxWidth,
-    stepNodeWidth
-  )
 
 proc addParallelRegularStepValues(self: FlowComponent, step: FlowStep) =
   # check if there is a widget and container for this step

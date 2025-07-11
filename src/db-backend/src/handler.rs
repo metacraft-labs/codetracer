@@ -1359,7 +1359,7 @@ impl Handler {
             bytes: event_record.content.len(),
             rr_event_id: index,
             direct_location_rr_ticks: step_id_int,
-            metadata: "".to_string(),
+            metadata: event_record.metadata.to_string(),
             stdout: true,
             event_index: index,
             tracepoint_result_index: NO_INDEX,

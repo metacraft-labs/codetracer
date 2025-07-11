@@ -196,10 +196,23 @@
   .eventLog-event
     // background-image: EVENT_LOG_EVENT_ICON_PATH
     background-repeat: no-repeat
-    width: 13px
-    height: 13px
+    width: 18px
+    // height: 13px
     position: relative
-    top: 30%
+    cursor: pointer
+    min-width: 2.3ch !important
+    max-width: 2.3ch !important
+    height: 24px
+    display: flex
+    align-items: center
+    // top: 30%
+
+    .row-expander
+      background-size: 2ch !important
+      height: 18px !important
+      background-position: center !important
+      min-width: 2.3ch !important
+      max-width: 2.3ch !important
 
   .eventLog-text
     width: 25% // calc(15%)
@@ -327,7 +340,7 @@ label
 
 .eventLog-cell
   text-overflow: ellipsis
-  white-space: nowrap
+  white-space: pre
   overflow: hidden
   color: TEXT_CONTENT_COLOR
   font-weight: bold
@@ -339,12 +352,13 @@ label
 
 .eventLog-text
   padding-top: 4px !important
-  line-height: 16px !important
+  line-height: 20px !important
   padding-bottom: 0px !important
+  max-height: 24px
+  overflow: auto
 
 .eventLog-text:hover
   overflow-x: auto
-  white-space: nowrap
 
   &::-webkit-scrollbar-thumb:horizontal
     border: 0px !important

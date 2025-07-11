@@ -38,6 +38,8 @@ type
     text*: langstring
     # contains step_id for db-backend
     rrTicks*: int64
+    metadata*: langstring
+
   FlowStep* = object
     position*: int
     loop*: int

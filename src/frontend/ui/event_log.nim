@@ -5,6 +5,8 @@ import
 
 var arg: js
 
+const CLICK_DELAY_TIMER = 5
+
 const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
   "std streams:",
   "read events:",
@@ -12,7 +14,8 @@ const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
   "network:",
   "trace:",
   "file:",
-  "errors:"
+  "errors:",
+  "evm events:"
 ]
 
 const EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
@@ -29,7 +32,8 @@ const EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
   "open",
   "error",
 
-  "trace log event"
+  "trace log event",
+  "messages",
 ]
 
 const EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
@@ -53,7 +57,8 @@ let kindTags: array[EventLogKind, seq[EventTag]] = [
   @[EventFiles],              #Open
   @[EventErrorEvents],        #Error
 
-  @[EventTrace]               #TraceLogEvent
+  @[EventTrace],               #TraceLogEvent
+  @[EventEvm]
 ]
 
 var tagKinds: array[EventTag, seq[EventLogKind]]
@@ -233,6 +238,11 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
     of EventLogKind.Error:
       fmt"error: {eventElement.content}"
 
+    of EventLogKind.EvmEvent:
+      if eventElement.metadata != "":
+        fmt"{eventElement.metadata}: {eventElement.content}"
+      else:
+        fmt"{eventElement.content}"
     else:
       fmt"event {eventElement.kind}"
 
@@ -286,9 +296,24 @@ proc events(self: EventLogComponent) =
 
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()
-    self.lastJumpFireTime = currentTime
-    if not self.service.debugger.stableBusy:
-      self.jump(table, e)
+    if currentTime - self.lastJumpFireTime > CLICK_DELAY_TIMER:
+      self.lastJumpFireTime = currentTime
+      let isAction = cast[bool](e.target.classList[0] == "row-expander".toJs)
+      if isAction:
+        let textElement = e.currentTarget.childNodes[3]
+        if textElement.classList[0] == "eventLog-text".toJs:
+          if textElement.style.toJs.maxHeight == "24px".toJs:
+            textElement.style.overflow = "auto"
+            textElement.style.maxHeight = "20ch".toJs
+            e.target.classList.remove("flow-hide-content")
+            e.target.classList.add("flow-show-content")
+          else:
+            textElement.style.overflow = ""
+            textElement.style.maxHeight = "24px".toJs
+            e.target.classList.remove("flow-show-content")
+            e.target.classList.add("flow-hide-content")
+      elif not self.service.debugger.stableBusy:
+        self.jump(table, e)
 
   proc handlerMouseover(table: js, e: js) =
     discard
@@ -363,8 +388,13 @@ proc events(self: EventLogComponent) =
             searchable: true,
             data: j"kind",
             title: j"event-image",
-            render: proc(event: EventLogKind): cstring =
-              cstring""
+            render: proc(kind: EventLogKind, t: js, event: ProgramEvent): cstring =
+              if event.content.split("\n").len() == 2 and event.content.split("\n")[^1] == "":
+                cstring""
+              elif event.content.split("\n").len() > 1:
+                cstring"""<span class="row-expander flow-hide-content flow-view-more-button"/>"""
+              else:
+                cstring""
           },
           js{
             className: j"eventLog-text eventLog-cell",
@@ -374,7 +404,7 @@ proc events(self: EventLogComponent) =
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
                 of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
-                   OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error:
+                   OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error, EventLogKind.EvmEvent:
                   cstring(eventLogDescriptionRepr(event, event.eventIndex))
 
                 of TraceLogEvent:

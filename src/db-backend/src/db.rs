@@ -195,6 +195,7 @@ impl Db {
                 }
             }
         }
+        info!("next step id: {:?}", self.steps[last_step_id]);
         (last_step_id, step_id != last_step_id)
     }
 
@@ -219,6 +220,8 @@ impl Db {
             let new_call_key = new_step.call_key;
             current_step_id = new_step.step_id;
             let new_call = &self.calls[new_call_key];
+
+            info!("for returned: {:?} with depth: {:?}", new_step, new_call.depth);
 
             // depth - delta can be < 0: we did get
             // such an underflow crash => compare as i64
@@ -744,6 +747,7 @@ pub struct DbRecordEvent {
     pub kind: EventLogKind,
     pub content: String,
     pub step_id: StepId,
+    pub metadata: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

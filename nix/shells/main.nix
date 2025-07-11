@@ -29,6 +29,8 @@ mkShell {
       # general dependencies
       git
 
+      rustup
+
       gcc
       binutils
 
@@ -46,6 +48,9 @@ mkShell {
       cargo
       rustc
       capnproto
+
+      # stylus
+      ourPkgs.cargo-stylus
 
       yarn
       yarn2nix
@@ -65,10 +70,7 @@ mkShell {
       # https://github.com/casey/just
       just
 
-      cargo
-      rustfmt
       # ourPkgs.codetracer-rust-wrapped
-      clippy
 
       # For inspecting our deb packages
       dpkg
@@ -148,6 +150,9 @@ mkShell {
       # ui-test dependencies
       playwright-driver.browsers
       playwright
+
+      # runtime_tracing build dependency
+      capnproto
     ]
     ++ pkgs.lib.optionals (!stdenv.isDarwin) [
       # Building AppImage
@@ -165,6 +170,9 @@ mkShell {
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
   shellHook = ''
+    rustup override set 1.87
+    rustup target add wasm32-unknown-unknown
+
     # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
     ROOT_PATH=$(git rev-parse --show-toplevel)
 

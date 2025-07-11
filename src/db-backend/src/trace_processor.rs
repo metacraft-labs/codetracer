@@ -52,6 +52,7 @@ impl<'a> TraceProcessor<'a> {
         for event in events {
             self.process_event(event)?;
         }
+
         while self.db.variables.len() > self.db.steps.len() {
             self.db.variables.pop();
         }
@@ -93,6 +94,7 @@ impl<'a> TraceProcessor<'a> {
                     call_key: self.current_call_key,
                     global_call_key: self.last_started_call_key,
                 };
+
                 // info!("step with #{} and call key {:?}", db_step.step_id.0, db_step.call_key);
 
                 self.db.steps.push(db_step);
@@ -190,9 +192,11 @@ impl<'a> TraceProcessor<'a> {
                 if self.db.variables.is_empty() {
                     self.db.variables.push(vec![]);
                 }
+
                 for arg in call_record.args.iter() {
                     self.db.variables[self.current_step_id].push(arg.clone())
                 }
+
                 let current_step_id_usize = self.current_step_id.0 as usize;
                 if current_step_id_usize > 0 && current_step_id_usize < self.db.steps.len() {
                     // not true for 0 sometimes: no step for first top-level call:
@@ -232,6 +236,7 @@ impl<'a> TraceProcessor<'a> {
                     kind: record_event.kind,
                     content: record_event.content.clone(),
                     step_id: self.current_step_id,
+                    metadata: record_event.metadata.clone(),
                 });
             }
             TraceLowLevelEvent::DropLastStep => {

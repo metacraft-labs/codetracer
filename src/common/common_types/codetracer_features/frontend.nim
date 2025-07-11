@@ -192,6 +192,7 @@ type
     name*: langstring
     folder*: langstring
     welcomeScreen*: bool
+    stylusExplorer*: bool
     app*: langstring
     shellUi*: bool
     address*: langstring

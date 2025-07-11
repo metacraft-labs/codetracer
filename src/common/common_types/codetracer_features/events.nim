@@ -22,7 +22,10 @@ type
     Error,
 
     # used for trace log events
-    TraceLogEvent
+    TraceLogEvent,
+
+    # used for stylus evm events
+    EvmEvent,
 
   OrdValue* = object ## Order value for a column in a TableArgs object
     column*: int

@@ -84,7 +84,7 @@ type
     hint*: cstring
     handler*: proc(ev: kdom.Event) {.closure.}
 
-  EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents
+  EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents, EventEvm
 
   EventDropDownBox* = enum Filter, OnlyTrace, OnlyRecordedEvent, EnableDisable
 
@@ -1375,6 +1375,7 @@ type
     keyPlugins*:            array[Content, JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]]
     recentProjects*:        seq[Project]
     recentTraces*:          seq[Trace]
+    stylusTransactions*:    seq[StylusTransaction]
     pointList*:             PointListData
     minRRTicks*:            int
     maxRRTicks*:            int
