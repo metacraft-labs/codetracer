@@ -560,6 +560,9 @@ type
     hiddenRows*: int
     lastJumpFireTime*: int64
     isFlowUpdate*: bool
+    started*: bool
+    ignoreOutput*: bool
+    programEvents*: seq[ProgramEvent]
 
 
   DebugComponent* = ref object of Component
