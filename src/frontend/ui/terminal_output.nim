@@ -2,6 +2,8 @@ import
   ../types,
   ui_imports, colors, typetraits, strutils, base64
 
+import ../communication, ../../common/ct_event
+
 var newAnsiUp* {.importcpp: "new AnsiUp".}: proc: js
 let ansiUp {.exportc.} = newAnsiUp()
 
@@ -15,6 +17,7 @@ proc ensureLine(self: TerminalOutputComponent) =
 proc appendToTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: int) =
   self.ensureLine()
   var lineTerminalEvents = self.cachedLines[self.currentLine]
+  echo "#### GOING THROUGH THE APPEND TO TERMINAL = ", text
 
   lineTerminalEvents.add(TerminalEvent(
     text: text,
@@ -29,17 +32,12 @@ proc addTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: i
 var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent = makeTerminalOutputComponent(data, 0, inExtension = true)
 
 proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
-  if terminalOutputComponentForExtension.cachedLines.len() == 0:
-    terminalOutputComponentForExtension.addTerminalLine("first print event", 0)
-    terminalOutputComponentForExtension.addTerminalLine("second print event", 1)
-    terminalOutputComponentForExtension.addTerminalLine("third print event", 2)
-
   if terminalOutputComponentForExtension.kxi.isNil:
     terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = terminalOutputComponentForExtension.render(), id, proc = discard)
   result = terminalOutputComponentForExtension
 
 proc getLines(self: TerminalOutputComponent) =
-  self.service.loadTerminal()
+  self.api.emit(CtLoadTerminal, EmptyArg())
 
 proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramEvent]) =
   var raw = ""
@@ -125,7 +123,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
 
             nextLineStart = tokens[^1]
           else:
-            if isDbBased(self.data.trace.lang): # and tokens[^1] == "\n":
+            if self.isDbBasedTrace: # and tokens[^1] == "\n":
               self.addTerminalLine(nextLineStart & tokens[^1], eventIndex)
             else:
               self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
@@ -143,20 +141,20 @@ method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.
     self.onTerminalEventClick(eventElement)
 
 proc terminalEventView(self: TerminalOutputComponent, lineEvent: TerminalEvent): VNode =
-  let eventElement = if not self.inExtension: self.cachedEvents[lineEvent.eventIndex] else: ProgramEvent()
+  let eventElement = self.cachedEvents[lineEvent.eventIndex]
   let rrTicks = eventElement.directLocationRRTicks
-  let focusRRTicks = self.data.services.debugger.location.rrTicks
-  let lineClass =
-    if rrTicks < focusRRTicks:
-      "past"
-    elif rrTicks == focusRRTicks:
-      "active"
-    else:
-      "future"
+  # let focusRRTicks = self.data.services.debugger.location.rrTicks
+  # let lineClass =
+  #   if rrTicks < focusRRTicks:
+  #     "past"
+  #   elif rrTicks == focusRRTicks:
+  #     "active"
+  #   else:
+  #     "future"
 
   buildHtml(
     tdiv(
-      class = &"{lineClass}",
+      # class = &"{lineClass}",
       onclick = proc = self.onTerminalEventClick(eventElement)
     )
   ):
@@ -173,7 +171,7 @@ proc terminalLineView(self: TerminalOutputComponent, i: int, lineEvents: seq[Ter
       terminalEventView(self, lineEvent)
 
 method render*(self: TerminalOutputComponent): VNode  =
-  if self.initialUpdate and not self.inExtension:
+  if self.initialUpdate:
     self.getLines()
     self.initialUpdate = false
 
@@ -187,3 +185,16 @@ method render*(self: TerminalOutputComponent): VNode  =
       else:
         tdiv(class="empty-overlay"):
           text "The current record does not print anything to the terminal."
+
+method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtLoadedTerminal, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
+    discard self.onLoadedTerminal(response)
+  )
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    self.redrawForExtension()
+  )
+
+# think if it's possible to directly exportc in this way the method
+proc registerTerminalOutputComponent*(component: TerminalOutputComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
