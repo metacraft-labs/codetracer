@@ -10,6 +10,8 @@ const CALL_HEIGHT_PX = 24
 const CALL_BUFFER = 20
 const START_BUFFER = 10
 const TRACE_LINE_OFFSET = 10
+const EXPAND_CALLS_KIND = CtExpandCalls
+const COLLAPSE_CALLS_KIND = CtCollapseCalls
 
 proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
 proc searchCalltrace*(self: CalltraceComponent, query: cstring) {.async.}
@@ -45,23 +47,15 @@ func calltraceLinesTransformTranslateY(self: CalltraceComponent): cstring =
 func calltraceLinesStyle(self: CalltraceComponent): VStyle =
   style((StyleAttr.transform, self.calltraceLinesTransformTranslateY()))
 
-proc collapseCalls*(
+proc toggleCalls*(
   self: CalltraceComponent,
+  kind: CtEventKind,
   callKey: cstring,
   nonExpandedKind: CalltraceNonExpandedKind,
   count: int
 ) =
   let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
-  self.api.emit(CtCollapseCalls, target)
-
-proc expandCalls*(
-  self: CalltraceComponent,
-  callKey: cstring,
-  nonExpandedKind: CalltraceNonExpandedKind,
-  count: int
-) =
-  let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
-  self.api.emit(CtExpandCalls, target)
+  self.api.emit(kind, target)
 
 proc createContextMenuItems(
   self: CalltraceComponent,
@@ -81,7 +75,7 @@ proc createContextMenuItems(
         name: "Expand Call Children",
         hint: "",
         handler: proc(e: Event) =
-          self.service.expandCalls(call.key, CalltraceNonExpandedKind.Children, 0)
+          self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, 0)
           self.loadLines(fromScroll=false)
       )
     contextMenu&= expandCallChildren
@@ -91,13 +85,13 @@ proc createContextMenuItems(
         name: "Collapse Call Children",
         hint: "",
         handler: proc(e: Event) =
-          self.service.collapseCalls(call.key, CalltraceNonExpandedKind.Children, 0)
+          self.toggleCalls(COLLAPSE_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, 0)
           self.loadLines(fromScroll=false)
       )
     contextMenu&= collapseCallChildren
 
   expandCallstack = ContextMenuItem(name: "Expand Full Callstack", hint: "", handler: proc(e: Event) =
-    self.service.expandCalls("0", CalltraceNonExpandedKind.CallstackInternal, -1)
+    self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.CallstackInternal, -1)
     self.loadLines(fromScroll=false))
   contextMenu &= expandCallstack
 
@@ -307,7 +301,7 @@ proc expandCallView(self: CalltraceComponent, call: Call, count: int, active: cs
     span(
       class = "toggle-call",
       onclick = proc(ev: Event, v: VNode) =
-        self.expandCalls(call.key, CalltraceNonExpandedKind.Children, count)
+        self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, count)
         self.loadLines(fromScroll=false)
     )
   ):
@@ -324,7 +318,7 @@ proc collapseCallView(
     span(
       class = "toggle-call",
       onclick = proc(ev: Event, v: VNode) =
-        self.collapseCalls(call.key, kind, count)
+        self.toggleCalls(COLLAPSE_CALLS_KIND, call.key, kind, count)
         self.loadLines(fromScroll=false)
     )
   ):
@@ -696,9 +690,9 @@ proc hiddenCallstackView(
         onclick = proc(ev: Event, v: VNode) =
           if content.kind == CallLineContentKind.StartCallstackCount:
             self.depthStart = call.depth
-            self.service.expandCalls("0", CalltraceNonExpandedKind.Callstack, count)
+            self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.Callstack, count)
           else:
-            self.service.expandCalls(call.key, CalltraceNonExpandedKind.CallstackInternal, count)
+            self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.CallstackInternal, count)
           self.loadLines(fromScroll=false)
       ):
         if content.kind == CallLineContentKind.CallstackInternalCount:
@@ -1048,14 +1042,14 @@ method onEnter*(self: CalltraceComponent) {.async.} =
       of CallLineContentKind.CallstackInternalCount:
         let content = self.callLines[callLinesIndex].content
 
-        self.service.expandCalls(content.call.key, CalltraceNonExpandedKind.CallstackInternal, content.count)
+        self.toggleCalls(EXPAND_CALLS_KIND, content.call.key, CalltraceNonExpandedKind.CallstackInternal, content.count)
         self.loadLines(fromScroll=false)
 
       of CallLineContentKind.StartCallstackCount:
         let content = self.callLines[callLinesIndex].content
 
         self.depthStart = content.call.depth
-        self.service.expandCalls("0", CalltraceNonExpandedKind.Callstack, content.count)
+        self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.Callstack, content.count)
         self.loadLines(fromScroll=false)
 
       of CallLineContentKind.NonExpanded:
