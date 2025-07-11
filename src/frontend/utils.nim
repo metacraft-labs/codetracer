@@ -147,6 +147,8 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
       lastJumpFireTime: 0,
       inExtension: inExtension,
       drawId: 0,
+      started: false,
+      isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
     )
     data.registerComponent(result, Content.EventLog)
 

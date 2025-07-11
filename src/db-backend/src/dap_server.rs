@@ -4,7 +4,10 @@ use crate::dap::{
 };
 use crate::db::Db;
 use crate::handler::Handler;
-use crate::task::{gen_task_id, Action, CalltraceLoadArgs, SourceLocation, StepArg, Task, TaskId, TaskKind, UpdateTableArgs};
+use crate::task::{
+    gen_task_id, Action, CalltraceLoadArgs, CollapseCallsArgs, SourceLocation, StepArg, Task, TaskId, TaskKind,
+    UpdateTableArgs,
+};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
 use serde_json::json;
@@ -156,6 +159,10 @@ fn handle_request<W: Write>(
         "variables" => handler.variables(req.clone(), req.load_args::<dap::VariablesArguments>()?)?,
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<dap::CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
+        "ct/event-load" => handler.event_load(req.clone())?,
+        "ct/load-terminal" => handler.load_terminal(req.clone())?,
+        "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
+        "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         "ct/load-calltrace-section" => {
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }

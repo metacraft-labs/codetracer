@@ -175,13 +175,13 @@ impl Receiver {
             TaskKind::RunToEntry => handler.run_to_entry(task),
             // TaskKind::LoadLocals => handler.load_locals(task),
             TaskKind::LoadCallstack => handler.load_callstack(task),
-            TaskKind::CollapseCalls => handler.collapse_calls(self.core.read_arg(&task.id)?, task),
-            TaskKind::ExpandCalls => handler.expand_calls(self.core.read_arg(&task.id)?, task),
+            // TaskKind::CollapseCalls => handler.collapse_calls(self.core.read_arg(&task.id)?, task),
+            // TaskKind::ExpandCalls => handler.expand_calls(self.core.read_arg(&task.id)?, task),
             // TaskKind::LoadCallArgs => handler.load_call_args(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadFlow => handler.load_flow(self.core.read_arg(&task.id)?, task),
             // superseded by dap_server
             // TaskKind::Step => handler.step(self.core.read_arg(&task.id)?, task),
-            TaskKind::EventLoad => handler.event_load(task),
+            // TaskKind::EventLoad => handler.event_load(task),
             TaskKind::EventJump => handler.event_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::CalltraceJump => handler.calltrace_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::SourceLineJump => handler.source_line_jump(self.core.read_arg(&task.id)?, task),
@@ -205,7 +205,7 @@ impl Receiver {
             TaskKind::RegisterTracepointLogs => handler.register_tracepoint_logs(self.core.read_arg(&task.id)?, task),
             TaskKind::SetupTraceSession => handler.setup_trace_session(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadAsmFunction => handler.load_asm_function(self.core.read_arg(&task.id)?, task),
-            TaskKind::LoadTerminal => handler.load_terminal(task),
+            // TaskKind::LoadTerminal => handler.load_terminal(task),
             _ => {
                 unimplemented!()
             }

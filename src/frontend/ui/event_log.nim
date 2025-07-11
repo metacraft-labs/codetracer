@@ -579,7 +579,7 @@ proc events(self: EventLogComponent) =
     jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"contextmenu", j"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
-    if not self.inExtension and self.resizeObserver.isNil:
+    if self.resizeObserver.isNil:
       let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
       let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
         for entry in entries:
@@ -983,9 +983,8 @@ proc eventLogHeaderView*(self: EventLogComponent): VNode =
       eventLogCategoryButtonView(self, EventDropDownBox.Filter)
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
-  echo "##### GOT A RESPONSE :?"
   let response = res.tableUpdate
-  kout response
+
   if not response.isTrace and self.drawId == response.data.draw:
     let dt = self.denseTable
 
@@ -1052,7 +1051,7 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
   self.denseTable.updateTableRows(redraw = true)
   self.detailedTable.updateTableRows(redraw = true)
 
-  if not self.inExtension and self.resizeObserver.isNil:
+  if self.resizeObserver.isNil:
     let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
     let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
       for entry in entries:
@@ -1150,7 +1149,52 @@ method onEnter*(self: EventLogComponent) {.async.} =
 method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    discard self.onCompleteMove(response))
+    discard self.onCompleteMove(response)
+    if self.started:
+      discard
+    else:
+      self.started = true
+      self.api.emit(CtEventLoad, EmptyArg())
+
+  )
+  api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
+    data.maxRRTicks = response[0].maxRRTicks
+    if self.ignoreOutput:
+      return
+
+    console.time(cstring"new events service")
+
+    for element in response:
+      self.programEvents.add(element)
+      # TODO: use ansi_up or the escape function?
+      # eventually have a flag/shortcut or menu option to
+      # toggle between non-escaped and escaped content
+      # think again about html/xml in content escaping/pre tags
+
+    console.timeEnd(cstring"new events service")
+
+    self.redrawForExtension()
+  )
+  api.subscribe(CtUpdatedEventsContent, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
+    if self.ignoreOutput:
+      return
+
+    let lines = response.split(jsNl)
+    var lineIndex = 0
+    var eventsIndex = 0
+    while lineIndex < lines.len and eventsIndex < self.programEvents.len:
+      while true:
+        if eventsIndex < self.programEvents.len:
+          if self.programEvents[eventsIndex].kind in {Write, WriteFile, WriteOther, Read, ReadFile, ReadOther}:
+            self.programEvents[eventsIndex].content = lines[lineIndex]
+            lineIndex += 1
+          eventsIndex += 1
+        else:
+          echo fmt"warn: no event for line number {lineIndex}"
+          break
+
+    self.redrawForExtension()
+  )
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
     discard self.onUpdatedTable(response))
 
