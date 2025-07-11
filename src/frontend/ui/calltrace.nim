@@ -45,6 +45,24 @@ func calltraceLinesTransformTranslateY(self: CalltraceComponent): cstring =
 func calltraceLinesStyle(self: CalltraceComponent): VStyle =
   style((StyleAttr.transform, self.calltraceLinesTransformTranslateY()))
 
+proc collapseCalls*(
+  self: CalltraceComponent,
+  callKey: cstring,
+  nonExpandedKind: CalltraceNonExpandedKind,
+  count: int
+) =
+  let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
+  self.api.emit(CtCollapseCalls, target)
+
+proc expandCalls*(
+  self: CalltraceComponent,
+  callKey: cstring,
+  nonExpandedKind: CalltraceNonExpandedKind,
+  count: int
+) =
+  let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
+  self.api.emit(CtExpandCalls, target)
+
 proc createContextMenuItems(
   self: CalltraceComponent,
   ev: js,
@@ -289,7 +307,7 @@ proc expandCallView(self: CalltraceComponent, call: Call, count: int, active: cs
     span(
       class = "toggle-call",
       onclick = proc(ev: Event, v: VNode) =
-        self.service.expandCalls(call.key, CalltraceNonExpandedKind.Children, count)
+        self.expandCalls(call.key, CalltraceNonExpandedKind.Children, count)
         self.loadLines(fromScroll=false)
     )
   ):
@@ -306,7 +324,7 @@ proc collapseCallView(
     span(
       class = "toggle-call",
       onclick = proc(ev: Event, v: VNode) =
-        self.service.collapseCalls(call.key, kind, count)
+        self.collapseCalls(call.key, kind, count)
         self.loadLines(fromScroll=false)
     )
   ):

@@ -357,18 +357,26 @@ impl Handler {
         Ok(())
     }
 
-    pub fn collapse_calls(&mut self, collapse_calls_args: CollapseCallsArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn collapse_calls(
+        &mut self,
+        _req: dap::Request,
+        collapse_calls_args: CollapseCallsArgs,
+    ) -> Result<(), Box<dyn Error>> {
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             self.calltrace.change_expand_state(CallKey(num_key), false);
         } else {
             error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
         }
 
-        self.return_task((task, VOID_RESULT.to_string()))?;
+        // self.return_task((task, VOID_RESULT.to_string()))?;
         Ok(())
     }
 
-    pub fn expand_calls(&mut self, collapse_calls_args: CollapseCallsArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn expand_calls(
+        &mut self,
+        _req: dap::Request,
+        collapse_calls_args: CollapseCallsArgs,
+    ) -> Result<(), Box<dyn Error>> {
         let kind = collapse_calls_args.non_expanded_kind;
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             if kind == CalltraceNonExpandedKind::CallstackInternal {
@@ -382,7 +390,7 @@ impl Handler {
         } else {
             error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
         }
-        self.return_task((task, VOID_RESULT.to_string()))?;
+        // self.return_task((task, VOID_RESULT.to_string()))?;
         Ok(())
     }
 
@@ -624,7 +632,7 @@ impl Handler {
         Ok(())
     }
 
-    pub fn event_load(&mut self, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn event_load(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         let mut events: Vec<ProgramEvent> = vec![];
         let mut first_events: Vec<ProgramEvent> = vec![];
         let mut contents: String = "".to_string();
@@ -642,19 +650,11 @@ impl Handler {
         self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
         self.event_db.refresh_global();
 
-        self.send_event((
-            EventKind::UpdatedEvents,
-            gen_event_id(EventKind::UpdatedEvents),
-            self.serialize(&first_events)?,
-            false,
-        ))?;
+        // let raw_event = self.dap_client.updated_events(first_events)?;
+        // self.send_dap(&raw_event)?;
 
-        self.send_event((
-            EventKind::UpdatedEventsContent,
-            gen_event_id(EventKind::UpdatedEventsContent),
-            contents,
-            true,
-        ))?;
+        // let raw_event_content = self.dap_client.updated_events_content(contents)?;
+        // self.send_dap(&raw_event_content)?;
 
         Ok(())
     }
@@ -1256,7 +1256,6 @@ impl Handler {
     }
 
     pub fn update_table(&mut self, req: dap::Request, args: UpdateTableArgs) -> Result<(), Box<dyn Error>> {
-        info!("------- GETTING TO THE TABLE UPDATE FUNC?");
         let (table_update, trace_values_option) = self.event_db.update_table(args)?;
         // TODO: For now no trace values are available
         // if let Some(trace_values) = trace_values_option {
@@ -1268,7 +1267,9 @@ impl Handler {
         //     ))?;
         // }
         // info!("table update {:?}", table_update);
-        let raw_event = self.dap_client.updated_table_event(&CtUpdatedTableResponseBody{table_update})?;
+        let raw_event = self
+            .dap_client
+            .updated_table_event(&CtUpdatedTableResponseBody { table_update })?;
         self.send_dap(&raw_event)?;
         Ok(())
     }
@@ -1355,20 +1356,17 @@ impl Handler {
         }
     }
 
-    pub fn load_terminal(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_terminal(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         let mut events_list: Vec<ProgramEvent> = vec![];
         for (i, event_record) in self.db.events.iter().enumerate() {
             if event_record.kind == EventLogKind::Write {
                 events_list.push(self.to_program_event(event_record, i));
             }
         }
-        self.send_event((
-            EventKind::LoadedTerminal,
-            gen_event_id(EventKind::LoadedTerminal),
-            self.serialize(&events_list)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+
+        let raw_event = self.dap_client.loaded_terminal_event(events_list)?;
+        self.send_dap(&raw_event)?;
+
         Ok(())
     }
 
