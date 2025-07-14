@@ -1,76 +1,31 @@
 # Introduction
 
-Welcome to the codetracer-desktop wiki. Here you can find information on almost every topic
-regarding codetracer development and usage.
+CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages.
 
-## Installation
+It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward through the execution and to examine the history of all memory locations. They say a picture is worth a thousand words — well, a video is even better! Watch the demo below to see CodeTracer in action:
 
-> [!CAUTION]
-> Codetracer can only be installed on Linux and macOS currently.
+  [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
 
-### Prerequisites
+## The benefits of time-travel
 
-On systems that are not NixOS, you need to install `direnv` and `nix`.
+Compared to traditional debuggers, CodeTracer gives you two major superpowers:
 
-Nix should not be installed through your distribution's package manager, but from [here](https://nixos.org/download/).
+* **Once you capture a bug in a recording, consider it squashed!**
 
-Direnv should be set up in your shell, as shown [here](https://direnv.net/docs/hook.html).
+  Bugs that are hard to reproduce can be painful to fix — you’ve surely been there. Once such a bug is captured with CodeTracer, you'll rarely need more than 30 minutes to track it down! This is largely a consequence of the next superpower:
 
-### Installation
+* **Most bugs are easily revealed when you know the origin of any value in the program.**
 
-1. Setup SSH with our private GitLab instance: <https://gitlab.metacraft-labs.com>
-1. Clone the repository with submodules: `git clone gitlab@gitlab.metacraft-labs.com:codetracer/codetracer-desktop.git --recursive`
-1. Enter the created directory
-1. For first-time setup:
-   - Create a PAT from [here](https://gitlab.metacraft-labs.com/-/user_settings/personal_access_tokens)
-   - Create a new token with at least `read_api` and `read_repository` access
-   - Add the following text to `~/.config/nix/nix.conf`
-   ```
-   access-tokens = gitlab.metacraft-labs.com=PAT:<token>
-   experimental-features = nix-command flakes
-   ```
-   - And replace `<token>` with your PAT
-1. Run `nix develop`
-1. Run `direnv allow`
-1. To build codetracer simply run `just build`
-1. Now every time you enter the `codetracer-desktop` directory your environment should be updated
+  All programs produce output. Some examples are bytes generated as a response to a web request, pixels being drawn on your screen or perhaps a simple log line written to the terminal.
 
-<!-- Question: Is an access token required for GitHub right now? It might be needed if we use the GitHub API more than a couple of times a second
-TODO:
-1. Change repository URL
-1. Remove references to GitLab
--->
+  When CodeTracer creates a recording, it captures a user-extensible set of output events relevant to the program. The GUI displays these events in a searchable chronological event log.
 
+  Consider a misbehaving program that prints unexpected output to a log file midway through its execution. Clicking on the specific output event in CodeTracer will take you to the precise moment and code line where it was generated.
 
-> [!TIP]
-> Users of Visual Studio Code might encounter issues when using `code .`. To fix them do the following:
-> 1. Run `direnv deny`
-> 1. Run `code .`
-> 1. Run `direnv allow`
+  The unexpected value must be originating from some variable that's being passed to the logging function. With CodeTracer, you can now ask the question "Where did this value come from?". CodeTracer will find another moment in the execution, potentially multiple seconds earlier, in a completely different part of the program where this particular memory location was last written to.
 
-### Building and running the tests
+  This could be memory corruption or a genuine logical error. Either way, CodeTracer will report the origin. Let's say that you end up in the correct function that is responsible for computing the problematic value, but another input there leads to the issue. You can continue the search by repeating the question "Where did this input come from"? It usually takes just a few of these jumps to earlier moments in time to arrive at the root cause for the bug.
 
-Currently, you can run the db-backend (Rust) tests:
+  Every time you jump to a new moment in the execution, you can fearlessly explore your surroundings by stepping forward or backwards, having access to a back button that can always get you to any previous point of interest. At every point of the journey, our novel UI shows you details about the past and future program states at a glance and you know your position in the precisely recorded call trace of the program.
 
-```bash
-# inside src/db-backend:
-cargo test --release --bin db-backend # test most cases: non-ignored
-cargo test --release --bin db-backend -- --ignored # test the ignored cases: ignored by default as they're slower
-```
-
-some initial simple end to end playwright tests:
-
-```bash
-just test-e2e
-````
-
-We hope to write a lot more e2e tests, as we haven't covered most features/cases.
-
-### Enabling `cachix`
-
-<!-- TODO(alexander): I removed the detailed cachix guide, as it's sensitive, and we don't have a public codetracer cache yet  -->
-<!-- either include it in an internal docs in the rr-backend, or re-include here when this is discussed again -->
-
-Cachix is a cache for nix that allows you to save time on compiling codetracer and related projects. We'll discuss using a public codetracer cache
-for the open sourced parts, however this is available only internally for now.
-
+  These features combined, make for a truly powerful debugging experience.

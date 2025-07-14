@@ -1,7 +1,7 @@
 ## Summary
 
 - [Introduction](./introduction.md)
-- [Contributing](./CONTRIBUTING.md)
+- [Installation](./installation.md)
 
 ## Usage guide
 
@@ -34,6 +34,7 @@
 
 ### Misc
 
+- [Contributing](./CONTRIBUTING.md)
 - [Troubleshooting](./misc/troubleshooting.md)
 - [Environment variables](./misc/environment_variables.md)
 - [Building the documentation](./misc/building_docs.md)
