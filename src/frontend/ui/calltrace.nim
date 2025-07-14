@@ -274,7 +274,7 @@ proc setExpandedValueOffset(
 
 proc childlessCallView(self: CalltraceComponent, call: Call, active: cstring): VNode =
   let internalActive =
-    if active != "" and call.location.key == data.services.debugger.location.key:
+    if active != "" and call.location.key == self.location.key:
       "active"
     else:
       ""
@@ -284,7 +284,7 @@ proc childlessCallView(self: CalltraceComponent, call: Call, active: cstring): V
     )
   ):
     tdiv(class = fmt"dot-call-img {internalActive}")
-    if call.location.rrTicks < data.services.debugger.location.rrTicks and active != "" and call.location.key != data.services.debugger.location.key:
+    if call.location.rrTicks < self.location.rrTicks and active != "" and call.location.key != self.location.key:
       tdiv(class = "active-call-location")
 
 proc endOfProgramCallView(self: CalltraceComponent, isError: bool): VNode =
@@ -595,7 +595,7 @@ proc callView*(
         else:
           call.children.len
       let active =
-        if call.location.key == data.services.debugger.location.globalCallKey:
+        if call.location.key == self.location.globalCallKey:
           "active"
         else:
           ""
