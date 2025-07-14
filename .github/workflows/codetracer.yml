@@ -229,9 +229,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
-          #   adding `--checksum-algorithm CRC32`
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg --checksum-algorithm CRC32
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
 
       - name: Extract dmg
         if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
@@ -239,8 +237,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
-          #   adding `--checksum-algorithm CRC32`
           7zz x ./CodeTracer.dmg
 
       - name: Check if ct starts
@@ -258,7 +254,7 @@ jobs:
     steps:
       - name: Install AWS CLI
         if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
-        run: sudo apt-get install -y awscli
+        run: sudo snap install aws-cli --classic
 
       - name: Download artifact
         if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
@@ -266,9 +262,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
-          #   adding `--checksum-algorithm CRC32`
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage --checksum-algorithm CRC32
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
 
       - name: Check if ct starts
         if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
