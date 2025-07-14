@@ -1488,6 +1488,10 @@ type
     # sys*: SysConfig
 
 when defined(ctRenderer):
+  import 
+    std / jsconsole,
+    .. / common / ct_event
+
   proc newFlowUpdate*: FlowUpdate
 
 
@@ -1561,11 +1565,54 @@ when defined(ctRenderer):
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
 
+  # === LocalViewSubscriber:
+
+  type
+    LocalViewSubscriber* = ref object of Subscriber
+      # viewApi*: MediatorWithSubscriber
+      viewTransport*: Transport
+
+  const logging* = true # TODO: maybe reuse/use a dynamic log level mechanism
+
+  method emitRaw*(l: LocalViewSubscriber, kind: CtEventKind, value: JsObject, subscriber: Subscriber) =
+    if logging: console.log cstring"webview subscriber emitRaw: ", cstring($kind), cstring" ", value
+    l.viewTransport.internalRawReceive(CtRawEvent(kind: kind, value: value).toJs, subscriber)
+
+  proc newLocalViewSubscriber(viewTransport: Transport): LocalViewSubscriber =
+    LocalViewSubscriber(viewTransport: viewTransport)
+
+  # === end
+
+
+  # LocalViewToMiddlewareTransport:
+
+  type
+    LocalViewToMiddlewareTransport* = ref object of Transport
+      # component*: JsObject
+      middlewareToViewsTransport*: Transport
+
+  method send(l: LocalViewToMiddlewareTransport, data: JsObject, subscriber: Subscriber) =
+    l.middlewareToViewsTransport.internalRawReceive(data, subscriber)
+
+  # internalRawReceive for this is called by the subscriber in the middleware
+
+  proc newLocalViewToMiddlewareTransport(middlewareToViewsTransport: Transport): LocalViewToMiddlewareTransport =
+    LocalViewToMiddlewareTransport(middlewareToViewsTransport: middlewareToViewsTransport)
+  
+  # === end
+
+  proc setupLocalViewToMiddlewareApi*(name: cstring, middlewareToViewsApi: MediatorWithSubscribers): MediatorWithSubscribers =
+    let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
+    result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
+    result.asSubscriber = newLocalViewSubscriber(transport)
+
   proc registerComponent*(data: Data, component: Component, content: Content) =
     component.data = data
     component.content = content
     if not middlewareToViewsApi.isNil:
-      component.register(middlewareToViewsApi)
+      let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+      component.register(componentToMiddlewareApi)
+    echo "register component ", content, " ", component.id
     data.ui.componentMapping[content][component.id] = component
 
   proc projectPath*(project: cstring, path: string): cstring =
