@@ -27,6 +27,8 @@ proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
   result = stateComponentForExtension
 
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
+  clog fmt"registerLocals"
+  console.log response
   self.locals = response.locals
   for localVariable in response.locals:
     let expression = localVariable.expression
@@ -38,11 +40,14 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
         chart.replaceAllValues(expression, localVariable.value.elements)
   self.completeMoveIndex += 1
 
+  clog "after registering locals"
+  console.log self
+  console.log self.data
+  console.log self.data.ui.componentMapping[Content.State][0] == self
   self.redrawForExtension()
 
-method onDapStopped(self: StateComponent, response: DapStoppedEvent) {.async.} =
-  # TODO: maybe move to onCompleteMove again when it's working
-  # fixing rr ticks
+method onMove(self: StateComponent) {.async.} =
+  # TODO: fixing rr ticks
   # self.rrTicks = response.location.rrTicks
   let countBudget = 3000
   let minCountLimit = 50
@@ -52,11 +57,15 @@ method onDapStopped(self: StateComponent, response: DapStoppedEvent) {.async.} =
     minCountLimit: minCountLimit,
   )
   self.api.emit(CtLoadLocals, arguments)
+  if not self.data.isNil:
+    self.data.redraw()
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
-    discard self.onDapStopped(response))
+    discard self.onMove())
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onMove())
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response))
   # api.subscribe(CtCompleteMove, self.onCompleteMove)
@@ -223,13 +232,4 @@ proc excerpt(self: StateComponent): VNode =
 
   
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
-  self.rrTicks = response.location.rrTicks
-  var countBudget = 3000
-  var minCountLimit = 50
-
-  
-  let locals = await self.service.loadLocals(self.rrTicks, countBudget, minCountLimit)
-
-  self.registerLocals(CtLoadLocalsResponseBody(locals: locals))
-
-  self.data.redraw()
+  await self.onMove()

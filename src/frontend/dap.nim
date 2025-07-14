@@ -74,8 +74,17 @@ when not defined(ctInExtension):
       # finish? TODO?
       discard
     of "ct/load-locals":
-      # TODO?
-      discard
+      dap.receive(
+        ExampleDapMessage(
+          `type`: "response",
+          command: "ct/load-locals",
+          body: CtLoadLocalsResponseBody(
+            locals: @[
+              Variable(expression: "a", value: Value(kind: Int, i: "0"))
+            ]
+          ).toJs
+        )
+      )
     of "ct/update-table":
       dap.receive(ExampleDapMessage(`type`: "event", event: "ct/updated-table", body: CtUpdatedTableResponseBody(
         tableUpdate: TableUpdate(
