@@ -1,26 +1,23 @@
-<!-- This page's structure feels really off, please help me rewrite it -->
+# Overview
 
-# Intro to usage guide
+Welcome to the CodeTracer Usage Guide. This guide will help you understand how to use CodeTracer effectively to debug your applications.
 
-CodeTracer is a semi-portable piece of technology, so its usage varies, the following subpages explain how you can
-interact with it through different interfaces, as well as, how to use its signature features:
+## Core Concept: Record and Replay
 
-- [CLI](https://dev-docs.codetracer.com/Introduction/UsageGuide/CLI)
-- [GUI](https://dev-docs.codetracer.com/Introduction/UsageGuide/BasicGUI)
-- [Tracepoints](https://dev-docs.codetracer.com/Introduction/UsageGuide/Tracepoints)
-- [CodeTracer Shell](https://dev-docs.codetracer.com/Introduction/UsageGuide/CodetracerShell)
-- [Building C/C++ applications manually](https://dev-docs.codetracer.com/Introduction/UsageGuide/ManualBuilding)
+Unlike traditional debuggers that attach to a running process, CodeTracer works by first **recording** your application's execution into a trace file. This trace captures everything that happens during the run.
 
-## Frontends
+Once a recording is made, you can **replay** it as many times as you need in the CodeTracer GUI. This allows you to inspect the application's state at any point in time, move forwards and backwards through the execution, and use powerful features like tracepoints without having to run your application again.
 
-CodeTracer currently only has a GUI frontend, though some interactions, like recording and replaying applications are
-activated through the CLI. For example, one can launch `ct replay` and the GUI will launch, where you will do all your
-work after that initial start from the CLI
+Think of it like recording a video of your program's execution that you can then analyze in detail.
 
-The GUI frontend is implemented using web technologies. When running as a desktop application, it uses Electron in order to integrate with
-your host operating system. You can also use CodeTracer in a web browser.
+## How to Use This Guide
 
-> [!NOTE]
-> Running CodeTracer in your web browser is not a currently released feature, although we have a working version internally
+This guide is structured to help you get started quickly and then dive deeper into the features that interest you.
 
-There are plans for an additional future frontend, such as a REPL or TUI frontend.
+*   **To learn about the different ways to interact with CodeTracer**, see the following sections:
+    *   [**Graphical User Interface (GUI)**](./gui.md): Learn how to use the visual interface to replay traces, inspect state, and set tracepoints.
+    *   [**Command-Line Interface (CLI)**](./cli.md): Discover how to record traces and manage trace files from your terminal.
+*   **To learn about specific features**, see these sections:
+    *   [**Tracepoints**](./tracepoints.md): A deep dive into using tracepoints for advanced debugging scenarios.
+*   **For advanced use cases**, explore these topics:
+    *   [**CodeTracer Shell**](./codetracer_shell.md): For integrating CodeTracer with complex or custom build systems.
