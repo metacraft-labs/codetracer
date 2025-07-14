@@ -4,8 +4,11 @@ int calc(int a, int b) {
 }
 
 int main() {
-	for (int i = 0; i < 700; i +=1 ) {
+	int a = 0;
+	for (int i = 0; i < 700000000; i +=1 ) {
 		calc(1, 2);
+		a += i;
 	}
+	return a;
 }
 
