@@ -240,6 +240,7 @@ fi
 ARCH=$APPIMAGE_ARCH appimagetool "${APP_DIR}" CodeTracer.AppImage
 
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${ROOT_PATH}"/CodeTracer.AppImage
+patchelf --remove-rpath "${ROOT_PATH}"/CodeTracer.AppImage
 
 echo "============================"
 echo "AppImage successfully built!"
