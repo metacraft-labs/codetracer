@@ -1746,50 +1746,12 @@ when not defined(ctInExtension):
 
   # === end of LocalToViewsTransport
 
-  # === LocalViewSubscriber:
-
-  type
-    LocalViewSubscriber* = ref object of Subscriber
-      # viewApi*: MediatorWithSubscriber
-      viewTransport*: Transport
-
-  method emitRaw*(l: LocalViewSubscriber, kind: CtEventKind, value: JsObject, subscriber: Subscriber) =
-    if logging: console.log cstring"webview subscriber emitRaw: ", cstring($kind), cstring" ", value
-    l.viewTransport.internalRawReceive(CtRawEvent(kind: kind, value: value).toJs, subscriber)
-
-  proc newLocalViewSubscriber(viewTransport: Transport): LocalViewSubscriber =
-    LocalViewSubscriber(viewTransport: viewTransport)
-
-  # === end
-
   proc setupSinglePageViewsApi(name: cstring, data: Data): MediatorWithSubscribers =
     let transport = newLocalToViewsTransport(data)
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
 
-  # LocalViewToMiddlewareTransport:
-
-  type
-    LocalViewToMiddlewareTransport* = ref object of Transport
-      # component*: JsObject
-      middlewareToViewsTransport*: Transport
-
-  method send*(l: LocalViewToMiddlewareTransport, data: JsObject, subscriber: Subscriber) =
-    l.middlewareToViewsTransport.internalRawReceive(data, subscriber)
-
-  # internalRawReceive for this is called by the subscriber in the middleware
-
-  proc newLocalViewToMiddlewareTransport(middlewareToViewsTransport: Transport): LocalViewToMiddlewareTransport =
-    LocalViewToMiddlewareTransport(middlewareToViewsTransport: middlewareToViewsTransport)
-    
-  proc setupLocalViewToMiddlewareApi(name: cstring, middlewareToViewsApi: MediatorWithSubscribers): MediatorWithSubscribers =
-    let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
-    result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
-    result.asSubscriber = newLocalViewSubscriber(transport)
-
-  # === end
-
+  
   proc configureMiddleware =
-    echo "middleware"
     middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
     dapApi = newExampleDapApi() # TODO: replace with real DAP client
 
