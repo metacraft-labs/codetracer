@@ -221,6 +221,15 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
+# Clear up the executable's rpath
+patchelf --remove-rpath "${APP_DIR}"/bin/ct_unwrapped
+patchelf --remove-rpath "${APP_DIR}"/bin/db-backend
+patchelf --remove-rpath "${APP_DIR}"/bin/db-backend-record
+patchelf --remove-rpath "${APP_DIR}"/bin/nargo
+patchelf --remove-rpath "${APP_DIR}"/bin/wazero
+patchelf --remove-rpath "${APP_DIR}"/bin/ctags
+patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
+
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
   # The appimagetool has its own convention for specifying the ARM64 arch
