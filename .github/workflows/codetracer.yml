@@ -245,7 +245,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          ./CodeTracer/CadeTracer.app/Contents/MacOS/bin/ct --version
+          ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
 
   appimage-lib-check:
     runs-on: ubuntu-latest
@@ -255,6 +255,10 @@ jobs:
       - name: Install AWS CLI
         if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         run: sudo snap install aws-cli --classic
+
+      - name: Install FUSE
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        run: sudo apt-get install -y fuse libfuse2
 
       - name: Download artifact
         if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
