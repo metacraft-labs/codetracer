@@ -74,6 +74,10 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip"
 LIBZIP=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip.out")
 cp -L "${LIBZIP}"/lib/libzip.so.5 "${APP_DIR}"/lib
 
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.curl"
+CURL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.curl.out")
+cp -L "${CURL}"/lib/libcurl.so.4 "${APP_DIR}"/lib
+
 OPENSSL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl.out")
 cp -L "${OPENSSL}"/lib/libssl.so.3 "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libssl.so "${APP_DIR}"/lib
@@ -129,7 +133,10 @@ cp -Lr "${ROOT_PATH}/src/links/ctags" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/ctags"
 # We want splitting
 # shellcheck disable=SC2046
-cp $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+
+# shellcheck disable=SC2046
+cp -n $(lddtree -l "${APP_DIR}/bin/cargo-stylus" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
 chmod -R +x "${APP_DIR}/bin"
 chmod -R +x "${APP_DIR}/electron"
@@ -220,6 +227,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-rec
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
 # Clear up the executable's rpath

@@ -27,6 +27,8 @@
         cargo-stylus =
           inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus;
 
+        curl = pkgs.curl;
+
         inherit (pkgs)
           sqlite
           pcre
