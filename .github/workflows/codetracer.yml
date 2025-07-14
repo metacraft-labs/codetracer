@@ -210,6 +210,74 @@ jobs:
           #   adding `--checksum-algorithm CRC32`
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
 
+  dmg-lib-check:
+    runs-on: macos-latest
+    needs:
+      - dmg-build
+    steps:
+      - name: Install AWS CLI
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        run: brew install awscli
+
+      - name: Install 7zip
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        run: brew install sevenzip
+
+      - name: Download artifact
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
+          #   adding `--checksum-algorithm CRC32`
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg --checksum-algorithm CRC32
+
+      - name: Extract dmg
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
+          #   adding `--checksum-algorithm CRC32`
+          7zz x ./CodeTracer.dmg
+
+      - name: Check if ct starts
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          ./CodeTracer/CadeTracer.app/Contents/MacOS/bin/ct --version
+
+  appimage-lib-check:
+    runs-on: ubuntu-latest
+    needs:
+      - appimage-build
+    steps:
+      - name: Install AWS CLI
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        run: sudo apt-get install -y awscli
+
+      - name: Download artifact
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
+          #   adding `--checksum-algorithm CRC32`
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage --checksum-algorithm CRC32
+
+      - name: Check if ct starts
+        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          ./CodeTracer.AppImage --version
+
   test-rust:
     runs-on: [self-hosted, nixos]
     needs:
@@ -261,6 +329,8 @@ jobs:
     needs:
       - test-rust
       - test-ui-tests
+      - appimage-lib-check
+      - dmg-lib-check
     if: github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}
     steps:
       - name: Checkout
@@ -315,12 +385,12 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
       - name: Get changelog text
         id: changelog
-        run: | 
+        run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c "awk '/^## /{if (p) exit; p=1} p' CHANGELOG.md > release_changelog.md"
           echo "\
-            
+
           We're actively working on multiple exciting features, which are not yet fully released. Stay tuned!
-            
+
           [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-amd64.AppImage)
           [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-arm64.dmg)" >> release_changelog.md
       - name: Create Release
