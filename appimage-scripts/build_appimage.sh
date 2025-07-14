@@ -164,6 +164,7 @@ export HERE=$(dirname "$(readlink -f "${0}")")
 # TODO: This includes references to x86_64. What about aarch64?
 export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
 export LINKS_PATH_DIR=$HERE
+export PATH="${HERE}/bin:${PATH}"
 
 exec ${HERE}/bin/ct "$@"
 EOF
