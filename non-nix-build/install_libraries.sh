@@ -10,4 +10,7 @@ brew install libzip
 
 HOMEBREW_LIB_DIR="/System/Volumes/Data/opt/homebrew/lib"
 
-cp "${HOMEBREW_LIB_DIR}/libzip.5.dylib" "${LIB_DIR}"
+cp "${HOMEBREW_LIB_DIR}/libzip.dylib" "${LIB_DIR}"
+
+install_name_tool -id "@rpath/libzip.dylib" "${LIB_DIR}/libzip.dylib"
+codesign -s - --force --deep "${LIB_DIR}/libzip.dylib"
