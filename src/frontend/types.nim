@@ -1652,8 +1652,8 @@ proc toCamelCase*(name: string): string =
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
 
 method redrawForExtension*(self: Component) {.base.} =
-  if self.inExtension:
-    self.kxi.redraw()
+  # if self.inExtension:
+  self.kxi.redraw()
 
 method restart*(self: Component) {.base.} =
   discard
