@@ -23,7 +23,7 @@ echo "==========="
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
     --dynlibOverride: "libzip" \
-    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.dylib" \
+    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.5.dylib" \
     --gc:refc --hints:on --warnings:off \
     --debugInfo --lineDir:on \
     --boundChecks:on --stacktrace:on --linetrace:on \
@@ -40,7 +40,7 @@ nim -d:release \
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
     --dynlibOverride: "libzip" \
-    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.dylib" \
+    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.5.dylib" \
     --gc:refc --hints:on --warnings:off \
     --debugInfo --lineDir:on \
     --boundChecks:on --stacktrace:on --linetrace:on \
