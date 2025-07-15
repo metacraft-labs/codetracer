@@ -41,10 +41,19 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   self.completeMoveIndex += 1
 
   clog "after registering locals"
-  console.log self
-  console.log self.data
-  console.log self.data.ui.componentMapping[Content.State][0] == self
   self.redrawForExtension()
+
+  if not self.kxi.isNil:
+    self.kxi.redraw()
+  let vdom = self.render()
+  let newDom = vnodeToDom(vdom, KaraxInstance())
+
+  console.log newDom
+  var node = jq(".value-components-container").toJs.to(Node)
+  node.parentNode.replaceChild(newDom, node)
+
+
+  
 
 method onMove(self: StateComponent) {.async.} =
   # TODO: fixing rr ticks
@@ -57,9 +66,18 @@ method onMove(self: StateComponent) {.async.} =
     minCountLimit: minCountLimit,
   )
   self.api.emit(CtLoadLocals, arguments)
-  if not self.data.isNil:
-    self.data.redraw()
+  if not self.kxi.isNil:
+    self.kxi.redraw()
 
+  
+  let vdom = self.render()
+  let newDom = vnodeToDom(vdom, KaraxInstance())
+
+  console.log newDom
+  var element = jq("#state-component-0").toJs.to(Node)
+  element.parentNode.replaceChild(newDom, element)
+
+  
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =

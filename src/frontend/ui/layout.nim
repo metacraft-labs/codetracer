@@ -307,6 +307,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
           (proc: VNode = component.render()),
           containerId,
           proc = discard)
+        component.kxi = kxiMap[state.label]
 
         EditorViewComponent(component).renderer = kxiMap[state.fullPath]
 
@@ -359,6 +360,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
             containerId,
             proc = discard
           )
+          component.kxi = kxiMap[state.label]
 
         if state.content == Content.Shell:
           let shellComponent = ShellComponent(component)
