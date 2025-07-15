@@ -1,15 +1,11 @@
 ## Stylus / WASM
 
-We are adding MVP support for Stylus contracts written in Rust and using WASM.
+The implementation is based on a [wazero]() WASM interpreter patch and can be used for various WASM languages.
+Testing has been done using Sylus contracts and small rust-based WASM programs.
 
-The support is implemented in a general way, by patching the [wazero]() WASM interpreter, so
-it can be used for various WASM languages/usecases, but the first iteration is a bit more tested with
-the Stylus contract usecase or small example Rust-based WASM programs.
+### Steps to record / replay a Stylus program
 
-### Stylus demo
-
-The Stylus tools allow you to deploy and interact with Arbitrum Stylus contracts locally.
-Follow these steps to experiment with the demo contract shipped with CodeTracer.
+Adjust the steps below for your use case or run the exact steps to launch the demo program which is included with the repo.
 
 1. **Run a local devnode**
 
@@ -23,23 +19,21 @@ Follow these steps to experiment with the demo contract shipped with CodeTracer.
    run-nitro-devnode
    ```
 
-   > [!CAUTION]
-   > The dev node runs in the foreground and hijacks the terminal.
-
 2. **Deploy the demo contract**
 
-   Open a new terminal, switch to the CodeTracer repository and check out the `feat/stylus-demo` branch:
+   Navigate to the directory of your program and let CodeTracer deploy the smart contract.
 
    ```bash
-   git checkout feat/stylus-demo
    cd ui-tests/programs/stylus_fund_tracker
    ct arb deploy
    ```
-
-   Copy the printed smart contract address.
+   After this step, CodeTracer will return the deployed smart contract address.
 
 3. **Send transactions**
 
+   After CodeTracer has deployed the smart contract each transaction to it will be recorded.
+
+   To make the cast commands more readable we first export some of the arguments.
    In another terminal enter the Stylus development shell and set up the environment variables:
 
    ```bash
@@ -47,10 +41,12 @@ Follow these steps to experiment with the demo contract shipped with CodeTracer.
 
    export PK=0xb6b15c8cb491557369f3c7d2c287b053eb229daa9c22138887752191c9520659
    export RPC_URL=http://localhost:8547
-   export CONTRACT_ADDR=<deployed contract address>
+   export CONTRACT_ADDR=<deployed smart contract address>
    ```
 
-   Replace `<deployed contract address>` with the one printed in the previous step.
+   Make sure to replace `<deployed smart contract address>` with the address from the previous step 
+
+   
 
    Send a few funding transactions and trigger a `largeIncomes` event:
 
