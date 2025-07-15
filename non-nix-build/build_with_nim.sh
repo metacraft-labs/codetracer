@@ -22,8 +22,7 @@ echo "==========="
 # codetracer
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
-    --dynlibOverride: "libzip" \
-    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.5.dylib" \
+    --passL:"-headerpad_max_install_names" \
     --gc:refc --hints:on --warnings:off \
     --debugInfo --lineDir:on \
     --boundChecks:on --stacktrace:on --linetrace:on \
@@ -37,10 +36,19 @@ nim -d:release \
     -d:ctmacos \
     --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
 
+install_name_tool \
+  -change /opt/homebrew/opt/libzip/lib/libzip.dylib @rpath/libzip.dylib \
+  "${DIST_DIR}/bin/ct"
+
+install_name_tool \
+  -add_rpath "@executable_path/../../Frameworks" \
+  "${DIST_DIR}/bin/ct"
+
+codesign -s - --force --deep "${DIST_DIR}/bin/ct"
+
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
-    --dynlibOverride: "libzip" \
-    --passL:"${GIT_ROOT}/non-nix-build/CodeTracer.app/Contents/Frameworks/libzip.5.dylib" \
+    --passL:"-headerpad_max_install_names" \
     --gc:refc --hints:on --warnings:off \
     --debugInfo --lineDir:on \
     --boundChecks:on --stacktrace:on --linetrace:on \
@@ -53,6 +61,16 @@ nim -d:release \
     --nimcache:nimcache \
     -d:ctmacos \
     --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct/db_backend_record.nim
+
+install_name_tool \
+  -change /opt/homebrew/opt/libzip/lib/libzip.dylib @rpath/libzip.dylib \
+  "${DIST_DIR}/bin/db-backend-record"
+
+install_name_tool \
+  -add_rpath "@executable_path/../../Frameworks" \
+  "${DIST_DIR}/bin/db-backend-record"
+
+codesign -s - --force --deep "${DIST_DIR}/bin/db-backend-record"
 
 # this works    --passL:/nix/store/f6afb4jw9g5f94ixw0jn6cl0ah4liy35-sqlite-3.45.3/lib/libsqlite3.so.0 \
 
