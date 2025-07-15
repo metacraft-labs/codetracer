@@ -182,8 +182,8 @@ impl Receiver {
             // superseded by dap_server
             // TaskKind::Step => handler.step(self.core.read_arg(&task.id)?, task),
             // TaskKind::EventLoad => handler.event_load(task),
-            TaskKind::EventJump => handler.event_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::CalltraceJump => handler.calltrace_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::EventJump => handler.event_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::CalltraceJump => handler.calltrace_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::SourceLineJump => handler.source_line_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::SourceCallJump => handler.source_call_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::AddBreak => handler.add_breakpoint(self.core.read_arg(&task.id)?, task),

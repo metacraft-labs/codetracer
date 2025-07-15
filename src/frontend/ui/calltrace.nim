@@ -20,6 +20,9 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool)
 
 var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
 
+proc calltraceJump(self: CalltraceComponent, location: types.Location) =
+  self.api.emit(CtCalltraceJump, location)
+
 proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
   if calltraceComponentForExtension.kxi.isNil:
     calltraceComponentForExtension.kxi = setRenderer(proc: VNode = calltraceComponentForExtension.render(), id, proc = discard)
@@ -449,7 +452,7 @@ proc searchResultView(self: CalltraceComponent, call: Call): VNode =
     tdiv(
       class = "search-result",
       onclick = proc =
-        self.service.calltraceJump(location)
+        self.calltraceJump(location)
         self.data.redraw()
     )
   ):
@@ -611,21 +614,16 @@ proc callView*(
         id = &"local-call-text-{key}",
         class = "call-text",
         onclick = proc =
-          if self.inExtension:
-            # TODO: api emitvscode.postMessage(js{command: "calltrace-jump", callKey: call.key})
-            # self.api.emit(CtCallTraceJump, call.key)
-            echo "TODO emit with api"
-          else:
-            clog fmt"calltrace: jump onclick call key " & $key
-            self.resetValueView()
-            # TODO: send event to middleware to change state
-            # self.data.services.debugger.stableBusy = true
-            self.selectedCallNumber = self.lineIndex[call.key]
-            self.lastSelectedCallKey = call.key
-            self.service.calltraceJump(call.location)
-            # TODO: send event to middleware to change status state
-            # inc self.data.services.debugger.operationCount
-            self.redrawCallLines()
+          clog fmt"calltrace: jump onclick call key " & $key
+          self.resetValueView()
+          # TODO: send event to middleware to change state
+          # self.data.services.debugger.stableBusy = true
+          self.selectedCallNumber = self.lineIndex[call.key]
+          self.lastSelectedCallKey = call.key
+          self.calltraceJump(call.location)
+          # TODO: send event to middleware to change status state
+          # inc self.data.services.debugger.operationCount
+          self.redrawCallLines()
       ):
         if key != cstring"-1 -1 -1":
           text $call.location.highLevelFunctionName & " #" & $call.key
@@ -655,7 +653,7 @@ proc endOfProgramView*(
       id = fmt"local-call--1",
       class = "call-child-box",
       onclick = proc(e: Event, tg: VNode) =
-        self.service.calltraceJump(callLine.call.location)
+        self.calltraceJump(callLine.call.location)
     ):
       endOfProgramCallView(self, callLine.isError)
       tdiv(
