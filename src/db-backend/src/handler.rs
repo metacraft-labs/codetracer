@@ -660,23 +660,21 @@ impl Handler {
         Ok(())
     }
 
-    pub fn event_jump(&mut self, event: ProgramEvent, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
                                                               // for compat with rr/gdb core support
         self.step_id_jump(step_id);
         self.complete_move(false)?;
 
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn calltrace_jump(&mut self, location: Location, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(location.rr_ticks.0); // using this field
                                                    // for compat with rr/gdb core support
         self.step_id_jump(step_id);
         self.complete_move(false)?;
 
-        self.return_void(task)?;
         Ok(())
     }
 

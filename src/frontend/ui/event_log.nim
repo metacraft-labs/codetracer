@@ -248,14 +248,13 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
     else:
       fmt"event {eventElement.kind}"
 
+proc eventJump(self: EventLogComponent, event: ProgramEvent) =
+  self.api.emit(CtEventJump, event)
+
 proc programEventJump(self: EventLogComponent, event: ProgramEvent) =
   self.findActiveRow(event.directLocationRRTicks)
   self.activeRowTicks = event.directLocationRRTicks
-  self.service.eventJump(event)
-
-proc isDbBased(self: EventLogComponent): bool =
-  data.ui.editors.hasKey(self.data.services.debugger.location.path) and
-  data.ui.editors[self.data.services.debugger.location.path].lang.isDbBased()
+  self.eventJump(event)
 
 const DELAY: int64 = 200 # milliseconds
 
@@ -272,7 +271,7 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
   var event: ProgramEvent
 
   if data.toJs != jsUndefined:
-    let location = self.data.services.debugger.location
+    let location = self.location
     event = cast[ProgramEvent](data)
     event.highLevelPath = location.highLevelPath
     event.highLevelLine = location.highLevelLine
@@ -287,8 +286,8 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
     cerror "event_log: datatable row data undefined"
     return
   self.programEventJump(event)
-  if self.data.ui.activeFocus != self:
-    self.data.focusComponent(self)
+  # if self.data.ui.activeFocus != self:
+  #   self.data.focusComponent(self)
 
 proc events(self: EventLogComponent) =
   var context = self
@@ -298,8 +297,8 @@ proc events(self: EventLogComponent) =
 
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()
-    self.lastJumpFireTime = currentTime
-    if not self.service.debugger.stableBusy:
+    if currentTime - self.lastJumpFireTime > 10:
+      self.lastJumpFireTime = currentTime
       self.jump(table, e)
 
   proc handlerMouseover(table: js, e: js) =
@@ -427,7 +426,7 @@ proc events(self: EventLogComponent) =
           proc(content: cstring, t: js, event: ProgramEvent): cstring {.closure.} =
             cstring"low level location"
         ]
-      if self.isDbBased():
+      if self.isDbBasedTrace:
         let lower = j("FullPath".toLowerAscii())
 
         denseColumns.add(
@@ -1072,6 +1071,7 @@ proc afterMove(self: EventLogComponent) =
 method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
   # if self.data.ui.activeFocus != self:
   let currentTime: int64 = now()
+  self.location = response.location
 
   self.activeRowTicks = response.location.rrTicks
   self.lastJumpFireTime = currentTime
