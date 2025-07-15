@@ -516,6 +516,7 @@ type
     kxi*: KaraxInstance
     inExtension*: bool
     api*: MediatorWithSubscribers
+    location*: Location
 
   DataTableComponent* = ref object
     context*: js
@@ -686,7 +687,6 @@ type
     lastChange*: BiggestInt
     lastSearch*: BiggestInt
     lastQuery*: cstring
-    location*: Location
     expandedValues*: JsAssoc[cstring, CallExpandedValuesComponent]
     callLines*: seq[CallLine]
     originalCallLines*: seq[CallLine]
@@ -991,7 +991,6 @@ type
     lastSliderUpdateTimeInMs*: int64
     lineGroups*: JsAssoc[int, Group]
     lineWidgets*: JsAssoc[int, js]
-    location*: Location
     loopColumnMinWidth*: int
     loopLineSteps*: JsAssoc[int, int]
     loopStates*: JsAssoc[int, LoopState]

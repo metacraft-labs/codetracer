@@ -19,6 +19,8 @@ type
     CtLoadedTerminal,
     CtCollapseCalls,
     CtExpandCalls,
+    CtCalltraceJump,
+    CtEventJump,
     
 when defined(js):
   import std / jsffi

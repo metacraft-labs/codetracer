@@ -6,7 +6,7 @@ use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
     gen_task_id, Action, CalltraceLoadArgs, CollapseCallsArgs, SourceLocation, StepArg, Task, TaskId, TaskKind,
-    UpdateTableArgs,
+    UpdateTableArgs, Location, ProgramEvent,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
@@ -163,6 +163,8 @@ fn handle_request<W: Write>(
         "ct/load-terminal" => handler.load_terminal(req.clone())?,
         "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
+        "ct/calltrace-jump" => handler.calltrace_jump(req.clone(), req.load_args::<Location>()?)?,
+        "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
         "ct/load-calltrace-section" => {
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }
