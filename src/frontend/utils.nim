@@ -193,7 +193,9 @@ proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateC
     minNameWidth: 30,
     maxNameWidth: 85,
     totalValueWidth: 95,
-    inExtension: inExtension)
+    inExtension: inExtension,
+    valueHistory: JsAssoc[cstring, ValueHistory]{},
+  )
   data.registerComponent(result, Content.State)
 
 proc makeBuildComponent*(data: Data): BuildComponent =

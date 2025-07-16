@@ -844,9 +844,6 @@ type
     expression*: langstring
     value*: Value
 
-  CtLoadHistoryArguments* = ref object
-    expression*: langstring
-
   CtLoadLocalsArguments* = ref object
     rrTicks*: int
     countBudget*: int
