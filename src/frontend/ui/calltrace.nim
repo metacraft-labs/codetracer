@@ -14,7 +14,6 @@ const EXPAND_CALLS_KIND = CtExpandCalls
 const COLLAPSE_CALLS_KIND = CtCollapseCalls
 
 proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
-proc searchCalltrace*(self: CalltraceComponent, query: cstring) {.async.}
 proc redrawCallLines(self: CalltraceComponent)
 proc loadLines(self: CalltraceComponent, fromScroll: bool)
 
@@ -454,7 +453,7 @@ proc searchResultView(self: CalltraceComponent, call: Call): VNode =
       class = "search-result",
       onclick = proc =
         self.calltraceJump(location)
-        self.data.redraw()
+        self.redrawForExtension()
     )
   ):
     text &"#{location.key} - {ticksText}({location.rrTicks}): {location.highLevelFunctionName}"
@@ -487,7 +486,7 @@ proc searchCalltraceView(self: CalltraceComponent): VNode =
     ev.target.focus()
     if ev.keyCode == ENTER_KEY_CODE:
       self.searchText = cast[cstring](ev.target.toJs.value)
-      discard self.searchCalltrace(self.searchText)
+      self.api.emit(CtSearchCalltrace, CallSearchArg(value: self.searchText))
 
   buildHtml(
     tdiv(class = "calltrace-search")
@@ -763,25 +762,18 @@ proc localCalltraceView*(self: CalltraceComponent): VNode =
   buildHtml(tdiv(class= &"local-calltrace")):
     tdiv(class="calltrace-lines")
 
-proc searchCalltrace*(self: CalltraceComponent, query: cstring) {.async.} =
-  if query.len == 0:
-    self.lastSearch = now()
+proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
+  self.searchResults = searchResults
+  self.isSearching = true
+  self.data.redraw()
+
+
+  self.lastSearch = now()
+
+  let current = cast[cstring](jq(".calltrace-search-input").toJs.value)
+
+  if current.len > 0:
     self.lastChange = self.lastSearch
-    self.searchResults = @[]
-    self.isSearching = false
-    redrawAll()
-  else:
-    self.searchResults = await self.service.searchCalltrace(query)
-    self.isSearching = true
-    self.data.redraw()
-
-    self.lastQuery = query
-    self.lastSearch = now()
-
-    let current = cast[cstring](jq(".calltrace-search-input").toJs.value)
-
-    if current.len > 0:
-      self.lastChange = self.lastSearch
 
 func findCall(call: Call, key: cstring): Call =
   if call.key == key:
@@ -836,9 +828,14 @@ func supportCallstackOnly(self: CalltraceComponent): bool =
 method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    discard self.onCompleteMove(response))
+    discard self.onCompleteMove(response)
+  )
   api.subscribe(CtUpdatedCalltrace, proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
-    discard self.onUpdatedCalltrace(response))
+    discard self.onUpdatedCalltrace(response)
+  )
+  api.subscribe(CtCalltraceSearchResponse, proc(kind: CtEventKind, response: seq[Call], sub: Subscriber) =
+    self.registerSearchRes(response)
+  )
 
 proc registerCalltraceComponent*(component: CalltraceComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
