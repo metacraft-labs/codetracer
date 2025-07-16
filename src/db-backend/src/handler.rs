@@ -766,10 +766,9 @@ impl Handler {
         Ok(())
     }
 
-    pub fn history_jump(&mut self, loc: Location, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn history_jump(&mut self, _req: dap::Request, loc: Location) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(loc.rr_ticks.0));
         self.complete_move(false)?;
-        self.return_void(task)?;
         Ok(())
     }
 
