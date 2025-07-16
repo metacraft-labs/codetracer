@@ -80,7 +80,7 @@ when not defined(ctInExtension):
           command: "ct/load-locals",
           body: CtLoadLocalsResponseBody(
             locals: @[
-              Variable(expression: "a", value: Value(kind: Int, i: "0"))
+              Variable(expression: "a", value: Value(kind: Int, i: "0", typ: Type(kind: Int, langType: cstring"int")))
             ]
           ).toJs
         )
