@@ -197,7 +197,7 @@ impl Receiver {
             // TaskKind::UpdateTable => handler.update_table(self.core.read_arg(&task.id)?, task),
             TaskKind::TracepointDelete => handler.tracepoint_delete(self.core.read_arg(&task.id)?, task),
             TaskKind::TracepointToggle => handler.tracepoint_toggle(self.core.read_arg(&task.id)?, task),
-            TaskKind::CalltraceSearch => handler.calltrace_search(self.core.read_arg(&task.id)?, task),
+            // TaskKind::CalltraceSearch => handler.calltrace_search(self.core.read_arg(&task.id)?, task),
             TaskKind::SearchProgram => handler.search_program(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadStepLines => handler.load_step_lines(self.core.read_arg(&task.id)?, task),
             TaskKind::LocalStepJump => handler.local_step_jump(self.core.read_arg(&task.id)?, task),

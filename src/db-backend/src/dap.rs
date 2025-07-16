@@ -481,6 +481,18 @@ impl DapClient {
             body: serde_json::to_value(history_update)?,
         }))
     }
+
+    pub fn calltrace_search_event(&mut self, search_res: Vec<task::Call>) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/calltrace-search-res".to_string(),
+            body: serde_json::to_value(search_res)?,
+        }))
+    }
+
     pub fn updated_events(&mut self, first_events: Vec<task::ProgramEvent>) -> Result<DapMessage, serde_json::Error> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
