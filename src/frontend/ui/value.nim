@@ -148,7 +148,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
     tdiv(
       class = "select-view-kind",
       tabindex = "0",
-      onclick = proc =
+      onmousedown = proc =
         self.kindSelectorIsClicked = not self.kindSelectorIsClicked
         redrawAll(),
       onblur = proc =
@@ -168,7 +168,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
       ):
         tdiv(
           class = "dropdown-item",
-          onclick = proc =
+          onmousedown = proc =
             if self.viewKind != ViewTable:
               self.changed = true
               self.viewKind = ViewTable
@@ -179,7 +179,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
           text "table"
         tdiv(
           class = "dropdown-item",
-          onclick = proc =
+          onmousedown = proc =
             if self.viewKind != ViewLine:
               self.viewKind = ViewLine
               self.pie = nil
@@ -189,7 +189,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
           text "line"
         tdiv(
           class = "dropdown-item",
-          onclick = proc =
+          onmousedown = proc =
             if self.viewKind != ViewPie:
               self.viewKind = ViewPie
               self.line = nil
@@ -536,7 +536,7 @@ proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-location",
-      onclick = proc = self.historyClick(event.location),
+      onmousedown = proc = self.historyClick(event.location),
       oncontextmenu = proc(ev: Event, tg: Vnode) = self.historyContextAction(event, ev)
     )
   ):
@@ -546,7 +546,7 @@ proc historyValueView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-value",
-      onclick = proc = self.historyClick(event.location),
+      onmousedown = proc = self.historyClick(event.location),
       oncontextmenu = proc(ev: Event, tg: VNode) = self.historyContextAction(event, ev)
     )
   ):
@@ -1092,7 +1092,7 @@ proc view(
         if self.isTooltipValue and expression == self.baseExpression:
           tdiv(
             class = "add-to-scratchpad-button",
-            onclick = proc(ev: Event, v: VNode) =
+            onmousedown = proc(ev: Event, v: VNode) =
               openValueInScratchpad((expression, value))
               self.data.redraw()
           ):
@@ -1100,7 +1100,7 @@ proc view(
               text "Add to scratchpad"
         span(
           class = "value-expand-button " & fresh,
-          onclick = proc(ev: Event, v: VNode) =
+          onmousedown = proc(ev: Event, v: VNode) =
             self.data.focusComponent(self)
             ev.stopPropagation()
             capture expression, value, cPath:
@@ -1156,7 +1156,7 @@ proc view(
       if value.partiallyExpanded and self.uiExpanded(value, expression):
         button(
           class = "value-load-more-button",
-          onclick = proc(ev: Event, v: VNode)=
+          onmousedown = proc(ev: Event, v: VNode)=
             capture value, cPath:
               if not self.isOperationRunning:
                 self.isOperationRunning = true
