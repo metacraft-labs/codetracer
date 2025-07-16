@@ -21,6 +21,8 @@ type
     CtExpandCalls,
     CtCalltraceJump,
     CtEventJump,
+    CtLoadHistory,
+    CtUpdatedHistory,
     
 when defined(js):
   import std / jsffi

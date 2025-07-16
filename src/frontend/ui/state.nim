@@ -90,8 +90,8 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onMove())
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-    self.registerLocals(response))
-  # api.subscribe(CtCompleteMove, self.onCompleteMove)
+    self.registerLocals(response)
+  )
 
 # think if it's possible to directly exportc in this way the method
 proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
@@ -110,6 +110,7 @@ method render*(self: StateComponent): VNode =
       self.values[name] = ValueComponent(
         expanded: JsAssoc[cstring, bool]{},
         charts: JsAssoc[cstring, ChartComponent]{},
+        state: self,
         # history: JsAssoc[cstring, seq[HistoryResult]]{},
         showInline: JsAssoc[cstring, bool]{},
         baseExpression: name,
@@ -118,10 +119,13 @@ method render*(self: StateComponent): VNode =
         id: self.values.len,
         data: self.data,
         nameWidth: self.nameWidth,
-        valueWidth: self.calculateValueWidth()
+        valueWidth: self.calculateValueWidth(),
+        location: self.location,
+        api: self.api
       )
-    elif self.data.services.debugger.valueHistory.hasKey(name):
-      checkHistoryLocation(self.values[name], self.data.services.debugger, name)
+      registerValueComponent(self.values[name], self.api)
+    elif self.valueHistory.hasKey(name):
+      checkHistoryLocation(self.values[name], name)
 
   try:
     proc renderFunction(value: ValueComponent): VNode =
@@ -255,4 +259,5 @@ proc excerpt(self: StateComponent): VNode =
 
   
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
+  self.location = response.location
   await self.onMove()

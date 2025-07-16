@@ -1,4 +1,5 @@
 import ui_imports, ../types, ../renderer, ../utils
+import ../communication, ../../common/ct_event
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -17,9 +18,15 @@ proc view(
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
 
 proc loadHistory(self: ValueComponent, expression: cstring) =
-  # TODO: self.api.emit(CtLoadHistory, ..)
-  # discard dapSendRequest("ct/load-history", CtLoadHistoryArguments(expression: expression), void)
-  discard
+  self.api.emit(CtLoadHistory, LoadHistoryArg(expression: expression, location: self.location))
+
+method register*(self: ValueComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
+    discard self.onUpdatedHistory(response))
+
+proc registerValueComponent*(component: ValueComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
 
 proc intValue*(i: int): Value {.exportc.} =
   Value(
@@ -292,17 +299,17 @@ proc ensureBase(self: ChartComponent) =
 proc ensure*(self: ChartComponent) =
   var label = if self.viewKind == ViewLine: "ensureLine" else: "ensurePie"
 
-  if self.stateID != -1:
-    # TODO: think how this would work in extension
-    kxiMap[j("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
-      discard windowSetTimeout(proc = self.ensureBase(), 500)
-    )
+  # if self.stateID != -1:
+  #   # TODO: think how this would work in extension
+  #   kxiMap[j("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
+  #     discard windowSetTimeout(proc = self.ensureBase(), 500)
+  #   )
+  # else:
+  if not self.trace.isNil:
+    self.ensureBase()
   else:
-    if not self.trace.isNil:
-      self.ensureBase()
-    else:
-      cerror "vaue: " & label & " cant be called"
-      return
+    cerror "vaue: " & label & " cant be called"
+    return
 
 proc renderLine*(self: ChartComponent): VNode =
   let hidden =
@@ -481,13 +488,12 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
 
   chart.ensure()
 
-  if self.stateID != -1:
-    kxiMap[&"stateComponent-{self.stateID}"].afterRedraws.add(proc =
-      let container = document.getElementById(cstring(fmt"history-{expression}"))
-      if not container.isNil:
-        container.toJs.scrollTop = chart.historyScrollTop
-    ) # TODO: Handle multiple state components
-
+  # if self.stateID != -1:
+  #   kxiMap[&"stateComponent-{self.stateID}"].afterRedraws.add(proc =
+  #     let container = document.getElementById(cstring(fmt"history-{expression}"))
+  #     if not container.isNil:
+  #       container.toJs.scrollTop = chart.historyScrollTop
+  #   ) # TODO: Handle multiple state components
   result = buildHtml(
     tdiv(class = "history-container")
   ):
@@ -580,19 +586,19 @@ method ensureCollectionElementsChart*(
       self.charts[expression].tableView = tableView
       self.charts[expression].update(value.elements, replace=true)
 
-proc checkHistoryLocation*(self: ValueComponent, debugger: DebuggerService, expression: cstring) =
-  let currentLocation = self.data.services.debugger.location
+proc checkHistoryLocation*(self: ValueComponent, expression: cstring) =
+  let currentLocation = self.location
 
-  if currentLocation.path != debugger.valueHistory[expression].location.path or
-    currentLocation.functionName != debugger.valueHistory[expression].location.functionName:
-      data.services.debugger.valueHistory.del(expression)
+  if currentLocation.path != self.state.valueHistory[expression].location.path or
+    currentLocation.functionName != self.state.valueHistory[expression].location.functionName:
+      self.state.valueHistory.del(expression)
       self.showInline[expression] = false
 
 method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
-  if not self.data.services.debugger.valueHistory.hasKey(expression):
-    let location = self.data.services.debugger.location
+  if not self.state.valueHistory.hasKey(expression):
+    let location = self.location
 
-    self.data.services.debugger.valueHistory[expression] =
+    self.state.valueHistory[expression] =
       ValueHistory(
         location: location,
         results: @[]
@@ -609,10 +615,10 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
       buildHtml(tdiv(class = cstring(fmt"history-text {kl}"))):
         tdiv(class = "history-text-element"):
           tdiv(class = "history-location-element"):
-            for event in self.data.services.debugger.valueHistory[expression].results:
+            for event in self.state.valueHistory[expression].results:
               historyLocationView(self, event)
           tdiv(class = "history-value-element"):
-            for event in self.data.services.debugger.valueHistory[expression].results:
+            for event in self.state.valueHistory[expression].results:
               historyValueView(self, event)
 
     let chart = self.addChart(expression)
@@ -620,16 +626,15 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
     chart.tableView = tableView
     # chart.ensure()
     # self.ensureValueComponent()
-
     self.loadHistory(expression)
   else:
     self.showInline[expression] = not self.showInline[expression]
 
-  self.data.redraw()
+  self.redrawForExtension()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
   let expression = cast[cstring](update.expression)
-  var valueHistory = self.data.services.debugger.valueHistory
+  var valueHistory = self.state.valueHistory
 
   if valueHistory.hasKey(expression):
     var unsortedHistory = valueHistory[expression].results.concat(update.results.filterIt(it notin valueHistory[expression].results))
@@ -659,7 +664,8 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
 
     valueHistory[expression].results = historyWithoutRepetitions
 
-    self.data.redraw()
+    # self.data.redraw()
+    self.redrawForExtension()
 
 
 proc atomValueView(self: ValueComponent, valueText: string, expression: cstring, klass: string, value: Value): VNode =
@@ -1116,7 +1122,7 @@ proc view(
           if expression == self.baseExpression:
             span(
               class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",
-              onclick = proc() =
+              onmousedown = proc() =
                 discard self.showHistory(expression)
             ):
               tdiv(class = "custom-tooltip"):
@@ -1142,7 +1148,7 @@ proc view(
       if expression == self.baseExpression and not self.uiExpanded(value, expression):
         span(
           class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",
-          onclick = proc() =
+          onmousedown = proc() =
             discard self.showHistory(expression)
         ):
           tdiv(class = "custom-tooltip"):

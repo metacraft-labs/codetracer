@@ -703,7 +703,7 @@ impl Handler {
         &self.db.variable_names[variable_id]
     }
 
-    pub fn load_history(&mut self, load_history_arg: LoadHistoryArg, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_history(&mut self, _req: dap::Request, load_history_arg: LoadHistoryArg) -> Result<(), Box<dyn Error>> {
         let mut history_results: Vec<HistoryResult> = vec![];
         // from start to end:
         //  find all steps with such a variable name: for them:
@@ -753,13 +753,15 @@ impl Handler {
         }
 
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
-
-        self.send_event((
-            EventKind::UpdatedHistory,
-            gen_event_id(EventKind::UpdatedHistory),
-            serde_json::to_string(&history_update)?,
-            false,
-        ))?;
+        let raw_event = self.dap_client.updated_history_event(history_update)?;
+        
+        self.send_dap(&raw_event)?;
+        // self.send_event((
+        //     EventKind::UpdatedHistory,
+        //     gen_event_id(EventKind::UpdatedHistory),
+        //     serde_json::to_string(&history_update)?,
+        //     false,
+        // ))?;
 
         Ok(())
     }
