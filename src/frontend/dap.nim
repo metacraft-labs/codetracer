@@ -174,6 +174,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtEventJump: "ct/event-jump",
   CtLoadHistory: "ct/load-history",
   CtUpdatedHistory: "ct/updated-history",
+  CtHistoryJump: "ct/history-jump",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
