@@ -24,6 +24,8 @@ type
     CtLoadHistory,
     CtUpdatedHistory,
     CtHistoryJump,
+    CtSearchCalltrace,
+    CtCalltraceSearchResponse,
     
 when defined(js):
   import std / jsffi
