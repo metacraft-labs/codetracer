@@ -1626,13 +1626,16 @@ when defined(ctRenderer):
     result.asSubscriber = newLocalViewSubscriber(transport)
 
   proc registerComponent*(data: Data, component: Component, content: Content) =
-    component.data = data
-    component.content = content
-    if not middlewareToViewsApi.isNil:
-      let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
-      component.register(componentToMiddlewareApi)
-    echo "register component ", content, " ", component.id
-    data.ui.componentMapping[content][component.id] = component
+    if data.ui.componentMapping[content].hasKey(component.id):
+      echo fmt"WARNING: already having a component for {content} with id {component.id}"
+    else:
+      component.data = data
+      component.content = content
+      if not middlewareToViewsApi.isNil:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+        component.register(componentToMiddlewareApi)
+      echo "register component ", content, " ", component.id
+      data.ui.componentMapping[content][component.id] = component
 
   proc projectPath*(project: cstring, path: string): cstring =
     return data.startOptions.app & cstring("/") & project & cstring(path)
@@ -1671,8 +1674,8 @@ proc toCamelCase*(name: string): string =
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
 
 method redrawForExtension*(self: Component) {.base.} =
-  # if self.inExtension:
-  self.kxi.redraw()
+  if self.inExtension:
+    self.kxi.redraw()
 
 method restart*(self: Component) {.base.} =
   discard
