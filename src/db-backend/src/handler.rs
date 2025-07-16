@@ -678,7 +678,7 @@ impl Handler {
         Ok(())
     }
 
-    pub fn calltrace_search(&mut self, arg: CallSearchArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn calltrace_search(&mut self, _req: dap::Request, arg: CallSearchArg) -> Result<(), Box<dyn Error>> {
         let mut calls: Vec<Call> = vec![];
         let mut list: Vec<usize> = vec![];
         let re = Regex::new(&arg.value.clone())?;
@@ -696,7 +696,8 @@ impl Handler {
             }
         }
 
-        self.return_task((task, self.serialize(&calls)?))?;
+        let raw_event = self.dap_client.calltrace_search_event(calls)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
