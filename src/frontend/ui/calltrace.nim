@@ -153,7 +153,8 @@ proc showCallValue*(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring)
     stateID: -1,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    data: data
+    data: data,
+    location: self.location
   )
 
   self.forceRerender[id] = true
