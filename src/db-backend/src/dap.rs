@@ -471,6 +471,16 @@ impl DapClient {
         }))
     }
 
+    pub fn updated_history_event(&mut self, history_update: task::HistoryUpdate) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-history".to_string(),
+            body: serde_json::to_value(history_update)?,
+        }))
+    }
     pub fn updated_events(&mut self, first_events: Vec<task::ProgramEvent>) -> Result<DapMessage, serde_json::Error> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {

@@ -603,6 +603,7 @@ type
   ValueComponent* = ref object of Component
     expanded*:           JsAssoc[cstring, bool]
     # history*:          JsAssoc[cstring, seq[HistoryResult]]
+    state*:              StateComponent
     showInline*:         JsAssoc[cstring, bool]
     baseValue*:          Value
     baseExpression*:     cstring
@@ -653,6 +654,7 @@ type
   StateComponent* = ref object of Component
     isState*:       bool
     watchExpressions*: seq[cstring]
+    valueHistory*:  JsAssoc[cstring, ValueHistory]
     service*:       DebuggerService
     i*:             int
     inState*:       bool
