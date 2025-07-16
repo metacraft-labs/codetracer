@@ -23,6 +23,7 @@ type
     CtEventJump,
     CtLoadHistory,
     CtUpdatedHistory,
+    CtHistoryJump,
     
 when defined(js):
   import std / jsffi

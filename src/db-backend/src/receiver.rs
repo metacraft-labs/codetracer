@@ -192,7 +192,7 @@ impl Receiver {
             TaskKind::Enable => handler.toggle_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::RunTracepoints => handler.run_tracepoints(self.core.read_arg(&task.id)?, task),
             TaskKind::TraceJump => handler.trace_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::HistoryJump => handler.history_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::HistoryJump => handler.history_jump(self.core.read_arg(&task.id)?, task),
             // TaskKind::LoadHistory => handler.load_history(self.core.read_arg(&task.id)?, task),
             // TaskKind::UpdateTable => handler.update_table(self.core.read_arg(&task.id)?, task),
             TaskKind::TracepointDelete => handler.tracepoint_delete(self.core.read_arg(&task.id)?, task),

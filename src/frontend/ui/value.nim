@@ -521,8 +521,11 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
 
   return contextMenu 
 
+proc historyJump(self: ValueComponent, location: types.Location) =
+  self.api.emit(CtHistoryJump, location)
+
 proc historyClick(self: ValueComponent, location: types.Location) =
-  self.service.historyJump(location)
+  self.historyJump(location)
 
 proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event) =
   ev.stopPropagation()
