@@ -30,6 +30,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
 
   dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
 
+  viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStoppedEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadCalltraceSection, proc(kind: CtEventKind, value: CalltraceLoadArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
