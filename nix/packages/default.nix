@@ -4,7 +4,6 @@
     {
       system,
       pkgs,
-      unstablePkgs,
       ...
     }:
     let
@@ -27,7 +26,8 @@
         cargo-stylus =
           inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus;
 
-        curl = pkgs.curl;
+        # curl = pkgs.curl;
+        inherit (pkgs) curl;
 
         inherit (pkgs)
           sqlite
@@ -528,13 +528,15 @@
 
           inherit src;
 
-          nativeBuildInputs = [
+          nativeBuildInputs = with pkgs; [
             upstream-nim-codetracer
             staticDeps
             runtimeDeps
             node-modules-derivation
+            makeWrapper
           ];
           buildInputs = [
+            cargo-stylus
             pkgs.rustc
             pkgs.sqlite
             pkgs.libzip
@@ -547,11 +549,6 @@
             ls -al ${staticDeps.outPath}/bin
             echo ${runtimeDeps.outPath}/bin
             ls -al ${runtimeDeps.outPath}/bin
-
-            # ${upstream-nim-codetracer.out}/bin/nim \
-            #   -d:release \
-            #   --nimcache:nimcache_ct \
-            #   --out:ct c ./src/ct/ct.nim
 
             ${upstream-nim-codetracer.out}/bin/nim \
               -d:debug -d:asyncBackend=asyncdispatch \
@@ -650,6 +647,12 @@
           '';
 
           meta.mainProgram = "ct";
+
+          postFixup = ''
+            wrapProgram $out/bin/ct \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ cargo-stylus ]}
+          '';
+
         };
 
         codetracer-dependency-paths = pkgs.writeTextFile {
