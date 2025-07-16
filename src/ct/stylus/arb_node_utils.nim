@@ -4,8 +4,8 @@ import ../../common/[types]
 const DEFAULT_NODE_URL* = "http://localhost:8547"
 
 # TODO: get name from config? Maybe use SQLite?
-const CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
-const EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
+let CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
+let EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode {.raises: [IOError, ValueError].} =
   # TODO: add random/uniqie stuff to id
@@ -100,7 +100,7 @@ proc getTransactions(maxAge: int): seq[JsonNode] {.raises: [IOError, ValueError]
     let txs = transactionsBlock["transactions"].getElems()
     for tx in txs:
       tx["timestamp"] = %timestampDecimal
-      
+
     collected.add(txs)
     blockNum -= 1
 
