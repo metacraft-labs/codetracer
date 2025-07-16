@@ -38,3 +38,6 @@ type
     supportsStartDebuggingRequest*: bool
 
     supportsANSIStyling*: bool
+
+  DapStepArguments* = ref object
+    threadId*: int
