@@ -6,6 +6,8 @@ import
   .. / communication, 
   .. / .. / common / ct_event
 
+from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
+
 # let MIN_NAME_WIDTH: float = 15 #%
 # let MAX_NAME_WIDTH: float = 85 #%
 # let TOTAL_VALUE_COMPONENT_WIDTH: float = 95 #%
@@ -14,6 +16,7 @@ proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - se
 # proc watchView(self: StateComponent): VNode
 # proc headerView(self: StateComponent): VNode
 proc excerpt(self: StateComponent): VNode
+proc redraw*(self: StateComponent)
 
 
 method restart*(self: StateComponent) =
@@ -28,7 +31,6 @@ proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
 
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
   clog fmt"registerLocals"
-  console.log response
   self.locals = response.locals
   for localVariable in response.locals:
     let expression = localVariable.expression
@@ -39,21 +41,33 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
       for chart in value.charts:
         chart.replaceAllValues(expression, localVariable.value.elements)
   self.completeMoveIndex += 1
+  self.redraw()
 
-  clog "after registering locals"
-  self.redrawForExtension()
 
-  if not self.kxi.isNil:
-    self.kxi.redraw()
+
+proc redrawDynamically*(self: StateComponent) =
   let vdom = self.render()
   let newDom = vnodeToDom(vdom, KaraxInstance())
 
-  console.log newDom
-  var node = jq(".value-components-container").toJs.to(Node)
-  node.parentNode.replaceChild(newDom, node)
+  # console.log "new vdom, dom ", vdom, newDom
 
+  let idSelector = cstring(fmt"#stateComponent-{self.id}")
+  var node = cast[Node](kdom.document.querySelector(idSelector)).parentNode # value-components-container"))
+  if node.childNodes.len > 0:
+    node.removeChild(node.childNodes[0])
+  # console.log("old ", node)
+  node.appendChild(newDom)
+  # console.log("new ", node)
 
-  
+proc redraw*(self: StateComponent) =
+  if self.inExtension:
+    self.redrawForExtension()
+  else:
+    self.redrawDynamically()
+  # should be working.. but for now workaround with redrawDynamically
+  # if not self.kxi.isNil:
+    # self.kxi.redraw()
+
 
 method onMove(self: StateComponent) {.async.} =
   # TODO: fixing rr ticks
@@ -66,22 +80,13 @@ method onMove(self: StateComponent) {.async.} =
     minCountLimit: minCountLimit,
   )
   self.api.emit(CtLoadLocals, arguments)
-  if not self.kxi.isNil:
-    self.kxi.redraw()
-
-  
-  let vdom = self.render()
-  let newDom = vnodeToDom(vdom, KaraxInstance())
-
-  console.log newDom
-  var element = jq("#state-component-0").toJs.to(Node)
-  element.parentNode.replaceChild(newDom, element)
+  self.redraw()
 
   
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
-  api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
-    discard self.onMove())
+  # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
+    # discard self.onMove())
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onMove())
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
@@ -139,8 +144,8 @@ method render*(self: StateComponent): VNode =
         initialPosition = currentPosition
 
     result = buildHtml(
-      tdiv(id = "values",
-        class = componentContainerClass(klass),
+      tdiv(id = cstring(fmt"stateComponent-{self.id}"),
+        class = componentContainerClass(klass) & cstring" " & cstring"state-component",
         onclick = proc(ev: Event, tg: VNode) =
           self.chevronClicked = false
           ev.preventDefault(),
