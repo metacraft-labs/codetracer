@@ -4,18 +4,25 @@ The CodeTracer GUI is the primary tool for replaying and analyzing trace files. 
 
 You can launch the GUI in a few ways:
 *   Run `ct` in your terminal to open the Startup Screen.
-The Startup Screen is your entry point into the CodeTracer GUI. You can open it by running `ct` in your terminal.
+*   Run `ct replay` returns a list of recorded traces. Enter the number of a trace to open it in CodeTracer's UI.
+*   Run `ct run <application>` to record a new trace and immediately open it for replay.
+
+Note: For some programming languages it is required to provide the path to a source file that contains the entry point, for other languages the path to the project folder is sufficient.
+Example:
+
+```
+ct run examples/ruby_space_ship/main.rb
+ct run examples/noir_space_ship
+```
+
+## Startup Screen
+
+If you start CodeTracer by just running the `ct` command you will see the startup screen.
 
 From here, you can:
 *   **View and open recent traces:** The main list shows traces you have recently recorded or opened. You can click on any trace to open it in the Replay Interface.
 *   **Open a local trace:** Click the "Open local trace" button to open a trace file from your computer. This is useful for opening traces that are not in your recent list or for opening traces shared by others.
 *   **Record a new trace:** The "Record new trace" button allows you to start a new recording session. This is currently supported for Noir projects. You will be prompted to select the root folder of your Noir project, and CodeTracer will handle the rest. Once the recording is complete, the new trace will open automatically.
-*   Run `ct replay` returns a list of recorded traces. Enter the number of a trace to open it in CodeTracer's UI
-*   Run `ct run <application>` to record a new trace and immediately open it for replay.
-Note: For some programming languages it is required to provide the path to a source file that contains the entry point, for other languages the path to the project folder is sufficient.
-Example:
-ct run examples/ruby_space_ship/main.rb
-ct run examples/noir_space_ship
 
 ## Replay Interface
 
@@ -33,7 +40,7 @@ Here is a brief overview of the main components:
 *   **State Panel:** Displays the state of all local variables at the currently selected point in the execution. As you navigate through the code, this panel updates to reflect the variables that are accessible from the current line of code as well as their exact values.
 The state panel also gives quick access to a variable's value history.
 *   **Scratchpad Panel:** Allows you to "set aside" a specific variable or object at its current state and conveniently browse through object properties or big values.
-*   **Event Log:** A log of all significant events that occurred during the execution like std strams, read events, write events, network events, trace events, file operations, errors and evm events.
+*   **Event Log:** A log of all significant events that occurred during the execution like stdout and strerr streams, read events, write events, network events, trace events, file operations, errors and evm events.
 *   **Terminal Output Panel:** Shows the complete terminal output (stdout/stderr) of the traced program. Clicking on any part of the terminal output will result in a jump to the exact moment when the character has been printed.
 
 All the components are designed to let you move freely through your program's execution, making it easy to pinpoint the cause of bugs or understand complex behavior.
