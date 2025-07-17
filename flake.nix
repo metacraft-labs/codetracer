@@ -33,7 +33,7 @@
     };
 
     wazero = {
-      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=feat-mvp-trace";
+      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=wasm-tracing";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
       flake = true;
     };
