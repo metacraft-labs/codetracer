@@ -11,7 +11,7 @@ else
   echo nim is missing! installing...
 fi
 
-: ${DEPS_DIR:=$PWD/deps}
+: "${DEPS_DIR:=$PWD/deps}"
 cd "$DEPS_DIR"
 
 # based on https://forum.nim-lang.org/t/10373#69081: from Araq:

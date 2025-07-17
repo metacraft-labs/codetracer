@@ -16,11 +16,11 @@ else
   echo rust is missing! installing...
 fi
 
-: ${DEPS_DIR:=$PWD/deps}
+: "${DEPS_DIR:=$PWD/deps}"
 
 export RUSTUP_INIT_SKIP_PATH_CHECK=yes
 
 curl --proto '=https' --tlsv1.2 -sf https://sh.rustup.rs | sh -s -- --no-modify-path -y --default-toolchain nightly
 
-source $CARGO_HOME/env # adds rustc to our PATH
+source "$CARGO_HOME"/env # adds rustc to our PATH
 

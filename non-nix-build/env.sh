@@ -3,7 +3,7 @@
 set -e
 
 NON_NIX_BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-cd $NON_NIX_BUILD_DIR
+cd "$NON_NIX_BUILD_DIR"
 
 export ROOT_DIR=$NON_NIX_BUILD_DIR/..
 
@@ -29,8 +29,8 @@ fi
 export platform
 export os
 
-: ${BIN_DIR:=$NON_NIX_BUILD_DIR/bin}
-: ${DEPS_DIR:=$NON_NIX_BUILD_DIR/deps}
+: "${BIN_DIR:="$NON_NIX_BUILD_DIR"/bin}"
+: "${DEPS_DIR:="$NON_NIX_BUILD_DIR"/deps}"
 
 echo "BIN_DIR" "${BIN_DIR}"
 echo "DEPS_DIR" "${DEPS_DIR}"
@@ -45,8 +45,8 @@ export DIST_DIR
 export RUSTUP_HOME=$DEPS_DIR/rustup
 export CARGO_HOME=$DEPS_DIR/cargo
 
-if [ ! -f $ROOT_DIR/ct_paths.json ]; then
-  echo "{\"PYTHONPATH\": \"\",\"LD_LIBRARY_PATH\":\"\"}" > $ROOT_DIR/ct_paths.json
+if [ ! -f "$ROOT_DIR"/ct_paths.json ]; then
+  echo "{\"PYTHONPATH\": \"\",\"LD_LIBRARY_PATH\":\"\"}" > "$ROOT_DIR"/ct_paths.json
 fi
 
 export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build-debug/bin:$PATH
@@ -66,7 +66,7 @@ else
   DEFAULT_DIST_DIR=$NON_NIX_BUILD_DIR/dist
 fi
 
-: ${DIST_DIR:=$DEFAULT_DIST_DIR}
+: "${DIST_DIR:=$DEFAULT_DIST_DIR}"
 
 pushd "$ROOT_DIR"
   [ ! -d node_modules ] && ln -s node-packages/node_modules ./

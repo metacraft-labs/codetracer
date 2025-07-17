@@ -64,6 +64,7 @@ type
       ctPaths: "",
       debugInfoToolPath: ""
     ).}:                                                  RRBackendConfig
+    skipInstall:                                          bool
 
   Config* = ref ConfigObject
 
