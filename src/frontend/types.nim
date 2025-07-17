@@ -1466,7 +1466,7 @@ type
 
   Config* = ref object
     # The config object is the schema for config yaml files
-    # keep it in sync with config_c.nim definition
+    # keep it in sync with common/config.nim definition
     theme*:                   cstring
     version*:                 cstring
     flow*:                    FlowConfigObjWrapper
@@ -1485,7 +1485,8 @@ type
     shortcutMap*:             ShortcutMap
     defaultBuild*:            cstring
     showMinimap*:             bool
-    traceSharing*:         TraceSharingConfigObj
+    traceSharing*:            TraceSharingConfigObj
+    skipInstall*:             bool
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint

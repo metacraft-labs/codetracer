@@ -3,7 +3,7 @@
 set -e
 
 NON_NIX_BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-cd $NON_NIX_BUILD_DIR
+cd "$NON_NIX_BUILD_DIR"
 
 source env.sh
 

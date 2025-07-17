@@ -28,7 +28,7 @@ nim -d:release \
     --boundChecks:on --stacktrace:on --linetrace:on \
     -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
     -d:chronicles_timestamps=UnixTime \
-    -d:ctTest -d:ssl -d:testing --hint[XDeclaredButNotUsed]:off \
+    -d:ctTest -d:ssl -d:testing "--hint[XDeclaredButNotUsed]:off" \
     -d:libcPath=libc \
     -d:builtWithNix \
     -d:ctEntrypoint \
@@ -54,7 +54,7 @@ nim -d:release \
     --boundChecks:on --stacktrace:on --linetrace:on \
     -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
     -d:chronicles_timestamps=UnixTime \
-    -d:ctTest -d:ssl -d:testing --hint[XDeclaredButNotUsed]:off \
+    -d:ctTest -d:ssl -d:testing "--hint[XDeclaredButNotUsed]:off" \
     -d:libcPath=libc \
     -d:builtWithNix \
     -d:ctEntrypoint \

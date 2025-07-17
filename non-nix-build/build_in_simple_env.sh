@@ -12,8 +12,8 @@ export CODETRACER_BUILD_OS="$2"
 rm -rf "$DIST_DIR"
 rm -rf "$ROOT_DIR/non-nix-build/CodeTracer.app"
 
-mkdir -p $DIST_DIR/bin
-mkdir -p $DIST_DIR/src
+mkdir -p "$DIST_DIR/bin"
+mkdir -p "$DIST_DIR/src"
 
 # setup node deps
 bash setup_node_deps.sh
@@ -21,7 +21,7 @@ bash setup_node_deps.sh
 # build our css files
 bash build_css.sh
 
-cd $ROOT_DIR
+cd "$ROOT_DIR"
 # build/setup nim-based files
 bash ./non-nix-build/build_with_nim.sh
 
@@ -37,21 +37,23 @@ bash build_db_backend.sh
 #   src/build-debug!
 
 # setup/copy/link other files
-cp $ROOT_DIR/resources/electron $DIST_DIR/bin/
+cp "$ROOT_DIR"/resources/electron "$DIST_DIR"/bin/
 
 # The built-in macOS ruby binary is too old and has to be hacked around
-cp $(brew --prefix ruby)/bin/ruby $DIST_DIR/bin/ruby
+cp "$(brew --prefix ruby)/bin/ruby" "$DIST_DIR/bin/ruby"
 
-cp $(which ctags) $DIST_DIR/bin/ctags
-cp $ROOT_DIR/libs/codetracer-ruby-recorder/src/*.rb $DIST_DIR/src/
-cp $ROOT_DIR/src/helpers.js $DIST_DIR/src/helpers.js
-cp $ROOT_DIR/src/helpers.js $DIST_DIR/helpers.js
-cp $ROOT_DIR/src/frontend/*.html $DIST_DIR/src/
-cp $ROOT_DIR/src/frontend/*.html $DIST_DIR/
-rm -f $DIST_DIR/config
-rm -f $DIST_DIR/public
-cp -r $ROOT_DIR/src/config $DIST_DIR/config
-cp -r $ROOT_DIR/src/public $DIST_DIR/public
-cp $BIN_DIR/nargo $DIST_DIR/bin/
-cp $BIN_DIR/wazero $DIST_DIR/bin/
+cp "$(which ctags)" "$DIST_DIR"/bin/ctags
+cp "$ROOT_DIR"/libs/codetracer-ruby-recorder/src/*.rb "$DIST_DIR"/src/
+cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/src/helpers.js
+cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/helpers.js
+cp "$ROOT_DIR"/src/frontend/*.html "$DIST_DIR"/src/
+cp "$ROOT_DIR"/src/frontend/*.html "$DIST_DIR"/
+rm -f "$DIST_DIR"/config
+rm -f "$DIST_DIR"/public
+cp -r "$ROOT_DIR"/src/config "$DIST_DIR"/config
+cp -r "$ROOT_DIR"/src/public "$DIST_DIR"/public
+cp "$BIN_DIR"/nargo "$DIST_DIR"/bin/
+cp "$BIN_DIR"/wazero "$DIST_DIR"/bin/
 
+# Enable the installation prompt. Extra argument to be compatible with FreeBSD coreutils
+sed -i "" "s/skipInstall.*/skipInstall: false/g" "$DIST_DIR/config/default_config.yaml"

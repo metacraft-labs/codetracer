@@ -54,7 +54,7 @@ theme: "default_dark"
 # project open
 default: ""
 
-# what command to use by default for build and update while editing
+# what commands to use by default for build and update while editing
 defaultBuild: ""
 
 # === editor/shortcut settings
@@ -116,6 +116,8 @@ rrBackend:
   path: ""
   ctPaths: ""
   debugInfoToolPath: ""
+
+skipInstall: true
 
 # TODO: Use this somehow
 version: "0.1alpha"

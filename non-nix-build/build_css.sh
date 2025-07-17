@@ -13,10 +13,10 @@ pushd "$ROOT_DIR"
 
 mkdir -p "$DIST_DIR/frontend/styles/"
 stylus="$ROOT_DIR/node_modules/.bin/stylus"
-node $stylus -o "$DIST_DIR/frontend/styles/" src/frontend/styles/default_white_theme.styl
-node $stylus -o "$DIST_DIR/frontend/styles/" src/frontend/styles/default_dark_theme.styl
-node $stylus -o "$DIST_DIR/frontend/styles/" src/frontend/styles/loader.styl
-node $stylus -o "$DIST_DIR/frontend/styles/" src/frontend/styles/subwindow.styl
+node "$stylus" -o "$DIST_DIR/frontend/styles/" src/frontend/styles/default_white_theme.styl
+node "$stylus" -o "$DIST_DIR/frontend/styles/" src/frontend/styles/default_dark_theme.styl
+node "$stylus" -o "$DIST_DIR/frontend/styles/" src/frontend/styles/loader.styl
+node "$stylus" -o "$DIST_DIR/frontend/styles/" src/frontend/styles/subwindow.styl
 
 popd
 

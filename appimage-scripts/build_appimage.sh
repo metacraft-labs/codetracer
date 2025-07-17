@@ -157,6 +157,9 @@ rm -rf "${APP_DIR}/config"
 rm -rf "${APP_DIR}/public"
 cp -Lr "${ROOT_PATH}/src/config" "${APP_DIR}/config"
 
+# Enable the installation prompt
+sed -i "s/skipInstall.*/skipInstall: false/g" "${APP_DIR}/config/default_config.yaml"
+
 cp -Lr "${ROOT_PATH}/src/public" "${APP_DIR}/public"
 chmod -R +wr "${APP_DIR}/public"
 

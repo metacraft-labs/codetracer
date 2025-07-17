@@ -626,7 +626,7 @@ proc onTraceLoaded(
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
-  if not data.startOptions.isInstalled and not response.dontAskAgain:
+  if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
     installMessage()
 
 

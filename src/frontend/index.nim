@@ -30,7 +30,7 @@ var ctStartCoreProcess: NodeSubProcess = nil
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc loadExistingRecord(traceId: int) {.async.}
 proc prepareForLoadingTrace(traceId: int, pid: int) {.async.}
-proc isCtInstalled: bool
+proc isCtInstalled(config: Config): bool
 
 
 proc onClose(e: js) =
@@ -1342,7 +1342,8 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
   # data.layout = layout
   # data.helpers = helpers
 
-  data.startOptions.isInstalled = isCtInstalled()
+  data.startOptions.isInstalled = isCtInstalled(data.config)
+  data.config.skipInstall = data.startOptions.isInstalled
 
   if data.startOptions.shellUi:
     await wait(1_000)
@@ -1452,29 +1453,22 @@ when not defined(ctRepl) and not defined(server):
 
 var process {.importc.}: js
 
-proc isCtInstalled: bool =
-  if process.platform == "darwin".toJs:
-    let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct")
-    fs.existsSync(ctLaunchersPath)
+proc isCtInstalled(config: Config): bool =
+  if not config.skipInstall:
+    if process.platform == "darwin".toJs:
+      let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct")
+      return fs.existsSync(ctLaunchersPath)
+    else:
+      let dataHome = getEnv("XDG_DATA_HOME", getEnv("HOME") / ".local/share")
+      let dataDirs = getEnv("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(':')
+
+      # if we find the desktop file then it's installed by the package manager automatically
+      for d in @[dataHome] & dataDirs:
+        if fs.existsSync(d / "applications/codetracer.desktop"):
+          return true
+      return false
   else:
-    let ctInstalledPath = cstring($paths.home / ".local" / "bin" / "ct")
-    let desktopFilePath = cstring($paths.home / ".local" / "share" / "applications" / "codetracer.desktop")
-
-    # var isDesktopOk : bool = false;
-    # if fs.existsSync(desktopFilePath):
-    #   echo desktopFilePath
-    #   let execField = extractExecCommandJs($desktopFilePath)
-    #   echo "Exec field: ", execField
-    #   if fs.existsSync(execField):
-    #     isDesktopOk = true;
-
-    fs.existsSync(ctInstalledPath) and fs.existsSync(desktopFilePath)
-
-
-proc hasUserConfigSetup: bool =
-  let userConfigFilePath = userConfigDir / configPath
-  fs.existsSync(userConfigFilePath)
-
+    return true
 
 proc waitForResponseFromInstall: Future[InstallResponse] {.async.} =
   return newPromise() do (resolve: proc(response: InstallResponse)):
@@ -1485,12 +1479,17 @@ proc ready {.async.} =
   # we configure the listeners
   configureIpcMain()
 
-  if not hasUserConfigSetup() and not isCtInstalled():
+  # we load the config file
+  var config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
+
+  config.skipInstall = isCtInstalled(config)
+  if not config.skipInstall:
     installDialogWindow = createInstallSubwindow()
     discard await waitForResponseFromInstall()
 
   debugPrint "index: creating window"
   mainWindow = createMainWindow()
+
   when not defined(server):
     mainWindow.setMenuBarVisibility(false)
     mainWindow.setMenu(jsNull)
@@ -1527,9 +1526,6 @@ proc ready {.async.} =
       let serialized = JSON.stringify(response, replacer, 2.toJs)
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {serialized}"
       ipc.socket.emit(id, serialized)
-
-  # we load the config file
-  let config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
 
   # we load the layout
   # let layout = if data.startOptions.inTest:
