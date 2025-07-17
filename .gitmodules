@@ -71,3 +71,7 @@
 [submodule "libs/zip"]
 	path = libs/zip
 	url = https://github.com/nim-lang/zip.git
+[submodule "libs/nim-debug-adapter"]
+	path = libs/nim-debug-adapter
+	url = https://github.com/jasagiri/nim-debug-adapter.git
+	branch = main
