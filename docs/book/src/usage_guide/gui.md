@@ -34,7 +34,7 @@ Watch this video for a demonstration of the key features:
 
 Here is a brief overview of the main components:
 
-*   **Source Code Panel:** Displays your source code. The currently executing line is highlighted. You can click on any line to see the program's state at that point in time. You can also right-click to add tracepoints.
+*   **Source Code Panel:** Displays your source code, highlighting the currently executing line. Thanks to a feature called "Omniscience", taken code branches are also highlighted while non-executed code is grayed out. This allows you to see the future and the past: you can click on any line to see the program's state and the values of all variables at that point in time. You can also right-click to add tracepoints.
 *   **Filesystem Panel:** Provides a tree-like view of the project's source code, allowing you to browse and open files.
 *   **Calltrace Panel:** Shows the entire execution trace as a hierarchical list of function calls. You can navigate through the program's execution by jumping to any point in the call trace.
 *   **State Panel:** Displays the state of all local variables at the currently selected point in the execution. As you navigate through the code, this panel updates to reflect the variables that are accessible from the current line of code as well as their exact values.
