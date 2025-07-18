@@ -1130,7 +1130,7 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   self.flow.valueMode = BeforeValueMode
 
   let taskId = genTaskId(LoadFlow)
-  discard self.flow.service.loadFlow(taskId)
+  self.api.emit(CtLoadFlow, self.location)
   cdebug "start load-flow", taskId
 
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =

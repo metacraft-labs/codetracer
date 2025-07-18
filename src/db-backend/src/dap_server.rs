@@ -169,6 +169,7 @@ fn handle_request<W: Write>(
         "ct/tracepoint-toggle" => handler.tracepoint_toggle(req.clone(), req.load_args::<TracepointId>()?)?,
         "ct/tracepoint-delete" => handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?)?,
         "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
+        "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<Location>()?)?,
         "ct/load-calltrace-section" => {
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }
