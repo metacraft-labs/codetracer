@@ -56,6 +56,19 @@ proc record*(lang: string,
     pargs = concat(pargs, args)
 
   # echo "detected lang ", detectedLang
+  # TODO: eventually maybe simplify how this works
+  # currently recording from startup screen form(index.nim)
+  # calls `ct record` which calls another process and we need to
+  # map correctly our `ct record` pid to the trace id
+  # that's why we pass it as an env var to the process that
+  # actually records in sqlite (except if in tup build
+  # we already pass it from ct_wrapper)
+  #
+  # eventually Dimo/Petar want to simplify this to maybe
+  # directly read the traceId from the record process output 
+  if getEnv("CODETRACER_WRAPPER_PID", "").len == 0:
+    putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
+
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
     return recordInternal(dbBackendRecordExe, pargs, "")
   else:

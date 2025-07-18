@@ -238,6 +238,7 @@ proc record(
       quit(1)
   except CatchableError:
     exitCode = -1
+  # echo "record trace from db_backend_record with pid ", rrPid
   result = trace_index.recordTrace(
     traceID,
     program = executable,
