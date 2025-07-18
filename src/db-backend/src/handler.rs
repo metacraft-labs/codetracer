@@ -432,26 +432,22 @@ impl Handler {
             self.calltrace.depth_offset,
         );
         // self.return_task((task, VOID_RESULT.to_string()))?;
-        info!("-------- This is the calltrace");
         let raw_event = self.dap_client.updated_calltrace_event(&update)?;
         self.send_dap(&raw_event)?;
         Ok(())
     }
 
-    pub fn load_flow(&mut self, location: Location, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_flow(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(location.rr_ticks.0);
         let call_key = self.db.steps[step_id].call_key;
         let function_id = self.db.calls[call_key].function_id;
         let function_first = self.db.functions[function_id].line;
         let flow_update = self.flow_preloader.load(location, function_first, &self.db);
-        self.return_task((task, VOID_RESULT.to_string()))?;
-        self.send_event((
-            EventKind::UpdatedFlow,
-            gen_event_id(EventKind::UpdatedFlow),
-            self.serialize(&flow_update)?,
-            false,
-        ))?;
+        let raw_event = self.dap_client.updated_flow_event(flow_update)?;
+
+        self.send_dap(&raw_event)?;
         warn!("flow not finished");
+
         Ok(())
     }
 
