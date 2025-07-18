@@ -33,6 +33,8 @@ type
     CtTracepointDelete,
     CtTraceJump,
     CtUpdatedTrace,
+    CtLoadFlow,
+    CtUpdatedFlow,
     
 when defined(js):
   import std / jsffi
