@@ -42,7 +42,8 @@ type
     id*: int
     locals*: seq[seq[(langstring, Value)]]
 
-  TracepointId* = int
+  TracepointId* = object
+    id*: int
 
   TraceResult* = object
     i*: int

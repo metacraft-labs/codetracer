@@ -19,6 +19,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
     dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
     dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
+    dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
 
     viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
@@ -35,6 +36,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     viewsApi.subscribe(CtSourceLineJump, proc(kind: CtEventKind, value: SourceLineJumpTarget, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtSourceCallJump, proc(kind: CtEventKind, value: SourceCallJumpTarget, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtLocalStepJump, proc(kind: CtEventKind, value: LocalStepJump, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtTracepointToggle, proc(kind: CtEventKind, value: TracepointId, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtTracepointDelete, proc(kind: CtEventKind, value: TracepointId, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtTraceJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
 
     # maybe somehow a more proxy-like/macro way
     # some kind of loop or more raw subscribe, that directly sends for many cases

@@ -29,6 +29,10 @@ type
     CtSourceLineJump,
     CtSourceCallJump,
     CtLocalStepJump,
+    CtTracepointToggle,
+    CtTracepointDelete,
+    CtTraceJump,
+    CtUpdatedTrace,
     
 when defined(js):
   import std / jsffi
