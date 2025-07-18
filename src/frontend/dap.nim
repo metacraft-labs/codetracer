@@ -177,6 +177,9 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtHistoryJump: "ct/history-jump",
   CtSearchCalltrace: "ct/search-calltrace",
   CtCalltraceSearchResponse: "ct/calltrace-search-res",
+  CtSourceLineJump: "ct/source-line-jump",
+  CtSourceCallJump: "ct/source-call-jump",
+  CtLocalStepJump: "ct/local-step-jump",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}

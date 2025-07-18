@@ -6,7 +6,7 @@ use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
     gen_task_id, Action, CalltraceLoadArgs, CollapseCallsArgs, SourceLocation, StepArg, Task, TaskId, TaskKind,
-    UpdateTableArgs, Location, ProgramEvent, LoadHistoryArg, CallSearchArg,
+    UpdateTableArgs, Location, ProgramEvent, LoadHistoryArg, CallSearchArg, SourceCallJumpTarget, LocalStepJump,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
@@ -162,6 +162,9 @@ fn handle_request<W: Write>(
         "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?)?,
         "ct/history-jump" => handler.history_jump(req.clone(), req.load_args::<Location>()?)?,
         "ct/search-calltrace" => handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?)?,
+        "ct/source-line-jump" => handler.source_line_jump(req.clone(), req.load_args::<SourceLocation>()?)?,
+        "ct/source-call-jump" => handler.source_call_jump(req.clone(), req.load_args::<SourceCallJumpTarget>()?)?,
+        "ct/local-step-jump" => handler.local_step_jump(req.clone(), req.load_args::<LocalStepJump>()?)?,
         "ct/load-calltrace-section" => {
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }
