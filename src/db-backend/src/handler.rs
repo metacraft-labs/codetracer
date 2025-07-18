@@ -818,11 +818,10 @@ impl Handler {
         None
     }
 
-    pub fn source_line_jump(&mut self, source_location: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn source_line_jump(&mut self, _req: dap::Request, source_location: SourceLocation) -> Result<(), Box<dyn Error>> {
         if let Some(step_id) = self.get_closest_step_id(&source_location) {
             self.step_id_jump(step_id);
             self.complete_move(false)?;
-            self.return_void(task)?;
             Ok(())
         } else {
             let err: String = format!("unknown location: {}", &source_location);
@@ -861,7 +860,7 @@ impl Handler {
         None
     }
 
-    pub fn source_call_jump(&mut self, call_target: SourceCallJumpTarget, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn source_call_jump(&mut self, _req: dap::Request, call_target: SourceCallJumpTarget) -> Result<(), Box<dyn Error>> {
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
             path: call_target.path.clone(),
@@ -872,7 +871,6 @@ impl Handler {
         if let Some(call_step_id) = self.get_call_target(&call_target) {
             self.step_id_jump(call_step_id);
             self.complete_move(false)?;
-            self.return_void(task)?;
             Ok(())
         } else {
             let err: String = format!("unknown call location: {}", &call_target);
@@ -882,7 +880,6 @@ impl Handler {
                 "Line reached but couldn't find the function!",
                 false,
             )?;
-            self.return_void(task)?;
             Err(err.into())
         }
     }
@@ -1202,10 +1199,9 @@ impl Handler {
         Ok(())
     }
 
-    pub fn local_step_jump(&mut self, arg: LocalStepJump, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn local_step_jump(&mut self, _req: dap::Request, arg: LocalStepJump) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(arg.rr_ticks));
         self.complete_move(false)?;
-        self.return_void(task)?;
         Ok(())
     }
 
@@ -1378,12 +1374,13 @@ impl Handler {
         is_operation_status: bool,
     ) -> Result<(), Box<dyn Error>> {
         let notification = Notification::new(kind, msg, is_operation_status);
-        self.send_event((
-            EventKind::NewNotification,
-            gen_event_id(EventKind::NewNotification),
-            self.serialize(&notification)?,
-            false,
-        ))?;
+        // TODO: Fix using dap protocol
+        // self.send_event((
+        //     EventKind::NewNotification,
+        //     gen_event_id(EventKind::NewNotification),
+        //     self.serialize(&notification)?,
+        //     false,
+        // ))?;
         Ok(())
     }
 
