@@ -927,8 +927,7 @@ proc onCloseWindow(sender: js, response: JsObject) {.async.} =
 
 when not defined(server):
   app.on("window-all-closed") do ():
-    if electronProcess.platform != "darwin":
-      app.quit(0)
+    app.quit(0)
 
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):
@@ -1317,12 +1316,6 @@ proc configureIpcMain =
 
     # update filesystem component
     "load-path-content"
-
-when not defined(server):
-  app.on("window-all-closed") do ():
-    if electronProcess.platform != "darwin":
-      app.quit(0)
-
 
 const NO_LIMIT = (-1)
 
