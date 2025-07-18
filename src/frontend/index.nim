@@ -538,10 +538,6 @@ proc onDisable(sender: js, response: SourceLocation) {.async.} =
   # var calls = await debugger.loadCallstackDirectChildrenBefore(response.codeID, response.before)
   # mainWindow.webContents.send "CODETRACER::load-callstack-direct-children-before-received", js{argId: j($response.codeID & " " & $response.before), value: calls}
 
-proc onSearchCalltrace(sender: js, response: cstring) {.async.} =
-  var calls = await debugger.calltraceSearch(response)
-  mainWindow.webContents.send "CODETRACER::search-calltrace-received", js{argId: response, value: calls}
-
 # TODO
 # proc onUpdatedCalltraceArgs(sender: js, response: js) {.async.} =
 #   for element in response.args:

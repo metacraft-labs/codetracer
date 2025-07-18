@@ -60,7 +60,8 @@ type
     scrollPosition*: int
     maxDepth*: int
 
-  CallSearchArg* = langstring
+  CallSearchArg* = object
+    value*: langstring
 
   CalltraceMode* {.pure.} = enum NoInstrumentation, CallKeyOnly, RawRecordNoValues, FullRecord
 

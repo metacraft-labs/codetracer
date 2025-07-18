@@ -2,6 +2,7 @@ import
   ../ui_helpers, ui_imports,
   ../renderer, value, scratchpad
 
+import ../communication, ../../common/ct_event
 import strutils, os
 
 # thank, God!
@@ -1075,6 +1076,31 @@ method onCtrlNumber*(self: FlowComponent, arg: int) {.async.} =
 
 const DELAY: int64 = 50
 
+proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: int, iteration: int, rrTicks: int = -1, reverse: bool = false) =
+  # (line, rr ticks) => all steps that correspond to those rr ticks and line
+  # if two steps same lines rr ticks it means jump without changing rr ticks..
+  # hard to believe
+  let firstLoopLine = if path.len > 0 and not self.editorUI.isNil and not self.editorUI.flow.isNil:
+      let flow = self.flow
+      let loopId = flow.steps[stepCount].loop
+      flow.loops[loopId].first
+    else:
+      # e.g. step list jump for now
+      -1
+
+  self.api.emit(
+    CtLocalStepJump,
+    LocalStepJump(
+      path: path,
+      line: line,
+      stepCount: stepCount,
+      iteration: iteration,
+      firstLoopLine: firstLoopLine,
+      rrTicks: rrTicks,
+      reverse: reverse
+    )
+  )
+
 proc afterJump(self: FlowComponent, stepCount: int) =
   let step = self.flow.steps[stepCount]
   let location = self.data.services.debugger.location
@@ -1086,7 +1112,7 @@ proc afterJump(self: FlowComponent, stepCount: int) =
 
   if lastTimePlusDelay <= currentTime:
     self.redrawFlow()
-    self.data.services.debugger.jumpToLocalStep(self.tab.name, step.position, stepCount, step.iteration, step.rrTicks, reverse)
+    self.jumpToLocalStep(self.tab.name, step.position, stepCount, step.iteration, step.rrTicks, reverse)
 
 
 proc jumpToLocalStep*(self: FlowComponent, stepCount: int) =

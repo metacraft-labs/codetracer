@@ -32,6 +32,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     viewsApi.subscribe(CtLoadHistory, proc(kind: CtEventKind, value: LoadHistoryArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtHistoryJump, proc(kind: CtEventKind, value: Location, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtSearchCalltrace, proc(kind: CtEventKind, value: CallSearchArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtSourceLineJump, proc(kind: CtEventKind, value: SourceLineJumpTarget, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtSourceCallJump, proc(kind: CtEventKind, value: SourceCallJumpTarget, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtLocalStepJump, proc(kind: CtEventKind, value: LocalStepJump, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
 
     # maybe somehow a more proxy-like/macro way
     # some kind of loop or more raw subscribe, that directly sends for many cases

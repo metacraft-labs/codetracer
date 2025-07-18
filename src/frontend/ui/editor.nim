@@ -1,6 +1,7 @@
 import ../ui_helpers, ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom, ../renderer
   # ../public/third_party/monaco-themes/themes/customThemes/nim/customThemes
 import std/[ cstrutils, jsre ]
+import ../communication, ../../common/ct_event
 
 from dom import createElement
 
@@ -28,6 +29,8 @@ proc removeClasses(index: int, class: cstring, name: string)
 proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
+# proc adjustEditorWidth(self: EditorViewComponent)
+proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
@@ -130,7 +133,7 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
       let targetToken = editor.toJs.getModel().getWordAtPosition(position)
 
       if not targetToken.isNil:
-        e.data.services.debugger.sourceCallJump(e.name, position.lineNumber, cast[cstring](targetToken.word), SmartJump)
+        e.sourceCallJump(e.name, position.lineNumber, cast[cstring](targetToken.word), SmartJump)
 }
 
 for i in 1 .. 9:
@@ -561,11 +564,40 @@ proc redrawFlow(self: EditorViewComponent) =
   if self.flow.flow.isNil:
     return
 
+method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
+
+proc registerEditorViewComponent*(component: EditorViewComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
+
+proc sourceLineJump(self: EditorViewComponent, path: cstring, line: int, behaviour: JumpBehaviour) =
+  self.api.emit(
+    CtSourceLineJump,
+    SourceLineJumpTarget(
+      path: path,
+      line: line,
+      behaviour: behaviour,
+    )
+  )
+
+proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour) =
+  self.api.emit(
+    CtSourceCallJump,
+    SourceCallJumpTarget(
+      path: path,
+      line: line,
+      token: targetToken,
+      behaviour: behaviour,
+    ))
+
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour) =
   if self.tabInfo.lang != LangAsm:
-    data.services.debugger.sourceLineJump(self.name, line, behaviour)
+    self.sourceLineJump(self.name, line, behaviour)
   elif 0 <= line - 1 and line - 1 <= self.tabInfo.instructions.instructions.len():
-    data.services.debugger.sourceLineJump(self.name, self.tabInfo.instructions.instructions[line-1].highLevelLine, behaviour)
+    self.sourceLineJump(self.name, self.tabInfo.instructions.instructions[line-1].highLevelLine, behaviour)
 
 type
   AmbiguousFunctionCallException = object of ValueError
@@ -659,19 +691,19 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
           name: "Jump to call",
           hint: "CTRL+ALT+&lt;click function name&gt;",
           handler: proc(e: Event) =
-            data.services.debugger.sourceCallJump(self.name, line, targetToken, SmartJump)
+            self.sourceCallJump(self.name, line, targetToken, SmartJump)
         )
         callLineForward = ContextMenuItem(
           name: "Jump forward to call",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.sourceCallJump(self.name, line, targetToken, ForwardJump)
+            self.sourceCallJump(self.name, line, targetToken, ForwardJump)
         )
         callLineBackward = ContextMenuItem(
           name: "Jump backward to call",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.sourceCallJump(self.name, line, targetToken, BackwardJump)
+            self.sourceCallJump(self.name, line, targetToken, BackwardJump)
         )
       else:
         const handler = proc(e: Event) = errorMessage "No word selected."
@@ -1037,7 +1069,7 @@ proc sourceOrCallJump(self: EditorViewComponent, position: js) =
     let targetToken = self.getTokenFromPosition(position)
 
     if targetToken != "":
-      data.services.debugger.sourceCallJump(
+      self.sourceCallJump(
         self.name,
         self.lastMouseMoveLine,
         targetToken,
@@ -1213,7 +1245,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           try:
             let targetToken = self.getTokenFromPosition(e.target.position)
             if targetToken != "":
-              data.services.debugger.sourceCallJump(
+              self.sourceCallJump(
                 self.name,
                 self.lastMouseMoveLine,
                 targetToken,

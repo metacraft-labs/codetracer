@@ -26,6 +26,9 @@ type
     CtHistoryJump,
     CtSearchCalltrace,
     CtCalltraceSearchResponse,
+    CtSourceLineJump,
+    CtSourceCallJump,
+    CtLocalStepJump,
     
 when defined(js):
   import std / jsffi
