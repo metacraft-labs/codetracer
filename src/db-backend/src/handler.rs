@@ -1119,29 +1119,23 @@ impl Handler {
         Ok(())
     }
 
-    pub fn trace_jump(&mut self, event: ProgramEvent, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn trace_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(event.direct_location_rr_ticks));
         self.complete_move(false)?;
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn tracepoint_delete(&mut self, tracepoint_id: TracepointId, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn tracepoint_delete(&mut self, _req: dap::Request, tracepoint_id: TracepointId) -> Result<(), Box<dyn Error>> {
         self.event_db.clear_single_table(SingleTableId(tracepoint_id.id + 1));
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
-        self.send_event((
-            EventKind::UpdatedTrace,
-            gen_event_id(EventKind::UpdatedTrace),
-            self.serialize(&t_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let raw_event = self.dap_client.updated_trace_event(t_update)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
-    pub fn tracepoint_toggle(&mut self, tracepoint_id: TracepointId, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn tracepoint_toggle(&mut self, _req: dap::Request, tracepoint_id: TracepointId) -> Result<(), Box<dyn Error>> {
         let table_id = self.event_db.make_single_table_id(tracepoint_id.id);
         if self.event_db.disabled_tables.contains(&table_id) {
             self.event_db.enable_table(table_id);
@@ -1151,13 +1145,8 @@ impl Handler {
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
-        self.send_event((
-            EventKind::UpdatedTrace,
-            gen_event_id(EventKind::UpdatedTrace),
-            self.serialize(&t_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let raw_event = self.dap_client.updated_trace_event(t_update)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
