@@ -57,10 +57,6 @@ onSignal(SIGINT):
   cleanup()
   quit(1)
 
-# onSignal(SIGKILL):
-#   cleanup()
-#   quit(0)
-
 onSignal(SIGTERM):
   cleanup()
   quit(0)

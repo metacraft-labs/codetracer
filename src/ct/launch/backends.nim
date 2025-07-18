@@ -1,9 +1,11 @@
 import
-  std/[strformat, strutils, osproc],
+  std/[strformat, strutils, osproc, posix, posix_utils],
   ../../common/[start_utils, types, trace_index],
   ../utilities/[env],
   ../cli/[logging],
   cleanup
+
+var coreProcessId* = -1
 
 proc startCore*(traceArg: string, callerPid: int, test: bool) =
   # start_core <trace-program-pattern> <caller-pid> [--test]
@@ -23,6 +25,13 @@ proc startCore*(traceArg: string, callerPid: int, test: bool) =
     quit(1)
   # echo trace.repr
   let process = startCoreProcess(traceId = trace.id, recordCore=recordCore, callerPid=callerPid, test=test)
+  coreProcessId = process.processId
+
+  onSignal(SIGTERM):
+    if coreProcessId != -1:
+      echo "ct: stopping core process"
+      sendSignal(coreProcessId.Pid, SIGTERM)
+
   let code = waitForExit(process)
   discard code
-  stopCoreProcess(process, recordCore)
+

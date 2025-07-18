@@ -25,6 +25,7 @@ else:
 data.start = now()
 
 var close = false
+var ctStartCoreProcess: NodeSubProcess = nil
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc loadExistingRecord(traceId: int) {.async.}
@@ -689,6 +690,10 @@ proc onNoReloadFile(sender: js, response: jsobject(path=cstring)) {.async.} =
 proc onCloseApp(sender: js, response: js) {.async.} =
   for (name, file) in files:
     await fsWriteFile(name, file)
+
+  if not ctStartCoreProcess.isNil:
+    ctStartCoreProcess.stopProcess()
+
   mainWindow.close()
 
 proc onRunToEntry(sender: js, response: js) {.async.} =
@@ -948,10 +953,10 @@ proc loadExistingRecord(traceId: int) {.async.} =
     data.trace.compileCommand = data.config.defaultBuild
 
   debugPrint "index: start ct start_core " & $traceId & " " & $callerProcessPid
-  var process = child_process.spawn(
-    codetracerExe.cstring,
+  # var process = child_process.spawn(
+    # codetracerExe.cstring,
     # TODO: don't hardcode those, use Victor's fields and parseArgs first
-    @[cstring"start_core", cstring($traceId), cstring($callerProcessPid)])
+    # @[cstring"start_core", cstring($traceId), cstring($callerProcessPid)])
 
   debugPrint "index: start and setup core ipc"
   await startAndSetupCoreIPC(debugger)
@@ -990,6 +995,10 @@ proc prepareForLoadingTrace(traceId: int, pid: int) {.async.} =
   let process = await startProcess(
     codetracerExe.cstring,
     @[cstring"start_core", cstring($traceId), cstring($pid)])
+  if process.isOk:
+    ctStartCoreProcess = process.value
+  # keep a reference for later: on close, stop the ct process, which should stop
+  #   the backend process as well
 
 proc replayTx(txHash: cstring, pid: int) {.async.} =
   callerProcessPid = pid
