@@ -223,7 +223,11 @@ proc record(
     if lang == LangRubyDb:
       return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, "", traceId)
     elif lang in {LangNoir, LangRustWasm, LangCppWasm}:
-      recordSymbols(executable, outputFolder, lang)
+      if lang == LangNoir:
+        # TODO: base the first arg: source folder for record symbols on
+        #   debuginfo or trace_paths.json
+        # for noir for now "executable" is the noir folder
+        recordSymbols(executable, outputFolder, lang)
       var vmPath = ""
       if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
         vmPath = wazeroExe
