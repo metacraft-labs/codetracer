@@ -7,6 +7,7 @@ use crate::handler::Handler;
 use crate::task::{
     gen_task_id, Action, CalltraceLoadArgs, CollapseCallsArgs, SourceLocation, StepArg, Task, TaskId, TaskKind,
     UpdateTableArgs, Location, ProgramEvent, LoadHistoryArg, CallSearchArg, SourceCallJumpTarget, LocalStepJump,
+    TracepointId,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
@@ -165,6 +166,9 @@ fn handle_request<W: Write>(
         "ct/source-line-jump" => handler.source_line_jump(req.clone(), req.load_args::<SourceLocation>()?)?,
         "ct/source-call-jump" => handler.source_call_jump(req.clone(), req.load_args::<SourceCallJumpTarget>()?)?,
         "ct/local-step-jump" => handler.local_step_jump(req.clone(), req.load_args::<LocalStepJump>()?)?,
+        "ct/tracepoint-toggle" => handler.tracepoint_toggle(req.clone(), req.load_args::<TracepointId>()?)?,
+        "ct/tracepoint-delete" => handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?)?,
+        "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
         "ct/load-calltrace-section" => {
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }

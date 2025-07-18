@@ -454,6 +454,17 @@ impl DapClient {
         Ok(self.request("setBreakpoints", serde_json::to_value(args)?))
     }
 
+    pub fn updated_trace_event(&mut self, args: task::TraceUpdate) -> Result<DapMessage, Box<dyn std::error::Error>> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-trace".to_string(),
+            body: serde_json::to_value(args)?,
+        }))
+    }
+
     pub fn stopped_event(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {
         let body = StoppedEventBody {
             reason: reason.to_string(),
