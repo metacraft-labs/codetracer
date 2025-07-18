@@ -52,7 +52,7 @@ when not defined(ctInExtension):
   proc sendRequest*(dap: ExampleDap, command: cstring, value: JsObject) =
     console.log("example dap: -> ", command, value)
     case $command:
-    of "step":
+    of "stepIn":
       dap.location.key = cstring($(dap.location.key.parseJsInt + 1))
       dap.location.rrTicks += 1
       dap.stackLines.add(dap.location.line)
@@ -64,7 +64,7 @@ when not defined(ctInExtension):
       dap.location.line += 1
       dap.location.highLevelLine = dap.location.line
       dap.receiveOnMove()
-    of "step-out":
+    of "stepOut":
       dap.location.key = cstring($(dap.location.key.parseJsInt - 1))
       dap.location.rrTicks += 1
       dap.location.line = dap.stackLines.pop() + 1
@@ -163,6 +163,12 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   DapStopped: "stopped",
   DapInitialized: "initialized",
   DapOutput: "output",
+  DapStepIn: "stepIn",
+  DapStepOut: "stepOut",
+  DapNext: "next",
+  DapContinue: "continue",
+  DapStepBack: "stepBack",
+  DapReverseContinue: "reverseContinue",
   CtEventLoad: "ct/event-load",
   CtUpdatedEvents: "ct/updated-events",
   CtUpdatedEventsContent: "ct/updated-events-content",

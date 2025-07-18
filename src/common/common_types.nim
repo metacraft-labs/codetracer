@@ -853,6 +853,9 @@ type
     # TODO
     threadId*: int
 
+  DapStepArguments* = ref object
+    threadId*: int
+
   # IMPORTANT: must update `pub const EVENT_KINDS_COUNT` in db-backend/src/task.rs
   # on changes here!
   # also must update codetracer-ruby-tracer trace.rb `EVENT_KIND_..` consts
