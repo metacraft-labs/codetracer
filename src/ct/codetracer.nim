@@ -17,6 +17,6 @@ try:
     customValidateConfig(conf)
     runInitial(conf)
 except Exception as ex:
-  errorPrint "Unhandled exception"
-  errorPrint getStackTrace(ex)
-  errorPrint "Unhandled " & ex.msg
+  echo "Error: Unhandled exception"
+  echo getStackTrace(ex)
+  echo "Unhandled " & ex.msg

@@ -147,7 +147,9 @@ proc runInitial*(conf: CodetracerConf) =
       of ArbCommand.deploy:
         deployStylus()
       of ArbCommand.listRecentTx:
-        let res = Json.encode(getTrackableTransactions())
+        # discard getTrackableTransactions()
+        let transactions = getTrackableTransactions()
+        let res = Json.encode(transactions)
         echo res
     # of StartupCommand.host:
     #   host(
