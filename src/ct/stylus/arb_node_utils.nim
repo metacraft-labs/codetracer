@@ -135,5 +135,4 @@ proc getTrackableTransactions*(maxAge: int = 3600): seq[StylusTransaction] {.rai
       toAddress: tx["to"].getStr(),
       time: fromUnix(tx["timestamp"].getInt()).format("MM-dd hh:mm"),
     ))
-
   return result
