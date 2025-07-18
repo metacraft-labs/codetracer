@@ -1,4 +1,4 @@
-## CLI
+## Command-line interface
 
 This page details some of the options, available to you through the `ct` CLI command.
 
