@@ -180,6 +180,10 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtSourceLineJump: "ct/source-line-jump",
   CtSourceCallJump: "ct/source-call-jump",
   CtLocalStepJump: "ct/local-step-jump",
+  CtTracepointToggle: "ct/tracepoint-toggle",
+  CtTracepointDelete: "ct/tracepoint-delete",
+  CtTraceJump: "ct/trace-jump",
+  CtUpdatedTrace: "ct/updated-trace",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}

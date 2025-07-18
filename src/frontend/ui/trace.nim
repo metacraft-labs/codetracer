@@ -2,6 +2,7 @@ import
   ../ui_helpers, ../types, ../lang,
   ui_imports, value, ../utils, ../renderer,
   datatable
+import ../communication, ../../common/ct_event
 
 let MIN_EDITOR_WIDTH: float = 20 #%
 let MAX_EDITOR_WIDTH: float = 70 #%
@@ -239,7 +240,7 @@ proc renderTableResults(
         if cast[bool](event.originalEvent.ctrlKey):
           self.data.redraw()
         else:
-          traceJump(traceValue)
+          self.api.emit(CtTraceJump, traceValue)
 
       jqFind(cstring(fmt"#trace-table-{self.id} tbody")).on(cstring"contextmenu", cstring"tr") do (event: js):
         # let target = event.target
@@ -268,6 +269,7 @@ proc enableIcon(self: TraceComponent) =
 
   if not iconDom.isNil:
     iconDom.innerHtml = "Disable"
+    self.redrawForExtension()
     self.data.redraw()
 
 proc disableIcon(self: TraceComponent) =
@@ -276,6 +278,7 @@ proc disableIcon(self: TraceComponent) =
 
   if not iconDom.isNil:
     iconDom.innerHtml = "Enable"
+    self.redrawForExtension()
     self.data.redraw()
 
 proc showSelectedChart(self: TraceComponent) =
@@ -452,8 +455,8 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int): cst
     else:
       tracepointHtml = j"<div class='gutter-disabled-trace' onmousedown='event.stopPropagation()'></div>"
 
-  if line == self.data.services.debugger.location.line and
-      path == self.data.services.debugger.location.path:
+  if line == self.location.line and
+      path == self.location.path:
     highlightHtml = j"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
 
   if self.data.services.debugger.hasBreakpoint(path, realLine):
@@ -480,7 +483,7 @@ proc updateLineNumbersOnly*(self: EditorViewComponent) =
   editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
 
 proc toggleTraceState*(self: TraceComponent) =
-  discard self.data.services.debugger.tracepointToggle(self.id)
+  self.api.emit(CtTracepointToggle, TracepointId(id: self.id))
 
   self.isDisabled = not self.isDisabled
   self.forceReload = true
@@ -962,7 +965,8 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   editorUI.data.redraw()
   data.ui.activeFocus = trace
 
-method onCompleteMove*(self: TraceComponent, reponse: MoveState) {.async.} =
+method onCompleteMove*(self: TraceComponent, response: MoveState) {.async.} =
+  self.location = response.location
   self.editorUI.updateLineNumbersOnly()
 
 method onError*(self: TraceComponent, error: DebuggerError) {.async.} =
@@ -971,9 +975,18 @@ method onError*(self: TraceComponent, error: DebuggerError) {.async.} =
       self.error = error
       self.data.redraw()
 
+method register*(self: TraceComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
+
+proc registerTraceComponent*(component: TraceComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
+
 proc closeTrace*(self: TraceComponent) =
   if self.isRan:
-    discard self.data.services.debugger.tracepointDelete(self.id)
+    self.api.emit(CtTracepointDelete, TracepointId(id: self.id))
 
   if self.editorUI.tabInfo.isNil:
     return
