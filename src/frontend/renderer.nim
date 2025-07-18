@@ -1219,7 +1219,7 @@ proc windowMenu*(data: Data, fromWelcomeScreen: bool = false): VNode =
     tdiv(
       class = "menu-button-svg close",
       onclick = proc =
-        data.ipc.send "CODETRACER::close-window")
+        data.ipc.send "CODETRACER::close-app")
 
 proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
   let y = yPos - 30

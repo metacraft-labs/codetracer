@@ -51,7 +51,7 @@ STYLUS = stylus
 !ts = |> ^ %f^ $(TSC) %f |> %o
 
 # JS Rules:
-!nim_js = |> ^ %f^ $(NIM_RELEASE)\
+!nim_js = |> ^ %f^ $(NIM_DEBUG)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
 --debugInfo:on\
@@ -60,19 +60,19 @@ STYLUS = stylus
 --out:%o\
 js %f |> %B.js
 
-!nim_node = |> ^ %f^ $(NIM_RELEASE)\
+!nim_node = |> ^ %f^ $(NIM_DEBUG)\
 -d:nodejs\
 --out:%o\
 js %f |> %B.js
 
-!nim_node_index = |> ^ %f^ $(NIM_RELEASE)\
+!nim_node_index = |> ^ %f^ $(NIM_DEBUG)\
 -d:ctIndex\
 -d:nodejs\
 --sourcemap:on\
 --out:%o\
 js %f |> %B.js %B.js.map
 
-!nim_node_subwindow = |> ^ %f^ $(NIM_RELEASE)\
+!nim_node_subwindow = |> ^ %f^ $(NIM_DEBUG)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
 --debugInfo:on\
@@ -82,7 +82,7 @@ js %f |> %B.js %B.js.map
 --out:%o\
 js %f |> %B.js %B.js.map
 
-!nim_node_index_server = |> ^ %f^ $(NIM_RELEASE)\
+!nim_node_index_server = |> ^ %f^ $(NIM_DEBUG)\
 -d:ctIndex\
 -d:server\
 -d:nodejs\
@@ -90,12 +90,12 @@ js %f |> %B.js %B.js.map
 --out:%o \
 js %f |> %B.js %B.js.map
 
-!codetracer_shell = |> $(NIM_RELEASE)\
+!codetracer_shell = |> $(NIM_DEBUG)\
 -d:nodejs\
 --out:%o\
 js %f |> %o
 
-!nim_test_js = |> ^ %f^ $(NIM_RELEASE) \
+!nim_test_js = |> ^ %f^ $(NIM_DEBUG) \
 -d:ctTest\
 -d:chronicles_log_level=DEBUG\
 --verbosity:1\
@@ -109,11 +109,11 @@ js %f |> %o
 js %f |> %B.js
 
 # C rules:
-!nim_c = |> ^ %f^ $(NIM_RELEASE)\
+!nim_c = |> ^ %f^ $(NIM_DEBUG)\
 --out:%o\
 c %f |> %o
 
-!codetracer = |> $(NIM_RELEASE)\
+!codetracer = |> $(NIM_DEBUG)\
 -d:testing\
 --boundChecks:on\
 --stacktrace:on\
@@ -126,7 +126,7 @@ c %f |> %o
 --out:%o\
 c %f |> %o
 
-!nim_tester = |> ^ %f^ $(NIM_RELEASE) \
+!nim_tester = |> ^ %f^ $(NIM_DEBUG) \
 --nimcache:/tmp/ct-nim-cache/tester \
 --warnings:on \
 --hints:on \

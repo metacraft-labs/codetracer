@@ -1,5 +1,5 @@
 import
-  std / [os, osproc, strformat, strtabs],
+  std / [os, osproc, strformat, strtabs, posix, posix_utils],
   json_serialization, json_serialization / std / tables
 
 type
@@ -8,6 +8,8 @@ type
     # PATH: string
     # LD_LIBRARY_PATH: string
     # PYTHONPATH: string
+
+var ctProcess: Process = nil
 
 proc start(args: seq[string]) =
   let configPath = getEnv(
@@ -40,16 +42,27 @@ proc start(args: seq[string]) =
     # don't debug/log with echo: breaks ct trace_metadata json output
     # writeFile("ct_wrapper.log", "CT WRAPPER: putting pid " & $codetracerWrapperPid)
 
-    let p = startProcess(
+    ctProcess = startProcess(
       getAppDir() / "codetracer_depending_on_env_vars_in_tup",
       # workingDir = getAppDir().parentDir.parentDir, # repo folder
       args = args,
       env = env,
       options = {poParentStreams, poStdErrToStdOut})
-    quit(waitForExit(p))
+    quit(waitForExit(ctProcess))
   except:
     echo "ct helper error: ", getCurrentExceptionMsg()
     echo "  ct paths config path: ", configPath
     quit(1)
 
+onSignal(SIGTERM):
+  if not ctProcess.isNil:
+    discard kill(ctProcess.processID().cint, SIGTERM)
+    quit(128 + SIGTERM)
+
+onSignal(SIGINT):
+  if not ctProcess.isNil:
+    discard kill(ctProcess.processID().cint, SIGINT)
+    quit(128 + SIGINT)
+
 start(commandLineParams())
+
