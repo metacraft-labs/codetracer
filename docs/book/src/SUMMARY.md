@@ -12,7 +12,8 @@
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
   - [Getting Started](./usage_guide/getting_started/overview.md)
     - [Noir](./usage_guide/getting_started/noir.md)
-    - [Stylus / WASM](./usage_guide/getting_started/stylus_and_wasm.md)
+    - [Stylus](./usage_guide/getting_started/stylus.md)
+    - [WASM](./usage_guide/getting_started/wasm.md)
     - [Ruby](./usage_guide/getting_started/ruby.md)
 
 ## Building & packaging
