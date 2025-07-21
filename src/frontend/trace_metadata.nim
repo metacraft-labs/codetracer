@@ -61,6 +61,7 @@ proc findRecentTransactions*(app: ElectronApp, limit: int): Future[seq[StylusTra
       # assuming that json parse failed => assuming this is raw error output and output it
       echo ""
       echo "error: loading recent transactions problem: ", raw, " (or possibly invalid json)"
+      app.quit(1)  
   else:
     echo "error: trying to run the codetracer arb listRecentTx command: ", res.error
     app.quit(1)
