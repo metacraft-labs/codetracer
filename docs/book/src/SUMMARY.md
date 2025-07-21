@@ -10,23 +10,10 @@
   - [Graphical interface](./usage_guide/gui.md)
   - [Tracepoints](./usage_guide/tracepoints.md)
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
-
-
-## Backends
-
-- [DB backend](./backends/db_backend.md)
-  - [Noir](./backends/db-backend/noir.md)
-  - [Ruby](./backends/db-backend/ruby.md)
-  - [Python](./backends/db-backend/py.md)
-  - [Lua](./backends/db-backend/lua.md)
-  - [small](./backends/db-backend/small.md)
-  - [Stylus and WASM](./usage_guide/stylus_and_wasm.md)
-  
-- [RR backend](./backends/rr_backend.md)
-  - [C & C++](./backends/rr-backend/c_and_cpp.md)
-  - [Rust](./backends/rr-backend/rust.md)
-  - [Nim](./backends/rr-backend/nim.md)
-  - [Go](./backends/rr-backend/go.md)
+  - [Getting Started](./usage_guide/getting_started/overview.md)
+    - [Noir](./usage_guide/getting_started/noir.md)
+    - [Stylus / WASM](./usage_guide/getting_started/stylus_and_wasm.md)
+    - [Ruby](./usage_guide/getting_started/ruby.md)
 
 ## Building & packaging
 
