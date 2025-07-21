@@ -12,6 +12,5 @@ Adjust the steps below for your use case or run the exact steps to launch the sp
 2. Use ```ct record <path to rb file> [<args>]``` and ```ct replay <name of rb file>``` (or directly ```ct run <path to rb file> [<args>]```)
 
    Example: ```ct run examples/ruby_space_ship/main.rb```
-
+ 
 ## Note: Ruby on rails programs are currently not supported.
-
