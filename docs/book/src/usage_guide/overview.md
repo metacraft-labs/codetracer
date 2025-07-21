@@ -21,10 +21,3 @@ This guide is structured to help you get started quickly and then dive deeper in
     *   [**Tracepoints**](./tracepoints.md): A deep dive into using tracepoints for advanced debugging scenarios.
 *   **For advanced use cases**, explore these topics:
     *   [**CodeTracer Shell**](./codetracer_shell.md): For integrating CodeTracer with complex or custom build systems.
-*   **Getting started section**, Each programming languages has it's own rules when recording and replaying program, see how to get stared using the following languages:
-    *   [**Noir**](./getting_started/noir.md)
-    *   [**Stylus**](./getting_started/stylus.md)
-    *   [**WASM**](./getting_started/wasm.md)
-    *   [**Ruby**](./getting_started/euby.md)
-    
-    
