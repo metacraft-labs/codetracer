@@ -618,6 +618,10 @@ proc onError*(error: DebuggerError) =
   errorPrint error.kind, " ", error.msg
   mainWindow.webContents.send "CODETRACER::error", error
 
+proc sendNotification*(kind: NotificationKind, message: cstring) =
+  let notification = newNotification(kind, $message)
+  mainWindow.webContents.send "CODETRACER::new-notification", notification
+
 proc openTab*(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1): Future[void] {.async.}
 
 
