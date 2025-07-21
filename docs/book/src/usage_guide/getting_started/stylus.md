@@ -1,4 +1,4 @@
-## Stylus / WASM
+## Stylus
 
 The implementation is based on a [wazero]() WASM interpreter patch and can be used for various WASM languages.
 Testing has been done using Sylus contracts and small rust-based WASM programs.
