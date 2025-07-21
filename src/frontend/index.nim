@@ -1000,21 +1000,50 @@ proc prepareForLoadingTrace(traceId: int, pid: int) {.async.} =
   # keep a reference for later: on close, stop the ct process, which should stop
   #   the backend process as well
 
-proc replayTx(txHash: cstring, pid: int) {.async.} =
+proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
   callerProcessPid = pid
-  let process = await startProcess(
+  let outputResult = await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"arb", cstring"replay", txHash]
   )
-  discard setTimeout(proc() = app.quit(0), 1000) #TODO: Find a better way to init the backend instead of killing Electron - only a workaround for now
+  var output = cstring""
+  if outputResult.isOk:
+    output = outputResult.value
+    let lines = output.split(jsNl)
+    if lines.len > 1:
+      let traceIdLine = $lines[^2]
+      # probably because we print `traceId:<traceId>\n` : so the last line is ''
+      #   and traceId is in the second last line
+      if traceIdLine.startsWith("traceId:"):
+        let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+        return (output, traceId)
+  else:
+    output = JSON.stringify(outputResult.error)
+  return (output, NO_INDEX)
 
 proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=int)) {.async.} =
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
-  await replayTx(response.txHash, nodeProcess.pid.to(int))
-
+  let (rawOutputOrError, traceId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
+  if traceId != NO_INDEX:
+    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+    await loadExistingRecord(traceId)
+  else:
+    # TODO: process notifications in welcome screen, or a different kind of error handler for this case
+    # currently not working in frontend, because no status component for now in welcome screen
+    # sendNotification(NotificationKind.NotificationError, "couldn't record trace for the transaction")
+    echo ""
+    echo ""
+    echo "ERROR: couldn't record trace for transaction:"
+    echo "==========="
+    echo "(raw output or error):"
+    echo rawOutputOrError
+    echo "(end of raw output or error)"
+    echo "==========="
+    quit(1)
+    
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await app.findTraceByRecordProcessId(pid)
   await prepareForLoadingTrace(trace.id, pid)

@@ -56,6 +56,6 @@ proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError,
 proc replayStylus*(hash: string) {.raises: [IOError, ValueError, OSError, CatchableError, Exception].} =
   # TODO: don't rerecord transactions
   let recordedTrace = recordStylus(hash)
-
-  let process = startProcess(codetracerExe, args = @["replay", "--id=" & $recordedTrace.id], options = {poParentStreams})
-  discard process.waitForExit()
+  # for now it prints `traceId:<traceId>` which is read by index(from ct arb explorer) which starts the replay in its instance
+  #   for example
+  #   traceId:479  
