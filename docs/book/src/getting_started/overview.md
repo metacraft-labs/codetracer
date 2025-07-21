@@ -15,7 +15,7 @@ Think of it like recording a video of your program's execution that you can then
 This guide is structured to help you get started quickly and then dive deeper into the features that interest you.
 
 *   **Instructions on how to launch CodeTracer using each of the languages listed below**
-    *   [**Noir**](./noir.md): Se examples and steps how to launch CodeTracer using a Noir program.
-    *   [**Stylus**](./stylus.md): Se examples and steps how to launch CodeTracer using a Stylus or WASM program.
-    *   [**WASM**](./wasm.md): Se examples and steps how to launch CodeTracer using a Stylus or WASM program.
-    *   [**Ruby**](./ruby.md): Se examples and steps how to launch CodeTracer using a Ruby program.    
+    *   [**Noir**](./noir.md): Examples and steps how to trace a Noir program.
+    *   [**Stylus**](./stylus.md): Examples and steps how to trace a Stylus.
+    *   [**Ruby**](./ruby.md): Examples and steps how to trace a Ruby program.    
+    *   [**WASM**](./wasm.md): Examples and steps how to trace a WASM program.
