@@ -61,7 +61,7 @@ fi
 ./install_nim_osx.sh
 
 if [[ "$platform" == "mac" ]]; then
-  DEFAULT_DIST_DIR=$NON_NIX_BUILD_DIR/CodeTracer.app/Contents/MacOS
+  DEFAULT_DIST_DIR=$NON_NIX_BUILD_DIR/dist_macos
 else
   DEFAULT_DIST_DIR=$NON_NIX_BUILD_DIR/dist
 fi

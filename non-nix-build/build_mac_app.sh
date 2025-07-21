@@ -1,23 +1,42 @@
 #!/usr/bin/env bash
 set -e
 
-cd "$DIST_DIR"
+# Define the absolute path to the non-nix-build directory to ensure paths are correct
+NON_NIX_BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-mkdir -p "$DIST_DIR"/../Resources/
-iconutil -c icns "$ROOT_DIR"/resources/Icon.iconset --output "$DIST_DIR"/../Resources/CodeTracer.icns
-cp "$ROOT_DIR"/resources/Info.plist "$DIST_DIR"/..
+# The final output directory for the .app bundle
+APP_DIR="$NON_NIX_BUILD_DIR"/CodeTracer.app
 
-# In the `public` folder, we have some symlinks to this awkwardly placed directory
-cd "$DIST_DIR"/..
-ln -s MacOS/node_modules ./
+# 1. Start with a clean Electron app
+ELECTRON_APP_PATH="$ROOT_DIR"/node_modules/electron/dist/Electron.app
+rm -rf "$APP_DIR"
+cp -R "$ELECTRON_APP_PATH" "$APP_DIR"
+mv "$APP_DIR"/Contents/MacOS/Electron "$APP_DIR"/Contents/MacOS/CodeTracer
 
-# Hack because basically every OS-level string is labeled as Electron instead CodeTracer. Can be resolved by using a bundler
-cp "$ROOT_DIR"/resources/Info.plist "$(realpath MacOS/node_modules)"/electron/dist/Electron.app/Contents/Info.plist
-cp "$DIST_DIR"/../Resources/CodeTracer.icns "$(realpath MacOS/node_modules)"/electron/dist/Electron.app/Contents/Resources/
+# 2. Create the app resources directory
+RESOURCES_DIR="$APP_DIR"/Contents/Resources
+APP_RESOURCES_DIR="$RESOURCES_DIR"/app
+mkdir -p "$APP_RESOURCES_DIR"
 
-# macOS uses core utils from FreeBSD so the additional "" is needed to execute this sed call.
-#
-# This sed call is needed because even though we replaced the entire plist file, the CodeTracer icon will not be displayed correctly
-# in the auto-generated about menu, if the correct executable isn't listed here. If it was left as "bin/ct" a big disabled icon would
-# be overlayed on top of the app icon
-sed -i "" "s/\<string\>bin\/ct/\<string\>Electron/g" "$(realpath MacOS/node_modules)"/electron/dist/Electron.app/Contents/Info.plist
+# 3. Copy our application source code and assets from the build dir
+# The DIST_DIR (e.g., non-nix-build/dist_macos) contains all the compiled assets
+cp -R "$DIST_DIR"/* "$APP_RESOURCES_DIR"/
+
+# 4. Rebrand the app
+INFO_PLIST="$APP_DIR"/Contents/Info.plist
+
+# Set the executable name
+plutil -replace CFBundleExecutable -string "CodeTracer" "$INFO_PLIST"
+
+# Set the app name and display name
+plutil -replace CFBundleName -string "CodeTracer" "$INFO_PLIST"
+plutil -replace CFBundleDisplayName -string "CodeTracer" "$INFO_PLIST"
+
+# Set the bundle identifier
+plutil -replace CFBundleIdentifier -string "com.codetracer.CodeTracer" "$INFO_PLIST"
+
+# Set the icon
+iconutil -c icns "$ROOT_DIR"/resources/Icon.iconset --output "$RESOURCES_DIR"/CodeTracer.icns
+plutil -replace CFBundleIconFile -string "CodeTracer.icns" "$INFO_PLIST"
+
+echo "Successfully created and rebranded CodeTracer.app"
