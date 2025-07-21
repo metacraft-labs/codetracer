@@ -16,5 +16,6 @@ This guide is structured to help you get started quickly and then dive deeper in
 
 *   **Instructions on how to launch CodeTracer using each of the languages listed below**
     *   [**Noir**](./noir.md): Se examples and steps how to launch CodeTracer using a Noir program.
-    *   [**Stylus and WASM**](./stylus_and_wasm.md): Se examples and steps how to launch CodeTracer using a Stylus or WASM program.
+    *   [**Stylus**](./stylus.md): Se examples and steps how to launch CodeTracer using a Stylus or WASM program.
+    *   [**WASM**](./wasm.md): Se examples and steps how to launch CodeTracer using a Stylus or WASM program.
     *   [**Ruby**](./ruby.md): Se examples and steps how to launch CodeTracer using a Ruby program.    

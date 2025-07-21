@@ -9,7 +9,7 @@ The recorder for Ruby is currently hosted in the [codetracer-ruby-recorder](http
 Adjust the steps below for your use case or run the exact steps to launch the space_ship program which is included with the repo.
 
 1. Navigate to CodeTracer's folder
-2. Use `ct record <path to rb file> [<args>]` and `ct replay <name of rb file>` (or directly `ct run <path to rb file> [<args>]`)
+2. Use ```ct record <path to rb file> [<args>]``` and ```ct replay <name of rb file>``` (or directly ```ct run <path to rb file> [<args>]```)
 
    Example: ```ct run examples/ruby_space_ship/main.rb```
 
