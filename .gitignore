@@ -7,6 +7,11 @@ nimcache/
 .venv/
 build-*/
 
+# wasm binaries
+*.wasm
+# object files
+*.o
+
 # Mac build
 *.app
 *.dmg
@@ -71,9 +76,7 @@ tests/tests/
 src/tests/**_test.js
 styles/loader.css
 cpp_translator
-trace.o
 trace.out
-tests/programs/*.o
 tests.log
 report*log
 lines.txt
