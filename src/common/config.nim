@@ -1,7 +1,7 @@
 ## keep this in sync with types.nim Config def
 ## a file with config code for the c backend, used mostly by ui_data for repl/tests
 
-import json_serialization/std/tables, strutils, sequtils,  os, yaml, std/streams
+import json_serialization/std/tables, strutils, sequtils,  os, yaml, std / [streams, strformat]
 import .. / common / [types, paths]
 
 type
@@ -139,7 +139,7 @@ proc loadConfig*(folder: string, inTest: bool): Config =
   if file.len == 0:
     file = userConfigDir / configPath
     createDir(userConfigDir)
-    copyFile(configDir / defaultConfigPath, userConfigDir / configPath)
+    copyFile(configDir / defaultConfigPath, file)
   # if inTest:
   #   file = codetracerTestDir / testConfigPath
   var raw = ""
@@ -160,6 +160,15 @@ proc loadConfig*(folder: string, inTest: bool): Config =
   except Exception as e:
     echo "ERROR: loading config: ", e.msg
     echo "  if the schema has changed, and you have an existing config file, you might get an error here"
-    echo "  you can manually adapt your config file or"
-    echo "  you can reset it by deleting $HOME/.config/codetracer/.config.yaml"
-    quit(1)
+    # echo "  you can manually adapt your config file or"
+    # echo "  you can reset it by deleting $HOME/.config/codetracer/.config.yaml"
+    let backupFilePath = userConfigDir / "backup_config.yaml"
+    createDir(userConfigDir)
+    try:
+      copyFile(file, backupFilePath)
+      echo fmt"   for now we now have directly copied your existing config file to {backupFilePath}"
+    except Exception as copyError:
+      echo "ERROR: couldn't backup your existing config file; error: ", copyError.msg
+    copyFile(configDir / defaultConfigPath, file)
+    echo "  REPLACED with new up to date default config file"
+
