@@ -158,4 +158,8 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     c.shortcutMap = initShortcutMap(config.bindings)
     return c
   except Exception as e:
-    raise e
+    echo "ERROR: loading config: ", e.msg
+    echo "  if the schema has changed, and you have an existing config file, you might get an error here"
+    echo "  you can manually adapt your config file or"
+    echo "  you can reset it by deleting $HOME/.config/codetracer/.config.yaml"
+    quit(1)
