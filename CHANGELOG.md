@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## 25.07.1 - 2025-07-22
+
+We are releasing our initial Arbitrum Stylus and WASM support with this version!
+
+Now CodeTracer can record and replay [Arbitrum Stylus](https://arbitrum.io/stylus) contracts.
+It can also record and replay Rust programs compiled to WASM: we implemented a wasm codetracer recorder, 
+forking [the wazero WASM runtime](https://wazero.io/) : https://github.com/metacraft-labs/codetracer-wasm-recorder/ which is the based for the
+Stylus and WASM support.
+
+One can go through the [Stylus docs](https://docs.codetracer.com/getting_started/stylus.html) in our
+new docs website and follow the steps to replay an example Stylus program. One can also read how to try to build and debug simple Rust wasm programs following [Getting started with WASM](https://docs.codetracer.com/getting_started/wasm.html).
+
+
+Other new developments:
+
+* db-backend now supports a new experimental binary runtime_tracing format (using capnproto internally, but this might be a subject to change)
+* various bugfixes related to managing processes, stability
+* internal tmpdir handling generalization: improving usage by different accounts
+* improvements in config schema
+* osx native menu and other improvements
+* various user interface improvements: 
+  * deletable iteration in input
+  * prevent text selection in footer
+  * long value truncation
+  * various other fixes
+
+
 ## 25.05.1 - 2025-05-05
 
 The first release for a while, including our progress since March:
