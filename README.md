@@ -1,9 +1,13 @@
-<!-- enable when we have a github release [![Release](https://img.shields.io/github/release/metacraft-labs/codetracer.svg)](https://github.com/metacraft-labs/codetracer/releases) -->
 [![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg?branch=main)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
-[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-amd64.AppImage)
-[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-arm64.dmg)
+[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage)
+[![Download AppImage Signature](https://img.shields.io/badge/Download-AppImage%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage.asc)
+
+[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg)
+[![Download macOS Signature](https://img.shields.io/badge/Download-macOS%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg.asc)
+
+[![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/share/applications` on Linux).
