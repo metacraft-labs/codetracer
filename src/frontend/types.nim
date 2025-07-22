@@ -1,5 +1,6 @@
-import jsffi, dom, vdom, karax, kdom, async, typetraits, tables
-import lib, lang, communication
+import std / [jsffi, dom, async, typetraits, tables]
+import vdom, karax, kdom
+import lib, lang, communication, dap
 
 import rr_gdb
 
@@ -1362,6 +1363,8 @@ type
   ClientActionHandler* = proc: void {.nimcall.}
 
   Data* = ref object
+    dapApi*:                DapApi
+    viewsApi*:              MediatorWithSubscribers
     services*:              Services
     ui*:                    Components
     redraw*:                proc: void
@@ -1493,10 +1496,23 @@ when defined(ctRenderer):
     std / jsconsole,
     .. / common / ct_event
 
+  type
+    LocalToViewsTransport* = ref object of Transport
+      data*: Data
+
   proc newFlowUpdate*: FlowUpdate
 
+  proc newLocalToViewsTransport(data: Data): LocalToViewsTransport =
+    LocalToViewsTransport(data: data)
+
+  proc setupSinglePageViewsApi(name: cstring): MediatorWithSubscribers =
+    # let transport = newLocalToViewsTransport(data)
+    let x = Transport()
+    newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=x)
 
   var data* = Data(
+    dapApi: DapApi(),
+    viewsApi: setupSinglePageViewsApi(cstring"single-page-frontend-to-views"),
     services: Services(
       eventLog: EventLogService(),
       debugger: DebuggerService(
@@ -1556,6 +1572,12 @@ when defined(ctRenderer):
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
     maxRRTicks: 100_000) # TODO, not based on events which don't update? somehow record/send from record
     # TODO max for program, maybe min as well?
+
+  # setupMiddlewareApis(dapApi, data.middlewareToViewsApi)
+
+  data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+    discard data.services.debugger.onCompleteMove(data.services.debugger, value)
+    discard data.services.editor.onCompleteMove(data.services.editor, value))
 
   var domwindow {.importc: "window".}: JsObject
   domwindow.data = data

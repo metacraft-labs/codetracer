@@ -3,7 +3,13 @@ import .. / common / ct_event
 import lib
 
 when not defined(ctInExtension):
-  import types
+
+  type
+    DapApi* = ref object
+      handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]
+
+  proc newDapApi() : DapApi =
+    result = DapApi()
 
   type
     # copied from VsCodeDapMessage
@@ -15,123 +21,15 @@ when not defined(ctInExtension):
       body*: JsObject
      
     ExampleDap* = ref object
-      location*: Location
+      # location*: Location
       stackLines*: seq[int]
       handlers*: seq[proc(message: ExampleDapMessage)]
 
-  const START_CALL_LINE = 7
+  # Don't accept a raw JsObject, define adequate types
+  proc onDapRawResponseOrEvent*(sender: JsObject, raw: JsObject) = 
+    # TODO: Implement
+    discard
 
-  proc receive(dap: ExampleDap, message: ExampleDapMessage) =
-    console.log cstring"example dap: <- ", message
-    for handler in dap.handlers:
-      try:
-        handler(message)
-      except:
-        console.log cstring"example dap receive error: ", getCurrentExceptionMsg().cstring
-
-  proc receiveOnMove*(dap: ExampleDap, newCall: bool = false) =
-    dap.receive(ExampleDapMessage(`type`: "event", event: "stopped", body: DapStoppedEvent(threadId: 1).toJs))
-    dap.receive(
-      ExampleDapMessage(
-        `type`: "event",
-        event: "ct/complete-move",
-        body: MoveState(
-          location: dap.location,
-          cLocation: dap.location,
-          main: false,
-          status: cstring"stopped",
-          resetFlow: newCall,
-          frameInfo: FrameInfo(
-            offset: 0,
-            hasSelected: false
-          )
-        ).toJs
-      )
-    )
-
-  proc sendRequest*(dap: ExampleDap, command: cstring, value: JsObject) =
-    console.log("example dap: -> ", command, value)
-    case $command:
-    of "step":
-      dap.location.key = cstring($(dap.location.key.parseJsInt + 1))
-      dap.location.rrTicks += 1
-      dap.stackLines.add(dap.location.line)
-      dap.location.line = START_CALL_LINE
-      dap.location.highLevelLine = dap.location.line
-      dap.receiveOnMove()
-    of "next":
-      dap.location.rrTicks += 1
-      dap.location.line += 1
-      dap.location.highLevelLine = dap.location.line
-      dap.receiveOnMove()
-    of "step-out":
-      dap.location.key = cstring($(dap.location.key.parseJsInt - 1))
-      dap.location.rrTicks += 1
-      dap.location.line = dap.stackLines.pop() + 1
-      dap.location.highLevelLine = dap.location.line
-      dap.receiveOnMove()
-    of "continue":
-      # finish? TODO?
-      discard
-    of "ct/load-locals":
-      dap.receive(
-        ExampleDapMessage(
-          `type`: "response",
-          command: "ct/load-locals",
-          body: CtLoadLocalsResponseBody(
-            locals: @[
-              Variable(expression: "a", value: Value(kind: Int, i: "0", typ: Type(kind: Int, langType: cstring"int")))
-            ]
-          ).toJs
-        )
-      )
-    of "ct/update-table":
-      dap.receive(ExampleDapMessage(`type`: "event", event: "ct/updated-table", body: CtUpdatedTableResponseBody(
-        tableUpdate: TableUpdate(
-          data: TableData(
-            draw: 0,
-            recordsTotal: 0,
-            recordsFiltered: 0,
-            data: @[
-              TableRow(
-                directLocationRRTicks: 0,
-                rrEventId: 0,
-                fullPath: dap.location.path,
-                lowLevelLocation: dap.location.lowLevelPath,
-                kind: EventLogKind.Write,
-                content: "-".cstring,
-                metadata: "-".cstring,
-                base64Encoded: true,
-                stdout: true,
-              )
-            ]
-          ),
-          isTrace: false,
-          traceId: 0,
-        )
-      ).toJs))
-    of "ct/load-calltrace-section":
-      dap.receive(ExampleDapMessage(`type`: "event", event: "ct/updated-calltrace", body: CtUpdatedCalltraceResponseBody(
-        callLines: @[
-          CallLine(
-            content: CallLineContent(
-              kind: CallLineContentKind.Call,
-              count: 1,
-              call: Call(key: dap.location.key, location: dap.location, rawName: dap.location.functionName)
-            )
-          )
-        ]
-      ).toJs))
-    else:
-      discard
-
-  proc on*(dap: ExampleDap, handler: proc(message: ExampleDapMessage)) =
-    dap.handlers.add(handler)
-    
-  type
-    DapApi* = ref object
-      handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]
-      exampleDap*: ExampleDap    
 else:
   import vscode
 
@@ -251,29 +149,11 @@ proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
 when not defined(ctInExtension):
   import errors
 
+  # TODO: Send this to the index process using IPC
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-    dap.exampleDap.sendRequest(toDapCommandOrEvent(kind), rawValue)
+    discard
+    #dap.exampleDap.sendRequest(toDapCommandOrEvent(kind), rawValue)
     # raise newException(NotImplementedError, "asyncSendCtRequest not implemented")
-
-  proc newExampleDapApi*: DapApi =
-    let exampleDap = ExampleDap(
-      location: Location(
-        path: cstring"/home/alexander92/wazero/test_code/rust_struct_test.rs",
-        line: 1,
-        key: cstring"0",
-        functionName: cstring"<top level>",
-      ),
-      stackLines: @[],
-      handlers: @[]
-    )
-    exampleDap.location.highLevelPath = exampleDap.location.path
-
-    result = DapApi(exampleDap: exampleDap) 
-    result.exampleDap.on(proc(message: ExampleDapMessage) =
-      if message.`type` == cstring"response":
-        result.receiveResponse(message.command, message.body)
-      elif message.`type` == cstring"event":
-        result.receiveEvent(message.event, message.body))
   
 else:
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
@@ -303,4 +183,5 @@ else:
 
 proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
   discard dap.asyncSendCtRequest(kind, rawValue)
+
 

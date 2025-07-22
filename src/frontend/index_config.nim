@@ -432,11 +432,12 @@ var dapSocket*: JsObject
 proc onDapRawMessage*(message: RawDapMessage, sender: JsObject) {.async.} =
   if not dapSocket.isNil:
     dapSocket.write(message.raw)
-  else: 
+  else:
     # TODO: put in a queue, or directly make an error, as it might be made hard to happen, 
     # if sending from frontend only after dap socket setup here
     errorPrint "dap socket is nil, couldn't send ", message.toJs
  
+# Make sure we accept the data wholly before forwarding it to the UI
 proc setupProxyForDap* =
   dapSocket.on(cstring"data", proc(data: cstring) =
     mainWindow.webContents.send "CODETRACER::dap-raw-response-or-event", data)
@@ -444,11 +445,10 @@ proc setupProxyForDap* =
 proc dapSocketPathForCallerPid(callerPid: int): cstring =
   CT_DAP_SOCKET_PATH_BASE & cstring"_" & cstring($callerPid)
 
-proc startAndSetupCoreIPC*(debugger: DebuggerIPC) {.async.} =
+proc startAndSetupCoreIPC*() {.async.} =
   while dapSocket.isNil:
     let socketPath = dapSocketPathForCallerPid(callerProcessPid)
     dapSocket = await startSocket(socketPath)
-    await wait(500)
   setupProxyForDap()
 
   # while unixClient.isNil or unixSender.isNil:
