@@ -11,5 +11,6 @@ in
       xz
       gnutar
       pkgs.gawk
+      gnupg
     ];
   }

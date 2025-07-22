@@ -97,7 +97,27 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/ui-tests.sh"
-
+  push-gpg-public-key:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: "Import GPG key for signing commits"
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: "Upload public key"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command gpg --armor --export > CodeTracer.pub.asc
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.pub.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc
   dev-build:
     runs-on: [self-hosted, nixos]
     needs:
@@ -168,16 +188,37 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
 
+      - name: "Import GPG key for signing commits"
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+
       - name: Build
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/appimage.sh"
 
       - name: Upload artifact
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
+          nix develop .#devShells.x86_64-linux.default --command gpg --armor --detach-sign CodeTracer.AppImage
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
+
+      - name: Upload latest
+        if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && !github.event['codetracer-ci'] }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc
+
 
   dmg-build:
     runs-on: macos-latest
@@ -193,22 +234,42 @@ jobs:
         with:
           submodules: recursive
 
+      - name: "Import GPG key for signing commits"
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+
       - name: Build
         run: ./ci/build/dmg.sh
 
       - name: Install AWS CLI
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         run: brew install awscli
 
       - name: Upload artifact
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
+          gpg --armor --detach-sign non-nix-build/CodeTracer.dmg
           # for now apply workaround from https://community.cloudflare.com/t/an-error-occurred-internalerror-when-calling-the-putobject-operation/764905/11:
           #   adding `--checksum-algorithm CRC32`
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
+
+      - name: Upload latest
+        if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && !github.event['codetracer-ci'] }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
+          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
+
 
   dmg-lib-check:
     runs-on: macos-latest
@@ -216,15 +277,12 @@ jobs:
       - dmg-build
     steps:
       - name: Install AWS CLI
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         run: brew install awscli
 
       - name: Install 7zip
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         run: brew install sevenzip
 
       - name: Download artifact
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
@@ -232,7 +290,6 @@ jobs:
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg ./CodeTracer.dmg
 
       - name: Extract dmg
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
@@ -240,7 +297,6 @@ jobs:
           7zz x ./CodeTracer.dmg
 
       - name: Check if ct starts
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
@@ -253,15 +309,13 @@ jobs:
       - appimage-build
     steps:
       - name: Install AWS CLI
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
         run: sudo snap install aws-cli --classic
 
       - name: Install FUSE
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         run: sudo apt-get install -y fuse libfuse2
 
       - name: Download artifact
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
@@ -269,7 +323,6 @@ jobs:
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
 
       - name: Check if ct starts
-        if: startsWith(github.ref, 'refs/tags/') && ${{ !github.event.codetracer-ci }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
@@ -330,7 +383,7 @@ jobs:
       - test-ui-tests
       - appimage-lib-check
       - dmg-lib-check
-    if: github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}
+    if: "github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -350,7 +403,7 @@ jobs:
   build-and-deploy-docs:
     runs-on: [self-hosted, nixos]
     needs: [push-to-cachix]
-    if: github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}
+    if: ${{ github.ref == 'refs/heads/main' && !github.event['codetracer-ci'] }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -369,7 +422,7 @@ jobs:
   create-release:
     runs-on: [ self-hosted, nixos ]
     needs: [ dev-build, nix-build, appimage-build, dmg-build ]
-    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+    if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && !github.event['codetracer-ci'] }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -381,7 +434,9 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
       - name: Create resource tarball
-        run: nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
+          nix develop .#devShells.x86_64-linux.default --command bash -c "gpg --detach-sign resources.tar.xz"
       - name: Get changelog text
         id: changelog
         run: |
@@ -391,12 +446,46 @@ jobs:
           We're actively working on multiple exciting features, which are not yet fully released. Stay tuned!
 
           [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-amd64.AppImage)
-          [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-arm64.dmg)" >> release_changelog.md
+          [![Download AppImage Signature](https://img.shields.io/badge/Download-AppImage%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc)
+
+          [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-arm64.dmg)
+          [![Download macOS Signature](https://img.shields.io/badge/Download-macOS%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc)
+
+          [![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)" >> release_changelog.md
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: "release_changelog.md"
           draft: true
           prerelease: false
-          files: resources.tar.xz
+          files: |
+            resources.tar.xz
+            resources.tar.xz.asc
           generate_release_notes: false
+
+  push-tag:
+    runs-on: [ self-hosted, nixos ]
+    needs: [ dev-build, nix-build, appimage-build, dmg-build ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Nix
+        uses: metacraft-labs/nixos-modules/.github/install-nix@main
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+      - name: Create tag
+        run: |
+          YEAR=$(nix develop .#devShells.x86_64-linux.default --command bash -c 'grep "CodeTracerYear\*" src/ct/version.nim | sed "s/.*CodeTracerYear\* = //g"')
+          MONTH=$(nix develop .#devShells.x86_64-linux.default --command bash -c "printf '%02d' \$(grep \"CodeTracerMonth\*\" src/ct/version.nim | sed \"s/.*CodeTracerMonth\* = //g\")")
+          BUILD=$(nix develop .#devShells.x86_64-linux.default --command bash -c 'grep "CodeTracerBuild\*" src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g"')
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" -s || echo "Tag already exists"
+          git push origin "$YEAR.$MONTH.$BUILD" || echo "Tag already exists"
