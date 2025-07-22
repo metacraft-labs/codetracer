@@ -7,7 +7,7 @@ import
       build, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code],
-  lib, types, lang, renderer, config,
+  lib, types, lang, renderer, config, dap,
   property_test / test
 
 when defined(ctInExtension):
@@ -1201,6 +1201,8 @@ proc configureIPC(data: Data) =
     "delete-online-trace-file-received"
     "menu-action"
 
+    "dap-raw-response-or-event"
+
   duration("configureIPCRun")
 
 proc zoomInEditors*(data: Data) =
@@ -1725,18 +1727,11 @@ when not defined(ctInExtension):
     communication, middleware, dap,
     .. / common / ct_event
 
-  var dapApi {.exportc.}: DapApi
-
   const logging = true # TODO: maybe overridable dynamically
   
   # === LocalToViewTransport
 
-  type
-    LocalToViewsTransport* = ref object of Transport
-      data*: Data
 
-  proc newLocalToViewsTransport(data: Data): LocalToViewsTransport =
-    LocalToViewsTransport(data: data)
 
   # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
   # as there are many subscribers
@@ -1745,30 +1740,21 @@ when not defined(ctInExtension):
   # a local view emits
 
   # === end of LocalToViewsTransport
-
-  proc setupSinglePageViewsApi(name: cstring, data: Data): MediatorWithSubscribers =
-    let transport = newLocalToViewsTransport(data)
-    newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
-
   
   proc configureMiddleware =
-    middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
-    dapApi = newExampleDapApi() # TODO: replace with real DAP client
+    # middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
 
-    setupMiddlewareApis(dapApi, middlewareToViewsApi)
+    setupMiddlewareApis(data.dapApi, data.viewsApi)
 
     # additional handler, so for now editor service can keep working
-    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
-      discard data.services.editor.onCompleteMove(data.services.editor, value))
 
     for content, components in data.ui.componentMapping:
       for i, component in components:
         let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
         component.register(componentToMiddlewareApi)
 
-    discard windowSetTimeout(proc =
-      dapApi.exampleDap.receiveOnMove(), 1_000)
+    # discard windowSetTimeout(proc =
+    #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
 
   once:
     configureMiddleware()
