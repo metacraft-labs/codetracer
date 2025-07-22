@@ -76,7 +76,6 @@ method onMove(self: StateComponent) {.async.} =
   self.api.emit(CtLoadLocals, arguments)
   self.redraw()
 
-  
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
   # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =

@@ -220,7 +220,6 @@ proc selectDir(dialogTitle: cstring, defaultPath: cstring = cstring""): Future[c
 proc duration*(name: string) =
   infoPrint fmt"index: TIME for {name}: {now() - data.start}ms"
 
-
   # If codetracer has a 'broken' installation, only then do we attempt to install it
 
 proc createMainWindow: js =
@@ -956,7 +955,7 @@ proc loadExistingRecord(traceId: int) {.async.} =
     # @[cstring"start_core", cstring($traceId), cstring($callerProcessPid)])
 
   debugPrint "index: start and setup core ipc"
-  await startAndSetupCoreIPC(debugger)
+  await startAndSetupCoreIPC()
 
   if not data.trace.isNil:
     debugPrint "index: init debugger"
@@ -1356,7 +1355,6 @@ proc configureIpcMain =
 
 const NO_LIMIT = (-1)
 
-
 proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
   debugPrint "index: init"
   let bypass = true
@@ -1395,7 +1393,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
 
   if not data.startOptions.welcomeScreen:
     debugPrint "index: start and setup core ipc"
-    await startAndSetupCoreIPC(debugger)
+    await startAndSetupCoreIPC()
 
   await started()
 
@@ -1596,7 +1594,6 @@ proc matchRegex(text: string, pattern: string): JsObject {.importjs: "#.match(ne
 #   echo "NO MATCH FOUND"
 #
 #   return ""  # Return empty if no match found
-
 
 when not defined(server):
   app.on("ready") do ():
