@@ -630,6 +630,11 @@ proc ensureMonacoEditor(self: TraceComponent) =
       data.ui.editors[data.services.editor.active].monacoEditor
     let activeMonacoTheme = activeMonacoEditor.getCurrentMonacoTheme()
 
+    let documentTmp = domWindow.document
+    let overflowHost = documentTmp.createElement("div")
+    overflowHost.className = cstring("monaco-editor")
+    documentTmp.body.appendChild(overflowHost)
+
     # create trace monaco editor
     self.monacoEditor = monaco.editor.create(
       jq(&".trace #{self.selectorId}"),
@@ -649,7 +654,9 @@ proc ensureMonacoEditor(self: TraceComponent) =
           horizontalSliderSize: 4,
           verticalScrollbarSize: 4,
           verticalSliderSize: 4
-        }
+        },
+        overflowWidgetsDomNode: overflowHost,
+        fixedOverflowWidgets: true
       )
     )
 

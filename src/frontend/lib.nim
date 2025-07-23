@@ -157,23 +157,25 @@ type
     defineTheme*: proc(themeName: cstring, themeData: js)
 
   MonacoEditorOptions* = ref object
-    value*:                cstring
-    language*:             cstring
-    automaticLayout*:      bool
-    theme*:                cstring
-    readOnly*:             bool
-    lineNumbers*:          proc(line: int): cstring
-    fontSize*:             cstring
-    fontFamily*:           cstring
-    contextmenu*:          bool
-    minimap*:              JsObject
-    find*:                 JsObject
-    scrollbar*:            JsObject
-    lineDecorationsWidth*: int
-    renderLineHighlight*:  cstring
-    glyphMargin*:          bool
-    folding*:              bool
+    value*:                  cstring
+    language*:               cstring
+    automaticLayout*:        bool
+    theme*:                  cstring
+    readOnly*:               bool
+    lineNumbers*:            proc(line: int): cstring
+    fontSize*:               cstring
+    fontFamily*:             cstring
+    contextmenu*:            bool
+    minimap*:                JsObject
+    find*:                   JsObject
+    scrollbar*:              JsObject
+    lineDecorationsWidth*:   int
+    renderLineHighlight*:    cstring
+    glyphMargin*:            bool
+    folding*:                bool
     scrollBeyondLastColumn*: int
+    overflowWidgetsDomNode*: JsObject
+    fixedOverflowWidgets*:   bool
 
   MonacoScrollType* = enum Smooth, Immediate
 
