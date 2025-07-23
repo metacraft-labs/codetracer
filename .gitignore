@@ -199,3 +199,6 @@ test-results
 .DS_Store
 nim/
 csources_v1/
+
+# Emacs
+*~
