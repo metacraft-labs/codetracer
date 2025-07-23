@@ -53,7 +53,7 @@ let
     '';
     outputHashMode = "recursive";
     outputHash = (if stdenv.isAarch64
-                  then "sha512-UWympCycvDOUSeMLO9E6HNwQWEV1pNHK7OjsFssUmTNIrY3vboXZV91xhWoLsJ/nHAcr9T91fXEBSlPXMGmA9A=="
+                  then "sha512-J9t4DyOclFAaz0aTrMjLYet64YnVwY3gfV7F1YYZ4GVsF8JvuSBs4w3U6AZBSWvIq24n7Ccxqt8bpS3Do93mnA==" 
                   else "sha512-+f3z4zwF2YlzskL7uDwVvQ3Fg0EYJ1HGPEqIGNb2VsiQpXoY2tU+EufqX79YRCOW7lXkuDfMQHYI3XcPioAEvg==");
   };
 
