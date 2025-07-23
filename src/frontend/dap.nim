@@ -13,25 +13,6 @@ when not defined(ctInExtension):
   proc newDapApi() : DapApi =
     result = DapApi()
 
-  type
-    # copied from VsCodeDapMessage
-    ExampleDapMessage* = ref object of JsObject
-      # type for now can be also accessed as ["type"] because of JsObject
-      `type`*: cstring
-      event*: cstring
-      command*: cstring
-      body*: JsObject
-     
-    ExampleDap* = ref object
-      # location*: Location
-      stackLines*: seq[int]
-      handlers*: seq[proc(message: ExampleDapMessage)]
-
-  # Don't accept a raw JsObject, define adequate types
-  proc onDapRawResponseOrEvent*(sender: JsObject, raw: JsObject) = 
-    # TODO: Implement
-    discard
-
 else:
   import vscode
   # import ui / flow
@@ -159,6 +140,7 @@ when not defined(ctInExtension):
 
   # TODO: Send this to the index process using IPC
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
+    
     discard
     #dap.exampleDap.sendRequest(toDapCommandOrEvent(kind), rawValue)
     # raise newException(NotImplementedError, "asyncSendCtRequest not implemented")
