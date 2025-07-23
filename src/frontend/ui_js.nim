@@ -529,6 +529,14 @@ proc tryInitLayout*(data: Data) =
     initLayout(data.ui.resolvedConfig)
     redrawAll()
 
+# Don't accept a raw JsObject, define adequate types
+proc onDapRawResponseOrEvent*(sender: JsObject, raw: JsObject) = 
+
+  # Args: (dap: DapApi, kind: CtEventKind, rawValue: JsObject)
+  
+  echo "RECEIVED THE FOLLOWING DAP EVENT: ", raw
+  # receive(data.dapApi, , sender)
+
 proc onReady(event: dom.Event) =
   if cast[cstring](cast[js](dom.document).readyState) == j"complete":
     data.ui.pageLoaded = true
@@ -1201,7 +1209,9 @@ proc configureIPC(data: Data) =
     "delete-online-trace-file-received"
     "menu-action"
 
-    "dap-raw-response-or-event"
+    # "dap-raw-response-or-event"
+    "dap-receive-response"
+    "dap-receive-event"
 
   duration("configureIPCRun")
 
@@ -1731,8 +1741,6 @@ when not defined(ctInExtension):
   
   # === LocalToViewTransport
 
-
-
   # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
   # as there are many subscribers
   # IMPORTANT:
@@ -1746,11 +1754,10 @@ when not defined(ctInExtension):
 
     setupMiddlewareApis(data.dapApi, data.viewsApi)
 
-    # additional handler, so for now editor service can keep working
-
     for content, components in data.ui.componentMapping:
       for i, component in components:
-        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
+        # middlewareToViewsApi
         component.register(componentToMiddlewareApi)
 
     # discard windowSetTimeout(proc =
