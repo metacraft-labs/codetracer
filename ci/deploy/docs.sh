@@ -14,6 +14,10 @@ mdbook build # build output is in the `book` directory
 # so that the history is not kept, which can be very expensive.
 git worktree add --orphan -B gh-pages gh-pages
 cp -a book/. gh-pages
+
+# Required by github pages to set up a custom domain
+echo "docs.codetracer.com" > gh-pages/CNAME
+
 git config user.name "Deploy from CI"
 git config user.email ""
 cd gh-pages
