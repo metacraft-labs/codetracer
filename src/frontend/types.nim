@@ -1575,6 +1575,12 @@ when defined(ctRenderer):
 
   # setupMiddlewareApis(dapApi, data.middlewareToViewsApi)
 
+  console.log "data.dapApi"
+  console.log data.dapApi 
+
+  console.log "data.viewsApi"
+  console.log data.viewsApi
+
   data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     discard data.services.debugger.onCompleteMove(data.services.debugger, value)
     discard data.services.editor.onCompleteMove(data.services.editor, value))

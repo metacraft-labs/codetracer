@@ -1315,6 +1315,9 @@ proc configureIpcMain =
 
     "dap-raw-message"
 
+    # "dap-forward-response"
+    # "dap-forward-event"
+
     # "update-expansion"
     # "load-tokens"
     # "load-locals"
