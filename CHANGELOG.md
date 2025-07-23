@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Next release
+???
+
+Other new developments:
+
+- Various UI improvements:
+  - Fixed certain tooltips and popups produced by the editor widget being clipped in the first lines of code
+
 ## 25.07.1 - 2025-07-22
 
 We are releasing our initial Arbitrum Stylus and WASM support with this version!

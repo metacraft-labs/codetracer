@@ -1146,6 +1146,11 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
 
       try:
+        let documentTmp = domWindow.document
+        let overflowHost = documentTmp.createElement(cstring("div"))
+        overflowHost.className = cstring("monaco-editor")
+        documentTmp.body.appendChild(overflowHost)
+
         cdebug "editor: creating monaco editor " & $self.name
         var lang = fromPath(self.data.services.debugger.location.path)
         if lang == LangNoir:
@@ -1172,7 +1177,9 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
               horizontalSliderSize: 8,
               verticalScrollbarSize: 14,
               verticalSliderSize: 8
-            }
+            },
+            overflowWidgetsDomNode: overflowHost,
+            fixedOverflowWidgets: true
           )
         )
         tabInfo.monacoEditor.config = getConfiguration(tabInfo.monacoEditor)
