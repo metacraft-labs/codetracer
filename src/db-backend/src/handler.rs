@@ -647,11 +647,11 @@ impl Handler {
         self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
         self.event_db.refresh_global();
 
-        // let raw_event = self.dap_client.updated_events(first_events)?;
-        // self.send_dap(&raw_event)?;
+        let raw_event = self.dap_client.updated_events(first_events)?;
+        self.send_dap(&raw_event)?;
 
-        // let raw_event_content = self.dap_client.updated_events_content(contents)?;
-        // self.send_dap(&raw_event_content)?;
+        let raw_event_content = self.dap_client.updated_events_content(contents)?;
+        self.send_dap(&raw_event_content)?;
 
         Ok(())
     }
