@@ -88,7 +88,8 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
     # discard self.onMove())
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    discard self.onMove())
+    discard self.onCompleteMove(response)
+  )
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response)
   )
@@ -153,12 +154,12 @@ method render*(self: StateComponent): VNode =
         onclick = proc(ev: Event, tg: VNode) =
           self.chevronClicked = false
           ev.preventDefault(),
-        onmousemove = proc(ev: Event, tg:VNode) =
-          if self.chevronClicked:
-            resizeColumns(ev,tg),
-        onmousedown = proc(ev: Event, tg:VNode) =
-          if self.chevronClicked:
-            initialPosition = cast[MouseEvent](ev).screenX.toJs.to(float), 
+        # onmousemove = proc(ev: Event, tg:VNode) =
+        #   if self.chevronClicked:
+        #     resizeColumns(ev,tg),
+        # onmousedown = proc(ev: Event, tg:VNode) =
+        #   if self.chevronClicked:
+        #     initialPosition = cast[MouseEvent](ev).screenX.toJs.to(float), 
         onmouseup = proc =
           self.chevronClicked = false,
         onmouseleave = proc = self.chevronClicked = false
@@ -260,4 +261,6 @@ proc excerpt(self: StateComponent): VNode =
   
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.location = response.location
+  for value in self.values:
+    value.location = response.location
   await self.onMove()

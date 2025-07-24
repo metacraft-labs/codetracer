@@ -23,7 +23,8 @@ proc loadHistory(self: ValueComponent, expression: cstring) =
 method register*(self: ValueComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
-    discard self.onUpdatedHistory(response))
+    if cast[cstring](response.expression) == self.baseExpression:
+      discard self.onUpdatedHistory(response))
 
 proc registerValueComponent*(component: ValueComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
@@ -494,16 +495,33 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
   #     if not container.isNil:
   #       container.toJs.scrollTop = chart.historyScrollTop
   #   ) # TODO: Handle multiple state components
+  self.state.kxi.afterRedraws.add(proc = 
+    let container = document.getElementById(cstring(fmt"history-{expression}"))
+    if not container.isNil:
+      container.toJs.scrollTop = self.historyScrollTop
+      self.state.redrawForExtension()
+  )
+
   result = buildHtml(
     tdiv(class = "history-container")
   ):
     tdiv(
       class = "inline-history",
       id = cstring(fmt"history-{expression}"),
-      onscroll = proc(e: Event, tg: VNode) =
-        chart.historyScrollTop = cast[int](e.target.scrollTop),
     ):
       chartElement
+
+  proc setupExtraScrollHandlers() =
+    let el = document.getElementById("history-" & $expression)
+    if not el.isNil:
+      el.addEventListener(
+        "wheel",
+        proc (ev: Event) =
+          kout el.scrollTop
+          self.historyScrollTop = cast[int](el.scrollTop)
+      )
+
+  discard setTimeout(proc() = setupExtraScrollHandlers(), 1)
 
 proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: Value, ev: Event): seq[ContextMenuItem] =
   var addToScratchpad:  ContextMenuItem
@@ -634,6 +652,7 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
     self.showInline[expression] = not self.showInline[expression]
 
   self.redrawForExtension()
+  self.state.redrawForExtension()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
   let expression = cast[cstring](update.expression)
