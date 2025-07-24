@@ -10,7 +10,17 @@ pushd docs/book/
 # for now depending on global project devshell 
 mdbook build # build output is in the `book` directory
 
-# If the gh-pages branch already exists, this will overwrite it
+# If the worktree already exists at the given location it should be removed first
+if [ -d "gh-pages" ]; then
+    git worktree remove gh-pages
+fi
+
+# If the gh-pages branch already exists, delete it first
+if git show-ref --verify --quiet refs/heads/gh-pages; then
+    git branch -D gh-pages
+fi
+
+# Create a new orphan branch (this will overwrite any existing remote branch)
 # so that the history is not kept, which can be very expensive.
 git worktree add --orphan -B gh-pages gh-pages
 cp -a book/. gh-pages
@@ -26,4 +36,6 @@ git commit -m 'deploy new book'
 git push origin +gh-pages
 cd ..
 
+# Clean the environment
+git worktree remove gh-pages
 popd
