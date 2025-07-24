@@ -220,6 +220,19 @@ type
         desc: "Path to a stylus emv trace json file"
       .} : string
 
+      recordAddress* {.
+        name: "address"
+        abbr: "a"
+        defaultValue: ""
+        desc: "Address when we are recording in ci mode/environment"
+      .}: string
+
+      recordSocket* {.
+        name: "socket"
+        defaultValue: ""
+        desc: "Path to socket for sending the trace events metadata when in ci mode/environment"
+      .}: string
+
       recordProgram* {.
         argument
         desc: "Program to record"

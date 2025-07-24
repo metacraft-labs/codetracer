@@ -1,7 +1,8 @@
 import std / [ 
-  os, strformat, httpclient, json, strutils, sequtils, 
+  os, osproc, strformat, httpclient, json, strutils, sequtils, 
   times, db_sqlite
 ]
+import json_serialization
 import paths, types, lang
 include common_trace_index
 
@@ -271,12 +272,34 @@ proc loadTrace(trace: Row, test: bool): Trace =
     quit(1)
 
 
+proc sendEvent(socketPath: string, address: string, event: SessionEvent) =
+  let raw = Json.encode(event)
+
+  # echo fmt"sending with curl to {socketPath} and {address}:"
+  # echo raw
+  # echo "===="
+
+  # example: curl --unix-socket /tmp/my_socket.sock http://localhost/api/ping
+  let process = startProcess(
+    curlExe,
+    args = @[
+      "--header", "Content-Type: application/json",
+      "--data", raw,
+      "--request", "POST",
+      "--unix-socket", socketPath, address],
+    options = {}) # poParentStreams})
+  let code = waitForExit(process)
+  if code != 0:
+    stderr.writeLine(fmt"WARNING: couldn't send event to codetracer-web: exit-code {code} from curl")
 
 # CODE REVIEW question: should we use a register event object which can include
-#   reportFile / shellSocket / shellAddress / others for better maintanance/code?
+#   reportFile / socketPath / address / others for better maintanance/code?
 #   or is separate params everywhere ok for now?
-proc registerEvent*(reportFile: string, shellSocket: string, shellAddress: string, event: SessionEvent) =
-  discard # not implemented for this backend for now
+proc registerEvent*(reportFile: string, socketPath: string, address: string, event: SessionEvent) =
+  if socketPath.len > 0:
+    sendEvent(socketPath, address, event)
+  else:
+    discard # not implemented for this backend for now
 
 proc registerRecordTraceId*(pid: int, traceId: int, test: bool) =
   let db = ensureDB(test=test)
@@ -292,14 +315,14 @@ proc registerRecordTraceId*(pid: int, traceId: int, test: bool) =
 proc find*(id: int, test: bool): Trace
 
 proc registerRecordingCommand*(
-    reportFile: string, shellSocket: string, shellAddress: string,
+    reportFile: string, socketPath: string, address: string,
     sessionId: int, actionId: int, trace: Trace, command: string,
     status: SessionEventStatus, errorMessage: string,
     firstLine: int, lastLine: int = -1) =
   registerEvent(
     reportFile,
-    shellSocket,
-    shellAddress,
+    socketPath,
+    address,
     SessionEvent(
       kind: RecordingCommand,
       sessionId: sessionId,

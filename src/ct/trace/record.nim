@@ -18,8 +18,8 @@ proc recordInternal(exe: string, args: seq[string], configPath: string): Trace =
     options = {poStdErrToStdOut})
 
   let (lines, exCode) = p.readLines
-  echo args
-  echo exCode
+  # echo args
+  # echo exCode
   for line in lines:
     echo line
 
@@ -34,6 +34,8 @@ proc record*(lang: string,
              backend: string,
              exportFile: string,
              stylusTrace: string,
+             address: string,
+             socketPath: string,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
@@ -50,6 +52,12 @@ proc record*(lang: string,
   if stylusTrace != "":
     pargs.add("--stylus-trace")
     pargs.add(stylusTrace)
+  if address != "":
+    pargs.add("--address")
+    pargs.add(address)
+  if socketPath != "":
+    pargs.add("--socket")
+    pargs.add(socketPath)
 
   pargs.add(program)
   if args.len != 0:

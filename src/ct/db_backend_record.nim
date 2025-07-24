@@ -124,7 +124,7 @@ proc recordDb(
   # noir: call directly its local exe as a simple workaround for now:
   # (noirExe from src/common/paths.nim)
   #   we should try to not always depend on env var paths though
-  echo "codetracer: starting language tracer with:"
+  # echo "codetracer: starting language tracer with:"
   let workdir = if lang == LangNoir:
         # for noir, we must start in the noir project directory
         # for the trace command to work
@@ -137,7 +137,7 @@ proc recordDb(
     vmExe,
     args = startArgs.concat(args),
     workingDir = workdir,
-    options = {poEchoCmd, poParentStreams})
+    options = {poParentStreams}) # add poEchoCmd if you want to debug and see how the cmd might look
   let exitCode = waitForExit(process)
   if exitCode != 0:
     echo "error: problem with ruby trace: exit code = ", exitCode
@@ -231,7 +231,7 @@ proc record(
       var vmPath = ""
       if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
         vmPath = wazeroExe
-        echo "wasm vm path ", vmPath
+        # echo "wasm vm path ", vmPath
       else:
         vmPath = noirExe
       return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
@@ -269,6 +269,7 @@ proc main*(): Trace =
   #   [--backend <backend>]
   #   [-e/--export <export-zip>] [-c/--cleanup-output-folder]
   #   [-t/--stylus-trace <trace-path>]
+  #   [-a/--address <address>] [--socket <socket-path>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:
@@ -286,6 +287,9 @@ proc main*(): Trace =
   var exportZipPath = ""
   var backend = ""
   var stylusTrace = ""
+  var address = ""
+  var socketPath = ""
+
   # for i, arg in args:
   var i = 0
   while i < args.len:
@@ -324,6 +328,18 @@ proc main*(): Trace =
         displayHelp()
         return
       stylusTrace = args[i + 1]
+      i += 2
+    elif arg == "--address" or arg == "-a":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      address = args[i + 1]
+      i += 2
+    elif arg == "--socket":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      socketPath = args[i + 1] 
       i += 2
     else:
       if program == "":
@@ -391,9 +407,21 @@ proc main*(): Trace =
   # echo "program ", program, " recordArgs ", recordArgs, "lang ", lang
 
   # echo "recording? ", sessionId, " ", shellSocket, " ", shellAddress
-  if sessionId != -1:
+
+  if socketPath.len == 0: # arg has precedence over env: only if empty, use env
+    socketPath = shellSocket
+  if address.len == 0:
+    address = shellAddress
+
+  let shouldSendEvents = sessionId != -1 or socketPath.len > 0 and address.len > 0
+
+  # echo "socketPath ", socketPath
+  # echo "address ", address
+  # echo "shouldSendEvents ", shouldSendEvents
+
+  if shouldSendEvents:
     registerRecordingCommand(
-      reportFile, shellSocket, shellAddress,
+      reportFile, socketPath, address,
       sessionId, actionId, Trace(id: traceId, outputFolder: outputFolder),
       command, WorkingStatus,
       errorMessage="", firstLine=firstLine, lastLine=firstLine)
@@ -411,10 +439,10 @@ proc main*(): Trace =
       let exportZipFullPath = expandFilename(exportZipPath)
       outputPath = exportZipFullPath
 
-    if sessionId != -1:
+    if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
       registerRecordingCommand(
-        reportFile, shellSocket, shellAddress,
+        reportFile, socketPath, address,
         sessionId, actionId, trace,
         command, OkStatus,
         errorMessage="", firstLine=firstLine, lastLine=lastLine)
@@ -430,10 +458,10 @@ proc main*(): Trace =
     echo fmt"traceId:{traceId}"
     return trace
   except CatchableError as e:
-    if sessionId != -1:
+    if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
       registerRecordingCommand(
-        reportFile, shellSocket, shellAddress,
+        reportFile, socketPath, address,
         sessionId, actionId, Trace(id: -1, outputFolder: outputFolder),
         command, ErrorStatus,
         errorMessage=e.msg, firstLine=firstLine, lastLine=lastLine)
