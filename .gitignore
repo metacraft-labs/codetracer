@@ -202,3 +202,4 @@ csources_v1/
 
 # Emacs
 *~
+.aider*
