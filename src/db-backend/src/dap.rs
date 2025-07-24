@@ -532,7 +532,7 @@ impl DapClient {
                 seq: self.next_seq(),
                 type_: "event".to_string(),
             },
-            event: "ct/updated-events_content".to_string(),
+            event: "ct/updated-events-content".to_string(),
             body: serde_json::to_value(contents)?,
         }))
     }
