@@ -620,6 +620,7 @@ type
     isTooltipValue*:     bool
     isScratchpadValue*:  bool
     isOperationRunning*: bool
+    historyScrollTop*:   int
 
   ScratchpadComponent* = ref object of Component
     i*:             int
