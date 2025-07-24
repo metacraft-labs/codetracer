@@ -131,7 +131,7 @@ method onLoadedTerminal*(self: TerminalOutputComponent, eventList: seq[ProgramEv
   self.cacheAnsiToHtmlLines(eventList)
 
 proc onTerminalEventClick(self: TerminalOutputComponent, eventElement: ProgramEvent) =
-  self.service.eventJump(eventElement)
+  self.api.emit(CtEventJump, eventElement)
 
 method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.async.} =
   if self.cachedLines[response].len > 0:
@@ -170,10 +170,6 @@ proc terminalLineView(self: TerminalOutputComponent, i: int, lineEvents: seq[Ter
       terminalEventView(self, lineEvent)
 
 method render*(self: TerminalOutputComponent): VNode  =
-  if self.initialUpdate:
-    self.getLines()
-    self.initialUpdate = false
-
   buildHtml(
     tdiv(class=componentContainerClass("terminal"))
   ):
@@ -189,6 +185,11 @@ method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtLoadedTerminal, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
     discard self.onLoadedTerminal(response)
+  )
+  api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
+    if self.initialUpdate:
+      self.getLines()
+      self.initialUpdate = false
   )
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     self.redrawForExtension()
