@@ -7,19 +7,19 @@
 
 ### Linux
 You can download the Linux AppImage from our website:
-[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.05.1-amd64.AppImage)
+[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage)
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g. `~/.local/bin`)
 
 ### macOS
 macOS binaries are temporarily unavailable but will be restored soon.
+You can download a `.dmg` app bundle from our website:
+[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg)
 
-<!--
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS).
 When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
--->
 
 > [!CAUTION]  
 > Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `xattr -c <path/to/CodeTracer.app>`. We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program that will ensure CodeTracer is properly signed and whitelisted by Apple. See https://discussions.apple.com/thread/253714860?sortBy=rank for more details.
