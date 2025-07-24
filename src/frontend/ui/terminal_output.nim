@@ -17,7 +17,6 @@ proc ensureLine(self: TerminalOutputComponent) =
 proc appendToTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: int) =
   self.ensureLine()
   var lineTerminalEvents = self.cachedLines[self.currentLine]
-  echo "#### GOING THROUGH THE APPEND TO TERMINAL = ", text
 
   lineTerminalEvents.add(TerminalEvent(
     text: text,
