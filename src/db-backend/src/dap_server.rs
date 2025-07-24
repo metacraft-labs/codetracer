@@ -158,6 +158,7 @@ fn handle_request<W: Write>(
         "threads" => handler.threads(req.clone())?,
         "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap::StackTraceArguments>()?)?,
         "variables" => handler.variables(req.clone(), req.load_args::<dap::VariablesArguments>()?)?,
+        "restart" => handler.run_to_entry(Task {kind: TaskKind::RunToEntry, id: TaskId("run-to-entry-0".to_string())})?,
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<dap::CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
