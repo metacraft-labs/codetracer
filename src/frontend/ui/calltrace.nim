@@ -451,7 +451,7 @@ proc searchResultView(self: CalltraceComponent, call: Call): VNode =
   buildHtml(
     tdiv(
       class = "search-result",
-      onclick = proc =
+      onmousedown = proc =
         self.calltraceJump(location)
         self.redrawForExtension()
     )
@@ -765,7 +765,7 @@ proc localCalltraceView*(self: CalltraceComponent): VNode =
 proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
   self.searchResults = searchResults
   self.isSearching = true
-  self.data.redraw()
+  self.redrawForExtension()
 
 
   self.lastSearch = now()
