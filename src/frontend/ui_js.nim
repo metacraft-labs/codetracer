@@ -529,13 +529,19 @@ proc tryInitLayout*(data: Data) =
     initLayout(data.ui.resolvedConfig)
     redrawAll()
 
-# Don't accept a raw JsObject, define adequate types
-proc onDapRawResponseOrEvent*(sender: JsObject, raw: JsObject) = 
 
-  # Args: (dap: DapApi, kind: CtEventKind, rawValue: JsObject)
-  
-  echo "RECEIVED THE FOLLOWING DAP EVENT: ", raw
-  # receive(data.dapApi, , sender)
+# "dap-receive-response"
+# "dap-receive-event"
+
+# In both these `on` functions, we must communicate them to the ui
+
+# We receive a DAP "Response" from the index process
+proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
+  receiveResponse(data.dapApi, "", raw)
+
+# We receive a DAP "Event" from the index process
+proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
+  receiveEvent(data.dapApi, "", raw)
 
 proc onReady(event: dom.Event) =
   if cast[cstring](cast[js](dom.document).readyState) == j"complete":
