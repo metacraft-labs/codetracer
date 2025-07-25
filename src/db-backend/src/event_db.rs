@@ -264,7 +264,7 @@ impl EventDb {
             // Table update without search
             if args.table_args.search.value.is_empty() {
                 let mut start = args.table_args.start;
-                if self.single_tables.len() > 0
+                if !self.single_tables.is_empty()
                     && self.single_tables[0].events.len() != self.global_table.len()
                     && args.table_args.start != 0
                 {
