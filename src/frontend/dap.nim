@@ -132,7 +132,6 @@ when not defined(ctInExtension):
 
   # TODO: Send this to the index process using IPC
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-    
     discard
     #dap.exampleDap.sendRequest(toDapCommandOrEvent(kind), rawValue)
     # raise newException(NotImplementedError, "asyncSendCtRequest not implemented")

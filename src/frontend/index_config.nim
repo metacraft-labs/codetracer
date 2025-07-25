@@ -429,18 +429,35 @@ type
 
 var dapSocket*: JsObject
 
+# We receive a "raw" DAP message from the db-backend.
+# We have no guarantees whatsoever that this message will arrive "complete" through this socket
 proc onDapRawMessage*(message: RawDapMessage, sender: JsObject) {.async.} =
   if not dapSocket.isNil:
+    echo "We've just received"
+    echo message.raw
     dapSocket.write(message.raw)
   else:
     # TODO: put in a queue, or directly make an error, as it might be made hard to happen, 
     # if sending from frontend only after dap socket setup here
     errorPrint "dap socket is nil, couldn't send ", message.toJs
  
-# Make sure we accept the data wholly before forwarding it to the UI
+# Here, we must decide whether we send:
+
+# "dap-receive-response"
+# "dap-receive-event"
+
+# TODO: This function need to differentiate between a response and an event
 proc setupProxyForDap* =
   dapSocket.on(cstring"data", proc(data: cstring) =
-    mainWindow.webContents.send "CODETRACER::dap-raw-response-or-event", data)
+    echo "received: ", splitLines($data)
+    let body = splitLines($data)[2]
+    echo "body: ", body
+
+    if body.`type` == "request":
+      mainWindow.webContents.send "CODETRACER::dap-receive-response", data
+    elif body.`type` == "event":
+      mainWindow.webContents.send "CODETRACER::dap-receive-event", data
+  )
 
 proc dapSocketPathForCallerPid(callerPid: int): cstring =
   CT_DAP_SOCKET_PATH_BASE & cstring"_" & cstring($callerPid)
