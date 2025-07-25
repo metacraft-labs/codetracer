@@ -36,7 +36,7 @@ git config user.name "Deploy from CI"
 git config user.email ""
 cd gh-pages
 git add -A
-git commit -m 'deploy new book'
+git commit -m 'deploy new book' --no-gpg-sign
 git push origin +gh-pages
 cd ..
 
