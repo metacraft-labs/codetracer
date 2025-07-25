@@ -616,12 +616,11 @@ proc callView*(
         onclick = proc =
           clog fmt"calltrace: jump onclick call key " & $key
           self.resetValueView()
-          # TODO: send event to middleware to change state
-          # self.data.services.debugger.stableBusy = true
           self.selectedCallNumber = self.lineIndex[call.key]
           self.lastSelectedCallKey = call.key
           self.calltraceJump(call.location)
           # TODO: send event to middleware to change status state
+          # or auto-change on move events there
           # inc self.data.services.debugger.operationCount
           self.redrawCallLines()
       ):
@@ -1028,11 +1027,14 @@ method onEnter*(self: CalltraceComponent) {.async.} =
         let call = self.callLines[callLinesIndex].content.call
 
         self.resetValueView()
-        # TODO: Middleware
-        # self.data.services.debugger.stableBusy = true
+        
         self.lastSelectedCallKey = call.key
-        # TODO: Middleware
-        # self.service.calltraceJump(call.location)
+        self.calltraceJump(call.location)
+        # TODO: middleware: stableBusy true and operationCount increase
+        # either directly from all those jumps
+        # or by an additional 
+        # NewMove event?
+        # self.data.services.debugger.stableBusy = true
         # inc self.data.services.debugger.operationCount
 
       of CallLineContentKind.CallstackInternalCount:
@@ -1143,7 +1145,7 @@ method render*(self: CalltraceComponent): VNode =
       searchCalltraceView(self)
       if not self.inExtension and not self.isDbBasedTrace:
         filterCalltraceView(self)
-    if self.service.isCalltrace:
+    if self.isCalltrace:
       tdiv(
         id = fmt"calltraceScroll-{self.id}",
         class = "local-calltrace-view",
