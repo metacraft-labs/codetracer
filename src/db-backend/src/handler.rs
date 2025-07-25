@@ -1236,8 +1236,8 @@ impl Handler {
         Ok(())
     }
 
-    pub fn update_table(&mut self, req: dap::Request, args: UpdateTableArgs) -> Result<(), Box<dyn Error>> {
-        let (table_update, trace_values_option) = self.event_db.update_table(args)?;
+    pub fn update_table(&mut self, _req: dap::Request, args: UpdateTableArgs) -> Result<(), Box<dyn Error>> {
+        let (table_update, _trace_values_option) = self.event_db.update_table(args)?;
         // TODO: For now no trace values are available
         // if let Some(trace_values) = trace_values_option {
         //     self.send_event((
@@ -1357,7 +1357,7 @@ impl Handler {
         msg: &str,
         is_operation_status: bool,
     ) -> Result<(), Box<dyn Error>> {
-        let notification = Notification::new(kind, msg, is_operation_status);
+        let _notification = Notification::new(kind, msg, is_operation_status);
         // TODO: Fix using dap protocol
         // self.send_event((
         //     EventKind::NewNotification,
