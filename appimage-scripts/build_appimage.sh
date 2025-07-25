@@ -135,6 +135,10 @@ chmod +x "${APP_DIR}/bin/ctags"
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
+# curl
+cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
+chmod +x "${APP_DIR}/bin/curl"
+
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/cargo-stylus" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
@@ -230,6 +234,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-rec
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/curl
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
@@ -240,6 +245,7 @@ patchelf --remove-rpath "${APP_DIR}"/bin/db-backend-record
 patchelf --remove-rpath "${APP_DIR}"/bin/nargo
 patchelf --remove-rpath "${APP_DIR}"/bin/wazero
 patchelf --remove-rpath "${APP_DIR}"/bin/ctags
+patchelf --remove-rpath "${APP_DIR}"/bin/curl
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
 
 APPIMAGE_ARCH=$CURRENT_ARCH
