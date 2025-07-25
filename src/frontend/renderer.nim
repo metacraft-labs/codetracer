@@ -10,7 +10,7 @@ import
   # internal
   lib, ui_helpers, types, utils, lang,
   services / [
-    event_log_service, debugger_service, editor_service, calltrace_service,
+    event_log_service, debugger_service, editor_service,
     history_service, flow_service, search_service, shell_service]
   # ui / datatable
 
@@ -1484,4 +1484,4 @@ var scrollAssembly* = -1
 #       data.ui.menu.active = false
 #       data.redraw()
 
-export event_log_service, debugger_service, editor_service, calltrace_service, history_service, flow_service, search_service, shell_service, utils
+export event_log_service, debugger_service, editor_service, history_service, flow_service, search_service, shell_service, utils

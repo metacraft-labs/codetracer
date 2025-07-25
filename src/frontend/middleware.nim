@@ -21,6 +21,19 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
     dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
     dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+    # dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate, replays: Replays) = viewsApi.emit(CtUpdatedFlow, value, replays))
+    
+
+    # proc(value: CtEvent) = emit(value)
+
+    # if event.replays.kind == Id == self.replayId:
+    #    onUpdatedFlow(event.flowData)
+
+    # viewsApi.subscribe(CtUpdateStatusOperation, proc(kind: CtEventKind, value: cstring, replays, sub) = 
+      # data.statusOperation = value
+      # viewsApi.emit(CtUpdateStatusOperation, value, replays))
+    # !!!
+    # viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, replays: Replays, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs, replays))
 
     viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStoppedEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
