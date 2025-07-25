@@ -10,7 +10,11 @@ pushd docs/book/
 # for now depending on global project devshell 
 mdbook build # build output is in the `book` directory
 
-# If the worktree already exists at the given location it should be removed first
+# Prune any stale worktrees that no longer exist on disk
+git worktree prune
+
+# If the worktree directory still exists, remove it.
+# This handles the case where a previous run failed after creating the worktree.
 if [ -d "gh-pages" ]; then
     git worktree remove gh-pages
 fi
