@@ -1,4 +1,4 @@
-use crate::task::{self, TableUpdate};
+use crate::task::{self};
 use log::info;
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
