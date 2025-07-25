@@ -1612,10 +1612,7 @@ mod tests {
         let db = setup_db();
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_tracepoints_args(1, 0),
             Task {
@@ -1633,10 +1630,7 @@ mod tests {
         let db = setup_db();
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         // TODO
         // this way we are resetting them after reforms
         // needs to pass multiple tracepoints at once now
@@ -1681,10 +1675,7 @@ mod tests {
         let db: Db = setup_db();
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_multiple_tracepoints_with_multiline_logs(3, size),
             Task {
@@ -1715,10 +1706,7 @@ mod tests {
         let db: Db = setup_db_loop(size);
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_tracepoints_args(2, 0),
             Task {
@@ -1739,10 +1727,7 @@ mod tests {
         let db: Db = setup_db_with_step_count(count);
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_tracepoints_with_count(count),
             Task {
@@ -1780,34 +1765,25 @@ mod tests {
             line: 3,
         };
         handler.source_line_jump(
-            source_location,
-            Task {
-                kind: TaskKind::SourceLineJump,
-                id: TaskId("0".to_string()),
-            },
+            dap::Request::default(),
+            source_location
         )?;
         assert_eq!(handler.step_id, StepId(2));
         handler.source_line_jump(
+            dap::Request::default(),
             SourceLocation {
                 path: path.to_string(),
                 line: 2,
-            },
-            Task {
-                kind: TaskKind::SourceLineJump,
-                id: TaskId("1".to_string()),
-            },
+            }
         )?;
         assert_eq!(handler.step_id, StepId(1));
         handler.source_call_jump(
+            dap::Request::default(),
             SourceCallJumpTarget {
                 path: "/test/workdir".to_string(),
                 line: 1,
                 token: "<top-level>".to_string(),
-            },
-            Task {
-                kind: TaskKind::SourceCallJump,
-                id: TaskId("0".to_string()),
-            },
+            }
         )?;
         assert_eq!(handler.step_id, StepId(0));
         Ok(())
@@ -1872,7 +1848,7 @@ mod tests {
 
     fn test_load_flow(handler: &mut Handler, _path: &PathBuf) {
         handler
-            .load_flow(handler.load_location(handler.step_id), gen_task(TaskKind::LoadFlow))
+            .load_flow(dap::Request::default(), handler.load_location(handler.step_id))
             .unwrap();
     }
 
