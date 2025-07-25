@@ -10,6 +10,10 @@ Other new developments:
 - Various UI improvements:
   - Fixed certain tooltips and popups produced by the editor widget being clipped in the first lines of code
   - Fixed incorrect text highlighting persistance after selecting a file in the global search bar
+- macOS support:
+  - Fixed dead link preventing users from recording ruby correctly
+  - CodeTracer no longer requires homebrew(homebrew is still required for ruby)
+  - The CodeTracer team now officially supports all versions of macOS, since macOS 12 Monterey
 
 ## 25.07.1 - 2025-07-22
 
@@ -26,7 +30,7 @@ new docs website and follow the steps to replay an example Stylus program. One c
 
 Other new developments:
 
-* db-backend now supports a new experimental binary runtime_tracing format (using capnproto internally, but this might be a subject to change)
+* db-backend now supports a new experimental binary runtime\_tracing format (using capnproto internally, but this might be a subject to change)
 * various bugfixes related to managing processes, stability
 * internal tmpdir handling generalization: improving usage by different accounts
 * improvements in config schema

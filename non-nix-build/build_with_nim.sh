@@ -8,7 +8,7 @@ set -e
 
 export GIT_ROOT=$(git rev-parse --show-toplevel)
 
-"${GIT_ROOT}"/non-nix-build/install_libraries.sh
+brew install libzip
 
 echo "==========="
 echo "codetracer build: build based on nim"
@@ -30,6 +30,7 @@ nim -d:release \
     -d:chronicles_timestamps=UnixTime \
     -d:ctTest -d:ssl -d:testing "--hint[XDeclaredButNotUsed]:off" \
     -d:libcPath=libc \
+    -d:useLibzipSrc \
     -d:builtWithNix \
     -d:ctEntrypoint \
     --nimcache:nimcache \
@@ -37,12 +38,10 @@ nim -d:release \
     --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
 
 install_name_tool \
-  -change /opt/homebrew/opt/libzip/lib/libzip.dylib @rpath/libzip.dylib \
-  "${DIST_DIR}/bin/ct"
-
-install_name_tool \
   -add_rpath "@executable_path/../../Frameworks" \
   "${DIST_DIR}/bin/ct"
+
+install_name_tool -add_rpath "@loader_path" "${DIST_DIR}/bin/ct"
 
 codesign -s - --force --deep "${DIST_DIR}/bin/ct"
 
@@ -56,15 +55,12 @@ nim -d:release \
     -d:chronicles_timestamps=UnixTime \
     -d:ctTest -d:ssl -d:testing "--hint[XDeclaredButNotUsed]:off" \
     -d:libcPath=libc \
+    -d:useLibzipSrc \
     -d:builtWithNix \
     -d:ctEntrypoint \
     --nimcache:nimcache \
     -d:ctmacos \
     --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct/db_backend_record.nim
-
-install_name_tool \
-  -change /opt/homebrew/opt/libzip/lib/libzip.dylib @rpath/libzip.dylib \
-  "${DIST_DIR}/bin/db-backend-record"
 
 install_name_tool \
   -add_rpath "@executable_path/../../Frameworks" \
