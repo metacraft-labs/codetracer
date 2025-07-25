@@ -14,11 +14,20 @@
 [![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)
 
 > [!TIP]
-> You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/share/applications` on Linux).
-When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
+> You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/bin` on Linux).
+> 
+> When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
 
 > [!CAUTION]  
-> Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `xattr -c <path/to/CodeTracer.app>`. We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program that will ensure CodeTracer is properly signed and whitelisted by Apple. See https://discussions.apple.com/thread/253714860?sortBy=rank for more details.
+> Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `user $ xattr -c <path/to/CodeTracer.app>`.
+>
+> We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program which will ensure CodeTracer is properly signed and whitelisted by Apple.
+> See [this discussion](https://discussions.apple.com/thread/253714860?sortBy=rank) for more details.
+
+> [!CAUTION]
+> Recording ruby on macOS requires you to install ruby through [homebrew](https://brew.sh), otherwise trying to record ruby programs will fail due to the built-in ruby binary on macOS being more than 7 years old.
+> 
+> Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
 
 # Introduction
 

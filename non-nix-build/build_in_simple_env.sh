@@ -52,8 +52,7 @@ rm -f "$DIST_DIR"/config
 rm -f "$DIST_DIR"/public
 cp -r "$ROOT_DIR"/src/config "$DIST_DIR"/config
 cp -r "$ROOT_DIR"/src/public "$DIST_DIR"/public
-cp "$BIN_DIR"/nargo "$DIST_DIR"/bin/
-cp "$BIN_DIR"/wazero "$DIST_DIR"/bin/
+cp -r "$BIN_DIR"/* "$DIST_DIR"/bin/
 
 # Enable the installation prompt. Extra argument to be compatible with FreeBSD coreutils
 sed -i "" "s/skipInstall.*/skipInstall: false/g" "$DIST_DIR/config/default_config.yaml"
