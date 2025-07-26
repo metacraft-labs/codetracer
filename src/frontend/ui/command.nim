@@ -265,8 +265,7 @@ method render*(self: CommandPaletteComponent): VNode =
             data.search(SearchFileRealTime, "".cstring),
           oninput = proc(ev: Event, tg: VNode) =
             let value = self.inputField.toJs.value.to(cstring)
-            if value != self.inputValue:
-              self.onInput(value),
+            self.onInput(value),
           onkeydown = proc(e: KeyboardEvent, v: VNode) =
             echo "command ", e.keyCode
             if e.keyCode == DOWN_KEY_CODE: # down

@@ -9,6 +9,7 @@ Other new developments:
 
 - Various UI improvements:
   - Fixed certain tooltips and popups produced by the editor widget being clipped in the first lines of code
+  - Fixed incorrect text highlighting persistance after selecting a file in the global search bar
 
 ## 25.07.1 - 2025-07-22
 
