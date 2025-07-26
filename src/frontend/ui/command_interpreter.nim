@@ -78,12 +78,44 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
 proc searchProgram*(self: CommandInterpreter, query: cstring) =
   self.data.services.search.searchProgram(query)
 
-proc getSortedFuzzyResults[T](self: CommandInterpreter, query: cstring, collection: seq[T], options: FuzzyOptions = COMMAND_FUZZY_OPTIONS): seq[FuzzyResult] =
-  fuzzysort.go(query, collection, options).sorted(
-    (x,y) => y.score - x.score)
+proc getSortedFuzzyResults(
+    self: CommandInterpreter,
+    query: cstring,
+    collection: seq[cstring],
+    options: FuzzyOptions = COMMAND_FUZZY_OPTIONS): seq[FuzzyResult] =
+  ## Run ``fuzzysort`` on ``collection`` and return the results sorted by score.
+  ##
+  ## ``collection`` is provided as raw strings and converted to freshly prepared
+  ## ``fuzzysort`` objects on every call. This avoids reusing prepared results
+  ## whose internal indexes caused stale highlights between searches.
+
+  let prepared = collection.mapIt(fuzzysort.prepare(it))
+  fuzzysort.go(query, prepared, options).sorted((x,y) => y.score - x.score)
 
 proc highlightResult(fuzzyResult: FuzzyResult, open: cstring = cstring("<b>"), close: cstring = cstring("</b>")): cstring =
-  fuzzysort.highlight(fuzzyResult, open, close)
+  ## Return ``fuzzyResult.target`` with the characters at ``fuzzyResult._indexes``
+  ## wrapped in the provided ``open`` and ``close`` tags.
+  ##
+  ## This avoids using ``fuzzysort.highlight`` directly which mutates the
+  ## ``FuzzyResult`` instance, leading to stale highlight ranges when the same
+  ## prepared result is reused across searches.
+
+  if fuzzyResult.target.len == 0 or fuzzyResult.`"_indexes"`.len == 0:
+    return fuzzyResult.target
+
+  var result = newStringOfCap(fuzzyResult.target.len +
+                              fuzzyResult.`"_indexes"`.len * (open.len + close.len))
+  var last = 0
+  for idx in fuzzyResult.`"_indexes"`:
+    if idx < 0 or idx >= fuzzyResult.target.len:
+      continue
+    result.add(($fuzzyResult.target)[last ..< idx])
+    result.add($open)
+    result.add(($fuzzyResult.target)[idx])
+    result.add($close)
+    last = idx + 1
+  result.add(($fuzzyResult.target)[last ..< fuzzyResult.target.len])
+  return result.cstring
 
 proc prepareCommandPanelResults(self: CommandInterpreter, kind: QueryKind, results: seq[FuzzyResult]): seq[CommandPanelResult] =
   var queryResults: seq[CommandPanelResult] = @[]
@@ -150,27 +182,30 @@ proc autocompleteQuery*(self: CommandInterpreter, query: SearchQuery): seq[Comma
 
       # prepare subcommand to be searched
       # and to be given as an argument to prepareCommandPanelResults() procedure
-      let preparedSubcommands =
-        inputCommand.subcommands.mapIt(fuzzysort.prepare(it))
-
-      # sort subcommands according to the input argument
+      # sort subcommands according to the input argument using the raw strings
       fuzzyResults =
         self.getSortedFuzzyResults(
           subcommandSearchQuery,
-          preparedSubcommands,
+          inputCommand.subcommands,
           SUBCOMMANDS_FUZZY_OPTIONS)
     else:
       fuzzyResults =
-        self.getSortedFuzzyResults(query.value, self.commandsPrepared)
+        self.getSortedFuzzyResults(
+          query.value,
+          self.commands.keys.toSeq())
 
   of FileQuery:
     fuzzyResults =
-      self.getSortedFuzzyResults(query.value, self.filesPrepared)
+      self.getSortedFuzzyResults(
+        query.value,
+        self.files.keys.toSeq())
 
   of SymbolQuery:
     if query.value.len > 4:
       fuzzyResults =
-        self.getSortedFuzzyResults(($query.value)[4 .. ^1], self.symbolsPrepared)
+        self.getSortedFuzzyResults(
+          ($query.value)[4 .. ^1],
+          self.symbols.keys.toSeq())
 
   of ProgramQuery:
     # shouldn't be called! we should call directly searchProgram for now
