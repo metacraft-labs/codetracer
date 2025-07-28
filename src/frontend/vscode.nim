@@ -8,6 +8,7 @@ when defined(ctInExtension):
       postMessage*: proc(raw: JsObject): void
       # valid only in extension-level, not webview context
       debug*: VsCodeDebugApi
+      window*: JsObject
 
     VsCodeDebugApi* = ref object
       activeDebugSession*: VsCodeDebugSession
@@ -83,4 +84,3 @@ when defined(ctInExtension):
     let transport = VsCodeExtensionToViewsTransport() # for now not used for sending;
     # viewsApi.receive called in message handler in `getOrCreatePanel` in initPanels.ts
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
-
