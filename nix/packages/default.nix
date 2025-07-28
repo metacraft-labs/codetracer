@@ -103,7 +103,8 @@
           paths = [
             pkgs.which
 
-            pkgs.nodejs-18_x
+            # pkgs.nodejs-18_x
+            pkgs.nodejs_20
             pkgs.nodePackages.npm
             pkgs.nodePackages.webpack-cli
             pkgs.bashInteractive
@@ -308,7 +309,7 @@
             codetracer-electron
             node-modules-derivation
             stdenv.cc
-            pkgs.electron_33
+            pkgs.electron
             pkgs.ruby
             indexJavascript
             uiJavascript
@@ -366,7 +367,7 @@
             project =
               pkgs.callPackage ../../node-packages/yarn-project.nix
                 {
-                  nodejs = pkgs.nodejs-18_x;
+                  nodejs = pkgs.nodejs_20;
                 }
                 {
                   src = ../../node-packages;
@@ -406,7 +407,8 @@
           inherit src;
 
           nativeBuildInputs = [
-            pkgs.nodejs-18_x
+            # pkgs.nodejs-18_x
+            pkgs.nodejs_20
             node-modules-derivation
           ];
 
