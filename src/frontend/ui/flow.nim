@@ -3164,6 +3164,7 @@ proc adjustFlow(self: FlowComponent) =
       flowLine.mainLoopContainer.style.left = &"{flowLine.offsetLeft}px"
 
 method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
+  echo "###### WENT IN!!!!!!!!!!"
   try:
     if update.isNil:
       cdebug "flow: update is nil: stopping"
