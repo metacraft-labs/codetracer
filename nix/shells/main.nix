@@ -34,7 +34,7 @@ mkShell {
       gcc
       binutils
 
-      electron_33
+      electron
 
       # node and build tools
       nodejs-18_x
@@ -232,7 +232,7 @@ mkShell {
     [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
     [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
     [ ! -f links/wazero ] && ln -s ${ourPkgs.wazero.outPath}/bin/wazero links/wazero
-    [ ! -f links/electron ] && ln -s ${electron_33.outPath}/bin/electron links/electron
+    [ ! -f links/electron ] && ln -s ${electron.outPath}/bin/electron links/electron
     [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
     # TODO: try to add an option to link to libs/upstream-nim, libs/rr
     #   for faster iteration when patching them as Zahary suggested?
