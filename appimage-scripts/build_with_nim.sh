@@ -15,6 +15,9 @@ pushd "$ROOT_PATH"
 echo "links path const:"
 echo "${APP_DIR}"
 
+
+    # --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
+
 # codetracer
 nim -d:release \
     --d:asyncBackend=asyncdispatch \
@@ -25,7 +28,7 @@ nim -d:release \
     --dynlibOverride:"libzip" \
     --dynlibOverride:"libcrypto" \
     --dynlibOverride:"libssl" \
-    --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
+    --passL:"-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
     --passL:"${APP_DIR}/lib/libpcre.so.1" \
     --passL:"${APP_DIR}/lib/libzip.so.5" \
     --passL:"${APP_DIR}/lib/libcrypto.so" \
@@ -59,10 +62,11 @@ nim \
     -d:libcPath=libc \
     -d:builtWithNix \
     -d:ctEntrypoint \
+    --dynlibOverride:"libsqlite3" \
     --dynlibOverride:"sqlite3" \
     --dynlibOverride:"pcre" \
     --dynlibOverride:"libzip" \
-    --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
+    --passL:"-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
     --passL:"${APP_DIR}/lib/libpcre.so.1" \
     --passL:"${APP_DIR}/lib/libzip.so.5" \
     --nimcache:nimcache \
