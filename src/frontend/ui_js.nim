@@ -1675,6 +1675,8 @@ when not defined(ctInExtension):
 
     setupMiddlewareApis(data.dapApi, data.viewsApi)
 
+    data.dapApi.ipc = data.ipc
+
     for content, components in data.ui.componentMapping:
       for i, component in components:
         let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)

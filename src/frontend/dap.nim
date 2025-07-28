@@ -7,8 +7,9 @@ when not defined(ctInExtension):
   type
     DapApi* = ref object
       handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]
+      ipc*: Jsobject
 
-  proc newDapApi() : DapApi =
+  proc newDapApi(ipc: JsObject) : DapApi =
     result = DapApi()
 
 else:
@@ -130,12 +131,10 @@ proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
 when not defined(ctInExtension):
   import errors
 
-  # TODO: Send this to the index process using IPC
+  # TODO: Construct DAP message (re-use types from initial DAP client)
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-    discard
-    #dap.exampleDap.sendRequest(toDapCommandOrEvent(kind), rawValue)
-    # raise newException(NotImplementedError, "asyncSendCtRequest not implemented")
-  
+    dap.ipc.send "CODETRACER::dap-raw-message", "test"
+
 else:
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
     console.log cstring"-> dap request: ", toDapCommandOrEvent(kind), rawValue
