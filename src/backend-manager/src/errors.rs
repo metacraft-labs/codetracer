@@ -10,3 +10,15 @@ impl Display for InvalidID {
 }
 
 impl Error for InvalidID {}
+
+#[derive(Debug)]
+pub struct SocketPathError;
+
+impl Display for SocketPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Can't get path for socket!")
+    }
+}
+
+impl Error for SocketPathError {}
+
