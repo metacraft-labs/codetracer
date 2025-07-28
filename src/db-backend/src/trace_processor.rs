@@ -417,10 +417,9 @@ impl<'a> TraceProcessor<'a> {
 
 #[allow(clippy::panic)]
 pub fn load_trace_data(trace_file: &Path, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let mut tracer = runtime_tracing::Tracer::new("", &[]);
-    tracer.load_trace_events(trace_file, file_format)?;
-
-    Ok(tracer.events)
+    let mut trace_reader = runtime_tracing::create_trace_reader(file_format);
+    let trace_events = trace_reader.load_trace_events(trace_file)?;
+    Ok(trace_events)
 }
 
 #[allow(clippy::panic)]
