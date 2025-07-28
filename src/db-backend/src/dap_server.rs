@@ -215,7 +215,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let capabilities = Capabilities {
-                    supports_loaded_sources_request: Some(true),
+                    supports_loaded_sources_request: Some(false),
                     supports_step_back: Some(true),
                     supports_configuration_done_request: Some(true),
                     supports_disassemble_request: Some(true),

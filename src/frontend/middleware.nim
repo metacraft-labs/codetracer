@@ -21,6 +21,15 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
     dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
     dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+    when defined(ctInExtension):
+      dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
+        if not dapApi.flowFunction.isNil:
+          dapApi.flowFunction(dapApi.editor, value)
+      )
+      dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+        if not dapApi.flowFunction.isNil:
+          dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
+      )
 
     viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
@@ -54,6 +63,7 @@ when defined(ctInExtension):
     # we don't want this in webview
     {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
     {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
+    {.emit: "module.exports.setupEditorApi = setupEditorApi;".}
     {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
     {.emit: "module.exports.receive = receive;".}
     {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
