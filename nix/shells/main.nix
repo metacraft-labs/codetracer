@@ -37,7 +37,7 @@ mkShell {
       electron
 
       # node and build tools
-      nodejs-18_x
+      nodejs_22
       nodePackages.webpack-cli
       corepack
 
@@ -227,7 +227,7 @@ mkShell {
 
     [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
     [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
-    [ ! -f links/node ] && ln -s ${nodejs-18_x.outPath}/bin/node links/node
+    [ ! -f links/node ] && ln -s ${nodejs_22.outPath}/bin/node links/node
     [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
     [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
     [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
