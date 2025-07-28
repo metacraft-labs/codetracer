@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, error::Error};
 
-use serde_json::{Value, from_slice};
+use serde_json::Value;
 
 enum ParserState {
     ParsingContentLength,
@@ -14,7 +14,30 @@ pub struct DapParser {
     remaining: usize,
 }
 
+const CONTENT_LENTGH_HEADER: & str = "Content-Length: ";
+
 impl DapParser {
+    pub fn new() -> Self {
+        Self {
+            buffer: VecDeque::new(),
+            state: ParserState::ParsingContentLength,
+            curr: Vec::new(),
+            remaining: 0,
+        }
+    }
+
+    pub fn to_bytes(val: Value) -> Vec<u8> {
+        let val_str = val.to_string();
+        let json = val_str.as_bytes();
+
+        let mut res = Vec::new();
+        res.extend(CONTENT_LENTGH_HEADER.as_bytes());
+        res.extend(json.len().to_string().as_bytes());
+        res.extend("\r\n\r\n".as_bytes());
+
+        res
+    }
+
     // Returns None when more bytes are needed for the message?
     pub fn parse_bytes(&mut self, bytes: &[u8]) -> Option<Result<Value, Box<dyn Error>>> {
         self.buffer.extend(bytes);
@@ -52,7 +75,6 @@ impl DapParser {
                         let curr = &self.curr.clone()[..self.curr.len() - 4]; // TODO: verify this
                         self.curr.clear();
 
-                        const CONTENT_LENTGH_HEADER: &'static str = "Content-Length: ";
                         if !curr.starts_with(CONTENT_LENTGH_HEADER.as_bytes()) {
                             todo!("Return error");
                         }
