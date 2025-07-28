@@ -430,7 +430,6 @@ var dapSocket*: JsObject
 # We have no guarantees whatsoever that this message will arrive "complete" through this socket
 proc onDapRawMessage*(message: RawDapMessage, sender: JsObject) {.async.} =
   if not dapSocket.isNil:
-    echo "We've just received"
     echo message.raw
     dapSocket.write(message.raw)
   else:
@@ -447,12 +446,12 @@ proc onDapRawMessage*(message: RawDapMessage, sender: JsObject) {.async.} =
 proc setupProxyForDap* =
   dapSocket.on(cstring"data", proc(data: cstring) =
     echo "received: ", splitLines($data)
-    let body = splitLines($data)[2]
+    let body: JsonNode = parseJson(splitLines($data)[2])
     echo "body: ", body
 
-    if body.`type` == "request":
+    if body["type"].getStr == "request":
       mainWindow.webContents.send "CODETRACER::dap-receive-response", data
-    elif body.`type` == "event":
+    elif body["type"].getStr == "event":
       mainWindow.webContents.send "CODETRACER::dap-receive-event", data
   )
 
