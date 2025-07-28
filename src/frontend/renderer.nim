@@ -44,7 +44,6 @@ if inElectron:
 else:
   ipc = undefined
 
-
 var escapeHandler*: proc: void
 escapeHandler = nil
 

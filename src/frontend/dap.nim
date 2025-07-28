@@ -9,8 +9,9 @@ when not defined(ctInExtension):
   type
     DapApi* = ref object
       handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]
+      ipc*: Jsobject
 
-  proc newDapApi() : DapApi =
+  proc newDapApi(ipc: JsObject) : DapApi =
     result = DapApi()
 
 else:
@@ -138,36 +139,10 @@ proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
 when not defined(ctInExtension):
   import errors
 
-  # TODO: Send this to the index process using IPC
+  # TODO: Construct DAP message (re-use types from initial DAP client)
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-    discard
-    #dap.exampleDap.sendRequest(toDapCommandOrEvent(kind), rawValue)
-    # raise newException(NotImplementedError, "asyncSendCtRequest not implemented")
-<<<<<<< HEAD
+    dap.ipc.send "CODETRACER::dap-raw-message", "test"
 
-  proc newExampleDapApi*: DapApi =
-    let exampleDap = ExampleDap(
-      location: Location(
-        path: cstring"/tmp/rust_struct_test.rs",
-        line: 1,
-        key: cstring"0",
-        functionName: cstring"<top level>",
-        highLevelFunctionName: cstring"<top level>",
-      ),
-      stackLines: @[],
-      handlers: @[]
-    )
-    exampleDap.location.highLevelPath = exampleDap.location.path
-
-    result = DapApi(exampleDap: exampleDap) 
-    result.exampleDap.on(proc(message: ExampleDapMessage) =
-      if message.`type` == cstring"response":
-        result.receiveResponse(message.command, message.body)
-      elif message.`type` == cstring"event":
-        result.receiveEvent(message.event, message.body))
-=======
->>>>>>> cabf6a8 (feat(dap): start integrating dap client into index and ui)
-  
 else:
   import .. / .. / libs / karax / karax / kdom
   proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject)
@@ -227,8 +202,3 @@ else:
 
 proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
   discard dap.asyncSendCtRequest(kind, rawValue)
-<<<<<<< HEAD
-=======
-
-
->>>>>>> cabf6a8 (feat(dap): start integrating dap client into index and ui)
