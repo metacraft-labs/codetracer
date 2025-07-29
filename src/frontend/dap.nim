@@ -307,75 +307,25 @@ else:
             onDidSendMessage: onDidSendMessage,
           }
         }
-      ))
+      )
+    )
 
   type
     VsCodeEditor* = ref object
       editor*: JsObject
       flow*: FlowComponent
 
-  var vsCodeEditor = VsCodeEditor()
+  var vsCodeEditor* = VsCodeEditor()
 
-  proc onUpdatedFlow*(editor: JsObject, update: FlowUpdate) =
-    discard cast[FlowComponent](vsCodeEditor.flow).onUpdatedFlow(update)
-
-  proc completeMove*(editor: JsObject, response: MoveState, dapApi: DapApi) =
-    vsCodeEditor.flow = FlowComponent(
-      id: 0,
-      flow: nil,
-      # tab: self.tabInfo,
-      location: response.location,
-      multilineZones: JsAssoc[int, MultilineZone]{},
-      flowDom: JsAssoc[int, Node]{},
-      shouldRecalcFlow: false,
-      flowLoops: JsAssoc[int, FlowLoop]{},
-      flowLines: JsAssoc[int, FlowLine]{},
-      activeStep: FlowStep(rrTicks: -1),
-      selectedLine: -1,
-      selectedLineInGroup: -1,
-      selectedStepCount: -1,
-      # multilineFlowLines: multilineFlowLines(),
-      multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
-      loopLineSteps: JsAssoc[int, int]{},
-      inlineDecorations: JsAssoc[int, InlineDecorations]{},
-      # editorUI: self,
-      # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
-      # editor: self.service,
-      # service: self.data.services.flow,
-      # data: self.data,
-      lineGroups: JsAssoc[int, Group]{},
-      # status: FlowUpdateState(kind: FlowWaitingForStart),
-      statusWidget: nil,
-      sliderWidgets: JsAssoc[int, js]{},
-      lineWidgets: JsAssoc[int, js]{},
-      multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
-      stepNodes: JsAssoc[int, Node]{},
-      loopStates: JsAssoc[int, LoopState]{},
-      viewZones: JsAssoc[int, int]{},
-      loopViewZones: JsAssoc[int, int]{},
-      loopColumnMinWidth: 15,
-      shrinkedLoopColumnMinWidth: 8,
-      pixelsPerSymbol: 8,
-      distanceBetweenValues: 10,
-      distanceToSource: 50,
-      inlineValueWidth: 80,
-      bufferMaxOffsetInPx: 300,
-      maxWidth: 0,
-      modalValueComponent: JsAssoc[cstring, ValueComponent]{},
-      valueMode: BeforeValueMode
-    )
-
-    dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
-
-  proc setupEditorApi(dapApi: DapApi, vscode: VsCode, context: VsCodeContext, editor: JsObject) {.exportc.} =
-    dapApi.flowFunction = onUpdatedFlow
-    dapApi.completeMoveFunction = completeMove
+  proc setupEditorApi*(dapApi: DapApi, vscode: VsCode, context: VsCodeContext, editor: JsObject) {.exportc.} =
+    dapApi.editor = editor
     vsCodeEditor.editor = editor
     context.subscriptions.push(
       vscode.window.toJs.onDidChangeActiveTextEditor(proc(editor: JsObject) =
         if not editor.isNil:
           let uri = editor["document"]["uri"]
           dapApi.editor = editor
+          vsCodeEditor.editor = editor
       )
     )
 
