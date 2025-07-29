@@ -11,7 +11,7 @@ use crate::backend_manager::BackendManager;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // TODO: maybe implement shutdown message?
-    let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel::<()>();
+    let (_shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel::<()>();
 
     let mgr = BackendManager::new().await?;
     let mut mgr = mgr.lock().await;

@@ -32,4 +32,3 @@ impl Display for SocketPathError {
 }
 
 impl Error for SocketPathError {}
-
