@@ -65,7 +65,7 @@ impl BackendManager {
                     if !rx.is_empty() {
                         if let Some(message) = rx.recv().await {
                             socket_write
-                                .write_all(&DapParser::to_bytes(message))
+                                .write_all(&DapParser::to_bytes(&message))
                                 .await
                                 .unwrap(); // TODO: handle error
                         }
@@ -151,7 +151,7 @@ impl BackendManager {
         tokio::spawn(async move {
             while let Some(message) = parent_rx.recv().await {
                 socket_write
-                    .write_all(&DapParser::to_bytes(message))
+                    .write_all(&DapParser::to_bytes(&message))
                     .await
                     .unwrap(); // TODO: handle error
             }
