@@ -1405,8 +1405,7 @@ mod tests {
     // use futures::stream::Iter;
     use lang::Lang;
     use runtime_tracing::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, StepId, StepRecord, TraceLowLevelEvent, TraceMetadata,
-        Tracer, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, NONE_VALUE,
+        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NonStreamingTraceWriter, StepId, StepRecord, TraceLowLevelEvent, TraceMetadata, TraceWriter, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, NONE_VALUE
     };
 
     use task::{TaskId, TaskKind, TraceSession, Tracepoint, TracepointMode};
@@ -1818,7 +1817,7 @@ mod tests {
 
     fn setup_db_with_calls() -> Db {
         // TODO: maybe source from a real program trace?
-        let mut tracer = Tracer::new("example.small", &[]);
+        let mut tracer = NonStreamingTraceWriter::new("example.small", &[]);
         let path = &PathBuf::from("/test/workdir/example.small");
         tracer.start(path, Line(1));
         tracer.register_step(path, Line(1));
