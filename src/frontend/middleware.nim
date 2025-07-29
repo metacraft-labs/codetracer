@@ -27,7 +27,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
           dapApi.flowFunction(dapApi.editor, value)
       )
       dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-        if not dapApi.flowFunction.isNil:
+        if not dapApi.completeMoveFunction.isNil:
           dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
       )
 
@@ -67,4 +67,3 @@ when defined(ctInExtension):
     {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
     {.emit: "module.exports.receive = receive;".}
     {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
-

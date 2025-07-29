@@ -2,7 +2,7 @@ import
   ../ui_helpers, ui_imports,
   ../renderer, value, scratchpad
 
-import ../communication, ../../common/ct_event
+import ../communication, ../../common/ct_event, ../dap
 import strutils, os
 
 # thank, God!
@@ -470,7 +470,7 @@ proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool
         self.data.redraw()
 
 proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
-  when not defined(server):
+  when not defined(server) and not defined(ctInCentralExtensionContext):
     let tippy = require("tippy.js")
     let followCursor = tippy.followCursor
 
@@ -3211,7 +3211,6 @@ proc adjustFlow(self: FlowComponent) =
       flowLine.mainLoopContainer.style.left = &"{flowLine.offsetLeft}px"
 
 method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
-  echo "###### WENT IN!!!!!!!!!!"
   try:
     if update.isNil:
       cdebug "flow: update is nil: stopping"
@@ -3918,3 +3917,59 @@ proc switchFlowType*(self: FlowComponent, flowType: FlowUI) =
     self.recalculateAndRedrawFlow()
     self.updateFlowDom()
 
+when defined(ctInExtension):
+  proc vsUpdatedFlow*(editor: JsObject, update: FlowUpdate) {.exportc.} =
+    discard cast[FlowComponent](vsCodeEditor.flow).onUpdatedFlow(update)
+
+  proc completeMove*(editor: JsObject, response: MoveState, dapApi: DapApi) {.exportc.} =
+    vsCodeEditor.flow = FlowComponent(
+      id: 0,
+      flow: nil,
+      # tab: self.tabInfo,
+      location: response.location,
+      multilineZones: JsAssoc[int, MultilineZone]{},
+      flowDom: JsAssoc[int, Node]{},
+      shouldRecalcFlow: false,
+      flowLoops: JsAssoc[int, FlowLoop]{},
+      flowLines: JsAssoc[int, FlowLine]{},
+      activeStep: FlowStep(rrTicks: -1),
+      selectedLine: -1,
+      selectedLineInGroup: -1,
+      selectedStepCount: -1,
+      # multilineFlowLines: multilineFlowLines(),
+      multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
+      loopLineSteps: JsAssoc[int, int]{},
+      inlineDecorations: JsAssoc[int, InlineDecorations]{},
+      # editorUI: self,
+      # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
+      # editor: self.service,
+      # service: self.data.services.flow,
+      # data: self.data,
+      lineGroups: JsAssoc[int, Group]{},
+      # status: FlowUpdateState(kind: FlowWaitingForStart),
+      statusWidget: nil,
+      sliderWidgets: JsAssoc[int, js]{},
+      lineWidgets: JsAssoc[int, js]{},
+      multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
+      stepNodes: JsAssoc[int, Node]{},
+      loopStates: JsAssoc[int, LoopState]{},
+      viewZones: JsAssoc[int, int]{},
+      loopViewZones: JsAssoc[int, int]{},
+      loopColumnMinWidth: 15,
+      shrinkedLoopColumnMinWidth: 8,
+      pixelsPerSymbol: 8,
+      distanceBetweenValues: 10,
+      distanceToSource: 50,
+      inlineValueWidth: 80,
+      bufferMaxOffsetInPx: 300,
+      maxWidth: 0,
+      modalValueComponent: JsAssoc[cstring, ValueComponent]{},
+      valueMode: BeforeValueMode
+    )
+
+    dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
+
+when defined(ctInExtension):
+  when defined(ctInCentralExtensionContext):
+    {.emit: "module.exports.vsUpdatedFlow = vsUpdatedFlow".}
+    {.emit: "module.exports.completeMove = completeMove".}
