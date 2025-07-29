@@ -16,7 +16,7 @@ pub struct DapParser {
     remaining: usize,
 }
 
-const CONTENT_LENTGH_HEADER: & str = "Content-Length: ";
+const CONTENT_LENTGH_HEADER: &str = "Content-Length: ";
 
 impl DapParser {
     pub fn new() -> Self {
@@ -51,7 +51,7 @@ impl DapParser {
 
     fn parse_buffer(&mut self) -> Option<Result<Value, Box<dyn Error>>> {
         while !self.buffer.is_empty() {
-            // The buffer is not empty, so this is safe
+            // SAFETY: The condition of the loop ensures that the buffer is not empty
             self.curr
                 .push(unsafe { self.buffer.pop_front().unwrap_unchecked() });
 
@@ -62,7 +62,7 @@ impl DapParser {
                     if self.remaining == 0 {
                         let res: Option<Result<Value, Box<dyn Error>>> =
                             match serde_json::from_slice::<Value>(&self.curr) {
-                                Ok(msg) => Some(Ok(msg)),
+                                Ok(msg) => Some(Ok(msg)), // TODO: verify that msg is object
                                 Err(err) => Some(Err(Box::new(err))),
                             };
 
@@ -80,7 +80,7 @@ impl DapParser {
                         self.curr.clear();
 
                         if !curr.starts_with(CONTENT_LENTGH_HEADER.as_bytes()) {
-                            return Some(Err(Box::new(InvalidLengthHeader)))
+                            return Some(Err(Box::new(InvalidLengthHeader)));
                         }
 
                         let len_str = str::from_utf8(&curr[CONTENT_LENTGH_HEADER.len()..]);
