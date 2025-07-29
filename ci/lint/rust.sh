@@ -30,6 +30,19 @@ env RUSTFLAGS="-D warnings" cargo check --release --bin schema-generator
 
 popd
 
+echo '###############################################################################'
+echo 'Checking backend-manager'
+echo '###############################################################################'
+
+pushd src/backend-mamager
+
+# threat warnings as errors here!
+env RUSTFLAGS="-D warnings" cargo check --release
+
+cargo clippy -- -D warnings
+
+popd
+
 
 
 echo '###############################################################################'

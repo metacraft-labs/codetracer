@@ -15,3 +15,14 @@ cargo test --release --bin db-backend # test non-ignored
 cargo test --release --bin db-backend -- --ignored # test ignored
 
 popd
+
+
+echo '###############################################################################'
+echo 'Checking backend-manager'
+echo '###############################################################################'
+
+pushd src/backend-manager
+
+cargo test --release
+
+popd
