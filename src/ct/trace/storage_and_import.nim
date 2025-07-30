@@ -103,7 +103,10 @@ proc importDbTrace*(
     traceFileName = "trace.json"
     tracePath = traceFolder / traceFileName
 
-  let outputFolder = fmt"{codetracerTraceDir}/trace-{traceID}/"
+  let outputFolder = if traceIdArg == NO_TRACE_ID:
+      fmt"{codetracerTraceDir}/trace-{traceID}/"
+    else:
+      traceFolder
   if traceIdArg == NO_TRACE_ID:
     createDir(outputFolder)
     copyFile(traceMetadataPath, outputFolder / "trace_metadata.json")
