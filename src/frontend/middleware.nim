@@ -67,3 +67,4 @@ when defined(ctInExtension):
     {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
     {.emit: "module.exports.receive = receive;".}
     {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
+    {.emit: "module.exports.ctSourceLineJump = ctSourceLineJump".}
