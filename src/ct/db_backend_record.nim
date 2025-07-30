@@ -1,6 +1,7 @@
 import std/[ os, osproc, strutils, strformat, sequtils, json ],
+  json_serialization,
   ../common/[ lang, paths, types, trace_index ],
-  utilities/[ env, language_detection ],
+  utilities/[ env, language_detection, zip ],
   cli/[ logging, help ],
   globals,
   trace/storage_and_import,
@@ -263,6 +264,56 @@ proc record(
     calltraceMode = calltraceMode)
 
 
+proc fillTraceDbMetadataFile(path: string, traceId: int) =
+  let trace = trace_index.find(traceId, test=false)
+  if trace.isNil:
+    echo "error: trace with id ", traceId, " not found for filling trace metadata json file: stopping"
+    quit (1)
+  writeFile(path, JSON.encode(trace, pretty=true))
+
+
+proc exportRecord(
+    program: string,
+    recordArgs: seq[string],
+    traceId: int,
+    exportZipPath: string,
+    outputFolder: string,
+    cleanupOutputFolder: bool) =
+  # let folder = codetracerTmpPath / changeFileEx(exportZipPath, "")
+
+  # outputFolder/
+  #   < original files >
+  #   trace_db_metadata.json
+  #
+  # -> zip -> <exportZipPath>
+
+  fillTraceDbMetadataFile(outputFolder / "trace_db_metadata.json", traceId)
+
+  # (alexander): 
+  #   trying to find full path
+  #   a hack: writing first there, otherwise i think expandFilename fails in some cases, when no such file yets
+  writeFile(exportZipPath, "")
+  let exportZipFullPath = expandFilename(exportZipPath)
+  # otherwise zip seems to try to add to it and because it's not a valid archive, it leads to an error
+  removeFile(exportZipPath)
+
+  # zip -r <exportZipPath> . # in <outputFolder>
+  # changing directory, so we have relative paths
+  try:
+    zip.zipFolder(outputFolder, exportZipFullPath)
+    # echo "OK"
+  # let process = startProcess(zipExe, workingDir=outputFolder, args = @["-r", exportZipFullPath, "."], options={poParentStreams})
+  # let code = waitForExit(process)
+  except Exception as e:
+    echo "error: ", e.msg, " while trying to zip: maybe archive is not created"
+    quit(1)
+  finally:
+    if cleanupOutputFolder:
+      # in both cases: success or error
+      # echo "cleanup output folder: ", outputFolder
+      removeDir outputFolder
+
+
 proc main*(): Trace =
   # record
   #   [--lang <lang>] [-o/--output-folder <output-folder>]
@@ -390,14 +441,12 @@ proc main*(): Trace =
 
   let binaryName = program.extractFilename()
 
-  if isExported:
-    if exportZipPath == "":
-      outputFolder = binaryName
-    else:
-      outputFolder = codetracerTmpPath / changeFileExt(exportZipPath, "")
-
   if recordsOutputFolder != "":
     outputFolder = recordsOutputFolder / fmt"trace-{binaryName}-{traceID}"
+  else:
+    # if empty, it would be constructed in `record` if it receives an empty outputFolder: get from there after `record(..)`
+    # otherwise: it's already ready
+    discard
 
   if isShellExported:
     isExported = true
@@ -432,10 +481,12 @@ proc main*(): Trace =
       traceIDRecord=traceID, outputFolderArg=outputFolder)
     traceId = trace.id
     var outputPath = trace.outputFolder
+    outputFolder = trace.outputFolder
+
     createDir(outputFolder)
+    # echo isExported, " ", exportZipPath
     if isExported:
-      # TODO: exportRecord
-      # exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
+      exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
       let exportZipFullPath = expandFilename(exportZipPath)
       outputPath = exportZipFullPath
 
