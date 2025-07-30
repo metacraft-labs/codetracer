@@ -288,6 +288,14 @@ else:
     console.log cstring"-> dap request: ", toDapCommandOrEvent(kind), rawValue
     discard dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
 
+  proc ctSourceLineJump*(dap: DapApi, line: int, path: cstring, behaviour: JumpBehaviour) {.exportc.} =
+    let target = SourceLineJumpTarget(
+      path: path,
+      line: line,
+      behaviour: behaviour,
+    )
+    dap.sendCtRequest(CtSourceLineJump, target.toJs)
+
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     result = DapApi(vscode: vscode, context: context)
     proc onDidSendMessage(message: VsCodeDapMessage) =
