@@ -4,7 +4,7 @@ import
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],
   ../online_sharing/[ upload, download, delete ],
-  ../trace/[ replay, record, run, metadata ],
+  ../trace/[ replay, record, run, metadata, host ],
   ../codetracerconf,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
@@ -108,6 +108,11 @@ proc runInitial*(conf: CodetracerConf) =
     of StartupCommand.console:
       # similar to replay
       notSupportedCommand($conf.cmd)
+    of StartupCommand.host:
+      hostCommand(
+        conf.hostPort,
+        conf.hostBackendSocketPort, conf.hostFrontendSocketPort,
+        conf.hostFrontendSocketParameters, conf.hostTraceArg)
     of StartupCommand.upload:
       # similar to replay/console
       uploadCommand(
