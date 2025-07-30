@@ -231,6 +231,7 @@ when defined(server):
     server.use(cstring"/styles/", express.`static`(codetracerExeDir & cstring"/frontend/styles/"))
     server.use(cstring"/frontend/styles/", express.`static`(codetracerExeDir & cstring"/frontend/styles/"))
     server.use(cstring"/node_modules", express.`static`(codetracerInstallDir & cstring"/node_modules"))
+    server.use(cstring"/ui.js", express.`static`(userInterfacePath))
     server.listen(data.startOptions.port, proc = infoPrint fmt"listening on localhost:{data.startOptions.port}")
 
 
