@@ -4,7 +4,7 @@ import
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],
   ../online_sharing/[ upload, download, delete ],
-  ../trace/[ replay, record, run, metadata, host ],
+  ../trace/[ replay, record, run, metadata, host, import_command ],
   ../codetracerconf,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
@@ -113,6 +113,10 @@ proc runInitial*(conf: CodetracerConf) =
         conf.hostPort,
         conf.hostBackendSocketPort, conf.hostFrontendSocketPort,
         conf.hostFrontendSocketParameters, conf.hostTraceArg)
+    of StartupCommand.`import`:
+      importCommand(
+        conf.importTraceZipPath,
+        conf.importOutputPath)
     of StartupCommand.upload:
       # similar to replay/console
       uploadCommand(
@@ -131,7 +135,7 @@ proc runInitial*(conf: CodetracerConf) =
     of StartupCommand.record:
       discard record(
         conf.recordLang, conf.recordOutputFolder,
-        conf.recordExportFile, conf.recordLang, conf.recordStylusTrace,
+        conf.recordExportFile, conf.recordStylusTrace,
         conf.recordAddress, conf.recordSocket,
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:

@@ -27,6 +27,7 @@ type
     record,
     console,
     host,
+    `import`,
     arb,
 
     # `g++`,
@@ -208,6 +209,16 @@ type
       hostTraceArg* {.
         argument
         desc: "Trace id to run. If not a valid trace id, treats it as a trace folder"
+      .} : string
+    of `import`:
+      importTraceZipPath* {.
+        argument
+        desc: "Trace zip file to import"
+      .} : string
+      importOutputPath* {.
+        argument
+        defaultValue: ""
+        desc: "Output folder for the import command"
       .} : string
     of build:
       buildProgramPath* {.

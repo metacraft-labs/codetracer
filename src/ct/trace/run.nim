@@ -36,7 +36,6 @@ proc runWithRestart(
           "wasm"
       recordedTrace = record(lang=extension,
                              outputFolder="",
-                             backend="",
                              exportFile="",
                              stylusTrace="",
                              address="",

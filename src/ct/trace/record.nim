@@ -31,7 +31,6 @@ proc recordInternal(exe: string, args: seq[string], configPath: string): Trace =
 
 proc record*(lang: string,
              outputFolder: string,
-             backend: string,
              exportFile: string,
              stylusTrace: string,
              address: string,
