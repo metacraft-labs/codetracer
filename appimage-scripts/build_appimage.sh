@@ -36,6 +36,7 @@ export NIX_CODETRACER_EXE_DIR="${APP_DIR}"
 mkdir -p "${APP_DIR}"/bin
 mkdir -p "${APP_DIR}"/src
 mkdir -p "${APP_DIR}"/lib
+mkdir -p "${APP_DIR}"/views
 
 # Install Ruby
 bash "${ROOT_PATH}"/appimage-scripts/install_ruby.sh
@@ -156,6 +157,8 @@ cp "${ROOT_PATH}/src/frontend/index.html" "${APP_DIR}/index.html"
 
 cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/subwindow.html"
 cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/src/subwindow.html"
+
+cp "${ROOT_PATH}/views/server_index.ejs" "${APP_DIR}/views/server_index.ejs"
 
 rm -rf "${APP_DIR}/config"
 rm -rf "${APP_DIR}/public"

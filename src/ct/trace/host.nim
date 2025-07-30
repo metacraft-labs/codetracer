@@ -30,9 +30,9 @@ proc hostCommand*(
   # for name, value in envPairs():
   #   env[name] = value
 
-  when defined(builtWithNix):
-    putEnv("NODE_PATH", nodeModulesPath)
-    putEnv("NIX_CODETRACER_EXE_DIR", nixCodetracerExeDir) 
+  # when defined(builtWithNix):
+    # putEnv("NODE_PATH", nodeModulesPath)
+    # putEnv("NIX_CODETRACER_EXE_DIR", nixCodetracerExeDir) 
     # env["NODE_PATH"] = nodeModulesPath
     # env["NIX_CODETRACER_EXE_DIR"] = nixCodetracerExeDir
 
