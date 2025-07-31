@@ -7,6 +7,7 @@ include_rules
 #: foreach *.styl |> !stylus |>
 
 : default_white_theme.styl |> !stylus |> default_white_theme.css
-: default_dark_theme.styl |> !stylus |> default_dark_theme.css
+: default_dark_theme_electron.styl |> !stylus |> default_dark_theme_electron.css
+: default_dark_theme_extension.styl |> !stylus |> default_dark_theme_extension.css
 : loader.styl |> !stylus |> loader.css
 : subwindow.styl |> !stylus |> subwindow.css

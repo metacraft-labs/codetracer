@@ -426,7 +426,7 @@
 
             echo "Transpiling .styl into .css files using stylus"
             node $stylus src/frontend/styles/default_white_theme.styl
-            node $stylus src/frontend/styles/default_dark_theme.styl
+            node $stylus src/frontend/styles/default_dark_theme_electron.styl
             node $stylus src/frontend/styles/loader.styl
             node $stylus src/frontend/styles/subwindow.styl
 
