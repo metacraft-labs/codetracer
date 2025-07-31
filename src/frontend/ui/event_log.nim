@@ -575,7 +575,12 @@ proc events(self: EventLogComponent) =
     jqFind(j"#" & context.denseId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.denseTable.context, e))
     let denseWrapper = j"#" & self.denseId & j"_wrapper"  
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
-      .addEventListener(j"scroll", proc = self.denseTable.updateTableRows())
+      .addEventListener(
+        j"scroll",
+        proc =
+          self.denseTable.updateTableRows()
+          self.redrawForExtension()
+      )
     jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"contextmenu", j"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))

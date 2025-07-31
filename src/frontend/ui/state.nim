@@ -43,8 +43,6 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   self.completeMoveIndex += 1
   self.redraw()
 
-
-
 proc redrawDynamically*(self: StateComponent) =
   let vdom = self.render()
   let newDom = vnodeToDom(vdom, KaraxInstance())
