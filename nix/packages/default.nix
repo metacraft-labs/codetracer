@@ -34,6 +34,7 @@
           pcre
           libzip
           openssl
+          libuv
           ;
 
         chromedriver-102 = pkgs.chromedriver.overrideAttrs (_: {
@@ -543,6 +544,7 @@
             pkgs.sqlite
             pkgs.libzip
             pkgs.openssl
+            pkgs.libuv
             # pkgs.zip
           ];
 
