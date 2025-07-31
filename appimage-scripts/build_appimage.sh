@@ -85,6 +85,11 @@ cp -L "${OPENSSL}"/lib/libssl.so "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libcrypto.so "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libcrypto.so.3 "${APP_DIR}"/lib
 
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv"
+LIBUV=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv.out")
+cp -L "${LIBUV}"/lib/libuv.so.1 "${APP_DIR}"/lib
+ls -al "${APP_DIR}"/lib
+
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
 bash "${ROOT_PATH}"/appimage-scripts/install_electron.sh
@@ -139,6 +144,10 @@ cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DI
 # curl
 cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/curl"
+
+# node
+cp -Lr "${ROOT_PATH}/src/links/node" "${APP_DIR}/bin/"
+chmod +x "${APP_DIR}/bin/node"
 
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/cargo-stylus" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
@@ -239,6 +248,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/curl
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/node
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
 # Clear up the executable's rpath
@@ -249,6 +259,7 @@ patchelf --remove-rpath "${APP_DIR}"/bin/nargo
 patchelf --remove-rpath "${APP_DIR}"/bin/wazero
 patchelf --remove-rpath "${APP_DIR}"/bin/ctags
 patchelf --remove-rpath "${APP_DIR}"/bin/curl
+patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
 
 APPIMAGE_ARCH=$CURRENT_ARCH

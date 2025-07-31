@@ -82,7 +82,7 @@ proc hostCommand*(
   let coreProcess = startCoreProcess(traceId=traceId, recordCore=recordCore, callerPid=callerPid)
   echo "server index ", codetracerExeDir
   var process = startProcess(
-    electronExe,
+    nodeExe,
     workingDir = codetracerInstallDir,
     args = @[
       codetracerExeDir / "server_index.js",
