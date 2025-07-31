@@ -19,6 +19,8 @@ nim \
   --out:"$2" \
   js src/frontend/middleware.nim
 
+just build-once
+
 cd ./src/db-backend
 cargo build
 cd ../..
