@@ -258,7 +258,7 @@ when not defined(ctInExtension):
   proc newExampleDapApi*: DapApi =
     let exampleDap = ExampleDap(
       location: Location(
-        path: cstring"/home/alexander92/wazero/test_code/rust_struct_test.rs",
+        path: cstring"/tmp/rust_struct_test.rs",
         line: 1,
         key: cstring"0",
         functionName: cstring"<top level>",
