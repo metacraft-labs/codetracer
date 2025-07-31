@@ -9,7 +9,8 @@
   font-size: 3ch
 
 .calltrace-search
-  // padding-right: 8px
+  if !IS_EXTENSION
+    padding-right: 8px
 
 .calltrace-view
 
@@ -489,7 +490,10 @@
   width: fit-content
 
 .calltrace-search-input
-  margin: 4px !important
+  if !IS_EXTENSION
+    margin-left: 4px !important
+  else
+    margin: 4px !important
 
 .step-list
   overflow: auto

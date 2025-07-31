@@ -716,7 +716,7 @@ proc loadTheme*(name: cstring) =
   var link = jq("#theme")
   let currentTheme = cast[JsObject](link).dataset.theme.to(cstring)
   if currentTheme != name:
-    let linkValue = cstring(fmt"frontend/styles/{name}_theme.css?theme={now()}")
+    let linkValue = cstring(fmt"frontend/styles/{name}_theme_electron.css?theme={now()}")
     cast[js](link).href = linkValue
     cast[js](link).dataset.theme = name
 
