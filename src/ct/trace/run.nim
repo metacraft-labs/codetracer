@@ -36,9 +36,10 @@ proc runWithRestart(
           "wasm"
       recordedTrace = record(lang=extension,
                              outputFolder="",
-                             backend="",
                              exportFile="",
                              stylusTrace="",
+                             address="",
+                             socketPath="",
                              program=recordArgs[0],
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:

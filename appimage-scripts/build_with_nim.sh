@@ -91,6 +91,12 @@ nim \
     -d:nodejs --out:"${APP_DIR}/index.js" js src/frontend/index.nim
 cp "${APP_DIR}/index.js" "${APP_DIR}/src/index.js"
 
+nim \
+    --hints:on --warnings:off --sourcemap:on \
+    -d:ctIndex -d:server -d:chronicles_sinks=json \
+    -d:nodejs --out:"${APP_DIR}/server_index.js" js src/frontend/index.nim
+cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
+
 # ui.js
 nim \
     --hints:off --warnings:off \

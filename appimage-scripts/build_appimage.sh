@@ -36,6 +36,7 @@ export NIX_CODETRACER_EXE_DIR="${APP_DIR}"
 mkdir -p "${APP_DIR}"/bin
 mkdir -p "${APP_DIR}"/src
 mkdir -p "${APP_DIR}"/lib
+mkdir -p "${APP_DIR}"/views
 
 # Install Ruby
 bash "${ROOT_PATH}"/appimage-scripts/install_ruby.sh
@@ -63,6 +64,7 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.sqlite"
 
 SQLITE=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.sqlite.out")
 cp -L "${SQLITE}"/lib/libsqlite3.so.0 "${APP_DIR}"/lib
+cp -L "${SQLITE}"/lib/libsqlite3.so "${APP_DIR}"/lib
 
 nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.pcre"
 
@@ -83,6 +85,11 @@ cp -L "${OPENSSL}"/lib/libssl.so.3 "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libssl.so "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libcrypto.so "${APP_DIR}"/lib
 cp -L "${OPENSSL}"/lib/libcrypto.so.3 "${APP_DIR}"/lib
+
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv"
+LIBUV=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv.out")
+cp -L "${LIBUV}"/lib/libuv.so.1 "${APP_DIR}"/lib
+ls -al "${APP_DIR}"/lib
 
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
@@ -135,6 +142,18 @@ chmod +x "${APP_DIR}/bin/ctags"
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
+
+# curl
+cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
+chmod +x "${APP_DIR}/bin/curl"
+
+# node
+cp -Lr "${ROOT_PATH}/src/links/node" "${APP_DIR}/bin/"
+chmod +x "${APP_DIR}/bin/node"
+
+# shellcheck disable=SC2046
+cp -n $(lddtree -l "${APP_DIR}/bin/node" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/cargo-stylus" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
@@ -152,6 +171,8 @@ cp "${ROOT_PATH}/src/frontend/index.html" "${APP_DIR}/index.html"
 
 cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/subwindow.html"
 cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/src/subwindow.html"
+
+cp "${ROOT_PATH}/views/server_index.ejs" "${APP_DIR}/views/server_index.ejs"
 
 rm -rf "${APP_DIR}/config"
 rm -rf "${APP_DIR}/public"
@@ -230,7 +251,9 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-rec
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/curl
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/node
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
 # Clear up the executable's rpath
@@ -240,7 +263,11 @@ patchelf --remove-rpath "${APP_DIR}"/bin/db-backend-record
 patchelf --remove-rpath "${APP_DIR}"/bin/nargo
 patchelf --remove-rpath "${APP_DIR}"/bin/wazero
 patchelf --remove-rpath "${APP_DIR}"/bin/ctags
+patchelf --remove-rpath "${APP_DIR}"/bin/curl
+patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
+
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/node"
 
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then

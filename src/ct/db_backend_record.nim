@@ -1,6 +1,7 @@
 import std/[ os, osproc, strutils, strformat, sequtils, json ],
+  json_serialization,
   ../common/[ lang, paths, types, trace_index ],
-  utilities/[ env, language_detection ],
+  utilities/[ env, language_detection, zip ],
   cli/[ logging, help ],
   globals,
   trace/storage_and_import,
@@ -124,7 +125,7 @@ proc recordDb(
   # noir: call directly its local exe as a simple workaround for now:
   # (noirExe from src/common/paths.nim)
   #   we should try to not always depend on env var paths though
-  echo "codetracer: starting language tracer with:"
+  # echo "codetracer: starting language tracer with:"
   let workdir = if lang == LangNoir:
         # for noir, we must start in the noir project directory
         # for the trace command to work
@@ -137,7 +138,7 @@ proc recordDb(
     vmExe,
     args = startArgs.concat(args),
     workingDir = workdir,
-    options = {poEchoCmd, poParentStreams})
+    options = {poParentStreams}) # add poEchoCmd if you want to debug and see how the cmd might look
   let exitCode = waitForExit(process)
   if exitCode != 0:
     echo "error: problem with ruby trace: exit code = ", exitCode
@@ -231,7 +232,7 @@ proc record(
       var vmPath = ""
       if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
         vmPath = wazeroExe
-        echo "wasm vm path ", vmPath
+        # echo "wasm vm path ", vmPath
       else:
         vmPath = noirExe
       return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
@@ -263,12 +264,63 @@ proc record(
     calltraceMode = calltraceMode)
 
 
+proc fillTraceDbMetadataFile(path: string, traceId: int) =
+  let trace = trace_index.find(traceId, test=false)
+  if trace.isNil:
+    echo "error: trace with id ", traceId, " not found for filling trace metadata json file: stopping"
+    quit (1)
+  writeFile(path, JSON.encode(trace, pretty=true))
+
+
+proc exportRecord(
+    program: string,
+    recordArgs: seq[string],
+    traceId: int,
+    exportZipPath: string,
+    outputFolder: string,
+    cleanupOutputFolder: bool) =
+  # let folder = codetracerTmpPath / changeFileEx(exportZipPath, "")
+
+  # outputFolder/
+  #   < original files >
+  #   trace_db_metadata.json
+  #
+  # -> zip -> <exportZipPath>
+
+  fillTraceDbMetadataFile(outputFolder / "trace_db_metadata.json", traceId)
+
+  # (alexander): 
+  #   trying to find full path
+  #   a hack: writing first there, otherwise i think expandFilename fails in some cases, when no such file yets
+  writeFile(exportZipPath, "")
+  let exportZipFullPath = expandFilename(exportZipPath)
+  # otherwise zip seems to try to add to it and because it's not a valid archive, it leads to an error
+  removeFile(exportZipPath)
+
+  # zip -r <exportZipPath> . # in <outputFolder>
+  # changing directory, so we have relative paths
+  try:
+    zip.zipFolder(outputFolder, exportZipFullPath)
+    # echo "OK"
+  # let process = startProcess(zipExe, workingDir=outputFolder, args = @["-r", exportZipFullPath, "."], options={poParentStreams})
+  # let code = waitForExit(process)
+  except Exception as e:
+    echo "error: ", e.msg, " while trying to zip: maybe archive is not created"
+    quit(1)
+  finally:
+    if cleanupOutputFolder:
+      # in both cases: success or error
+      # echo "cleanup output folder: ", outputFolder
+      removeDir outputFolder
+
+
 proc main*(): Trace =
   # record
   #   [--lang <lang>] [-o/--output-folder <output-folder>]
   #   [--backend <backend>]
   #   [-e/--export <export-zip>] [-c/--cleanup-output-folder]
   #   [-t/--stylus-trace <trace-path>]
+  #   [-a/--address <address>] [--socket <socket-path>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:
@@ -286,6 +338,10 @@ proc main*(): Trace =
   var exportZipPath = ""
   var backend = ""
   var stylusTrace = ""
+  var address = ""
+  var socketPath = ""
+  var isExportedWithArg = false
+
   # for i, arg in args:
   var i = 0
   while i < args.len:
@@ -298,6 +354,7 @@ proc main*(): Trace =
       outputFolder = expandFilename(args[i + 1])
       i += 2
     elif arg == "-e" or arg == "--export":
+      isExportedWithArg = true
       isExported = true
       if args.len < i + 2:
         displayHelp()
@@ -324,6 +381,18 @@ proc main*(): Trace =
         displayHelp()
         return
       stylusTrace = args[i + 1]
+      i += 2
+    elif arg == "--address" or arg == "-a":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      address = args[i + 1]
+      i += 2
+    elif arg == "--socket":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      socketPath = args[i + 1] 
       i += 2
     else:
       if program == "":
@@ -358,7 +427,7 @@ proc main*(): Trace =
   let sessionLogPath = scriptSessionLogPath(sessionId)
   let reportFile = getEnv("CODETRACER_SHELL_REPORT_FILE", "")
   let recordsOutputFolder = getEnv("CODETRACER_SHELL_RECORDS_OUTPUT", "")
-  let isShellExported = getEnv("CODETRACER_SHELL_EXPORT", "0") == "1"
+  let exportFolder = getEnv("CODETRACER_SHELL_EXPORT", "")
   let shellCleanupOutputFolder = getEnv("CODETRACER_SHELL_CLEANUP_OUTPUT_FOLDER", "0") == "1"
   let shellSocket = getEnv("CODETRACER_SHELL_SOCKET", "")
   let shellAddress = getEnv("CODETRACER_SHELL_ADDRESS", "")
@@ -366,34 +435,40 @@ proc main*(): Trace =
   let actionId = -1 # TODO? newActionId(sessionId, test=false)
   let firstLine = loadLine(sessionId, sessionLogPath)
 
-  if isShellExported:
-    isExported = true
-
   if shellCleanupOutputFolder:
     cleanupOutputFolder = true
 
   let binaryName = program.extractFilename()
 
-  if isExported:
-    if exportZipPath == "":
-      outputFolder = binaryName
-    else:
-      outputFolder = codetracerTmpPath / changeFileExt(exportZipPath, "")
-
   if recordsOutputFolder != "":
     outputFolder = recordsOutputFolder / fmt"trace-{binaryName}-{traceID}"
+  else:
+    # if empty, it would be constructed in `record` if it receives an empty outputFolder: get from there after `record(..)`
+    # otherwise: it's already ready
+    discard
 
-  if isShellExported:
+  if exportFolder.len > 0:
     isExported = true
-    exportZipPath = outputFolder & ".zip"
 
   # echo "outputFolder ", outputFolder, " isExported ", isExported, " exportZipPath ", exportZipPath
   # echo "program ", program, " recordArgs ", recordArgs, "lang ", lang
 
   # echo "recording? ", sessionId, " ", shellSocket, " ", shellAddress
-  if sessionId != -1:
+
+  if socketPath.len == 0: # arg has precedence over env: only if empty, use env
+    socketPath = shellSocket
+  if address.len == 0:
+    address = shellAddress
+
+  let shouldSendEvents = sessionId != -1 or socketPath.len > 0 and address.len > 0
+
+  # echo "socketPath ", socketPath
+  # echo "address ", address
+  # echo "shouldSendEvents ", shouldSendEvents
+
+  if shouldSendEvents:
     registerRecordingCommand(
-      reportFile, shellSocket, shellAddress,
+      reportFile, socketPath, address,
       sessionId, actionId, Trace(id: traceId, outputFolder: outputFolder),
       command, WorkingStatus,
       errorMessage="", firstLine=firstLine, lastLine=firstLine)
@@ -403,18 +478,24 @@ proc main*(): Trace =
       program, recordArgs, "", lang, backend, stylusTrace,
       traceIDRecord=traceID, outputFolderArg=outputFolder)
     traceId = trace.id
-    var outputPath = trace.outputFolder
+    outputFolder = trace.outputFolder
+
     createDir(outputFolder)
     if isExported:
-      # TODO: exportRecord
-      # exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
-      let exportZipFullPath = expandFilename(exportZipPath)
-      outputPath = exportZipFullPath
+      # args override env vars, which exportFolder comes from
+      if not isExportedWithArg and exportFolder.len > 0:
+        exportZipPath = exportFolder / fmt"trace-{traceId}.zip"
+        createDir(exportFolder)
+      exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
 
-    if sessionId != -1:
+      let exportZipFullPath = expandFilename(exportZipPath)
+      # (alexander): codetracer ci expects `trace.outputFolder` to be the zip path without ".zip" i think
+      trace.outputFolder = exportZipFullPath.changeFileExt("")
+
+    if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
       registerRecordingCommand(
-        reportFile, shellSocket, shellAddress,
+        reportFile, socketPath, address,
         sessionId, actionId, trace,
         command, OkStatus,
         errorMessage="", firstLine=firstLine, lastLine=lastLine)
@@ -430,10 +511,10 @@ proc main*(): Trace =
     echo fmt"traceId:{traceId}"
     return trace
   except CatchableError as e:
-    if sessionId != -1:
+    if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
       registerRecordingCommand(
-        reportFile, shellSocket, shellAddress,
+        reportFile, socketPath, address,
         sessionId, actionId, Trace(id: -1, outputFolder: outputFolder),
         command, ErrorStatus,
         errorMessage=e.msg, firstLine=firstLine, lastLine=lastLine)

@@ -93,6 +93,7 @@ let
   # TODO make it work
   electronExe* = linksPath / "bin" / "electron"
   electronIndexPath* = codetracerExeDir / "src" / "index.js"
+  userInterfacePath* = codetracerExeDir / "ui.js"
   chromedriverExe* = linksPath / "bin" / "chromedriver"
 
   cTraceObjectFilePath* = env.get(

@@ -26,6 +26,8 @@ type
     build,
     record,
     console,
+    host,
+    `import`,
     arb,
 
     # `g++`,
@@ -177,6 +179,47 @@ type
        abbr: "i",
        desc: "explicit flag for interactively choosing a trace"
       .}: Option[bool]
+    of host:
+      # codetracer host --port <port>
+      #        [--backend-socket-port <port>]
+      #        [--frontend-socket <port>]
+      #        [--frontend-socket-parameters <parameters>]
+      #        <trace-id>/<trace-folder>
+      hostPort* {.
+        name: "port"
+        desc: "Port to listen on"
+      .} : int
+
+      hostBackendSocketPort* {.
+        name: "backend-socket-port"
+        desc: "Port to listen on for backend socket"
+      .} : Option[int]
+
+      hostFrontendSocketPort* {.
+        name: "frontend-socket"
+        desc: "Port to listen on for frontend socket"
+      .} : Option[int]
+
+      hostFrontendSocketParameters* {.
+        name: "frontend-socket-parameters"
+        defaultValue: ""
+        desc: "Parameters to forward to frontend socket"
+      .} : string
+
+      hostTraceArg* {.
+        argument
+        desc: "Trace id to run. If not a valid trace id, treats it as a trace folder"
+      .} : string
+    of `import`:
+      importTraceZipPath* {.
+        argument
+        desc: "Trace zip file to import"
+      .} : string
+      importOutputPath* {.
+        argument
+        defaultValue: ""
+        desc: "Output folder for the import command"
+      .} : string
     of build:
       buildProgramPath* {.
         argument
@@ -219,6 +262,19 @@ type
         defaultValue: ""
         desc: "Path to a stylus emv trace json file"
       .} : string
+
+      recordAddress* {.
+        name: "address"
+        abbr: "a"
+        defaultValue: ""
+        desc: "Address when we are recording in ci mode/environment"
+      .}: string
+
+      recordSocket* {.
+        name: "socket"
+        defaultValue: ""
+        desc: "Path to socket for sending the trace events metadata when in ci mode/environment"
+      .}: string
 
       recordProgram* {.
         argument
