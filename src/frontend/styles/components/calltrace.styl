@@ -470,7 +470,8 @@
   font-size: 14px
   height: 100%
   color: COLOR
-  // padding-left: 4px
+  if !IS_EXTENSION
+    padding-left: 4px
   // background-color: BACKGROUND_COLOR
 
 .full-calltrace
@@ -653,7 +654,10 @@
   flex-direction: column
 
 .value-expanded
-  width: calc(100% - 10px)
+  if IS_EXTENSION
+    width: calc(100% - 10px)
+  else
+    width: 100%
   display: flex
   flex-direction: column
   overflow: visible /*hidden*/
@@ -713,7 +717,8 @@
   overflow-y: scroll
   position: relative
   height: 100%
-  // margin-left: 2px
+  if !IS_EXTENSION
+    margin-left: 2px
   // margin: 5px
   // margin-right: -5px
 
