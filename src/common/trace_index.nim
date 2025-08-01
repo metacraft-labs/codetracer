@@ -275,9 +275,12 @@ proc loadTrace(trace: Row, test: bool): Trace =
 proc sendEvent(socketPath: string, address: string, event: SessionEvent) =
   let raw = Json.encode(event)
 
-  # echo fmt"sending with curl to {socketPath} and {address}:"
-  # echo raw
-  # echo "===="
+  let debugCtSendWithCurl = getEnv("CODETRACER_DEBUG_CURL", "0") == "1"
+
+  if debugCtSendWithCurl:
+    echo fmt"sending with curl to {socketPath} and {address}:"
+    echo raw
+    echo "===="
 
   # example: curl --unix-socket /tmp/my_socket.sock http://localhost/api/ping
   let process = startProcess(
