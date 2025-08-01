@@ -5,9 +5,8 @@ use crate::dap::{
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
-    gen_task_id, Action, CalltraceLoadArgs, CollapseCallsArgs, SourceLocation, StepArg, Task, TaskId, TaskKind,
-    UpdateTableArgs, Location, ProgramEvent, LoadHistoryArg, CallSearchArg, SourceCallJumpTarget, LocalStepJump,
-    TracepointId,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, LoadHistoryArg, LocalStepJump, Location,
+    ProgramEvent, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
@@ -79,7 +78,10 @@ fn launch(
     // duration code copied from
     // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
     let start = Instant::now();
-    if let (Ok(meta), Ok(trace)) = (load_trace_metadata(&metadata_path), load_trace_data(&trace_path, trace_file_format)) {
+    if let (Ok(meta), Ok(trace)) = (
+        load_trace_metadata(&metadata_path),
+        load_trace_data(&trace_path, trace_file_format),
+    ) {
         let duration = start.elapsed();
         info!("loading trace: duration: {:?}", duration);
 
@@ -94,10 +96,7 @@ fn launch(
         // eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db), tx.clone());
         handler.dap_client.seq = seq;
-        handler.run_to_entry(Task {
-            kind: TaskKind::RunToEntry,
-            id: TaskId("run-to-entry-0".to_string()),
-        })?;
+        handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
     } else {
         Err("problem with reading metadata or path trace files".into())
@@ -158,7 +157,7 @@ fn handle_request<W: Write>(
         "threads" => handler.threads(req.clone())?,
         "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap::StackTraceArguments>()?)?,
         "variables" => handler.variables(req.clone(), req.load_args::<dap::VariablesArguments>()?)?,
-        "restart" => handler.run_to_entry(Task {kind: TaskKind::RunToEntry, id: TaskId("run-to-entry-0".to_string())})?,
+        "restart" => handler.run_to_entry(req.clone())?,
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<dap::CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
@@ -177,6 +176,7 @@ fn handle_request<W: Write>(
         "ct/tracepoint-delete" => handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?)?,
         "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<Location>()?)?,
+        "ct/run-to-entry" => handler.run_to_entry(req.clone())?,
         "ct/load-calltrace-section" => {
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }

@@ -28,12 +28,13 @@ proc addTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: i
   self.appendToTerminalLine(text, eventIndex)
   self.currentLine += 1
 
-var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent = makeTerminalOutputComponent(data, 0, inExtension = true)
+when defined(ctInExtension):
+  var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent = makeTerminalOutputComponent(data, 0, inExtension = true)
 
-proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
-  if terminalOutputComponentForExtension.kxi.isNil:
-    terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = terminalOutputComponentForExtension.render(), id, proc = discard)
-  result = terminalOutputComponentForExtension
+  proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
+    if terminalOutputComponentForExtension.kxi.isNil:
+      terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = terminalOutputComponentForExtension.render(), id, proc = discard)
+    result = terminalOutputComponentForExtension
 
 proc getLines(self: TerminalOutputComponent) =
   self.api.emit(CtLoadTerminal, EmptyArg())
@@ -192,8 +193,9 @@ method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
       self.initialUpdate = false
   )
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    self.redrawForExtension()
+    self.redraw()
   )
+  api.emit(InternalLastCompleteMove, EmptyArg())
 
 # think if it's possible to directly exportc in this way the method
 proc registerTerminalOutputComponent*(component: TerminalOutputComponent, api: MediatorWithSubscribers) {.exportc.} =

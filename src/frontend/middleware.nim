@@ -6,6 +6,7 @@ import communication, dap
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
+    var lastCompleteMove: MoveState = nil
     # backendApi.dapApi.onAll(proc(kind: CtEventKind, rawValue: JsObject) =
       # viewsApi.emit(kind, rawValue))
 
@@ -15,7 +16,10 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
     dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
     dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
-    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) = viewsApi.emit(CtCompleteMove, value))
+    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+      viewsApi.emit(CtCompleteMove, value)
+      lastCompleteMove = value
+    )
     dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
     dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
     dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
@@ -50,6 +54,11 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     viewsApi.subscribe(CtTracepointDelete, proc(kind: CtEventKind, value: TracepointId, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtTraceJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
     viewsApi.subscribe(CtLoadFlow, proc(kind: CtEventKind, value: Location, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(CtRunToEntry, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+    viewsApi.subscribe(InternalLastCompleteMove, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
+      if not lastCompleteMove.isNil:
+        viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
+    )
 
     # maybe somehow a more proxy-like/macro way
     # some kind of loop or more raw subscribe, that directly sends for many cases

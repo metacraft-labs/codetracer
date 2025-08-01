@@ -517,6 +517,7 @@ type
     inExtension*: bool
     api*: MediatorWithSubscribers
     location*: Location
+    stableBusy*: bool
 
   DataTableComponent* = ref object
     context*: js
@@ -538,7 +539,6 @@ type
     tableCallback*: proc(data: js)
     autoScrollUpdate*: bool
     isDetailed*:   bool
-    redraw*: bool
     kinds*: JsAssoc[EventLogKind, bool]
     columns*: JsAssoc[EventOptionalColumn, bool]
     tags*: JsAssoc[EventTag, bool]
@@ -572,6 +572,14 @@ type
     # TODO dropdown
     after*: bool
     before*: bool
+    listHistory*: bool
+    fullHistory*: bool
+    historyIndex*: int
+    usingContextMenu*: bool
+    historyDirection*: bool
+    activeHistory*: cstring
+    finished*: bool
+    jumpHistory*: seq[JumpHistory]
 
 
 
@@ -602,12 +610,10 @@ type
 
   ValueComponent* = ref object of Component
     expanded*:           JsAssoc[cstring, bool]
-    # history*:          JsAssoc[cstring, seq[HistoryResult]]
     state*:              StateComponent
     showInline*:         JsAssoc[cstring, bool]
     baseValue*:          Value
     baseExpression*:     cstring
-    service*:            HistoryService
     charts*:             JsAssoc[cstring, ChartComponent]
     i*:                  int
     fresh*:              bool
@@ -656,7 +662,6 @@ type
     isState*:       bool
     watchExpressions*: seq[cstring]
     valueHistory*:  JsAssoc[cstring, ValueHistory]
-    service*:       DebuggerService
     i*:             int
     inState*:       bool
     locals*:        seq[Variable]
@@ -1675,10 +1680,6 @@ proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
   tokens[0] & tokens[1..^1].mapIt(it.capitalizeAscii).join("")
 
-method redrawForExtension*(self: Component) {.base.} =
-  if self.inExtension:
-    self.kxi.redraw()
-
 method restart*(self: Component) {.base.} =
   discard
 
@@ -1834,6 +1835,22 @@ method refreshTrace*(self: Component) {.base.} =
 
 method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {.base, async.} =
   discard
+
+method handleHistoryJump*(self: Component, isForward: bool) {.base.} =
+  discard
+
+method redrawForExtension*(self: Component) {.base.} =
+  if not self.kxi.isNil:
+    self.kxi.redraw()
+
+method redrawForSinglePage*(self: Component) {.base.} =
+  discard
+
+method redraw*(self: Component) {.base.} =
+  if self.inExtension:
+    self.redrawForExtension()
+  else:
+    self.redrawForSinglePage()
 
 # templates for singletons
 template debugComponent*(data: Data): DebugComponent =

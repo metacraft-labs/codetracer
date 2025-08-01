@@ -16,18 +16,18 @@ proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - se
 # proc watchView(self: StateComponent): VNode
 # proc headerView(self: StateComponent): VNode
 proc excerpt(self: StateComponent): VNode
-proc redraw*(self: StateComponent)
 
 
 method restart*(self: StateComponent) =
   discard
 
-var stateComponentForExtension* {.exportc.}: StateComponent = makeStateComponent(data, 0, inExtension = true)
+when defined(ctInExtension):
+  var stateComponentForExtension* {.exportc.}: StateComponent = makeStateComponent(data, 0, inExtension = true)
 
-proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
-  if stateComponentForExtension.kxi.isNil:
-    stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
-  result = stateComponentForExtension
+  proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
+    if stateComponentForExtension.kxi.isNil:
+      stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
+    result = stateComponentForExtension
 
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
   clog fmt"registerLocals"
@@ -57,15 +57,11 @@ proc redrawDynamically*(self: StateComponent) =
   node.appendChild(newDom)
   # console.log("new ", node)
 
-proc redraw*(self: StateComponent) =
-  if self.inExtension:
-    self.redrawForExtension()
-  else:
-    self.redrawDynamically()
+method redrawForSinglePage*(self: StateComponent) =
+  self.redrawDynamically()
   # should be working.. but for now workaround with redrawDynamically
   # if not self.kxi.isNil:
-    # self.kxi.redraw()
-
+  #   self.kxi.redraw()
 
 method onMove(self: StateComponent) {.async.} =
   # TODO: fixing rr ticks
@@ -91,6 +87,7 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response)
   )
+  api.emit(InternalLastCompleteMove, EmptyArg())
 
 # think if it's possible to directly exportc in this way the method
 proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
@@ -110,10 +107,8 @@ method render*(self: StateComponent): VNode =
         expanded: JsAssoc[cstring, bool]{},
         charts: JsAssoc[cstring, ChartComponent]{},
         state: self,
-        # history: JsAssoc[cstring, seq[HistoryResult]]{},
         showInline: JsAssoc[cstring, bool]{},
         baseExpression: name,
-        service: self.data.services.history,
         stateID: self.id,
         id: self.values.len,
         data: self.data,
@@ -143,7 +138,7 @@ method render*(self: StateComponent): VNode =
 
       if newPosition >= self.minNameWidth and newPosition < self.maxNameWidth:
         self.nameWidth = max(newPosition, self.minNameWidth)
-        self.data.redraw()
+        self.redraw()
         initialPosition = currentPosition
 
     result = buildHtml(
@@ -163,13 +158,14 @@ method render*(self: StateComponent): VNode =
         onmouseleave = proc = self.chevronClicked = false
       )
     ):
-      excerpt(self)
-      # watchView(self) # TODO: Add later on
+      if not self.inExtension:
+        excerpt(self)
+        # watchView(self) # TODO: Add later on
 
       tdiv(class = "value-components-container"):
-        if (not self.service.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
+        if (not self.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
           self.i = 0
-          let localsList = if self.inExtension: self.locals else: self.service.locals
+          let localsList = self.locals
           for variable in localsList:
             let name = variable.expression
             let value = variable.value
@@ -189,12 +185,12 @@ method render*(self: StateComponent): VNode =
 
 # Show the current active debugger line on top of the search bar in the state component
 proc excerpt(self: StateComponent): VNode =
-  let path = data.services.debugger.location.path
+  let path = self.location.path
   let id = cstring(fmt"code-state-line-{self.id}")
 
   if data.ui.editors.hasKey(path):
     let editor = data.ui.editors[path]
-    let codeLine = data.services.debugger.location.line
+    let codeLine = self.location.line
     let sourceCode = editor.tabInfo.sourceLines[codeLine - 1]
 
     result = buildHtml(
@@ -249,7 +245,7 @@ proc excerpt(self: StateComponent): VNode =
 #           discard self.data.services.debugger.updateWatches(proc(service: DebuggerService, locals: seq[Variable]) =
 #             self.locals = locals
 #             service.locals = locals
-#             self.data.redraw())
+#             self.redraw())
 #           jq("#watch").toJs.value = j"",
 #       onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
 #       onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()

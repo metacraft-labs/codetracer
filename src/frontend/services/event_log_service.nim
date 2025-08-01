@@ -12,25 +12,6 @@ proc eventJump*(self: EventLogService, event: ProgramEvent) =
 # TODO escape < and > for raw html as well
 # TODO terminal view?
 
-proc loadEvents*(self: EventLogService, update: TableData) =
-  self.events = @[]
-  for i, row in update.data:
-    self.events.add(
-      ProgramEvent(
-        kind: row.kind,
-        content: row.content,
-        rrEventId: row.rrEventId,
-        metadata: row.metadata,
-        highLevelPath: row.fullPath,
-        directLocationRRTicks: row.directLocationRRTicks,
-        eventIndex: i,
-        tracepointResultIndex: 0,
-        base64Encoded: row.base64Encoded,
-        maxRRTicks: data.maxRRTicks,
-        stdout: row.stdout
-      )
-    )
-
 proc loadTerminal*(self: EventLogService) =
   self.data.ipc.send "CODETRACER::load-terminal", js{}
 

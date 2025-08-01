@@ -187,7 +187,6 @@ proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateC
     locals: data.services.debugger.locals,
     values: JsAssoc[cstring, ValueComponent]{},
     completeMoveIndex: 0,
-    service: data.services.debugger,
     nameWidth: 40,
     chevronClicked: false,
     minNameWidth: 30,
@@ -427,11 +426,9 @@ proc ensureValueComponent*(self: CallExpandedValuesComponent, name: cstring, val
      self.values[name] = ValueComponent(
        expanded: JsAssoc[cstring, bool]{},
        charts: JsAssoc[cstring, ChartComponent]{},
-      #  history: JsAssoc[cstring, seq[HistoryResult]]{},
        showInline: JsAssoc[cstring, bool]{},
        baseExpression: name,
        baseValue: value,
-       service: self.data.services.history,
        stateID: -1,
        data: self.data,
        nameWidth: VALUE_COMPONENT_NAME_WIDTH,
@@ -1282,13 +1279,11 @@ proc registerScratchpadValue*(self: ScratchpadComponent, expression: cstring, va
   self.values.add(ValueComponent(
     expanded: JsAssoc[cstring, bool]{},
     charts: JsAssoc[cstring, ChartComponent]{},
-    # history: JsAssoc[cstring, seq[HistoryResult]]{},
     showInline: JsAssoc[cstring, bool]{},
     baseExpression: expression,
     baseValue: value,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    service: self.data.services.history,
     stateID: -1,
     data: self.data))
 

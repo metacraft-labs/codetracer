@@ -1775,5 +1775,3 @@ when not defined(ctInExtension):
 
 # else:
   # configureIPC = functionAsJs(configureIPCRun)
-
-export makeStateComponentForExtension

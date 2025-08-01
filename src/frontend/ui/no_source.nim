@@ -1,4 +1,5 @@
 import ui_imports, strutils
+import ../communication, ../../common/ct_event
 from ../rr_gdb import RRGDBStopSignal
 
 const NO_CODE = -1
@@ -7,6 +8,9 @@ const NO_PATH = ""
 proc getAsmCode(self: NoSourceComponent, location: types.Location) {.async.} =
   self.instructions = await data.services.editor.asmLoad(location)
   self.data.redraw()
+
+proc historyJump*(self: NoSourceComponent, location: types.Location) =
+  self.api.emit(CtHistoryJump, location)
 
 method render*(self: NoSourceComponent): VNode =
   let height = document.getElementById("ROOT").clientHeight - 20
@@ -58,7 +62,7 @@ method render*(self: NoSourceComponent): VNode =
                 onclick = proc =
                   if hasHistory:
                     self.data.services.debugger.currentOperation = HISTORY_JUMP_VALUE
-                    self.data.services.history.historyJump(location)
+                    self.historyJump(location)
                     discard self.data.services.debugger.jumpHistory.pop()
               ): text "Jump back"
       p(): text fmt"Originating address: 0x{toHex(self.instructions.address)}"

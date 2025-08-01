@@ -69,15 +69,16 @@ for kind, tags in kindTags:
   for tag in tags:
     tagKinds[tag].add(kind)
 
-var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
+when defined(ctInExtension):
+  var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
+
+  proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
+    if eventLogComponentForExtension.kxi.isNil:
+      eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
+    result = eventLogComponentForExtension
 
 proc events(self: EventLogComponent)
 proc resizeEventLogHandler(self: EventLogComponent)
-
-proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
-  if eventLogComponentForExtension.kxi.isNil:
-    eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
-  result = eventLogComponentForExtension
 
 proc denseId*(context: EventLogComponent): cstring =
   j("eventLog-" & $context.id & "-dense-table-" & $context.index)
@@ -97,8 +98,8 @@ proc resizeEventLogHandler(self: EventLogComponent) =
 proc filterEvents(self: EventLogComponent): seq[ProgramEvent] =
   var events: seq[ProgramEvent] = @[]
 
-  for i in 0..<self.service.events.len():
-    let event = self.service.events[i]
+  for i in 0..<self.programEvents.len():
+    let event = self.programEvents[i]
     if self.selectedKinds[event.kind]:
       events.add(event)
 
@@ -302,9 +303,6 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
 proc events(self: EventLogComponent) =
   var context = self
 
-  # if not self.service.updatedContent:
-  #   return
-
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()
     if currentTime - self.lastJumpFireTime > CLICK_DELAY_TIMER:
@@ -324,7 +322,6 @@ proc events(self: EventLogComponent) =
             e.target.classList.remove("flow-show-content")
             e.target.classList.add("flow-hide-content")
       else:
-      # elif not self.service.debugger.stableBusy:
         self.jump(table, e)
 
   proc handlerMouseover(table: js, e: js) =
@@ -513,6 +510,7 @@ proc events(self: EventLogComponent) =
             callback: proc(data: js),
             settings: js
           ) =
+            echo "#### EMIT FOR UPDATE"
             var mutData = data
             self.tableCallback = callback
             self.drawId += 1
@@ -549,7 +547,7 @@ proc events(self: EventLogComponent) =
     context.denseTable.context = jqFind(j"#" & context.denseId).DataTable()
     context.detailedTable.context = jqFind(j"#" & context.detailedId).DataTable()
     context.redrawColumns = context.tableCallback.isNil
-    context.eventsIndex = self.service.events.len
+    context.eventsIndex = self.programEvents.len
 
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
@@ -564,10 +562,7 @@ proc events(self: EventLogComponent) =
 
     console.time(cstring"new events: load in datatable: redraw")
 
-    if context.redraw:
-      context.redraw = false
-
-    var events = self.service.events
+    var events = self.programEvents
 
     console.timeEnd(cstring"new events: load in datatable: redraw")
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
@@ -577,9 +572,9 @@ proc events(self: EventLogComponent) =
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
       .addEventListener(
         j"scroll",
-        proc =
+        proc () =
           self.denseTable.updateTableRows()
-          self.redrawForExtension()
+          self.redraw()
       )
     jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
@@ -602,8 +597,7 @@ proc eventLogKindView*(self: EventLogComponent, kind: EventLogKind): VNode =
         onclick = proc =
           discard jsdelete self.kindsEnabled[kind]
           self.recalculateKinds()
-          self.redraw = true
-          self.data.redraw()
+          self.redraw()
       )
     ):
       text $kind
@@ -614,8 +608,7 @@ proc eventLogKindView*(self: EventLogComponent, kind: EventLogKind): VNode =
         onclick = proc =
           self.kindsEnabled[kind] = true
           self.recalculateKinds()
-          self.redraw = true
-          self.data.redraw()
+          self.redraw()
       )
     ):
       text $kind
@@ -657,16 +650,14 @@ proc eventLogColumnView*(self: EventLogComponent, column: EventOptionalColumn): 
 
 proc switchEventKindSelection(self: EventLogComponent, kind: EventLogKind) =
   self.selectedKinds[kind] = not self.selectedKinds[kind]
-  self.redraw = true
-  self.data.redraw()
+  self.redraw()
 
 proc changeAllEventKinds(self: EventLogComponent, value: bool) =
   for tag, _ in self.tags:
     for kind in tagKinds[tag]:
       self.selectedKinds[kind] = value
 
-  self.redraw = true
-  self.data.redraw()
+  self.redraw()
 
 proc isTagSelected(self: EventLogComponent, tag: EventTag): bool =
   var isChecked = true
@@ -684,8 +675,7 @@ proc switchEventTagSelection(self: EventLogComponent, tag: EventTag, value: bool
   for kind in tagKinds[tag]:
     self.selectedKinds[kind] = isChecked
 
-  self.redraw = true
-  self.data.redraw()
+  self.redraw()
 
 proc checkIndeterminateCheckbox(self: EventLogComponent, tag: EventTag): (bool, string) =
   var isChecked = true
@@ -987,14 +977,37 @@ proc eventLogHeaderView*(self: EventLogComponent): VNode =
     tdiv(class = local("categories")):
       eventLogCategoryButtonView(self, EventDropDownBox.Filter)
 
+proc loadEvents*(self: EventLogComponent, update: TableData) =
+  self.programEvents = @[]
+  for i, row in update.data:
+    self.programEvents.add(
+      ProgramEvent(
+        kind: row.kind,
+        content: row.content,
+        rrEventId: row.rrEventId,
+        metadata: row.metadata,
+        highLevelPath: row.fullPath,
+        directLocationRRTicks: row.directLocationRRTicks,
+        eventIndex: i,
+        tracepointResultIndex: 0,
+        base64Encoded: row.base64Encoded,
+        maxRRTicks: data.maxRRTicks,
+        stdout: row.stdout
+      )
+    )
+
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
   let response = res.tableUpdate
+
+  echo "#### CHECK THE RES"
+  kout res
+  kout self
 
   if not response.isTrace and self.drawId == response.data.draw:
     let dt = self.denseTable
 
     dt.rowsCount = response.data.recordsTotal
-    self.service.loadEvents(response.data)
+    self.loadEvents(response.data)
 
     var mutData = response.data
 
@@ -1003,7 +1016,7 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
         mutData.data[i].content = cstring(decode($response.data.data[i].content))
 
     self.tableCallback(mutData.toJs)
-    self.data.redraw()
+    self.redraw()
 
     if self.autoScrollUpdate:
       self.findActiveRow(self.activeRowTicks, true)
@@ -1020,7 +1033,7 @@ method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.}
     let dt = self.denseTable
 
     dt.rowsCount = response.totalCount
-    self.data.redraw()
+    self.redraw()
 
 method restart*(self: EventLogComponent) =
   if not self.denseTable.isNil:
@@ -1149,7 +1162,7 @@ method onFindOrFilter*(self: EventLogComponent) {.async.} =
   divElement.focus()
 
 method onEnter*(self: EventLogComponent) {.async.} =
-  let event = cast[ProgramEvent](self.service.events[self.rowSelected - self.hiddenRows])
+  let event = cast[ProgramEvent](self.programEvents[self.rowSelected - self.hiddenRows])
   self.programEventJump(event)
 
 method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
@@ -1161,7 +1174,6 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
     else:
       self.started = true
       self.api.emit(CtEventLoad, EmptyArg())
-
   )
   api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
     data.maxRRTicks = response[0].maxRRTicks
@@ -1178,8 +1190,8 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
       # think again about html/xml in content escaping/pre tags
 
     console.timeEnd(cstring"new events service")
-
-    self.redrawForExtension()
+    self.denseTable.context.ajax.reload()
+    self.redraw()
   )
   api.subscribe(CtUpdatedEventsContent, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
     if self.ignoreOutput:
@@ -1199,10 +1211,12 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
           echo fmt"warn: no event for line number {lineIndex}"
           break
 
-    self.redrawForExtension()
+    self.redraw()
   )
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
-    discard self.onUpdatedTable(response))
+    discard self.onUpdatedTable(response)
+  )
+  api.emit(InternalLastCompleteMove, EmptyArg())
 
 proc registerEventLogComponent*(component: EventLogComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)

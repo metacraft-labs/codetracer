@@ -35,6 +35,8 @@ type
     CtUpdatedTrace,
     CtLoadFlow,
     CtUpdatedFlow,
+    CtRunToEntry,
+    InternalLastCompleteMove,
     
 when defined(js):
   import std / jsffi

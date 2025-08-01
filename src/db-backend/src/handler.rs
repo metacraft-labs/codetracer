@@ -301,10 +301,9 @@ impl Handler {
         Ok(())
     }
 
-    pub fn run_to_entry(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(0));
         self.complete_move(true)?;
-        self.return_void(task)?;
         Ok(())
     }
 
@@ -751,7 +750,7 @@ impl Handler {
 
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
         let raw_event = self.dap_client.updated_history_event(history_update)?;
-        
+
         self.send_dap(&raw_event)?;
         // self.send_event((
         //     EventKind::UpdatedHistory,
@@ -813,7 +812,11 @@ impl Handler {
         None
     }
 
-    pub fn source_line_jump(&mut self, _req: dap::Request, source_location: SourceLocation) -> Result<(), Box<dyn Error>> {
+    pub fn source_line_jump(
+        &mut self,
+        _req: dap::Request,
+        source_location: SourceLocation,
+    ) -> Result<(), Box<dyn Error>> {
         if let Some(step_id) = self.get_closest_step_id(&source_location) {
             self.step_id_jump(step_id);
             self.complete_move(false)?;
@@ -855,7 +858,11 @@ impl Handler {
         None
     }
 
-    pub fn source_call_jump(&mut self, _req: dap::Request, call_target: SourceCallJumpTarget) -> Result<(), Box<dyn Error>> {
+    pub fn source_call_jump(
+        &mut self,
+        _req: dap::Request,
+        call_target: SourceCallJumpTarget,
+    ) -> Result<(), Box<dyn Error>> {
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
             path: call_target.path.clone(),
@@ -1573,7 +1580,9 @@ mod tests {
     // use futures::stream::Iter;
     use lang::Lang;
     use runtime_tracing::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NonStreamingTraceWriter, StepId, StepRecord, TraceLowLevelEvent, TraceMetadata, TraceWriter, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, NONE_VALUE
+        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NonStreamingTraceWriter, StepId, StepRecord,
+        TraceLowLevelEvent, TraceMetadata, TraceWriter, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
+        NONE_VALUE,
     };
 
     use task::{TaskId, TaskKind, TraceSession, Tracepoint, TracepointMode};
@@ -1762,17 +1771,14 @@ mod tests {
             path: path.to_string(),
             line: 3,
         };
-        handler.source_line_jump(
-            dap::Request::default(),
-            source_location
-        )?;
+        handler.source_line_jump(dap::Request::default(), source_location)?;
         assert_eq!(handler.step_id, StepId(2));
         handler.source_line_jump(
             dap::Request::default(),
             SourceLocation {
                 path: path.to_string(),
                 line: 2,
-            }
+            },
         )?;
         assert_eq!(handler.step_id, StepId(1));
         handler.source_call_jump(
@@ -1781,7 +1787,7 @@ mod tests {
                 path: "/test/workdir".to_string(),
                 line: 1,
                 token: "<top-level>".to_string(),
-            }
+            },
         )?;
         assert_eq!(handler.step_id, StepId(0));
         Ok(())

@@ -1174,7 +1174,6 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
       showInLine: JsAssoc[cstring, bool]{},
       baseExpression: name,
       baseValue: value,
-      service: data.services.history,
       stateID: -1,
       nameWidth: VALUE_COMPONENT_NAME_WIDTH,
       valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
