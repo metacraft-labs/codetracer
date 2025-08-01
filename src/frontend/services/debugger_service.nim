@@ -1,10 +1,6 @@
 import std / jsconsole
 import service_imports
 
-proc updateWatches*(self: DebuggerService, handler: proc(service: DebuggerService, locals: seq[Variable])) {.async.} =
-  data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
-  self.onUpdatedWatches = handler
-
 proc restart*(self: DebuggerService) =
   self.locals = @[]
   self.watchExpressions = @[]
@@ -63,23 +59,6 @@ proc tracepointToggle*(self: DebuggerService, tracepointId: TracepointId) {.asyn
     "tracpeoint-toggle-" & fmt"{now()}-{tracepointId}",
     Future[void]
   )
-
-proc expandValue*(self: DebuggerService, subPath: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
-  let count = 50
-  var value = await self.data.asyncSend("expand-value", ExpandValueTarget(subPath: subPath, rrTicks: self.location.rrTicks, isLoadMore: isLoadMore, startIndex: startIndex, count: count), $self.location.rrTicks & " " & $subPath, Value)
-  return value
-
-proc expandValues*(self: DebuggerService, expressions: seq[cstring], depth: int, stateCompleteMoveIndex: int): Future[seq[Value]] {.async.} =
-  let values = await self.data.asyncSend(
-    "expand-values",
-    js{
-      expressions: expressions,
-      depth: depth,
-      stateCompleteMoveIndex: stateCompleteMoveIndex
-    },
-    $stateCompleteMoveIndex & " " & $expressions,
-    seq[Value])
-  return values
 
 proc debugRepl*(self: DebuggerService, cmd: cstring) {.exportc.} =
   if not self.stableBusy:
@@ -161,6 +140,13 @@ proc step*(
       " reverse: " & $reverse & " repeat: " & $repeat &
       " complete: " & $complete
     # StepArg + taskId
+    # TODO: move this to a more general handler
+    # that e.g. does both (or optionally both)
+    #   a normal dap step operation
+    #   and a custom ct ct/step operation
+    #   and maybe base it on a custom mediator
+    #   so it can be easily called from various components
+    #   without depending on a service/shared context
     self.data.ipc.send(
       &"CODETRACER::step", js{
         action: realActionEnum,
@@ -226,7 +212,7 @@ proc deleteBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool 
     # TODO move point list
     for i, b in data.pointList.breakpoints:
       if b == self.breakpointTable[path][line]:
-        data.pointList.breakpoints.delete(i, i)
+        delete(data.pointList.breakpoints, i..i)
         data.pointList.redrawBreakpoints = true
       break
     self.breakpointTable[path].del(line)
@@ -249,7 +235,6 @@ proc toggleBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool 
 
 
 proc isEnabled*(self: DebuggerService, path: cstring, line: int): bool =
-  var found = false
   if self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line):
     return self.breakpointTable[path][line].enabled
   else:
@@ -307,7 +292,7 @@ proc onAddBreakResponse*(self: DebuggerService, response: BreakpointInfo, c: boo
 proc deleteAllBreakpoints*(self: DebuggerService, editor: EditorViewComponent) =
   let breakpointsCopy = data.pointList.breakpoints
   for i, b in breakpointsCopy:
-    data.pointList.breakpoints.delete(i, i)
+    delete(data.pointList.breakpoints, i..i)
     data.services.debugger.breakpointTable[b.path].del(b.line)
     editor.refreshEditorLine(b.line)
   data.pointList.redrawBreakpoints = true

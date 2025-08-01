@@ -4,11 +4,9 @@ import ../types
 
 proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) =
   clog "tabs: switchHistory: " & $path & " " & $editorView
-  var index = -1
   for index, tab in self.tabHistory:
     if tab.name == path:
-
-      self.tabHistory.delete(index, index)
+      delete(self.tabHistory, index..index)
       break
   self.tabHistory.add(EditorViewTabArgs(name: path, editorView: editorView))
   self.historyIndex = self.tabHistory.len - 1

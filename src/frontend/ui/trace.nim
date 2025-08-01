@@ -2,12 +2,11 @@ import
   ../ui_helpers, ../types, ../lang,
   ui_imports, value, ../utils, ../renderer,
   datatable
-
-const LIMIT = 5
+import ../communication, ../../common/ct_event
 
 let MIN_EDITOR_WIDTH: float = 20 #%
 let MAX_EDITOR_WIDTH: float = 70 #%
-let LINE_NUMBERS_COLUMN_WIDTH: int = 81 #px
+# let LINE_NUMBERS_COLUMN_WIDTH: int = 81 #px
 
 let RUN_TRACE_MESSAGE: cstring = "Press Ctrl+Enter to run the trace."
 let NO_RESULTS_MESSAGE: cstring = "No results. Line was not reached (or errors while evaluating logs)."
@@ -26,19 +25,19 @@ proc calcTraceWidth(self: TraceComponent) =
 
   self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
   
-proc traceMainStyle(self: TraceComponent): VStyle =
-  self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
-  self.calcTraceWidth()
+# proc traceMainStyle(self: TraceComponent): VStyle =
+#   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
+#   self.calcTraceWidth()
 
-  style(
-    (StyleAttr.height, cstring($self.traceHeight & "px")),
-    (StyleAttr.width, cstring(fmt"{self.traceWidth}px"))
-  )
+#   style(
+#     (StyleAttr.height, cstring($self.traceHeight & "px")),
+#     (StyleAttr.width, cstring(fmt"{self.traceWidth}px"))
+#   )
 
 proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: int) =
-  let id = fmt"modal-content-{line}"
+  let id = cstring(fmt"modal-content-{line}")
   let traceMain = document.getElementById(id)
-  let expandedWindow = document.getElementById(&"trace-modal-window-{line}")
+  let expandedWindow = document.getElementById(cstring(fmt"trace-modal-window-{line}"))
 
   traceMain.innerHTML = ""
   traceMain.style.display = "block"
@@ -50,7 +49,6 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
     showInLine: JsAssoc[cstring, bool]{},
     baseExpression: traceValue[0],
     baseValue: traceValue[1],
-    service: data.services.history,
     stateID: -1,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
@@ -86,7 +84,7 @@ proc shouldUpdate(self: TraceComponent, response: TraceUpdate): bool =
     (self.dataTable.rowsCount == 0 or self.isLoading)
 
 method onUpdatedTrace*(self: TraceComponent, response: TraceUpdate) {.async.} =
-  let timeInMs = now()
+  # let timeInMs = now()
   var traceSession = data.services.trace.traceSessions[response.sessionID]
 
   # for tracepoint in traceSession.tracepoints:
@@ -111,7 +109,7 @@ method onUpdatedTrace*(self: TraceComponent, response: TraceUpdate) {.async.} =
           traceComponent.dataTable.endRow != traceComponent.dataTable.rowsCount:
         traceComponent.dataTable.context.ajax.reload(nil, false)
 
-    let duration = timeInMs - tracepointStart
+    # let duration = timeInMs - tracepointStart
 
 proc createContextMenuItems(self: TraceComponent, ev: js): seq[ContextMenuItem] =
   var addToScratchpad:     ContextMenuItem
@@ -121,7 +119,7 @@ proc createContextMenuItems(self: TraceComponent, ev: js): seq[ContextMenuItem] 
   let localValues = self.locals[max(cast[int](ev.currentTarget.rowIndex) - 1, 0)]
   let name = if localValues.len() > 1: "values" else: "value"
   addToScratchpad = ContextMenuItem(
-    name: &"Add {name} to scratchpad",
+    name: cstring(fmt"Add {name} to scratchpad"),
     hint: "",
     handler: proc(e: Event) =
       for local in localValues:
@@ -152,7 +150,7 @@ proc renderTableResults(
   if self.dataTable.context.isNil:
     # there is not dataTabl context defined
     # we create a new one and load all the session results in it
-    let element = jqFind(&"#trace-table-{self.id}")
+    let element = jqFind(cstring(fmt"#trace-table-{self.id}"))
 
     if not element.isNil:
       # traceSession.tracepoints[self.indexInSession].lastRender += results.len
@@ -209,10 +207,10 @@ proc renderTableResults(
       self.dataTable.resizeTable()
 
       # add event listener for scrolling to update table footer
-      let scrollBodyDom = jq(&"#chart-table-{self.id} .dataTables_scrollBody")
+      let scrollBodyDom = jq(cstring(fmt"#chart-table-{self.id} .dataTables_scrollBody"))
 
       # add wheel event handler for nested scrollable element (table content)
-      scrollBodyDom.toJs.addEventListener(j"wheel", proc(ev: Event, tg: VNode) =
+      scrollBodyDom.toJs.addEventListener(cstring"wheel", proc(ev: Event, tg: VNode) =
         ev.stopPropagation()
         self.dataTable.inputFieldChange = false
         discard setTimeout(proc() = self.dataTable.updateTableRows(), 100)
@@ -231,7 +229,7 @@ proc renderTableResults(
           maxRRTicks: data.maxRRTicks,
         )
 
-      jqFind(&"#trace-table-{self.id} tbody").on(j"click", j"tr") do (event: js):
+      jqFind(cstring(fmt"#trace-table-{self.id} tbody")).on(cstring"click", cstring"tr") do (event: js):
         let target = event.target
         let parentNode = target.parentNode
         let datatable = self.dataTable.context
@@ -241,14 +239,14 @@ proc renderTableResults(
         if cast[bool](event.originalEvent.ctrlKey):
           self.data.redraw()
         else:
-          traceJump(traceValue)
+          self.api.emit(CtTraceJump, traceValue)
 
-      jqFind(&"#trace-table-{self.id} tbody").on(j"contextmenu", j"tr") do (event: js):
-        let target = event.target
-        let parentNode = target.parentNode
-        let datatable = self.dataTable.context
-        let datatableRow = datatable.row(parentNode)
-        let traceValue = self.toProgramEvent(datatableRow.data())
+      jqFind(cstring(fmt"#trace-table-{self.id} tbody")).on(cstring"contextmenu", cstring"tr") do (event: js):
+        # let target = event.target
+        # let parentNode = target.parentNode
+        # let datatable = self.dataTable.context
+        # let datatableRow = datatable.row(parentNode)
+        # let traceValue = self.toProgramEvent(datatableRow.data())
         let contextMenu = createContextMenuItems(self, event)
 
         if contextMenu != @[]:
@@ -256,7 +254,7 @@ proc renderTableResults(
     else:
       return
 
-    let denseWrapper = j"#trace-table-" & fmt"{self.id}" & j"_wrapper"
+    let denseWrapper = cstring(fmt"#trace-table-{self.id}_wrapper")
 
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
         .addEventListener(j"wheel", proc(ev: Event) = 
@@ -270,6 +268,7 @@ proc enableIcon(self: TraceComponent) =
 
   if not iconDom.isNil:
     iconDom.innerHtml = "Disable"
+    self.redrawForExtension()
     self.data.redraw()
 
 proc disableIcon(self: TraceComponent) =
@@ -278,6 +277,7 @@ proc disableIcon(self: TraceComponent) =
 
   if not iconDom.isNil:
     iconDom.innerHtml = "Enable"
+    self.redrawForExtension()
     self.data.redraw()
 
 proc showSelectedChart(self: TraceComponent) =
@@ -346,7 +346,7 @@ method refreshTrace*(self: TraceComponent) =
   # change button text if chart kind is changed
   if self.chart.changed:
     self.kindSwitchButton.innerHTML =
-      ($self.chart.viewKind)[4..^1].toLowerAscii()
+      ($self.chart.viewKind)[4..^1].toLowerAscii().cstring
 
   var traceSession: TraceSession
 
@@ -363,7 +363,7 @@ method refreshTrace*(self: TraceComponent) =
     # if it's disabled, it should continue receiving results, but only for the trace it wasnt disabled for:
     # so traceSession should not be nil
     if not traceSession.isNil:
-      let resultsContainer = cast[Element](jq(&"#trace-{self.id} .trace-view"))
+      # let resultsContainer = cast[Element](jq(cstring(fmt"#trace-{self.id} .trace-view")))
 
       if self.chart.changed:
         # show selected chart kind
@@ -409,13 +409,13 @@ proc ensureChart(self: TraceComponent) =
 
       buildHtml(
         tdiv(
-          id = &"chart-table-{self.id}",
+          id = cstring(fmt"chart-table-{self.id}"),
           class = "chart-table hidden"
         )
       ):
         tdiv(class = "data-table"):
           table(
-            id = &"trace-table-{self.id}",
+            id = cstring(fmt"trace-table-{self.id}"),
             class = "trace-table",
             onmouseover = proc =
               self.mouseIsOverTable = true,
@@ -454,8 +454,8 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int): cst
     else:
       tracepointHtml = j"<div class='gutter-disabled-trace' onmousedown='event.stopPropagation()'></div>"
 
-  if line == self.data.services.debugger.location.line and
-      path == self.data.services.debugger.location.path:
+  if line == self.location.line and
+      path == self.location.path:
     highlightHtml = j"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
 
   if self.data.services.debugger.hasBreakpoint(path, realLine):
@@ -482,7 +482,7 @@ proc updateLineNumbersOnly*(self: EditorViewComponent) =
   editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
 
 proc toggleTraceState*(self: TraceComponent) =
-  discard self.data.services.debugger.tracepointToggle(self.id)
+  self.api.emit(CtTracepointToggle, TracepointId(id: self.id))
 
   self.isDisabled = not self.isDisabled
   self.forceReload = true
@@ -520,7 +520,7 @@ proc traceMenuView(self: TraceComponent): VNode =
     tdiv(class = "trace-search"):
       input(
         `type` = "text",
-        id = &"trace-input-{self.id}",
+        id = cstring(fmt"trace-input-{self.id}"),
         onchange = search,
         oninput = search,
         placeholder = "Search"
@@ -572,11 +572,11 @@ proc traceMenuView(self: TraceComponent): VNode =
             ):
               text "Delete"
 
-proc doNotDoAnything(monacoEditor: MonacoEditor, editor: EditorViewComponent) =
-  discard
+# proc doNotDoAnything(monacoEditor: MonacoEditor, editor: EditorViewComponent) =
+#   discard
 
-proc insertNewLine(monacoEditor: MonacoEditor, editor: EditorViewComponent) =
-  monacoEditor.insertTextAtCurrentPosition("\n")
+# proc insertNewLine(monacoEditor: MonacoEditor, editor: EditorViewComponent) =
+#   monacoEditor.insertTextAtCurrentPosition("\n")
 
 proc renderEdit(self: TraceComponent): VNode =
   result = buildHtml(
@@ -591,7 +591,7 @@ proc renderEdit(self: TraceComponent): VNode =
 func traceLine(line: int): cstring =
   cstring($line)
 
-const RESULT_HEIGHT = 10
+# const RESULT_HEIGHT = 10
 
 proc expandWithEnter*(self: TraceComponent, newHeight: int) =
   self.editorUI.monacoEditor.changeViewZones do (view: js):
@@ -606,21 +606,21 @@ proc expandWithEnter*(self: TraceComponent, newHeight: int) =
     1
   )
   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
-  let traceMain = kdom.document.getElementById(fmt"trace-{self.id}")
+  let traceMain = kdom.document.getElementById(cstring(fmt"trace-{self.id}"))
   let editor = self.editorUI.monacoEditor
   let editorLayout = editor.config.layoutInfo
   let editorWidth = editorLayout.width
   let contentLeft = editorLayout.contentLeft
   let minimapWidth = editorLayout.minimapWidth
   self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
-  traceMain.style.width = fmt"{self.traceWidth}px"
-  jq(&"#trace-{self.id} .editor-textarea").style.height = fmt"{self.lineCount * (data.ui.fontSize + 5)}px"
+  traceMain.style.width = cstring(fmt"{self.traceWidth}px")
+  jq(cstring(fmt"#trace-{self.id} .editor-textarea")).style.height = cstring(fmt"{self.lineCount * (data.ui.fontSize + 5)}px")
 
-proc traceErrorView(self: TraceComponent): VNode =
-  buildHtml(
-    tdiv(class = "trace-error")
-  ):
-    text self.error.msg
+# proc traceErrorView(self: TraceComponent): VNode =
+#   buildHtml(
+#     tdiv(class = "trace-error")
+#   ):
+#     text self.error.msg
 
 proc ensureMonacoEditor(self: TraceComponent) =
   # check if trace has a monaco editor
@@ -637,7 +637,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
 
     # create trace monaco editor
     self.monacoEditor = monaco.editor.create(
-      jq(&".trace #{self.selectorId}"),
+      jq(cstring(fmt".trace #{self.selectorId}")),
       MonacoEditorOptions(
         value: self.source,
         language: toJsLang(self.editorUI.lang),
@@ -691,10 +691,11 @@ proc resizeEditorHandler(self: TraceComponent) =
 
 proc setEditorResizeObserver(self: TraceComponent) =
   let activeEditor = "\"" & self.data.services.editor.active & "\""
-  let editorDom = jq(fmt"[data-label={activeEditor}]")
+  let editorDom = jq(cstring(fmt"[data-label={activeEditor}]"))
   let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
     for entry in entries:
-      let timeout = setTimeout(proc = resizeEditorHandler(self),100)
+      # let timeout = 
+      discard setTimeout(proc = resizeEditorHandler(self), 100)
   )
 
   resizeObserver.observe(cast[Node](editorDom))
@@ -706,7 +707,6 @@ method render*(self: TraceComponent): VNode =
   self.ensureChart()
 
   var tabInfo = self.editorUI.tabInfo
-  let name = self.name
 
   # check if main editor source has changed
   if tabInfo.changed:
@@ -717,16 +717,16 @@ method render*(self: TraceComponent): VNode =
 
   proc resizeEditor(ev: Event, tg:VNode) =
     let mouseEvent = cast[MouseEvent](ev)
-    let containerWidth = cast[float](jq(".trace-main").offsetHeight)
-    let currentPosition = cast[float](mouseEvent.screenY)
+    let containerWidth = jq(".trace-main").offsetHeight.toJs.to(float)
+    let currentPosition = mouseEvent.screenY.toJs.to(float)
     let movementX = (currentPosition-initialPosition) * 100 / containerWidth
     let newPosition = self.editorWidth + movementX
 
     if newPosition >= MIN_EDITOR_WIDTH and newPosition < MAX_EDITOR_WIDTH:
       self.editorWidth = max(newPosition, MIN_EDITOR_WIDTH)
 
-      jq(&"#trace-{self.id} .editor-textarea").style.height = "100" & "px"
-      jq(&"#trace-{self.id} .editor-traces").style.height = "60px"
+      jq(cstring(fmt"#trace-{self.id} .editor-textarea")).style.height = "100px"
+      jq(cstring(fmt"#trace-{self.id} .editor-traces")).style.height = "60px"
 
       initialPosition = currentPosition
 
@@ -744,7 +744,7 @@ method render*(self: TraceComponent): VNode =
           resizeEditor(ev,tg),
       onmousedown = proc(ev: Event, tg: VNode) =
         if self.splitterClicked:
-          initialPosition = cast[float](cast[MouseEvent](ev).screenY),
+          initialPosition = cast[MouseEvent](ev).screenY.toJs.to(float),
       onmouseup = proc(ev: Event, tg: VNode) =
         if self.splitterClicked:
           self.splitterClicked = false
@@ -755,33 +755,33 @@ method render*(self: TraceComponent): VNode =
         tdiv(class = "trace-chevron-arrow")
       tdiv(class = "editor-info"):
         tdiv(
-          class = fmt"editor-textarea editor-textarea-width-{$self.editorWidth}",
-          style = style(StyleAttr.height, fmt"{self.lineCount * (data.ui.fontSize + 5) + 20}px")
+          class = cstring(fmt"editor-textarea editor-textarea-width-{$self.editorWidth}"),
+          style = style(StyleAttr.height, cstring(fmt"{self.lineCount * (data.ui.fontSize + 5) + 20}px"))
         ):
           tdiv(class = "trace-disabled-overlay tracepoint-overlay hidden"):
             tdiv(class = "trace-overlay"):
               text "Tracepoint is disabled"
           tdiv(class = "editor-textarea-empty-header")
           renderEdit(self)
-        tdiv(class = fmt"editor-traces"):
+        tdiv(class = "editor-traces"):
           traceMenuView(self)
           tdiv(class = "trace-view"):
             mainView
           tdiv(class = "trace-results-overlay tracepoint-overlay"):
             tdiv(class = "trace-overlay"):
               text "Press Ctrl+Enter to run the trace."
-      tdiv(class = "trace-modal", id = &"trace-modal-window-{self.line}"):
+      tdiv(class = "trace-modal", id = cstring(fmt"trace-modal-window-{self.line}")):
         button(
           class = "modal-close-button",
           onclick = proc =
-            document.getElementById(&"modal-content-{self.line}").style.display = "none"
-            document.getElementById(&"trace-modal-window-{self.line}").style.display = "none"
+            document.getElementById(cstring(fmt"modal-content-{self.line}")).style.display = "none"
+            document.getElementById(cstring(fmt"trace-modal-window-{self.line}")).style.display = "none"
         )
-        tdiv(id = &"modal-content-{self.line}")
+        tdiv(id = cstring(fmt"modal-content-{self.line}"))
 
 proc traceBase(self: TraceComponent): VNode =
-  buildHtml(tdiv(id = &"trace-{self.id}", class="trace")):
-    tdiv(id = &"trace-editor-{self.id}")
+  buildHtml(tdiv(id = cstring(fmt"trace-{self.id}"), class="trace")):
+    tdiv(id = cstring(fmt"trace-editor-{self.id}"))
 
 const TOGGLE_REPEAT_TIME_LIMIT = 100i64
 
@@ -799,10 +799,10 @@ proc toggleChartKindMenu(self: TraceComponent) =
     self.closeKindSwitchMenu()
 
 proc resizeTraceHandler(self: TraceComponent) =
-  let traceMain = document.getElementById(fmt"trace-{self.id}")
+  let traceMain = document.getElementById(cstring(fmt"trace-{self.id}"))
 
   self.calcTraceWidth()
-  traceMain.style.width = fmt"{self.traceWidth}px"
+  traceMain.style.width = cstring(fmt"{self.traceWidth}px")
 
   if not self.dataTable.context.isNil:
     self.dataTable.resizeTable()
@@ -964,7 +964,8 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   editorUI.data.redraw()
   data.ui.activeFocus = trace
 
-method onCompleteMove*(self: TraceComponent, reponse: MoveState) {.async.} =
+method onCompleteMove*(self: TraceComponent, response: MoveState) {.async.} =
+  self.location = response.location
   self.editorUI.updateLineNumbersOnly()
 
 method onError*(self: TraceComponent, error: DebuggerError) {.async.} =
@@ -973,9 +974,18 @@ method onError*(self: TraceComponent, error: DebuggerError) {.async.} =
       self.error = error
       self.data.redraw()
 
+method register*(self: TraceComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
+
+proc registerTraceComponent*(component: TraceComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
+
 proc closeTrace*(self: TraceComponent) =
   if self.isRan:
-    discard self.data.services.debugger.tracepointDelete(self.id)
+    self.api.emit(CtTracepointDelete, TracepointId(id: self.id))
 
   if self.editorUI.tabInfo.isNil:
     return
@@ -995,7 +1005,7 @@ proc closeTrace*(self: TraceComponent) =
   # remove monaco editor
   for i, me in self.data.ui.traceMonacoEditors:
     if me == self.monacoEditor:
-      data.ui.traceMonacoEditors.delete(i,i)
+      delete(data.ui.traceMonacoEditors, i..i)
       break
 
   #remove trace component from componentMapping register

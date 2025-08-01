@@ -398,7 +398,7 @@ proc setupCoreIPC(debugger: DebuggerIPC) =
         # args.mapIt(JSON.stringify(it) & jsNl).join(cstring"") &
         # cstring"#END" & jsNl)
 
-proc startSocket*(debugger: DebuggerIPC, path: cstring, expectPossibleFail: bool = false): Future[JsObject] =
+proc startSocket*(path: cstring, expectPossibleFail: bool = false): Future[JsObject] =
   var future = newPromise() do (resolve: proc(response: JsObject)):
     var connections: seq[JsObject] = @[nil.toJs]
     connections[0] = net.createConnection(js{path: path, encoding: cstring"utf8"}, proc =
@@ -419,14 +419,41 @@ proc startSocket*(debugger: DebuggerIPC, path: cstring, expectPossibleFail: bool
       resolve(nil.toJs)
   return future
 
-proc startAndSetupCoreIPC*(debugger: DebuggerIPC) {.async.} =
-  while unixClient.isNil or unixSender.isNil:
-    if unixClient.isNil:
-      unixClient = await startSocket(debugger, CT_CLIENT_SOCKET_PATH & cstring"_" & cstring($callerProcessPid))
-    if unixSender.isNil:
-      unixSender = await startSocket(debugger, CT_SOCKET_PATH & cstring"_" & cstring($callerProcessPid))
+type
+  RawDapMessage* = ref object
+    raw*: cstring
 
-  setupCoreIPC(debugger)
+var dapSocket*: JsObject
+
+proc onDapRawMessage*(message: RawDapMessage, sender: JsObject) {.async.} =
+  if not dapSocket.isNil:
+    dapSocket.write(message.raw)
+  else: 
+    # TODO: put in a queue, or directly make an error, as it might be made hard to happen, 
+    # if sending from frontend only after dap socket setup here
+    errorPrint "dap socket is nil, couldn't send ", message.toJs
+ 
+proc setupProxyForDap* =
+  dapSocket.on(cstring"data", proc(data: cstring) =
+    mainWindow.webContents.send "CODETRACER::dap-raw-response-or-event", data)
+
+proc dapSocketPathForCallerPid(callerPid: int): cstring =
+  CT_DAP_SOCKET_PATH_BASE & cstring"_" & cstring($callerPid)
+
+proc startAndSetupCoreIPC*(debugger: DebuggerIPC) {.async.} =
+  while dapSocket.isNil:
+    let socketPath = dapSocketPathForCallerPid(callerProcessPid)
+    dapSocket = await startSocket(socketPath)
+    await wait(500)
+  setupProxyForDap()
+
+  # while unixClient.isNil or unixSender.isNil:
+  #   if unixClient.isNil:
+  #     unixClient = await startSocket(debugger, CT_CLIENT_SOCKET_PATH & cstring"_" & cstring($callerProcessPid))
+  #   if unixSender.isNil:
+  #     unixSender = await startSocket(debugger, CT_SOCKET_PATH & cstring"_" & cstring($callerProcessPid))
+  #   await wait(500)
+  # setupCoreIPC(debugger)
 
 
 var debugger* = debuggerIPC
@@ -653,17 +680,19 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
     # source = j"<file missing>!"
     # filename = j"<file missing: " & filename & j">"
     # missing = true
-
+    console.log "error reading file directly ", filename, " ", err
     if data.trace.imported:
       # try original filename if
       # it was first tried with a trace copy path
       (source, err) = await fsReadFileWithErr(filename)
 
       if not err.isNil:
+        console.log "error reading file from trace ", filename, " ", err
         return
     else:
       # we tried the original filename if not imported:
       # directly stop
+      console.log "error: trace not imported, but file couldn't be read ", filename
       return
     # bug "file missing " & $filename
 
@@ -686,6 +715,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
 
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
 
+  echo "index_config open: file read succesfully"
   var sourceLines = source.split(jsNl)
 
   var name = cstring""

@@ -5,7 +5,7 @@ when not defined(js):
   proc get*(a: string, default: string = ""): string =
     os.getEnv(a, default)
 else:
-  import jsffi
+  # import jsffi
 
   type
     NodePath* = ref object
@@ -14,7 +14,7 @@ else:
       dirname*: proc(path: cstring): cstring
       basename*: proc(path: cstring): cstring
 
-  proc jsGetEnv(a: cstring): cstring {.importcpp: "process.env[#]".}
+  proc jsGetEnv*(a: cstring): cstring {.importcpp: "process.env[#]".}
 
   var nodeFilename* {.importcpp: "__filename".}: cstring
 

@@ -9,7 +9,8 @@
   font-size: 3ch
 
 .calltrace-search
-  padding-right: 8px
+  if !IS_EXTENSION
+    padding-right: 8px
 
 .calltrace-view
 
@@ -469,7 +470,8 @@
   font-size: 14px
   height: 100%
   color: COLOR
-  padding-left: 4px
+  if !IS_EXTENSION
+    padding-left: 4px
   // background-color: BACKGROUND_COLOR
 
 .full-calltrace
@@ -489,7 +491,10 @@
   width: fit-content
 
 .calltrace-search-input
-  margin-left: 4px !important
+  if !IS_EXTENSION
+    margin-left: 4px !important
+  else
+    margin: 4px !important
 
 .step-list
   overflow: auto
@@ -649,7 +654,10 @@
   flex-direction: column
 
 .value-expanded
-  width: 100%
+  if IS_EXTENSION
+    width: calc(100% - 10px)
+  else
+    width: 100%
   display: flex
   flex-direction: column
   overflow: visible /*hidden*/
@@ -709,7 +717,8 @@
   overflow-y: scroll
   position: relative
   height: 100%
-  margin-left: 2px
+  if !IS_EXTENSION
+    margin-left: 2px
   // margin: 5px
   // margin-right: -5px
 

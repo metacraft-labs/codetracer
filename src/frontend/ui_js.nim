@@ -10,6 +10,9 @@ import
   lib, types, lang, renderer, config,
   property_test / test
 
+when defined(ctInExtension):
+  import vscode
+
 import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
@@ -596,6 +599,8 @@ proc onTraceLoaded(
     save=Save,
     dontAskAgain=bool)) {.async.} =
 
+  clog "trace loaded"
+
   data.trace = response.trace
   data.ui.readOnly = true
   data.services.debugger.functions = response.functions
@@ -1105,6 +1110,7 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
           `handlers`
       # echo messageCode.repr
     result.add(messageCode)
+  # echo result.repr
 
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
@@ -1141,9 +1147,9 @@ proc configureIPC(data: Data) =
     "updated-trace": TraceUpdate => [ui]
     "updated-history": HistoryUpdate => [ui]
     "updated-flow": FlowUpdate => [ui]
-    "loaded-terminal": seq[ProgramEvent] => [ui]
-    "updated-table": TableUpdate => [ui]
-    "updated-call-args": CallArgsUpdateResults => [ui]
+    # "loaded-terminal": seq[ProgramEvent] => [ui]
+    # "updated-table": TableUpdate => [ui]
+    # "updated-call-args": CallArgsUpdateResults => [ui]
     "updated-watches": JsAssoc[cstring, Value] => debugger
     "updated-shell": ShellUpdate => shell
     "loaded-flow-shape": FlowShape => [ui]
@@ -1656,58 +1662,116 @@ var actions*: array[ClientAction, ClientActionHandler] = [
 
 data.actions = actions
 
+when not defined(ctInExtension):
+  if not inElectron:
+    var io {.importc.}: proc(address: cstring, options: JsObject): js
+    var frontendSocketPort {.importc.}: int
+    var frontendSocketParameters {.importc.}: cstring
 
-if not inElectron:
-  var io {.importc.}: proc(address: cstring, options: JsObject): js
-  var frontendSocketPort {.importc.}: int
-  var frontendSocketParameters {.importc.}: cstring
+    proc startIPC =
+      let host = domwindow.location.hostname.to(cstring)
+      let parameters = if frontendSocketParameters.len > 0:
+          cstring"/" & frontendSocketParameters
+        else:
+          cstring""
 
-  proc startIPC =
-    let host = domwindow.location.hostname.to(cstring)
-    let parameters = if frontendSocketParameters.len > 0:
-        cstring"/" & frontendSocketParameters
-      else:
-        cstring""
+      let port = if frontendSocketPort != -1:
+          cstring($frontendSocketPort)
+        else:
+          domwindow.location.port.to(cstring)
 
-    let port = if frontendSocketPort != -1:
-        cstring($frontendSocketPort)
-      else:
-        domwindow.location.port.to(cstring)
+      let protocol = domwindow.location.protocol.to(cstring)
+      let wsProtocol = if protocol == cstring"https:":
+          cstring"wss:"
+        else: # assume http: , can it be different?
+          cstring"ws:"
+      let address = if port != cstring"":
+          cstring(fmt"{wsProtocol}//{host}:{port}")
+        else:
+          cstring(fmt"{wsProtocol}//{host}")
 
-    let protocol = domwindow.location.protocol.to(cstring)
-    let wsProtocol = if protocol == cstring"https:":
-        cstring"wss:"
-      else: # assume http: , can it be different?
-        cstring"ws:"
-    let address = if port != cstring"":
-        cstring(fmt"{wsProtocol}//{host}:{port}")
-      else:
-        cstring(fmt"{wsProtocol}//{host}")
+      console.log protocol, wsProtocol, address
+      var socket = io(
+        address,
+        js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}")})
+      socketdebug = socket
+      socket.on(cstring"connect") do ():
+        ipc = js{
+          send: proc(id: cstring, response: js) =
+            console.log cstring"=> ", id, response
+            socket.emit(id, response),
+          on: proc(id: cstring, code: js) = socket.on(id, proc(response: cstring) =
+            console.log cstring"<= ", id, response
+            code.call(code, undefined, JSON.parse(response))
+            )}
+        data.ipc = ipc
+        configureIPC(data)
+        configure(data)
 
-    console.log protocol, wsProtocol, address
-    var socket = io(
-      address,
-      js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}")})
-    socketdebug = socket
-    socket.on(cstring"connect") do ():
-      ipc = js{
-        send: proc(id: cstring, response: js) =
-          console.log cstring"=> ", id, response
-          socket.emit(id, response),
-        on: proc(id: cstring, code: js) = socket.on(id, proc(response: cstring) =
-          console.log cstring"<= ", id, response
-          code.call(code, undefined, JSON.parse(response))
-          )}
-      data.ipc = ipc
-      configureIPC(data)
-      configure(data)
+    startIPC()
 
-  startIPC()
-
+when defined(ctInExtension):
+  once:
+    # configureIPC(data)
+    configure(data)
 
 if inElectron:
   once:
     configureIPC(data)
     configure(data)
+
+when not defined(ctInExtension):
+  import 
+    communication, middleware, dap,
+    .. / common / ct_event
+
+  var dapApi {.exportc.}: DapApi
+
+  const logging = true # TODO: maybe overridable dynamically
+  
+  # === LocalToViewTransport
+
+  type
+    LocalToViewsTransport* = ref object of Transport
+      data*: Data
+
+  proc newLocalToViewsTransport(data: Data): LocalToViewsTransport =
+    LocalToViewsTransport(data: data)
+
+  # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
+  # as there are many subscribers
+  # IMPORTANT:
+  # internalRawReceive for it is called by the LocalViewToMiddlewareTransport when
+  # a local view emits
+
+  # === end of LocalToViewsTransport
+
+  proc setupSinglePageViewsApi(name: cstring, data: Data): MediatorWithSubscribers =
+    let transport = newLocalToViewsTransport(data)
+    newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
+
+  
+  proc configureMiddleware =
+    middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
+    dapApi = newExampleDapApi() # TODO: replace with real DAP client
+
+    setupMiddlewareApis(dapApi, middlewareToViewsApi)
+
+    # additional handler, so for now editor service can keep working
+    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
+      discard data.services.editor.onCompleteMove(data.services.editor, value))
+
+    for content, components in data.ui.componentMapping:
+      for i, component in components:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+        component.register(componentToMiddlewareApi)
+
+    discard windowSetTimeout(proc =
+      dapApi.exampleDap.receiveOnMove(), 1_000)
+
+  once:
+    configureMiddleware()
+
 # else:
   # configureIPC = functionAsJs(configureIPCRun)

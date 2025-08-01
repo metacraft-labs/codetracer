@@ -48,7 +48,7 @@ type
     content*: CallLineContent
     depth*: int
 
-  CallArgsUpdateResults* = object
+  CtUpdatedCalltraceResponseBody* = object
     finished*: bool
     args*: TableLike[langstring, seq[CallArg]] # TODO int64 .. on javascript
     returnValues*: TableLike[langstring, Value]
@@ -60,7 +60,8 @@ type
     scrollPosition*: int
     maxDepth*: int
 
-  CallSearchArg* = langstring
+  CallSearchArg* = object
+    value*: langstring
 
   CalltraceMode* {.pure.} = enum NoInstrumentation, CallKeyOnly, RawRecordNoValues, FullRecord
 

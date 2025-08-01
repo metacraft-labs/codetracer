@@ -85,7 +85,6 @@ proc onClicks*(e: kdom.Event, onClick: proc (ev: kdom.Event, et: VNode), onDoubl
       windowClearTimeout(currentId)
       id = 0
     onDoubleClick(e,nil)
-    kout cstring"onclicks 2 end ", id
   else:
     discard
 
@@ -103,4 +102,4 @@ proc convertStringToHtmlClass*(input : cstring): cstring =
 
   normalString = ($(matches.mapIt(it[0]).join(j"-"))).toLowerAscii()
 
-  return normalString
+  return normalString.cstring

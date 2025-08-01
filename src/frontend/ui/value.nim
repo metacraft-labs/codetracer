@@ -1,10 +1,9 @@
-import ui_imports, ../types, ../renderer
+import ui_imports, ../types, ../renderer, ../utils
+import ../communication, ../../common/ct_event
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
   types.Error, TypeKind.Raw, FunctionKind, TypeKind.None} # temp Function
-
-var default = 0
 
 proc view(
   self: ValueComponent,
@@ -18,17 +17,38 @@ proc view(
 
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
 
+proc loadHistory(self: ValueComponent, expression: cstring) =
+  self.api.emit(CtLoadHistory, LoadHistoryArg(expression: expression, location: self.location))
+
+method register*(self: ValueComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
+    if cast[cstring](response.expression) == self.baseExpression:
+      discard self.onUpdatedHistory(response))
+
+proc registerValueComponent*(component: ValueComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
+
+proc intValue*(i: int): Value {.exportc.} =
+  Value(
+    kind: TypeKind.Int,
+    i: cstring($i),
+    typ: Type(kind: TypeKind.Int, langType: "Int"),
+  )
+
 proc deleteWatch*(self: StateComponent, expression: cstring) =
   var i = self.watchExpressions.find(expression)
 
   if i != -1:
-    self.watchExpressions.delete(i, i)
-    self.data.services.debugger.watchExpressions.delete(i, i)
+    delete(self.watchExpressions, i..i)
     self.locals = self.locals.filterIt(it.expression != expression)
-    self.data.services.debugger.locals = self.data.services.
-      debugger.locals.
-      filterIt(it.expression != expression)
-    self.data.redraw()
+    self.redraw()
+
+proc updateWatches*(self: StateComponent, handler: proc(locals: seq[Variable])) {.async.} =
+  # TODO: Fix up with new communication
+  # data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
+  # self.onUpdatedWatches = handler
+  discard
 
 proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstring) =
   self.deleteWatch(expression)
@@ -37,12 +57,10 @@ proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstr
     errorMessage(cstring"newlines forbidden in watch expressions: not registered")
   else:
     self.watchExpressions.add(newExpression)
-    self.data.services.debugger.watchExpressions.add(newExpression)
 
-    discard self.data.services.debugger.updateWatches(proc(service: DebuggerService, locals: seq[Variable]) =
+    discard self.updateWatches(proc(locals: seq[Variable]) =
       self.locals = locals
-      service.locals = locals
-      self.data.redraw()
+      self.redraw()
     )
 
 proc uiExpanded*(self: ValueComponent, value: Value, expression: cstring): bool =
@@ -81,6 +99,20 @@ func findNonExpanded(value: Value): seq[Value] =
   else:
     discard
 
+proc expandValues*(self: ValueComponent, expressions: seq[cstring], depth: int, stateCompleteMoveIndex: int): Future[seq[Value]] {.async.} =
+  # TODO: Fix with db-backend
+  # let values = await self.data.asyncSend(
+  #   "expand-values",
+  #   js{
+  #     expressions: expressions,
+  #     depth: depth,
+  #     stateCompleteMoveIndex: stateCompleteMoveIndex
+  #   },
+  #   $stateCompleteMoveIndex & " " & $expressions,
+  #   seq[Value])
+  # return values
+  discard
+
 proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.async.} =
   if value.kind in ATOM_KINDS:
     return
@@ -90,7 +122,7 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
   self.expanded[expression] = uiExpanded
 
   if self.customRedraw.isNil:
-    self.data.redraw()
+    self.redraw()
   else:
     self.customRedraw(self)
 
@@ -100,7 +132,7 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
     let nonExpandedItemExpressions = nonExpandedItems.mapIt(it.expression)
     let state = self.data.stateComponent(self.stateID)
     let originalStateIndex = state.completeMoveIndex
-    let expandedItems = await self.data.services.debugger.expandValues(nonExpandedItemExpressions, 1, originalStateIndex)
+    let expandedItems = await self.expandValues(nonExpandedItemExpressions, 1, originalStateIndex)
 
     if state.completeMoveIndex != originalStateIndex:
       return
@@ -113,25 +145,25 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
         cerror &"no expanded item {i}"
 
     if self.customRedraw.isNil:
-      self.data.redraw()
+      self.redraw()
     else:
       self.customRedraw(self)
 
 proc switchChartKindView*(self: ChartComponent): VNode =
   # based on https://getbootstrap.com/docs/4.3/components/dropdowns/ : good to use
-  var kindSelectorClass = "select-view-kind-button"
-  var dropdownClass = "kind-dropdown-menu"
+  var kindSelectorClass = cstring"select-view-kind-button"
+  var dropdownClass = cstring"kind-dropdown-menu"
 
   if not self.kindSelectorIsClicked:
-    dropdownClass = dropdownClass & " hidden"
+    dropdownClass = dropdownClass & cstring" hidden"
   else:
-    kindSelectorClass = kindSelectorClass & " active"
+    kindSelectorClass = kindSelectorClass & cstring" active"
 
   buildHtml(
     tdiv(
       class = "select-view-kind",
       tabindex = "0",
-      onclick = proc =
+      onmousedown = proc =
         self.kindSelectorIsClicked = not self.kindSelectorIsClicked
         redrawAll(),
       onblur = proc =
@@ -140,10 +172,10 @@ proc switchChartKindView*(self: ChartComponent): VNode =
       )
     ):
       tdiv(
-        class = fmt"dropdown-toggle {kindSelectorClass}",
+        class = cstring(fmt"dropdown-toggle {kindSelectorClass}"),
         id = "dropdownMenuButton"
       ):
-        let kind = ($self.viewKind)[4..^1].toLowerAscii()
+        let kind = ($self.viewKind)[4..^1].toLowerAscii().cstring
         text kind
       tdiv(
         class = dropdownClass,
@@ -151,41 +183,41 @@ proc switchChartKindView*(self: ChartComponent): VNode =
       ):
         tdiv(
           class = "dropdown-item",
-          onclick = proc =
+          onmousedown = proc =
             if self.viewKind != ViewTable:
               self.changed = true
               self.viewKind = ViewTable
               self.line = nil
               self.pie = nil
-            self.data.redraw()
+            self.redraw()
         ):
           text "table"
         tdiv(
           class = "dropdown-item",
-          onclick = proc =
+          onmousedown = proc =
             if self.viewKind != ViewLine:
               self.viewKind = ViewLine
               self.pie = nil
               self.changed = true
-            self.data.redraw()
+            self.redraw()
         ):
           text "line"
         tdiv(
           class = "dropdown-item",
-          onclick = proc =
+          onmousedown = proc =
             if self.viewKind != ViewPie:
               self.viewKind = ViewPie
               self.line = nil
               self.changed = true
-            self.data.redraw()
+            self.redraw()
         ):
           text "pie"
 
 proc ensureLine*(self: ChartComponent) =
   if self.line.isNil and self.viewKind == ViewLine:
-    var canvasElement = jq(j"#chart-line-canvas-" & $self.getId).toJs
+    var canvasElement = jq(cstring(fmt"#chart-line-canvas-{self.getId}")).toJs
     try:
-      var canvasCtx = canvasElement.getContext(j"2d")
+      var canvasCtx = canvasElement.getContext(cstring"2d")
 
       # based on MDN docs : https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/createLinearGradient#filling_a_rectangle_with_a_linear_gradient
       var gradient = canvasCtx.createLinearGradient(276.0 / 2.0, 0, 276.0 / 2.0, 552.0)
@@ -248,13 +280,13 @@ proc ensurePie*(self: ChartComponent) =
           },
       }
     try:
-      var canvas = jq(j"#chart-pie-canvas-" & $self.getId).toJs.getContext(j"2d")
+      var canvas = jq(cstring(fmt"#chart-pie-canvas-{self.getId}")).toJs.getContext(cstring"2d")
       let containerWidth = jq(".trace .editor-traces").toJs.offsetWidth.to(float)
       
       self.pie = newChart(canvas, self.pieConfig)
       self.trace.traceHeight = containerWidth/2
 
-      jq(".trace .trace-main").style.height = $(self.trace.traceHeight + 30) & "px"
+      jq(".trace .trace-main").style.height = cstring($(self.trace.traceHeight + 30) & "px")
 
       let additionalHeightInLines = Math.ceil((self.trace.traceHeight + 30 - 210)/20)
 
@@ -282,16 +314,17 @@ proc ensureBase(self: ChartComponent) =
 proc ensure*(self: ChartComponent) =
   var label = if self.viewKind == ViewLine: "ensureLine" else: "ensurePie"
 
-  if self.stateID != -1:
-    kxiMap[j("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
-      discard windowSetTimeout(proc = self.ensureBase(), 500)
-    )
+  # if self.stateID != -1:
+  #   # TODO: think how this would work in extension
+  #   kxiMap[j("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
+  #     discard windowSetTimeout(proc = self.ensureBase(), 500)
+  #   )
+  # else:
+  if not self.trace.isNil:
+    self.ensureBase()
   else:
-    if not self.trace.isNil:
-      self.ensureBase()
-    else:
-      cerror "vaue: " & label & " cant be called"
-      return
+    cerror "vaue: " & label & " cant be called"
+    return
 
 proc renderLine*(self: ChartComponent): VNode =
   let hidden =
@@ -302,11 +335,11 @@ proc renderLine*(self: ChartComponent): VNode =
 
   result = buildHtml(
     tdiv(
-      class = &"chart-line{hidden}",
-      id = "chart-line-" & $self.getId
+      class = cstring(fmt"chart-line{hidden}"),
+      id = cstring(fmt"chart-line-{self.getId}"),
     )
   ):
-    canvas(id = "chart-line-canvas-" & $self.getId)
+    canvas(id = cstring(fmt"chart-line-canvas-{self.getId}"))
 
 
 proc lineData*(self: ChartComponent, values: seq[Value]): seq[float] =
@@ -364,17 +397,18 @@ proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
   for (label, value) in zip(self.pieLabels, self.pieValues):
     values[label] = value
 
-  for val in lineData:
-    if values.hasKey($val):
-      values[$val] = values[$val] + 1.0
+  for value in lineData:
+    let valueText = cstring($value)
+    if values.hasKey(valueText):
+      values[valueText] = values[valueText] + 1.0
     else:
-      values[$val] = 1.0
+      values[valueText] = 1.0
 
   self.pieLabels = @[]
   self.pieValues = @[]
 
   for label, value in values:
-    self.pieLabels.add($label)
+    self.pieLabels.add(label)
     self.pieValues.add(value)
 
   if not self.pie.isNil:
@@ -384,7 +418,7 @@ proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
 
 proc replaceAllValues*(self: ChartComponent, expression: cstring, values: seq[Value]) =
   if self.lineDatasetIndices.hasKey(expression):
-    let lineData = self.lineData(values)
+    # let lineData = self.lineData(values)
     let dataset = cast[seq[JsObject]](self.datasets)[self.lineDatasetIndices[expression]]
     var datasetData = cast[seq[int]](dataset.data)
 
@@ -412,11 +446,12 @@ proc update*(self: ChartComponent, values: seq[Value], replace: bool) =
     for (label, value) in zip(self.pieLabels, self.pieValues):
       values[label] = value
 
-  for val in lineData:
-    if values.hasKey($val):
-      values[$val] = values[$val] + 1.0
+  for value in lineData:
+    let valueText = cstring($value)
+    if values.hasKey(valueText):
+      values[valueText] = values[valueText] + 1.0
     else:
-      values[$val] = 1.0
+      values[valueText] = 1.0
 
   self.pieLabels = @[]
   self.pieValues = @[]
@@ -444,11 +479,11 @@ proc renderPie*(self: ChartComponent): VNode =
 
   result = buildHtml(
     tdiv(
-      class = &"chart-pie{hidden}",
-      id = "chart-pie-" & $self.getId
+      class = cstring(fmt"chart-pie{hidden}"),
+      id = cstring(fmt"chart-pie-{self.getId}"),
     )
   ):
-    canvas(id = "chart-pie-canvas-" & $self.getId)
+    canvas(id = cstring(fmt"chart-pie-canvas-{self.getId}"))
 
 method render*(self: ChartComponent): VNode =
   var table = self.tableView()
@@ -468,23 +503,39 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
 
   chart.ensure()
 
-  if self.stateID != -1:
-    kxiMap[&"stateComponent-{self.stateID}"].afterRedraws.add(proc =
-      let container = document.getElementById(fmt"history-{expression}")
-      if not container.isNil:
-        container.toJs.scrollTop = chart.historyScrollTop
-    ) # TODO: Handle multiple state components
+  # if self.stateID != -1:
+  #   kxiMap[&"stateComponent-{self.stateID}"].afterRedraws.add(proc =
+  #     let container = document.getElementById(cstring(fmt"history-{expression}"))
+  #     if not container.isNil:
+  #       container.toJs.scrollTop = chart.historyScrollTop
+  #   ) # TODO: Handle multiple state components
+  self.state.kxi.afterRedraws.add(proc = 
+    let container = document.getElementById(cstring(fmt"history-{expression}"))
+    if not container.isNil:
+      container.toJs.scrollTop = self.historyScrollTop
+      self.state.redrawForExtension()
+  )
 
   result = buildHtml(
     tdiv(class = "history-container")
   ):
     tdiv(
       class = "inline-history",
-      id = fmt"history-{expression}",
-      onscroll = proc(e: Event, tg: VNode) =
-        chart.historyScrollTop = cast[int](e.target.scrollTop),
+      id = cstring(fmt"history-{expression}"),
     ):
       chartElement
+
+  proc setupExtraScrollHandlers() =
+    let el = document.getElementById("history-" & $expression)
+    if not el.isNil:
+      el.addEventListener(
+        "wheel",
+        proc (ev: Event) =
+          kout el.scrollTop
+          self.historyScrollTop = cast[int](el.scrollTop)
+      )
+
+  discard setTimeout(proc() = setupExtraScrollHandlers(), 1)
 
 proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: Value, ev: Event): seq[ContextMenuItem] =
   var addToScratchpad:  ContextMenuItem
@@ -495,15 +546,18 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
     hint: "",
     handler: proc(e: Event) =
       openValueInScratchpad((expression, value))
-      self.data.redraw()
+      self.redraw()
   )
 
   contextMenu &= addToScratchpad
 
   return contextMenu 
 
+proc historyJump(self: ValueComponent, location: types.Location) =
+  self.api.emit(CtHistoryJump, location)
+
 proc historyClick(self: ValueComponent, location: types.Location) =
-  self.service.historyJump(location)
+  self.historyJump(location)
 
 proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event) =
   ev.stopPropagation()
@@ -517,7 +571,7 @@ proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-location",
-      onclick = proc = self.historyClick(event.location),
+      onmousedown = proc = self.historyClick(event.location),
       oncontextmenu = proc(ev: Event, tg: Vnode) = self.historyContextAction(event, ev)
     )
   ):
@@ -527,7 +581,7 @@ proc historyValueView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-value",
-      onclick = proc = self.historyClick(event.location),
+      onmousedown = proc = self.historyClick(event.location),
       oncontextmenu = proc(ev: Event, tg: VNode) = self.historyContextAction(event, ev)
     )
   ):
@@ -549,9 +603,9 @@ method ensureCollectionElementsChart*(
   value: Value,
   expression: cstring,
   valueView: proc(value: Value): VNode
-) =
+) {.base.} =
   let tableView = proc: VNode =
-    let kl = if self.charts[expression].viewKind == ViewTable: "view-active" else: "view-inactive"
+    let kl = if self.charts[expression].viewKind == ViewTable: cstring"view-active" else: cstring"view-inactive"
     buildHtml(tdiv(class=kl)):
       valueView(value)
   if not self.charts.hasKey(expression):
@@ -567,19 +621,19 @@ method ensureCollectionElementsChart*(
       self.charts[expression].tableView = tableView
       self.charts[expression].update(value.elements, replace=true)
 
-proc checkHistoryLocation*(self: ValueComponent, debugger: DebuggerService, expression: cstring) =
-  let currentLocation = self.data.services.debugger.location
+proc checkHistoryLocation*(self: ValueComponent, expression: cstring) =
+  let currentLocation = self.location
 
-  if currentLocation.path != debugger.valueHistory[expression].location.path or
-    currentLocation.functionName != debugger.valueHistory[expression].location.functionName:
-      data.services.debugger.valueHistory.del(expression)
+  if currentLocation.path != self.state.valueHistory[expression].location.path or
+    currentLocation.functionName != self.state.valueHistory[expression].location.functionName:
+      self.state.valueHistory.del(expression)
       self.showInline[expression] = false
 
 method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
-  if not self.data.services.debugger.valueHistory.hasKey(expression):
-    let location = self.data.services.debugger.location
+  if not self.state.valueHistory.hasKey(expression):
+    let location = self.location
 
-    self.data.services.debugger.valueHistory[expression] =
+    self.state.valueHistory[expression] =
       ValueHistory(
         location: location,
         results: @[]
@@ -593,32 +647,30 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
         else:
           "view-inactive"
 
-      buildHtml(
-        tdiv(class = "history-text " & kl)
-      ):
+      buildHtml(tdiv(class = cstring(fmt"history-text {kl}"))):
         tdiv(class = "history-text-element"):
           tdiv(class = "history-location-element"):
-            for event in self.data.services.debugger.valueHistory[expression].results:
+            for event in self.state.valueHistory[expression].results:
               historyLocationView(self, event)
           tdiv(class = "history-value-element"):
-            for event in self.data.services.debugger.valueHistory[expression].results:
+            for event in self.state.valueHistory[expression].results:
               historyValueView(self, event)
 
     let chart = self.addChart(expression)
 
     chart.tableView = tableView
-    chart.ensure()
-    self.ensureValueComponent()
-
-    await self.service.loadHistory(expression)
+    # chart.ensure()
+    # self.ensureValueComponent()
+    self.loadHistory(expression)
   else:
     self.showInline[expression] = not self.showInline[expression]
 
-  self.data.redraw()
+  self.state.redrawForExtension()
+  self.state.redraw()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
   let expression = cast[cstring](update.expression)
-  var valueHistory = self.data.services.debugger.valueHistory
+  var valueHistory = self.state.valueHistory
 
   if valueHistory.hasKey(expression):
     var unsortedHistory = valueHistory[expression].results.concat(update.results.filterIt(it notin valueHistory[expression].results))
@@ -648,8 +700,7 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
 
     valueHistory[expression].results = historyWithoutRepetitions
 
-    self.data.redraw()
-
+    self.redraw()
 
 proc atomValueView(self: ValueComponent, valueText: string, expression: cstring, klass: string, value: Value): VNode =
   let klassNumber =
@@ -668,7 +719,7 @@ proc atomValueView(self: ValueComponent, valueText: string, expression: cstring,
       ""
 
   result = buildHtml(
-    tdiv(class = &"value-expanded-atom atom-{klass} {klassNumber} {defaultClass}")
+    tdiv(class = cstring(fmt"value-expanded-atom atom-{klass} {klassNumber} {defaultClass}"))
   ):
     if not self.uiExpanded(value, expression) or not self.charts.hasKey(expression):
       span(class = "value-expanded-text"):
@@ -689,7 +740,7 @@ proc expandValueView(self: ValueComponent, value: Value, expression: cstring, le
   self.i += 1
 
   result = buildHtml(
-    span(class = &"value-expand {klass}")
+    span(class = cstring(fmt"value-expand {klass}"))
   ):
     text(&"{left}{list}{right}")
 
@@ -710,7 +761,7 @@ proc expandedCompoundView*(
 ): VNode =
   result = buildHtml(
     tdiv(
-      class = &"value-expanded-compound depth-{depth}",
+      class = cstring(fmt"value-expanded-compound depth-{depth}"),
       style = style(StyleAttr.marginLeft, cstring"17px")
     )
   ):
@@ -738,9 +789,9 @@ proc expandedCompoundView*(
           )
 
           if name in value.activeFields:
-            view(self, element, fmt"{expression} {name}", name, path, depth + 1)
+            view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
         else:
-          view(self, element, fmt"{expression} {name}", name, path, depth + 1)
+          view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
 
         if depth + 1 < path.len:
           discard path.pop()
@@ -761,20 +812,21 @@ proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[
 
   return contextMenu
 
-proc historyButtonView(self: ValueComponent, expression: cstring): VNode =
-  buildHtml(
-    tdiv(
-      class = "value-history-button",
-      onclick = proc =
-        discard self.showHistory(expression)
-    )
-  ):
-    fa "search"
+# proc historyButtonView(self: ValueComponent, expression: cstring): VNode =
+#   buildHtml(
+#     tdiv(
+#       class = "value-history-button",
+#       onclick = proc =
+#         discard self.showHistory(expression)
+#     )
+#   ):
+#     fa "search"
 
 proc compoundOrPointsToCompound(value: Value): bool =
   return value.kind notin ATOM_KINDS and
     (value.kind != Pointer or
     (not value.refValue.isNil and value.refValue.kind notin ATOM_KINDS))
+
 
 proc view(
   self: ValueComponent,
@@ -794,9 +846,13 @@ proc view(
   if self.uiExpanded(value, expression):
     discard self.expandNewValues(value, path)
 
-  var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
+  # var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
   var atom = if value.kind in ATOM_KINDS or not self.uiExpanded(value, expression): "value-expanded-atom-parent" else: "value-expanded-compound-parent"
-  let lang = self.data.trace.lang
+  var lang = LangUnknown
+  try:
+    lang = self.data.trace.lang
+  except:
+    lang = LangNoir
   var valueView = proc(value: Value): VNode =
     case value.kind:
     of Int, Float, String, CString, Char, Bool:
@@ -927,82 +983,91 @@ proc view(
       ):
         text("")
 
-  var selectRow = proc =
-    if value.isWatch:
-      if self.selected:
-        self.selected = false
-      else:
-        let state = self.data.stateComponent(self.stateID)
+  # var selectRow = proc =
+  #   if value.isWatch:
+  #     if self.selected:
+  #       self.selected = false
+  #     else:
+  #       let state = self.data.stateComponent(self.stateID)
 
-        for name, valueComponent in state.values:
-          valueComponent.selected = false
-          self.selected = true
-          self.data.focusComponent(self)
+  #       for name, valueComponent in state.values:
+  #         valueComponent.selected = false
+  #         self.selected = true
+  #         self.data.focusComponent(self)
 
-          kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
-            discard windowSetTimeout(proc =
-              jq(j".value-name-selected").focus(), 50)
-          )
+  #         kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
+  #           discard windowSetTimeout(proc =
+  #             jq(j".value-name-selected").focus(), 50)
+  #         )
 
-      self.data.redraw()
+  #     self.data.redraw()
 
-  var nameEdit = proc =
-    if value.isWatch:
-      if not self.selected:
-        let state = self.data.stateComponent(self.stateID)
+  # var nameEdit = proc =
+  #   if value.isWatch:
+  #     if not self.selected:
+  #       let state = self.data.stateComponent(self.stateID)
 
-        for name, valueComponent in state.values:
-          valueComponent.selected = false
-          self.selected = true
-          self.data.focusComponent(self)
+  #       for name, valueComponent in state.values:
+  #         valueComponent.selected = false
+  #         self.selected = true
+  #         self.data.focusComponent(self)
 
-          kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
-            discard windowSetTimeout(proc =
-              jq(j".value-name-selected").focus(), 50)
-          )
+  #         kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
+  #           discard windowSetTimeout(proc =
+  #             jq(j".value-name-selected").focus(), 50)
+  #         )
 
-        self.data.redraw()
+  #       self.data.redraw()
 
-  var renameWatch = proc(e: Event, v: VNode) =
-    var element = e.target
-    let state = self.data.stateComponent(self.stateID)
-    var text = cast[cstring](cast[js](element).innerText)
+  # var renameWatch = proc(e: Event, v: VNode) =
+  #   var element = e.target
+  #   let state = self.data.stateComponent(self.stateID)
+  #   var text = cast[cstring](cast[js](element).innerText)
 
-    if text.len > 0:
-      state.renameWatch(expression, text)
-    else:
-      state.deleteWatch(expression)
+  #   if text.len > 0:
+  #     state.renameWatch(expression, text)
+  #   else:
+  #     state.deleteWatch(expression)
 
-    self.data.redraw()
+  #   self.data.redraw()
 
   var isWatch = if value.isWatch: j"value-watch" else: j""
   var isSelected = if self.selected: j"value-selected" else: j""
-  var nameSelected = if self.selected: j"value-name-selected" else: j""
+  # var nameSelected = if self.selected: j"value-name-selected" else: j""
   var fresh = if self.fresh: j("value-fresh-" & $self.freshIndex) else: j""
 
-  let ensureCollectionElementsChart = proc: VNode =
-    if isExpandedCompoundParent:
-      self.ensureCollectionElementsChart(
-        value,
-        expression,
-        proc(value: Value): VNode =
-          buildHtml(tdiv()):
-            valueView(value)
-      )
-    else:
-      raise newException(ValueError, "chart not in right context")
+  # let ensureCollectionElementsChart = proc: VNode =
+  #   if isExpandedCompoundParent:
+  #     self.ensureCollectionElementsChart(
+  #       value,
+  #       expression,
+  #       proc(value: Value): VNode =
+  #         buildHtml(tdiv()):
+  #           valueView(value)
+  #     )
+  #   else:
+  #     raise newException(ValueError, "chart not in right context")
 
-  let renderSelectedView = proc: VNode =
-    if isExpandedCompoundParent:
-      if self.charts.hasKey(expression):
-        let chart = self.charts[expression]
+  # let renderSelectedView = proc: VNode =
+  #   if isExpandedCompoundParent:
+  #     if self.charts.hasKey(expression):
+  #       let chart = self.charts[expression]
 
-        result = chart.render()
-        chart.ensure()
-      else:
-        result = nil
-    else:
-      raise newException(ValueError, "chart not in right context")
+  #       result = chart.render()
+  #       chart.ensure()
+  #     else:
+  #       result = nil
+  #   else:
+  #     raise newException(ValueError, "chart not in right context")
+
+  proc expandValue(self: ValueComponent, path: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
+    # We need to emit expand value event and sub to the expand value response
+    # and then to resolve the Future[Value]
+    # Before we were calling data.services.debugger.expandValue(path)
+    # let count = 50
+    # var value = await self.data.asyncSend("expand-value", ExpandValueTarget(subPath: subPath, rrTicks: self.location.rrTicks, isLoadMore: isLoadMore, startIndex: startIndex, count: count), $self.location.rrTicks & " " & $subPath, Value)
+    # return value
+    discard
 
   proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
     var expand: bool = value.kind == NonExpanded
@@ -1020,8 +1085,9 @@ proc view(
 
           break
 
+    # TODO: Rework with the new db-backend and init
     if expand:
-      let newValue = await data.services.debugger.expandValue(path)
+      let newValue = await self.expandValue(path)
 
       if value.kind != Pointer:
         objectAssign(value.toJs, newValue.toJs)
@@ -1029,7 +1095,7 @@ proc view(
         objectAssign(value.refValue.toJs, newValue.refValue.toJs)
 
       if self.customRedraw.isNil:
-        self.data.redraw()
+        self.state.redraw()
       else:
         self.customRedraw(self)
 
@@ -1037,29 +1103,29 @@ proc view(
     var newValue: Value
 
     if value.kind != TableKind:
-      newValue = await data.services.debugger.expandValue(path, isLoadMore = true, startIndex = value.elements.len)
+      newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.elements.len)
 
       for element in newValue.elements:
         self.baseValue.elements.add(element)
     else:
-      newValue = await data.services.debugger.expandValue(path, isLoadMore = true, startIndex = value.items.len)
+      newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.items.len)
 
       for item in newValue.items:
         self.baseValue.items.add(item)
 
     self.isOperationRunning = false
     self.baseValue.partiallyExpanded = newValue.partiallyExpanded
-    self.data.redraw()
+    self.redraw()
 
   let cPath = path
 
   self.isOperationRunning = false
 
   result = buildHtml(
-    tdiv(class = &"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name")
+    tdiv(class = cstring(fmt"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name"))
   ):
     tdiv(
-      class = &"{atom}",
+      class = cstring(fmt"{atom}"),
       onContextMenu = proc(ev: Event, v: VNode) =
       let contextMenu = self.createContextMenuItems(value, ev)
       let e = ev.toJs
@@ -1070,15 +1136,15 @@ proc view(
         if self.isTooltipValue and expression == self.baseExpression:
           tdiv(
             class = "add-to-scratchpad-button",
-            onclick = proc(ev: Event, v: VNode) =
+            onmousedown = proc(ev: Event, v: VNode) =
               openValueInScratchpad((expression, value))
-              self.data.redraw()
+              self.redraw()
           ):
             tdiv(class = "custom-tooltip"):
               text "Add to scratchpad"
         span(
           class = "value-expand-button " & fresh,
-          onclick = proc(ev: Event, v: VNode) =
+          onmousedown = proc(ev: Event, v: VNode) =
             self.data.focusComponent(self)
             ev.stopPropagation()
             capture expression, value, cPath:
@@ -1100,7 +1166,7 @@ proc view(
           if expression == self.baseExpression:
             span(
               class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",
-              onclick = proc() =
+              onmousedown = proc() =
                 discard self.showHistory(expression)
             ):
               tdiv(class = "custom-tooltip"):
@@ -1126,7 +1192,7 @@ proc view(
       if expression == self.baseExpression and not self.uiExpanded(value, expression):
         span(
           class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",
-          onclick = proc() =
+          onmousedown = proc() =
             discard self.showHistory(expression)
         ):
           tdiv(class = "custom-tooltip"):
@@ -1134,7 +1200,7 @@ proc view(
       if value.partiallyExpanded and self.uiExpanded(value, expression):
         button(
           class = "value-load-more-button",
-          onclick = proc(ev: Event, v: VNode)=
+          onmousedown = proc(ev: Event, v: VNode)=
             capture value, cPath:
               if not self.isOperationRunning:
                 self.isOperationRunning = true
@@ -1152,5 +1218,10 @@ method render*(self: ValueComponent): VNode =
   var path: seq[SubPath] = @[]
 
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
-  self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
+  result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
 
+method redraw*(self: ValueComponent) =
+  if not self.state.isNil:
+    self.state.redraw()
+  else:
+    cast[Component](self).redraw()

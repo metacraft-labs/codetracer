@@ -1,5 +1,6 @@
 use crate::core::{Core, NO_CALLER_PROCESS_PID};
 // use crate::receiver::Receiver;
+use crate::paths::CODETRACER_PATHS;
 use crate::response::Response;
 use crate::task::{to_event_kind_text, to_task_kind_text};
 use log::{error, info};
@@ -10,7 +11,6 @@ use std::io::Write;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use crate::paths::CODETRACER_PATHS;
 
 pub struct Sender {
     sending_socket: Option<UnixStream>,

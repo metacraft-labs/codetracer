@@ -2,6 +2,7 @@ import
   ../ui_helpers, ui_imports,
   ../renderer, value, scratchpad
 
+import ../communication, ../../common/ct_event, ../dap
 import strutils, os
 
 # thank, God!
@@ -469,7 +470,7 @@ proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool
         self.data.redraw()
 
 proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
-  when not defined(server):
+  when not defined(server) and not defined(ctInCentralExtensionContext):
     let tippy = require("tippy.js")
     let followCursor = tippy.followCursor
 
@@ -1075,6 +1076,31 @@ method onCtrlNumber*(self: FlowComponent, arg: int) {.async.} =
 
 const DELAY: int64 = 50
 
+proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: int, iteration: int, rrTicks: int = -1, reverse: bool = false) =
+  # (line, rr ticks) => all steps that correspond to those rr ticks and line
+  # if two steps same lines rr ticks it means jump without changing rr ticks..
+  # hard to believe
+  let firstLoopLine = if path.len > 0 and not self.editorUI.isNil and not self.editorUI.flow.isNil:
+      let flow = self.flow
+      let loopId = flow.steps[stepCount].loop
+      flow.loops[loopId].first
+    else:
+      # e.g. step list jump for now
+      -1
+
+  self.api.emit(
+    CtLocalStepJump,
+    LocalStepJump(
+      path: path,
+      line: line,
+      stepCount: stepCount,
+      iteration: iteration,
+      firstLoopLine: firstLoopLine,
+      rrTicks: rrTicks,
+      reverse: reverse
+    )
+  )
+
 proc afterJump(self: FlowComponent, stepCount: int) =
   let step = self.flow.steps[stepCount]
   let location = self.data.services.debugger.location
@@ -1086,7 +1112,7 @@ proc afterJump(self: FlowComponent, stepCount: int) =
 
   if lastTimePlusDelay <= currentTime:
     self.redrawFlow()
-    self.data.services.debugger.jumpToLocalStep(self.tab.name, step.position, stepCount, step.iteration, step.rrTicks, reverse)
+    self.jumpToLocalStep(self.tab.name, step.position, stepCount, step.iteration, step.rrTicks, reverse)
 
 
 proc jumpToLocalStep*(self: FlowComponent, stepCount: int) =
@@ -1148,7 +1174,6 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
       showInLine: JsAssoc[cstring, bool]{},
       baseExpression: name,
       baseValue: value,
-      service: data.services.history,
       stateID: -1,
       nameWidth: VALUE_COMPONENT_NAME_WIDTH,
       valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
@@ -3891,3 +3916,59 @@ proc switchFlowType*(self: FlowComponent, flowType: FlowUI) =
     self.recalculateAndRedrawFlow()
     self.updateFlowDom()
 
+when defined(ctInExtension):
+  proc vsUpdatedFlow*(editor: JsObject, update: FlowUpdate) {.exportc.} =
+    discard cast[FlowComponent](vsCodeEditor.flow).onUpdatedFlow(update)
+
+  proc completeMove*(editor: JsObject, response: MoveState, dapApi: DapApi) {.exportc.} =
+    vsCodeEditor.flow = FlowComponent(
+      id: 0,
+      flow: nil,
+      # tab: self.tabInfo,
+      location: response.location,
+      multilineZones: JsAssoc[int, MultilineZone]{},
+      flowDom: JsAssoc[int, Node]{},
+      shouldRecalcFlow: false,
+      flowLoops: JsAssoc[int, FlowLoop]{},
+      flowLines: JsAssoc[int, FlowLine]{},
+      activeStep: FlowStep(rrTicks: -1),
+      selectedLine: -1,
+      selectedLineInGroup: -1,
+      selectedStepCount: -1,
+      # multilineFlowLines: multilineFlowLines(),
+      multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
+      loopLineSteps: JsAssoc[int, int]{},
+      inlineDecorations: JsAssoc[int, InlineDecorations]{},
+      # editorUI: self,
+      # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
+      # editor: self.service,
+      # service: self.data.services.flow,
+      # data: self.data,
+      lineGroups: JsAssoc[int, Group]{},
+      # status: FlowUpdateState(kind: FlowWaitingForStart),
+      statusWidget: nil,
+      sliderWidgets: JsAssoc[int, js]{},
+      lineWidgets: JsAssoc[int, js]{},
+      multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
+      stepNodes: JsAssoc[int, Node]{},
+      loopStates: JsAssoc[int, LoopState]{},
+      viewZones: JsAssoc[int, int]{},
+      loopViewZones: JsAssoc[int, int]{},
+      loopColumnMinWidth: 15,
+      shrinkedLoopColumnMinWidth: 8,
+      pixelsPerSymbol: 8,
+      distanceBetweenValues: 10,
+      distanceToSource: 50,
+      inlineValueWidth: 80,
+      bufferMaxOffsetInPx: 300,
+      maxWidth: 0,
+      modalValueComponent: JsAssoc[cstring, ValueComponent]{},
+      valueMode: BeforeValueMode
+    )
+
+    dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
+
+when defined(ctInExtension):
+  when defined(ctInCentralExtensionContext):
+    {.emit: "module.exports.vsUpdatedFlow = vsUpdatedFlow".}
+    {.emit: "module.exports.completeMove = completeMove".}

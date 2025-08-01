@@ -1,4 +1,5 @@
 import ui_imports, show_code, value, ../utils
+import ../communication, ../../common/ct_event
 
 
 let returnValueName: cstring = "<return value>"
@@ -9,11 +10,23 @@ const CALL_HEIGHT_PX = 24
 const CALL_BUFFER = 20
 const START_BUFFER = 10
 const TRACE_LINE_OFFSET = 10
+const EXPAND_CALLS_KIND = CtExpandCalls
+const COLLAPSE_CALLS_KIND = CtCollapseCalls
 
 proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
-proc searchCalltrace*(self: CalltraceComponent, query: cstring) {.async.}
 proc redrawCallLines(self: CalltraceComponent)
 proc loadLines(self: CalltraceComponent, fromScroll: bool)
+
+when defined(ctInExtension):
+  var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
+
+  proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
+    if calltraceComponentForExtension.kxi.isNil:
+      calltraceComponentForExtension.kxi = setRenderer(proc: VNode = calltraceComponentForExtension.render(), id, proc = discard)
+    result = calltraceComponentForExtension
+
+proc calltraceJump(self: CalltraceComponent, location: types.Location) =
+  self.api.emit(CtCalltraceJump, location)
 
 proc isAtStart(self: CalltraceComponent): bool =
   self.startCallLineIndex < START_BUFFER
@@ -37,6 +50,16 @@ func calltraceLinesTransformTranslateY(self: CalltraceComponent): cstring =
 func calltraceLinesStyle(self: CalltraceComponent): VStyle =
   style((StyleAttr.transform, self.calltraceLinesTransformTranslateY()))
 
+proc toggleCalls*(
+  self: CalltraceComponent,
+  kind: CtEventKind,
+  callKey: cstring,
+  nonExpandedKind: CalltraceNonExpandedKind,
+  count: int
+) =
+  let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
+  self.api.emit(kind, target)
+
 proc createContextMenuItems(
   self: CalltraceComponent,
   ev: js,
@@ -55,7 +78,7 @@ proc createContextMenuItems(
         name: "Expand Call Children",
         hint: "",
         handler: proc(e: Event) =
-          self.service.expandCalls(call.key, CalltraceNonExpandedKind.Children, 0)
+          self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, 0)
           self.loadLines(fromScroll=false)
       )
     contextMenu&= expandCallChildren
@@ -65,13 +88,13 @@ proc createContextMenuItems(
         name: "Collapse Call Children",
         hint: "",
         handler: proc(e: Event) =
-          self.service.collapseCalls(call.key, CalltraceNonExpandedKind.Children, 0)
+          self.toggleCalls(COLLAPSE_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, 0)
           self.loadLines(fromScroll=false)
       )
     contextMenu&= collapseCallChildren
 
   expandCallstack = ContextMenuItem(name: "Expand Full Callstack", hint: "", handler: proc(e: Event) =
-    self.service.expandCalls("0", CalltraceNonExpandedKind.CallstackInternal, -1)
+    self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.CallstackInternal, -1)
     self.loadLines(fromScroll=false))
   contextMenu &= expandCallstack
 
@@ -126,11 +149,11 @@ proc showCallValue*(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring)
     showInLine: JsAssoc[cstring, bool]{},
     baseExpression: arg.name,
     baseValue: arg.value,
-    service: data.services.history,
     stateID: -1,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    data: data
+    data: data,
+    location: self.location
   )
 
   self.forceRerender[id] = true
@@ -254,7 +277,7 @@ proc setExpandedValueOffset(
 
 proc childlessCallView(self: CalltraceComponent, call: Call, active: cstring): VNode =
   let internalActive =
-    if active != "" and call.location.key == data.services.debugger.location.key:
+    if active != "" and call.location.key == self.location.key:
       "active"
     else:
       ""
@@ -264,7 +287,7 @@ proc childlessCallView(self: CalltraceComponent, call: Call, active: cstring): V
     )
   ):
     tdiv(class = fmt"dot-call-img {internalActive}")
-    if call.location.rrTicks < data.services.debugger.location.rrTicks and active != "" and call.location.key != data.services.debugger.location.key:
+    if call.location.rrTicks < self.location.rrTicks and active != "" and call.location.key != self.location.key:
       tdiv(class = "active-call-location")
 
 proc endOfProgramCallView(self: CalltraceComponent, isError: bool): VNode =
@@ -281,7 +304,7 @@ proc expandCallView(self: CalltraceComponent, call: Call, count: int, active: cs
     span(
       class = "toggle-call",
       onclick = proc(ev: Event, v: VNode) =
-        self.service.expandCalls(call.key, CalltraceNonExpandedKind.Children, count)
+        self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, count)
         self.loadLines(fromScroll=false)
     )
   ):
@@ -298,7 +321,7 @@ proc collapseCallView(
     span(
       class = "toggle-call",
       onclick = proc(ev: Event, v: VNode) =
-        self.service.collapseCalls(call.key, kind, count)
+        self.toggleCalls(COLLAPSE_CALLS_KIND, call.key, kind, count)
         self.loadLines(fromScroll=false)
     )
   ):
@@ -333,7 +356,7 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
             self.resetValueView()
           self.calcValueLeftPosition(ev, id)
           self.forceRerender[id] = not self.forceRerender[id]
-        self.data.redraw(),
+        self.redraw(),
       oncontextmenu = proc(ev: Event, v: VNode) {.gcsafe.} =
         let e = ev.toJs
         ev.stopPropagation()
@@ -423,14 +446,14 @@ proc returnValueView(
 
 proc searchResultView(self: CalltraceComponent, call: Call): VNode =
   let location = call.location
-  let ticksText = if self.data.trace.lang.isDbBased(): "stepId" else: "rrTicks"
+  let ticksText = if self.isDbBasedTrace: "stepId" else: "rrTicks"
 
   buildHtml(
     tdiv(
       class = "search-result",
-      onclick = proc =
-        self.service.calltraceJump(location)
-        self.data.redraw()
+      onmousedown = proc =
+        self.calltraceJump(location)
+        self.redraw()
     )
   ):
     text &"#{location.key} - {ticksText}({location.rrTicks}): {location.highLevelFunctionName}"
@@ -442,7 +465,7 @@ proc emptyResultView(self: CalltraceComponent): VNode =
       class = "empty-search-result",
       onclick = proc =
         self.isSearching = false
-        self.data.redraw()
+        self.redraw()
     )
   ):
     text &"Couldn't find any results for '{self.searchText}'!\n-Click To Close-"
@@ -463,7 +486,7 @@ proc searchCalltraceView(self: CalltraceComponent): VNode =
     ev.target.focus()
     if ev.keyCode == ENTER_KEY_CODE:
       self.searchText = cast[cstring](ev.target.toJs.value)
-      discard self.searchCalltrace(self.searchText)
+      self.api.emit(CtSearchCalltrace, CallSearchArg(value: self.searchText))
 
   buildHtml(
     tdiv(class = "calltrace-search")
@@ -486,6 +509,9 @@ proc searchCalltraceView(self: CalltraceComponent): VNode =
 
     searchResultsView(self)
 
+method locationLang*(self: CalltraceComponent): Lang =
+  self.location.path.toLangFromFilename()
+
 proc filterCalltraceView(self: CalltraceComponent): VNode =
   let onFilterKeyUp = proc(ev: Event, v: VNode) {.async.} =
     if cast[cstring](ev.toJs.key) == cstring"Enter":
@@ -497,10 +523,10 @@ proc filterCalltraceView(self: CalltraceComponent): VNode =
         self.startCallLineIndex = 0
         self.loadLines(fromScroll=false)
 
-        self.data.redraw()
+        self.redraw()
 
   if self.rawIgnorePatterns.isNil:
-    if self.data.trace.lang != LangNim:
+    if self.locationLang() != LangNim:
       self.rawIgnorePatterns = cstring""
     else:
       self.rawIgnorePatterns = cstring"path~lib/system;path~chronicles"
@@ -529,7 +555,7 @@ proc callView*(
   index: int,
   depth: int
 ): VNode =
-  let currentCallKey = self.data.services.debugger.location.key
+  let currentCallKey = self.location.key
   let call = callLine.call
   let childrenCount = callLine.count
   let hiddenChildren = callLine.hiddenChildren
@@ -572,7 +598,7 @@ proc callView*(
         else:
           call.children.len
       let active =
-        if call.location.key == data.services.debugger.location.globalCallKey:
+        if call.location.key == self.location.globalCallKey:
           "active"
         else:
           ""
@@ -590,12 +616,15 @@ proc callView*(
         onclick = proc =
           clog fmt"calltrace: jump onclick call key " & $key
           self.resetValueView()
-          self.data.services.debugger.stableBusy = true
+          # TODO: send event to middleware to change state
+          # self.data.services.debugger.stableBusy = true
           self.selectedCallNumber = self.lineIndex[call.key]
           self.lastSelectedCallKey = call.key
-          self.service.calltraceJump(call.location)
-          inc self.data.services.debugger.operationCount
-          self.redrawCallLines()):
+          self.calltraceJump(call.location)
+          # TODO: send event to middleware to change status state
+          # inc self.data.services.debugger.operationCount
+          self.redrawCallLines()
+      ):
         if key != cstring"-1 -1 -1":
           text $call.location.highLevelFunctionName & " #" & $call.key
 
@@ -624,7 +653,7 @@ proc endOfProgramView*(
       id = fmt"local-call--1",
       class = "call-child-box",
       onclick = proc(e: Event, tg: VNode) =
-        self.service.calltraceJump(callLine.call.location)
+        self.calltraceJump(callLine.call.location)
     ):
       endOfProgramCallView(self, callLine.isError)
       tdiv(
@@ -659,9 +688,9 @@ proc hiddenCallstackView(
         onclick = proc(ev: Event, v: VNode) =
           if content.kind == CallLineContentKind.StartCallstackCount:
             self.depthStart = call.depth
-            self.service.expandCalls("0", CalltraceNonExpandedKind.Callstack, count)
+            self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.Callstack, count)
           else:
-            self.service.expandCalls(call.key, CalltraceNonExpandedKind.CallstackInternal, count)
+            self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.CallstackInternal, count)
           self.loadLines(fromScroll=false)
       ):
         if content.kind == CallLineContentKind.CallstackInternalCount:
@@ -685,6 +714,7 @@ proc callLineContentView*(
 
 proc callLineView*(self: CalltraceComponent, callLine: CallLine, index: int): VNode =
   let buffer = self.getStartBufferLen()
+
   let selected =
     if self.activeCallIndex == self.startCallLineIndex + index - buffer:
       "event-selected"
@@ -732,25 +762,18 @@ proc localCalltraceView*(self: CalltraceComponent): VNode =
   buildHtml(tdiv(class= &"local-calltrace")):
     tdiv(class="calltrace-lines")
 
-proc searchCalltrace*(self: CalltraceComponent, query: cstring) {.async.} =
-  if query.len == 0:
-    self.lastSearch = now()
+proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
+  self.searchResults = searchResults
+  self.isSearching = true
+  self.redraw()
+
+
+  self.lastSearch = now()
+
+  let current = cast[cstring](jq(".calltrace-search-input").toJs.value)
+
+  if current.len > 0:
     self.lastChange = self.lastSearch
-    self.searchResults = @[]
-    self.isSearching = false
-    redrawAll()
-  else:
-    self.searchResults = await self.service.searchCalltrace(query)
-    self.isSearching = true
-    self.data.redraw()
-
-    self.lastQuery = query
-    self.lastSearch = now()
-
-    let current = cast[cstring](jq(".calltrace-search-input").toJs.value)
-
-    if current.len > 0:
-      self.lastChange = self.lastSearch
 
 func findCall(call: Call, key: cstring): Call =
   if call.key == key:
@@ -762,9 +785,11 @@ func findCall(call: Call, key: cstring): Call =
   return nil
 
 proc calltraceScroll(self: CalltraceComponent, height: int) =
-  jqFind(j"#" & "calltraceScroll-" & $self.id).toJs[0].scrollTop = height
+  let calltraceElement = jqFind(j"#" & "calltraceScroll-" & $self.id)
+  if not calltraceElement.isNil and not calltraceElement.toJs[0].isNil:
+    calltraceElement.toJs[0].scrollTop = height
 
-method onUpdatedCallArgs*(self: CalltraceComponent, results: CallArgsUpdateResults) {.async.} =
+method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
   self.totalCallsCount = results.totalCallsCount
 
   for key, res in results.args:
@@ -795,18 +820,34 @@ method onUpdatedCallArgs*(self: CalltraceComponent, results: CallArgsUpdateResul
   else:
     self.redrawCallLines()
 
+  self.redraw()
+
 func supportCallstackOnly(self: CalltraceComponent): bool =
-  not self.data.config.calltrace or self.data.trace.lang == LangRust
+  not self.config.calltrace or self.locationLang() == LangRust
+
+method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
+  api.subscribe(CtUpdatedCalltrace, proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
+    discard self.onUpdatedCalltrace(response)
+  )
+  api.subscribe(CtCalltraceSearchResponse, proc(kind: CtEventKind, response: seq[Call], sub: Subscriber) =
+    self.registerSearchRes(response)
+  )
+  api.emit(InternalLastCompleteMove, EmptyArg())
+
+proc registerCalltraceComponent*(component: CalltraceComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
 
 proc loadLines(self: CalltraceComponent, fromScroll: bool) =
-  let rrGdbBased = not self.data.trace.lang.isDbBased()
-
-  if not (rrGdbBased and fromScroll) or not self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
+  if not (not self.isDbBasedTrace and fromScroll) or not self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
     let depth = self.panelDepth()
     let height = self.panelHeight()
     let startBuffer = self.getStartBufferLen()
     let calltraceLoadArgs = CalltraceLoadArgs(
-      location: self.debugger.location,
+      location: self.location,
       startCallLineIndex: self.startCallLineIndex - startBuffer,
       depth: depth,
       height: height + CALL_BUFFER + startBuffer,
@@ -815,7 +856,8 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool) =
       autoCollapsing: not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse
     )
 
-    discard self.service.loadCallArgs(calltraceLoadArgs)
+    self.api.emit(CtLoadCalltraceSection, calltraceLoadArgs)
+
     self.loadedCallKeys = JsAssoc[cstring, int]{}
   else:
     cwarn "ignore"
@@ -915,21 +957,21 @@ proc redrawCallLines(self: CalltraceComponent) =
   let calltraceLinesDom = cast[kdom.Element](vnodeToDom(calltraceLinesVdom, KaraxInstance()))
   let calltraceLinesElement = findElement(".calltrace-lines")
 
-  self.width =
-    if localCalltraceElement.style.width != "":
-      localCalltraceElement.style.width
-    else:
-      self.width
-
-  localCalltraceElement.style.height = self.calcScrollHeight()
-
   if not localCalltraceElement.isNil:
+    self.width =
+      if localCalltraceElement.style.width != "":
+        localCalltraceElement.style.width
+      else:
+        self.width
+
+    localCalltraceElement.style.height = self.calcScrollHeight()
+
     localCalltraceElement.replaceChild(
       calltraceLinesDom,
       calltraceLinesElement)
     self.redrawTraceLine()
 
-  if self.resizeObserver.isNil:
+  if not self.inExtension and self.resizeObserver.isNil:
     self.setCalltraceMutationObserver()
 
 proc changeLastCallSelection(self: CalltraceComponent) =
@@ -938,7 +980,7 @@ proc changeLastCallSelection(self: CalltraceComponent) =
 proc changeCallSelection(self: CalltraceComponent, key: cstring) =
   self.selectedCallNumber = self.lineIndex[key]
   self.changeLastCallSelection()
-  self.data.redraw()
+  self.redraw()
 
 proc getSelectedCall(self: CalltraceComponent): Call =
   self.callsByLine[self.selectedCallNumber].call
@@ -987,22 +1029,23 @@ method onEnter*(self: CalltraceComponent) {.async.} =
         let call = self.callLines[callLinesIndex].content.call
 
         self.resetValueView()
-        self.data.services.debugger.stableBusy = true
         self.lastSelectedCallKey = call.key
-        self.service.calltraceJump(call.location)
-        inc self.data.services.debugger.operationCount
+        self.calltraceJump(call.location)
+        # TODO: Middleware
+        # self.services.debugger.stableBusy = true
+        # inc self.data.services.debugger.operationCount
 
       of CallLineContentKind.CallstackInternalCount:
         let content = self.callLines[callLinesIndex].content
 
-        self.service.expandCalls(content.call.key, CalltraceNonExpandedKind.CallstackInternal, content.count)
+        self.toggleCalls(EXPAND_CALLS_KIND, content.call.key, CalltraceNonExpandedKind.CallstackInternal, content.count)
         self.loadLines(fromScroll=false)
 
       of CallLineContentKind.StartCallstackCount:
         let content = self.callLines[callLinesIndex].content
 
         self.depthStart = content.call.depth
-        self.service.expandCalls("0", CalltraceNonExpandedKind.Callstack, content.count)
+        self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.Callstack, content.count)
         self.loadLines(fromScroll=false)
 
       of CallLineContentKind.NonExpanded:
@@ -1058,6 +1101,7 @@ method onFindOrFilter*(self: CalltraceComponent) {.async.} =
       inputElement[0].focus()
 
 method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} =
+  self.location = response.location
   if self.loadedCallKeys.hasKey(response.location.key):
     let buffer = self.getStartBufferLen()
 
@@ -1069,16 +1113,21 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true
     self.loadLines(fromScroll=false)
+  self.redraw()
 
 method render*(self: CalltraceComponent): VNode =
   self.callsByLine = @[]
   self.lineIndex = JsAssoc[cstring, int]{}
 
-  if self.data.trace.isNil:
-    return buildHtml(tdiv())
+  # if self.data.trace.isNil:
+  #   return buildHtml(tdiv())
 
-  kxiMap["calltraceComponent-0"].afterRedraws.add(proc =
-    self.redrawCallLines())
+  if self.inExtension:
+    self.kxi.afterRedraws.add(proc = self.redrawCallLines())
+  else:
+    kxiMap["calltraceComponent-0"].afterRedraws.add(proc =
+      self.redrawCallLines()
+    )
 
   result = buildHtml(
     tdiv(
@@ -1093,7 +1142,7 @@ method render*(self: CalltraceComponent): VNode =
   ):
     tdiv():
       searchCalltraceView(self)
-      if not isDbBased(self.data.trace.lang):
+      if not self.inExtension and not self.isDbBasedTrace:
         filterCalltraceView(self)
     if self.service.isCalltrace:
       tdiv(

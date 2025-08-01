@@ -1,7 +1,7 @@
 # backend agnostic code, part of the types module, should not be imported directly,
 # use common/types or frontend/types instead.
 import
-  strformat, strutils, sequtils, macros, json, times, typetraits, results, paths
+  strformat, strutils, sequtils, macros, json, times, results, paths
 
 import task_and_event
 
@@ -17,7 +17,7 @@ include
   common_types/codetracer_features/[ notifications, events ],
   common_types/utils/constants,
   common_types/language_features/[ tokens, code, "type", "value", value_history, "macro" ],
-  common_types/debugger_features/[ breakpoint, call, trace, debugger, jumps],
+  common_types/debugger_features/[ breakpoint, call, dap_types, trace, debugger, jumps],
   common_types/codetracer_features/[ flow, frontend, shell, stylus ],
   common_types/debugger_features/[ stepping, tracepoints ]
 

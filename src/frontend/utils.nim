@@ -117,13 +117,17 @@ proc generateId*(data: Data, content: Content): int =
   else:
     return 0
 
-proc makeEventLogComponent*(data: Data, id: int): EventLogComponent =
+proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
 
     var dropDownsInit: array[EventDropDownBox,bool]
     dropDownsInit.fill(false);
 
     var selectedKinds: array[EventLogKind,bool]
     selectedKinds.fill(true)
+
+    # TODO: Remove hardcode bool value
+    if inExtension:
+      data.services.eventLog.updatedContent = true
 
     result = EventLogComponent(
       id: id,
@@ -140,7 +144,12 @@ proc makeEventLogComponent*(data: Data, id: int): EventLogComponent =
       detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
       traceSessionID: -1,
       traceUpdateId: -1,
-      lastJumpFireTime: 0)
+      lastJumpFireTime: 0,
+      inExtension: inExtension,
+      drawId: 0,
+      started: false,
+      isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
+    )
     data.registerComponent(result, Content.EventLog)
 
 proc makeShellComponent*(data: Data, id: int): ShellComponent =
@@ -172,18 +181,20 @@ proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
   data.ui.welcomeScreen = result
   data.registerComponent(result, Content.WelcomeScreen)
 
-proc makeStateComponent*(data: Data, id: int): StateComponent =
+proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateComponent =
   result = StateComponent(
     id: id,
     locals: data.services.debugger.locals,
     values: JsAssoc[cstring, ValueComponent]{},
     completeMoveIndex: 0,
-    service: data.services.debugger,
     nameWidth: 40,
     chevronClicked: false,
     minNameWidth: 30,
     maxNameWidth: 85,
-    totalValueWidth: 95)
+    totalValueWidth: 95,
+    inExtension: inExtension,
+    valueHistory: JsAssoc[cstring, ValueHistory]{},
+  )
   data.registerComponent(result, Content.State)
 
 proc makeBuildComponent*(data: Data): BuildComponent =
@@ -415,11 +426,9 @@ proc ensureValueComponent*(self: CallExpandedValuesComponent, name: cstring, val
      self.values[name] = ValueComponent(
        expanded: JsAssoc[cstring, bool]{},
        charts: JsAssoc[cstring, ChartComponent]{},
-      #  history: JsAssoc[cstring, seq[HistoryResult]]{},
        showInline: JsAssoc[cstring, bool]{},
        baseExpression: name,
        baseValue: value,
-       service: self.data.services.history,
        stateID: -1,
        data: self.data,
        nameWidth: VALUE_COMPONENT_NAME_WIDTH,
@@ -429,7 +438,7 @@ proc ensureValueComponent*(self: CallExpandedValuesComponent, name: cstring, val
 proc ensureValueComponent*(self: ValueComponent) =
   self.data.registerComponent(self, Content.Value)
 
-proc makeCalltraceComponent*(data: Data, id: int): CalltraceComponent =
+proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): CalltraceComponent =
   result = CalltraceComponent(
     id: id,
     searchResults: @[],
@@ -450,6 +459,9 @@ proc makeCalltraceComponent*(data: Data, id: int): CalltraceComponent =
     startPositionY: -1,
     width: "300",
     callValuePosition: JsAssoc[cstring, float]{},
+    inExtension: inExtension,
+    config: Config(calltrace: true), #TODO: For now hardcoded
+    isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
   data.registerComponent(result, Content.Calltrace)
 
@@ -467,10 +479,12 @@ proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
     forceRedraw: true,)
   data.registerComponent(result, Content.Filesystem)
 
-proc makeScratchpadComponent*(data: Data, id: int): ScratchpadComponent =
+proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): ScratchpadComponent =
   result = ScratchpadComponent(
     id: id,
-    service: data.services.debugger)
+    service: data.services.debugger,
+    inExtension: inExtension,
+  )
   data.registerComponent(result, Content.Scratchpad)
 
 func getId*(c: ChartComponent): int =
@@ -570,14 +584,16 @@ proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponen
     calltrace: data.services.calltrace)
   data.registerComponent(result, Content.CalltraceEditor)
 
-proc makeTerminalOutputComponent*(data: Data, id: int): TerminalOutputComponent =
+proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false): TerminalOutputComponent =
   result = TerminalOutputComponent(
     id: id,
     cachedLines: JsAssoc[int, seq[TerminalEvent]]{},
     cachedEvents: @[],
     lineEventIndices: JsAssoc[int, int]{},
     service: data.services.eventLog,
-    initialUpdate: true)
+    initialUpdate: true,
+    inExtension: inExtension,
+  )
   data.registerComponent(result, Content.TerminalOutput)
 
 proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
@@ -929,7 +945,7 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
     raise newException(Exception, "There is not any component with the given id.")
 
   # get editor component
-  let component = data.ui.componentMapping[content][id]
+  # let component = data.ui.componentMapping[content][id]
 
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
@@ -1134,7 +1150,7 @@ proc openTab*(
     noInfoMessage: cstring = cstring"",
     line: int = NO_LINE) = #  lang: Lang = LangUnknown) =
   cdebug "editor: openTab: " & $name & " " & $editorView
-  let tabName = if name != "unknown": name else: "NO SOURCE"
+  # let tabName = if name != "unknown": name else: "NO SOURCE"
   # singleton no info page?
   if not data.services.editor.open.hasKey(name):
     discard data.openNewEditorView(name, editorView, noInfoMessage=noInfoMessage, line=line)
@@ -1151,14 +1167,14 @@ proc openTab*(
   #   data.showTab(id)
 
 proc convertTracepointEventToProgramEvent*(tracepointEvent: Stop): ProgramEvent =
-  var res: string
+  var res: cstring
   if tracepointEvent.errorMessage == "":
     for (name, value) in tracepointEvent.locals:
       if value.kind != types.Error:
         if value.isLiteral and value.kind == types.String:
           res.add(value.text & cstring" ")
         else:
-          res.add(name & j"=" & textRepr(value) & cstring"; ")
+          res.add(name & j"=" & textRepr(value).cstring & cstring"; ")
       else:
         res.add(name & j"=" & j"<span class=error-trace>" & value.msg & j"</span>")
         res.add(j" ")
@@ -1214,7 +1230,7 @@ proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCac
     data.network.futures[j(id)][j(argId)] = functionAsJs(proc(value: JsObject): U =
       discard jsdelete data.asyncSendCache[j(id)][j(argId)]
       discard jsdelete data.network.futures[j(id)][j(argId)]
-      resolve(cast[U](value)))
+      resolve(value.to(U)))
 
     data.ipc.send j("CODETRACER::" & id), arg
     echo "<- sent: ", "CODETRACER::" & id
@@ -1263,13 +1279,11 @@ proc registerScratchpadValue*(self: ScratchpadComponent, expression: cstring, va
   self.values.add(ValueComponent(
     expanded: JsAssoc[cstring, bool]{},
     charts: JsAssoc[cstring, ChartComponent]{},
-    # history: JsAssoc[cstring, seq[HistoryResult]]{},
     showInline: JsAssoc[cstring, bool]{},
     baseExpression: expression,
     baseValue: value,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    service: self.data.services.history,
     stateID: -1,
     data: self.data))
 
@@ -1296,7 +1310,7 @@ proc findTRNode*(node: js): js =
     node else: findTRNode(node.parentNode)
 
 proc convertNotificationKind*(notificationKind: NotificationKind): cstring =
-  return ($notificationKind)["Notification".len .. ^1]
+  return cstring(($notificationKind)["Notification".len .. ^1])
 
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig =
   domwindow.editor = editor

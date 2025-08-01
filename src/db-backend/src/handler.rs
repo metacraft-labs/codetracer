@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
+use crate::dap::{self, CtUpdatedTableResponseBody, DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
@@ -45,6 +46,9 @@ pub struct Handler {
     pub calltrace: Calltrace,
     pub step_lines_loader: StepLinesLoader,
     pub trace: CoreTrace,
+    pub dap_client: DapClient,
+    pub resulting_dap_messages: Vec<DapMessage>,
+    pub previous_step_id: StepId,
 
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
@@ -101,6 +105,9 @@ impl Handler {
             trace,
             calltrace,
             step_lines_loader,
+            dap_client: DapClient::default(),
+            previous_step_id: StepId(0),
+            resulting_dap_messages: vec![],
         }
     }
     // TODO
@@ -195,10 +202,36 @@ impl Handler {
         )
     }
 
+    pub fn reset_dap(&mut self) {
+        self.resulting_dap_messages = vec![];
+    }
+
+    fn send_dap(&mut self, dap_message: &DapMessage) -> Result<(), Box<dyn Error>> {
+        self.resulting_dap_messages.push(dap_message.clone());
+        Ok(())
+    }
+
+    fn respond_dap<T: Serialize>(&mut self, request: dap::Request, value: T) -> Result<(), Box<dyn Error>> {
+        let response = DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: self.dap_client.seq,
+                type_: "response".to_string(),
+            },
+            request_seq: request.base.seq,
+            success: true,
+            command: request.command.clone(),
+            message: None,
+            body: serde_json::to_value(value)?,
+        });
+        self.dap_client.seq += 1;
+        self.send_dap(&response)
+    }
+
     fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         let call_key = self.db.call_key_for_step(self.step_id);
         let reset_flow = is_main || call_key != self.last_call_key;
         self.last_call_key = call_key;
+        info!("complete move: step_id: {:?}", self.step_id);
         let move_state = MoveState {
             status: "".to_string(),
             location: self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
@@ -210,12 +243,41 @@ impl Handler {
         };
 
         // info!("move_state {:?}", move_state);
-        self.send_event((
-            EventKind::CompleteMove,
-            gen_event_id(EventKind::CompleteMove),
-            serde_json::to_string(&move_state)?,
-            false,
-        ))?;
+        let reason = if is_main { "entry" } else { "step" };
+        info!("generate stopped event");
+        let raw_event = self.dap_client.stopped_event(reason)?;
+        info!("raw stopped event: {:?}", raw_event);
+        self.send_dap(&raw_event)?;
+        let raw_complete_move_event = self.dap_client.complete_move_event(&move_state)?;
+        self.send_dap(&raw_complete_move_event)?;
+        if self.step_id.0 > self.previous_step_id.0 {
+            let mut raw_output_events: Vec<dap::DapMessage> = vec![];
+            for event in self.db.events.iter() {
+                if event.step_id.0 > self.previous_step_id.0 && event.step_id.0 <= self.step_id.0 {
+                    // different kind of if-s:
+                    //   upper if the event is in the range of the move
+                    //   this internal one: for which kinds do we produce dap events
+                    #[allow(clippy::collapsible_if)]
+                    if event.kind == EventLogKind::Write {
+                        let step = self.db.steps[event.step_id];
+                        info!("generate output event");
+                        let raw_output_event = self.dap_client.output_event(
+                            "stdout",
+                            &self.db.paths[step.path_id],
+                            step.line.0 as usize,
+                            &event.content,
+                        )?;
+                        info!("raw output event: {:?}", raw_output_event);
+                        raw_output_events.push(raw_output_event);
+                    }
+                }
+            }
+            for raw_output_event in raw_output_events.iter() {
+                self.send_dap(raw_output_event)?;
+            }
+        }
+        self.previous_step_id = self.step_id;
+
         // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 
         let exact = false; // or for now try as flow // true just for this exact step
@@ -239,14 +301,13 @@ impl Handler {
         Ok(())
     }
 
-    pub fn run_to_entry(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(0));
         self.complete_move(true)?;
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn load_locals(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_locals(&mut self, req: dap::Request, _args: dap::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
             .map(|v| Variable {
@@ -275,7 +336,7 @@ impl Handler {
         // for now just removing duplicated variables/expressions: even if storing different values
         locals.dedup_by(|a, b| a.expression == b.expression);
 
-        self.return_task((task, self.serialize(&locals)?))?;
+        self.respond_dap(req, dap::CtLoadLocalsResponseBody { locals })?;
         Ok(())
     }
 
@@ -295,18 +356,26 @@ impl Handler {
         Ok(())
     }
 
-    pub fn collapse_calls(&mut self, collapse_calls_args: CollapseCallsArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn collapse_calls(
+        &mut self,
+        _req: dap::Request,
+        collapse_calls_args: CollapseCallsArgs,
+    ) -> Result<(), Box<dyn Error>> {
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             self.calltrace.change_expand_state(CallKey(num_key), false);
         } else {
             error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
         }
 
-        self.return_task((task, VOID_RESULT.to_string()))?;
+        // self.return_task((task, VOID_RESULT.to_string()))?;
         Ok(())
     }
 
-    pub fn expand_calls(&mut self, collapse_calls_args: CollapseCallsArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn expand_calls(
+        &mut self,
+        _req: dap::Request,
+        collapse_calls_args: CollapseCallsArgs,
+    ) -> Result<(), Box<dyn Error>> {
         let kind = collapse_calls_args.non_expanded_kind;
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             if kind == CalltraceNonExpandedKind::CallstackInternal {
@@ -320,11 +389,11 @@ impl Handler {
         } else {
             error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
         }
-        self.return_task((task, VOID_RESULT.to_string()))?;
+        // self.return_task((task, VOID_RESULT.to_string()))?;
         Ok(())
     }
 
-    fn load_local_calltrace(&mut self, args: CalltraceLoadArgs, _task: &Task) -> Result<Vec<CallLine>, Box<dyn Error>> {
+    fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
         let call_key = self.db.call_key_for_step(self.step_id);
         self.calltrace.optimize_collapse = args.optimize_collapse;
         if call_key != self.calltrace.start_call_key {
@@ -344,9 +413,13 @@ impl Handler {
         self.db.calls.len() - collapsed_count
     }
 
-    pub fn load_call_args(&mut self, args: CalltraceLoadArgs, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_calltrace_section(
+        &mut self,
+        _req: dap::Request,
+        args: CalltraceLoadArgs,
+    ) -> Result<(), Box<dyn Error>> {
         let start_call_line_index = args.start_call_line_index;
-        let call_lines = self.load_local_calltrace(args, &task)?;
+        let call_lines = self.load_local_calltrace(args)?;
         let total_count = self.calc_total_calls();
         let position = self.calltrace.calc_scroll_position();
         let update = CallArgsUpdateResults::finished_update_call_lines(
@@ -356,30 +429,23 @@ impl Handler {
             position,
             self.calltrace.depth_offset,
         );
-        self.return_task((task, VOID_RESULT.to_string()))?;
-        self.send_event((
-            EventKind::UpdatedCallArgs,
-            gen_event_id(EventKind::UpdatedCallArgs),
-            self.serialize(&update)?,
-            false,
-        ))?;
+        // self.return_task((task, VOID_RESULT.to_string()))?;
+        let raw_event = self.dap_client.updated_calltrace_event(&update)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
-    pub fn load_flow(&mut self, location: Location, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_flow(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(location.rr_ticks.0);
         let call_key = self.db.steps[step_id].call_key;
         let function_id = self.db.calls[call_key].function_id;
         let function_first = self.db.functions[function_id].line;
         let flow_update = self.flow_preloader.load(location, function_first, &self.db);
-        self.return_task((task, VOID_RESULT.to_string()))?;
-        self.send_event((
-            EventKind::UpdatedFlow,
-            gen_event_id(EventKind::UpdatedFlow),
-            self.serialize(&flow_update)?,
-            false,
-        ))?;
+        let raw_event = self.dap_client.updated_flow_event(flow_update)?;
+
+        self.send_dap(&raw_event)?;
         warn!("flow not finished");
+
         Ok(())
     }
 
@@ -429,9 +495,8 @@ impl Handler {
         Ok((call, count))
     }
 
-    pub fn step_in(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
-
         Ok(())
     }
 
@@ -461,7 +526,7 @@ impl Handler {
         }
     }
 
-    pub fn next(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         let step_to_different_line = true; // which is better/should be let the user configure it?
         (self.step_id, _) = self
             .db
@@ -469,13 +534,13 @@ impl Handler {
         Ok(())
     }
 
-    pub fn step_out(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         (self.step_id, _) = self.db.step_out_step_id_relative_to(self.step_id, forward);
         Ok(())
     }
 
     #[allow(clippy::expect_used)]
-    pub fn step_continue(&mut self, forward: bool, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step_continue(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         for step in self.db.step_from(self.step_id, forward) {
             if !self.breakpoint_list.is_empty() {
                 if let Some(is_active) = self.breakpoint_list[step.path_id.0]
@@ -516,17 +581,17 @@ impl Handler {
         Ok(())
     }
 
-    pub fn step(&mut self, arg: StepArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn step(&mut self, request: dap::Request, arg: StepArg) -> Result<(), Box<dyn Error>> {
         // for now not supporting repeat/skip_internal: TODO
         // TODO: reverse
         let original_step_id = self.step_id;
         // let original_step = self.db.steps[original_step_id];
         // let original_depth = self.db.calls[original_step.call_key].depth;
         match arg.action {
-            Action::StepIn => self.step_in(!arg.reverse, task.clone())?,
-            Action::Next => self.next(!arg.reverse, task.clone())?,
-            Action::StepOut => self.step_out(!arg.reverse, task.clone())?,
-            Action::Continue => self.step_continue(!arg.reverse, task.clone())?,
+            Action::StepIn => self.step_in(!arg.reverse)?,
+            Action::Next => self.next(!arg.reverse)?,
+            Action::StepOut => self.step_out(!arg.reverse)?,
+            Action::Continue => self.step_continue(!arg.reverse)?,
             _ => error!("action {:?} not implemented", arg.action),
         }
         if arg.complete && arg.action != Action::Continue {
@@ -558,11 +623,11 @@ impl Handler {
         //     }
         // }
 
-        self.return_void(task)?;
+        self.respond_dap(request, 0)?;
         Ok(())
     }
 
-    pub fn event_load(&mut self, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn event_load(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         let mut events: Vec<ProgramEvent> = vec![];
         let mut first_events: Vec<ProgramEvent> = vec![];
         let mut contents: String = "".to_string();
@@ -580,44 +645,34 @@ impl Handler {
         self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
         self.event_db.refresh_global();
 
-        self.send_event((
-            EventKind::UpdatedEvents,
-            gen_event_id(EventKind::UpdatedEvents),
-            self.serialize(&first_events)?,
-            false,
-        ))?;
+        let raw_event = self.dap_client.updated_events(first_events)?;
+        self.send_dap(&raw_event)?;
 
-        self.send_event((
-            EventKind::UpdatedEventsContent,
-            gen_event_id(EventKind::UpdatedEventsContent),
-            contents,
-            true,
-        ))?;
+        let raw_event_content = self.dap_client.updated_events_content(contents)?;
+        self.send_dap(&raw_event_content)?;
 
         Ok(())
     }
 
-    pub fn event_jump(&mut self, event: ProgramEvent, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
                                                               // for compat with rr/gdb core support
         self.step_id_jump(step_id);
         self.complete_move(false)?;
 
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn calltrace_jump(&mut self, location: Location, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(location.rr_ticks.0); // using this field
                                                    // for compat with rr/gdb core support
         self.step_id_jump(step_id);
         self.complete_move(false)?;
 
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn calltrace_search(&mut self, arg: CallSearchArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn calltrace_search(&mut self, _req: dap::Request, arg: CallSearchArg) -> Result<(), Box<dyn Error>> {
         let mut calls: Vec<Call> = vec![];
         let mut list: Vec<usize> = vec![];
         let re = Regex::new(&arg.value.clone())?;
@@ -635,7 +690,8 @@ impl Handler {
             }
         }
 
-        self.return_task((task, self.serialize(&calls)?))?;
+        let raw_event = self.dap_client.calltrace_search_event(calls)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
@@ -643,7 +699,7 @@ impl Handler {
         &self.db.variable_names[variable_id]
     }
 
-    pub fn load_history(&mut self, load_history_arg: LoadHistoryArg, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_history(&mut self, _req: dap::Request, load_history_arg: LoadHistoryArg) -> Result<(), Box<dyn Error>> {
         let mut history_results: Vec<HistoryResult> = vec![];
         // from start to end:
         //  find all steps with such a variable name: for them:
@@ -693,21 +749,22 @@ impl Handler {
         }
 
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
+        let raw_event = self.dap_client.updated_history_event(history_update)?;
 
-        self.send_event((
-            EventKind::UpdatedHistory,
-            gen_event_id(EventKind::UpdatedHistory),
-            serde_json::to_string(&history_update)?,
-            false,
-        ))?;
+        self.send_dap(&raw_event)?;
+        // self.send_event((
+        //     EventKind::UpdatedHistory,
+        //     gen_event_id(EventKind::UpdatedHistory),
+        //     serde_json::to_string(&history_update)?,
+        //     false,
+        // ))?;
 
         Ok(())
     }
 
-    pub fn history_jump(&mut self, loc: Location, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn history_jump(&mut self, _req: dap::Request, loc: Location) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(loc.rr_ticks.0));
         self.complete_move(false)?;
-        self.return_void(task)?;
         Ok(())
     }
 
@@ -755,11 +812,14 @@ impl Handler {
         None
     }
 
-    pub fn source_line_jump(&mut self, source_location: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn source_line_jump(
+        &mut self,
+        _req: dap::Request,
+        source_location: SourceLocation,
+    ) -> Result<(), Box<dyn Error>> {
         if let Some(step_id) = self.get_closest_step_id(&source_location) {
             self.step_id_jump(step_id);
             self.complete_move(false)?;
-            self.return_void(task)?;
             Ok(())
         } else {
             let err: String = format!("unknown location: {}", &source_location);
@@ -798,7 +858,11 @@ impl Handler {
         None
     }
 
-    pub fn source_call_jump(&mut self, call_target: SourceCallJumpTarget, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn source_call_jump(
+        &mut self,
+        _req: dap::Request,
+        call_target: SourceCallJumpTarget,
+    ) -> Result<(), Box<dyn Error>> {
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
             path: call_target.path.clone(),
@@ -809,7 +873,6 @@ impl Handler {
         if let Some(call_step_id) = self.get_call_target(&call_target) {
             self.step_id_jump(call_step_id);
             self.complete_move(false)?;
-            self.return_void(task)?;
             Ok(())
         } else {
             let err: String = format!("unknown call location: {}", &call_target);
@@ -819,7 +882,6 @@ impl Handler {
                 "Line reached but couldn't find the function!",
                 false,
             )?;
-            self.return_void(task)?;
             Err(err.into())
         }
     }
@@ -844,6 +906,11 @@ impl Handler {
         inner_map.remove(&loc.line);
         self.return_void(task)?;
         Ok(())
+    }
+
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_list.clear();
+        self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
     }
 
     pub fn toggle_breakpoint(&mut self, loc: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
@@ -1055,29 +1122,23 @@ impl Handler {
         Ok(())
     }
 
-    pub fn trace_jump(&mut self, event: ProgramEvent, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn trace_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(event.direct_location_rr_ticks));
         self.complete_move(false)?;
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn tracepoint_delete(&mut self, tracepoint_id: TracepointId, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn tracepoint_delete(&mut self, _req: dap::Request, tracepoint_id: TracepointId) -> Result<(), Box<dyn Error>> {
         self.event_db.clear_single_table(SingleTableId(tracepoint_id.id + 1));
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
-        self.send_event((
-            EventKind::UpdatedTrace,
-            gen_event_id(EventKind::UpdatedTrace),
-            self.serialize(&t_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let raw_event = self.dap_client.updated_trace_event(t_update)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
-    pub fn tracepoint_toggle(&mut self, tracepoint_id: TracepointId, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn tracepoint_toggle(&mut self, _req: dap::Request, tracepoint_id: TracepointId) -> Result<(), Box<dyn Error>> {
         let table_id = self.event_db.make_single_table_id(tracepoint_id.id);
         if self.event_db.disabled_tables.contains(&table_id) {
             self.event_db.enable_table(table_id);
@@ -1087,13 +1148,8 @@ impl Handler {
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
-        self.send_event((
-            EventKind::UpdatedTrace,
-            gen_event_id(EventKind::UpdatedTrace),
-            self.serialize(&t_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let raw_event = self.dap_client.updated_trace_event(t_update)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
@@ -1134,10 +1190,9 @@ impl Handler {
         Ok(())
     }
 
-    pub fn local_step_jump(&mut self, arg: LocalStepJump, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn local_step_jump(&mut self, _req: dap::Request, arg: LocalStepJump) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(arg.rr_ticks));
         self.complete_move(false)?;
-        self.return_void(task)?;
         Ok(())
     }
 
@@ -1188,25 +1243,22 @@ impl Handler {
         Ok(())
     }
 
-    pub fn update_table(&mut self, args: UpdateTableArgs, task: Task) -> Result<(), Box<dyn Error>> {
-        let (table_update, trace_values_option) = self.event_db.update_table(args)?;
-        if let Some(trace_values) = trace_values_option {
-            self.send_event((
-                EventKind::TracepointLocals,
-                gen_event_id(EventKind::TracepointLocals),
-                self.serialize(&trace_values)?,
-                false,
-            ))?;
-        }
+    pub fn update_table(&mut self, _req: dap::Request, args: UpdateTableArgs) -> Result<(), Box<dyn Error>> {
+        let (table_update, _trace_values_option) = self.event_db.update_table(args)?;
+        // TODO: For now no trace values are available
+        // if let Some(trace_values) = trace_values_option {
+        //     self.send_event((
+        //         EventKind::TracepointLocals,
+        //         gen_event_id(EventKind::TracepointLocals),
+        //         self.serialize(&trace_values)?,
+        //         false,
+        //     ))?;
+        // }
         // info!("table update {:?}", table_update);
-
-        self.send_event((
-            EventKind::UpdatedTable,
-            gen_event_id(EventKind::UpdatedTable),
-            self.serialize(&table_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let raw_event = self
+            .dap_client
+            .updated_table_event(&CtUpdatedTableResponseBody { table_update })?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 
@@ -1226,20 +1278,12 @@ impl Handler {
                 for step in steps {
                     if step.call_key == call_key {
                         if !list.contains_key(&line) {
-                            info!(
-                                "----- Not a loop here enter Line({:?}) and StepId - {:?}",
-                                line, step.step_id
-                            );
                             list.insert(line, step.step_id);
                         } else if step.step_id >= self.step_id {
                             list.entry(line)
                                 .and_modify(|e| *e = step.step_id)
                                 .or_insert(step.step_id);
                             // We change the line entry and break because we have found the next closest
-                            info!(
-                                "----- because of the loop we change here Line({:?}) with StepId - {:?}",
-                                line, step.step_id
-                            );
                             break;
                         }
                     }
@@ -1300,20 +1344,17 @@ impl Handler {
         }
     }
 
-    pub fn load_terminal(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_terminal(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         let mut events_list: Vec<ProgramEvent> = vec![];
         for (i, event_record) in self.db.events.iter().enumerate() {
             if event_record.kind == EventLogKind::Write {
                 events_list.push(self.to_program_event(event_record, i));
             }
         }
-        self.send_event((
-            EventKind::LoadedTerminal,
-            gen_event_id(EventKind::LoadedTerminal),
-            self.serialize(&events_list)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+
+        let raw_event = self.dap_client.loaded_terminal_event(events_list)?;
+        self.send_dap(&raw_event)?;
+
         Ok(())
     }
 
@@ -1323,13 +1364,14 @@ impl Handler {
         msg: &str,
         is_operation_status: bool,
     ) -> Result<(), Box<dyn Error>> {
-        let notification = Notification::new(kind, msg, is_operation_status);
-        self.send_event((
-            EventKind::NewNotification,
-            gen_event_id(EventKind::NewNotification),
-            self.serialize(&notification)?,
-            false,
-        ))?;
+        let _notification = Notification::new(kind, msg, is_operation_status);
+        // TODO: Fix using dap protocol
+        // self.send_event((
+        //     EventKind::NewNotification,
+        //     gen_event_id(EventKind::NewNotification),
+        //     self.serialize(&notification)?,
+        //     false,
+        // ))?;
         Ok(())
     }
 
@@ -1386,6 +1428,139 @@ impl Handler {
         let res = serde_json::to_string(value)?;
         Ok(res)
     }
+
+    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> dap::StackFrame {
+        // for this simplified scenario:
+        // step 1: call 1
+        // step 2: call 1
+        // step 3: call 2
+        // step 4: call 2
+        // we were returning the function-entry locations: equivalent of steps [3, 1]
+        // now with a workaround, we return the correct current frame(call) step(location), but keep
+        //   returning the function-entry locations for upper frames(calls), so with DAP
+        //   we can at least return the correct current location
+        //   the equivalent of [4, 1]
+        // eventually: TODO: return the current upper frame location/steps as well:
+        //   the equivalent of [4, 2]
+        //   how to do it efficiently is a non-trivial question: maybe by iterating through previous steps,
+        //   or a new kind of index?
+        let call = self.db.to_call(call_record, &mut self.expr_loader);
+        let location = if call_record.key == self.db.steps[self.step_id].call_key {
+            self.db
+                .load_location(self.step_id, call_record.key, &mut self.expr_loader)
+        } else {
+            call.location
+        };
+        dap::StackFrame {
+            id: call_record.key.0,
+            name: location.function_name,
+            source: Some(dap::Source {
+                name: Some("".to_string()),
+                path: Some(location.path),
+                source_reference: None,
+            }),
+            line: if location.line >= 0 { location.line as usize } else { 0 },
+            column: 1,
+            end_line: None,
+            end_column: None,
+            instruction_pointer_reference: None,
+            module_id: None,
+            presentation_hint: None,
+        }
+    }
+    pub fn threads(&mut self, request: dap::Request) -> Result<(), Box<dyn Error>> {
+        self.respond_dap(
+            request,
+            dap::ThreadsResponseBody {
+                threads: vec![dap::Thread {
+                    id: 1,
+                    name: "<thread 1>".to_string(),
+                }],
+            },
+        )?;
+        Ok(())
+    }
+
+    pub fn stack_trace(&mut self, request: dap::Request, args: dap::StackTraceArguments) -> Result<(), Box<dyn Error>> {
+        let stack_frames: Vec<dap::StackFrame> = if args.thread_id == 1 {
+            self.calltrace
+                .load_callstack(self.step_id, &self.db)
+                .iter()
+                .map(|call_record| {
+                    // expanded children count not relevant in raw callstack
+                    self.produce_stack_frame(call_record)
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        let total_frames = stack_frames.len();
+        self.respond_dap(
+            request,
+            dap::StackTraceResponseBody {
+                stack_frames,
+                total_frames,
+            },
+        )?;
+        Ok(())
+    }
+
+    pub fn scopes(&mut self, request: dap::Request, arg: dap::ScopeArguments) -> Result<(), Box<dyn Error>> {
+        let call = &self.db.calls[CallKey(arg.frame_id)];
+        let function = &self.db.functions[call.function_id];
+        let scope = dap::Scope {
+            name: function.name.clone(),
+            presentation_hint: Some("locals".to_string()),
+            variables_reference: arg.frame_id,
+            named_variables: Some(0),
+            indexed_variables: Some(0),
+            expensive: false,
+            source: None,
+            line: Some(function.line.0 as usize),
+            column: Some(1),
+            end_line: None,
+            end_column: None,
+        };
+        self.respond_dap(request, dap::ScopeResponseBody { scopes: vec![scope] })?;
+
+        Ok(())
+    }
+
+    pub fn to_dap_variable(&self, ct_variable: &Variable) -> dap::Variable {
+        let dap_value_text = ct_variable.value.text_repr();
+        dap::Variable::new(&ct_variable.expression, &dap_value_text, 0)
+    }
+
+    pub fn variables(&mut self, request: dap::Request, _arg: dap::VariablesArguments) -> Result<(), Box<dyn Error>> {
+        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
+            .iter()
+            .map(|v| Variable {
+                expression: self.db.variable_name(v.variable_id).to_string(),
+                value: self.db.to_ct_value(&v.value),
+            })
+            .collect();
+
+        let dap_variables = full_value_locals.iter().map(|v| self.to_dap_variable(v)).collect();
+
+        self.respond_dap(
+            request,
+            dap::VariablesResponseBody {
+                variables: dap_variables,
+            },
+        )?;
+
+        Ok(())
+    }
+
+    pub fn respond_to_disconnect(
+        &mut self,
+        request: dap::Request,
+        _arg: dap::DisconnectArguments,
+    ) -> Result<(), Box<dyn Error>> {
+        self.respond_dap(request, dap::DisconnectResponseBody {})?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1405,7 +1580,9 @@ mod tests {
     // use futures::stream::Iter;
     use lang::Lang;
     use runtime_tracing::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NonStreamingTraceWriter, StepId, StepRecord, TraceLowLevelEvent, TraceMetadata, TraceWriter, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, NONE_VALUE
+        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NonStreamingTraceWriter, StepId, StepRecord,
+        TraceLowLevelEvent, TraceMetadata, TraceWriter, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
+        NONE_VALUE,
     };
 
     use task::{TaskId, TaskKind, TraceSession, Tracepoint, TracepointMode};
@@ -1442,10 +1619,7 @@ mod tests {
         let db = setup_db();
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_tracepoints_args(1, 0),
             Task {
@@ -1463,10 +1637,7 @@ mod tests {
         let db = setup_db();
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         // TODO
         // this way we are resetting them after reforms
         // needs to pass multiple tracepoints at once now
@@ -1511,10 +1682,7 @@ mod tests {
         let db: Db = setup_db();
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_multiple_tracepoints_with_multiline_logs(3, size),
             Task {
@@ -1545,10 +1713,7 @@ mod tests {
         let db: Db = setup_db_loop(size);
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_tracepoints_args(2, 0),
             Task {
@@ -1569,10 +1734,7 @@ mod tests {
         let db: Db = setup_db_with_step_count(count);
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.event_load(Task {
-            kind: TaskKind::EventLoad,
-            id: TaskId("0".to_string()),
-        })?;
+        handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             make_tracepoints_with_count(count),
             Task {
@@ -1593,13 +1755,8 @@ mod tests {
 
         // Act: Create a new Handler instance
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
-        handler.step(
-            make_step_in(),
-            Task {
-                kind: TaskKind::Step,
-                id: TaskId("0".to_string()),
-            },
-        )?;
+        let request = dap::Request::default();
+        handler.step(request, make_step_in())?;
         assert_eq!(handler.step_id, StepId(1_i64));
         Ok(())
     }
@@ -1614,34 +1771,22 @@ mod tests {
             path: path.to_string(),
             line: 3,
         };
-        handler.source_line_jump(
-            source_location,
-            Task {
-                kind: TaskKind::SourceLineJump,
-                id: TaskId("0".to_string()),
-            },
-        )?;
+        handler.source_line_jump(dap::Request::default(), source_location)?;
         assert_eq!(handler.step_id, StepId(2));
         handler.source_line_jump(
+            dap::Request::default(),
             SourceLocation {
                 path: path.to_string(),
                 line: 2,
             },
-            Task {
-                kind: TaskKind::SourceLineJump,
-                id: TaskId("1".to_string()),
-            },
         )?;
         assert_eq!(handler.step_id, StepId(1));
         handler.source_call_jump(
+            dap::Request::default(),
             SourceCallJumpTarget {
                 path: "/test/workdir".to_string(),
                 line: 1,
                 token: "<top-level>".to_string(),
-            },
-            Task {
-                kind: TaskKind::SourceCallJump,
-                id: TaskId("0".to_string()),
             },
         )?;
         assert_eq!(handler.step_id, StepId(0));
@@ -1664,14 +1809,9 @@ mod tests {
             raw_ignore_patterns: "".to_string(),
             auto_collapsing: true,
             optimize_collapse: true,
+            render_call_line_index: 0,
         };
-        let _call_lines = handler.load_local_calltrace(
-            calltrace_load_args,
-            &Task {
-                kind: TaskKind::LoadCallArgs,
-                id: TaskId("load-call-args-0".to_string()),
-            },
-        )?;
+        let _call_lines = handler.load_local_calltrace(calltrace_load_args)?;
 
         // assert_eq!(parent_key, CallKey(0));
         // assert_eq!(calltrace.location.key, "1".to_string());
@@ -1712,14 +1852,14 @@ mod tests {
 
     fn test_load_flow(handler: &mut Handler, _path: &PathBuf) {
         handler
-            .load_flow(handler.load_location(handler.step_id), gen_task(TaskKind::LoadFlow))
+            .load_flow(dap::Request::default(), handler.load_location(handler.step_id))
             .unwrap();
     }
 
     fn test_step_in_scenario(handler: &mut Handler, path: &PathBuf) {
         for i in 0..handler.db.steps.len() - 1 {
             // eprintln!("doing step-in {i}");
-            handler.step_in(true, gen_task(TaskKind::Step)).unwrap();
+            handler.step_in(true).unwrap();
             assert_eq!(handler.step_id, StepId(i as i64 + 1));
             test_load_locals(handler);
             test_load_callstack(handler);
@@ -1728,7 +1868,9 @@ mod tests {
     }
 
     fn test_load_locals(handler: &mut Handler) {
-        handler.load_locals(gen_task(TaskKind::LoadLocals)).unwrap();
+        handler
+            .load_locals(dap::Request::default(), dap::CtLoadLocalsArguments::default())
+            .unwrap();
     }
 
     fn test_load_callstack(handler: &mut Handler) {

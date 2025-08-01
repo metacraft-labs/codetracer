@@ -1,5 +1,5 @@
 import jsffi, dom, vdom, karax, kdom, async, typetraits, tables
-import lib, lang
+import lib, lang, communication
 
 import rr_gdb
 
@@ -184,7 +184,7 @@ type
     # current*:     int64
     # callNames*: JsAssoc[cstring, cstring]
     loadingArgs*: JsSet[cstring]
-    onUpdatedCallArgs*: proc(self: CalltraceService, response: CallArgsUpdateResults): Future[void]
+    # onUpdatedCallArgs*: proc(self: CalltraceService, response: CallArgsUpdateResults): Future[void]
 
   TabService* = ref object of Service
     tabs*:          JsAssoc[cstring, TabInfo]
@@ -505,12 +505,19 @@ type
 
   Component* = ref object of RootObj
     data*: Data
+    isDbBasedTrace*: bool
+    config*: Config
     id*: int
     rendered*: bool
     rrTicks*: int
     readOnly*: js
     content*: Content
     layoutItem*: GoldenContentItem
+    kxi*: KaraxInstance
+    inExtension*: bool
+    api*: MediatorWithSubscribers
+    location*: Location
+    stableBusy*: bool
 
   DataTableComponent* = ref object
     context*: js
@@ -532,7 +539,6 @@ type
     tableCallback*: proc(data: js)
     autoScrollUpdate*: bool
     isDetailed*:   bool
-    redraw*: bool
     kinds*: JsAssoc[EventLogKind, bool]
     columns*: JsAssoc[EventOptionalColumn, bool]
     tags*: JsAssoc[EventTag, bool]
@@ -555,6 +561,9 @@ type
     hiddenRows*: int
     lastJumpFireTime*: int64
     isFlowUpdate*: bool
+    started*: bool
+    ignoreOutput*: bool
+    programEvents*: seq[ProgramEvent]
 
 
   DebugComponent* = ref object of Component
@@ -563,6 +572,14 @@ type
     # TODO dropdown
     after*: bool
     before*: bool
+    listHistory*: bool
+    fullHistory*: bool
+    historyIndex*: int
+    usingContextMenu*: bool
+    historyDirection*: bool
+    activeHistory*: cstring
+    finished*: bool
+    jumpHistory*: seq[JumpHistory]
 
 
 
@@ -593,11 +610,10 @@ type
 
   ValueComponent* = ref object of Component
     expanded*:           JsAssoc[cstring, bool]
-    # history*:          JsAssoc[cstring, seq[HistoryResult]]
+    state*:              StateComponent
     showInline*:         JsAssoc[cstring, bool]
     baseValue*:          Value
     baseExpression*:     cstring
-    service*:            HistoryService
     charts*:             JsAssoc[cstring, ChartComponent]
     i*:                  int
     fresh*:              bool
@@ -610,6 +626,7 @@ type
     isTooltipValue*:     bool
     isScratchpadValue*:  bool
     isOperationRunning*: bool
+    historyScrollTop*:   int
 
   ScratchpadComponent* = ref object of Component
     i*:             int
@@ -644,7 +661,7 @@ type
   StateComponent* = ref object of Component
     isState*:       bool
     watchExpressions*: seq[cstring]
-    service*:       DebuggerService
+    valueHistory*:  JsAssoc[cstring, ValueHistory]
     i*:             int
     inState*:       bool
     locals*:        seq[Variable]
@@ -982,7 +999,6 @@ type
     lastSliderUpdateTimeInMs*: int64
     lineGroups*: JsAssoc[int, Group]
     lineWidgets*: JsAssoc[int, js]
-    location*: Location
     loopColumnMinWidth*: int
     loopLineSteps*: JsAssoc[int, int]
     loopStates*: JsAssoc[int, LoopState]
@@ -1498,6 +1514,10 @@ type
     # sys*: SysConfig
 
 when defined(ctRenderer):
+  import 
+    std / jsconsole,
+    .. / common / ct_event
+
   proc newFlowUpdate*: FlowUpdate
 
 
@@ -1565,10 +1585,64 @@ when defined(ctRenderer):
   var domwindow {.importc: "window".}: JsObject
   domwindow.data = data
 
+  var middlewareToViewsApi* {.exportc.}: MediatorWithSubscribers = nil
+  domwindow.middlewareToViewsApi = middlewareToViewsApi
+
+  method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
+    self.api = api
+
+  # === LocalViewSubscriber:
+
+  type
+    LocalViewSubscriber* = ref object of Subscriber
+      # viewApi*: MediatorWithSubscriber
+      viewTransport*: Transport
+
+  const logging* = true # TODO: maybe reuse/use a dynamic log level mechanism
+
+  method emitRaw*(l: LocalViewSubscriber, kind: CtEventKind, value: JsObject, subscriber: Subscriber) =
+    if logging: console.log cstring"webview subscriber emitRaw: ", cstring($kind), cstring" ", value
+    l.viewTransport.internalRawReceive(CtRawEvent(kind: kind, value: value).toJs, subscriber)
+
+  proc newLocalViewSubscriber(viewTransport: Transport): LocalViewSubscriber =
+    LocalViewSubscriber(viewTransport: viewTransport)
+
+  # === end
+
+
+  # LocalViewToMiddlewareTransport:
+
+  type
+    LocalViewToMiddlewareTransport* = ref object of Transport
+      # component*: JsObject
+      middlewareToViewsTransport*: Transport
+
+  method send(l: LocalViewToMiddlewareTransport, data: JsObject, subscriber: Subscriber) =
+    l.middlewareToViewsTransport.internalRawReceive(data, subscriber)
+
+  # internalRawReceive for this is called by the subscriber in the middleware
+
+  proc newLocalViewToMiddlewareTransport(middlewareToViewsTransport: Transport): LocalViewToMiddlewareTransport =
+    LocalViewToMiddlewareTransport(middlewareToViewsTransport: middlewareToViewsTransport)
+  
+  # === end
+
+  proc setupLocalViewToMiddlewareApi*(name: cstring, middlewareToViewsApi: MediatorWithSubscribers): MediatorWithSubscribers =
+    let transport = newLocalViewToMiddlewareTransport(middlewareToViewsApi.transport)
+    result = newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
+    result.asSubscriber = newLocalViewSubscriber(transport)
+
   proc registerComponent*(data: Data, component: Component, content: Content) =
-    component.data = data
-    component.content = content
-    data.ui.componentMapping[content][component.id] = component
+    if data.ui.componentMapping[content].hasKey(component.id):
+      echo fmt"WARNING: already having a component for {content} with id {component.id}"
+    else:
+      component.data = data
+      component.content = content
+      if not middlewareToViewsApi.isNil:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+        component.register(componentToMiddlewareApi)
+      echo "register component ", content, " ", component.id
+      data.ui.componentMapping[content][component.id] = component
 
   proc projectPath*(project: cstring, path: string): cstring =
     return data.startOptions.app & cstring("/") & project & cstring(path)
@@ -1601,9 +1675,6 @@ proc duration*(call: nil Call): int64 =
   #   delta(call.finishTime, call.startTime)
   # else:
   #   0
-
-template ttArray(a: array[7, string]): array[TokenText, string] =
-  cast[array[TokenText, string]](a)
 
 proc toCamelCase*(name: string): string =
   let tokens = name.split("-")
@@ -1712,7 +1783,10 @@ method onBuildStderr*(self: Component, response: BuildOutput) {.base, async.} =
 method onBuildCode*(self: Component, response: BuildCode) {.base, async.} =
   discard
 
-method onUpdatedCallArgs*(self: Component, response: CallArgsUpdateResults) {.base, async.} =
+method onUpdatedTable*(self: Component, response: CtUpdatedTableResponseBody) {.base, async.} =
+  discard
+
+method onUpdatedCalltrace*(self: Component, response: CtUpdatedCalltraceResponseBody) {.base, async.} =
   discard
 
 method onUpdatedShell*(self: Component, response: ShellUpdate) {.base, async.} =
@@ -1727,20 +1801,23 @@ method onDebugOutput*(self: Component, response: DebugOutput) {.base, async.} =
 method onError*(self: Component, error: DebuggerError) {.base, async.} =
   discard
 
-method onAddBreakResponse(self: Component, response: BreakpointInfo) {.base, async.} =
+method onAddBreakResponse*(self: Component, response: BreakpointInfo) {.base, async.} =
   discard
 
-method onAddBreakCResponse(self: Component, response: BreakpointInfo) {.base, async.} =
+method onAddBreakCResponse*(self: Component, response: BreakpointInfo) {.base, async.} =
   discard
 
 method onOutputJumpFromShellUi*(self: Component, response: int) {.base, async.} =
   discard
 
-method increaseWhitespaceWidth*(self: EditorViewComponent) =
+method onDapStopped*(self: Component, response: DapStoppedEvent) {.base, async.} =
+  discard
+ 
+method increaseWhitespaceWidth*(self: EditorViewComponent) {.base.} =
   if self.whitespace.width < MAX_WHITESPACE_WIDTH:
     self.whitespace.width += 1
 
-method decreaseWhitespaceWidth*(self: EditorViewComponent) =
+method decreaseWhitespaceWidth*(self: EditorViewComponent) {.base.} =
   if self.whitespace.width > 1:
     self.whitespace.width -= 1
 
@@ -1758,6 +1835,22 @@ method refreshTrace*(self: Component) {.base.} =
 
 method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {.base, async.} =
   discard
+
+method handleHistoryJump*(self: Component, isForward: bool) {.base.} =
+  discard
+
+method redrawForExtension*(self: Component) {.base.} =
+  if not self.kxi.isNil:
+    self.kxi.redraw()
+
+method redrawForSinglePage*(self: Component) {.base.} =
+  discard
+
+method redraw*(self: Component) {.base.} =
+  if self.inExtension:
+    self.redrawForExtension()
+  else:
+    self.redrawForSinglePage()
 
 # templates for singletons
 template debugComponent*(data: Data): DebugComponent =

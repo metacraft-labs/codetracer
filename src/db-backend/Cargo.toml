@@ -33,6 +33,8 @@ clap = { version = "4.5.4", features = ["derive"] }
 runtime_tracing = "0.14.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-add-evm-event" }
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
+chrono = "0.4.41"
+expanduser = "1.2.2"
 
 [lib]
 name = "db_backend"

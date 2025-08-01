@@ -9,6 +9,8 @@
 .terminal
   color: COLOR
   height: 100%
+  if IS_EXTENSION
+    overflow: auto
 
   .terminal-line
     cursor: pointer
@@ -19,6 +21,8 @@
     display: flex
     font-size: 14px
     font-family: "FiraCode" !important
+    if IS_EXTENSION
+      flex-direction: column
 
   pre
     color: COLOR

@@ -68,6 +68,17 @@ type
     startIndex*: int
     count*: int
 
+  CtLoadLocalsArguments* = ref object
+    rrTicks*: int
+    countBudget*: int
+    minCountLimit*: int
+    
+  CtLoadLocalsResponseBody* = ref object
+    locals*: seq[Variable]
+
+  CtUpdatedTableResponseBody* = ref object
+    tableUpdate*: TableUpdate
+
   Variable* = ref object
     expression*: langstring
     value*: Value

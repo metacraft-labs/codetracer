@@ -1,4 +1,5 @@
 import ui_imports, ../renderer
+import ../communication, ../../common/ct_event
 
 proc messageView(self: DebugComponent): VNode =
   var current = now()
@@ -9,7 +10,7 @@ proc messageView(self: DebugComponent): VNode =
   if self.message.message.len == 0 or self.message.time == -1:
     buildHtml(tdiv())
   else:
-    let kl = "message-" & ($self.message.level)[3 .. ^1].toLowerAscii
+    let kl = cstring("message-" & ($self.message.level)[3 .. ^1].toLowerAscii)
 
     buildHtml(
       tdiv(id = "message", class = kl)
@@ -32,7 +33,26 @@ proc stopJump*(self: DebugComponent) =
   self.data.redraw()
 
 proc runToEntry*(self: DebugComponent) =
-  self.service.runToEntry()
+  self.api.emit(CtRunToEntry, EmptyArg())
+
+proc historyJump(self: DebugComponent, location: types.Location) =
+  self.api.emit(CtHistoryJump, location)
+
+proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
+  if isForward:
+    if self.jumpHistory.len != 0 and self.jumpHistory.len - self.historyIndex > 0:
+      self.historyIndex += 1
+      let location = self.jumpHistory[^self.historyIndex].location
+
+      self.service.currentOperation = HISTORY_JUMP_VALUE
+      self.historyJump(location)
+  else:
+    if self.jumpHistory.len != 0 and self.historyIndex >= 2:
+      self.historyIndex -= 1
+      let location = self.jumpHistory[^self.historyIndex].location
+
+      self.service.currentOperation = HISTORY_JUMP_VALUE
+      self.historyJump(location)
 
 proc action(self: DebugComponent, id: string) =
   case id:
@@ -40,15 +60,15 @@ proc action(self: DebugComponent, id: string) =
     let taskId = genTaskId(ResetOperation)
     clog "start reset-operation", taskId
     self.service.resetOperation(full=false, taskId=taskId)
-    if self.service.jumpHistory.len != 0:
-      self.service.jumpHistory[^1].lastOperation = cstring"reset-operation"
+    if self.jumpHistory.len != 0:
+      self.jumpHistory[^1].lastOperation = cstring"reset-operation"
 
   of "full-reset-operation":
     let taskId = genTaskId(ResetOperation)
     clog "start reset-operation", taskId
     self.service.resetOperation(full=true, resetLastLocation=true, taskId=taskId)
-    if self.service.jumpHistory.len != 0:
-      self.service.jumpHistory[^1].lastOperation = cstring"full-reset-operation"
+    if self.jumpHistory.len != 0:
+      self.jumpHistory[^1].lastOperation = cstring"full-reset-operation"
 
   of "stop": stopAction()
 
@@ -116,31 +136,31 @@ let tooltipText = JsAssoc[cstring, cstring]{
 proc buildListItem(self: DebugComponent, history: JumpHistory, id: int): VNode =
   let myLocation = history
   let fileName = history.location.highLevelPath.split("/")[^1]
-  var activeFlag = id == self.service.historyIndex - 1
+  var activeFlag = id == self.historyIndex - 1
   var active = if activeFlag: "active" else: ""
 
   buildHtml(
     tdiv(class="history-list-item-wrapper")
   ):
-    span(class=fmt"history-list-item {active}",
+    span(class=cstring(fmt"history-list-item {active}"),
       onmousedown = proc (ev: Event, et: VNode) =
         ev.preventDefault(),
       onclick = proc(ev: Event, v: VNode) =
         ev.stopPropagation()
         capture myLocation:
-          self.service.listHistory = false
-          self.service.fullHistory = false
-          data.services.history.historyJump(myLocation.location)
-          self.service.historyIndex = id + 1
+          self.listHistory = false
+          self.fullHistory = false
+          self.historyJump(myLocation.location)
+          self.historyIndex = id + 1
           self.service.currentOperation = HISTORY_JUMP_VALUE):
       text fmt"{history.lastOperation} => {history.location.highLevelFunctionName} || {fileName}:{history.location.line}"
 
 proc buildFullHistory(self: DebugComponent): VNode =
-  var hidden = if not self.service.fullHistory: "hidden" else: ""
+  var hidden = if not self.fullHistory: "hidden" else: ""
   return buildHtml(
-    tdiv(class = fmt"full-history-list {hidden}")
+    tdiv(class = cstring(fmt"full-history-list {hidden}"))
   ):
-    for id, history in self.service.jumpHistory.reversed():
+    for id, history in self.jumpHistory.reversed():
       buildListItem(self, history, id)
       if id > 30:
         break
@@ -149,28 +169,28 @@ proc buildHistoryMenu(self: DebugComponent): VNode =
   buildHtml(
     tdiv(class = "history-list")
   ):
-    if not self.service.historyDirection:
-      for id, history in self.service.jumpHistory.reversed():
-        if id >= self.service.historyIndex - 1:
+    if not self.historyDirection:
+      for id, history in self.jumpHistory.reversed():
+        if id >= self.historyIndex - 1:
           buildListItem(self, history, id)
           if id > 30: break
     else:
-      for id, history in self.service.jumpHistory.reversed():
-        if id < self.service.historyIndex - 1:
+      for id, history in self.jumpHistory.reversed():
+        if id < self.historyIndex - 1:
           buildListItem(self, history, id)
           if id > 30: break
     tdiv(class = "history-list-item-wrapper"):
-      span(class = fmt"history-list-item full-history-item",
+      span(class = cstring(fmt"history-list-item full-history-item"),
         id = "history-focus-id",
         tabIndex = "0",
         onblur = proc() =
-          self.service.listHistory = false
-          self.service.fullHistory = false
-          self.service.usingContextMenu = false,
+          self.listHistory = false
+          self.fullHistory = false
+          self.usingContextMenu = false,
         onclick = proc(ev: Event, tg: VNode) =
           ev.stopPropagation()
           ev.preventDefault()
-          self.service.fullHistory = not self.service.fullHistory
+          self.fullHistory = not self.fullHistory
           self.data.redraw()
       ):
         text fmt"View full history"
@@ -179,8 +199,8 @@ proc buildHistoryMenu(self: DebugComponent): VNode =
 
 
 method render*(self: DebugComponent): VNode =
-  let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
-  let finished = if self.service.finished: "debug-finished-background" else: ""
+  # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
+  let finished = if self.finished: cstring"debug-finished-background" else: cstring""
 
   result = buildHtml(
     tdiv()
@@ -189,7 +209,10 @@ method render*(self: DebugComponent): VNode =
     tdiv(id="debug", class=finished):
 
       proc debugStepButton(id: string, action: DebuggerAction, reverse: bool): VNode {.closure.} =
-        let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
+        # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000:
+        #       cstring"debug-button busy"
+        #     else:
+        #       cstring"debug-button"
 
         var click = proc =
           let taskId = genTaskId(Step)
@@ -198,7 +221,7 @@ method render*(self: DebugComponent): VNode =
 
         buildHtml(tdiv(class="debug-button-container")):
           span(
-            id = id & "-debug",
+            id = cstring(fmt"{id}-debug"),
             class = "debug-button",
             onclick = click
           ):
@@ -206,20 +229,20 @@ method render*(self: DebugComponent): VNode =
             tdiv(
               class = "custom-tooltip",
             ):
-              text tooltipText[id] & fmt" ({shortcuts[id]})"
+              text tooltipText[id] & cstring(fmt" ({shortcuts[id]})")
 
       proc debugButton(id: string, disabled: bool = false): VNode {.closure.} =
         let disabledClass = if disabled: "disabled" else: ""
-        let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
+        # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
         var click = proc = action(self, id)
 
-        if not self.service.usingContextMenu:
-          self.service.activeHistory = ""
+        if not self.usingContextMenu:
+          self.activeHistory = ""
 
-        buildHtml(tdiv(class=fmt"debug-button-container {disabledClass}")):
+        buildHtml(tdiv(class=cstring(fmt"debug-button-container {disabledClass}"))):
           span(
-            id = id & "-debug",
-            class = fmt"debug-button",
+            id = cstring(fmt"{id}-debug"),
+            class = "debug-button",
             onclick = proc() =
               if not disabled:
                 click()
@@ -227,15 +250,15 @@ method render*(self: DebugComponent): VNode =
                 discard,
             oncontextmenu = proc(ev: Event, tg: VNode) =
               if id == "history-back" or id == "history-forward":
-                self.service.usingContextMenu = true
-                if self.service.activeHistory == id:
-                  self.service.activeHistory = ""
-                  self.service.listHistory = false
+                self.usingContextMenu = true
+                if self.activeHistory == id:
+                  self.activeHistory = ""
+                  self.listHistory = false
                 else:
-                  self.service.activeHistory = id
-                  self.service.listHistory = true
-                self.service.historyDirection = id == "history-forward"
-                self.service.fullHistory = false
+                  self.activeHistory = id
+                  self.listHistory = true
+                self.historyDirection = id == "history-forward"
+                self.fullHistory = false
                 discard setTimeout(proc() =
                   try:
                     jq("#history-focus-id").focus()
@@ -244,17 +267,17 @@ method render*(self: DebugComponent): VNode =
                   100
                 )
           ):
-            tdiv(class=fmt"{disabledClass}"):
-              buttons[j(id)]
+            tdiv(class=cstring(fmt"{disabledClass}")):
+              buttons[cstring(id)]
             tdiv(
               class = "custom-tooltip",
             ):
               text tooltipText[id]
 
-      if not self.service.finished:
+      if not self.finished:
         separateBar()
         debugButton("history-back")
-        if self.service.listHistory:
+        if self.listHistory:
           buildHistoryMenu(self)
         debugButton("history-forward")
         separateBar()
@@ -272,7 +295,7 @@ method render*(self: DebugComponent): VNode =
         separateBar()
         debugButton("run-to-entry")
         separateBar()
-        debugButton("reset-operation", not self.service.stableBusy)
+        debugButton("reset-operation", not self.stableBusy)
         separateBar()
       else:
         debugStepButton("continue", Continue, false)

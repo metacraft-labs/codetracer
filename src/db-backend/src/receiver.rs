@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 
 use crate::core::{Core, NO_CALLER_PROCESS_PID};
 use crate::handler::Handler;
+use crate::paths::CODETRACER_PATHS;
 use crate::sender::Sender;
 use crate::task::{to_task_kind, Task, TaskId, TaskKind};
-use crate::paths::CODETRACER_PATHS;
 
 pub struct Receiver {
     receiving_socket: Option<UnixStream>,
@@ -40,7 +40,7 @@ impl Receiver {
         //   to sender(or pass sender to the methods?)
         //var socket = newSocket(domain=Domain.AF_UNIX, sockType=SockType.SOCK_STREAM, protocol=Protocol.IPPROTO_IP)
         //socket.setSockOpt(OptReuseAddr, true)
-        let socket_path: PathBuf; 
+        let socket_path: PathBuf;
         {
             let tmp = CODETRACER_PATHS.lock()?;
             let path = tmp.socket_path.display();
@@ -172,39 +172,40 @@ impl Receiver {
             // TODO: configure arg if needed
             TaskKind::Configure => handler.configure(self.core.read_arg(&task.id)?, task),
             TaskKind::Start => handler.start(task),
-            TaskKind::RunToEntry => handler.run_to_entry(task),
-            TaskKind::LoadLocals => handler.load_locals(task),
+            // TaskKind::RunToEntry => handler.run_to_entry(task),
+            // TaskKind::LoadLocals => handler.load_locals(task),
             TaskKind::LoadCallstack => handler.load_callstack(task),
-            TaskKind::CollapseCalls => handler.collapse_calls(self.core.read_arg(&task.id)?, task),
-            TaskKind::ExpandCalls => handler.expand_calls(self.core.read_arg(&task.id)?, task),
-            TaskKind::LoadCallArgs => handler.load_call_args(self.core.read_arg(&task.id)?, task),
-            TaskKind::LoadFlow => handler.load_flow(self.core.read_arg(&task.id)?, task),
-            TaskKind::Step => handler.step(self.core.read_arg(&task.id)?, task),
-            TaskKind::EventLoad => handler.event_load(task),
-            TaskKind::EventJump => handler.event_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::CalltraceJump => handler.calltrace_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::SourceLineJump => handler.source_line_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::SourceCallJump => handler.source_call_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::CollapseCalls => handler.collapse_calls(self.core.read_arg(&task.id)?, task),
+            // TaskKind::ExpandCalls => handler.expand_calls(self.core.read_arg(&task.id)?, task),
+            // TaskKind::LoadCallArgs => handler.load_call_args(self.core.read_arg(&task.id)?, task),
+            // TaskKind::LoadFlow => handler.load_flow(self.core.read_arg(&task.id)?, task),
+            // superseded by dap_server
+            // TaskKind::Step => handler.step(self.core.read_arg(&task.id)?, task),
+            // TaskKind::EventLoad => handler.event_load(task),
+            // TaskKind::EventJump => handler.event_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::CalltraceJump => handler.calltrace_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::SourceLineJump => handler.source_line_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::SourceCallJump => handler.source_call_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::AddBreak => handler.add_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::DeleteBreak => handler.delete_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::Disable => handler.toggle_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::Enable => handler.toggle_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::RunTracepoints => handler.run_tracepoints(self.core.read_arg(&task.id)?, task),
-            TaskKind::TraceJump => handler.trace_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::HistoryJump => handler.history_jump(self.core.read_arg(&task.id)?, task),
-            TaskKind::LoadHistory => handler.load_history(self.core.read_arg(&task.id)?, task),
-            TaskKind::UpdateTable => handler.update_table(self.core.read_arg(&task.id)?, task),
-            TaskKind::TracepointDelete => handler.tracepoint_delete(self.core.read_arg(&task.id)?, task),
-            TaskKind::TracepointToggle => handler.tracepoint_toggle(self.core.read_arg(&task.id)?, task),
-            TaskKind::CalltraceSearch => handler.calltrace_search(self.core.read_arg(&task.id)?, task),
+            // TaskKind::TraceJump => handler.trace_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::HistoryJump => handler.history_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::LoadHistory => handler.load_history(self.core.read_arg(&task.id)?, task),
+            // TaskKind::UpdateTable => handler.update_table(self.core.read_arg(&task.id)?, task),
+            // TaskKind::TracepointDelete => handler.tracepoint_delete(self.core.read_arg(&task.id)?, task),
+            // TaskKind::TracepointToggle => handler.tracepoint_toggle(self.core.read_arg(&task.id)?, task),
+            // TaskKind::CalltraceSearch => handler.calltrace_search(self.core.read_arg(&task.id)?, task),
             TaskKind::SearchProgram => handler.search_program(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadStepLines => handler.load_step_lines(self.core.read_arg(&task.id)?, task),
-            TaskKind::LocalStepJump => handler.local_step_jump(self.core.read_arg(&task.id)?, task),
+            // TaskKind::LocalStepJump => handler.local_step_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::RegisterEvents => handler.register_events(self.core.read_arg(&task.id)?, task),
             TaskKind::RegisterTracepointLogs => handler.register_tracepoint_logs(self.core.read_arg(&task.id)?, task),
             TaskKind::SetupTraceSession => handler.setup_trace_session(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadAsmFunction => handler.load_asm_function(self.core.read_arg(&task.id)?, task),
-            TaskKind::LoadTerminal => handler.load_terminal(task),
+            // TaskKind::LoadTerminal => handler.load_terminal(task),
             _ => {
                 unimplemented!()
             }
