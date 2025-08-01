@@ -17,15 +17,16 @@ proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeSe
 proc redrawCallLines(self: CalltraceComponent)
 proc loadLines(self: CalltraceComponent, fromScroll: bool)
 
-var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
+when defined(ctInExtension):
+  var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
+
+  proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
+    if calltraceComponentForExtension.kxi.isNil:
+      calltraceComponentForExtension.kxi = setRenderer(proc: VNode = calltraceComponentForExtension.render(), id, proc = discard)
+    result = calltraceComponentForExtension
 
 proc calltraceJump(self: CalltraceComponent, location: types.Location) =
   self.api.emit(CtCalltraceJump, location)
-
-proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
-  if calltraceComponentForExtension.kxi.isNil:
-    calltraceComponentForExtension.kxi = setRenderer(proc: VNode = calltraceComponentForExtension.render(), id, proc = discard)
-  result = calltraceComponentForExtension
 
 proc isAtStart(self: CalltraceComponent): bool =
   self.startCallLineIndex < START_BUFFER
@@ -148,7 +149,6 @@ proc showCallValue*(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring)
     showInLine: JsAssoc[cstring, bool]{},
     baseExpression: arg.name,
     baseValue: arg.value,
-    service: data.services.history,
     stateID: -1,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
@@ -356,7 +356,7 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
             self.resetValueView()
           self.calcValueLeftPosition(ev, id)
           self.forceRerender[id] = not self.forceRerender[id]
-        self.data.redraw(),
+        self.redraw(),
       oncontextmenu = proc(ev: Event, v: VNode) {.gcsafe.} =
         let e = ev.toJs
         ev.stopPropagation()
@@ -453,7 +453,7 @@ proc searchResultView(self: CalltraceComponent, call: Call): VNode =
       class = "search-result",
       onmousedown = proc =
         self.calltraceJump(location)
-        self.redrawForExtension()
+        self.redraw()
     )
   ):
     text &"#{location.key} - {ticksText}({location.rrTicks}): {location.highLevelFunctionName}"
@@ -465,7 +465,7 @@ proc emptyResultView(self: CalltraceComponent): VNode =
       class = "empty-search-result",
       onclick = proc =
         self.isSearching = false
-        self.data.redraw()
+        self.redraw()
     )
   ):
     text &"Couldn't find any results for '{self.searchText}'!\n-Click To Close-"
@@ -523,7 +523,7 @@ proc filterCalltraceView(self: CalltraceComponent): VNode =
         self.startCallLineIndex = 0
         self.loadLines(fromScroll=false)
 
-        self.data.redraw()
+        self.redraw()
 
   if self.rawIgnorePatterns.isNil:
     if self.locationLang() != LangNim:
@@ -765,7 +765,7 @@ proc localCalltraceView*(self: CalltraceComponent): VNode =
 proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
   self.searchResults = searchResults
   self.isSearching = true
-  self.redrawForExtension()
+  self.redraw()
 
 
   self.lastSearch = now()
@@ -820,7 +820,7 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
   else:
     self.redrawCallLines()
 
-  self.redrawForExtension()
+  self.redraw()
 
 func supportCallstackOnly(self: CalltraceComponent): bool =
   not self.config.calltrace or self.locationLang() == LangRust
@@ -836,6 +836,7 @@ method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCalltraceSearchResponse, proc(kind: CtEventKind, response: seq[Call], sub: Subscriber) =
     self.registerSearchRes(response)
   )
+  api.emit(InternalLastCompleteMove, EmptyArg())
 
 proc registerCalltraceComponent*(component: CalltraceComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
@@ -979,7 +980,7 @@ proc changeLastCallSelection(self: CalltraceComponent) =
 proc changeCallSelection(self: CalltraceComponent, key: cstring) =
   self.selectedCallNumber = self.lineIndex[key]
   self.changeLastCallSelection()
-  self.data.redraw()
+  self.redraw()
 
 proc getSelectedCall(self: CalltraceComponent): Call =
   self.callsByLine[self.selectedCallNumber].call
@@ -1028,11 +1029,10 @@ method onEnter*(self: CalltraceComponent) {.async.} =
         let call = self.callLines[callLinesIndex].content.call
 
         self.resetValueView()
-        # TODO: Middleware
-        # self.data.services.debugger.stableBusy = true
         self.lastSelectedCallKey = call.key
+        self.calltraceJump(call.location)
         # TODO: Middleware
-        # self.service.calltraceJump(call.location)
+        # self.services.debugger.stableBusy = true
         # inc self.data.services.debugger.operationCount
 
       of CallLineContentKind.CallstackInternalCount:
@@ -1113,7 +1113,7 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true
     self.loadLines(fromScroll=false)
-  self.redrawForExtension()
+  self.redraw()
 
 method render*(self: CalltraceComponent): VNode =
   self.callsByLine = @[]
@@ -1122,11 +1122,12 @@ method render*(self: CalltraceComponent): VNode =
   # if self.data.trace.isNil:
   #   return buildHtml(tdiv())
 
-  if not self.inExtension:
-    kxiMap["calltraceComponent-0"].afterRedraws.add(proc = self.redrawCallLines())
-
   if self.inExtension:
     self.kxi.afterRedraws.add(proc = self.redrawCallLines())
+  else:
+    kxiMap["calltraceComponent-0"].afterRedraws.add(proc =
+      self.redrawCallLines()
+    )
 
   result = buildHtml(
     tdiv(

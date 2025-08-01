@@ -1044,7 +1044,6 @@ proc renderValueTooltip(self: EditorViewComponent) {.async.} =
               showInLine: JsAssoc[cstring, bool]{},
               baseExpression: expression,
               baseValue: baseValue,
-              service: data.services.history,
               stateID: -1,
               nameWidth: VALUE_COMPONENT_NAME_WIDTH,
               valueWidth: VALUE_COMPONENT_VALUE_WIDTH,

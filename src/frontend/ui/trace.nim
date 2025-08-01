@@ -49,7 +49,6 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
     showInLine: JsAssoc[cstring, bool]{},
     baseExpression: traceValue[0],
     baseValue: traceValue[1],
-    service: data.services.history,
     stateID: -1,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,

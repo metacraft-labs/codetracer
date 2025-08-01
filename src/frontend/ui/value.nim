@@ -41,12 +41,14 @@ proc deleteWatch*(self: StateComponent, expression: cstring) =
 
   if i != -1:
     delete(self.watchExpressions, i..i)
-    delete(self.data.services.debugger.watchExpressions, i..i)
     self.locals = self.locals.filterIt(it.expression != expression)
-    self.data.services.debugger.locals = self.data.services.
-      debugger.locals.
-      filterIt(it.expression != expression)
-    self.data.redraw()
+    self.redraw()
+
+proc updateWatches*(self: StateComponent, handler: proc(locals: seq[Variable])) {.async.} =
+  # TODO: Fix up with new communication
+  # data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
+  # self.onUpdatedWatches = handler
+  discard
 
 proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstring) =
   self.deleteWatch(expression)
@@ -55,12 +57,10 @@ proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstr
     errorMessage(cstring"newlines forbidden in watch expressions: not registered")
   else:
     self.watchExpressions.add(newExpression)
-    self.data.services.debugger.watchExpressions.add(newExpression)
 
-    discard self.data.services.debugger.updateWatches(proc(service: DebuggerService, locals: seq[Variable]) =
+    discard self.updateWatches(proc(locals: seq[Variable]) =
       self.locals = locals
-      service.locals = locals
-      self.data.redraw()
+      self.redraw()
     )
 
 proc uiExpanded*(self: ValueComponent, value: Value, expression: cstring): bool =
@@ -99,6 +99,20 @@ func findNonExpanded(value: Value): seq[Value] =
   else:
     discard
 
+proc expandValues*(self: ValueComponent, expressions: seq[cstring], depth: int, stateCompleteMoveIndex: int): Future[seq[Value]] {.async.} =
+  # TODO: Fix with db-backend
+  # let values = await self.data.asyncSend(
+  #   "expand-values",
+  #   js{
+  #     expressions: expressions,
+  #     depth: depth,
+  #     stateCompleteMoveIndex: stateCompleteMoveIndex
+  #   },
+  #   $stateCompleteMoveIndex & " " & $expressions,
+  #   seq[Value])
+  # return values
+  discard
+
 proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.async.} =
   if value.kind in ATOM_KINDS:
     return
@@ -108,7 +122,7 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
   self.expanded[expression] = uiExpanded
 
   if self.customRedraw.isNil:
-    self.data.redraw()
+    self.redraw()
   else:
     self.customRedraw(self)
 
@@ -118,7 +132,7 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
     let nonExpandedItemExpressions = nonExpandedItems.mapIt(it.expression)
     let state = self.data.stateComponent(self.stateID)
     let originalStateIndex = state.completeMoveIndex
-    let expandedItems = await self.data.services.debugger.expandValues(nonExpandedItemExpressions, 1, originalStateIndex)
+    let expandedItems = await self.expandValues(nonExpandedItemExpressions, 1, originalStateIndex)
 
     if state.completeMoveIndex != originalStateIndex:
       return
@@ -131,7 +145,7 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
         cerror &"no expanded item {i}"
 
     if self.customRedraw.isNil:
-      self.data.redraw()
+      self.redraw()
     else:
       self.customRedraw(self)
 
@@ -175,7 +189,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
               self.viewKind = ViewTable
               self.line = nil
               self.pie = nil
-            self.data.redraw()
+            self.redraw()
         ):
           text "table"
         tdiv(
@@ -185,7 +199,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
               self.viewKind = ViewLine
               self.pie = nil
               self.changed = true
-            self.data.redraw()
+            self.redraw()
         ):
           text "line"
         tdiv(
@@ -195,7 +209,7 @@ proc switchChartKindView*(self: ChartComponent): VNode =
               self.viewKind = ViewPie
               self.line = nil
               self.changed = true
-            self.data.redraw()
+            self.redraw()
         ):
           text "pie"
 
@@ -532,7 +546,7 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
     hint: "",
     handler: proc(e: Event) =
       openValueInScratchpad((expression, value))
-      self.data.redraw()
+      self.redraw()
   )
 
   contextMenu &= addToScratchpad
@@ -651,8 +665,8 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
   else:
     self.showInline[expression] = not self.showInline[expression]
 
-  self.redrawForExtension()
   self.state.redrawForExtension()
+  self.state.redraw()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
   let expression = cast[cstring](update.expression)
@@ -686,9 +700,7 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
 
     valueHistory[expression].results = historyWithoutRepetitions
 
-    # self.data.redraw()
-    self.redrawForExtension()
-
+    self.redraw()
 
 proc atomValueView(self: ValueComponent, valueText: string, expression: cstring, klass: string, value: Value): VNode =
   let klassNumber =
@@ -1048,6 +1060,15 @@ proc view(
   #   else:
   #     raise newException(ValueError, "chart not in right context")
 
+  proc expandValue(self: ValueComponent, path: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
+    # We need to emit expand value event and sub to the expand value response
+    # and then to resolve the Future[Value]
+    # Before we were calling data.services.debugger.expandValue(path)
+    # let count = 50
+    # var value = await self.data.asyncSend("expand-value", ExpandValueTarget(subPath: subPath, rrTicks: self.location.rrTicks, isLoadMore: isLoadMore, startIndex: startIndex, count: count), $self.location.rrTicks & " " & $subPath, Value)
+    # return value
+    discard
+
   proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
     var expand: bool = value.kind == NonExpanded
 
@@ -1064,8 +1085,9 @@ proc view(
 
           break
 
+    # TODO: Rework with the new db-backend and init
     if expand:
-      let newValue = await data.services.debugger.expandValue(path)
+      let newValue = await self.expandValue(path)
 
       if value.kind != Pointer:
         objectAssign(value.toJs, newValue.toJs)
@@ -1073,7 +1095,7 @@ proc view(
         objectAssign(value.refValue.toJs, newValue.refValue.toJs)
 
       if self.customRedraw.isNil:
-        self.data.redraw()
+        self.state.redraw()
       else:
         self.customRedraw(self)
 
@@ -1081,19 +1103,19 @@ proc view(
     var newValue: Value
 
     if value.kind != TableKind:
-      newValue = await data.services.debugger.expandValue(path, isLoadMore = true, startIndex = value.elements.len)
+      newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.elements.len)
 
       for element in newValue.elements:
         self.baseValue.elements.add(element)
     else:
-      newValue = await data.services.debugger.expandValue(path, isLoadMore = true, startIndex = value.items.len)
+      newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.items.len)
 
       for item in newValue.items:
         self.baseValue.items.add(item)
 
     self.isOperationRunning = false
     self.baseValue.partiallyExpanded = newValue.partiallyExpanded
-    self.data.redraw()
+    self.redraw()
 
   let cPath = path
 
@@ -1116,7 +1138,7 @@ proc view(
             class = "add-to-scratchpad-button",
             onmousedown = proc(ev: Event, v: VNode) =
               openValueInScratchpad((expression, value))
-              self.data.redraw()
+              self.redraw()
           ):
             tdiv(class = "custom-tooltip"):
               text "Add to scratchpad"
@@ -1197,3 +1219,9 @@ method render*(self: ValueComponent): VNode =
 
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
   result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
+
+method redraw*(self: ValueComponent) =
+  if not self.state.isNil:
+    self.state.redraw()
+  else:
+    cast[Component](self).redraw()

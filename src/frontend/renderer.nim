@@ -10,8 +10,8 @@ import
   # internal
   lib, ui_helpers, types, utils, lang,
   services / [
-    event_log_service, debugger_service, editor_service, calltrace_service,
-    history_service, flow_service, search_service, shell_service]
+    event_log_service, debugger_service, editor_service,
+    flow_service, search_service, shell_service]
   # ui / datatable
 
 # (alexander): if i remember correctly: to prevent clashes with other dom-related modules 
@@ -344,7 +344,6 @@ proc removeTraceLogsFromEventLog() =
   data.services.eventLog.events = newEvents
   for i, component in data.ui.componentMapping[Content.EventLog]:
     var eventLogComponent = EventLogComponent(component)
-    eventLogComponent.redraw = true
     data.ui.componentMapping[Content.EventLog][i] = eventLogComponent
   data.redraw()
 
@@ -1370,26 +1369,10 @@ proc commandSelectNext* =
     data.ui.commandPalette.selected += 1
     redrawAll()
 
-proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
-  if isForward:
-    if self.service.jumpHistory.len != 0 and self.service.jumpHistory.len - self.service.historyIndex > 0:
-      self.service.historyIndex += 1
-      let location = self.service.jumpHistory[^self.service.historyIndex].location
-
-      self.service.currentOperation = HISTORY_JUMP_VALUE
-      data.services.history.historyJump(location)
-  else:
-    if self.service.jumpHistory.len != 0 and self.service.historyIndex >= 2:
-      self.service.historyIndex -= 1
-      let location = self.service.jumpHistory[^self.service.historyIndex].location
-
-      self.service.currentOperation = HISTORY_JUMP_VALUE
-      data.services.history.historyJump(location)
-
 proc setOpen* =
   ipc.send "CODETRACER::set-open"
 
 
 var scrollAssembly* = -1
 
-export event_log_service, debugger_service, editor_service, calltrace_service, history_service, flow_service, search_service, shell_service, utils
+export event_log_service, debugger_service, editor_service, flow_service, search_service, shell_service, utils

@@ -191,6 +191,8 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtUpdatedTrace: "ct/updated-trace",
   CtLoadFlow: "ct/load-flow",
   CtUpdatedFlow: "ct/updated-flow",
+  CtRunToEntry: "ct/run-to-entry",
+  InternalLastCompleteMove: "internal/last-complete-move",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
@@ -267,6 +269,7 @@ when not defined(ctInExtension):
         line: 1,
         key: cstring"0",
         functionName: cstring"<top level>",
+        highLevelFunctionName: cstring"<top level>",
       ),
       stackLines: @[],
       handlers: @[]

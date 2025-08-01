@@ -1,10 +1,6 @@
 import std / jsconsole
 import service_imports
 
-proc updateWatches*(self: DebuggerService, handler: proc(service: DebuggerService, locals: seq[Variable])) {.async.} =
-  data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
-  self.onUpdatedWatches = handler
-
 proc restart*(self: DebuggerService) =
   self.locals = @[]
   self.watchExpressions = @[]
@@ -63,23 +59,6 @@ proc tracepointToggle*(self: DebuggerService, tracepointId: TracepointId) {.asyn
     "tracpeoint-toggle-" & fmt"{now()}-{tracepointId}",
     Future[void]
   )
-
-proc expandValue*(self: DebuggerService, subPath: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
-  let count = 50
-  var value = await self.data.asyncSend("expand-value", ExpandValueTarget(subPath: subPath, rrTicks: self.location.rrTicks, isLoadMore: isLoadMore, startIndex: startIndex, count: count), $self.location.rrTicks & " " & $subPath, Value)
-  return value
-
-proc expandValues*(self: DebuggerService, expressions: seq[cstring], depth: int, stateCompleteMoveIndex: int): Future[seq[Value]] {.async.} =
-  let values = await self.data.asyncSend(
-    "expand-values",
-    js{
-      expressions: expressions,
-      depth: depth,
-      stateCompleteMoveIndex: stateCompleteMoveIndex
-    },
-    $stateCompleteMoveIndex & " " & $expressions,
-    seq[Value])
-  return values
 
 proc debugRepl*(self: DebuggerService, cmd: cstring) {.exportc.} =
   if not self.stableBusy:

@@ -1,16 +1,21 @@
 import ui_imports, ../types
+import ../communication
 
-var scratchpadComponentForExtension* {.exportc.}: ScratchpadComponent = makeScratchpadComponent(data, 0, inExtension = true)
+when defined(ctInExtension):
+  var scratchpadComponentForExtension* {.exportc.}: ScratchpadComponent = makeScratchpadComponent(data, 0, inExtension = true)
 
-proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
-  if scratchpadComponentForExtension.kxi.isNil:
-    scratchpadComponentForExtension.kxi = setRenderer(proc: VNode = scratchpadComponentForExtension.render(), id, proc = discard)
-  result = scratchpadComponentForExtension
+  proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
+    if scratchpadComponentForExtension.kxi.isNil:
+      scratchpadComponentForExtension.kxi = setRenderer(proc: VNode = scratchpadComponentForExtension.render(), id, proc = discard)
+    result = scratchpadComponentForExtension
 
 proc removeValue*(self: ScratchpadComponent, i: int) =
   self.programValues.delete(i, i)
   self.values.delete(i, i)
-  self.data.redraw()
+  self.redraw()
+
+method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
+  self.api = api
 
 proc scratchpadValueView(self: ScratchpadComponent, i: int, value: ValueComponent): VNode =
   value.isScratchpadValue = true
