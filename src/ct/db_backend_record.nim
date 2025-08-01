@@ -340,6 +340,7 @@ proc main*(): Trace =
   var stylusTrace = ""
   var address = ""
   var socketPath = ""
+  var isExportedWithArg = false
 
   # for i, arg in args:
   var i = 0
@@ -353,6 +354,7 @@ proc main*(): Trace =
       outputFolder = expandFilename(args[i + 1])
       i += 2
     elif arg == "-e" or arg == "--export":
+      isExportedWithArg = true
       isExported = true
       if args.len < i + 2:
         displayHelp()
@@ -425,16 +427,13 @@ proc main*(): Trace =
   let sessionLogPath = scriptSessionLogPath(sessionId)
   let reportFile = getEnv("CODETRACER_SHELL_REPORT_FILE", "")
   let recordsOutputFolder = getEnv("CODETRACER_SHELL_RECORDS_OUTPUT", "")
-  let isShellExported = getEnv("CODETRACER_SHELL_EXPORT", "0") == "1"
+  let exportFolder = getEnv("CODETRACER_SHELL_EXPORT", "")
   let shellCleanupOutputFolder = getEnv("CODETRACER_SHELL_CLEANUP_OUTPUT_FOLDER", "0") == "1"
   let shellSocket = getEnv("CODETRACER_SHELL_SOCKET", "")
   let shellAddress = getEnv("CODETRACER_SHELL_ADDRESS", "")
 
   let actionId = -1 # TODO? newActionId(sessionId, test=false)
   let firstLine = loadLine(sessionId, sessionLogPath)
-
-  if isShellExported:
-    isExported = true
 
   if shellCleanupOutputFolder:
     cleanupOutputFolder = true
@@ -448,9 +447,8 @@ proc main*(): Trace =
     # otherwise: it's already ready
     discard
 
-  if isShellExported:
+  if exportFolder.len > 0:
     isExported = true
-    exportZipPath = outputFolder & ".zip"
 
   # echo "outputFolder ", outputFolder, " isExported ", isExported, " exportZipPath ", exportZipPath
   # echo "program ", program, " recordArgs ", recordArgs, "lang ", lang
@@ -480,15 +478,19 @@ proc main*(): Trace =
       program, recordArgs, "", lang, backend, stylusTrace,
       traceIDRecord=traceID, outputFolderArg=outputFolder)
     traceId = trace.id
-    var outputPath = trace.outputFolder
     outputFolder = trace.outputFolder
 
     createDir(outputFolder)
-    # echo isExported, " ", exportZipPath
     if isExported:
+      # args override env vars, which exportFolder comes from
+      if not isExportedWithArg and exportFolder.len > 0:
+        exportZipPath = exportFolder / fmt"trace-{traceId}.zip"
+        createDir(exportFolder)
       exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
+
       let exportZipFullPath = expandFilename(exportZipPath)
-      outputPath = exportZipFullPath
+      # (alexander): codetracer ci expects `trace.outputFolder` to be the zip path without ".zip" i think
+      trace.outputFolder = exportZipFullPath.changeFileExt("")
 
     if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
