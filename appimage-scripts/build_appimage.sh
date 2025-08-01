@@ -64,6 +64,7 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.sqlite"
 
 SQLITE=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.sqlite.out")
 cp -L "${SQLITE}"/lib/libsqlite3.so.0 "${APP_DIR}"/lib
+cp -L "${SQLITE}"/lib/libsqlite3.so "${APP_DIR}"/lib
 
 nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.pcre"
 
@@ -141,6 +142,7 @@ chmod +x "${APP_DIR}/bin/ctags"
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
+
 # curl
 cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/curl"
@@ -148,6 +150,9 @@ chmod +x "${APP_DIR}/bin/curl"
 # node
 cp -Lr "${ROOT_PATH}/src/links/node" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/node"
+
+# shellcheck disable=SC2046
+cp -n $(lddtree -l "${APP_DIR}/bin/node" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/cargo-stylus" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
@@ -261,6 +266,8 @@ patchelf --remove-rpath "${APP_DIR}"/bin/ctags
 patchelf --remove-rpath "${APP_DIR}"/bin/curl
 patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
+
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/node"
 
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
