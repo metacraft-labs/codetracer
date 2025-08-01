@@ -74,7 +74,10 @@
   padding-left: 28px
   padding-right: 30px
   transform: translate(0px, 2px)
-  width: 80px
+  if IS_EXTENSION
+    width: 80px
+  else
+    width: 150px
   position: relative
   z-index: 1
   font-weight: bold
@@ -149,7 +152,8 @@
   right: 0
 
 .dropdown-list
-  // width: 150px !important
+  if !IS_EXTENSION
+    width: 150px !important
   list-style-type: none
   padding-left: 8px
   position: relative
@@ -158,7 +162,10 @@
 
   .dropdown-list-item
     width: inherit
-    align-items: center
+    if IS_EXTENSION
+      align-items: center
+    else
+      align-items: normal
     justify-content: start
     padding-left: 20px
 

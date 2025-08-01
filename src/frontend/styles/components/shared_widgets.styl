@@ -20,12 +20,13 @@
 ::-webkit-scrollbar-thumb:horizontal:active
   background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
 
-html
-  height: -webkit-fill-available !important
+if IS_EXTENSION
+  html
+    height: -webkit-fill-available !important
 
-body
-  height: inherit
-  overflow: hidden
+  body
+    height: inherit
+    overflow: hidden
 
 input::-webkit-input-placeholder
   color: INPUT_PLACEHOLDER_COLOR;
@@ -74,7 +75,8 @@ TRACE_LOG_EDITOR_Z_INDEX = 50
 html, body
   padding: 0
   margin: 0
-  // overflow: hidden // For now comment out
+  if !IS_EXTENSION
+    overflow: hidden
 
 body
   font-family: -apple-system, 'Helvetica Neue', Helvetica, sans-serif !important
@@ -99,9 +101,12 @@ input
   // font-size: 17px !important
   border: 0
   background-color: HEADER_ELEMENT_BACKGROUND_COLOR
-  width: -webkit-fill-available
+  if IS_EXTENSION
+    width: -webkit-fill-available
+  else
+    width: calc(100% - 6px)
+    margin-right: 8px
   margin-left: 8px !important
-  // margin-right: 8px
   margin-bottom: 5px !important
   border-radius: 6px
   padding-left: 24px
@@ -188,7 +193,8 @@ button
   font-weight: 400 !important
   width: 100%
   height: 100%
-  // box-shadow: inset 2px 0px 0px 0px LAYOUT_SPLITTER_COLOR
+  if !IS_EXTENSION
+    box-shadow: inset 2px 0px 0px 0px LAYOUT_SPLITTER_COLOR
 
   &:focus
     outline: 0px

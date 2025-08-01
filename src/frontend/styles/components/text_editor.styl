@@ -828,10 +828,13 @@
   display: flex
   flex-basis: 100%
 
-.state-component
-  overflow-x: hidden
-  width: 100%
-
+if IS_EXTENSION
+  .state-component
+    overflow-x: hidden
+    width: 100%
+else
+  #values
+    overflow-x: scroll
 #right
   width: 24%
   float: left
