@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mgr = BackendManager::new().await?;
     let mut mgr = mgr.lock().await;
-    mgr.spawn().await?;
+    mgr.start_replay().await?;
 
     tokio::select! {
         _ = signal::ctrl_c() => {
