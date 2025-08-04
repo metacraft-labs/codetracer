@@ -1,4 +1,3 @@
-
 import std / [ async, jsffi, strutils, sequtils, sugar, dom, strformat, os, jsconsole, json ]
 import results
 import lib, types, lang, paths, index_config, config, trace_metadata
