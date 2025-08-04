@@ -20,6 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
 
+use std::fs::{File, OpenOptions};
+use std::io::BufWriter;
+
 // fn forward_raw_events<W: Write>(
 //     rx: &mpsc::Receiver<BackendResponse>,
 //     writer: &mut W,
@@ -222,6 +225,16 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     let mut received_configuration_done = false;
     while let Ok(msg) = dap::from_reader(reader) {
         info!("DAP <- {:?}", msg);
+
+        let path = "/home/pesho/data/db_backend_output.txt";
+
+        let mut file = File::create(path)?;
+
+        writeln!(file, "DAP <- {:?}", msg)?;
+
+        drop(file);
+
+        println!("DAP <- {:?}", msg);
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let capabilities = Capabilities {
