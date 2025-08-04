@@ -48,3 +48,8 @@ type
     lastLine*: int
     actionId*: int
     time*: langstring
+
+  CITraceEvent* = ref object
+    traceArchivePath*: langstring
+    recordPid*: int
+    langName*: langstring
