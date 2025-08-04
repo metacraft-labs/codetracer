@@ -1483,21 +1483,24 @@ when not defined(ctRepl) and not defined(server):
 var process {.importc.}: js
 
 proc isCtInstalled(config: Config): bool =
-  if not config.skipInstall:
-    if process.platform == "darwin".toJs:
-      let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct")
-      return fs.existsSync(ctLaunchersPath)
-    else:
-      let dataHome = getEnv("XDG_DATA_HOME", getEnv("HOME") / ".local/share")
-      let dataDirs = getEnv("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(':')
-
-      # if we find the desktop file then it's installed by the package manager automatically
-      for d in @[dataHome] & dataDirs:
-        if fs.existsSync(d / "applications/codetracer.desktop"):
-          return true
-      return false
-  else:
+  when defined(server):
     return true
+  else:
+    if not config.skipInstall:
+      if process.platform == "darwin".toJs:
+        let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct")
+        return fs.existsSync(ctLaunchersPath)
+      else:
+        let dataHome = getEnv("XDG_DATA_HOME", getEnv("HOME") / ".local/share")
+        let dataDirs = getEnv("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(':')
+
+        # if we find the desktop file then it's installed by the package manager automatically
+        for d in @[dataHome] & dataDirs:
+          if fs.existsSync(d / "applications/codetracer.desktop"):
+            return true
+        return false
+    else:
+      return true
 
 proc waitForResponseFromInstall: Future[InstallResponse] {.async.} =
   return newPromise() do (resolve: proc(response: InstallResponse)):
@@ -1511,10 +1514,11 @@ proc ready {.async.} =
   # we load the config file
   var config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
 
-  config.skipInstall = isCtInstalled(config)
-  if not config.skipInstall:
-    installDialogWindow = createInstallSubwindow()
-    discard await waitForResponseFromInstall()
+  when not defined(server):
+    config.skipInstall = isCtInstalled(config)
+    if not config.skipInstall:
+      installDialogWindow = createInstallSubwindow()
+      discard await waitForResponseFromInstall()
 
   debugPrint "index: creating window"
   mainWindow = createMainWindow()
