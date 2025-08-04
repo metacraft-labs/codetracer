@@ -20,9 +20,9 @@ use crate::{
 
 #[derive(Debug)]
 pub struct BackendManager {
-    children: Vec<Child>,
-    children_receivers: Vec<UnboundedReceiver<Value>>,
-    parent_senders: Vec<UnboundedSender<Value>>,
+    children: Vec<Option<Child>>,
+    children_receivers: Vec<Option<UnboundedReceiver<Value>>>,
+    parent_senders: Vec<Option<UnboundedSender<Value>>>,
     selected: usize,
 }
 
@@ -61,12 +61,14 @@ impl BackendManager {
             loop {
                 let mut res = res2.lock().await;
                 for rx in &mut res.children_receivers {
-                    if !rx.is_empty() {
-                        if let Some(message) = rx.recv().await {
-                            socket_write
-                                .write_all(&DapParser::to_bytes(&message))
-                                .await
-                                .unwrap(); // TODO: handle error
+                    if let Some(rx) = rx {
+                        if !rx.is_empty() {
+                            if let Some(message) = rx.recv().await {
+                                socket_write
+                                    .write_all(&DapParser::to_bytes(&message))
+                                    .await
+                                    .unwrap(); // TODO: handle error
+                            }
                         }
                     }
                 }
@@ -115,14 +117,14 @@ impl BackendManager {
     }
 
     fn check_id(&self, id: usize) -> Result<(), Box<dyn Error>> {
-        if id < self.children.len() {
+        if id < self.children.len() || self.children[id].is_none() {
             return Err(Box::new(InvalidID(id)));
         }
 
         Ok(())
     }
 
-    pub async fn spawn(&mut self) -> Result<usize, Box<dyn Error>> {
+    pub async fn start_replay(&mut self) -> Result<usize, Box<dyn Error>> {
         let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
         socket_path.push("codetracer");
         socket_path.push(std::process::id().to_string());
@@ -142,16 +144,16 @@ impl BackendManager {
         let child = cmd.spawn()?;
         sleep(Duration::from_millis(10)).await;
 
-        self.children.push(child);
+        self.children.push(Some(child));
 
         let (mut socket_read, mut socket_write) =
             tokio::io::split(UnixStream::connect(socket_path).await?);
 
         let (child_tx, child_rx) = mpsc::unbounded_channel();
-        self.children_receivers.push(child_rx);
+        self.children_receivers.push(Some(child_rx));
 
         let (parent_tx, mut parent_rx) = mpsc::unbounded_channel::<Value>();
-        self.parent_senders.push(parent_tx);
+        self.parent_senders.push(Some(parent_tx));
 
         tokio::spawn(async move {
             while let Some(message) = parent_rx.recv().await {
@@ -194,7 +196,29 @@ impl BackendManager {
         Ok(self.children.len() - 1)
     }
 
-    pub fn select(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
+    pub async fn stop_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
+        self.check_id(id)?;
+
+        // TODO: send stop message to the instance. Or directly kill?
+
+        // SAFETY: check_id ensures this is safe
+        let child = unsafe { self.children[id].as_mut().unwrap_unchecked() };
+        _ = child.wait().await?;
+
+        self.children[id] = None;
+
+        // SAFETY: check_id ensures this is safe
+        let child_receiver = unsafe { self.children_receivers[id].as_mut().unwrap_unchecked() };
+        child_receiver.close();
+
+        self.children_receivers[id] = None;
+
+        self.parent_senders[id] = None;
+
+        Ok(())
+    }
+
+    pub fn select_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
         self.check_id(id)?;
 
         self.selected = id;
@@ -245,19 +269,45 @@ impl BackendManager {
                 let args = msg.get("arguments");
 
                 match req_type {
-                    "codetracer-start-backend" => {
+                    "codetracer-start-replay" => {
                         // TODO: add args for startring backend
-                        self.spawn().await;
+                        self.start_replay().await;
                         // TODO: send response
                         return Ok(());
                     }
 
-                    "codetracer-stop-backend" => {
-                        todo!()
+                    "codetracer-stop-replay" => {
+                        if args.is_none() {
+                            // TODO: return error
+                        }
+                        // SAFETY: The if above ensures safety
+                        let args = unsafe { args.unwrap_unchecked() };
+
+                        if !args.is_u64() {
+                            // TODO: return error
+                        }
+
+                        // SAFETY: The if above ensures safety
+                        let arg = unsafe { args.as_u64().unwrap_unchecked() };
+
+                        return self.stop_replay(arg as usize).await;
                     }
 
-                    "codetracer-select-backend" => {
-                        todo!()
+                    "codetracer-select-replay" => {
+                        if args.is_none() {
+                            // TODO: return error
+                        }
+                        // SAFETY: The if above ensures safety
+                        let args = unsafe { args.unwrap_unchecked() };
+
+                        if !args.is_u64() {
+                            // TODO: return error
+                        }
+
+                        // SAFETY: The if above ensures safety
+                        let arg = unsafe { args.as_u64().unwrap_unchecked() };
+
+                        return self.select_replay(arg as usize);
                     }
 
                     _ => {
@@ -318,7 +368,9 @@ impl BackendManager {
     pub async fn message(&self, id: usize, message: Value) -> Result<(), Box<dyn Error>> {
         self.check_id(id)?;
 
-        self.parent_senders[id].send(message)?;
+        // SAFETY: check_id ensures this is safe
+        let parent_sender = unsafe { self.parent_senders[id].as_ref().unwrap_unchecked() };
+        parent_sender.send(message)?;
 
         Ok(())
     }
