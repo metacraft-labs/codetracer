@@ -1,6 +1,7 @@
 import jsffi, async, strformat, strutils, sequtils, macros, os, jsconsole, json
 import lib, config, path_utils, task_and_event, lang, paths
 import ../common/ct_logging
+import dap_protocol
 
 import types
 # Contains a lot of index process procedures dealing with files and configs
@@ -433,10 +434,26 @@ type
 
 var dapSocket*: JsObject
 
+proc utf8ByteLen(s: cstring): int
+  {.importjs: "(typeof Buffer==='function' ? Buffer.byteLength(#,'utf8') : (new TextEncoder()).encode(#).length)".}
+
+proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
 proc onDapRawMessage*(sender: js, response: DapRequest) {.async.} =
   if not dapSocket.isNil:
     console.log "RECEIVED THE FOLLOWING DAP MESSAGE IN INDEX FROM UI: ", response.command, " with val: ", response.value
-    dapSocket.write(response)
+
+    let cmd = $response.command
+
+    let req = Request(
+      seq: 1,
+      `type`: "request",
+      command: cmd,
+      arguments: response.value
+    )
+    console.log "SENDING AFTER PROCESSING: ", req
+
+    dapSocket.write req.toCString()
   else:
     # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
     # if sending from frontend only after dap socket setup here

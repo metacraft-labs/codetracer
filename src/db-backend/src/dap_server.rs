@@ -5,9 +5,8 @@ use crate::dap::{
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
-    gen_task_id, Action, CalltraceLoadArgs, CollapseCallsArgs, SourceLocation, StepArg, Task, TaskId, TaskKind,
-    UpdateTableArgs, Location, ProgramEvent, LoadHistoryArg, CallSearchArg, SourceCallJumpTarget, LocalStepJump,
-    TracepointId,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, LoadHistoryArg, LocalStepJump, Location,
+    ProgramEvent, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskId, TaskKind, TracepointId, UpdateTableArgs,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info};
@@ -20,6 +19,9 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
+
+use std::fs::{File, OpenOptions};
+use std::io::BufWriter;
 
 // fn forward_raw_events<W: Write>(
 //     rx: &mpsc::Receiver<BackendResponse>,
@@ -214,6 +216,16 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     let mut received_configuration_done = false;
     while let Ok(msg) = dap::from_reader(reader) {
         info!("DAP <- {:?}", msg);
+
+        let path = "/home/pesho/data/db_backend_output.txt";
+
+        let mut file = File::create(path)?;
+
+        writeln!(file, "DAP <- {:?}", msg)?;
+
+        drop(file);
+
+        println!("DAP <- {:?}", msg);
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let capabilities = Capabilities {

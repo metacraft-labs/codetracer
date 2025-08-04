@@ -71,3 +71,6 @@
 [submodule "libs/zip"]
 	path = libs/zip
 	url = https://github.com/nim-lang/zip.git
+[submodule "libs/jsony"]
+	path = libs/jsony
+	url = git@github.com:treeform/jsony.git
