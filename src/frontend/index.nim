@@ -1,4 +1,3 @@
-
 import std / [ async, jsffi, strutils, sequtils, sugar, dom, strformat, os, jsconsole, json ]
 import results
 import lib, types, lang, paths, index_config, config, trace_metadata
@@ -67,7 +66,7 @@ proc parseArgs =
   else:
     discard
 
-  
+
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TEST_STRATEGY"):
     data.startOptions.rawTestStrategy = electronProcess.env[cstring"CODETRACER_TEST_STRATEGY"]
@@ -1531,7 +1530,7 @@ proc isCtInstalled: bool =
     #   echo "Exec field: ", execField
     #   if fs.existsSync(execField):
     #     isDesktopOk = true;
-  
+
     fs.existsSync(ctInstalledPath) and fs.existsSync(desktopFilePath)
 
 
@@ -1606,7 +1605,7 @@ proc ready {.async.} =
   # we load helpers
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
-  
+
   # init the UI
   discard windowSetTimeout(proc = discard data.init(config, layout, helpers), 250)
 

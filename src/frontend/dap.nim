@@ -94,7 +94,7 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   case $command:
   of "ct/load-locals": CtLoadLocalsResponse
   else: raise newException(
-    ValueError, 
+    ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")
 
 
@@ -127,13 +127,32 @@ proc receiveResponse*(dap: DapApi, command: cstring, rawValue: JsObject) =
 
 proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
   dap.receive(dapEventToCtEventKind(event), rawValue)
- 
+
 when not defined(ctInExtension):
   import errors
 
+  proc stringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
   # TODO: Construct DAP message (re-use types from initial DAP client)
-  proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-    dap.ipc.send "CODETRACER::dap-raw-message", "test"
+  # proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
+  #   dap.ipc.send "CODETRACER::dap-raw-message",
+
+  proc asyncSendCtRequest(dap: DapApi,
+                        kind: CtEventKind,
+                        rawValue: JsObject) {.async.} =
+    # Turn the `rawValue` JsObject into a JSON string -----------------------
+    # when defined(js):
+    #   let jsonTxt = cast[cstring](stringify(rawValue))
+    # else:
+    #   let jsonTxt = cast[cstring](rawValue.pretty)   # JsonNode -> text
+
+    # Wrap it in our new RawDapMessage object --------------------------------
+    let packet = DapRequest(command: toDapCommandOrEvent(kind), value: rawValue)
+    console.log "SENDING DAP MESSAGE FROM UI TO INDEX: ", packet.toJs
+
+    # Fire it through the shared IPC channel ---------------------------------
+    dap.ipc.send("CODETRACER::dap-raw-message", packet.toJs)
+
 
 else:
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
@@ -162,6 +181,7 @@ else:
       ))
 
 proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
+  console.log "Sending ct request: ", kind, " with val ", rawValue
   discard dap.asyncSendCtRequest(kind, rawValue)
 
 
