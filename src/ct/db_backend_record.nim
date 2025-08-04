@@ -139,12 +139,13 @@ proc recordDb(
     args = startArgs.concat(args),
     workingDir = workdir,
     options = {poParentStreams}) # add poEchoCmd if you want to debug and see how the cmd might look
+  let recordPid = process.processId
   let exitCode = waitForExit(process)
   if exitCode != 0:
     echo "error: problem with ruby trace: exit code = ", exitCode
     quit(1)
 
-  result = importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT)
+  result = importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT)
 
 
 # record a program run
