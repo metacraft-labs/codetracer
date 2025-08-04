@@ -498,14 +498,12 @@ proc main*(): Trace =
 
     if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
-      registerRecordingCommand(
-        reportFile, socketPath, address,
-        sessionId, actionId, trace.rrPid, traceZipFullPath,
-        command, OkStatus,
-        errorMessage="", firstLine=firstLine, lastLine=lastLine)
-
-    # if reportFile != "":
-      # registerRecordInReportFile(reportFile, trace, outputPath)
+      registerRecordingCommandForCI(
+        socketPath, address,
+        trace.rrPid, traceZipFullPath, toCLang(trace.lang))
+      # in the past it was `registerRecordingCommand().. with more args
+      #   for `ct shell` mode; if needed, this can be restored
+  
     putEnv("CODETRACER_RECORDING", "")
 
     let inUiTest = getEnv("CODETRACER_IN_UI_TEST", "") == "1"

@@ -272,14 +272,12 @@ proc loadTrace(trace: Row, test: bool): Trace =
     quit(1)
 
 
-proc sendEvent(socketPath: string, address: string, event: SessionEvent) =
-  let raw = Json.encode(event)
-
+proc sendEvent(socketPath: string, address: string, rawEvent: string) = 
   let debugCtSendWithCurl = getEnv("CODETRACER_DEBUG_CURL", "0") == "1"
 
   if debugCtSendWithCurl:
     echo fmt"sending with curl to {socketPath} and {address}:"
-    echo raw
+    echo rawEvent
     echo "===="
 
   # example: curl --unix-socket /tmp/my_socket.sock http://localhost/api/ping
@@ -287,7 +285,7 @@ proc sendEvent(socketPath: string, address: string, event: SessionEvent) =
     curlExe,
     args = @[
       "--header", "Content-Type: application/json",
-      "--data", raw,
+      "--data", rawEvent,
       "--request", "POST",
       "--unix-socket", socketPath, address],
     options = {}) # poParentStreams})
@@ -300,7 +298,7 @@ proc sendEvent(socketPath: string, address: string, event: SessionEvent) =
 #   or is separate params everywhere ok for now?
 proc registerEvent*(reportFile: string, socketPath: string, address: string, event: SessionEvent) =
   if socketPath.len > 0:
-    sendEvent(socketPath, address, event)
+    sendEvent(socketPath, address, Json.encode(event))
   else:
     discard # not implemented for this backend for now
 
@@ -317,6 +315,19 @@ proc registerRecordTraceId*(pid: int, traceId: int, test: bool) =
 
 proc find*(id: int, test: bool): Trace
 
+proc registerRecordingCommandForCI*(
+    socketPath: string, address: string,
+    recordPid: int, traceArchivePath: string,
+    langName: string) =
+  sendEvent(
+    socketPath,
+    address,
+    Json.encode(
+      CITraceEvent(
+        recordPid: recordPid,
+        traceArchivePath: traceArchivePath,
+        langName: langName)))
+  
 proc registerRecordingCommand*(
     reportFile: string, socketPath: string, address: string,
     sessionId: int, actionId: int, recordPid: int, traceArchivePath: string,
@@ -328,16 +339,16 @@ proc registerRecordingCommand*(
     socketPath,
     address,
     SessionEvent(
-      kind: RecordingCommand,
-      sessionId: sessionId,
-      recordPid: recordPid,
-      traceArchivePath: traceArchivePath,
-      command: command,
-      status: status,
-      errorMessage: errorMessage,
-      firstLine: firstLine,
-      lastLine: lastLine,
-      actionId: actionId))
+     kind: RecordingCommand,
+     sessionId: sessionId,
+     recordPid: recordPid,
+     traceArchivePath: traceArchivePath,
+     command: command,
+     status: status,
+     errorMessage: errorMessage,
+     firstLine: firstLine,
+     lastLine: lastLine,
+     actionId: actionId))
 
 
 proc all*(test: bool): seq[Trace] =
