@@ -25,16 +25,9 @@ proc hostCommand*(
     frontendSocketParameters: string,
     traceArg: string) =
 
-  # var env = newStringTable(modeStyleInsensitive)
-
-  # for name, value in envPairs():
-  #   env[name] = value
-
-  # when defined(builtWithNix):
-    # putEnv("NODE_PATH", nodeModulesPath)
-    # putEnv("NIX_CODETRACER_EXE_DIR", nixCodetracerExeDir) 
-    # env["NODE_PATH"] = nodeModulesPath
-    # env["NIX_CODETRACER_EXE_DIR"] = nixCodetracerExeDir
+  putEnv("NODE_PATH", nodeModulesPath)
+  putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir) 
+  putEnv("LINKS_PATH_DIR", linksPath)
 
   let isSetBackendSocketPort = backendSocketPort.isSome
   let isSetFrontendSocketPort = frontendSocketPort.isSome
