@@ -1,5 +1,5 @@
 import streams, nimcrypto, std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json ]
-import ../../common/[ config, trace_index, paths, lang ]
+import ../../common/[ config, trace_index, paths, lang, types ]
 import ../utilities/[ types, encryption, zip, language_detection ]
 import ../trace/storage_and_import, ../globals
 
@@ -38,7 +38,9 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
       break
 
   let lang = detectLang(pathValue.split("/")[^1], LangUnknown, isWasm)
-  discard importDbTrace(traceMetadataPath, traceId, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
+  let recordPid = NO_PID # for now not processing the pid , but it can be 
+  # accessed from trace metadata file if we need it in the future
+  discard importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
   return traceId
 
 proc extractInfoFromKey*(downloadKey: string, config: Config): (string, array[32, byte]) =

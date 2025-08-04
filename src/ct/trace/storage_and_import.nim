@@ -80,6 +80,7 @@ proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = 
 proc importDbTrace*(
   traceMetadataPath: string,
   traceIdArg: int,
+  recordPid: int,
   lang: Lang = LangNoir,
   selfContained: bool = true,
   downloadKey: string = ""
@@ -159,7 +160,7 @@ proc importDbTrace*(
     test = false,
     imported = selfContained,
     shellID = -1,
-    rrPid = -1,
+    rrPid = recordPid,
     exitCode = -1,
     calltrace = true,
     # for now always use FullRecord for db-backend
