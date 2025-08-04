@@ -319,7 +319,8 @@ proc find*(id: int, test: bool): Trace
 
 proc registerRecordingCommand*(
     reportFile: string, socketPath: string, address: string,
-    sessionId: int, actionId: int, trace: Trace, command: string,
+    sessionId: int, actionId: int, recordPid: int, traceArchivePath: string,
+    command: string,
     status: SessionEventStatus, errorMessage: string,
     firstLine: int, lastLine: int = -1) =
   registerEvent(
@@ -329,7 +330,8 @@ proc registerRecordingCommand*(
     SessionEvent(
       kind: RecordingCommand,
       sessionId: sessionId,
-      trace: trace,
+      recordPid: recordPid,
+      traceArchivePath: traceArchivePath,
       command: command,
       status: status,
       errorMessage: errorMessage,

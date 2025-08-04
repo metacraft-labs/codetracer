@@ -466,12 +466,17 @@ proc main*(): Trace =
   # echo "address ", address
   # echo "shouldSendEvents ", shouldSendEvents
 
+  # enable, if we need before-record events
+  let sendAdditionalEvents = false
+  var traceZipFullPath = ""
+
   if shouldSendEvents:
-    registerRecordingCommand(
-      reportFile, socketPath, address,
-      sessionId, actionId, Trace(id: traceId, outputFolder: outputFolder),
-      command, WorkingStatus,
-      errorMessage="", firstLine=firstLine, lastLine=firstLine)
+    if sendAdditionalEvents:
+      registerRecordingCommand(
+        reportFile, socketPath, address,
+        sessionId, actionId, NO_PID, "",
+        command, WorkingStatus,
+        errorMessage="", firstLine=firstLine, lastLine=firstLine)
 
   try:
     var trace = record(
@@ -488,15 +493,13 @@ proc main*(): Trace =
         createDir(exportFolder)
       exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
 
-      let exportZipFullPath = expandFilename(exportZipPath)
-      # (alexander): codetracer ci expects `trace.outputFolder` to be the zip path without ".zip" i think
-      trace.outputFolder = exportZipFullPath.changeFileExt("")
+      traceZipFullPath = expandFilename(exportZipPath)
 
     if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
       registerRecordingCommand(
         reportFile, socketPath, address,
-        sessionId, actionId, trace,
+        sessionId, actionId, trace.rrPid, traceZipFullPath,
         command, OkStatus,
         errorMessage="", firstLine=firstLine, lastLine=lastLine)
 
@@ -511,11 +514,11 @@ proc main*(): Trace =
     echo fmt"traceId:{traceId}"
     return trace
   except CatchableError as e:
-    if shouldSendEvents:
+    if shouldSendEvents and sendAdditionalEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)
       registerRecordingCommand(
         reportFile, socketPath, address,
-        sessionId, actionId, Trace(id: -1, outputFolder: outputFolder),
+        sessionId, actionId, NO_PID, "",
         command, ErrorStatus,
         errorMessage=e.msg, firstLine=firstLine, lastLine=lastLine)
     echo "error: ", e.msg

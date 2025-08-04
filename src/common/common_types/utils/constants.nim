@@ -9,6 +9,7 @@ const
   NO_KEY*: string = "-1"
   NO_LIMIT*: int = -1
   NO_TICKS*: int = -1
+  NO_PID*: int = -1
   FLOW_ITERATION_START*: int = 0
   RESTART_EXIT_CODE*: int = 10
   NO_NAME* = langstring""
