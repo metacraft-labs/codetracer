@@ -407,10 +407,10 @@ proc startSocket*(path: cstring, expectPossibleFail: bool = false): Future[JsObj
 
     connections[0].on(cstring"error") do (error: js):
       # in some cases, we expect a socket might not be connected
-      # e.g. for "instance client": this is not expected to work 
+      # e.g. for "instance client": this is not expected to work
       # if not started from the `shell-ui` feature, which is not really working now
       # (at least in thsi version)
-      # we only log an error for the other cases, 
+      # we only log an error for the other cases,
       # and just a debug print for the expected possible fails
       if not expectPossibleFail:
         errorPrint "socket ipc error: ", error
@@ -423,23 +423,20 @@ type
   RawDapMessage* = ref object
     raw*: cstring
 
+  DapRequest* = ref object
+    command*: cstring
+    value*: JsObject
+
 var dapSocket*: JsObject
 
-# We receive a "raw" DAP message from the db-backend.
-# We have no guarantees whatsoever that this message will arrive "complete" through this socket
-proc onDapRawMessage*(message: RawDapMessage, sender: JsObject) {.async.} =
+proc onDapRawMessage*(sender: js, response: DapRequest) {.async.} =
   if not dapSocket.isNil:
-    echo message.raw
-    dapSocket.write(message.raw)
+    console.log "RECEIVED THE FOLLOWING DAP MESSAGE IN INDEX FROM UI: ", response.command, " with val: ", response.value
+    dapSocket.write(response)
   else:
-    # TODO: put in a queue, or directly make an error, as it might be made hard to happen, 
+    # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
     # if sending from frontend only after dap socket setup here
-    errorPrint "dap socket is nil, couldn't send ", message.toJs
- 
-# Here, we must decide whether we send:
-
-# "dap-receive-response"
-# "dap-receive-event"
+    errorPrint "dap socket is nil, couldn't send ", response.toJs
 
 # TODO: This function need to differentiate between a response and an event
 proc setupProxyForDap* =
