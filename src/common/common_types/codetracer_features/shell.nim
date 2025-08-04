@@ -36,6 +36,9 @@ type
     of LinkingBinary:
       binary*: langstring
     of RecordingCommand:
+      traceArchivePath*: langstring
+      # for rr-backend: the rr process, not the recorded process itself
+      recordPid*: int
       trace*: Trace
     command*: langstring
     sessionId*: int
