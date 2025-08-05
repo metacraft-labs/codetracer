@@ -13,6 +13,7 @@ type
     DapInitialized,
     DapInitialize,
     DapInitializeResponse,
+    DapConfigurationDone,
     DapLaunch,
     DapLaunchResponse,
     DapOutput,
@@ -41,7 +42,7 @@ type
     CtUpdatedFlow,
     CtRunToEntry,
     InternalLastCompleteMove,
-    
+
 when defined(js):
   import std / jsffi
 

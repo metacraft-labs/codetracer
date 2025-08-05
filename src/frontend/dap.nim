@@ -10,9 +10,12 @@ when not defined(ctInExtension):
     DapApi* = ref object
       handlers*: array[CtEventKind, seq[proc(kind: CtEventKind, raw: JsObject)]]
       ipc*: Jsobject
+      seq*: int
 
   proc newDapApi(ipc: JsObject) : DapApi =
-    result = DapApi()
+    result = DapApi(
+      seq: 0
+    )
 
 else:
   import vscode
@@ -50,6 +53,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   DapInitialized: "initialized",
   DapInitialize: "initialize",
   DapInitializeResponse: "",
+  DapConfigurationDone: "configurationDone",
   DapLaunch: "launch",
   DapLaunchResponse: "",
   DapOutput: "output",
@@ -115,6 +119,7 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
 
 
 proc dapEventToCtEventKind(event: cstring): CtEventKind =
+  console.log cstring"CONVERTING EVENT: ", event
   if DAP_TO_EVENT_KIND_MAPPING.hasKey(event):
     DAP_TO_EVENT_KIND_MAPPING[event]
   else:
@@ -142,6 +147,7 @@ proc receiveResponse*(dap: DapApi, command: cstring, rawValue: JsObject) =
   dap.receive(commandToCtResponseEventKind(command), rawValue)
 
 proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
+  console.log cstring"Event raw value: ", rawValue
   dap.receive(dapEventToCtEventKind(event), rawValue)
 
 when not defined(ctInExtension):
@@ -156,19 +162,17 @@ when not defined(ctInExtension):
   proc asyncSendCtRequest(dap: DapApi,
                         kind: CtEventKind,
                         rawValue: JsObject) {.async.} =
-    # Turn the `rawValue` JsObject into a JSON string -----------------------
-    # when defined(js):
-    #   let jsonTxt = cast[cstring](stringify(rawValue))
-    # else:
-    #   let jsonTxt = cast[cstring](rawValue.pretty)   # JsonNode -> text
 
-    # Wrap it in our new RawDapMessage object --------------------------------
-    let packet = DapRequest(command: toDapCommandOrEvent(kind), value: rawValue)
-    console.log "SENDING DAP MESSAGE FROM UI TO INDEX: ", packet.toJs
+    let packet = JsObject{
+      seq:        dap.seq,
+      `type`:     cstring"request",
+      command:    toDapCommandOrEvent(kind),
+      arguments:  rawValue
+    }
 
-    # Fire it through the shared IPC channel ---------------------------------
-    dap.ipc.send("CODETRACER::dap-raw-message", packet.toJs)
+    dap.seq += 1
 
+    dap.ipc.send("CODETRACER::dap-raw-message", packet)
 
 else:
   import .. / .. / libs / karax / karax / kdom

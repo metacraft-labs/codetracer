@@ -226,15 +226,6 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     while let Ok(msg) = dap::from_reader(reader) {
         info!("DAP <- {:?}", msg);
 
-        let path = "/home/pesho/data/db_backend_output.txt";
-
-        let mut file = File::create(path)?;
-
-        writeln!(file, "DAP <- {:?}", msg)?;
-
-        drop(file);
-
-        println!("DAP <- {:?}", msg);
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
                 let capabilities = Capabilities {
