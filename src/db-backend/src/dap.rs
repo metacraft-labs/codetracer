@@ -659,6 +659,7 @@ pub fn to_json(message: &DapMessage) -> Result<String, serde_json::Error> {
 }
 
 pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json::Error> {
+    info!("from_reader");
     let mut header = String::new();
     reader
         .read_line(&mut header)
