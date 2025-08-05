@@ -442,18 +442,12 @@ proc onDapRawMessage*(sender: js, response: DapRequest) {.async.} =
       arguments:  response.value
     }
 
-
-
     let stringified_packet = stringify(packet)
     let len = len(stringified_packet)
 
-    console.log "SENDING PACKET: ", stringified_packet
-
-    let header = &"Content-Length: {len}\r\n\r\n"   # \r\n\r\n ends the header section
+    let header = &"Content-Length: {len}\r\n\r\n"
 
     let message = header & stringified_packet
-
-    console.log "SENDING MESSAGE: ", message
 
     dapSocket.write message
   else:
