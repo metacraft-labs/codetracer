@@ -602,6 +602,46 @@ proc onInit*(
   if not response.bypass:
     redrawAll()
 
+when not defined(ctInExtension):
+  import
+    communication, middleware, dap,
+    .. / common / ct_event
+
+  const logging = true # TODO: maybe overridable dynamically
+
+  # === LocalToViewTransport
+
+  # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
+  # as there are many subscribers
+  # IMPORTANT:
+  # internalRawReceive for it is called by the LocalViewToMiddlewareTransport when
+  # a local view emits
+
+  # === end of LocalToViewsTransport
+
+  proc configureMiddleware =
+    # middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
+
+    setupMiddlewareApis(data.dapApi, data.viewsApi)
+
+    data.dapApi.ipc = data.ipc
+
+    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+      clientName: "codetracer"
+    )))
+
+    for content, components in data.ui.componentMapping:
+      for i, component in components:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
+        # middlewareToViewsApi
+        component.register(componentToMiddlewareApi)
+
+    # discard windowSetTimeout(proc =
+    #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
+
+  # once:
+    # configureMiddleware()
+
 cast[js](dom.document).onreadystatechange = onReady
 
 proc onTraceLoaded(
@@ -648,6 +688,7 @@ proc onTraceLoaded(
   if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
     installMessage()
 
+  configureMiddleware()
 
 proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   # domwindow.kxi = JsAssoc[cstring, KaraxInstance]{}
@@ -1738,45 +1779,6 @@ if inElectron:
     configureIPC(data)
     configure(data)
 
-when not defined(ctInExtension):
-  import
-    communication, middleware, dap,
-    .. / common / ct_event
-
-  const logging = true # TODO: maybe overridable dynamically
-
-  # === LocalToViewTransport
-
-  # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
-  # as there are many subscribers
-  # IMPORTANT:
-  # internalRawReceive for it is called by the LocalViewToMiddlewareTransport when
-  # a local view emits
-
-  # === end of LocalToViewsTransport
-
-  proc configureMiddleware =
-    # middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
-
-    setupMiddlewareApis(data.dapApi, data.viewsApi)
-
-    data.dapApi.ipc = data.ipc
-
-    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
-      clientName: "codetracer"
-    )))
-
-    for content, components in data.ui.componentMapping:
-      for i, component in components:
-        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-        # middlewareToViewsApi
-        component.register(componentToMiddlewareApi)
-
-    # discard windowSetTimeout(proc =
-    #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
-
-  once:
-    configureMiddleware()
 
 # else:
   # configureIPC = functionAsJs(configureIPCRun)
