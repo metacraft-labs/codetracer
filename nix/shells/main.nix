@@ -62,6 +62,7 @@ mkShell {
       just
 
       cargo
+      rustc
       rustfmt
       # ourPkgs.codetracer-rust-wrapped
       clippy
