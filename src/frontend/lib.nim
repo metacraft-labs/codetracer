@@ -393,7 +393,7 @@ proc jsAsFunction*[T](handler: js): T {.importcpp: "#".}
 var nodeProcess* {.importcpp: "process".}: ElectronOrNodeProcess
 
 # proc getOptionsAsConfig*(editor: MonacoEditor)
-when defined(ctIndex) or defined(ctTest):
+when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
   let fs* = cast[NodeFilesystem](require("fs"))
   let fsPromises* = fs.promises
 

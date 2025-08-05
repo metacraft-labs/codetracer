@@ -1,7 +1,8 @@
 when defined(ctInExtension):
-  import std / [async, jsffi, jsconsole]
-  import .. / common / ct_event
+  import std / [async, jsffi, jsconsole, strformat]
+  import .. / common / [ct_event, paths]
   import communication
+  import lib, results
 
   type
     VsCode* = ref object
@@ -72,7 +73,7 @@ when defined(ctInExtension):
       if not data.kind.isNil and not data.value.isNil:
         # check that it's probably a ct raw event: as maybe we can receive other messages?
         result.onVsCodeMessage(cast[CtRawEvent](data)))
-  
+
   proc newVsCodeViewApi*(name: cstring, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers {.exportc.} =
     let transport = newVsCodeViewTransport(vscode, vscodeWindow)
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=true, transport=transport)
@@ -84,3 +85,17 @@ when defined(ctInExtension):
     let transport = VsCodeExtensionToViewsTransport() # for now not used for sending;
     # viewsApi.receive called in message handler in `getOrCreatePanel` in initPanels.ts
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
+
+  when defined(ctInCentralExtensionContext):
+    proc getRecentTraces*(): Future[seq[JsObject]] {.async, exportc.} =
+      let res = await readProcessOutput(
+        codetracerExe.cstring,
+        @[cstring"trace-metadata", cstring"--recent"]
+      )
+
+      if res.isOk:
+        let raw = res.value
+        let traces = cast[seq[JsObject]](JSON.parse(raw))
+        return traces
+      else:
+        echo "error: trying to run the codetracer trace metadata command: ", res.error
