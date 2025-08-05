@@ -68,3 +68,4 @@ when defined(ctInExtension):
     {.emit: "module.exports.receive = receive;".}
     {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
     {.emit: "module.exports.ctSourceLineJump = ctSourceLineJump".}
+    {.emit: "module.exports.getRecentTraces = getRecentTraces".}
