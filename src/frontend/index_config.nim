@@ -430,26 +430,32 @@ type
 
 var dapSocket*: JsObject
 
-proc utf8ByteLen(s: cstring): int
-  {.importjs: "(typeof Buffer==='function' ? Buffer.byteLength(#,'utf8') : (new TextEncoder()).encode(#).length)".}
-
 proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
 proc onDapRawMessage*(sender: js, response: DapRequest) {.async.} =
   if not dapSocket.isNil:
-    console.log "RECEIVED THE FOLLOWING DAP MESSAGE IN INDEX FROM UI: ", response.command, " with val: ", response.value
 
-    let cmd = $response.command
+    let packet = JsObject{
+      seq:        1,
+      `type`:     cstring"request",
+      command:    response.command,
+      arguments:  response.value
+    }
 
-    let req = Request(
-      seq: 1,
-      `type`: "request",
-      command: cmd,
-      arguments: response.value
-    )
-    console.log "SENDING AFTER PROCESSING: ", req
 
-    dapSocket.write req.toCString()
+
+    let stringified_packet = stringify(packet)
+    let len = len(stringified_packet)
+
+    console.log "SENDING PACKET: ", stringified_packet
+
+    let header = &"Content-Length: {len}\r\n\r\n"   # \r\n\r\n ends the header section
+
+    let message = header & stringified_packet
+
+    console.log "SENDING MESSAGE: ", message
+
+    dapSocket.write message
   else:
     # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
     # if sending from frontend only after dap socket setup here
