@@ -537,11 +537,11 @@ proc tryInitLayout*(data: Data) =
 
 # We receive a DAP "Response" from the index process
 proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
-  receiveResponse(data.dapApi, "", raw)
+  receiveResponse(data.dapApi, raw["command"].to(cstring), raw["body"])
 
 # We receive a DAP "Event" from the index process
 proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
-  receiveEvent(data.dapApi, "", raw)
+  receiveEvent(data.dapApi, raw["event"].to(cstring), raw["body"])
 
 proc onReady(event: dom.Event) =
   if cast[cstring](cast[js](dom.document).readyState) == j"complete":
@@ -1739,12 +1739,12 @@ if inElectron:
     configure(data)
 
 when not defined(ctInExtension):
-  import 
+  import
     communication, middleware, dap,
     .. / common / ct_event
 
   const logging = true # TODO: maybe overridable dynamically
-  
+
   # === LocalToViewTransport
 
   # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
@@ -1754,13 +1754,17 @@ when not defined(ctInExtension):
   # a local view emits
 
   # === end of LocalToViewsTransport
-  
+
   proc configureMiddleware =
     # middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
 
     setupMiddlewareApis(data.dapApi, data.viewsApi)
 
     data.dapApi.ipc = data.ipc
+
+    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+      clientName: "codetracer"
+    )))
 
     for content, components in data.ui.componentMapping:
       for i, component in components:

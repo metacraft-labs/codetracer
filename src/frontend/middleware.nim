@@ -5,6 +5,12 @@ import communication, dap
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 
+proc dapInitializationHandler() =
+  data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+  data.dapApi.sendCtRequest(DapLaunch, js{
+    traceFolder: data.trace.outputFolder
+  })
+
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   # backendApi.dapApi.onAll(proc(kind: CtEventKind, rawValue: JsObject) =
     # viewsApi.emit(kind, rawValue))
@@ -21,6 +27,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
   dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
   dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+
+  dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
 
   viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
@@ -48,14 +56,14 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
 #   viewsApi.subscribeRaw(CtLoadLocals, proc(kind: CtEventKind, rawValue: JsObject, sub: Subscriber) =
 #     dapApi.requestOrEvent(kind, rawValue))
 # for others(view/frontend communication) maybe different schema
-      
+
 when defined(ctInExtension):
   when defined(ctInCentralExtensionContext):
     # we don't want this in webview
     {.emit: "module.exports.setupVsCodeExtensionViewsApi = setupVsCodeExtensionViewsApi;".}
     {.emit: "module.exports.newDapVsCodeApi = newDapVsCodeApi;".}
     {.emit: "module.exports.setupEditorApi = setupEditorApi;".}
-    {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}  
+    {.emit: "module.exports.setupMiddlewareApis = setupMiddlewareApis;".}
     {.emit: "module.exports.receive = receive;".}
     {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
     {.emit: "module.exports.ctSourceLineJump = ctSourceLineJump".}

@@ -1,7 +1,6 @@
 import jsffi, async, strformat, strutils, sequtils, macros, os, jsconsole, json
 import lib, config, path_utils, task_and_event, lang, paths
 import ../common/ct_logging
-import dap_protocol
 
 import types
 # Contains a lot of index process procedures dealing with files and configs
@@ -425,30 +424,26 @@ type
   RawDapMessage* = ref object
     raw*: cstring
 
-  DapRequest* = ref object
-    command*: cstring
-    value*: JsObject
+  # DapRequest* = ref object
+  #   command*: cstring
+  #   value*: JsObject
 
 var dapSocket*: JsObject
 
 proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
-proc onDapRawMessage*(sender: js, response: DapRequest) {.async.} =
+proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   if not dapSocket.isNil:
 
-    let packet = JsObject{
-      seq:        1,
-      `type`:     cstring"request",
-      command:    response.command,
-      arguments:  response.value
-    }
+    let stringified_packet = stringify(response)
 
-    let stringified_packet = stringify(packet)
     let len = len(stringified_packet)
 
     let header = &"Content-Length: {len}\r\n\r\n"
 
     let message = header & stringified_packet
+
+    echo "SENDING: ", message
 
     dapSocket.write message
   else:
@@ -460,13 +455,13 @@ proc onDapRawMessage*(sender: js, response: DapRequest) {.async.} =
 proc setupProxyForDap* =
   dapSocket.on(cstring"data", proc(data: cstring) =
     echo "received: ", splitLines($data)
-    let body: JsonNode = parseJson(splitLines($data)[2])
+    let body: JsObject = Json.parse(cstring(splitLines($data)[2]))
     echo "body: ", body
 
-    if body["type"].getStr == "request":
-      mainWindow.webContents.send "CODETRACER::dap-receive-response", data
-    elif body["type"].getStr == "event":
-      mainWindow.webContents.send "CODETRACER::dap-receive-event", data
+    if body["type"].to(cstring) == "request":
+      mainWindow.webContents.send "CODETRACER::dap-receive-response", body
+    elif body["type"].to(cstring) == "event":
+      mainWindow.webContents.send "CODETRACER::dap-receive-event", body
   )
 
 proc dapSocketPathForCallerPid(callerPid: int): cstring =
