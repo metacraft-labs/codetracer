@@ -1,32 +1,74 @@
 // File containing style for widgets that are shared across all other widgets
-::-webkit-scrollbar
-  width: 14px
-  height: 14px
-  background-color: transparent
+if !IS_EXTENSION
+  ::-webkit-scrollbar
+    width: 14px
+    height: 14px
+    background-color: transparent
 
-::-webkit-scrollbar-corner
-  background-color: WEBKIT_SCROLLER_BACKGROUND_COLOR
+  ::-webkit-scrollbar-corner
+    background-color: WEBKIT_SCROLLER_BACKGROUND_COLOR
 
-::-webkit-scrollbar:hover
-  background-color: transparent
+  ::-webkit-scrollbar:hover
+    background-color: transparent
 
-::-webkit-scrollbar-thumb:vertical,
-::-webkit-scrollbar-thumb:horizontal
-  border-radius: 100px
-  background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR
-  border: 3px solid WEBKIT_SCROLLER_BACKGROUND_COLOR
+  ::-webkit-scrollbar-thumb:vertical,
+  ::-webkit-scrollbar-thumb:horizontal
+    border-radius: 100px
+    background-color: WEBKIT_SCROLLER_THUMB_BACKGROUND_COLOR
+    border: 3px solid WEBKIT_SCROLLER_BACKGROUND_COLOR
 
-::-webkit-scrollbar-thumb:vertical:active,
-::-webkit-scrollbar-thumb:horizontal:active
-  background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
+  ::-webkit-scrollbar-thumb:vertical:active,
+  ::-webkit-scrollbar-thumb:horizontal:active
+    background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
+
+@font-face {
+  font-family: 'SpaceGrotesk';
+  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: "FiraCode";
+  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
+}
 
 if IS_EXTENSION
-  html
+  .component-container-html
     height: -webkit-fill-available !important
 
-  body
+  .component-container-body
     height: inherit
     overflow: hidden
+
+  .sidebar-menu-body
+    display: flex
+    flex-direction: column
+    justify-content: start
+    background-color: var(--vscode-sideBar-background)
+    color: var(--vscode-sideBar-foreground)
+
+  .sidebar-menu-header
+    font-weight: 700 !important
+    margin: 8px
+    background: var(--vscode-sideBar-background)
+
+  .sidebar-menu-items
+    font-weight: 400 !important
+    margin: 8px !important
+    margin-top: 0px !important
+    cursor: pointer
+
+    div
+      color: var(--vscode-button-foreground)
+
+      &:hover
+        background: var(--vscode-button-secondaryBackground)
+
+    .sidebar-menu-item
+      padding-left: 8px
+      padding-right: 8px
+      padding-top: 4px
+      padding-bottom: 4px
+      border-radius: 4px
 
 input::-webkit-input-placeholder
   color: INPUT_PLACEHOLDER_COLOR;
@@ -38,16 +80,6 @@ input::-moz-placeholder
   color: INPUT_PLACEHOLDER_COLOR
 
 TRACE_LOG_EDITOR_Z_INDEX = 50
-
-@font-face {
-  font-family: 'SpaceGrotesk';
-  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: "FiraCode";
-  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
-}
 
 .hidden
   display: none !important
