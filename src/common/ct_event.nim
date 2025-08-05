@@ -11,6 +11,10 @@ type
     CtCompleteMove,
     DapStopped,
     DapInitialized,
+    DapInitialize,
+    DapInitializeResponse,
+    DapLaunch,
+    DapLaunchResponse,
     DapOutput,
     CtEventLoad,
     CtUpdatedEvents,
@@ -40,7 +44,7 @@ type
     
 when defined(js):
   import std / jsffi
-  
+
   type
     CtRawEvent* = ref object
       kind*: CtEventKind
@@ -51,6 +55,6 @@ type
     kind*: CtEventKind
     value: T
 
-    
+
 
 
