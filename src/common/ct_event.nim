@@ -14,6 +14,7 @@ type
     DapInitialize,
     DapInitializeResponse,
     DapConfigurationDone,
+    DapConfigurationDoneResponse,
     DapLaunch,
     DapLaunchResponse,
     DapOutput,

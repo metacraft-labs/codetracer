@@ -54,6 +54,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   DapInitialize: "initialize",
   DapInitializeResponse: "",
   DapConfigurationDone: "configurationDone",
+  DapConfigurationDoneResponse: "",
   DapLaunch: "launch",
   DapLaunchResponse: "",
   DapOutput: "output",
@@ -119,6 +120,7 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   of "ct/load-locals": CtLoadLocalsResponse
   of "initialize": DapInitializeResponse
   of "launch": DapLaunchResponse
+  of "configurationDone": DapConfigurationDoneResponse
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")

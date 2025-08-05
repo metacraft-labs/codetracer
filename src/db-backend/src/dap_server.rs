@@ -9,7 +9,7 @@ use crate::task::{
     ProgramEvent, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
-use log::{error, info};
+use log::{error, info, warn};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -191,6 +191,7 @@ fn handle_request<W: Write>(
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<Location>()?)?,
         "ct/run-to-entry" => handler.run_to_entry(req.clone())?,
         "ct/load-calltrace-section" => {
+            info!("load_calltrace_section");
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }
         _ => {
@@ -412,12 +413,16 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) => {
                 if let Some(h) = handler.as_mut() {
-                    handle_request(h, req, &mut seq, writer)?;
+                    let res = handle_request(h, req, &mut seq, writer);
+                    if let Err(e) = res {
+                        warn!("handle_request error: {e:?}");
+                    }
                 }
             }
             _ => {}
         }
         // forward_raw_events(&rx, writer, &mut seq)?;
     }
+    error!("maybe error from reader");
     Ok(())
 }

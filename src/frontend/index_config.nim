@@ -458,7 +458,7 @@ proc setupProxyForDap* =
     let body: JsObject = Json.parse(cstring(splitLines($data)[2]))
     echo "body: ", body
 
-    if body["type"].to(cstring) == "request":
+    if body["type"].to(cstring) == "response":
       mainWindow.webContents.send "CODETRACER::dap-receive-response", body
     elif body["type"].to(cstring) == "event":
       mainWindow.webContents.send "CODETRACER::dap-receive-event", body
