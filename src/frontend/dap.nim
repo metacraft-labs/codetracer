@@ -42,6 +42,10 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtCompleteMove: "ct/complete-move",
   DapStopped: "stopped",
   DapInitialized: "initialized",
+  DapInitialize: "initialize",
+  DapInitializeResponse: "",
+  DapLaunch: "launch",
+  DapLaunchResponse: "",
   DapOutput: "output",
   CtEventLoad: "ct/event-load",
   CtUpdatedEvents: "ct/updated-events",
@@ -78,6 +82,8 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # TODO: based on $kind? or mapping?
   case kind:
   of CtLoadLocals: CtLoadLocalsResponse
+  of DapInitialize: DapInitializeResponse
+  of DapLaunch: DapLaunchResponse
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
@@ -93,6 +99,8 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   # or some common mapping?
   case $command:
   of "ct/load-locals": CtLoadLocalsResponse
+  of "initialize": DapInitializeResponse
+  of "launch": DapLaunchResponse
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")
