@@ -4,10 +4,10 @@ you can enable it by editing `$HOME/.config/codetracer/.config.yaml`
 and toggling the `enabled` field of the `traceSharing` object to true
 """
 
-const UPLOAD_URL_FIELD* = "UploadUrl"
-const FILE_ID_FIELD* = "FileId"
-const CONTROL_ID_FIELD* = "ControlId"
-const FILE_STORED_FIELD* = "FileStoredUntil"
+const FILE_ID_FIELD* = "fileId"
+const CONTROL_ID_FIELD* = "controlId"
+const UPLOAD_URL_FIELD* = "uploadUrl"
+const FILE_STORED_UNTIL_FIELD* = "fileStoredUntilEpochSeconds"
 
 type UploadedInfo* = ref object
   fileId*: string

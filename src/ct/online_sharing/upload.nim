@@ -23,7 +23,7 @@ proc uploadFile(
     let uploadUrl = getUrlJson[UPLOAD_URL_FIELD].getStr("").strip()
     let fileId = getUrlJson[FILE_ID_FIELD].getStr("").strip()
     let controlId = getUrlJson[CONTROL_ID_FIELD].getStr("")
-    let storedUntilEpochSeconds = getUrlJson[FILE_STORED_FIELD].getInt()
+    let storedUntilEpochSeconds = getUrlJson[FILE_STORED_UNTIL_FIELD].getInt()
     if fileId == "" or uploadUrl == "" or controlId == "" or storedUntilEpochSeconds == 0:
       raise newException(KeyError, "error: Can't parse response")
 
@@ -100,7 +100,7 @@ proc uploadTrace*(trace: Trace, config: Config): UploadedInfo =
 
     updateField(trace.id, "remoteShareDownloadKey", uploadInfo.downloadKey, false)
     updateField(trace.id, "remoteShareControlId", uploadInfo.controlId, false)
-    updateField(trace.id, "remoteShareExpireTime", uploadInfo.storedUntilEpochSeconds, false)  
+    updateField(trace.id, "remoteShareExpireTime", uploadInfo.storedUntilEpochSeconds, false)
     return uploadInfo
   finally:
     removeFile(outputZip)
@@ -143,5 +143,5 @@ proc uploadCommand*(
       """
   else:
     echo fmt"""{{"downloadKey": "{uploadInfo.downloadKey}", "controlId": "{uploadInfo.controlId}", "storedUntilEpochSeconds": {uploadInfo.storedUntilEpochSeconds}}}"""
-  
+
   quit(0)
