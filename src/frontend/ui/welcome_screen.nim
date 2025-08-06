@@ -676,7 +676,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     ),
     WelcomeScreenOption(
       name: "Open online trace",
-      inactive: not data.config.traceSharing.enabled,
+      inactive: false,
       command: proc = 
         self.openOnlineTrace = true
         self.welcomeScreen = false
