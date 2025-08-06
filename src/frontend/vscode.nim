@@ -160,3 +160,38 @@ when defined(ctInExtension):
       else:
         output = JSON.stringify(outputResult.error)
       return cast[JsObject](output)
+
+    proc getTraceId(output: cstring): int =
+      let outputString = $output
+      let idx = outputString.find("traceId:")
+      if idx != NO_INDEX:
+        let traceIdx = outputString.find(":", idx)
+        if traceIdx != NO_INDEX:
+          let traceNumber = outputString[traceIdx + 1..^1]
+          return parseInt(traceNumber.strip())
+      return NO_INDEX
+
+    proc getCurrentTrace*(codetracerExe: cstring, workDir: cstring, isNixOS: bool): Future[JsObject] {.async, exportc.} =
+      let outputResult = await readCTOutput(
+        codetracerExe,
+        @[cstring"record", workDir],
+        isNixOS
+      )
+
+      if outputResult.isOk:
+        let traceId = getTraceId(outputResult.value)
+        if traceId != NO_INDEX:
+          let res = await readCTOutput(
+            codetracerExe.cstring,
+            @[cstring"trace-metadata", cstring(fmt"--id={traceId}")],
+            isNixOS
+          )
+
+          if res.isOk:
+            let raw = res.value
+            return cast[JsObject](parseCTJson(raw))
+          else:
+            echo "error: trying to run the codetracer trace metadata command: ", res.error
+        else:
+          echo "error: couldn't manage to get the trace id!"
+      return js{}

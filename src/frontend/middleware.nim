@@ -71,3 +71,4 @@ when defined(ctInExtension):
     {.emit: "module.exports.getRecentTraces = getRecentTraces".}
     {.emit: "module.exports.getRecentTransactions = getRecentTransactions".}
     {.emit: "module.exports.getTransactionTrace = getTransactionTrace".}
+    {.emit: "module.exports.getCurrentTrace = getCurrentTrace".}
