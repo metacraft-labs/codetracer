@@ -70,4 +70,4 @@ when defined(ctInExtension):
     {.emit: "module.exports.ctSourceLineJump = ctSourceLineJump".}
     {.emit: "module.exports.getRecentTraces = getRecentTraces".}
     {.emit: "module.exports.getRecentTransactions = getRecentTransactions".}
-    {.emit: "module.exports.getTransactionTraceId = getTransactionTraceId".}
+    {.emit: "module.exports.getTransactionTrace = getTransactionTrace".}

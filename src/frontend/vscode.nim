@@ -37,6 +37,7 @@ when defined(ctInExtension):
 
   const ctExtensionLogging {.strdefine.}: bool = true # TODO: false default for production
   const logging = ctExtensionLogging
+  const NO_INDEX = -1
 
   ### WebviewSubscriber:
 
@@ -89,69 +90,52 @@ when defined(ctInExtension):
   when defined(ctInCentralExtensionContext):
     # let EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
 
-    proc getRecentTraces*(): Future[seq[JsObject]] {.async, exportc.} =
-      let res = await readProcessOutput(
+    proc parseCTJson(raw: cstring): js =
+      let rawString = $raw
+      let idx = rawString.find(".AppImage installed")
+      if idx != NO_INDEX:
+        let jsonIdx = rawString.find("\n", idx)
+        if jsonIdx != NO_INDEX:
+          let jsonText = rawString[jsonIdx + 1..^1]
+          return JSON.parse(jsonText)
+      return JSON.parse(raw)
+
+    proc getRecentTraces*(codetracerExe: cstring, isNixOS: bool): Future[seq[JsObject]] {.async, exportc.} =
+      let res = await readCTOutput(
         codetracerExe.cstring,
-        @[cstring"trace-metadata", cstring"--recent"]
+        @[cstring"trace-metadata", cstring"--recent"],
+        isNixOS
       )
 
       if res.isOk:
         let raw = res.value
-        let traces = cast[seq[JsObject]](JSON.parse(raw))
+        let traces = cast[seq[JsObject]](parseCTJson(raw))
         return traces
       else:
         echo "error: trying to run the codetracer trace metadata command: ", res.error
 
-    proc getRecentTransactions*(): Future[seq[JsObject]] {.async, exportc.} =
-      let res = await readProcessOutput(
-        codetracerExe.cstring,
-        @[cstring"arb",  cstring"listRecentTx"]
+    proc getRecentTransactions*(codetracerExe: cstring, isNixOS: bool): Future[seq[JsObject]] {.async, exportc.} =
+      let res = await readCTOutput(
+        codetracerExe,
+        @[cstring"arb",  cstring"listRecentTx"],
+        isNixOS
       )
 
       if res.isOk:
         let raw = res.value
         try:
-          let traces = cast[seq[JsObject]](JSON.parse(raw))
+          let traces = cast[seq[JsObject]](parseCTJson(raw))
           return traces
         except:
           echo "\nerror: loading recent transactions problem: ", raw, " (or possibly invalid json)"
       else:
         echo "error: trying to run the codetracer arb listRecentTx command: ", res.error
 
-    proc getEvmTrace(txHash: cstring): Future[cstring] {.async.} =
-      let outputResult = await readProcessOutput(
-        cstring"cargo",
-        @[
-          cstring"stylus",
-          cstring"trace",
-          cstring"--use-native-tracer",
-          cstring"--tx",
-          txHash
-        ]
-      )
-      echo "#### THIS IS THE OUTPUTRESULT = ", outputResult
-      return cstring"#### UM ?"
-      # if not outputResult.isOk:
-      #   echo "Can't get EVM trace! Output:"
-      #   echo outputResult.value
-      #   # TODO: maybe specific exception
-      #   raise newException(CatchableError, "Can't get EVM trace!")
-
-      # # TODO: maybe validate output?
-
-      # let outputDir = EVM_TRACE_DIR_PATH / hash
-      # let outputFile = outputDir / "evm_trace.json"
-
-      # createDir(outputDir)
-      # writeFile(outputFile, output)
-
-      # return outputFile
-
-    proc getTransactionTraceId*(txHash: cstring): Future[JsObject] {.async, exportc.} =
-      let evm = await getEvmTrace(txHash)
-      let outputResult = await readProcessOutput(
-        codetracerExe.cstring,
-        @[cstring"arb", cstring"replay", txHash]
+    proc getTransactionTrace*(codetracerExe: cstring, txHash: cstring, isNixOS: bool): Future[JsObject] {.async, exportc.} =
+      let outputResult = await readCTOutput(
+        codetracerExe,
+        @[cstring"arb", cstring"record", txHash],
+        isNixOS
       )
       var output = cstring""
       if outputResult.isOk:
@@ -161,13 +145,15 @@ when defined(ctInExtension):
           let traceIdLine = $lines[^2]
           if traceIdLine.startsWith("traceId:"):
             let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
-            let res = await readProcessOutput(
+            let res = await readCTOutput(
               codetracerExe.cstring,
-              @[cstring"trace-metadata", cstring(fmt"--id={traceId}")])
+              @[cstring"trace-metadata", cstring(fmt"--id={traceId}")],
+              isNixOS
+            )
 
             if res.isOk:
               let raw = res.value
-              return cast[JsObject](raw)
+              return cast[JsObject](parseCTJson(raw))
             else:
               echo "error: trying to run the codetracer trace metadata command: ", res.error
             return js{}
