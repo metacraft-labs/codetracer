@@ -6,7 +6,7 @@ when not defined(js):
 
 import
   macros, dom, jsffi, typetraits, strutils, strformat, os, async,
-  kdom, sugar, jsconsole, results, task_and_event, paths
+  kdom, sugar, jsconsole, results, task_and_event, paths, sequtils
 import ../common/ct_logging
 
 type
@@ -486,6 +486,25 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
 
     var future = newPromise(futureHandler)
     return future
+
+  proc readCTOutput*(
+    codetracerExe: cstring,
+    args: seq[cstring],
+    isNixOS: bool = false,
+    options: JsObject = js{}
+  ): Future[Result[cstring, JsObject]] =
+    if not isNixOS or not ($codetracerExe).endsWith(".AppImage"):
+      readProcessOutput(
+        codetracerExe,
+        args,
+        options
+      )
+    else:
+      readProcessOutput(
+        "appimage-run",
+        @[codetracerExe].concat(args),
+        options
+      )
 
   proc startProcess*(
     path: cstring,
