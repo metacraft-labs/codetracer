@@ -10,7 +10,7 @@ import {
   clickNext,
   clickContinue,
   ctRun,
-} from "../lib/ct_helpers";
+} from "../../test-framework/lib/ct_helpers";
 // import { StatusBar } from "../page_objects/status_bar";
 
 ctRun("noir_example/");

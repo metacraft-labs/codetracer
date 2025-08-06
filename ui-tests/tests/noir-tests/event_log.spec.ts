@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { page, loadedEventLog, ctRun } from "../lib/ct_helpers";
+import { page, loadedEventLog, ctRun } from "../../test-framework/lib/ct_helpers";
 
 ctRun("noir_example/");
 
