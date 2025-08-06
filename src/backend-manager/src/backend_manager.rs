@@ -51,29 +51,38 @@ impl BackendManager {
         let mut socket_read;
         let mut socket_write;
 
+        info!("Socket listening on: {}", socket_path.display());
+
         let listener = UnixListener::bind(socket_path)?;
         match listener.accept().await {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
         }
 
+        info!("Connected");
+
         tokio::spawn(async move {
             loop {
+                sleep(Duration::from_millis(10)).await;
+
                 let mut res = res2.lock().await;
                 for rx in &mut res.children_receivers {
                     if let Some(rx) = rx {
                         if !rx.is_empty() {
                             if let Some(message) = rx.recv().await {
-                                socket_write
-                                    .write_all(&DapParser::to_bytes(&message))
-                                    .await
-                                    .unwrap(); // TODO: handle error
+                                let write_res =
+                                    socket_write.write_all(&DapParser::to_bytes(&message)).await;
+
+                                match write_res {
+                                    Ok(()) => {}
+                                    Err(err) => {
+                                        error!("Can't write to frontend socket! Error: {}", err);
+                                    }
+                                }
                             }
                         }
                     }
                 }
-
-                sleep(Duration::from_millis(10)).await;
             }
         });
 
@@ -99,7 +108,12 @@ impl BackendManager {
 
                             if let Some(x) = val {
                                 let mut res = res1.lock().await;
-                                res.parse_message(x).await.unwrap(); // TODO: handle error
+                                match res.parse_message(x).await {
+                                    Ok(()) => {}
+                                    Err(err) => {
+                                        // TODO: log error
+                                    }
+                                }
                                 cnt = 0;
                                 continue; // Having goto would be nice here...
                             }
@@ -124,7 +138,7 @@ impl BackendManager {
         Ok(())
     }
 
-    pub async fn start_replay(&mut self) -> Result<usize, Box<dyn Error>> {
+    pub async fn start_replay(&mut self, cmd: &str) -> Result<usize, Box<dyn Error>> {
         let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
         socket_path.push("codetracer");
         socket_path.push(std::process::id().to_string());
@@ -133,7 +147,7 @@ impl BackendManager {
 
         socket_path.push(self.children.len().to_string() + ".sock");
 
-        let mut cmd = Command::new("db-backend");
+        let mut cmd = Command::new(cmd);
         match socket_path.to_str() {
             Some(p) => {
                 cmd.arg(p);
@@ -141,7 +155,20 @@ impl BackendManager {
             None => return Err(Box::new(SocketPathError)),
         }
 
-        let child = cmd.spawn()?;
+        info!(
+            "Starting replay with id {}. Command: {:?}",
+            self.children.len(),
+            cmd
+        );
+
+        let child = cmd.spawn();
+        let child = match child {
+            Ok(c) => c,
+            Err(err) => {
+                error!("Can't start replay: {}", err);
+                return Err(Box::new(err));
+            }
+        };
         sleep(Duration::from_millis(10)).await;
 
         self.children.push(Some(child));
@@ -157,10 +184,13 @@ impl BackendManager {
 
         tokio::spawn(async move {
             while let Some(message) = parent_rx.recv().await {
-                socket_write
-                    .write_all(&DapParser::to_bytes(&message))
-                    .await
-                    .unwrap(); // TODO: handle error
+                let write_res = socket_write.write_all(&DapParser::to_bytes(&message)).await;
+                match write_res {
+                    Ok(()) => {}
+                    Err(err) => {
+                        error!("Can't send message to replay socket! Error: {}", err);
+                    }
+                }
             }
         });
 
@@ -176,18 +206,23 @@ impl BackendManager {
                             Some(Ok(val)) => Some(val),
 
                             Some(Err(err)) => {
-                                // TODO: log error
+                                warn!("Recieved malformed DAP message! Error: {}", err);
                                 None
                             }
 
                             None => None,
                         };
                         if let Some(x) = val {
-                            child_tx.send(x); // TODO: handle error appropriately
+                            match child_tx.send(x) {
+                                Ok(()) => {}
+                                Err(err) => {
+                                    error!("Can't send to child channel! Error: {}", err);
+                                }
+                            };
                         }
                     }
                     Err(err) => {
-                        // TODO: log error
+                        error!("Can't read from replay socket! Error: {}", err);
                     }
                 }
             }
@@ -199,11 +234,9 @@ impl BackendManager {
     pub async fn stop_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
         self.check_id(id)?;
 
-        // TODO: send stop message to the instance. Or directly kill?
-
         // SAFETY: check_id ensures this is safe
         let child = unsafe { self.children[id].as_mut().unwrap_unchecked() };
-        _ = child.wait().await?;
+        _ = child.kill().await?;
 
         self.children[id] = None;
 
@@ -271,7 +304,7 @@ impl BackendManager {
                 match req_type {
                     "codetracer-start-replay" => {
                         // TODO: add args for startring backend
-                        self.start_replay().await;
+                        self.start_replay("db-backend").await;
                         // TODO: send response
                         return Ok(());
                     }
