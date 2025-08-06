@@ -1125,9 +1125,10 @@ method render*(self: CalltraceComponent): VNode =
   if self.inExtension:
     self.kxi.afterRedraws.add(proc = self.redrawCallLines())
   else:
-    kxiMap["calltraceComponent-0"].afterRedraws.add(proc =
-      self.redrawCallLines()
-    )
+    if not self.kxi.isNil:
+      self.kxi.afterRedraws.add(proc =
+        self.redrawCallLines()
+      )
 
   result = buildHtml(
     tdiv(
