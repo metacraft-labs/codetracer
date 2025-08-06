@@ -3,8 +3,8 @@ import {
   page,
   readyOnEntryTest as readyOnEntry,
   ctRun,
-} from "../lib/ct_helpers";
-import { StatePanel } from "../page_objects/state";
+} from "../../test-framework/lib/ct_helpers";
+import { StatePanel } from "../../test-framework/page-objects/state";
 
 ctRun("noir_example/");
 
