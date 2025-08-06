@@ -16,9 +16,9 @@ history: true
 repl: true
 
 traceSharing:
-  enabled: false
+  enabled: true
   # for now local setup
-  baseUrl: "http://localhost:55504/api/codetracer/v1"
+  baseUrl: "http://192.168.8.212:55504/api/codetracer/v1"
   downloadApi: "/download"
   deleteApi: "/delete"
   getUploadUrlApi: "/get/upload/url"

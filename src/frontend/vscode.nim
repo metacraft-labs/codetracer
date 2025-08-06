@@ -1,5 +1,5 @@
 when defined(ctInExtension):
-  import std / [async, jsffi, jsconsole, strformat]
+  import std / [async, jsffi, jsconsole, strformat, strutils]
   import .. / common / [ct_event, paths]
   import communication
   import lib, results
@@ -87,6 +87,8 @@ when defined(ctInExtension):
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
 
   when defined(ctInCentralExtensionContext):
+    # let EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
+
     proc getRecentTraces*(): Future[seq[JsObject]] {.async, exportc.} =
       let res = await readProcessOutput(
         codetracerExe.cstring,
@@ -99,3 +101,76 @@ when defined(ctInExtension):
         return traces
       else:
         echo "error: trying to run the codetracer trace metadata command: ", res.error
+
+    proc getRecentTransactions*(): Future[seq[JsObject]] {.async, exportc.} =
+      let res = await readProcessOutput(
+        codetracerExe.cstring,
+        @[cstring"arb",  cstring"listRecentTx"]
+      )
+
+      if res.isOk:
+        let raw = res.value
+        try:
+          let traces = cast[seq[JsObject]](JSON.parse(raw))
+          return traces
+        except:
+          echo "\nerror: loading recent transactions problem: ", raw, " (or possibly invalid json)"
+      else:
+        echo "error: trying to run the codetracer arb listRecentTx command: ", res.error
+
+    proc getEvmTrace(txHash: cstring): Future[cstring] {.async.} =
+      let outputResult = await readProcessOutput(
+        cstring"cargo",
+        @[
+          cstring"stylus",
+          cstring"trace",
+          cstring"--use-native-tracer",
+          cstring"--tx",
+          txHash
+        ]
+      )
+      echo "#### THIS IS THE OUTPUTRESULT = ", outputResult
+      return cstring"#### UM ?"
+      # if not outputResult.isOk:
+      #   echo "Can't get EVM trace! Output:"
+      #   echo outputResult.value
+      #   # TODO: maybe specific exception
+      #   raise newException(CatchableError, "Can't get EVM trace!")
+
+      # # TODO: maybe validate output?
+
+      # let outputDir = EVM_TRACE_DIR_PATH / hash
+      # let outputFile = outputDir / "evm_trace.json"
+
+      # createDir(outputDir)
+      # writeFile(outputFile, output)
+
+      # return outputFile
+
+    proc getTransactionTraceId*(txHash: cstring): Future[JsObject] {.async, exportc.} =
+      let evm = await getEvmTrace(txHash)
+      let outputResult = await readProcessOutput(
+        codetracerExe.cstring,
+        @[cstring"arb", cstring"replay", txHash]
+      )
+      var output = cstring""
+      if outputResult.isOk:
+        output = outputResult.value
+        let lines = output.split(jsNl)
+        if lines.len > 1:
+          let traceIdLine = $lines[^2]
+          if traceIdLine.startsWith("traceId:"):
+            let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+            let res = await readProcessOutput(
+              codetracerExe.cstring,
+              @[cstring"trace-metadata", cstring(fmt"--id={traceId}")])
+
+            if res.isOk:
+              let raw = res.value
+              return cast[JsObject](raw)
+            else:
+              echo "error: trying to run the codetracer trace metadata command: ", res.error
+            return js{}
+      else:
+        output = JSON.stringify(outputResult.error)
+      return cast[JsObject](output)
