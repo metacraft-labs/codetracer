@@ -59,11 +59,21 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   DapLaunchResponse: "",
   DapOutput: "output",
   DapStepIn: "stepIn",
+  DapStepInResponse: "",
   DapStepOut: "stepOut",
+  DapStepOutResponse: "",
   DapNext: "next",
+  DapNextResponse: "",
   DapContinue: "continue",
+  DapContinueResponse: "",
   DapStepBack: "stepBack",
+  DapStepBackResponse: "",
   DapReverseContinue: "reverseContinue",
+  DapReverseContinueResponse: "",
+  CtReverseStepIn: "ct/reverseStepIn",
+  CtReverseStepInResponse: "",
+  CtReverseStepOut: "ct/reverseStepOut",
+  CtReverseStepOutResponse: "",
   CtEventLoad: "ct/event-load",
   CtUpdatedEvents: "ct/updated-events",
   CtUpdatedEventsContent: "ct/updated-events-content",
@@ -105,6 +115,14 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   of CtLoadLocals: CtLoadLocalsResponse
   of DapInitialize: DapInitializeResponse
   of DapLaunch: DapLaunchResponse
+  of DapStepIn: DapStepInResponse
+  of DapStepOut: DapStepOutResponse
+  of DapNext: DapNextResponse
+  of DapContinue: DapContinueResponse
+  of DapStepBack: DapStepBackResponse
+  of DapReverseContinue: DapReverseContinueResponse
+  of CtReverseStepIn: CtReverseStepInResponse
+  of CtReverseStepOut: CtReverseStepOutResponse
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
@@ -123,6 +141,14 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   of "initialize": DapInitializeResponse
   of "launch": DapLaunchResponse
   of "configurationDone": DapConfigurationDoneResponse
+  of "stepIn": DapStepInResponse
+  of "stepOut": DapStepOutResponse
+  of "next": DapNextResponse
+  of "continue": DapContinueResponse
+  of "stepBack": DapStepBackResponse
+  of "reverseContinue": DapReverseContinueResponse
+  of "ct/reverseStepIn": CtReverseStepIn
+  of "ct/reverseStepOut": CtReverseStepOut
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")
