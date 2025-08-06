@@ -6,6 +6,6 @@
     "strictNullChecks": true,
     "esModuleInterop": true
   },
-  "include": ["tests/**.ts", "playwright.config.ts", "tests/noir/**.ts"],
+  "include": ["tests/**.ts", "playwright.config.ts", "tests/noir-tests/**.ts", "tests/page-objects-tests/page_object.spec.ts"],
   "exclude": ["**.mjs"]
 }

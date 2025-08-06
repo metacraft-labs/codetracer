@@ -1,10 +1,10 @@
-import { test } from "@playwright/test";
-import { page, readyOnEntryTest as readyOnEntry, ctRun } from "./lib/ct_helpers";
-import { LayoutPage } from "./page_objects/layout_page";
-import { extractLayoutPageModel } from "./page_objects/layout_extractors";
+import { test, expect } from "@playwright/test";
+import { page, readyOnEntryTest as readyOnEntry, ctRun } from "../../test-framework/lib/ct_helpers";
+import { LayoutPage } from "../../test-framework/page-objects/layout_page";
+import { extractLayoutPageModel } from "../../test-framework/page-objects/layout_extractors";
 
 // Use the noir example just like the other tests.
-ctRun("noir_example/");
+ctRun("noir_space_ship/");
 
 test("page object test", async () => {
   await readyOnEntry();
@@ -16,6 +16,7 @@ test("page object test", async () => {
   await layout.continueButton().isVisible();
   await layout.nextButton().isVisible();
 
+  //await page.waitForTimeout(4000);
   // Iterate over event log tabs
   const eventLogs = await layout.eventLogTabs();
   for (const tab of eventLogs) {

@@ -1,8 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
 
-/**
- * Base class for all page objects. Mirrors BasePage from Nim code.
- */
 export class BasePage {
   readonly page: Page;
 
@@ -15,7 +12,7 @@ export class BasePage {
 export class TabObject {
   readonly page: Page;
   readonly root: Locator;
-  readonly tabButtonText: string;
+  tabButtonText: string;
 
   constructor(page: Page, root: Locator, tabButtonText: string) {
     this.page = page;
