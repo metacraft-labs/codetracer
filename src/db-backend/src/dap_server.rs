@@ -151,6 +151,9 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
         "continue" => Ok((Action::Continue, false)),
         "stepBack" => Ok((Action::Next, true)),
         "reverseContinue" => Ok((Action::Continue, true)),
+        // custom for codetracer
+        "ct/reverseStepIn" => Ok((Action::StepIn, true)),
+        "ct/reverseStepOut" => Ok((Action::StepOut, true)),
         _ => Err(CtDapError::new(&format!("not a recognized dap step action: {command}"))),
     }
 }
