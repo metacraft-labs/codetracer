@@ -77,8 +77,6 @@ LIBZIP=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libzip.out"
 cp -L "${LIBZIP}"/lib/libzip.so.5 "${APP_DIR}"/lib
 
 nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.curl"
-CURL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.curl.out")
-cp -L "${CURL}"/lib/libcurl.so.4 "${APP_DIR}"/lib
 
 OPENSSL=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.openssl.out")
 cp -L "${OPENSSL}"/lib/libssl.so.3 "${APP_DIR}"/lib
@@ -89,7 +87,6 @@ cp -L "${OPENSSL}"/lib/libcrypto.so.3 "${APP_DIR}"/lib
 nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv"
 LIBUV=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv.out")
 cp -L "${LIBUV}"/lib/libuv.so.1 "${APP_DIR}"/lib
-ls -al "${APP_DIR}"/lib
 
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
@@ -146,6 +143,10 @@ cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DI
 # curl
 cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/curl"
+# shellcheck disable=SC2046
+cp -n $(lddtree -l "${APP_DIR}/bin/curl" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+ls -al "${APP_DIR}"/lib
+
 
 # node
 cp -Lr "${ROOT_PATH}/src/links/node" "${APP_DIR}/bin/"
