@@ -545,8 +545,7 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
     name: "Add to scratchpad",
     hint: "",
     handler: proc(e: Event) =
-      openValueInScratchpad((expression, value))
-      self.redraw()
+      self.state.api.emit(CtAddToScratchpad, ValueWithExpression(expression: expression, value: value))
   )
 
   contextMenu &= addToScratchpad
@@ -561,18 +560,24 @@ proc historyClick(self: ValueComponent, location: types.Location) =
 
 proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event) =
   ev.stopPropagation()
+  if self.state.inExtension:
+    ev.preventDefault()
   let contextMenu = self.createHistoryContextMenu(self.baseExpression, event.value, ev)
   let e = ev.toJs
 
   if contextMenu != []:
-    showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
+    showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.state.inExtension)
 
 proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-location",
-      onmousedown = proc = self.historyClick(event.location),
-      oncontextmenu = proc(ev: Event, tg: Vnode) = self.historyContextAction(event, ev)
+      onmousedown = proc(ev: Event, tg: VNode) =
+        if cast[MouseEvent](ev).button == 0:
+          self.historyClick(event.location),
+      oncontextmenu = proc(ev: Event, tg: VNode) =
+        ev.preventDefault()
+        self.historyContextAction(event, ev)
     )
   ):
     text $event.location.rrTicks
@@ -581,8 +586,12 @@ proc historyValueView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-value",
-      onmousedown = proc = self.historyClick(event.location),
-      oncontextmenu = proc(ev: Event, tg: VNode) = self.historyContextAction(event, ev)
+      onmousedown = proc(ev: Event, tg: VNode) =
+        if cast[MouseEvent](ev).button == 0:
+          self.historyClick(event.location),
+      oncontextmenu = proc(ev: Event, tg: VNode) =
+        ev.preventDefault()
+        self.historyContextAction(event, ev)
     )
   ):
     text event.value.textRepr
@@ -1127,10 +1136,12 @@ proc view(
     tdiv(
       class = cstring(fmt"{atom}"),
       onContextMenu = proc(ev: Event, v: VNode) =
-      let contextMenu = self.createContextMenuItems(value, ev)
-      let e = ev.toJs
-      if contextMenu != []:
-        showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
+        let contextMenu = self.createContextMenuItems(value, ev)
+        let e = ev.toJs
+        if not self.state.isNil and self.state.inExtension:
+          ev.preventDefault()
+        if contextMenu != []:
+          showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), not self.state.isNil and self.state.inExtension)
     ):
       tdiv(class = "value-name-container"):
         if self.isTooltipValue and expression == self.baseExpression:

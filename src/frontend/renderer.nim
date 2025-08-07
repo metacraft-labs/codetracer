@@ -1213,7 +1213,7 @@ proc windowMenu*(data: Data, fromWelcomeScreen: bool = false): VNode =
       onclick = proc =
         data.ipc.send "CODETRACER::close-app")
 
-proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
+proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
   let y = yPos - 30
   let container = dom.document.getElementById("context-menu-container")
   container.style.display = "flex"
@@ -1247,12 +1247,19 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
       x - ((x + contextWidth + 10) - clientWidth)
     else:
       x
+
+  var heightOffset = 
+    if inExtension:
+      40
+    else:
+      0
+
   let topPos =
     if y + contextHeight > clientHeight:
       y - ((y + contextHeight + 10) - clientHeight)
     else:
       y
-  container.style.top = cstring(fmt"{topPos}px")
+  container.style.top = cstring(fmt"{topPos + heightOffset}px")
   container.style.left = cstring(fmt"{leftPos}px") 
 
   kdom.document.addEventListener("click", proc(e: Event) =
