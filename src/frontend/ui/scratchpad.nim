@@ -1,5 +1,6 @@
 import ui_imports, ../types
 import ../communication
+import ../../common/ct_event
 
 when defined(ctInExtension):
   var scratchpadComponentForExtension* {.exportc.}: ScratchpadComponent = makeScratchpadComponent(data, 0, inExtension = true)
@@ -14,8 +15,50 @@ proc removeValue*(self: ScratchpadComponent, i: int) =
   self.values.delete(i, i)
   self.redraw()
 
+proc registerLocals*(self: ScratchpadComponent, response: CtLoadLocalsResponseBody) =
+  self.locals = response.locals
+
+proc registerValue(self: ScratchpadComponent, variable: ValueWithExpression) =
+  let value = variable.value
+  let expression = variable.expression
+  self.programValues.add((expression, value))
+  self.values.add(
+    ValueComponent(
+      expanded: JsAssoc[cstring, bool]{},
+      charts: JsAssoc[cstring, ChartComponent]{},
+      showInline: JsAssoc[cstring, bool]{},
+      baseExpression: expression,
+      baseValue: value,
+      nameWidth: VALUE_COMPONENT_NAME_WIDTH,
+      valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
+      stateID: -1
+    )
+  )
+  self.redraw()
+
 method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
   self.api = api
+  api.subscribe(CtAddToScratchpad, proc(kind: CtEventKind, response: ValueWithExpression, sub: Subscriber) =
+    self.registerValue(response)
+  )
+  api.subscribe(CtAddToScratchpadWithExpression, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
+    var found: Variable
+    var foundIt = false
+
+    for v in self.locals:
+      if v.expression == response:
+        found = v
+        foundIt = true
+        break
+
+    if foundIt:
+      self.registerValue(ValueWithExpression(expression: found.expression, value: found.value))
+    else:
+      echo "Variable not found."
+  )
+  api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
+    self.registerLocals(response)
+  )
 
 proc scratchpadValueView(self: ScratchpadComponent, i: int, value: ValueComponent): VNode =
   value.isScratchpadValue = true

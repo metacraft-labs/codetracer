@@ -117,6 +117,10 @@ type
     stopSignal*: RRGDBStopSignal
     frameInfo*: FrameInfo
 
+  ValueWithExpression* = ref object
+    expression*: cstring
+    value*: Value
+
   SourceLine* = object
     path*:                  cstring
     line*:                  int
@@ -634,6 +638,7 @@ type
     programValues*:   seq[(cstring, Value)]
     values*:        seq[ValueComponent]
     service*:       DebuggerService
+    locals*:        seq[Variable]
 
   TimelineMode* = enum TimelineVariables, TimelineRegisters
 
