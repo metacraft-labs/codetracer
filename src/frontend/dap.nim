@@ -27,8 +27,8 @@ else:
       vscode*: VsCode
       context*: VsCodeContext
       editor*: JsObject
-      flowFunction*: proc(editor: JsObject, value: FlowUpdate)
-      completeMoveFunction*: proc(editor: JsObject, response: MoveState, dapApi: DapApi)
+      # flowFunction*: proc(editor: JsObject)
+      # completeMoveFunction*: proc(editor: JsObject, response: MoveState, dapApi: DapApi)
 
 type
   DapRequest* = ref object
@@ -89,8 +89,8 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtUpdatedFlow: "ct/updated-flow",
   CtRunToEntry: "ct/run-to-entry",
   InternalLastCompleteMove: "internal/last-complete-move",
-  CtAddToScratchpad: "",
-  CtAddToScratchpadWithExpression: "",
+  InternalAddToScratchpad: "",
+  InternalAddToScratchpadWithExpression: "",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
@@ -192,17 +192,6 @@ else:
     console.log cstring"-> dap request: ", toDapCommandOrEvent(kind), rawValue
     discard dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
 
-  proc ctSourceLineJump*(dap: DapApi, line: int, path: cstring, behaviour: JumpBehaviour) {.exportc.} =
-    let target = SourceLineJumpTarget(
-      path: path,
-      line: line,
-      behaviour: behaviour,
-    )
-    dap.sendCtRequest(CtSourceLineJump, target.toJs)
-
-  proc ctAddToScratchpad*(viewsApi: MediatorWithSubscribers, expression: cstring) {.exportc.} =
-    viewsApi.emit(CtAddToScratchpadWithExpression, expression.toJs)
-
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     result = DapApi(vscode: vscode, context: context)
     proc onDidSendMessage(message: VsCodeDapMessage) =
@@ -228,7 +217,7 @@ else:
   type
     VsCodeEditor* = ref object
       editor*: JsObject
-      flow*: FlowComponent
+      # flow*: FlowComponent
 
   var vsCodeEditor* = VsCodeEditor()
 
