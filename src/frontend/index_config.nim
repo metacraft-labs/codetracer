@@ -451,16 +451,72 @@ proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
     errorPrint "dap socket is nil, couldn't send ", response.toJs
 
 # TODO: This function need to differentiate between a response and an event
-proc setupProxyForDap* =
-  dapSocket.on(cstring"data", proc(data: cstring) =
-    echo "received: ", splitLines($data)
-    let body: JsObject = Json.parse(cstring(splitLines($data)[2]))
-    echo "body: ", body
+# proc setupProxyForDap* =
+#   dapSocket.on(cstring"data", proc(data: cstring) =
+#     echo "received: ", splitLines($data)
+#     let body: JsObject = Json.parse(cstring(splitLines($data)[2]))
+#     echo "body: ", body
+#
+#     if body["type"].to(cstring) == "response":
+#       mainWindow.webContents.send "CODETRACER::dap-receive-response", body
+#     elif body["type"].to(cstring) == "event":
+#       mainWindow.webContents.send "CODETRACER::dap-receive-event", body
+#   )
 
-    if body["type"].to(cstring) == "response":
-      mainWindow.webContents.send "CODETRACER::dap-receive-response", body
-    elif body["type"].to(cstring) == "event":
-      mainWindow.webContents.send "CODETRACER::dap-receive-event", body
+proc handleFrame(frame: string) =
+
+  let body: JsObject = Json.parse(frame)
+
+  let msgtype = body["type"].to(cstring)
+
+  if msgtype == "response":
+    mainWindow.webContents.send("CODETRACER::dap-receive-response", body)
+  elif msgtype == "event":
+    mainWindow.webContents.send("CODETRACER::dap-receive-event", body)
+  else:
+    echo "unknown DAP message: ", body
+
+var dapMessageBuffer = ""
+
+proc setupProxyForDap* =
+
+  let lineBreakSize = 4
+
+  dapSocket.on(cstring"data", proc(data: cstring) =
+    dapMessageBuffer.add $data
+
+    while true:
+
+      # Try and find the `Content-length` header's end
+      let hdrEnd = dapMessageBuffer.find("\r\n\r\n")
+
+      # We're still waiting on the header
+      if hdrEnd < 0: break
+
+      # We parse the header
+      let header = dapMessageBuffer[0 ..< hdrEnd]
+      var contentLen = -1
+      for line in header.splitLines:
+        if line.startsWith("Content-Length:"):
+          contentLen = line.split(":")[1].strip.parseInt
+          break
+      if contentLen < 0:
+        # Is this the right kind of exception ???
+        raise newException(ValueError, "DAP header without Content-Length")
+
+
+      # We try and parse the body
+      let frameEnd = hdrEnd + lineBreakSize + contentLen  # 4 = len("\r\n\r\n")
+
+      # We don't have the whole body yet
+      if dapMessageBuffer.len < frameEnd: break
+
+      # We handle the frame
+      let body = dapMessageBuffer.substr(hdrEnd + lineBreakSize, frameEnd - 1)
+      handleFrame(body)
+
+      # We sanitize the buffer
+      dapMessageBuffer = dapMessageBuffer.substr(frameEnd)
   )
 
 proc dapSocketPathForCallerPid(callerPid: int): cstring =
