@@ -699,9 +699,6 @@ pub fn write_message<W: Write>(writer: &mut W, message: &DapMessage) -> Result<(
         .write_all(json.as_bytes())
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
 
-    // TODO: REMOVE THIS, ACCEPT REQUESTS ADEQUATELY IN UI
-    // thread::sleep(time::Duration::from_millis(500));
-
     writer.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
     info!("DAP -> {:?}", message);
     Ok(())
