@@ -51,15 +51,6 @@ pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
 
-    let mut sample_event = DapMessage::Event(Event {
-        base: ProtocolMessage {
-            seq: 123,
-            type_: "event".to_string(),
-        },
-        event: "initialized".to_string(),
-        body: json!({}),
-    });
-    let _ = dap::write_message(&mut writer, &mut sample_event);
     handle_client(&mut reader, &mut writer)
 }
 
