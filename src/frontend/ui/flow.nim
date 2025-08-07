@@ -3193,12 +3193,13 @@ proc calculateLineHeight(self: FlowComponent) =
   self.fontSize = option.fontSize - 2
 
 proc recalculateAndRedrawFlow*(self: FlowComponent) =
-  self.createFlowLines()
-  self.calculateLineHeight()
-  self.renderFlowLines()
+  if not self.flow.isNil:
+    self.createFlowLines()
+    self.calculateLineHeight()
+    self.renderFlowLines()
 
-  if self.mutationObserver.isNil:
-    setEditorMutationObserver(self)
+    if self.mutationObserver.isNil:
+      setEditorMutationObserver(self)
 
 proc adjustFlow(self: FlowComponent) =
   self.recalculateMaxFlowLineWidth()

@@ -620,8 +620,6 @@ when not defined(ctInExtension):
   # === end of LocalToViewsTransport
 
   proc configureMiddleware =
-    # middlewareToViewsApi = setupSinglePageViewsApi(cstring"single-page-frontend-to-views", data)
-
     setupMiddlewareApis(data.dapApi, data.viewsApi)
 
     data.dapApi.ipc = data.ipc
@@ -633,7 +631,6 @@ when not defined(ctInExtension):
     for content, components in data.ui.componentMapping:
       for i, component in components:
         let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-        # middlewareToViewsApi
         component.register(componentToMiddlewareApi)
 
     # discard windowSetTimeout(proc =

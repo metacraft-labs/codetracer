@@ -207,7 +207,7 @@ func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
   of "step-out": result.ok(DapStepOut)
   of "next": result.ok(DapNext)
   of "continue": result.ok(DapContinue) 
-  of "reverse-step": result.ok(CtReverseStepIn)
+  of "reverse-step-in": result.ok(CtReverseStepIn)
   # err(cstring"no reverse-step dap equivalent for now: TODO ct/reverse-step?")
   of "reverse-step-out": result.ok(CtReverseStepOut)
   # (cstring"no reverse-step-out dap equivalent for now: TODO ct/reverse-step-out")
