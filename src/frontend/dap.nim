@@ -200,8 +200,8 @@ else:
     )
     dap.sendCtRequest(CtSourceLineJump, target.toJs)
 
-  proc ctAddToScratchpad*(dap: DapApi, expression: cstring) {.exportc.} =
-    dap.receive(CtAddToScratchpadWithExpression, expression.toJs)
+  proc ctAddToScratchpad*(viewsApi: MediatorWithSubscribers, expression: cstring) {.exportc.} =
+    viewsApi.emit(CtAddToScratchpadWithExpression, expression.toJs)
 
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     result = DapApi(vscode: vscode, context: context)

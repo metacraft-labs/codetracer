@@ -25,7 +25,6 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       viewsApi.emit(CtCompleteMove, value)
       lastCompleteMove = value
     )
-    dapApi.on(CtAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtAddToScratchpadWithExpression, value))
     dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
     dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
     dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
@@ -41,6 +40,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
           dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
       )
     viewsApi.subscribe(CtAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(CtAddToScratchpad, value))
+    viewsApi.subscribe(CtAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(CtAddToScratchpadWithExpression, value))
 
   dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
 
