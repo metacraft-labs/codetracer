@@ -111,7 +111,7 @@ proc createContextMenuItems(self: CallArg, component: CalltraceComponent, ev: js
       name: "Add value to scratchpad",
       hint: "CTRL+&lt;click on value&gt;",
       handler: proc(e: Event) =
-        component.api.emit(CtAddToScratchpad, ValueWithExpression(expression: self.name, value: self.value))
+        component.api.emit(InternalAddToScratchpad, ValueWithExpression(expression: self.name, value: self.value))
     )
   contextMenu &= addToScratchpad
 
@@ -347,7 +347,7 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
         if cast[bool](ev.toJs.ctrlKey):
           ev.stopPropagation()
           self.api.emit(
-            CtAddToScratchpad,
+            InternalAddToScratchpad,
             ValueWithExpression(
               expression: arg.name,
               value: arg.value

@@ -688,7 +688,8 @@ proc onTraceLoaded(
   if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
     installMessage()
 
-  configureMiddleware()
+  when not defined(ctInExtension):
+    configureMiddleware()
 
 proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   # domwindow.kxi = JsAssoc[cstring, KaraxInstance]{}
