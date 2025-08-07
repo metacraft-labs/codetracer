@@ -1177,8 +1177,9 @@ proc view(
           if expression == self.baseExpression:
             span(
               class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",
-              onmousedown = proc() =
-                discard self.showHistory(expression)
+              onmousedown = proc(ev: Event, tg: VNode) =
+                if cast[MouseEvent](ev).button == 0:
+                  discard self.showHistory(expression)
             ):
               tdiv(class = "custom-tooltip"):
                 text "Toggle history value"
@@ -1203,8 +1204,9 @@ proc view(
       if expression == self.baseExpression and not self.uiExpanded(value, expression):
         span(
           class = if self.showInline[expression]: "toggle-value-history active" else: "toggle-value-history",
-          onmousedown = proc() =
-            discard self.showHistory(expression)
+          onmousedown = proc(ev: Event, tg: VNode) =
+            if cast[MouseEvent](ev).button == 0:
+              discard self.showHistory(expression)
         ):
           tdiv(class = "custom-tooltip"):
             text "Toggle history value"
