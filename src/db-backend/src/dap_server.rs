@@ -20,9 +20,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
 
-use std::fs::{File, OpenOptions};
-use std::io::BufWriter;
-
 // fn forward_raw_events<W: Write>(
 //     rx: &mpsc::Receiver<BackendResponse>,
 //     writer: &mut W,
