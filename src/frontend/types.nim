@@ -1603,8 +1603,6 @@ when defined(ctRenderer):
     maxRRTicks: 100_000) # TODO, not based on events which don't update? somehow record/send from record
     # TODO max for program, maybe min as well?
 
-  # setupMiddlewareApis(dapApi, data.middlewareToViewsApi)
-
   console.log "data.dapApi"
   console.log data.dapApi 
 
@@ -1617,9 +1615,6 @@ when defined(ctRenderer):
 
   var domwindow {.importc: "window".}: JsObject
   domwindow.data = data
-
-  var middlewareToViewsApi* {.exportc.}: MediatorWithSubscribers = nil
-  domwindow.middlewareToViewsApi = middlewareToViewsApi
 
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
@@ -1671,8 +1666,8 @@ when defined(ctRenderer):
     else:
       component.data = data
       component.content = content
-      if not middlewareToViewsApi.isNil:
-        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), middlewareToViewsApi)
+      if not data.viewsApi.isNil:
+        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
         component.register(componentToMiddlewareApi)
       echo "register component ", content, " ", component.id
       data.ui.componentMapping[content][component.id] = component
