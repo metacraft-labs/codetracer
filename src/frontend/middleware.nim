@@ -54,7 +54,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(DapContinue, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapStepBack, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapReverseContinue, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-
+  viewsApi.subscribe(CtReverseStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtReverseStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  
   viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadCalltraceSection, proc(kind: CtEventKind, value: CalltraceLoadArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
