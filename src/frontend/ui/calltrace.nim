@@ -65,6 +65,8 @@ proc createContextMenuItems(
   ev: js,
   callLine: CallLineContent
 ): seq[ContextMenuItem] =
+  if self.inExtension:
+    ev.preventDefault()
   var expandCallstack:  ContextMenuItem
   var collapseCallChildren: ContextMenuItem
   var expandCallChildren: ContextMenuItem
@@ -366,7 +368,7 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
         ev.stopPropagation()
         let contextMenu = arg.createContextMenuItems(self, e)
         if contextMenu != @[]:
-            showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
+            showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.inExtension)
     )
   ):
     let value = arg.value.textRepr
@@ -594,7 +596,7 @@ proc callView*(
         let e = ev.toJs
         let contextMenu = self.createContextMenuItems(e, callLine)
         if contextMenu != @[]:
-          showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
+          showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.inExtension)
     ):
       codeCallView(&"{key}", call.location.highLevelPath, call.location.highLevelLine)
       let count = if childrenCount > 0:
