@@ -1628,7 +1628,7 @@ when defined(ctRenderer):
 
   type
     LocalViewSubscriber* = ref object of Subscriber
-      # viewApi*: MediatorWithSubscriber
+      # viewApi*: MediatorWithSubscribers
       viewTransport*: Transport
 
   const logging* = true # TODO: maybe reuse/use a dynamic log level mechanism
