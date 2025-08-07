@@ -100,7 +100,7 @@ proc createContextMenuItems(
 
   return contextMenu
 
-proc createContextMenuItems(self: CallArg, ev: js): seq[ContextMenuItem] =
+proc createContextMenuItems(self: CallArg, component: CalltraceComponent, ev: js): seq[ContextMenuItem] =
   var addToScratchpad:  ContextMenuItem
   var contextMenu:      seq[ContextMenuItem]
 
@@ -109,8 +109,7 @@ proc createContextMenuItems(self: CallArg, ev: js): seq[ContextMenuItem] =
       name: "Add value to scratchpad",
       hint: "CTRL+&lt;click on value&gt;",
       handler: proc(e: Event) =
-        openValueInScratchpad((self.name, self.value))
-        data.redraw()
+        component.api.emit(CtAddToScratchpad, ValueWithExpression(expression: self.name, value: self.value))
     )
   contextMenu &= addToScratchpad
 
@@ -345,8 +344,13 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
       onclick = proc(ev: Event, v: VNode) =
         if cast[bool](ev.toJs.ctrlKey):
           ev.stopPropagation()
-          openValueInScratchpad((arg.name, arg.value))
-          data.redraw()
+          self.api.emit(
+            CtAddToScratchpad,
+            ValueWithExpression(
+              expression: arg.name,
+              value: arg.value
+            )
+          )
         elif not self.modalValueComponent.hasKey(id):
           self.resetValueView()
           showCallValue(self, arg, keyOrIndex)
@@ -360,7 +364,7 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
       oncontextmenu = proc(ev: Event, v: VNode) {.gcsafe.} =
         let e = ev.toJs
         ev.stopPropagation()
-        let contextMenu = arg.createContextMenuItems(e)
+        let contextMenu = arg.createContextMenuItems(self, e)
         if contextMenu != @[]:
             showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
     )
