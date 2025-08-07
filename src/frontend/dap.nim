@@ -152,9 +152,11 @@ proc receive*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
       console.log cstring"rawValue: ", rawValue
 
 proc receiveResponse*(dap: DapApi, command: cstring, rawValue: JsObject) =
+  console.log "Received response: ", $rawValue
   dap.receive(commandToCtResponseEventKind(command), rawValue)
 
 proc receiveEvent*(dap: DapApi, event: cstring, rawValue: JsObject) =
+  echo "Received event: ", $rawValue
   console.log cstring"Event raw value: ", rawValue
   dap.receive(dapEventToCtEventKind(event), rawValue)
 
