@@ -4,7 +4,6 @@ use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serializ
 use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::{thread, time};
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
