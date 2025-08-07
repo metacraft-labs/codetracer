@@ -2,47 +2,51 @@ import std / [jsffi, jsconsole]
 import .. / common / ct_event
 import types
 import communication, dap
+import event_helpers
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 
-proc dapInitializationHandler() =
-  data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-  data.dapApi.sendCtRequest(DapLaunch, js{
-    traceFolder: data.trace.outputFolder
-  })
+when not defined(ctInExtension):
+  proc dapInitializationHandler() =
+    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+    data.dapApi.sendCtRequest(DapLaunch, js{
+      traceFolder: data.trace.outputFolder
+    })
 
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
-  # backendApi.dapApi.onAll(proc(kind: CtEventKind, rawValue: JsObject) =
-    # viewsApi.emit(kind, rawValue))
+  var lastCompleteMove: MoveState = nil
 
-    dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
-    dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
-    dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
-    dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
-    dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
-    dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
-    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-      viewsApi.emit(CtCompleteMove, value)
-      lastCompleteMove = value
-    )
-    dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
-    dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
-    dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
-    dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
-    dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
-    when defined(ctInExtension):
-      dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
-        if not dapApi.flowFunction.isNil:
-          dapApi.flowFunction(dapApi.editor, value)
-      )
-      dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-        if not dapApi.completeMoveFunction.isNil:
-          dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
-      )
-    viewsApi.subscribe(CtAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(CtAddToScratchpad, value))
-    viewsApi.subscribe(CtAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(CtAddToScratchpadWithExpression, value))
+  dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
+  dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
+  dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
+  dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
+  dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
+  dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
+  dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+    viewsApi.emit(CtCompleteMove, value)
+    lastCompleteMove = value
+  )
 
-  dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
+  dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
+  dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
+  dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
+  dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
+  dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+    #when defined(ctInExtension):
+    # TODO: For now not using in the extension
+    # dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
+    #   if not dapApi.flowFunction.isNil:
+    #     dapApi.flowFunction(dapApi.editor, value)
+    # )
+    # dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+    #   if not dapApi.completeMoveFunction.isNil:
+    #     dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
+    # )
+  viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
+  viewsApi.subscribe(InternalAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadWithExpression, value))
+
+  when not defined(ctInExtension):
+    dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
 
   viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStoppedEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
@@ -64,6 +68,11 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(CtTracepointDelete, proc(kind: CtEventKind, value: TracepointId, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtTraceJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadFlow, proc(kind: CtEventKind, value: Location, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtRunToEntry, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(InternalLastCompleteMove, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
+    if not lastCompleteMove.isNil:
+      viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
+  )
 
 # maybe somehow a more proxy-like/macro way
 # some kind of loop or more raw subscribe, that directly sends for many cases

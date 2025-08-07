@@ -545,7 +545,7 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
     name: "Add to scratchpad",
     hint: "",
     handler: proc(e: Event) =
-      self.state.api.emit(CtAddToScratchpad, ValueWithExpression(expression: expression, value: value))
+      self.state.api.emit(InternalAddToScratchpad, ValueWithExpression(expression: expression, value: value))
   )
 
   contextMenu &= addToScratchpad
