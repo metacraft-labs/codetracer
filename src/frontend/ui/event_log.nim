@@ -510,7 +510,6 @@ proc events(self: EventLogComponent) =
             callback: proc(data: js),
             settings: js
           ) =
-            echo "#### EMIT FOR UPDATE"
             var mutData = data
             self.tableCallback = callback
             self.drawId += 1
@@ -998,10 +997,6 @@ proc loadEvents*(self: EventLogComponent, update: TableData) =
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
   let response = res.tableUpdate
-
-  echo "#### CHECK THE RES"
-  kout res
-  kout self
 
   if not response.isTrace and self.drawId == response.data.draw:
     let dt = self.denseTable

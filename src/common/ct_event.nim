@@ -49,7 +49,9 @@ type
     CtUpdatedFlow,
     CtRunToEntry,
     InternalLastCompleteMove,
-
+    CtAddToScratchpad,
+    CtAddToScratchpadWithExpression,
+    
 when defined(js):
   import std / jsffi
 

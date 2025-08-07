@@ -89,6 +89,8 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtUpdatedFlow: "ct/updated-flow",
   CtRunToEntry: "ct/run-to-entry",
   InternalLastCompleteMove: "internal/last-complete-move",
+  CtAddToScratchpad: "",
+  CtAddToScratchpadWithExpression: "",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
@@ -197,6 +199,9 @@ else:
       behaviour: behaviour,
     )
     dap.sendCtRequest(CtSourceLineJump, target.toJs)
+
+  proc ctAddToScratchpad*(dap: DapApi, expression: cstring) {.exportc.} =
+    dap.receive(CtAddToScratchpadWithExpression, expression.toJs)
 
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
     result = DapApi(vscode: vscode, context: context)

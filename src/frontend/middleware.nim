@@ -15,18 +15,32 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # backendApi.dapApi.onAll(proc(kind: CtEventKind, rawValue: JsObject) =
     # viewsApi.emit(kind, rawValue))
 
-  dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
-  dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
-  dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
-  dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
-  dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
-  dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
-  dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) = viewsApi.emit(CtCompleteMove, value))
-  dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
-  dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
-  dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
-  dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
-  dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+    dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
+    dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
+    dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
+    dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
+    dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
+    dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
+    dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+      viewsApi.emit(CtCompleteMove, value)
+      lastCompleteMove = value
+    )
+    dapApi.on(CtAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtAddToScratchpadWithExpression, value))
+    dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
+    dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
+    dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
+    dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
+    dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+    when defined(ctInExtension):
+      dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
+        if not dapApi.flowFunction.isNil:
+          dapApi.flowFunction(dapApi.editor, value)
+      )
+      dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+        if not dapApi.completeMoveFunction.isNil:
+          dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
+      )
+    viewsApi.subscribe(CtAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(CtAddToScratchpad, value))
 
   dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
 
@@ -68,6 +82,7 @@ when defined(ctInExtension):
     {.emit: "module.exports.receive = receive;".}
     {.emit: "module.exports.newWebviewSubscriber = newWebviewSubscriber;".}
     {.emit: "module.exports.ctSourceLineJump = ctSourceLineJump".}
+    {.emit: "module.exports.ctAddToScratchpad = ctAddToScratchpad".}
     {.emit: "module.exports.getRecentTraces = getRecentTraces".}
     {.emit: "module.exports.getRecentTransactions = getRecentTransactions".}
     {.emit: "module.exports.getTransactionTrace = getTransactionTrace".}
