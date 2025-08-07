@@ -450,19 +450,6 @@ proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
     # if sending from frontend only after dap socket setup here
     errorPrint "dap socket is nil, couldn't send ", response.toJs
 
-# TODO: This function need to differentiate between a response and an event
-# proc setupProxyForDap* =
-#   dapSocket.on(cstring"data", proc(data: cstring) =
-#     echo "received: ", splitLines($data)
-#     let body: JsObject = Json.parse(cstring(splitLines($data)[2]))
-#     echo "body: ", body
-#
-#     if body["type"].to(cstring) == "response":
-#       mainWindow.webContents.send "CODETRACER::dap-receive-response", body
-#     elif body["type"].to(cstring) == "event":
-#       mainWindow.webContents.send "CODETRACER::dap-receive-event", body
-#   )
-
 proc handleFrame(frame: string) =
 
   let body: JsObject = Json.parse(frame)
