@@ -190,7 +190,7 @@ impl Receiver {
             TaskKind::DeleteBreak => handler.delete_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::Disable => handler.toggle_breakpoint(self.core.read_arg(&task.id)?, task),
             TaskKind::Enable => handler.toggle_breakpoint(self.core.read_arg(&task.id)?, task),
-            TaskKind::RunTracepoints => handler.run_tracepoints(self.core.read_arg(&task.id)?, task),
+            // TaskKind::RunTracepoints => handler.run_tracepoints(self.core.read_arg(&task.id)?, task),
             // TaskKind::TraceJump => handler.trace_jump(self.core.read_arg(&task.id)?, task),
             // TaskKind::HistoryJump => handler.history_jump(self.core.read_arg(&task.id)?, task),
             // TaskKind::LoadHistory => handler.load_history(self.core.read_arg(&task.id)?, task),
@@ -203,7 +203,7 @@ impl Receiver {
             // TaskKind::LocalStepJump => handler.local_step_jump(self.core.read_arg(&task.id)?, task),
             TaskKind::RegisterEvents => handler.register_events(self.core.read_arg(&task.id)?, task),
             TaskKind::RegisterTracepointLogs => handler.register_tracepoint_logs(self.core.read_arg(&task.id)?, task),
-            TaskKind::SetupTraceSession => handler.setup_trace_session(self.core.read_arg(&task.id)?, task),
+            // TaskKind::SetupTraceSession => handler.setup_trace_session(self.core.read_arg(&task.id)?, task),
             TaskKind::LoadAsmFunction => handler.load_asm_function(self.core.read_arg(&task.id)?, task),
             // TaskKind::LoadTerminal => handler.load_terminal(task),
             _ => {

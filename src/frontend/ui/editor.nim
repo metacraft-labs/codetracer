@@ -105,11 +105,11 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
   cstring"ALT+KeyE":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.toggleMacroExpansion(),
 
   cstring"ALT+KeyT":      proc(editor: MonacoEditor, e: EditorViewComponent) =
-    runTracepoints(),
+    runTracepoints(data),
 
 
   cstring"CTRL+Enter": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    runTracepoints(),
+    runTracepoints(data),
 
   cstring"CTRL+KeyS":      proc(editor: MonacoEditor, e: EditorViewComponent) =
     data.functions.update(data, build=false),
