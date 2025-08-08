@@ -393,18 +393,17 @@ proc events(self: EventLogComponent) =
             title: j"rr event id"
           },
       ]
-      when defined(ctInExtension):
-        if self.isDbBasedTrace:
-          let lower = j("FullPath".toLowerAscii())
+      if self.isDbBasedTrace:
+        let lower = j("FullPath".toLowerAscii())
 
-          denseColumns.add(
-            js{
-              className: j"eventLog-" & lower & " " & local("cell"),
-              searchable: true,
-              title: lower,
-              data: j"fullPath",
-            }
-          )
+        denseColumns.add(
+          js{
+            className: j"eventLog-" & lower & " " & local("cell"),
+            searchable: true,
+            title: lower,
+            data: j"fullPath",
+          }
+        )
       denseColumns.add(
         @[
           js{
@@ -470,29 +469,29 @@ proc events(self: EventLogComponent) =
           proc(content: cstring, t: js, event: ProgramEvent): cstring {.closure.} =
             cstring"low level location"
         ]
-      when not defined(ctInExtension):
-        if self.isDbBasedTrace:
-          let lower = j("FullPath".toLowerAscii())
 
-          denseColumns.add(
-            js{
-              className: j"eventLog-" & lower & " " & local("cell"),
-              searchable: true,
-              title: lower,
-              data: j"fullPath",
-            }
-          )
-          if false:
-            let lower = j("LowLevelLocation".toLowerAscii())
+      # if self.isDbBasedTrace:
+      #   let lower = j("FullPath".toLowerAscii())
 
-            denseColumns.add(
-              js{
-                className: j"eventLog-" & lower & " " & local("cell"),
-                searchable: true,
-                title: lower,
-                data: j"lowLevelLocation",
-              }
-            )
+      #   denseColumns.add(
+      #     js{
+      #       className: j"eventLog-" & lower & " " & local("cell"),
+      #       searchable: true,
+      #       title: lower,
+      #       data: j"fullPath",
+      #     }
+      #   )
+      #   if false:
+      #     let lower = j("LowLevelLocation".toLowerAscii())
+
+      #     denseColumns.add(
+      #       js{
+      #         className: j"eventLog-" & lower & " " & local("cell"),
+      #         searchable: true,
+      #         title: lower,
+      #         data: j"lowLevelLocation",
+      #       }
+      #     )
 
       console.timeEnd(cstring"new events: load in datatable: optional columns")
       console.time(cstring"new events: load in datatable: dense datatable preparation and call")
