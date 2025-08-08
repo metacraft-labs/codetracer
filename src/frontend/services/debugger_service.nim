@@ -1,4 +1,6 @@
-import std / jsconsole
+import std / [jsconsole, os]
+import ../dap
+import ../../common/ct_event
 import service_imports
 
 proc restart*(self: DebuggerService) =
@@ -79,10 +81,11 @@ proc internalDeleteBreakpointC*(self: DebuggerService, path: cstring, line: int)
   }
 
 proc internalAddBreakpoint*(self: DebuggerService, path: cstring, line: int) =
-  self.data.ipc.send "CODETRACER::add-break", js{
-    line: line,
-    path: path
-  }
+  # self.data.dapApi.sendCtRequest(DapSetBreakpoints, ) "CODETRACER::add-break", js{
+  #   line: line,
+  #   path: path
+  # }
+  discard
 
 proc internalAddBreakpointC*(self: DebuggerService, path: cstring, line: int) =
   self.data.ipc.send "CODETRACER::add-break-c", js{
@@ -188,6 +191,30 @@ proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount
 func hasBreakpoint*(self: DebuggerService, path: cstring, line: int): bool =
   self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line)
 
+const NO_B_COLUMN = 0
+
+proc dapSetBreakpoints*(self: DebuggerService) =
+  for path, breakpointList in self.breakpointTable:
+    var args = DapSetBreakpointsArguments(
+      source: DapSource(
+        name: extractFilename($path),
+        path: path,
+        sourceReference: nil
+      )
+    )
+    for line, b in breakpointList:
+      if b.enabled:
+        args.breakpoints.add(
+          DapSourceBreakpoint(
+            line: line,
+            column: NO_B_COLUMN
+          )
+        )
+        args.lines.add(line)
+    self.data.dapApi.sendCtRequest(
+      DapSetBreakpoints,
+      args.toJs
+    )
 
 proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
   if not self.hasBreakpoint(path, line):
@@ -196,15 +223,15 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
     self.breakpointTable[path][line] = UIBreakpoint(line: line, path: path, level: if not c: 0 else: 1, enabled: true)
     data.pointList.breakpoints.add(self.breakpointTable[path][line])
 
-    if not c:
-      self.internalAddBreakpoint(path, line)
-    else:
-      if self.data.trace.lang == LangNim:
-        self.internalAddBreakpointC(path, line)
+    # if not c:
+    #   self.internalAddBreakpoint(path, line)
+    # else:
+    #   if self.data.trace.lang == LangNim:
+    #     self.internalAddBreakpointC(path, line)
 
     # TODO self.data.services.editor.open[self.data.services.editor.active].viewLine = line
-
-    self.data.redraw()
+  self.dapSetBreakpoints()
+  self.data.redraw()
 
 
 proc deleteBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
@@ -217,14 +244,15 @@ proc deleteBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool 
       break
     self.breakpointTable[path].del(line)
 
-    if not c:
-      self.internalDeleteBreakpoint(path, line)
+    # if not c:
+    #   self.internalDeleteBreakpoint(path, line)
 
-    else:
-      if self.data.trace.lang == LangNim:
-        self.internalDeleteBreakpointC(path, line)
+    # else:
+    #   if self.data.trace.lang == LangNim:
+    #     self.internalDeleteBreakpointC(path, line)
 
-    self.data.redraw()
+  self.dapSetBreakpoints()
+  self.data.redraw()
 
 
 proc toggleBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
@@ -255,7 +283,7 @@ proc enable*(self: DebuggerService, path: cstring, line: int) =
     breakpoint.enabled = true
     self.breakpointTable[path][line] = breakpoint
 
-    self.data.ipc.send "CODETRACER::enable", js{path: path, line: line}
+    self.dapSetBreakpoints()
 
 proc disable*(self: DebuggerService, path: cstring, line: int) =
   if self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line):
@@ -271,7 +299,7 @@ proc disable*(self: DebuggerService, path: cstring, line: int) =
     var breakpoint = self.breakpointTable[path][line]
     breakpoint.enabled = false
     self.breakpointTable[path][line] = breakpoint
-    self.data.ipc.send "CODETRACER::disable", js{path: path, line: line}
+    self.dapSetBreakpoints()
 
 proc toggleAssemblyBreakpoint*(self: DebuggerService, address: cstring) =
   discard
@@ -296,7 +324,7 @@ proc deleteAllBreakpoints*(self: DebuggerService, editor: EditorViewComponent) =
     data.services.debugger.breakpointTable[b.path].del(b.line)
     editor.refreshEditorLine(b.line)
   data.pointList.redrawBreakpoints = true
-  self.data.ipc.send "CODETRACER::delete-all-breakpoints", js{}
+  self.dapSetBreakpoints()
 
 proc sourceLineJump*(self: DebuggerService, path: cstring, line: int, behaviour: JumpBehaviour) =
   self.data.ipc.send "CODETRACER::source-line-jump", SourceLineJumpTarget(

@@ -1,5 +1,5 @@
 use crate::task::{self};
-use log::info;
+use log::{error, info};
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, Write};
@@ -660,9 +660,10 @@ pub fn to_json(message: &DapMessage) -> Result<String, serde_json::Error> {
 pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json::Error> {
     info!("from_reader");
     let mut header = String::new();
-    reader
-        .read_line(&mut header)
-        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+    reader.read_line(&mut header).map_err(|e| {
+        error!("Read Line: {:?}", e);
+        serde_json::Error::custom(e.to_string())
+    })?;
     if !header.to_ascii_lowercase().starts_with("content-length:") {
         // println!("no content-length!");
         return Err(serde_json::Error::custom("Missing Content-Length header"));

@@ -41,3 +41,22 @@ type
 
   DapStepArguments* = ref object
     threadId*: int
+
+  DapSourceReference* = ref object
+    # TODO: Need something for Option[int]
+    # that will be serialized properly
+
+  DapSource* = ref object
+    name*: langstring
+    path*: langstring
+    sourceReference*: DapSourceReference
+
+  DapSourceBreakpoint* = ref object
+    line*: int
+    column*: int
+
+  DapSetBreakpointsArguments* = ref object
+    source*: DapSource
+    breakpoints*: seq[DapSourceBreakpoint]
+    lines*: seq[int]
+    sourceModified*: bool
