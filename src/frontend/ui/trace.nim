@@ -2,7 +2,7 @@ import
   ../ui_helpers, ../types, ../lang,
   ui_imports, value, ../utils, ../renderer,
   datatable
-import ../communication, ../../common/ct_event
+import ../communication, ../../common/ct_event, ../dap
 
 let MIN_EDITOR_WIDTH: float = 20 #%
 let MAX_EDITOR_WIDTH: float = 70 #%
@@ -66,10 +66,10 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
 
   self.data.redraw()
 
-method onUpdatedTable*(self: TraceComponent, response: TableUpdate) {.async.} =
-  if response.isTrace and response.data.draw == self.drawId:
-    self.tableCallback(response.data.toJs)
-    self.dataTable.rowsCount = response.data.recordsTotal
+method onUpdatedTable*(self: TraceComponent, response: CtUpdatedTableResponseBody) {.async.} =
+  if response.tableUpdate.isTrace and response.tableUpdate.data.draw == self.drawId:
+    self.tableCallback(response.tableUpdate.data.toJs)
+    self.dataTable.rowsCount = response.tableUpdate.data.recordsTotal
     self.dataTable.updateTableRows()
     self.dataTable.updateTableFooter()
 
@@ -82,6 +82,132 @@ proc shouldUpdate(self: TraceComponent, response: TraceUpdate): bool =
   return not self.isDisabled and response.firstUpdate or
     (not self.dataTable.context.isNil and cast[string](self.dataTable.context.search()) != "") or
     (self.dataTable.rowsCount == 0 or self.isLoading)
+
+const OLD_SESSION_RESULTS_KEY = -1
+
+proc removeTraceLogsFromEventLog() =
+  var eventLogService = data.services.eventLog
+  var newEvents = eventLogService.events.filterIt(it.kind != TraceLogEvent)
+  for i, event in newEvents.mpairs():
+    event.eventIndex = i
+  data.services.eventLog.events = newEvents
+  for i, component in data.ui.componentMapping[Content.EventLog]:
+    var eventLogComponent = EventLogComponent(component)
+    data.ui.componentMapping[Content.EventLog][i] = eventLogComponent
+  data.redraw()
+
+proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
+  self.editorUI.monacoEditor.changeViewZones do (view: js):
+    view.removeZone(self.zoneId)
+
+  self.viewZone.heightInPx = newHeight
+
+  self.editorUI.monacoEditor.changeViewZones do (view: js):
+    self.zoneId = cast[int](view.addZone(self.viewZone))
+  self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
+  let traceMain = kdom.document.getElementById(cstring(fmt"trace-{self.id}"))
+  let editor = self.editorUI.monacoEditor
+  let editorLayout = editor.config.layoutInfo
+  let editorWidth = editorLayout.width
+  let contentLeft = editorLayout.contentLeft
+  let minimapWidth = editorLayout.minimapWidth
+  self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
+  traceMain.style.width = cstring(fmt"{self.traceWidth}px")
+  self.resultsHeight = 210
+  jq(cstring(fmt"#trace-{self.id} .editor-traces")).style.height = cstring(fmt"{self.resultsHeight}px")
+  discard setTimeout(proc() =
+    self.monacoEditor.toJs.getDomNode().querySelector("textarea").focus(),
+    1
+  )
+
+proc runTracepoints*(data: Data) {.exportc.} =
+  tracepointStart = now()
+  var tracepoints: seq[Tracepoint] = @[]
+  var i = 0
+  var unchangedList: seq[ProgramEvent] = data.services.trace.unchanged
+  var unchangedTracepointLocations = JsAssoc[cstring, bool]{}
+
+  for component in data.ui.componentMapping[Content.Trace]:
+    let trace = TraceComponent(component)
+    if not trace.isChanged and not trace.isDisabled and not trace.forceReload:
+      unchangedTracepointLocations[&"{trace.tracepoint.name}_{trace.tracepoint.line}"] = true
+    else:
+      unchangedTracepointLocations[&"{trace.tracepoint.name}_{trace.tracepoint.line}"] = false
+
+  for id, component in data.ui.componentMapping[Content.Trace]:
+    let trace = TraceComponent(component)
+    let code = trace.monacoEditor.getValue()
+
+    if code != "" and not trace.isDisabled: # and trace.isChanged
+      if trace.resultsHeight == 36:
+        trace.updateViewZoneHeight(cast[int](trace.viewZone.heightInPx) + 180)
+        data.ui.activeFocus = trace
+      trace.isRan = true
+      trace.isLoading = trace.isChanged
+      trace.forceReload = false
+      # if not trace.dataTable.context.isNil:
+      #   # echo "remove"
+      #   trace.dataTable.context.rows().remove()
+      #   trace.dataTable.context.rows().draw()
+      #   trace.clearChartData()
+      #   trace.chart.pie = nil
+      #   trace.chart.pieConfig = nil
+      #   trace.chart.results = @[]
+      trace.indexInSession = i
+      trace.tracepoint.expression = code
+      trace.tracepoint.lastRender = 0
+      trace.tracepoint.isChanged = trace.isChanged
+      trace.tracepoint.results = @[]
+      trace.tracepoint.tracepointError = cstring""
+      # so we generate json-safe structure, it has problems with assigning null to other branch fields
+      # trace.tracepoint.query = cast[QueryNode](js{kind: QNone, label: cstring"", code: js{sons: cast[seq[QueryNode]](@[])}})
+      # QueryNode(kind: QNone, label: cstring"", code: QueryCode(sons: @[])) # placeholder
+      tracepoints.add(trace.tracepoint)
+      trace.loggedSource = code
+      trace.isChanged = false
+      trace.isUpdating = true
+      trace.error = nil
+      i += 1
+      trace.refreshTrace()
+
+  var oldResults: seq[Stop]
+  if data.services.trace.traceSessions.len == 0:
+    oldResults = @[]
+  else:
+    let lastSession = data.services.trace.traceSessions[^1]
+    unchangedList = unchangedList.filterIt(unchangedTracepointLocations[&"{it.highLevelPath}_{it.highLevelLine}"])
+    for sessionResults in lastSession.results:
+      for traceResult in sessionResults:
+        if unchangedTracepointLocations[&"{traceResult.path}_{traceResult.line}"]:
+          let programEvent = convertTracepointEventToProgramEvent(traceResult)
+          unchangedList.add(programEvent)
+
+    data.services.trace.unchanged = unchangedList
+
+  removeTraceLogsFromEventLog()
+  let newEvents = data.services.eventLog.events.concat(unchangedList)
+  data.services.eventLog.events = newEvents
+
+  if tracepoints.len == 0:
+    warnMessage("There are no changes in the tracepoints input.")
+
+  let results = JsAssoc[int, seq[Stop]]{}
+  results[OLD_SESSION_RESULTS_KEY] = oldResults
+
+  data.services.trace.traceSessions.add(TraceSession(
+    tracepoints: tracepoints,
+    lastCount: 0,
+    results: results,
+    id: data.services.trace.traceSessions.len))
+  data.pointList.lastTracepoint = 0
+  data.pointList.redrawTracepoints = true
+  data.dapApi.sendCtRequest(
+    CtRunTracepoints,
+    RunTracepointsArg(
+      session: data.services.trace.traceSessions[^1],
+      stopAfter: NO_LIMIT
+    ).toJs
+  )
 
 method onUpdatedTrace*(self: TraceComponent, response: TraceUpdate) {.async.} =
   # let timeInMs = now()
@@ -181,13 +307,13 @@ proc renderTableResults(
             self.service.drawId += 1
             mutData.draw = self.service.drawId
             self.drawId = mutData.draw
-            discard self.data.services.debugger.updateTable(
+            let updateTableArgs =
               UpdateTableArgs(
                 tableArgs: mutData,
                 isTrace: true,
                 traceId: self.id,
               )
-            ),
+            self.api.emit(CtUpdateTable, updateTableArgs),
           columns: columns,
         }
       )
@@ -527,7 +653,7 @@ proc traceMenuView(self: TraceComponent): VNode =
       )
     
     tdiv(class = "trace-buttons-container"):
-      tdiv(class = "run-trace-button", onclick = proc() = runTracepoints()):
+      tdiv(class = "run-trace-button", onclick = proc() = runTracepoints(self.data)):
         img(
           src = "public/resources/tracepoints/run_tracepoints_dark.svg",
           height = "24px",
@@ -978,6 +1104,12 @@ method register*(self: TraceComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
+  )
+  api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
+    discard self.onUpdatedTable(response)
+  )
+  api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
+    discard self.onUpdatedTrace(response)
   )
 
 proc registerTraceComponent*(component: TraceComponent, api: MediatorWithSubscribers) {.exportc.} =

@@ -1699,7 +1699,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc = data.enableAllTracepoints(),
   proc = data.disableTracepointAtPosition(),
   proc = data.disableAllTracepoints(),
-  proc = runTracepoints(),
+  proc = data.runTracepoints(),
   nil,
   nil,
   nil,

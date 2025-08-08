@@ -1073,15 +1073,9 @@ impl Handler {
         Ok(())
     }
 
-    pub fn run_tracepoints(&mut self, args: RunTracepointsArg, _task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn run_tracepoints(&mut self, req: dap::Request, args: RunTracepointsArg) -> Result<(), Box<dyn Error>> {
         // Sort steps in StepId Ord
-        self.setup_trace_session(
-            args.clone(),
-            Task {
-                kind: TaskKind::SetupTraceSession,
-                id: gen_task_id(TaskKind::SetupTraceSession),
-            },
-        )?;
+        self.setup_trace_session(req, args.clone())?;
 
         let tracepoints = &args.session.tracepoints;
         let is_empty = false; // TODO: check if there is at least one enabled non-empty log?
@@ -1097,28 +1091,9 @@ impl Handler {
                 trace.tracepoint_id,
                 self.event_db.tracepoint_errors.clone(),
             );
-            self.send_event((
-                EventKind::UpdatedTrace,
-                gen_event_id(EventKind::UpdatedTrace),
-                self.serialize(&trace_update)?,
-                false,
-            ))?;
+            let raw_event = self.dap_client.updated_trace_event(trace_update)?;
+            self.send_dap(&raw_event)?;
         }
-        // } else {
-        //     for trace in tracepoints.iter() {
-        //         let trace_update = TraceUpdate::new(args.session.id, true, trace.tracepoint_id);
-        //         // trace_update.tracepoint_errors
-        //         self.send_event((
-        //             EventKind::UpdatedTrace,
-        //             gen_event_id(EventKind::UpdatedTrace),
-        //             self.serialize(&trace_update)?,
-        //             false,
-        //         ))?;
-        //     }
-        // }
-
-        // Send update to frontend
-
         Ok(())
     }
 
@@ -1203,14 +1178,13 @@ impl Handler {
         Ok(())
     }
 
-    pub fn setup_trace_session(&mut self, arg: RunTracepointsArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn setup_trace_session(&mut self, _req: dap::Request, arg: RunTracepointsArg) -> Result<(), Box<dyn Error>> {
         for trace in arg.session.tracepoints {
             while trace.tracepoint_id + 1 >= self.event_db.single_tables.len() {
                 self.event_db.add_new_table(DbEventKind::Trace, &[]);
             }
             assert!(self.event_db.single_tables.len() > trace.tracepoint_id + 1);
         }
-        self.return_void(task)?;
         Ok(())
     }
 

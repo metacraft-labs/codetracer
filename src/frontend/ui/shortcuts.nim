@@ -1,6 +1,7 @@
 import
   jsffi,
   karax, ui_imports
+import trace
 
 const NO_CODE: int = -1
 const BROWSER_FORWARD: int = 3
@@ -121,7 +122,7 @@ proc configureShortcuts* =
     discard
 
   Mousetrap.`bind`("alt+t") do ():
-    runTracepoints()
+    runTracepoints(data)
 
   Mousetrap.`bind`("ctrl+pageup") do ():
     switchTab(change = -1)
