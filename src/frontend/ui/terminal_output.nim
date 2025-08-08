@@ -65,7 +65,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
           # check if there is a text before the html tag
           if preMatchText.len > 0:
             # split it by new line "\n" and check if there is more than one results
-            let tokens = preMatchText.split("\\n")
+            let tokens = preMatchText.split(jsNl)
 
             if tokens.len > 1:
               for j in 0..tokens.len - 2:
@@ -77,7 +77,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
           let startTag = match[1]
           let endTag = match[3]
           let text = match[2]
-          let tokens = text.split("\\n")
+          let tokens = text.split(jsNl)
 
           if tokens.len > 1:
             self.addTerminalLine(
@@ -99,7 +99,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
         # check if there is a text after the last html tag
         if postMatchText.len > 0:
           # split it by new line "\n" and check if there is more than one results
-          let tokens = postMatchText.split("\\n")
+          let tokens = postMatchText.split(jsNl)
 
           if tokens.len > 1:
             self.addTerminalLine(nextLineStart & tokens[0], eventIndex)
@@ -113,7 +113,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
       else:
         if html.len > 0:
           # split it by new line "\n" and check if there is more than one results
-          let tokens = html.split("\\n")
+          let tokens = html.split(jsNl)
 
           if tokens.len > 1:
             self.addTerminalLine(nextLineStart & tokens[0], eventIndex)
@@ -123,10 +123,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
 
             nextLineStart = tokens[^1]
           else:
-            if self.isDbBasedTrace: # and tokens[^1] == "\n":
-              self.addTerminalLine(nextLineStart & tokens[^1], eventIndex)
-            else:
-              self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
+            self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
 
 method onLoadedTerminal*(self: TerminalOutputComponent, eventList: seq[ProgramEvent]) {.async.} =
   self.cacheAnsiToHtmlLines(eventList)
