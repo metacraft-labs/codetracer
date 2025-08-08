@@ -197,7 +197,11 @@
   /* thanks to https://stackoverflow.com/a/52977310 */
 
   .eventLog-index
-    width: 7.5% // calc(7.5%)
+    if IS_EXTENSION
+      width: 8%
+      padding-left: 8px
+    else
+      width: 7.5% // calc(7.5%)
     text-align: center
 
   .eventLog-event
@@ -222,14 +226,20 @@
       max-width: 2.3ch !important
 
   .eventLog-text
-    width: 25% // calc(15%)
+    if IS_EXTENSION
+      min-width: 50%
+    else
+      width: 25% // calc(15%)
     margin-left: 15px
     flex: auto
     margin-right: 15px
     display: flex
 
   .eventLog-fullpath
-    width: 25% // calc(20%)
+    if IS_EXTENSION
+      width: 10%
+    else
+      width: 25% // calc(20%)
     flex: auto
 
   .eventLog-lowlevellocation
@@ -362,27 +372,31 @@ label
   line-height: 20px !important
   padding-bottom: 0px !important
   max-height: 24px
-  overflow: auto
+  if !IS_EXTENSION
+    overflow: auto
+  else
+    overflow: visible
 
-.eventLog-text:hover
-  overflow-x: auto
+if !IS_EXTENSION
+  .eventLog-text:hover
+    overflow-x: auto
 
-  &::-webkit-scrollbar-thumb:horizontal
-    border: 0px !important
-    background-color: PRIMARY_BASE
+    &::-webkit-scrollbar-thumb:horizontal
+      border: 0px !important
+      background-color: PRIMARY_BASE
 
-.eventLog-lowlevellocation:hover
-  overflow-x: overlay
-  white-space: nowrap
+  .eventLog-lowlevellocation:hover
+    overflow-x: overlay
+    white-space: nowrap
 
-.eventLog-cell::-webkit-scrollbar
-  width 8px
-  height 4px
-  background-color: transparent
+  .eventLog-cell::-webkit-scrollbar
+    width 8px
+    height 4px
+    background-color: transparent
 
-.eventLog-cell::-webkit-scrollbar:hover
-  background-color: transparent
-  position: absolute
+  .eventLog-cell::-webkit-scrollbar:hover
+    background-color: transparent
+    position: absolute
 
 
 /* todo .eventLog-cell */
