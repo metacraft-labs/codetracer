@@ -197,11 +197,9 @@
   /* thanks to https://stackoverflow.com/a/52977310 */
 
   .eventLog-index
-    if IS_EXTENSION
-      width: 8%
-      padding-left: 8px
-    else
-      width: 7.5% // calc(7.5%)
+    min-width: 8%
+    max-width: 8%
+    padding-left: 8px
     text-align: center
 
   .eventLog-event
@@ -226,24 +224,21 @@
       max-width: 2.3ch !important
 
   .eventLog-text
-    if IS_EXTENSION
-      min-width: 50%
-    else
-      width: 25% // calc(15%)
+    min-width: 40%
+    max-width: 40%
     margin-left: 15px
     flex: auto
     margin-right: 15px
     display: flex
 
   .eventLog-fullpath
-    if IS_EXTENSION
-      width: 10%
-    else
-      width: 25% // calc(20%)
+    min-width: 20%
+    max-width: 20%
     flex: auto
 
   .eventLog-lowlevellocation
-    width: 25% // calc(25%)
+    min-width: 25% // calc(25%)
+    max-width: 25% // calc(25%)
     flex: auto
 
   .eventLog-events
@@ -372,31 +367,28 @@ label
   line-height: 20px !important
   padding-bottom: 0px !important
   max-height: 24px
-  if !IS_EXTENSION
-    overflow: auto
-  else
-    overflow: visible
+  overflow: visible
 
-if !IS_EXTENSION
-  .eventLog-text:hover
-    overflow-x: auto
+// if !IS_EXTENSION
+//   .eventLog-text:hover
+//     overflow-x: auto
 
-    &::-webkit-scrollbar-thumb:horizontal
-      border: 0px !important
-      background-color: PRIMARY_BASE
+//     &::-webkit-scrollbar-thumb:horizontal
+//       border: 0px !important
+//       background-color: PRIMARY_BASE
 
-  .eventLog-lowlevellocation:hover
-    overflow-x: overlay
-    white-space: nowrap
+//   .eventLog-lowlevellocation:hover
+//     overflow-x: overlay
+//     white-space: nowrap
 
-  .eventLog-cell::-webkit-scrollbar
-    width 8px
-    height 4px
-    background-color: transparent
+//   .eventLog-cell::-webkit-scrollbar
+//     width 8px
+//     height 4px
+//     background-color: transparent
 
-  .eventLog-cell::-webkit-scrollbar:hover
-    background-color: transparent
-    position: absolute
+//   .eventLog-cell::-webkit-scrollbar:hover
+//     background-color: transparent
+//     position: absolute
 
 
 /* todo .eventLog-cell */
