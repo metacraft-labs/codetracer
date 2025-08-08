@@ -39,8 +39,11 @@
   .direct-location-rr-ticks
     display: inline-block
     position: relative
-    width: 15%
-    min-width: 15ex
+    if IS_EXTENSION
+      min-width: 10%
+    else
+      width: 15%
+      min-width: 15ex
     padding-left: 3ex
     padding-right: 3ex
     max-height: 24px
@@ -60,7 +63,11 @@
     display: none
 
   table
-    width: 100%
+    if IS_EXTENSION
+      min-width: fit-content !important
+      max-width: -webkit-fill-available
+    else
+      width: 100%
     display: block
 
     tbody
@@ -77,6 +84,8 @@
     border-top: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
     color: COLOR
     align-items: start
+    if IS_EXTENSION
+      padding-right: 8px
 
     td
       cursor: normal

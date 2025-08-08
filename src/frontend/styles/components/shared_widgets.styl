@@ -49,7 +49,7 @@ if IS_EXTENSION
   .sidebar-menu-header
     font-weight: 700 !important
     margin: 8px
-    padding-left: 8px
+    padding-left: 12px
     background: var(--vscode-sideBar-background)
 
   .sidebar-menu-items
@@ -64,7 +64,7 @@ if IS_EXTENSION
         background: var(--vscode-button-secondaryBackground)
 
     .sidebar-menu-item
-      padding-left: 16px
+      padding-left: 20px
       padding-right: 16px
       padding-top: 8px
       padding-bottom: 8px
@@ -360,7 +360,10 @@ input:checked ~ .checkmark:after
 
   &::after
     left: 3.6px;
-    top: 1.6px;
+    if IS_EXTENSION
+      top: 0px;
+    else
+      top: 1.6px;
     width: 6px;
     height: 8px;
     border: solid DROPDOWN_CHECKMARK_COLOR;
