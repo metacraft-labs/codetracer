@@ -569,6 +569,9 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
   )
+  api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
+    discard self.onUpdatedFlow(response)
+  )
 
 proc registerEditorViewComponent*(component: EditorViewComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
@@ -1084,6 +1087,7 @@ proc sourceOrCallJump(self: EditorViewComponent, position: js) =
 
 proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   self.flow = FlowComponent(
+    api: self.api,
     id: self.id,
     flow: nil,
     tab: self.tabInfo,
@@ -1442,6 +1446,7 @@ method onFindOrFilter*(self: EditorViewComponent) {.async.} =
 
 method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.} =
   duration("complete move")
+  self.location = response.location
   # cdebug fmt"reset Flow {response.resetFlow}"
 
   if self.editorView == ViewTargetSource and self.data.trace.lang == LangNim and
@@ -1514,6 +1519,8 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
             lastOperation: action
           )
         )
+  if not self.flow.isNil:
+    discard self.flow.onCompleteMove(response)
   self.data.redraw()
 
 proc onSelectFlow*(data: Data) {.async.} =
