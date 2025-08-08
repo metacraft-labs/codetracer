@@ -164,21 +164,25 @@ method render*(self: StateComponent): VNode =
       tdiv(class = "value-components-container"):
         if (not self.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
           self.i = 0
-          let localsList = self.locals
-          for variable in localsList:
-            let name = variable.expression
-            let value = variable.value
-            if value.isNil:
-              continue
-            # var realValue = readValue(cast[uint](value))
-            if self.values[name].baseValue.isNil or self.values[name].baseValue.kind != value.kind:
-              self.values[name].fresh = true
-              self.values[name].freshIndex = self.values[name].freshIndex + 1
-            else:
-              self.values[name].fresh = false
-            self.values[name].baseValue = value
-            self.values[name].i = self.i
-            renderFunction(self.values[name])
+          if self.locals.len() > 0:
+            let localsList = self.locals
+            for variable in localsList:
+              let name = variable.expression
+              let value = variable.value
+              if value.isNil:
+                continue
+              # var realValue = readValue(cast[uint](value))
+              if self.values[name].baseValue.isNil or self.values[name].baseValue.kind != value.kind:
+                self.values[name].fresh = true
+                self.values[name].freshIndex = self.values[name].freshIndex + 1
+              else:
+                self.values[name].fresh = false
+              self.values[name].baseValue = value
+              self.values[name].i = self.i
+              renderFunction(self.values[name])
+          else:
+            tdiv(class = "empty-overlay"):
+              text "No local variables are present in the current point of execution."
   except:
     echo getCurrentExceptionMsg()
 
