@@ -593,6 +593,7 @@ proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false
     service: data.services.eventLog,
     initialUpdate: true,
     inExtension: inExtension,
+    isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
   data.registerComponent(result, Content.TerminalOutput)
 
