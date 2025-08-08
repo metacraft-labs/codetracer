@@ -143,18 +143,18 @@ method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.
 proc terminalEventView(self: TerminalOutputComponent, lineEvent: TerminalEvent): VNode =
   let eventElement = self.cachedEvents[lineEvent.eventIndex]
   let rrTicks = eventElement.directLocationRRTicks
-  # let focusRRTicks = self.data.services.debugger.location.rrTicks
-  # let lineClass =
-  #   if rrTicks < focusRRTicks:
-  #     "past"
-  #   elif rrTicks == focusRRTicks:
-  #     "active"
-  #   else:
-  #     "future"
+  let focusRRTicks = self.location.rrTicks
+  let lineClass =
+    if rrTicks < focusRRTicks:
+      "past"
+    elif rrTicks == focusRRTicks:
+      "active"
+    else:
+      "future"
 
   buildHtml(
     tdiv(
-      # class = &"{lineClass}",
+      class = &"{lineClass}",
       onclick = proc = self.onTerminalEventClick(eventElement)
     )
   ):
@@ -171,6 +171,10 @@ proc terminalLineView(self: TerminalOutputComponent, i: int, lineEvents: seq[Ter
       terminalEventView(self, lineEvent)
 
 method render*(self: TerminalOutputComponent): VNode  =
+  if self.initialUpdate:
+    self.getLines()
+    self.initialUpdate = false
+
   buildHtml(
     tdiv(class=componentContainerClass("terminal"))
   ):
@@ -193,6 +197,7 @@ method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
       self.initialUpdate = false
   )
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    self.location = response.location
     self.redraw()
   )
   api.emit(InternalLastCompleteMove, EmptyArg())
