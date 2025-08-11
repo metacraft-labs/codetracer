@@ -1,17 +1,21 @@
-import ui_imports, flow, shell, sequtils
+import 
+  std /  sequtils,
+  .. / communication,
+  .. / .. / common / ct_event,
+  ui_imports, flow, shell
 
 const NOTIFICATION_LIMIT = 3
 
 proc locationView(self: StatusComponent): VNode =
   buildHtml(span(id = "location-status")):
-    if self.service.finished:
+    if self.state.finished:
       span(class = "finished"):
         text "FINISHED"
     else:
-      if not self.service.location.path.isNil:
-        let path = self.service.location.path
-        let line = self.service.location.line
-        let rrTicks = self.service.location.rrTicks
+      if not self.location.path.isNil:
+        let path = self.location.path
+        let line = self.location.line
+        let rrTicks = self.location.rrTicks
         let fullPathWithRRTicks = fmt"{path}:{line}#{rrTicks}"
         let activeClass = if self.copyMessageActive: "active" else: ""
 
@@ -38,6 +42,9 @@ proc locationView(self: StatusComponent): VNode =
           text "Path copied to clipboard"
 
 method onCompleteMove*(self: StatusComponent, response: MoveState) {.async.} =
+  self.stopSignal = response.stopSignal
+  self.location = response.location
+  self.state.stableBusy = false
   self.completeMoveId += 1
 
 proc counterHandler(self: StatusComponent): void {.async.} =
@@ -48,9 +55,9 @@ proc counterHandler(self: StatusComponent): void {.async.} =
   if self.service.timer == nil:
     # Nothing currently running, init anew.
     self.service.timer = initTimer()
-    self.service.timer.startTimer(self.service.operationCount)
+    self.service.timer.startTimer(self.state.operationCount)
 
-    while self.service.stableBusy and self.service.operationCount == self.service.timer.currentOpID:
+    while self.state.stableBusy and self.state.operationCount == self.service.timer.currentOpID:
       document.getElementById("timer").innerHTML = self.service.timer.formatted()
 
       # Handle slower processes.
@@ -84,12 +91,12 @@ proc counterHandler(self: StatusComponent): void {.async.} =
 
   else:
     # There's a loop already running.
-    let same: bool = self.service.timer.compareMetadata(self.service.operationCount)
+    let same: bool = self.service.timer.compareMetadata(self.state.operationCount)
     if not same:
       # But its timer is measuring another process and the process
       # is now changed.  In that case we simply restart it and make
       # it track the new process.
-      self.service.timer.startTimer(self.service.operationCount)
+      self.service.timer.startTimer(self.state.operationCount)
 
 proc upcountTimerBase(self: StatusComponent): VNode =
   result = buildHtml(
@@ -147,7 +154,7 @@ proc editorWhitespaceOption(self: StatusComponent, editor: EditorViewComponent):
 
 proc operationView(self: StatusComponent): VNode =
   buildHtml(span(id = "operation-status")):
-    processStatusView(self, self.service.stableBusy, self.service.currentOperation, "stable")
+    processStatusView(self, self.state.stableBusy, self.state.currentOperation, "stable")
 
 proc fileInfoView(self: StatusComponent): VNode =
   let editor = self.data.ui.editors[self.data.services.editor.active]
@@ -167,7 +174,7 @@ proc fileInfoView(self: StatusComponent): VNode =
 
 proc signalView(self: StatusComponent): VNode =
   buildHtml(span(id="signal-status")):
-    text $self.service.stopSignal
+    text $self.stopSignal
 
 proc buildStatusView(self: StatusComponent): VNode =
   let klass =
@@ -448,7 +455,7 @@ proc toggleInlineValues(self: StatusComponent): VNode =
       checked = toChecked(self.data.services.debugger.showInlineValues),
       onchange = proc() =
         self.data.services.debugger.showInlineValues = not self.data.services.debugger.showInlineValues
-        clearViewZones(self.data.ui.editors[self.service.location.highLevelPath]),
+        clearViewZones(self.data.ui.editors[self.location.highLevelPath]),
       value = "Toggle inline values")
     span(class = "checkbox-text"):
       text "Enable inline values"
@@ -479,6 +486,19 @@ proc toggleFlow(self: StatusComponent): VNode =
     )
     span(class="checkbox-text"):
       text "Enable flow"
+
+proc onStatusUpdate*(self: StatusComponent, update: StatusState) =
+  self.state = update
+
+method register*(self: StatusComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(InternalStatusUpdate, proc(kind: CtEventKind, response: StatusState, sub: Subscriber) =
+    self.onStatusUpdate(response)
+  )
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
+
 
 method render*(self: StatusComponent): VNode =
   let statusExpanded = if self.build.expanded or self.errors.expanded: statusExpandedView(self) else: nil

@@ -64,6 +64,8 @@ type
     InternalLastCompleteMove,
     InternalAddToScratchpad,
     InternalAddToScratchpadWithExpression,
+    InternalStatusUpdate,
+    InternalNewOperation,
     
 when defined(js):
   import std / jsffi

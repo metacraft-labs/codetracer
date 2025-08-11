@@ -12,6 +12,10 @@ type
     CoNext,
     NonAction
 
+  DebuggerDirection* = enum
+    DebForward,
+    DebReverse
+
   # Each member of this enum maps to some kind of frontend interaction. It is used to route events, set/get shortcuts, etc for a given frontend interaction
   ClientAction* = enum
     forwardContinue,
@@ -238,3 +242,25 @@ type
     CommandPalette = 32,
     StepList = 33,
     NoInfo = 34
+
+  StatusState* = ref object
+    lastDirection*:         DebuggerDirection
+    currentOperation*:      langstring
+    currentHistoryOperation*: langstring
+    finished*:              bool
+    stableBusy*:            bool
+    historyBusy*:           bool
+    traceBusy*:             bool
+    hasStarted*: bool
+    lastAction*:            langstring
+    # TODO: how to depend on this, if in errors
+    # error*:                 DebuggerError
+    operationCount*:        int
+
+  # updates the middleware current operation/operation count/stableBusy
+  # and usually produces StatusUpdate from middleware
+  NewOperation* = ref object
+    name*: langstring
+    stableBusy*: bool
+
+    

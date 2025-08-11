@@ -1,8 +1,4 @@
 type
-  DebuggerDirection* = enum
-    DebForward,
-    DebReverse
-
   StepIterationInfo* = ref object
     loopId*: int
     iteration*: int

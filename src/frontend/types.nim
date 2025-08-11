@@ -1300,6 +1300,8 @@ type
     showBugReport*: bool
     copyMessageActive*: bool
     completeMoveId*: int
+    stopSignal*: RRGDBStopSignal
+    state*: StatusState
 
   CalltraceEditorComponent* = ref object of Component
     loading*:   JsAssoc[cstring, bool]
@@ -1412,6 +1414,7 @@ type
 
     save*:                  Save
     homedir*:               cstring
+    status*:                StatusState
 
 
   KeyPluginContext* = ref object

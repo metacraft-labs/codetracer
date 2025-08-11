@@ -104,6 +104,8 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   InternalLastCompleteMove: "internal/last-complete-move",
   InternalAddToScratchpad: "",
   InternalAddToScratchpadWithExpression: "",
+  InternalStatusUpdate: "",
+  InternalNewOperation: "",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}

@@ -13,8 +13,34 @@ when not defined(ctInExtension):
       traceFolder: data.trace.outputFolder
     })
 
+  proc newOperationHandler*(viewsApi: MediatorWithSubscribers, operation: NewOperation) =
+    data.status.currentOperation = operation.name
+    data.status.stableBusy = operation.stableBusy
+    inc data.status.operationCount
+
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   var lastCompleteMove: MoveState = nil
+
+  # for event in ..
+  # dapApi.onRaw(DapStopped, proc(kind: CtEventKind, value: JsObject) = viewsApi.emit(DapStopped, value))
+
+  # for event in DapFirst..DapLast
+  # viewsApi.subscribeRaw(DapStepIn, proc(kind: CtEventKind, value: JsObject, sub: Subscriber) = dapApi.sendCtRequest(kind, value))
+  # for event in InternalFirst..InternalLast
+  # or maybe custom for each case!
+  # viewsApi.subscribeRaw(InternalAddToScratchpad, proc(kind: CtEventKind, value: JsObject, sub: Subscriber) = 
+    # viewsApi.emit(kind, value))
+  # for other custom cases, manual overrides! maybe typed
+  # problem: almost nowhere actual enforcing of types
+  # maybe if we combine in big variant type, then ok, but then one big type (maybe that's still better? if one field with subcase?)
+  # and a function that makes it possible to set/get as raw JsObject
+  # case kind: CtEventKind:
+  # of DapStopped: dapStoppedData*: DapStoppedEvent
+  # ..
+  # so one can either take a CtEvent
+  # or a payload/kind+payload
+  # or directly kind+raw 
+
 
   dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
   dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
@@ -25,6 +51,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     viewsApi.emit(CtCompleteMove, value)
     lastCompleteMove = value
+    data.status.stableBusy = false
+    data.status.hasStarted = true
   )
 
   dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
@@ -44,6 +72,10 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # )
   viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
   viewsApi.subscribe(InternalAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadWithExpression, value))
+  viewsApi.subscribe(InternalNewOperation, proc(kind: CtEventKind, value: NewOperation, sub: Subscriber) =
+    newOperationHandler(viewsApi, value)
+    viewsApi.emit(InternalStatusUpdate, data.status))
+  
 
   when not defined(ctInExtension):
     dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
@@ -84,13 +116,6 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     if not lastCompleteMove.isNil:
       viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
   )
-
-# maybe somehow a more proxy-like/macro way
-# some kind of loop or more raw subscribe, that directly sends for many cases
-# for dap events:
-#   viewsApi.subscribeRaw(CtLoadLocals, proc(kind: CtEventKind, rawValue: JsObject, sub: Subscriber) =
-#     dapApi.requestOrEvent(kind, rawValue))
-# for others(view/frontend communication) maybe different schema
 
 when defined(ctInExtension):
   when defined(ctInCentralExtensionContext):
