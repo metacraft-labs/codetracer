@@ -228,7 +228,19 @@ proc makeStatusComponent*(
     searchResults: searchResults,
     versionControlBranch: j"master",
     service: data.services.debugger,
-    copyMessageActive: false)
+    copyMessageActive: false,
+    state: StatusState(
+      lastDirection: DebForward,
+      currentOperation: cstring"",
+      currentHistoryOperation: cstring"",
+      finished: false,
+      stableBusy: true,
+      historyBusy: false,
+      traceBusy: false,
+      hasStarted: false,
+      lastAction: cstring"",
+      operationCount: 0,
+    ))
   data.ui.status = result
   data.registerComponent(result, Content.Status)
 
