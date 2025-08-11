@@ -661,7 +661,7 @@ var yaml*: Yaml
 if inElectron:
   yaml = cast[Yaml](require("js-yaml"))
 else:
-  when not defined(ctRenderer):
+  when not defined(ctRenderer) and not defined(ctInExtension):
     yaml = cast[Yaml](require("js-yaml"))
 
 # let mmap* = cast[MMap](require("mmap-io"))
