@@ -6,9 +6,11 @@ import
     async, jsconsole
   ],
   # third party
-  karax, karaxdsl, kdom, vdom, 
+  karax, karaxdsl, kdom, vdom, results,
   # internal
   lib, ui_helpers, types, utils, lang,
+  communication, dap,
+  .. / common / ct_event,
   services / [
     event_log_service, debugger_service, editor_service,
     flow_service, search_service, shell_service]
@@ -515,6 +517,34 @@ proc traceJump*(eventObj: ProgramEvent) =
 
 ## MOVE
 
+func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
+  case $action:
+  of "step-in": result.ok(DapStepIn)
+  of "step-out": result.ok(DapStepOut)
+  of "next": result.ok(DapNext)
+  of "continue": result.ok(DapContinue) 
+  of "reverse-step-in": result.ok(CtReverseStepIn)
+  # err(cstring"no reverse-step dap equivalent for now: TODO ct/reverse-step?")
+  of "reverse-step-out": result.ok(CtReverseStepOut)
+  # (cstring"no reverse-step-out dap equivalent for now: TODO ct/reverse-step-out")
+  of "reverse-next": result.ok(DapStepBack)
+  of "reverse-continue": result.ok(DapReverseContinue)
+  else: result.err(cstring(fmt"not added dap equivalent for {action} for now"))
+
+
+proc dapStep*(api: MediatorWithSubscribers, dapApi: DapApi, action: cstring) = 
+  echo "dap step ", action
+  let dapActionRes = toDapStepActionEnum(action)
+  if dapActionRes.isOk:
+    let dapAction = dapActionRes.value
+    # for now hardcoded threadId, eventually base on location/other
+    if not api.isNil:
+      api.emit(dapAction, DapStepArguments(threadId: 1))
+    else:
+      dapApi.sendCtRequest(dapAction, DapStepArguments(threadId: 1).toJs)
+  else:
+    cerror cstring(fmt"dap step to action enum error: {dapActionRes.error}")
+
 proc step*(
     data: Data,
     action: string,
@@ -537,13 +567,15 @@ proc step*(
   else:
     editorView = ViewSource
 
-  data.services.debugger.step(
-    action,
-    actionEnum,
-    reverse,
-    repeat,
-    editorView=editorView,
-    taskId=taskId)
+  # eventually always sending a different custom ct/step with more args?
+  dapStep(nil, data.dapApi, action.cstring)
+  # data.services.debugger.step(
+  #   action,
+  #   actionEnum,
+  #   reverse,
+  #   repeat,
+  #   editorView=editorView,
+  #   taskId=taskId)
 
 proc stepReverse*(data: Data, action: string, actionEnum: DebuggerAction, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID) =
   data.step(action, actionEnum, reverse=true, repeat=repeat, fromShortcutArg=fromShortcutArg, taskId=taskId)
