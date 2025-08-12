@@ -201,30 +201,6 @@ proc buildHistoryMenu(self: DebugComponent): VNode =
       buildFullHistory(self)
 
 
-func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
-  case $action:
-  of "step-in": result.ok(DapStepIn)
-  of "step-out": result.ok(DapStepOut)
-  of "next": result.ok(DapNext)
-  of "continue": result.ok(DapContinue) 
-  of "reverse-step-in": result.ok(CtReverseStepIn)
-  # err(cstring"no reverse-step dap equivalent for now: TODO ct/reverse-step?")
-  of "reverse-step-out": result.ok(CtReverseStepOut)
-  # (cstring"no reverse-step-out dap equivalent for now: TODO ct/reverse-step-out")
-  of "reverse-next": result.ok(DapStepBack)
-  of "reverse-continue": result.ok(DapReverseContinue)
-  else: result.err(cstring(fmt"not added dap equivalent for {action} for now"))
-
-proc dapStep*(api: MediatorWithSubscribers, action: cstring) = 
-  echo "dap step ", action
-  let dapActionRes = toDapStepActionEnum(action)
-  if dapActionRes.isOk:
-    let dapAction = dapActionRes.value
-    # for now hardcoded threadId, eventually base on location/other
-    api.emit(dapAction, DapStepArguments(threadId: 1))
-  else:
-    cerror cstring(fmt"dap step to action enum error: {dapActionRes.error}")
-
 method render*(self: DebugComponent): VNode =
   # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
   let finished = if self.finished: cstring"debug-finished-background" else: cstring""
@@ -244,7 +220,7 @@ method render*(self: DebugComponent): VNode =
         var click = proc =
           let taskId = genTaskId(Step)
           clog "click on step button", taskId
-          dapStep(self.api, id)
+          dapStep(self.api, nil, id)
           
           # TODO?
           # ctStep(data, id, action, reverse, 1, fromShortcutArg=false, taskId)
