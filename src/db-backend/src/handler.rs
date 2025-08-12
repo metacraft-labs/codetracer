@@ -20,13 +20,13 @@ use crate::response::{Event, Response, TaskResult, VOID_RESULT};
 use crate::sender;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{
-    gen_event_id, gen_task_id, Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
+    gen_event_id, Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
     CalltraceNonExpandedKind, CollapseCallsArgs, ConfigureArg, CoreTrace, DbEventKind, EventKind, FrameInfo,
     FunctionLocation, HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg,
     LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent,
     RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
-    Stop, StopType, Task, TaskKind, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX,
-    NO_PATH, NO_POSITION, NO_STEP_ID,
+    Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH,
+    NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 
@@ -1594,13 +1594,7 @@ mod tests {
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
         handler.event_load(dap::Request::default())?;
-        handler.run_tracepoints(
-            make_tracepoints_args(1, 0),
-            Task {
-                kind: TaskKind::RunTracepoints,
-                id: TaskId("1".to_string()),
-            },
-        )?;
+        handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0))?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
         Ok(())
     }
@@ -1616,25 +1610,16 @@ mod tests {
         // this way we are resetting them after reforms
         // needs to pass multiple tracepoints at once now
         // handler.run_tracepoints(
+        //     dap::Request::default(),
         //     make_tracepoints_args(3, 0),
-        //     Task {
-        //         kind: TaskKind::RunTracepoints,
-        //         id: TaskId("1".to_string()),
-        //     },
         // )?;
         // handler.run_tracepoints(
+        //     dap::Request::default(),
         //     make_tracepoints_args(2, 1),
-        //     Task {
-        //         kind: TaskKind::RunTracepoints,
-        //         id: TaskId("2".to_string()),
-        //     },
         // )?;
         // handler.run_tracepoints(
+        //     dap::Request::default(),
         //     make_tracepoints_args(1, 2),
-        //     Task {
-        //         kind: TaskKind::RunTracepoints,
-        //         id: TaskId("3".to_string()),
-        //     },
         // )?;
         // assert_eq!(handler.event_db.single_tables.len(), 4);
         // assert_eq!(handler.event_db.global_table.len(), 3);
@@ -1658,11 +1643,8 @@ mod tests {
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
+            dap::Request::default(),
             make_multiple_tracepoints_with_multiline_logs(3, size),
-            Task {
-                kind: TaskKind::RunTracepoints,
-                id: TaskId("1".to_string()),
-            },
         )?;
         assert_eq!(handler.event_db.single_tables.len(), 4);
         // TODO(alexander): debug what's happening here
@@ -1688,13 +1670,7 @@ mod tests {
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
         handler.event_load(dap::Request::default())?;
-        handler.run_tracepoints(
-            make_tracepoints_args(2, 0),
-            Task {
-                kind: TaskKind::RunTracepoints,
-                id: TaskId("1".to_string()),
-            },
-        )?;
+        handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0))?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
         Ok(())
     }
@@ -1709,13 +1685,7 @@ mod tests {
         let (sender_tx, _receiver_rx) = mpsc::channel();
         let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
         handler.event_load(dap::Request::default())?;
-        handler.run_tracepoints(
-            make_tracepoints_with_count(count),
-            Task {
-                kind: TaskKind::RunTracepoints,
-                id: TaskId("1".to_string()),
-            },
-        )?;
+        handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count))?;
 
         assert_eq!(handler.event_db.single_tables.len(), count + 1);
         Ok(())
