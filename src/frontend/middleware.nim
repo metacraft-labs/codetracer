@@ -17,6 +17,7 @@ when not defined(ctInExtension):
     data.status.currentOperation = operation.name
     data.status.stableBusy = operation.stableBusy
     inc data.status.operationCount
+    viewsApi.emit(InternalStatusUpdate, data.status)
 
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   var lastCompleteMove: MoveState = nil
@@ -78,7 +79,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
     viewsApi.subscribe(InternalNewOperation, proc(kind: CtEventKind, value: NewOperation, sub: Subscriber) =
       newOperationHandler(viewsApi, value)
-      viewsApi.emit(InternalStatusUpdate, data.status))
+    )
 
   viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))

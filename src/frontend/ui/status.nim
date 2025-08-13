@@ -31,10 +31,10 @@ proc locationView(self: StatusComponent): VNode =
           onclick = proc =
             clipboardCopy(path)
             self.copyMessageActive = true
-            self.data.redraw()
+            self.redraw()
             discard setTimeout(proc() =
               self.copyMessageActive = false
-              self.data.redraw(),
+              self.redraw(),
               2000
             )
         )
@@ -133,14 +133,14 @@ proc editorWhitespaceOption(self: StatusComponent, editor: EditorViewComponent):
           class = "whitespace-up whitespace-change",
           onclick = proc =
             editor.increaseWhitespaceWidth()
-            self.data.redraw()
+            self.redraw()
         ):
           fa "arrow-up"
         tdiv(
           class = "whitespace-down whitespace-change",
           onclick = proc =
             editor.decreaseWhitespaceWidth()
-            self.data.redraw()
+            self.redraw()
         ):
           fa "arrow-down"
       if editor.whitespace.character == WhitespaceSpaces:
@@ -208,7 +208,7 @@ proc bugReportButtonStatusView(self: StatusComponent): VNode =
       class = buttonClass,
       onclick = proc =
         self.showBugReport = not self.showBugReport
-        self.data.redraw()
+        self.redraw()
     )
   ):
     text "Report a Bug"
@@ -235,7 +235,7 @@ proc notificationsButtonStatusView(self: StatusComponent): VNode =
       onclick = proc =
         self.showNotifications = not self.showNotifications
         setAllNotificationsToSeen(self)
-        self.data.redraw()
+        self.redraw()
     )
   ):
     if self.notifications.filterIt(not it.seen and it.kind != NotificationKind.NotificationSuccess).len > 0:
@@ -250,7 +250,7 @@ proc buildOutputButtonStatusView(self: StatusComponent): VNode =
         class = "status-button",
         onclick = proc =
           self.build.expanded = true
-          self.data.redraw()
+          self.redraw()
       )
     ):
       text "Build Output"
@@ -261,7 +261,7 @@ proc buildOutputButtonStatusView(self: StatusComponent): VNode =
         class = "status-button status-minimize-button",
         onclick = proc =
           self.build.expanded = false
-          self.data.redraw()
+          self.redraw()
       )
     ):
       text "Build Output"
@@ -274,7 +274,7 @@ proc toggleSearchResultsView(self: StatusComponent): VNode =
         id = "toggle-search-results-active",
         onclick = proc =
           self.searchResults.active = not self.searchResults.active
-          self.data.redraw()
+          self.redraw()
       ):
         text "minimize search results"
     else:
@@ -282,7 +282,7 @@ proc toggleSearchResultsView(self: StatusComponent): VNode =
         id = "toggle-search-results-non-active",
         onclick = proc =
           self.searchResults.active = true
-          self.data.redraw()
+          self.redraw()
       ):
         text "search results"
 
@@ -342,7 +342,7 @@ proc flowButtonsView(self: StatusComponent): VNode =
         class = "status-flow-button status-button",
         onclick = proc =
           self.flowMenuIsOpen = not self.flowMenuIsOpen
-          self.data.redraw()
+          self.redraw()
       )
     ):
       text(buttonText)
@@ -369,7 +369,7 @@ proc deactivateNotification*(self: StatusComponent, notification: Notification) 
   notification.hasTimeout = false
   windowClearTimeout(notification.timeoutId)
 
-  self.data.redraw()
+  self.redraw()
 
 proc buttonActionView(self: StatusComponent, notification: Notification, buttonAction: NotificationAction): VNode =
 
@@ -443,7 +443,7 @@ proc sendBugReport(self: StatusComponent) =
   description.value = ""
   self.showBugReport = false
 
-  self.data.redraw()
+  self.redraw()
 
 proc toggleInlineValues(self: StatusComponent): VNode =
   buildHtml(
@@ -481,7 +481,7 @@ proc toggleFlow(self: StatusComponent): VNode =
             let taskId = genTaskId(LoadFlow)
             clog "start load-flow", taskId
             discard self.data.services.flow.loadFlow(taskId)
-        self.data.redraw(),
+        self.redraw(),
       value = "Enable flow"
     )
     span(class="checkbox-text"):
@@ -489,6 +489,7 @@ proc toggleFlow(self: StatusComponent): VNode =
 
 proc onStatusUpdate*(self: StatusComponent, update: StatusState) =
   self.state = update
+  self.redraw()
 
 method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   self.api = api

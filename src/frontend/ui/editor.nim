@@ -586,6 +586,13 @@ proc sourceLineJump(self: EditorViewComponent, path: cstring, line: int, behavio
       behaviour: behaviour,
     )
   )
+  self.api.emit(
+    InternalNewOperation,
+    NewOperation(
+      name: fmt"Source line jump - {line}",
+      stableBusy: true,
+    )
+  )
 
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour) =
   self.api.emit(
@@ -595,7 +602,15 @@ proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetT
       line: line,
       token: targetToken,
       behaviour: behaviour,
-    ))
+    )
+  )
+  self.api.emit(
+    InternalNewOperation,
+    NewOperation(
+      name: fmt"Source call jump - {targetToken}",
+      stableBusy: true,
+    )
+  )
 
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour) =
   if self.tabInfo.lang != LangAsm:

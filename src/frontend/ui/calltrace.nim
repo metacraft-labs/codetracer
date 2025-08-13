@@ -27,6 +27,7 @@ when defined(ctInExtension):
 
 proc calltraceJump(self: CalltraceComponent, location: types.Location) =
   self.api.emit(CtCalltraceJump, location)
+  self.api.emit(InternalNewOperation, NewOperation(stableBusy: true, name: "calltrace-jump"))
 
 proc isAtStart(self: CalltraceComponent): bool =
   self.startCallLineIndex < START_BUFFER
@@ -1037,9 +1038,6 @@ method onEnter*(self: CalltraceComponent) {.async.} =
         self.resetValueView()
         self.lastSelectedCallKey = call.key
         self.calltraceJump(call.location)
-        # TODO: Middleware
-        # self.services.debugger.stableBusy = true
-        # inc self.data.services.debugger.operationCount
 
       of CallLineContentKind.CallstackInternalCount:
         let content = self.callLines[callLinesIndex].content

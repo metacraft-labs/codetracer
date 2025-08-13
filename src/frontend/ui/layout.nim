@@ -157,6 +157,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
 
   if data.startOptions.shellUi:
     kxiMap["menu"] = setRenderer(proc: VNode = data.ui.menu.render(), "menu", proc = discard)
+    data.ui.menu.kxi = kxiMap["menu"]
     return
 
   if data.startOptions.welcomeScreen and data.trace.isNil:
@@ -165,7 +166,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
         proc: VNode = data.ui.welcomeScreen.render(),
         "welcomeScreen",
         proc = discard)
-
+    data.ui.welcomeScreen.kxi = kxiMap["welcome-screen"]
     return
 
   let root = document.getElementById(j"ROOT")
@@ -215,6 +216,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
   kxiMap["status"] = setRenderer(proc: VNode = data.ui.status.render(), "status", proc = discard)
   kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
   kxiMap["search-results"] = setRenderer(proc: VNode = data.ui.searchResults.render(), "search-results", proc = discard)
+
+  data.ui.menu.kxi = kxiMap["menu"]
+  data.ui.status.kxi = kxiMap["status"]
+  data.ui.searchResults.kxi = kxiMap["search-results"]
 
   layout.registerComponent(cstring"editorComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:

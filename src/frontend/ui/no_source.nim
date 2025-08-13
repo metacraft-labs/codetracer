@@ -1,6 +1,7 @@
 import ui_imports, strutils
 import ../communication, ../../common/ct_event
 from ../rr_gdb import RRGDBStopSignal
+import ../event_helpers
 
 const NO_CODE = -1
 const NO_PATH = ""
@@ -10,7 +11,7 @@ proc getAsmCode(self: NoSourceComponent, location: types.Location) {.async.} =
   self.data.redraw()
 
 proc historyJump*(self: NoSourceComponent, location: types.Location) =
-  self.api.emit(CtHistoryJump, location)
+  self.api.historyJump(location)
 
 method render*(self: NoSourceComponent): VNode =
   let height = document.getElementById("ROOT").clientHeight - 20
