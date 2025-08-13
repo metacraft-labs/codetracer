@@ -589,7 +589,7 @@ proc events(self: EventLogComponent) =
       .addEventListener(
         j"scroll",
         proc () =
-          self.denseTable.updateTableRows()
+          self.denseTable.updateTableRows(redraw = true)
           self.redraw()
       )
     jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
@@ -1091,10 +1091,7 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
     self.resizeObserver = resizeObserver
 
 method render*(self: EventLogComponent): VNode =
-  if not self.inExtension:
-    kxiMap[j("eventLogComponent-" & $self.id)].afterRedraws.add(proc = self.eventLogAfterRedraws())
-  else:
-    self.kxi.afterRedraws.add(proc = self.eventLogAfterRedraws())
+  self.kxi.afterRedraws.add(proc = self.eventLogAfterRedraws())
 
   result = buildHtml(
     tdiv(
@@ -1228,6 +1225,10 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
     discard self.onUpdatedTable(response)
   )
+  api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
+    discard self.onUpdatedTrace(response)
+  )
+
   api.emit(InternalLastCompleteMove, EmptyArg())
 
 proc registerEventLogComponent*(component: EventLogComponent, api: MediatorWithSubscribers) {.exportc.} =
