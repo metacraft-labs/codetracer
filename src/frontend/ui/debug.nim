@@ -3,6 +3,7 @@ import
   ui_imports, 
   ../renderer, ../communication,
   .. / .. / common / ct_event
+import .. / event_helpers
 
 proc messageView(self: DebugComponent): VNode =
   var current = now()
@@ -39,7 +40,7 @@ proc runToEntry*(self: DebugComponent) =
   self.api.emit(CtRunToEntry, EmptyArg())
 
 proc historyJump(self: DebugComponent, location: types.Location) =
-  self.api.emit(CtHistoryJump, location)
+  self.api.historyJump(location)
 
 proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
   if isForward:
@@ -47,14 +48,12 @@ proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
       self.historyIndex += 1
       let location = self.jumpHistory[^self.historyIndex].location
 
-      self.service.currentOperation = HISTORY_JUMP_VALUE
       self.historyJump(location)
   else:
     if self.jumpHistory.len != 0 and self.historyIndex >= 2:
       self.historyIndex -= 1
       let location = self.jumpHistory[^self.historyIndex].location
 
-      self.service.currentOperation = HISTORY_JUMP_VALUE
       self.historyJump(location)
 
 proc action(self: DebugComponent, id: string) =
@@ -110,6 +109,7 @@ proc dapStep*(api: MediatorWithSubscribers, action: cstring) =
     # for now hardcoded threadId, eventually base on location/other
     if not api.isNil:
       api.emit(dapAction, DapStepArguments(threadId: 1))
+      api.emit(InternalNewOperation, NewOperation(name: action, stableBusy: true))
   else:
     cerror cstring(fmt"dap step to action enum error: {dapActionRes.error}")
 

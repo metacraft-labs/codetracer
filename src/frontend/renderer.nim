@@ -493,28 +493,6 @@ proc jumpLocation*(location: types.Location) {.async.} =
   # TODO await tabLoad(location.path, j"", data.lang)
   highlightLine(location.path, location.line)
 
-proc historyJump*(eventObj: Stop, stateHistory: bool = false) =
-  if stateHistory:
-    for local, value in eventObj.locals:
-      # data.stateHistoryPreserved = JsAssoc[cstring, seq[Stop]]{}
-      # data.stateHistoryPreserved[local] = data.stateHistory[local]
-      break
-
-  # TODO
-  ipc.send "CODETRACER::history-jump", eventObj
-
-proc traceJump*(eventObj: ProgramEvent) =
-  if not data.services.debugger.stableBusy:
-    data.services.debugger.stableBusy = true
-    inc data.services.debugger.operationCount
-    data.services.debugger.currentOperation =
-      cstring(fmt"jump to trace on {eventObj.highLevelPath}:{eventObj.highLevelLine}")
-    # debug "operation", operation=data.services.debugger.currentOperation
-
-    ipc.send "CODETRACER::trace-jump", eventObj
-
-    data.redraw()
-
 ## MOVE
 proc step*(
     data: Data,
@@ -537,6 +515,7 @@ proc step*(
     editorView = ViewSource
 
   # eventually always sending a different custom ct/step with more args?
+  data.viewsApi.receive(InternalNewOperation, NewOperation(name: ($action).cstring, stableBusy: true).toJs, data.viewsApi.asSubscriber)
   data.dapApi.sendCtRequest(action, DapStepArguments(threadId: 1).toJs) # TODO: For now hardcode the threadId
 
 template forwardContinue*(fromShortcut: bool) =

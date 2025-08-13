@@ -261,6 +261,7 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
 
 proc eventJump(self: EventLogComponent, event: ProgramEvent) =
   self.api.emit(CtEventJump, event)
+  self.api.emit(InternalNewOperation, NewOperation(name: fmt"Event jump #{event.rrEventId}", stableBusy: true))
 
 proc programEventJump(self: EventLogComponent, event: ProgramEvent) =
   self.findActiveRow(event.directLocationRRTicks)

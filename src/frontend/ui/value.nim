@@ -1,5 +1,6 @@
 import ui_imports, ../types, ../renderer, ../utils
 import ../communication, ../../common/ct_event
+import ../event_helpers
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -553,7 +554,7 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
   return contextMenu 
 
 proc historyJump(self: ValueComponent, location: types.Location) =
-  self.api.emit(CtHistoryJump, location)
+  self.api.historyJump(location)
 
 proc historyClick(self: ValueComponent, location: types.Location) =
   self.historyJump(location)
