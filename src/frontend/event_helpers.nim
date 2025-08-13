@@ -12,4 +12,4 @@ proc ctSourceLineJump*(dap: DapApi, line: int, path: cstring, behaviour: JumpBeh
     dap.sendCtRequest(CtSourceLineJump, target.toJs)
 
 proc ctAddToScratchpad*(viewsApi: MediatorWithSubscribers, expression: cstring) {.exportc.} =
-    viewsApi.emit(InternalAddToScratchpadWithExpression, expression.toJs)
+    viewsApi.emit(InternalAddToScratchpadFromExpression, expression)

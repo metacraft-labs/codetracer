@@ -630,8 +630,9 @@ when not defined(ctInExtension):
 
     for content, components in data.ui.componentMapping:
       for i, component in components:
-        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-        component.register(componentToMiddlewareApi)
+        if component.api.isNil:
+          let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
+          component.register(componentToMiddlewareApi)
 
     # discard windowSetTimeout(proc =
     #   data.dapApi.exampleDap.receiveOnMove(), 1_000)

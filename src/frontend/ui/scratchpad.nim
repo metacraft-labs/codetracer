@@ -41,7 +41,7 @@ method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
   api.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, response: ValueWithExpression, sub: Subscriber) =
     self.registerValue(response)
   )
-  api.subscribe(InternalAddToScratchpadWithExpression, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
+  api.subscribe(InternalAddToScratchpadFromExpression, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
     var found: Variable
     var foundIt = false
 

@@ -72,7 +72,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     #     dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
     # )
   viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
-  viewsApi.subscribe(InternalAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadWithExpression, value))
+  viewsApi.subscribe(InternalAddToScratchpadFromExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadFromExpression, value))
 
   when not defined(ctInExtension):
     dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
