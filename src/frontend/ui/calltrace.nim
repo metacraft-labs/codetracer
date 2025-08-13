@@ -904,18 +904,18 @@ proc eventuallyScroll(self: CalltraceComponent) =
 proc setCalltraceMutationObserver(self: CalltraceComponent) =
   let calltrace = "\"" & fmt"calltrace-data-label-{self.id}" & "\""
   let activeCalltrace = jq(fmt"[data-label={calltrace}]")
-
-  self.resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
-    for entry in entries:
-      let timeout = setTimeout(proc =
-        self.startPositionX = -1
-        let index = self.scrollLineIndex()
-        self.startCallLineIndex = index
-        self.loadLines(fromScroll=false),
-        100
+  if not activeCalltrace.isNil:
+    self.resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
+      for entry in entries:
+        let timeout = setTimeout(proc =
+          self.startPositionX = -1
+          let index = self.scrollLineIndex()
+          self.startCallLineIndex = index
+          self.loadLines(fromScroll=false),
+          100
+        )
       )
-    )
-  self.resizeObserver.observe(cast[Node](activeCalltrace))
+    self.resizeObserver.observe(cast[Node](activeCalltrace))
 
 proc redrawTraceLine(self: CalltraceComponent) =
   let localCalltraceElement = document.querySelector(".local-calltrace")
