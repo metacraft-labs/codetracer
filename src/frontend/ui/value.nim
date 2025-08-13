@@ -55,7 +55,7 @@ proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstr
   self.deleteWatch(expression)
 
   if ($newExpression).find("\n") != NO_INDEX:
-    errorMessage(cstring"newlines forbidden in watch expressions: not registered")
+    self.api.errorMessage(cstring"newlines forbidden in watch expressions: not registered")
   else:
     self.watchExpressions.add(newExpression)
 

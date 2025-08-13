@@ -592,6 +592,17 @@ impl DapClient {
         }))
     }
 
+    pub fn notification_event(&mut self, notification: task::Notification) -> Result<DapMessage, serde_json::Error> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/notification".to_string(),
+            body: serde_json::to_value(notification)?,
+        }))
+    }
+
     pub fn output_event(
         &mut self,
         category: &str,

@@ -66,6 +66,7 @@ type
     InternalAddToScratchpadFromExpression,
     InternalStatusUpdate,
     InternalNewOperation,
+    CtNotification,
     
 when defined(js):
   import std / jsffi
