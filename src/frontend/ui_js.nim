@@ -9,6 +9,7 @@ import
       no_source, ui_imports, shortcuts, step_list, low_level_code],
   lib, types, lang, renderer, config, dap,
   property_test / test
+import event_helpers
 
 when defined(ctInExtension):
   import vscode
@@ -683,11 +684,11 @@ proc onTraceLoaded(
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
-  if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
-    installMessage()
-
   when not defined(ctInExtension):
     configureMiddleware()
+
+  if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
+    data.viewsApi.installMessage()
 
 proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   # domwindow.kxi = JsAssoc[cstring, KaraxInstance]{}
@@ -1002,7 +1003,7 @@ proc onWelcomeScreen(
   data.tryInitLayout()
 
 proc onNewNotification(sender: js, notification: Notification) =
-  data.showNotification(notification)
+  data.viewsApi.showNotification(notification)
 
 # func renderVariables(self: TimelineComponent): VNode =
   # buildHtml(tdi)
@@ -1019,9 +1020,9 @@ method render(self: TimelineComponent): VNode =
 
 proc onCtInstallStatus(sender: js, status: (cstring, cstring)) =
   if status[0] == cstring"ok":
-    successMessage($(status[1]))
+    data.viewsApi.successMessage($(status[1]))
   else:
-    errorMessage($(status[1]))
+    data.viewsApi.errorMessage($(status[1]))
 
 proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
   # discard
@@ -1099,7 +1100,7 @@ proc closeAllTabsAfterSave*(data: Data) {.locks: 0.} =
 
     except Exception as e:
       # maybe removed already
-      warnMessage(&"warn: {e.msg}")
+      data.viewsApi.warnMessage(&"warn: {e.msg}")
 
 proc exit*(data: Data) {.async.} =
   await data.saveAllFiles()

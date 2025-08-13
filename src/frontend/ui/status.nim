@@ -491,6 +491,13 @@ proc onStatusUpdate*(self: StatusComponent, update: StatusState) =
   self.state = update
   self.redraw()
 
+proc onNotification*(self: StatusComponent, notification: Notification) =
+  if self.notifications.len == self.maxNotificationsCount:
+    self.notifications.delete(0)
+
+  self.notifications.add(notification)
+  self.redraw()
+
 method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(InternalStatusUpdate, proc(kind: CtEventKind, response: StatusState, sub: Subscriber) =
@@ -498,6 +505,9 @@ method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   )
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
+  )
+  api.subscribe(CtNotification, proc(kind: CtEventKind, response: Notification, sub: Subscriber) =
+    self.onNotification(response)
   )
 
 

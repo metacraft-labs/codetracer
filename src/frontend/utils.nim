@@ -850,44 +850,6 @@ proc makeNotification*(kind: NotificationKind, text: cstring, isOperationStatus:
     active: true,
     isOperationStatus: isOperationStatus)
 
-proc showNotification*(data: Data, notification: Notification) =
-  if data.ui.status.notifications.len == data.ui.status.maxNotificationsCount:
-    data.ui.status.notifications.delete(0)
-
-  data.ui.status.notifications.add(notification)
-  data.redraw()
-
-proc infoMessage*(text: cstring) =
-  let notification =
-    makeNotification(NotificationKind.NotificationInfo, text)
-  data.showNotification(notification)
-
-proc installCt() =
-  data.ipc.send "CODETRACER::install-ct", js{}
-
-proc installMessage*() =
-  let notification = newNotification(
-    NotificationKind.NotificationInfo,
-    "CodeTracer isn't installed. Do you want to install it?",
-    actions = @[newNotificationButtonAction("Install", proc = installCt())]
-  )
-  data.showNotification(notification)
-
-proc warnMessage*(text: cstring) =
-  let notification =
-    makeNotification(NotificationKind.NotificationWarning, text)
-  data.showNotification(notification)
-
-proc errorMessage*(text: cstring) =
-  let notification =
-    makeNotification(NotificationKind.NotificationError, text)
-  data.showNotification(notification)
-
-proc successMessage*(text: cstring) =
-  let notification =
-    makeNotification(NotificationKind.NotificationSuccess, text)
-  data.showNotification(notification)
-
 proc openLayoutTab*(
   data: Data,
   content: Content,
@@ -1169,9 +1131,11 @@ proc openTab*(
     discard data.openNewEditorView(name, editorView, noInfoMessage=noInfoMessage, line=line)
   elif not data.services.editor.open[name].loading:
     data.showTab(name, noInfoMessage=noInfoMessage, line=line)
-  else:
-    data.showNotification(
-      newNotification(NotificationInfo, fmt"{name} already loading"))
+  # TODO: For now comment out and find a workaround later on
+  # Issue is with recursion imports with event_helpers(communication.nim)
+  # else:
+  #   data.viewsApi.showNotification(
+  #     newNotification(NotificationInfo, fmt"{name} already loading"))
 
   # let id = if level == 0 or level == 1: path else: cstring(fmt"low:{path}:{functionName}")
   # if level == 0 and not data.services.editor.open.hasKey(p) or level > 0:

@@ -3,6 +3,7 @@ import
   ui_imports, value, ../utils, ../renderer,
   datatable
 import ../communication, ../../common/ct_event, ../dap
+import ../event_helpers
 
 let MIN_EDITOR_WIDTH: float = 20 #%
 let MAX_EDITOR_WIDTH: float = 70 #%
@@ -189,7 +190,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
   data.services.eventLog.events = newEvents
 
   if tracepoints.len == 0:
-    warnMessage("There are no changes in the tracepoints input.")
+    data.viewsApi.warnMessage("There are no changes in the tracepoints input.")
 
   let results = JsAssoc[int, seq[Stop]]{}
   results[OLD_SESSION_RESULTS_KEY] = oldResults
@@ -836,7 +837,7 @@ method render*(self: TraceComponent): VNode =
 
   # check if main editor source has changed
   if tabInfo.changed:
-    warnMessage(cstring("can't create a tracepoint: you have to rebuild first, file changed"))
+    self.api.warnMessage(cstring("can't create a tracepoint: you have to rebuild first, file changed"))
     return
 
   var initialPosition: float
@@ -938,7 +939,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   let newTime = now()
 
   if lastToggleTime > 0 and newTime - lastToggleTime <= TOGGLE_REPEAT_TIME_LIMIT:
-    warnMessage(cstring(&"no toggleTrace on line {line}: happens before limit"))
+    editorUI.api.warnMessage(cstring(&"no toggleTrace on line {line}: happens before limit"))
     return
 
   lastToggleTime = newTime

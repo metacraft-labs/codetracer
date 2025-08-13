@@ -1338,14 +1338,9 @@ impl Handler {
         msg: &str,
         is_operation_status: bool,
     ) -> Result<(), Box<dyn Error>> {
-        let _notification = Notification::new(kind, msg, is_operation_status);
-        // TODO: Fix using dap protocol
-        // self.send_event((
-        //     EventKind::NewNotification,
-        //     gen_event_id(EventKind::NewNotification),
-        //     self.serialize(&notification)?,
-        //     false,
-        // ))?;
+        let notification = Notification::new(kind, msg, is_operation_status);
+        let raw_event = self.dap_client.notification_event(notification)?;
+        self.send_dap(&raw_event)?;
         Ok(())
     }
 

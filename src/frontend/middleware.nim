@@ -62,6 +62,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
   dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
   dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
+  dapApi.on(CtNotification, proc(kind: CtEventKind, value: Notification) = viewsApi.emit(CtNotification, value))
+  
     #when defined(ctInExtension):
     # TODO: For now not using in the extension
     # dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
@@ -81,6 +83,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       newOperationHandler(viewsApi, value)
     )
 
+  viewsApi.subscribe(CtNotification, proc(kind: CtEventKind, value: Notification, sub: Subscriber) = viewsApi.emit(CtNotification, value))
   viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapNext, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
