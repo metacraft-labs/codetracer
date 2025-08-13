@@ -909,7 +909,13 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
     self.resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
       for entry in entries:
         let timeout = setTimeout(proc =
+          let scrollPosition = jq(fmt"#calltraceScroll-{self.id}")
           self.startPositionX = -1
+          self.scrollLeftOffset =
+            if not scrollPosition.isNil:
+              cast[float](scrollPosition.toJs.scrollLeft)
+            else:
+              0
           let index = self.scrollLineIndex()
           self.startCallLineIndex = index
           self.loadLines(fromScroll=false),
@@ -932,7 +938,7 @@ proc redrawTraceLine(self: CalltraceComponent) =
     let rect = line.getBoundingClientRect()
 
     if self.startPositionX == -1:
-      self.startPositionX = rect.left - spanWidth
+      self.startPositionX = rect.left - spanWidth + self.scrollLeftOffset
 
     if self.startPositionY == -1:
       self.startPositionY = rect.top
