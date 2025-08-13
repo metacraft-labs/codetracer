@@ -1546,6 +1546,18 @@ when defined(ctRenderer):
   var data* = Data(
     dapApi: DapApi(),
     viewsApi: setupSinglePageViewsApi(cstring"single-page-frontend-to-views"),
+    status: StatusState(
+      lastDirection: DebForward,
+      currentOperation: cstring"",
+      currentHistoryOperation: cstring"",
+      finished: false,
+      stableBusy: true,
+      historyBusy: false,
+      traceBusy: false,
+      hasStarted: false,
+      lastAction: cstring"",
+      operationCount: 0,
+    ),
     services: Services(
       eventLog: EventLogService(),
       debugger: DebuggerService(

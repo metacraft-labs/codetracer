@@ -2,6 +2,7 @@ import
   ../types,
   ui_imports, colors, events, trace, typetraits, strutils,
   datatable
+import ../communication, ../../common/ct_event
 
 proc refreshTraces(self: TraceLogComponent) =
   if self.table.context.isNil:
@@ -88,8 +89,9 @@ proc refreshTraces(self: TraceLogComponent) =
         let elementEvent = target.parentNode
         let table = self.table
         let elementEventRow = table.context.row(elementEvent)
-        let data = cast[ProgramEvent](elementEventRow.data())
-        traceJump(data)
+        let event = cast[ProgramEvent](elementEventRow.data())
+        self.api.emit(CtEventJump, event)
+        self.api.emit(InternalNewOperation, NewOperation(name: "Trace jump", stableBusy: true))
 
     else:
       return
