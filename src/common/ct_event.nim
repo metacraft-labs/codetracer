@@ -63,7 +63,7 @@ type
     CtSetupTraceSession,
     InternalLastCompleteMove,
     InternalAddToScratchpad,
-    InternalAddToScratchpadWithExpression,
+    InternalAddToScratchpadFromExpression,
     InternalStatusUpdate,
     InternalNewOperation,
     

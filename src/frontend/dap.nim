@@ -103,7 +103,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtSetupTraceSession: "ct/setup-trace-session",
   InternalLastCompleteMove: "internal/last-complete-move",
   InternalAddToScratchpad: "",
-  InternalAddToScratchpadWithExpression: "",
+  InternalAddToScratchpadFromExpression: "",
   InternalStatusUpdate: "",
   InternalNewOperation: "",
 ]

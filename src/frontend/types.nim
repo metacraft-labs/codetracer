@@ -1669,7 +1669,7 @@ when defined(ctRenderer):
     else:
       component.data = data
       component.content = content
-      if not data.viewsApi.isNil:
+      if not data.viewsApi.isNil and component.api.isNil:
         let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
         component.register(componentToMiddlewareApi)
       echo "register component ", content, " ", component.id
@@ -1875,7 +1875,8 @@ method redrawForExtension*(self: Component) {.base.} =
     self.kxi.redraw()
 
 method redrawForSinglePage*(self: Component) {.base.} =
-  discard
+  if not self.kxi.isNil:
+    self.kxi.redraw()
 
 method redraw*(self: Component) {.base.} =
   if self.inExtension:

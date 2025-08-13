@@ -1148,7 +1148,10 @@ proc view(
           tdiv(
             class = "add-to-scratchpad-button",
             onmousedown = proc(ev: Event, v: VNode) =
-              openValueInScratchpad((expression, value))
+              # TODO: Figure out a way to open panel if closed
+              # The logic for opening should be in the middleware later on
+              # openValueInScratchpad((expression, value))
+              self.api.emit(InternalAddToScratchpad, ValueWithExpression(expression: expression, value: value))
               self.redraw()
           ):
             tdiv(class = "custom-tooltip"):
@@ -1237,4 +1240,4 @@ method redraw*(self: ValueComponent) =
   if not self.state.isNil:
     self.state.redraw()
   else:
-    cast[Component](self).redraw()
+    procCall Component(self).redraw()
