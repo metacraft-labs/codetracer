@@ -1169,6 +1169,7 @@ proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Val
 proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value: Value) =
   self.modalValueComponent[id] =
     ValueComponent(
+      api: self.api,
       expanded: JsAssoc[cstring, bool]{$name: true},
       charts: JsAssoc[cstring, ChartComponent]{},
       showInLine: JsAssoc[cstring, bool]{},

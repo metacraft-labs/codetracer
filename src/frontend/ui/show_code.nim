@@ -32,4 +32,5 @@ proc showCode* (id: cstring, path: cstring, fromLine: int, toLine: int, codeLine
           li(): code(class = "excerpt-code"): text line
   else:
     # TODO: loading the actual file content if file not open
-    cwarn "TODO: showCode: for non-loaded files"
+    # cwarn "TODO: showCode: for non-loaded files"
+    discard
