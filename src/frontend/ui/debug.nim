@@ -90,6 +90,28 @@ proc action(self: DebugComponent, id: string) =
   else:
     discard
 
+func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
+  case $action:
+  of "step-in": result.ok(DapStepIn)
+  of "step-out": result.ok(DapStepOut)
+  of "next": result.ok(DapNext)
+  of "continue": result.ok(DapContinue) 
+  of "reverse-step-in": result.ok(CtReverseStepIn)
+  of "reverse-step-out": result.ok(CtReverseStepOut)
+  of "reverse-next": result.ok(DapStepBack)
+  of "reverse-continue": result.ok(DapReverseContinue)
+  else: result.err(cstring(fmt"not added dap equivalent for {action} for now"))
+
+proc dapStep*(api: MediatorWithSubscribers, action: cstring) = 
+  echo "dap step ", action
+  let dapActionRes = toDapStepActionEnum(action)
+  if dapActionRes.isOk:
+    let dapAction = dapActionRes.value
+    # for now hardcoded threadId, eventually base on location/other
+    if not api.isNil:
+      api.emit(dapAction, DapStepArguments(threadId: 1))
+  else:
+    cerror cstring(fmt"dap step to action enum error: {dapActionRes.error}")
 
 var buttons = JsAssoc[cstring, VNode]{
   "history-back": buildHtml(img(src="public/resources/debug/history_back_black.svg", height="20px", width="18px", class="debug-button-svg")),
@@ -220,7 +242,7 @@ method render*(self: DebugComponent): VNode =
         var click = proc =
           let taskId = genTaskId(Step)
           clog "click on step button", taskId
-          dapStep(self.api, nil, id)
+          dapStep(self.api, id)
           
           # TODO?
           # ctStep(data, id, action, reverse, 1, fromShortcutArg=false, taskId)
