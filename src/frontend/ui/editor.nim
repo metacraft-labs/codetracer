@@ -118,9 +118,10 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
     if not data.functions.toggleMode.isNil:
       data.functions.toggleMode(data),
 
-  cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    let taskId = genTaskId(Step)
-    data.step("co-next", CoNext, reverse=false, taskId=taskId),
+  # TODO: support concurrent when add later on
+  # cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
+  #   let taskId = genTaskId(Step)
+  #   data.step("co-next", CoNext, reverse=false, taskId=taskId),
 
   cstring"CTRL+F8": proc(editor: MonacoEditor, e: EditorViewComponent) =
     if editor.hasTextFocus():

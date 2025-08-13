@@ -100,7 +100,7 @@ proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.expor
 proc lowAsm*(data: Data): bool
 proc highlightLine*(path: cstring, line: int)
 proc saveFiles*(data: Data, path: cstring = j"", saveAs: bool = false)
-proc step*(data: Data, action: string, actionEnum: DebuggerAction, reverse: bool = false, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
+proc step*(data: Data, action: CtEventKind, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
 proc openLocation*(data: Data, path: cstring, line: int) {.async.}
 
 # UTILS
@@ -516,48 +516,17 @@ proc traceJump*(eventObj: ProgramEvent) =
     data.redraw()
 
 ## MOVE
-
-func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
-  case $action:
-  of "step-in": result.ok(DapStepIn)
-  of "step-out": result.ok(DapStepOut)
-  of "next": result.ok(DapNext)
-  of "continue": result.ok(DapContinue) 
-  of "reverse-step-in": result.ok(CtReverseStepIn)
-  # err(cstring"no reverse-step dap equivalent for now: TODO ct/reverse-step?")
-  of "reverse-step-out": result.ok(CtReverseStepOut)
-  # (cstring"no reverse-step-out dap equivalent for now: TODO ct/reverse-step-out")
-  of "reverse-next": result.ok(DapStepBack)
-  of "reverse-continue": result.ok(DapReverseContinue)
-  else: result.err(cstring(fmt"not added dap equivalent for {action} for now"))
-
-
-proc dapStep*(api: MediatorWithSubscribers, dapApi: DapApi, action: cstring) = 
-  echo "dap step ", action
-  let dapActionRes = toDapStepActionEnum(action)
-  if dapActionRes.isOk:
-    let dapAction = dapActionRes.value
-    # for now hardcoded threadId, eventually base on location/other
-    if not api.isNil:
-      api.emit(dapAction, DapStepArguments(threadId: 1))
-    else:
-      dapApi.sendCtRequest(dapAction, DapStepArguments(threadId: 1).toJs)
-  else:
-    cerror cstring(fmt"dap step to action enum error: {dapActionRes.error}")
-
 proc step*(
     data: Data,
-    action: string,
-    actionEnum: DebuggerAction,
-    reverse: bool = false,
+    action: CtEventKind,
     repeat: int = 1,
     fromShortcutArg: bool = false,
     taskId: TaskId = NO_TASK_ID) =
   let taskId = if taskId == NO_TASK_ID: genTaskId(Step) else: taskId
   if fromShortcutArg:
-    cdebug &"shortcut for step {action} {actionEnum} {reverse}", taskId
+    cdebug &"shortcut for step {action}", taskId
   else:
-    cdebug &"renderer: step call for step {action} {actionEnum} {reverse}", taskId
+    cdebug &"renderer: step call for step {action}", taskId
 
   # for now directly depend here on the active view
   # maybe we should instead pass it as arg from the action handlers
@@ -568,41 +537,31 @@ proc step*(
     editorView = ViewSource
 
   # eventually always sending a different custom ct/step with more args?
-  dapStep(nil, data.dapApi, action.cstring)
-  # data.services.debugger.step(
-  #   action,
-  #   actionEnum,
-  #   reverse,
-  #   repeat,
-  #   editorView=editorView,
-  #   taskId=taskId)
-
-proc stepReverse*(data: Data, action: string, actionEnum: DebuggerAction, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID) =
-  data.step(action, actionEnum, reverse=true, repeat=repeat, fromShortcutArg=fromShortcutArg, taskId=taskId)
+  data.dapApi.sendCtRequest(action, DapStepArguments(threadId: 1).toJs) # TODO: For now hardcode the threadId
 
 template forwardContinue*(fromShortcut: bool) =
-  data.step "continue", Continue, false, fromShortcutArg=fromShortcut
+  data.step DapContinue, fromShortcutArg=fromShortcut
 
 template next*(fromShortcut: bool) =
-  data.step "next", Next, false, fromShortcutArg=fromShortcut
+  data.step DapNext, fromShortcutArg=fromShortcut
 
 template stepIn*(fromShortcut: bool) =
-  data.step "step-in", StepIn, false, fromShortcutArg=fromShortcut
+  data.step DapStepIn, fromShortcutArg=fromShortcut
 
 template stepOut*(fromShortcut: bool) =
-  data.step "step-out", StepOut, false, fromShortcutArg=fromShortcut
+  data.step DapStepOut, fromShortcutArg=fromShortcut
 
 template reverseContinue*(fromShortcut: bool) =
-  data.stepReverse "continue", Continue, fromShortcutArg=fromShortcut
+  data.step DapReverseContinue, fromShortcutArg=fromShortcut
 
 template reverseNext*(fromShortcut: bool) =
-  data.stepReverse "next", Next, fromShortcutArg=fromShortcut
+  data.step DapStepBack, fromShortcutArg=fromShortcut
 
 template reverseStepIn*(fromShortcut: bool) =
-  data.stepReverse "step-in", StepIn, fromShortcutArg=fromShortcut
+  data.step CtReverseStepIn, fromShortcutArg=fromShortcut
 
 template reverseStepOut*(fromShortcut: bool) =
-  data.stepReverse "step-out", StepOut, fromShortcutArg=fromShortcut
+  data.step CtReverseStepOut, fromShortcutArg=fromShortcut
 
 # proc continueTo(breakpoints: seq[UIBreakpoint]) =
 #   changeLine(data.lastLine)
