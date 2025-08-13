@@ -25,3 +25,27 @@ export task_and_event
 
 include
   common_types/utils/[ errors, meta, text_representation, timer ]
+
+# TODO: think if this is useful/where to put validation or type safety
+# type
+#   CtEvent* = ref object
+#     case kind*: CtEventKind:
+#     of CtUpdateTable: ctUpdateTableArg*: UpdateTableArgs
+#     of CtUpdatedTable: ctUpdatedTableData*: CtUpdatedTableResponseBody
+#     of CtUpdatedTableResponse: discard
+#     of CtSubscribe: ctSubscribeArg*: CtEventKind
+#     of CtLoadLocals: ctLoadLocalsArg*: LoadLocalsArg
+#     of CtLoadLocalsResponse: ctLoadLocalsResponseValue*: CtLoadLocalsResponseBody
+#     of CtUpdatedCalltrace: ctUpdatedCalltraceData*: CtUpdatedCalltraceResponseBody
+#     else: discard
+
+# func rawValue*(event: CtEvent): JsObject =
+#   case event.kind:
+#   of CtUpdateTable: event.ctUpdateTableArg.toJs
+#   of CtUpdatedTable: event.ctUpdatedTableData.toJs
+#   of CtUpdatedTableResponse: jsNull
+#   of CtSubscribe: event.ctSubscribeArg
+#   of CtLoadLocals: event.ctLoadLocalsArg
+#   of CtLoadLocalsResponse: event.ctLoadLocalsResponseValue
+#   of CtUpdatedCalltrace: event.ctUpdatedCalltraceData
+#   else: jsNull
