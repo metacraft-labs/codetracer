@@ -83,6 +83,3 @@ type
     kind*: CtEventKind
     value: T
 
-
-
-
