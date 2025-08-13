@@ -2,7 +2,17 @@ import std / jsffi
 import .. / common / ct_event
 import types
 import communication, dap
-import utils
+import lib
+
+const HISTORY_JUMP_VALUE*: string = "history-jump"
+
+proc makeNotification*(kind: NotificationKind, text: cstring, isOperationStatus: bool = false): Notification =
+  Notification(
+    kind: kind,
+    text: text,
+    time: Date.now(),
+    active: true,
+    isOperationStatus: isOperationStatus)
 
 proc ctSourceLineJump*(dap: DapApi, line: int, path: cstring, behaviour: JumpBehaviour) {.exportc.} =
     let target = SourceLineJumpTarget(

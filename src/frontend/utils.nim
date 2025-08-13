@@ -7,8 +7,6 @@ var kxiMap* = JsAssoc[cstring, KaraxInstance]{}
 const VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
 const VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
 
-const HISTORY_JUMP_VALUE*: string = "history-jump"
-
 proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCache: bool = false): Future[U]
 proc removeEditorFromClosedTabs*(data: Data, path: cstring)
 proc removeEditorFromLoading*(data: Data, path: cstring)
@@ -841,14 +839,6 @@ proc removeEditorFromLoading*(data: Data, path: cstring) =
 
   if editorPathIndex != -1:
     editorService.loading.delete(editorPathIndex)
-
-proc makeNotification*(kind: NotificationKind, text: cstring, isOperationStatus: bool = false): Notification =
-  Notification(
-    kind: kind,
-    text: text,
-    time: Date.now(),
-    active: true,
-    isOperationStatus: isOperationStatus)
 
 proc openLayoutTab*(
   data: Data,
