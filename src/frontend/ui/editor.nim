@@ -2,6 +2,7 @@ import ../ui_helpers, ui_imports, trace, debug, menu, flow, no_source, shortcuts
   # ../public/third_party/monaco-themes/themes/customThemes/nim/customThemes
 import std/[ cstrutils, jsre ]
 import ../communication, ../../common/ct_event
+import ../event_helpers
 
 from dom import createElement
 
@@ -725,7 +726,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
             self.sourceCallJump(self.name, line, targetToken, BackwardJump)
         )
       else:
-        const handler = proc(e: Event) = errorMessage "No word selected."
+        let handler = proc(e: Event) = self.api.errorMessage("No word selected.")
 
         callLine = ContextMenuItem(
           name: "Jump to call",
@@ -742,7 +743,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         )
     except AmbiguousFunctionCallException:
       let msg = getCurrentExceptionMsg()
-      let handler = proc(e: Event) = errorMessage msg
+      let handler = proc(e: Event) = self.api.errorMessage msg
 
       callLine = ContextMenuItem(
         name: "Jump to call",
@@ -1270,7 +1271,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
                 targetToken,
                 SmartJump)
           except AmbiguousFunctionCallException:
-            errorMessage getCurrentExceptionMsg()
+            self.api.errorMessage getCurrentExceptionMsg()
         elif cast[bool](e.event.ctrlKey) or cast[bool](e.event.middleButton):
           self.lastMouseClickLine = self.lastMouseMoveLine
           self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
