@@ -51,8 +51,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     viewsApi.emit(CtCompleteMove, value)
     lastCompleteMove = value
-    data.status.stableBusy = false
-    data.status.hasStarted = true
+    when not defined(ctInExtension):
+      data.status.stableBusy = false
+      data.status.hasStarted = true
   )
 
   dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
@@ -72,13 +73,12 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # )
   viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
   viewsApi.subscribe(InternalAddToScratchpadWithExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadWithExpression, value))
-  viewsApi.subscribe(InternalNewOperation, proc(kind: CtEventKind, value: NewOperation, sub: Subscriber) =
-    newOperationHandler(viewsApi, value)
-    viewsApi.emit(InternalStatusUpdate, data.status))
-  
 
   when not defined(ctInExtension):
     dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
+    viewsApi.subscribe(InternalNewOperation, proc(kind: CtEventKind, value: NewOperation, sub: Subscriber) =
+      newOperationHandler(viewsApi, value)
+      viewsApi.emit(InternalStatusUpdate, data.status))
 
   viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
