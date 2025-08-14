@@ -16,25 +16,35 @@ class RustGenerator {
         this.generatedDefinitions = [];
     }
 
-    loadType(property) {
-        console.log('loadType ', property);
-        if (property.type === undefined) {
-            let ref = property['$ref'];
-            if (ref !== undefined && ref.startsWith('#/definitions/')) {
-                return ref.slice('#/definitions/'.length);
-            } else {
-                return '<unknown>';
-            }
-        }
-        if (typeof property.type === 'string') {
-            switch (property.type) {
-                case 'integer': return 'i64';
-                case 'string': return 'String';
-                case 'boolean': return 'bool';
-                default: return property.type;
-            }
+    loadType(property, required, propertyName, parentName) {
+        // console.log('loadType ', property);
+        if (!required) {
+            let internalType = this.loadType(property, true, propertyName, parentName);
+            return `Option<${internalType}>`;
         } else {
-            return 'serde::Value'; // serde::Value : acting as a dynamic-like JSON any value
+            if (property.type === undefined) {
+                let ref = property['$ref'];
+                if (ref !== undefined && ref.startsWith('#/definitions/')) {
+                    return ref.slice('#/definitions/'.length);
+                } else {
+                    return '<unknown>';
+                }
+            }
+            if (typeof property.type === 'string') {
+                switch (property.type) {
+                    case 'integer': return 'i64';
+                    case 'string': return 'String';
+                    case 'boolean': return 'bool';
+                    case 'object': {
+                        let typeName = `${parentName}${propertyName}`;
+                        this.registerType(`${parentName}${propertyName}`, property);
+                        return typeName;
+                    }
+                    default: return property.type;
+                }
+            } else {
+                return 'serde::Value'; // serde::Value : acting as a dynamic-like JSON any value
+            }
         }
     }
 
@@ -45,7 +55,7 @@ class RustGenerator {
         else if (definition.allOf && definition.allOf.length == 2) {
             // assume Request, Response or Event: generate for the second type
             let secondDefinition = definition.allOf[1];
-            console.log('secondDefinition', secondDefinition);
+            // console.log('secondDefinition', secondDefinition);
             return this.generateObject(typeName, secondDefinition);
         }
         // TODO: allOf: combine fields?
@@ -54,9 +64,13 @@ class RustGenerator {
 
     generateObject(typeName, definition) {
         let fields = [];
+        console.log('generateObject:\n----------');
+        console.log('properties: ', definition.properties);
+        console.log('required: ', definition.required);
         if (definition.properties !== undefined) {
             for (let [name, property] of Object.entries(definition.properties)) {
-                let fieldType = this.loadType(property);
+                let required = definition.required !== undefined && definition.required.includes(name);
+                let fieldType = this.loadType(property, required, name, typeName);
                 let fieldName = to_underscore_case(name);
                 fields.push(`    pub ${fieldName}: ${fieldType},`);
             }
@@ -86,17 +100,14 @@ function run() {
     let generator = new RustGenerator();
     var i = 0;
     for ( let [typeName, definition] of Object.entries(definitions)) {
-        console.log('--------------------');
-        console.log(typeName);
-        console.log(definition);
-        if (definition.allOf !== undefined) {
-            console.log(definition.allOf[1].properties);
-        }
+        if (i === 57) {
+            console.log('--------------------');
+            console.log('type: ', typeName);
+            console.log('==');
+            console.log('definition: ', definition);
 
-        generator.registerType(typeName, definition, 'rust');
-        // if (i >= 10) {
-        //     break;
-        // }
+            generator.registerType(typeName, definition, 'rust');
+        }
         i += 1;
     }
     let text = generator.toText();
@@ -105,3 +116,9 @@ function run() {
 }
 
 run();
+
+// TODO: 
+// 1) maybe only produce code for arguments/payloads of requests/responses/events and for other types 
+//   filtering out `XResponse`, `XEvent` leaving only their body, but keeping maybe `XRequest` fields for `XArgs`
+// 2) fix/support more types
+// 3) try to build actual rust types
