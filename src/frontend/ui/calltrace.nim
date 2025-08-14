@@ -623,13 +623,9 @@ proc callView*(
         onclick = proc =
           clog fmt"calltrace: jump onclick call key " & $key
           self.resetValueView()
-          # TODO: send event to middleware to change state
-          # self.data.services.debugger.stableBusy = true
           self.selectedCallNumber = self.lineIndex[call.key]
           self.lastSelectedCallKey = call.key
           self.calltraceJump(call.location)
-          # TODO: send event to middleware to change status state
-          # inc self.data.services.debugger.operationCount
           self.redrawCallLines()
       ):
         if key != cstring"-1 -1 -1":

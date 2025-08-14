@@ -897,7 +897,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
             if local.expression == expression:
               let baseValue = local.value
               addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
-                openValueInScratchpad((expression, baseValue))
+                self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: baseValue))
                 self.data.redraw())
               contextMenu &= addToScratchpad
           break
@@ -927,7 +927,10 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
                 name: &"Add {tempValue[0]} to scratchpad",
                 hint: "",
                 handler: proc(e: Event) =
-                  openValueInScratchpad(tempValue)
+                  self.api.openValueInScratchpad(
+                    ValueWithExpression(
+                      expression: tempValue[0],
+                      value: tempValue[1]))
                   self.data.redraw()
               )
 
@@ -950,7 +953,10 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
             hint: "",
             handler: proc(e: Event) =
               for localValue in traceValue.locals:
-                openValueInScratchpad(localValue)
+                self.api.openValueInScratchpad(
+                  ValueWithExpression(
+                    expression: localValue[0],
+                    value: localValue[1]))
                 self.data.redraw()
           )
 
@@ -960,7 +966,10 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
             name: "Add value to scratchpad",
             hint: "CTRL+&lt;click on value&gt;",
             handler: proc(e: Event) =
-              openValueInScratchpad(traceValue.locals[0])
+              self.api.openValueInScratchpad(
+                ValueWithExpression(
+                  expression: traceValue.locals[0][0],
+                  value: traceValue.locals[0][1]))
               self.data.redraw()
           )
 

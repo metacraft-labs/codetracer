@@ -1,12 +1,14 @@
 import std / [jsffi, jsconsole]
 import .. / common / ct_event
-import types
+import types, lib
 import communication, dap
 import event_helpers
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 
 when not defined(ctInExtension):
+  import utils
+
   proc dapInitializationHandler() =
     data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     data.dapApi.sendCtRequest(DapLaunch, js{
@@ -18,6 +20,23 @@ when not defined(ctInExtension):
     data.status.stableBusy = operation.stableBusy
     inc data.status.operationCount
     viewsApi.emit(InternalStatusUpdate, data.status)
+
+  proc addToScratchpadHandler*(viewsApi: MediatorWithSubscribers, value: ValueWithExpression) =
+    # opens again or re-focuses scratchpad panel if needed
+    let openNew = data.ui.componentMapping[Content.Scratchpad].isNil or
+        data.ui.componentMapping[Content.Scratchpad].len == 0 or
+        data.ui.componentMapping[Content.Scratchpad].toJs[0].isUndefined or
+        data.ui.componentMapping[Content.Scratchpad][0].layoutItem.isNil
+    if openNew:
+      data.openLayoutTab(Content.Scratchpad)
+
+    if not data.ui.componentMapping[Content.Scratchpad][0].layoutItem.parent.isNil:
+      data.ui.componentMapping[Content.Scratchpad][0].
+        layoutItem.parent.setActiveContentItem(
+          data.ui.componentMapping[Content.Scratchpad][0].layoutItem)
+    # if there is no parent, we assume it's a visible panel
+    # with only tab scratchpad
+    viewsApi.emit(InternalAddToScratchpad, value)
 
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   var lastCompleteMove: MoveState = nil
@@ -75,7 +94,6 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     #   if not dapApi.completeMoveFunction.isNil:
     #     dapApi.completeMoveFunction(dapApi.editor, value, dapApi)
     # )
-  viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
   viewsApi.subscribe(InternalAddToScratchpadFromExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadFromExpression, value))
 
   when not defined(ctInExtension):
@@ -83,6 +101,15 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     viewsApi.subscribe(InternalNewOperation, proc(kind: CtEventKind, value: NewOperation, sub: Subscriber) =
       newOperationHandler(viewsApi, value)
     )
+
+    viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) =
+      addToScratchpadHandler(viewsApi, value))
+  else:
+    # TODO: also in extension: opening again/focusing scratchpad and 
+    # sending to it, maybe using a handler that we pass to setupMiddlewareApis ?
+    # or a global function?
+    viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
+
 
   viewsApi.subscribe(CtNotification, proc(kind: CtEventKind, value: Notification, sub: Subscriber) = viewsApi.emit(CtNotification, value))
   viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
