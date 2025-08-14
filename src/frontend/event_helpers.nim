@@ -63,3 +63,6 @@ proc successMessage*(api: MediatorWithSubscribers, text: cstring) =
   let notification =
     makeNotification(NotificationKind.NotificationSuccess, text)
   api.showNotification(notification)
+
+proc openValueInScratchpad*(api: MediatorWithSubscribers, arg: ValueWithExpression) =
+  api.emit(InternalAddToScratchpad, arg)

@@ -2,7 +2,7 @@ import
   ../ui_helpers, ui_imports,
   ../renderer, value, scratchpad
 
-import ../communication, ../../common/ct_event, ../dap
+import ../communication, ../../common/ct_event, ../dap, ../event_helpers
 import strutils, os
 
 # thank, God!
@@ -1148,7 +1148,7 @@ proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Val
     name: "Add value to scratchpad",
     hint: "CTRL+&lt;click on value&gt;",
     handler: proc(e: Event) =
-      openValueInScratchpad((name, beforeValue))
+      self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: beforeValue))
       data.redraw()
   )
 
@@ -1159,7 +1159,7 @@ proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Val
     hint: "",
     handler: proc(e: Event) =
       for key, value in step.beforeValues:
-        openValueInScratchpad((key, value))
+        self.api.openValueInScratchpad(ValueWithExpression(expression: key, value: value))
       data.redraw()
   )
 
@@ -1323,7 +1323,7 @@ proc flowSimpleValue*(
 
     if cast[MouseEvent](e).button == 0:
       if cast[bool](e.toJs.ctrlKey):
-        openValueInScratchpad((name, value))
+        self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: value))
         data.redraw()
       else:
         self.jumpToLocalStep(stepCount)

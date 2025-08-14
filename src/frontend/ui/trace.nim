@@ -250,8 +250,7 @@ proc createContextMenuItems(self: TraceComponent, ev: js): seq[ContextMenuItem] 
     hint: "",
     handler: proc(e: Event) =
       for local in localValues:
-        openValueInScratchpad(local)
-        self.data.redraw()
+        self.api.emit(InternalAddToScratchpad, ValueWithExpression(expression: local[0], value: local[1]))
   )
 
   contextMenu &= addToScratchpad

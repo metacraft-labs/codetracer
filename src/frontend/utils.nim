@@ -277,6 +277,7 @@ proc asmLoad*(self: EditorService, location: types.Location): Future[Instruction
   # else:
   #   name = location.functionName # using it for expanded-<firstLine>
   let instructions = await self.data.asyncSend("asm-load", functionLocation, $name, Instructions)
+
   return instructions
 
 # lowLevel: enum TODO
@@ -1254,23 +1255,6 @@ proc registerScratchpadValue*(self: ScratchpadComponent, expression: cstring, va
     stateID: -1,
     data: self.data))
 
-proc openValueInScratchpad*(value: (cstring, Value)) =
-  if data.ui.componentMapping[Content.Scratchpad].isNil or
-      data.ui.componentMapping[Content.Scratchpad].len == 0 or
-      data.ui.componentMapping[Content.Scratchpad].toJs[0].isUndefined or
-      data.ui.componentMapping[Content.Scratchpad][0].layoutItem.isNil:
-    data.openLayoutTab(Content.Scratchpad)
-
-  if not data.ui.componentMapping[Content.Scratchpad][0].layoutItem.parent.isNil:
-    cast[ScratchpadComponent](
-      data.ui.componentMapping[Content.Scratchpad][0]).registerScratchpadValue(
-        value[0],
-        value[1])
-    data.ui.componentMapping[Content.Scratchpad][0].
-      layoutItem.parent.setActiveContentItem(
-        data.ui.componentMapping[Content.Scratchpad][0].layoutItem)
-  # if there is no parent, we assume it's a visible panel
-  # with only tab scratchpad
 
 proc findTRNode*(node: js): js =
   return if node.tagName.to(cstring) == cstring("TR"):
