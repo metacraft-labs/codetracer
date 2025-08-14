@@ -1100,6 +1100,7 @@ proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: 
       reverse: reverse
     )
   )
+  self.api.emit(InternalNewOperation, NewOperation(name: "local step jump", stableBusy: true))
 
 proc afterJump(self: FlowComponent, stepCount: int) =
   let step = self.flow.steps[stepCount]

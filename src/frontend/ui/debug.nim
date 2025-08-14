@@ -38,6 +38,7 @@ proc stopJump*(self: DebugComponent) =
 
 proc runToEntry*(self: DebugComponent) =
   self.api.emit(CtRunToEntry, EmptyArg())
+  self.api.emit(InternalNewOperation, NewOperation(name: "run to entry", stableBusy: true))
 
 proc historyJump(self: DebugComponent, location: types.Location) =
   self.api.historyJump(location)

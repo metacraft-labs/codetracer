@@ -367,6 +367,7 @@ proc renderTableResults(
           self.data.redraw()
         else:
           self.api.emit(CtTraceJump, traceValue)
+          self.api.emit(InternalNewOperation, NewOperation(name: "trace jump", stableBusy: true))
 
       jqFind(cstring(fmt"#trace-table-{self.id} tbody")).on(cstring"contextmenu", cstring"tr") do (event: js):
         # let target = event.target

@@ -130,6 +130,7 @@ method onLoadedTerminal*(self: TerminalOutputComponent, eventList: seq[ProgramEv
 
 proc onTerminalEventClick(self: TerminalOutputComponent, eventElement: ProgramEvent) =
   self.api.emit(CtEventJump, eventElement)
+  self.api.emit(InternalNewOperation, NewOperation(name: "event jump", stableBusy: true))
 
 method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.async.} =
   if self.cachedLines[response].len > 0:
