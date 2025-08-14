@@ -101,6 +101,8 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtRunToEntry: "ct/run-to-entry",
   CtRunTracepoints: "ct/run-tracepoints",
   CtSetupTraceSession: "ct/setup-trace-session",
+  CtLoadAsmFunction: "ct/load-asm-function",
+  CtLoadAsmFunctionResponse: "",
   InternalLastCompleteMove: "internal/last-complete-move",
   InternalAddToScratchpad: "",
   InternalAddToScratchpadFromExpression: "",

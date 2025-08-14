@@ -61,6 +61,8 @@ type
     CtRunToEntry,
     CtRunTracepoints,
     CtSetupTraceSession,
+    CtLoadAsmFunction,
+    CtLoadAsmFunctionResponse,
     InternalLastCompleteMove,
     InternalAddToScratchpad,
     InternalAddToScratchpadFromExpression,

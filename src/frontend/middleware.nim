@@ -63,7 +63,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
   dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
   dapApi.on(CtNotification, proc(kind: CtEventKind, value: Notification) = viewsApi.emit(CtNotification, value))
-  
+  dapApi.on(CtLoadAsmFunctionResponse, proc(kind: CtEventKind, value: Instructions) = viewsApi.emit(CtLoadAsmFunctionResponse, value.toJs))
+
     #when defined(ctInExtension):
     # TODO: For now not using in the extension
     # dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) =
@@ -116,6 +117,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(CtRunToEntry, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtRunTracepoints, proc(kind: CtEventKind, value: RunTracepointsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtSetupTraceSession, proc(kind: CtEventKind, value: RunTracepointsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtLoadAsmFunction, proc(kind: CtEventKind, value: FunctionLocation, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(InternalLastCompleteMove, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
     if not lastCompleteMove.isNil:
       viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)

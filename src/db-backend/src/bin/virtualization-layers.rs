@@ -15,14 +15,14 @@ use std::error::Error;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc;
+// use std::sync::mpsc;
 
 extern crate db_backend;
 use db_backend::core::Core;
 use db_backend::db::Db;
 use db_backend::handler::Handler;
-use db_backend::receiver::Receiver;
-use db_backend::response::Response;
+// use db_backend::receiver::Receiver;
+// use db_backend::response::Response;
 
 /// virtualization layers for event log/trace/calltrace(maybe others)
 #[derive(Parser, Debug)]
@@ -68,18 +68,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         .filter(None, log::LevelFilter::Info)
         .init();
 
-    let mut receiver = Receiver::new();
-    let (tx, _rx): (mpsc::Sender<Response>, mpsc::Receiver<Response>) = mpsc::channel();
+    // TODO: DAP
+    // let mut receiver = Receiver::new();
+    // let (tx, _rx): (mpsc::Sender<Response>, mpsc::Receiver<Response>) = mpsc::channel();
 
     // let socket_path = cli.socket_path.clone();
 
     // a placeholder, we won't use it
     let db = Db::new(&PathBuf::from(""));
-    receiver.setup_for_virtualization_layers(&cli.socket_path, cli.caller_process_pid)?;
+    // receiver.setup_for_virtualization_layers(&cli.socket_path, cli.caller_process_pid)?;
 
-    let mut handler = Handler::construct(Box::new(db), tx.clone(), true);
+    let mut _handler = Handler::construct(Box::new(db), true);
 
-    receiver.receive_loop(&mut handler)?;
+    // receiver.receive_loop(&mut handler)?;
 
     Ok(())
 }

@@ -7,7 +7,7 @@ use crate::handler::Handler;
 use crate::task::{
     gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, LoadHistoryArg, LocalStepJump, Location,
     ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId,
-    UpdateTableArgs,
+    UpdateTableArgs, FunctionLocation,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info, warn};
@@ -18,7 +18,6 @@ use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::Instant;
 
 // fn forward_raw_events<W: Write>(
@@ -67,7 +66,6 @@ fn launch(
     trace_folder: &Path,
     trace_file: &Path,
     seq: i64,
-    tx: mpsc::Sender<crate::response::Response>,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -96,7 +94,7 @@ fn launch(
         info!("postprocessing trace: duration: {:?}", duration2);
 
         // eprintln!("TRACE METADATA: {:?}", meta);
-        let mut handler = Handler::new(Box::new(db), tx.clone());
+        let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
         handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
@@ -188,6 +186,7 @@ fn handle_request<W: Write>(
             info!("load_calltrace_section");
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }
+        "ct/load-asm-function" => handler.load_asm_function(req.clone(), req.load_args::<FunctionLocation>()?)?,
         _ => {
             match dap_command_to_step_action(&req.command) {
                 Ok((action, is_reverse)) => {
@@ -212,7 +211,7 @@ fn handle_request<W: Write>(
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
-    let (tx, _rx) = mpsc::channel();
+    // let (tx, _rx) = mpsc::channel();
     let mut handler: Option<Handler> = None;
     let mut received_launch = false;
     let mut launch_trace_folder = PathBuf::from("");
@@ -337,7 +336,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                     }
                     info!("stored launch trace folder: {launch_trace_folder:?}");
                     if received_configuration_done {
-                        handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq, tx.clone())?);
+                        handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq)?);
                         if let Some(h) = handler.as_mut() {
                             write_dap_messages(writer, h, &mut seq)?;
                         }
@@ -380,7 +379,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
 
                 info!("configuration done sent response; received_launch: {received_launch}");
                 if received_launch {
-                    handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq, tx.clone())?);
+                    handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq)?);
                     if let Some(h) = handler.as_mut() {
                         write_dap_messages(writer, h, &mut seq)?;
                     }

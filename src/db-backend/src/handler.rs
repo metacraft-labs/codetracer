@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::mpsc;
 
 use log::{error, info, warn};
 use regex::Regex;
@@ -16,12 +15,11 @@ use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::program_search_tool::ProgramSearchTool;
-use crate::response::{Event, Response, TaskResult, VOID_RESULT};
-use crate::sender;
+// use crate::response::{};
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{
-    gen_event_id, Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
-    CalltraceNonExpandedKind, CollapseCallsArgs, ConfigureArg, CoreTrace, DbEventKind, EventKind, FrameInfo,
+    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
+    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo,
     FunctionLocation, HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg,
     LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent,
     RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
@@ -37,9 +35,9 @@ pub struct Handler {
     pub db: Box<Db>,
     pub step_id: StepId,
     pub last_call_key: CallKey,
-    pub sender_tx: mpsc::Sender<Response>,
+    // pub sender_tx: mpsc::Sender<Response>,
     pub indirect_send: bool,
-    pub sender: sender::Sender,
+    // pub sender: sender::Sender,
     pub event_db: EventDb,
     pub flow_preloader: FlowPreloader,
     pub expr_loader: ExprLoader,
@@ -79,25 +77,24 @@ type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 //   sender.
 
 impl Handler {
-    pub fn new(db: Box<Db>, sender_tx: mpsc::Sender<Response>) -> Handler {
-        Self::construct(db, sender_tx, false)
+    pub fn new(db: Box<Db>) -> Handler {
+        Self::construct(db, false)
     }
 
-    pub fn construct(db: Box<Db>, sender_tx: mpsc::Sender<Response>, indirect_send: bool) -> Handler {
+    pub fn construct(db: Box<Db>, indirect_send: bool) -> Handler {
         let calltrace = Calltrace::new(&db);
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
         let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
         let step_lines_loader = StepLinesLoader::new(&db, &mut expr_loader);
-        let sender = sender::Sender::new();
+        // let sender = sender::Sender::new();
         Handler {
             db,
             step_id: StepId(0),
             last_call_key: CallKey(0),
-            sender_tx,
             indirect_send,
-            sender,
+            // sender,
             breakpoint_list,
             event_db: EventDb::new(),
             flow_preloader: FlowPreloader::new(),
@@ -133,37 +130,14 @@ impl Handler {
     //TaskKind::LoadLocals
     //TaskResult::LoadLocals(HashMap<..>) -> load-locals
 
-    fn send_event(&mut self, event: Event) -> Result<(), Box<dyn Error>> {
-        if self.indirect_send {
-            self.sender.prepare_response(Response::EventResponse(event));
-        } else {
-            self.sender_tx.send(Response::EventResponse(event))?;
-        }
-        Ok(())
-    }
 
-    fn return_task(&mut self, task_result: TaskResult) -> Result<(), Box<dyn Error>> {
-        if self.indirect_send {
-            self.sender.prepare_response(Response::TaskResponse(task_result));
-        } else {
-            self.sender_tx.send(Response::TaskResponse(task_result))?;
-        }
-        Ok(())
-    }
-
-    pub fn get_responses_for_sending_and_clear(&mut self) -> Vec<Response> {
-        let responses = self.sender.get_responses();
-        self.sender.clear_responses();
-        responses
-    }
-
-    pub fn configure(&mut self, arg: ConfigureArg, task: Task) -> Result<(), Box<dyn Error>> {
-        self.trace = arg.trace.clone();
-        self.expr_loader.trace = arg.trace.clone();
-        self.flow_preloader.expr_loader.trace = arg.trace;
-        self.return_void(task)?;
-        Ok(())
-    }
+    // pub fn configure(&mut self, arg: ConfigureArg, task: Task) -> Result<(), Box<dyn Error>> {
+    //     self.trace = arg.trace.clone();
+    //     self.expr_loader.trace = arg.trace.clone();
+    //     self.flow_preloader.expr_loader.trace = arg.trace;
+    //     self.return_void(task)?;
+    //     Ok(())
+    // }
 
     fn load_location(&self, step_id: StepId) -> Location {
         let step_id_int = step_id.0;
@@ -295,12 +269,6 @@ impl Handler {
         Ok(())
     }
 
-    pub fn start(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
-        // noop for db backend
-        self.return_void(task)?;
-        Ok(())
-    }
-
     pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(0));
         self.complete_move(true)?;
@@ -340,21 +308,20 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
-        let callstack: Vec<Call> = self
-            .calltrace
-            .load_callstack(self.step_id, &self.db)
-            .iter()
-            .map(|call_record| {
-                // expanded children count not relevant in raw callstack
-                self.db.to_call(call_record, &mut self.expr_loader)
-            })
-            .collect();
+    // pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
+    //     let callstack: Vec<Call> = self
+    //         .calltrace
+    //         .load_callstack(self.step_id, &self.db)
+    //         .iter()
+    //         .map(|call_record| {
+    //             // expanded children count not relevant in raw callstack
+    //             self.db.to_call(call_record, &mut self.expr_loader)
+    //         })
+    //         .collect();
 
-        // info!("callstack {:#?}", callstack);
-        self.return_task((task, self.serialize(&callstack)?))?;
-        Ok(())
-    }
+    //     // info!("callstack {:#?}", callstack);
+    //     Ok(())
+    // }
 
     pub fn collapse_calls(
         &mut self,
@@ -886,25 +853,23 @@ impl Handler {
         }
     }
 
-    pub fn add_breakpoint(&mut self, loc: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn add_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(&loc.path)
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
         let path_id = path_id_res?;
         let inner_map = &mut self.breakpoint_list[path_id.0];
         inner_map.insert(loc.line, BreakpointRecord { is_active: true });
-        self.return_void(task)?;
         Ok(())
     }
 
-    pub fn delete_breakpoint(&mut self, loc: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn delete_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(&loc.path)
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
         let path_id = path_id_res?;
         let inner_map = &mut self.breakpoint_list[path_id.0];
         inner_map.remove(&loc.line);
-        self.return_void(task)?;
         Ok(())
     }
 
@@ -913,7 +878,7 @@ impl Handler {
         self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
     }
 
-    pub fn toggle_breakpoint(&mut self, loc: SourceLocation, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn toggle_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(&loc.path)
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
@@ -921,7 +886,6 @@ impl Handler {
         if let Some(breakpoint) = self.breakpoint_list[path_id.0].get_mut(&loc.line) {
             breakpoint.is_active = !breakpoint.is_active;
         }
-        self.return_void(task)?;
         Ok(())
     }
 
@@ -1128,20 +1092,21 @@ impl Handler {
         Ok(())
     }
 
-    pub fn search_program(&mut self, query: String, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn search_program(&mut self, query: String, _task: Task) -> Result<(), Box<dyn Error>> {
         let program_search_tool = ProgramSearchTool::new(&self.db);
-        let results = program_search_tool.search(&query, &mut self.expr_loader)?;
-        self.send_event((
-            EventKind::ProgramSearchResults,
-            gen_event_id(EventKind::ProgramSearchResults),
-            self.serialize(&results)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        let _results = program_search_tool.search(&query, &mut self.expr_loader)?;
+        // TODO: send with DAP
+        // self.send_event((
+        //     EventKind::ProgramSearchResults,
+        //     gen_event_id(EventKind::ProgramSearchResults),
+        //     self.serialize(&results)?,
+        //     false,
+        // ))?;
+        // self.return_void(task)?;
         Ok(())
     }
 
-    pub fn load_step_lines(&mut self, arg: LoadStepLinesArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_step_lines(&mut self, arg: LoadStepLinesArg, _task: Task) -> Result<(), Box<dyn Error>> {
         let step_lines = vec![];
         // self.step_lines_loader.load_lines(
         //     &arg.location,
@@ -1150,18 +1115,19 @@ impl Handler {
         //     &self.db,
         //     &mut self.flow_preloader,
         // );
-        let step_lines_update = LoadStepLinesUpdate {
+        let _step_lines_update = LoadStepLinesUpdate {
             results: step_lines,
             arg_location: arg.location,
             finish: true,
         };
-        self.send_event((
-            EventKind::UpdatedLoadStepLines,
-            gen_event_id(EventKind::UpdatedLoadStepLines),
-            self.serialize(&step_lines_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        // TODO: send with DAP
+        // self.send_event((
+        //     EventKind::UpdatedLoadStepLines,
+        //     gen_event_id(EventKind::UpdatedLoadStepLines),
+        //     self.serialize(&step_lines_update)?,
+        //     false,
+        // ))?;
+        // self.return_void(task)?;
         Ok(())
     }
 
@@ -1171,10 +1137,10 @@ impl Handler {
         Ok(())
     }
 
-    pub fn register_events(&mut self, arg: RegisterEventsArg, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn register_events(&mut self, arg: RegisterEventsArg, _task: Task) -> Result<(), Box<dyn Error>> {
         self.event_db.register_events(arg.kind, &arg.events, vec![-1]);
         self.event_db.refresh_global();
-        self.return_void(task)?;
+        // TODO: rr-backend virtualization layers support self.return_void(task)?;
         Ok(())
     }
 
@@ -1188,7 +1154,7 @@ impl Handler {
         Ok(())
     }
 
-    pub fn register_tracepoint_logs(&mut self, arg: TracepointResults, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn register_tracepoint_logs(&mut self, arg: TracepointResults, _task: Task) -> Result<(), Box<dyn Error>> {
         self.event_db
             .register_tracepoint_values(arg.tracepoint_id, arg.tracepoint_values);
         self.event_db
@@ -1207,13 +1173,14 @@ impl Handler {
         trace_update.total_count = total_count;
         trace_update.count = trace_count;
         trace_update.update_id = arg.tracepoint_id;
-        self.send_event((
-            EventKind::UpdatedTrace,
-            gen_event_id(EventKind::UpdatedTrace),
-            self.serialize(&trace_update)?,
-            false,
-        ))?;
-        self.return_void(task)?;
+        // TODO: send with DAP for virtualization layers
+        // self.send_event((
+        //     EventKind::UpdatedTrace,
+        //     gen_event_id(EventKind::UpdatedTrace),
+        //     self.serialize(&trace_update)?,
+        //     false,
+        // ))?;
+        // self.return_void(task)?;
         Ok(())
     }
 
@@ -1269,7 +1236,7 @@ impl Handler {
         list
     }
 
-    pub fn load_asm_function(&mut self, args: FunctionLocation, task: Task) -> Result<(), Box<dyn Error>> {
+    pub fn load_asm_function(&mut self, request: dap::Request, args: FunctionLocation) -> Result<(), Box<dyn Error>> {
         let mut instructions: Vec<Instruction> = vec![];
         match args.key.parse::<i64>() {
             Ok(number) => {
@@ -1311,7 +1278,10 @@ impl Handler {
                     instructions,
                     error: "".to_string(),
                 };
-                self.return_task((task, self.serialize(&instructions)?))?;
+                self.respond_dap(
+                    request,
+                    instructions
+                )?;
                 Ok(())
             }
             Err(e) => Err(Box::new(e)),
@@ -1342,10 +1312,6 @@ impl Handler {
         let raw_event = self.dap_client.notification_event(notification)?;
         self.send_dap(&raw_event)?;
         Ok(())
-    }
-
-    fn return_void(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
-        self.return_task((task, VOID_RESULT.to_string()))
     }
 
     fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
@@ -1536,7 +1502,6 @@ impl Handler {
 mod tests {
     use std::env;
     use std::path::{Path, PathBuf};
-    use std::sync::mpsc;
 
     use super::*;
     // use crate::event_db;
@@ -1554,13 +1519,12 @@ mod tests {
         NONE_VALUE,
     };
 
-    use task::{TaskId, TaskKind, TraceSession, Tracepoint, TracepointMode};
+    use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
 
     #[test]
     fn test_struct_handling() {
         let db = setup_db();
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let handler: Handler = Handler::new(Box::new(db));
         let value = handler.db.to_ct_value(&ValueRecord::Struct {
             field_values: vec![],
             type_id: TypeId(1),
@@ -1572,10 +1536,8 @@ mod tests {
         // Arrange: Create a Db instance and an mpsc channel
         let db = setup_db();
 
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-
         // Act: Create a new Handler instance
-        let handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let handler: Handler = Handler::new(Box::new(db));
 
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
@@ -1586,8 +1548,7 @@ mod tests {
     #[test]
     fn test_run_single_tracepoint() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0))?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
@@ -1598,8 +1559,7 @@ mod tests {
     #[test]
     fn test_multiple_tracepoints() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         handler.event_load(dap::Request::default())?;
         // TODO
         // this way we are resetting them after reforms
@@ -1634,8 +1594,7 @@ mod tests {
     fn test_multile_tracepoints_with_multiline_logs() -> Result<(), Box<dyn Error>> {
         let size: usize = 10000;
         let db: Db = setup_db();
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             dap::Request::default(),
@@ -1662,8 +1621,7 @@ mod tests {
     fn test_tracepoint_in_loop() -> Result<(), Box<dyn Error>> {
         let size = 10000;
         let db: Db = setup_db_loop(size);
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0))?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
@@ -1677,8 +1635,7 @@ mod tests {
         // Number of tracepoints and steps
         let count: usize = 10000;
         let db: Db = setup_db_with_step_count(count);
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count))?;
 
@@ -1690,10 +1647,8 @@ mod tests {
     fn test_step_in() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
 
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-
         // Act: Create a new Handler instance
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         let request = dap::Request::default();
         handler.step(request, make_step_in())?;
         assert_eq!(handler.step_id, StepId(1_i64));
@@ -1703,8 +1658,7 @@ mod tests {
     #[test]
     fn test_source_jumps() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
         let path = "/test/workdir";
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
@@ -1735,8 +1689,7 @@ mod tests {
     #[test]
     fn test_local_calltrace() -> Result<(), Box<dyn Error>> {
         let db = setup_db_with_calls();
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
 
         let calltrace_load_args = CalltraceLoadArgs {
             location: handler
@@ -1778,8 +1731,7 @@ mod tests {
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/alexander92/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);
-        let (sender_tx, _receiver_rx) = mpsc::channel();
-        let mut handler: Handler = Handler::new(Box::new(db), sender_tx.clone());
+        let mut handler: Handler = Handler::new(Box::new(db));
 
         // step-in from 1 to end(maybe also a parameter?)
         // on each step check validity, load locals, load callstack
@@ -1801,7 +1753,7 @@ mod tests {
             handler.step_in(true).unwrap();
             assert_eq!(handler.step_id, StepId(i as i64 + 1));
             test_load_locals(handler);
-            test_load_callstack(handler);
+            // test_load_callstack(handler);
             test_load_flow(handler, path);
         }
     }
@@ -1812,9 +1764,9 @@ mod tests {
             .unwrap();
     }
 
-    fn test_load_callstack(handler: &mut Handler) {
-        handler.load_callstack(gen_task(TaskKind::LoadCallstack)).unwrap();
-    }
+    // fn test_load_callstack(handler: &mut Handler) {
+    //     handler.load_callstack(gen_task(TaskKind::LoadCallstack)).unwrap();
+    // }
 
     fn gen_task(kind: TaskKind) -> Task {
         Task {
