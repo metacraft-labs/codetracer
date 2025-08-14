@@ -155,8 +155,9 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   of "continue": DapContinueResponse
   of "stepBack": DapStepBackResponse
   of "reverseContinue": DapReverseContinueResponse
-  of "ct/reverseStepIn": CtReverseStepIn
-  of "ct/reverseStepOut": CtReverseStepOut
+  of "ct/reverseStepIn": CtReverseStepInResponse
+  of "ct/reverseStepOut": CtReverseStepOutResponse
+  of "ct/load-asm-function": CtLoadAsmFunctionResponse
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")

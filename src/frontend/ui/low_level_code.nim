@@ -1,4 +1,4 @@
-import ui_imports, ../types, ../ui_helpers, ../renderer
+import ui_imports, ../types, ../ui_helpers, ../renderer, ../communication, ../../common/ct_event
 
 const NO_LINE = -1
 
@@ -83,8 +83,18 @@ proc findHighlight(self: LowLevelCodeComponent, selectedLine: int): int =
 
   return -1
 
-proc getAsmCode(self: LowLevelCodeComponent, location: types.Location) {.async.} =
-  var tabInfo = TabInfo(
+proc loadAsm*(self: LowLevelCodeComponent, location: types.Location) =
+  var functionLocation = FunctionLocation(
+    path: location.path,
+    name: location.functionName,
+    key: location.key,
+    forceReload: location.path.split(".")[^1] == "nr"  # Force reload on move for noir files
+  )
+  self.api.emit(CtLoadAsmFunction, functionLocation)
+
+
+proc getAsmCode(self: LowLevelCodeComponent, location: types.Location) =
+  let tabInfo = TabInfo(
     name: self.editor.name,
     location: location,
     loading: false,
@@ -92,7 +102,13 @@ proc getAsmCode(self: LowLevelCodeComponent, location: types.Location) {.async.}
     lang: LangAsm,
   )
 
-  tabInfo.instructions = await data.services.editor.asmLoad(location)
+  self.partialTabInfo = tabInfo
+  self.location = location
+  self.loadAsm(location)
+
+proc onLoadAsmFunctionResponse(self: LowLevelCodeComponent, instructions: Instructions) =
+  var tabInfo = self.partialTabInfo
+  tabInfo.instructions = instructions
   tabInfo.sourceLines = tabInfo.instructions.instructions.mapIt(formatLine(it))
   tabInfo.source = tabInfo.sourceLines.join(jsNl) & jsNl
   self.editor.tabInfo = tabInfo
@@ -104,7 +120,7 @@ proc getAsmCode(self: LowLevelCodeComponent, location: types.Location) {.async.}
     50
   )
 
-  self.editor.tabInfo.highlightLine = self.findHighlight(location.highLevelLine)
+  self.editor.tabInfo.highlightLine = self.findHighlight(self.location.highLevelLine)
   self.data.redraw()
 
 proc clear(self: LowLevelCodeComponent, location: types.Location) =
@@ -141,19 +157,24 @@ proc clear(self: LowLevelCodeComponent, location: types.Location) =
 
 proc reloadLowLevel*(self: LowLevelCodeComponent) =
   self.clear()
-  discard self.getAsmCode(data.services.debugger.location)
+  self.getAsmCode(data.services.debugger.location)
 
 method onCompleteMove*(self: LowLevelCodeComponent, response: MoveState) {.async.} =
   if response.location.path != "":
     self.clear(response.location)
-    discard self.getAsmCode(response.location)
+    self.getAsmCode(response.location)
+
+method register*(self: LowLevelCodeComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  self.api.subscribe(CtLoadAsmFunctionResponse, proc(kind: CtEventKind, instructions: Instructions, sub: Subscriber) =
+    self.onLoadAsmFunctionResponse(instructions))
 
 method render*(self: LowLevelCodeComponent): VNode =
   if self.editor.renderer.isNil:
     self.editor.renderer = kxiMap[fmt"lowLevelCodeComponent-{self.id}"]
 
   if self.editor.tabInfo.isNil: #  or self.editor.tabInfo.instructions.instructions.len() == 0
-    discard self.getAsmCode(data.services.debugger.location)
+    self.getAsmCode(data.services.debugger.location)
 
   result = buildHtml(
     tdiv(class = componentContainerClass("low-level-code"))

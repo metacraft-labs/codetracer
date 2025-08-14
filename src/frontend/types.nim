@@ -750,6 +750,7 @@ type
     viewDom*: JsAssoc[int, kdom.Node]
     mutationObserver*: MutationObserver
     path*: cstring
+    partialTabInfo*: TabInfo
 
   EditorViewComponent* = ref object of Component
     editorView*:     EditorView
