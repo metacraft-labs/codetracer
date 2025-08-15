@@ -304,13 +304,6 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
 proc loadAsm*(data: ServerData, functionLocation: FunctionLocation): Future[Instructions] {.async.}
 
 
-proc mapAssemblyFunctions(data: ServerData, functions: seq[tuple[name: string, line: int]], functionName: cstring, savedFunctions: JsAssoc[cstring, seq[AssemblyToken]]): Future[JsAssoc[cstring, seq[AssemblyToken]]] {.async.} =
-  var res = savedFunctions
-  let raw = await data.toAsm($functionName)
-  let tokens: seq[AssemblyToken] = @[] #raw.mapIt(assemblyTokenize(it))
-  res[functionName] = tokens
-  return res
-
 proc basename(filename: cstring): cstring =
   var t = ($filename).rsplit("/", 1)[1]
   return j(t)
@@ -723,7 +716,7 @@ proc openTab*(main: js, location: types.Location, lang: Lang, editorView: Editor
 
 proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int): Future[void] {.async.} =
   var source = j""
-  var tokens: seq[seq[Token]] = @[]
+  # var tokens: seq[seq[Token]] = @[]
   var symbols = JsAssoc[cstring, seq[js]]{}
   if location.highLevelPath == j"unknown":
     return

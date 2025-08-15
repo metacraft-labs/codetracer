@@ -216,35 +216,6 @@ proc closeActiveTab*(data: Data) {.locks: 0.} =
 
 proc getBoundingClientRect(s: js): HTMLBoundingRect {.importcpp: "#.getBoundingClientRect()".}
 
-proc assemblyTokenView(token: Token): VNode =
-  buildHtml(td(class = &"token-{($token.kind).toLowerAscii[2..^1]} assembly-token")):
-    text(token.raw)
-
-proc assemblyLineView(
-  self: EditorViewComponent,
-  assemblyToken: AssemblyToken,
-  nextOffset: int,
-  index: int
-): VNode =
-  let location = self.data.services.debugger.location
-  let currentOpcode =
-    if assemblyToken.offset <= location.offset and nextOffset > location.offset:
-      "on"
-    else:
-      ""
-
-  if currentOpcode == "on":
-    scrollAssembly = index
-
-  buildHtml(
-    tr(class = &"low-level-assembly-line {currentOpcode}")
-  ):
-    tdiv(class = "assembly-offset", onclick=proc(ev: Event, v: VNode) =
-           self.data.services.debugger.toggleAssemblyBreakpoint(assemblyToken.address)):
-      text($assemblyToken.offset)
-    for token in assemblyToken.value:
-      assemblyTokenView(token)
-
 proc assemblyRegisterView(state: JsAssoc[cstring, cstring]): VNode =
   buildHtml(table(class = "assembly-registers")):
     for label, value in state:
@@ -254,15 +225,6 @@ proc assemblyRegisterView(state: JsAssoc[cstring, cstring]): VNode =
         td(class = "assembly-register-value"):
           text(value)
 
-proc assemblyFunctionView(self: EditorViewComponent, fn: cstring, tokens: seq[AssemblyToken]): VNode =
-  buildHtml(tdiv):
-    tdiv(class = "assembly-function"):
-      tdiv(class = "assembly-function-name"):
-        text(fn)
-      tdiv(class = "assembly-function-code"):
-        for i, token in tokens:
-          assemblyLineView(self, token, if i < tokens.len - 1: tokens[i + 1].offset else: -1, i)
-    assemblyRegisterView(self.data.services.debugger.registerState)
 
 proc removeClasses(index: int, class: cstring, name: string) =
   let elements = jqall(&"#{name}-{index} .{class}")

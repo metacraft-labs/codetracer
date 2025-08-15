@@ -31,22 +31,6 @@ type
     TkIndent,
     TkWhitespace
 
-  Token* = object
-    kind*: TokenKind
-    tokenName*: cstring
-    raw*: langstring
-    line*: int
-    column*: int
-
-  # support bytecode in general
-  AssemblyToken* = ref object
-    offset*:          int
-    highLevelLine*:   int
-    opcode*:          cstring
-    address*:         cstring
-    value*:           seq[Token]
-    help*:            cstring
-
 const
   TOKEN_TEXTS*: array[Lang, array[TokenText, string]] = [
     # InstanceOpen InstanceClose ArrayOpen ArrayClose SeqOpen SeqClose
