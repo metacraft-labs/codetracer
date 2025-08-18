@@ -53,6 +53,7 @@ type
     # summary,
     # `report-bug`,
     `trace-metadata`, # TODO .hidden?
+    start_backend,
 
 type
   # the following TODOs are for changes in confutils
@@ -478,6 +479,18 @@ type
         name: "test",
         defaultValue: false,
       .}: bool
+    of start_backend:
+      backendKind* {.
+        argument
+        desc: "This is the backend kind - either 'db' or 'rr'"
+      .}: string
+      isStdio* {.
+        name: "stdio",
+        defaultValue: false,
+      .}: bool
+      socketPath* {.
+        name: "socket-path",
+      .}: Option[string]
 
 proc customValidateConfig*(conf: CodetracerConf) =
   case conf.cmd:

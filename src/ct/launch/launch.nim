@@ -182,3 +182,5 @@ proc runInitial*(conf: CodetracerConf) =
         conf.traceMetadataRecent,
         conf.traceMetadataRecentLimit,
         conf.traceMetadataTest)
+    of StartupCommand.start_backend:
+      startBackend(conf.backendKind, conf.isStdio, conf.socketPath)
