@@ -7,10 +7,6 @@
 let fs = require('node:fs');
 let process = require('node:process');
 
-function to_underscore_case(name) {
-    // TODO;
-    return name;
-}
 
 class RustGenerator {
     constructor() {
@@ -18,7 +14,7 @@ class RustGenerator {
     }
 
     toLangFieldName(fieldName) {
-        let rawFieldName = to_underscore_case(fieldName);
+        let rawFieldName = this.to_underscore_case(fieldName);
         if (rawFieldName === 'type') { // TODO: other keywords or rename with serde
             return 'r#type';
         } else {
@@ -26,14 +22,56 @@ class RustGenerator {
         }
     }
 
-    loadType(property, required, propertyName, parentName) {
-        // console.log('loadType ', property);
-        if (!required) {
-            let internalType = this.loadType(property, true, propertyName, parentName);
-            if (internalType === undefined) {
-                return undefined;
+    optionalType(internalType) {
+        if (internalType === undefined) {
+            return undefined;
+        }
+        return `Option<${internalType}>`;
+    }
+
+    to_underscore_case(name) {
+        let parts = [];
+        let lastTokenStart = 0;
+        for (let i = 0; i < name.length; i += 1) {
+            let symbol = name.charAt(i);
+            // based on answers from here: https://stackoverflow.com/a/31415820
+            // ТОDO: fix adapter_iD , aN_sI and similar
+            if (symbol.toUpperCase() === symbol && symbol.toLowerCase() !== symbol) {
+                if (lastTokenStart < i - 1) {
+                    parts.push(name.charAt(lastTokenStart).toLowerCase() + name.slice(lastTokenStart + 1, i));
+                    lastTokenStart = i;
+                }
             }
-            return `Option<${internalType}>`;
+        }
+        if (lastTokenStart < name.length) {
+            parts.push(name.charAt(lastTokenStart).toLowerCase() + name.slice(lastTokenStart + 1));
+        }
+        return parts.join('_');
+    }
+    
+    toTypeName(name) {
+        // console.log('type name : ', name);
+        let tokens = name.split('_');
+        let parts = [];
+        for (let rawToken of tokens) {
+            let token = String(rawToken);
+            parts.push(token.charAt(0).toUpperCase());
+            parts.push(token.slice(1));
+        }
+        // console.log('return ', parts.join(''));
+        return parts.join('');
+    }
+
+    stringType() {
+        return 'String';
+    }
+
+    loadType(property, required, propertyName, parentName) {
+        console.log('loadType required: ', required, ' property: ', property);
+        if (!required) {
+            return this.optionalType(this.loadType(property, true, propertyName, parentName));
+        } else if (typeof property === 'string') {
+            return this.loadType({'type': property}, required, propertyName, parentName);
         } else {
             if (property.type === undefined) {
                 let ref = property['$ref'];
@@ -49,12 +87,21 @@ class RustGenerator {
                 switch (property.type) {
                     case 'integer': return 'i64';
                     case 'number': return 'i64'; // TODO: float? other?
-                    case 'string': return 'String';
+                    case 'string': return this.stringType();
                     case 'boolean': return 'bool';
-                    case 'object' | 'enum': {
-                        let typeName = `${parentName}${propertyName}`;
-                        this.visitTypes(`${parentName}${propertyName}`, property);
+                    case 'object' || 'enum': {
+                        console.log(propertyName, property);
+                        let typeName = this.toTypeName(`${parentName}_${propertyName}`);
+                        if (this.translatesAsObjectMapping(property)) {
+                            return this.generateMapping(property.additionalProperties.type);
+                        } else {
+                            this.visitTypes(typeName, property);
+                        }
                         return typeName;
+                    }
+                    case 'array': {
+                        let itemType = this.loadType(property.items, true, propertyName, parentName);
+                        return `Vec<${itemType}>`;
                     }
                     default: return property.type;
                 }
@@ -82,9 +129,55 @@ class RustGenerator {
             let secondDefinition = definition.allOf[1];
             // console.log('secondDefinition', secondDefinition);
             return this.generateObject(typeName, secondDefinition);
+        } else if (definition.type === 'string') {
+            return this.generateAliasSource(typeName, this.stringType()); // eventually enums in some cases?
         }
         // TODO: allOf: combine fields?
         // or if special casing: composition?
+    }
+
+    generateFieldSource(fieldName, fieldType) {
+        let annotation = '';
+        if (fieldType.startsWith('Option<')) {
+            annotation = '    #[serde(skip_serializing_if = "Option::is_none")]\n';
+        }
+        return `${annotation}    pub ${fieldName}: ${fieldType},`;
+    }
+
+    generateStructSource(typeName, fields) {
+        let fieldSources = [];
+        for (let field of fields) {
+            fieldSources.push(this.generateFieldSource(field.name, field.type));
+        }
+        let fieldsText = fieldSources.join('\n');
+        let derives = `#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]`;
+        return `${derives}\npub struct ${typeName} {\n${fieldsText}\n}\n`;
+    }
+
+    generateMapping(valueDefinition) {
+        let valueTypeSource = '';
+        if (valueDefinition instanceof Array) {
+            if (valueDefinition.length === 2 && valueDefinition[1] === "null") {
+                console.log('in');
+                valueTypeSource = this.optionalType(this.loadType(valueDefinition[0], true, '', ''));
+            } else {
+                console.log('WARNING: this value definition for a object/mapping not supported: ', valueDefinition, '; IGNORING');
+                return undefined;
+            }
+        } else {
+            valueTypeSource = this.loadType(valueDefinition, true, '', '');
+        }
+        return this.generateMappingSource(valueTypeSource);
+    }
+
+    generateMappingSource(valueTypeSource) {
+        // for now assume key is String
+        return `HashMap<String, ${valueTypeSource}>`;
+    }
+
+    generateAliasSource(typeName, otherType) {
+        return `type ${typeName} = ${otherType};\n`;
     }
 
     generateObject(typeName, definition) {
@@ -98,18 +191,29 @@ class RustGenerator {
                 let fieldType = this.loadType(property, required, name, typeName);
                 if (fieldType !== undefined) {
                     let fieldName = this.toLangFieldName(name);
-                    fields.push(`    pub ${fieldName}: ${fieldType},`);
+                    fields.push({name: fieldName, type: fieldType});
                 }
             }
         }
+
         if (this.typeGeneratedForCt(typeName)) {
-            let fieldsText = fields.join('\n');
-            let derives = `#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]`;
-            return `${derives}\npub struct ${typeName} {\n${fieldsText}\n}\n`;
+            if (!this.translatesAsObjectMapping(definition)) {
+                return this.generateStructSource(typeName, fields);
+            } else {
+                return this.generateMapping(definition.additionalProperties.type);
+            }
         } else {
             return undefined;
         }
+    }
+
+    translatesAsObjectMapping(definition) {
+        return definition.additionalProperties !== undefined && 
+            definition.additionalProperties.type !== undefined;
+    }
+
+    generateEnum(typeName, definition) {
+        // TODO
     }
 
     visitTypes(typeName, definition) {
@@ -142,13 +246,13 @@ function run() {
         i += 1;
     }
     let text = generator.toText();
-    console.log(text);
+    // console.log(text);
     let sourceCode = `
-use num_derive::FromPrimitive;
+// use num_derive::FromPrimitive;
 use serde::{Deserialize, Serialize};
-use serde_repr::*;
+// use serde_repr::*;
 
-// use std::collections::HashMap;
+use std::collections::HashMap;
 // use crate::lang::*;
 // use crate::value::{Type, Value};
 
