@@ -36,6 +36,7 @@ mod step_lines_loader;
 mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
+mod types;
 mod value;
 
 /// a custom backend for ruby (maybe others) support
