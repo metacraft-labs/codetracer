@@ -20,6 +20,7 @@ pub mod program_search_tool;
 pub mod step_lines_loader;
 pub mod task;
 pub mod trace_processor;
+pub mod types;
 pub mod tracepoint_interpreter;
 pub mod value;
 
