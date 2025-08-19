@@ -4,6 +4,7 @@ use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serializ
 use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use crate::types::Source;
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
@@ -46,17 +47,6 @@ pub struct LaunchRequestArguments {
     pub typ: Option<String>,
     #[serde(rename = "__sessionId", skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct Source {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(rename = "sourceReference")] // skip_serializing_if = "Option::is_none")]
-    pub source_reference: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -619,6 +609,11 @@ impl DapClient {
                 name: Some("".to_string()),
                 path: Some(path.to_string()),
                 source_reference: None,
+                adapter_data: None,
+                checksums: None,
+                origin: None,
+                presentation_hint: None,
+                sources: None,
             }),
             line: Some(line),
             column: Some(1),

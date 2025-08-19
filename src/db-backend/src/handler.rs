@@ -27,6 +27,7 @@ use crate::task::{
     NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
+use crate::types::Source;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -1389,10 +1390,15 @@ impl Handler {
         dap::StackFrame {
             id: call_record.key.0,
             name: location.function_name,
-            source: Some(dap::Source {
+            source: Some(Source {
                 name: Some("".to_string()),
                 path: Some(location.path),
                 source_reference: None,
+                adapter_data: None,
+                checksums: None,
+                origin: None,
+                presentation_hint: None,
+                sources: None,
             }),
             line: if location.line >= 0 { location.line as usize } else { 0 },
             column: 1,

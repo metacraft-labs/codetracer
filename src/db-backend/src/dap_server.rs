@@ -1,6 +1,6 @@
 use crate::dap::{
     self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, Response, SetBreakpointsArguments,
-    SetBreakpointsResponseBody, Source,
+    SetBreakpointsResponseBody,
 };
 use crate::db::Db;
 use crate::handler::Handler;
@@ -10,6 +10,7 @@ use crate::task::{
     UpdateTableArgs, FunctionLocation,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
+use crate::types::Source;
 use log::{error, info, warn};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -287,6 +288,11 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                                     name: args.source.name.clone(),
                                     path: Some(path.clone()),
                                     source_reference: args.source.source_reference,
+                                    adapter_data: None,
+                                    checksums: None,
+                                    origin: None,
+                                    presentation_hint: None,
+                                    sources: None,
                                 }),
                                 line: Some(line),
                             });
