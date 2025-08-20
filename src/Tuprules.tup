@@ -147,6 +147,10 @@ c %f |> %B macro_sourcemap_%B.json
 # rust
 export RUSTUP_HOME
 
+!rust_cargo_backend_manager = |> \
+  CARGO_TARGET_DIR=/tmp/codetracer/backend_manager_target \
+    cargo build --release && \
+    cp /tmp/codetracer/backend_manager_target/release/backend-manager %o |> %o
 !rust_cargo_db_backend = |> \
   CARGO_TARGET_DIR=/tmp/codetracer/db_backend_target \
     cargo build --release && \
