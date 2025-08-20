@@ -421,28 +421,26 @@ type
   #   command*: cstring
   #   value*: JsObject
 
-var dapSocket*: JsObject
-
-proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
-
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
-  if not dapSocket.isNil:
+  # TODO: send the message
+  # if not dapSocket.isNil:
 
-    let stringified_packet = stringify(response)
+  #   let stringified_packet = stringify(response)
 
-    let len = len(stringified_packet)
+  #   let len = len(stringified_packet)
 
-    let header = &"Content-Length: {len}\r\n\r\n"
+  #   let header = &"Content-Length: {len}\r\n\r\n"
 
-    let message = header & stringified_packet
+  #   let message = header & stringified_packet
 
-    echo "SENDING: ", message
+  #   echo "SENDING: ", message
 
-    dapSocket.write message
-  else:
-    # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
-    # if sending from frontend only after dap socket setup here
-    errorPrint "dap socket is nil, couldn't send ", response.toJs
+  #   dapSocket.write message
+  # else:
+  #   # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
+  #   # if sending from frontend only after dap socket setup here
+  #   errorPrint "dap socket is nil, couldn't send ", response.toJs
+  discard
 
 proc handleFrame(frame: string) =
 
@@ -459,11 +457,11 @@ proc handleFrame(frame: string) =
 
 var dapMessageBuffer = ""
 
-proc setupProxyForDap* =
+proc setupProxyForDap*(socket: JsObject) =
 
   let lineBreakSize = 4
 
-  dapSocket.on(cstring"data", proc(data: cstring) =
+  socket.on(cstring"data", proc(data: cstring) =
     dapMessageBuffer.add $data
 
     while true:
@@ -499,24 +497,6 @@ proc setupProxyForDap* =
       # We sanitize the buffer
       dapMessageBuffer = dapMessageBuffer.substr(frameEnd)
   )
-
-proc dapSocketPathForCallerPid(callerPid: int): cstring =
-  CT_DAP_SOCKET_PATH_BASE & cstring"_" & cstring($callerPid)
-
-proc startAndSetupCoreIPC*() {.async.} =
-  while dapSocket.isNil:
-    let socketPath = dapSocketPathForCallerPid(callerProcessPid)
-    dapSocket = await startSocket(socketPath)
-  setupProxyForDap()
-
-  # while unixClient.isNil or unixSender.isNil:
-  #   if unixClient.isNil:
-  #     unixClient = await startSocket(debugger, CT_CLIENT_SOCKET_PATH & cstring"_" & cstring($callerProcessPid))
-  #   if unixSender.isNil:
-  #     unixSender = await startSocket(debugger, CT_SOCKET_PATH & cstring"_" & cstring($callerProcessPid))
-  #   await wait(500)
-  # setupCoreIPC(debugger)
-
 
 var debugger* = debuggerIPC
 

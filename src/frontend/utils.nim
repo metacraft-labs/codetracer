@@ -1,4 +1,4 @@
-import strutils, strformat, sequtils, async, algorithm, jsffi, jsconsole
+import async, strutils, strformat, sequtils, async, algorithm, jsffi, jsconsole
 import karax, vdom, kdom
 import types, lang, lib
 

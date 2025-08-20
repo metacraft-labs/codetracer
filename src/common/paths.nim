@@ -86,6 +86,7 @@ let
   noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
   wazeroExe* = env.get("CODETRACER_WASM_VM_PATH", linksPath / "bin" / "wazero")
   dbBackendExe* = linksPath / "bin" / "db-backend"
+  backendManagerExe* = linksPath / "bin" / "backend-manager"
   dbBackendRecordExe* = codetracerExeDir / "bin" / "db-backend-record"
   virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
   ctagsExe* = linksPath / "bin" / "ctags"

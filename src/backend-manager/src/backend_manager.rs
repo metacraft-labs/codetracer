@@ -42,6 +42,7 @@ impl BackendManager {
 
         let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
         socket_path.push("codetracer");
+        socket_path.push("backend-manager");
 
         create_dir_all(&socket_path).await?;
 
@@ -141,6 +142,7 @@ impl BackendManager {
     pub async fn start_replay(&mut self, cmd: &str) -> Result<usize, Box<dyn Error>> {
         let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
         socket_path.push("codetracer");
+        socket_path.push("backend-manager");
         socket_path.push(std::process::id().to_string());
 
         create_dir_all(&socket_path).await?;

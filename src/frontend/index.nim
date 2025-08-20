@@ -24,13 +24,18 @@ else:
 data.start = now()
 
 var close = false
-var ctStartCoreProcess: NodeSubProcess = nil
+var backendManagerProcess: NodeSubProcess = nil
+var backendManagerSocket: JsObject = nil
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc loadExistingRecord(traceId: int) {.async.}
 proc prepareForLoadingTrace(traceId: int, pid: int) {.async.}
 proc isCtInstalled(config: Config): bool
 
+proc asyncSleep(ms: int): Future[void] =
+  let future = newPromise() do (resolve: (proc: void)):
+    discard windowSetTimeout(resolve, ms)
+  return future
 
 proc onClose(e: js) =
   if not data.config.isNil and data.config.test:
@@ -686,8 +691,9 @@ proc onCloseApp(sender: js, response: js) {.async.} =
   for (name, file) in files:
     await fsWriteFile(name, file)
 
-  if not ctStartCoreProcess.isNil:
-    ctStartCoreProcess.stopProcess()
+  # TODO: maybe send shutdown message
+  if not backendManagerProcess.isNil:
+    backendManagerProcess.stopProcess()
 
   mainWindow.close()
 
@@ -947,14 +953,8 @@ proc loadExistingRecord(traceId: int) {.async.} =
   if data.trace.compileCommand.len == 0:
     data.trace.compileCommand = data.config.defaultBuild
 
-  debugPrint "index: start ct start_core " & $traceId & " " & $callerProcessPid
-  # var process = child_process.spawn(
-    # codetracerExe.cstring,
-    # TODO: don't hardcode those, use Victor's fields and parseArgs first
-    # @[cstring"start_core", cstring($traceId), cstring($callerProcessPid)])
-
-  debugPrint "index: start and setup core ipc"
-  await startAndSetupCoreIPC()
+  # debugPrint "index: start and setup core ipc"
+  # await startAndSetupCoreIPC()
 
   if not data.trace.isNil:
     debugPrint "index: init debugger"
@@ -985,15 +985,23 @@ proc loadExistingRecord(traceId: int) {.async.} =
     debugPrint "warning: exception when starting instance client:"
     debugPrint "  that's ok, if this was not started from shell-ui!"
 
+proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
+proc wrapJsonForSending(obj: JsObject): cstring =
+    let stringified_packet = stringify(obj)
+    let len = len(stringified_packet)
+    let header = &"Content-Length: {len}\r\n\r\n"
+    let res = header & stringified_packet
+    return res.cstring
+
 proc prepareForLoadingTrace(traceId: int, pid: int) {.async.} =
   callerProcessPid = pid
-  let process = await startProcess(
-    codetracerExe.cstring,
-    @[cstring"start_core", cstring($traceId), cstring($pid)])
-  if process.isOk:
-    ctStartCoreProcess = process.value
-  # keep a reference for later: on close, stop the ct process, which should stop
-  #   the backend process as well
+  # TODO: use type/function for this
+  let packet = wrapJsonForSending js{
+    "type": cstring"request",
+    "command": cstring"codetracer-start-replay"
+  }
+  backendManagerSocket.write(packet)
 
 proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
   callerProcessPid = pid
@@ -1038,7 +1046,7 @@ proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.
     echo "(end of raw output or error)"
     echo "==========="
     quit(1)
-    
+
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await app.findTraceByRecordProcessId(pid)
   await prepareForLoadingTrace(trace.id, pid)
@@ -1390,9 +1398,9 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
 
-  if not data.startOptions.welcomeScreen:
-    debugPrint "index: start and setup core ipc"
-    await startAndSetupCoreIPC()
+  # if not data.startOptions.welcomeScreen:
+    # debugPrint "index: start and setup core ipc"
+    # await startAndSetupCoreIPC()
 
   await started()
 
@@ -1505,6 +1513,21 @@ proc waitForResponseFromInstall: Future[InstallResponse] {.async.} =
 
 
 proc ready {.async.} =
+  let backendManager = await startProcess(backendManagerExe.cstring, @[])
+  if backendManager.isOk:
+    backendManagerProcess = backendManager.value
+
+  let backendManagerSocketPath = getTempDir() / "codetracer" / "backend-manager" / $backendManagerProcess.pid & ".sock"
+
+  await asyncSleep(100)
+  while true:
+    backendManagerSocket = await startSocket(backendManagerSocketPath)
+    if not backendManagerSocket.isNil:
+      break
+    await asyncSleep(1000)
+
+  setupProxyForDap(backendManagerSocket)
+
   # we configure the listeners
   configureIpcMain()
 
