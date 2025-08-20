@@ -71,7 +71,7 @@ proc recordDb(
 
   let startArgs = case lang:
     of LangRubyDb:
-      @[rubyTracerPath, program]
+      @[rubyRecorderPath, "--out-dir", fmt"{traceFolder}", program]
     of LangSmall:
       @[program, "--tracing"]
     of LangRustWasm, LangCppWasm:
@@ -134,6 +134,7 @@ proc recordDb(
         # for other languages, we must start in the real inherited
         # work dir
         getCurrentDir()
+
   let process = startProcess(
     vmExe,
     args = startArgs.concat(args),
@@ -290,7 +291,7 @@ proc exportRecord(
 
   fillTraceDbMetadataFile(outputFolder / "trace_db_metadata.json", traceId)
 
-  # (alexander): 
+  # (alexander):
   #   trying to find full path
   #   a hack: writing first there, otherwise i think expandFilename fails in some cases, when no such file yets
   writeFile(exportZipPath, "")
@@ -393,7 +394,7 @@ proc main*(): Trace =
       if args.len() < i + 2:
         displayHelp()
         return
-      socketPath = args[i + 1] 
+      socketPath = args[i + 1]
       i += 2
     else:
       if program == "":
@@ -503,7 +504,7 @@ proc main*(): Trace =
         trace.rrPid, traceZipFullPath, toCLang(trace.lang))
       # in the past it was `registerRecordingCommand().. with more args
       #   for `ct shell` mode; if needed, this can be restored
-  
+
     putEnv("CODETRACER_RECORDING", "")
 
     let inUiTest = getEnv("CODETRACER_IN_UI_TEST", "") == "1"
