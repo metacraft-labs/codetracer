@@ -270,16 +270,19 @@
         # ```
 
         # TODO: like this or as a flake input?
-        ruby-recorder = stdenv.mkDerivation rec {
-          name = "ruby-recorder";
+        ruby-recorder-pure = stdenv.mkDerivation rec {
+          name = "ruby-recorder-pure";
           pname = name;
 
           inherit src;
 
           buildPhase = ''
 
-            mkdir -p $out/lib
-            cp -Lr ./libs/codetracer-ruby-recorder/src/*.rb $out/lib
+            mkdir -p $out/bin
+
+            cp -Lr \
+            ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
+            $out/bin
 
           '';
         };
@@ -319,7 +322,7 @@
             upstream-nim-codetracer
             noir
             wazero
-            ruby-recorder
+            ruby-recorder-pure
             pkgs.universal-ctags
           ] ++ staticDeps.paths;
 
@@ -343,7 +346,8 @@
             cp -L ${codetracer-electron.out}/src/frontend/subwindow.html $out/
 
             # Ruby
-            cp -Lr ${ruby-recorder}/lib/*.rb $out/src/
+            # cp -Lr ${ruby-recorder-pure.out}/bin/codetracer-pure-ruby-recorder \
+            # $out/bin/
 
             # Nim
             cp -L ${upstream-nim-codetracer.out}/bin/nim $out/bin/upstream-nim

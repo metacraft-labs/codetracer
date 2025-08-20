@@ -17,7 +17,10 @@ include_rules
 : helpers.js |> cp %f %o |> src/helpers.js
 
 # preserve
-: links/trace.rb |> !tup_preserve |> src/trace.rb
+# : links/trace.rb |> !tup_preserve |> src/trace.rb
+
+: links/codetracer-pure-ruby-recorder |> !tup_preserve |> bin/codetracer-pure-ruby-recorder
+
 : links/recorder.rb |> !tup_preserve |> src/recorder.rb
 : links/trace.py |> !tup_preserve |> src/trace.py
 : links/bash |> !tup_preserve |> bin/bash

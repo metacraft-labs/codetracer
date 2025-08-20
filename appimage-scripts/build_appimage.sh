@@ -53,6 +53,9 @@ export RUBYLIB="${HERE}/ruby/lib/ruby/3.3.0:${HERE}/ruby/lib/ruby/3.3.0/x86_64-l
 
 EOF
 
+# ruby recorder
+cp -Lr "${ROOT_PATH}/libs/codetracer-ruby-recorder" "${APP_DIR}/"
+
 CURRENT_NIX_SYSTEM=$(nix eval --impure --raw --expr 'builtins.currentSystem')
 CURRENT_ARCH=$(uname -m)
 
@@ -163,7 +166,8 @@ chmod -R +x "${APP_DIR}/electron"
 
 chmod -R 777 "${APP_DIR}"
 
-cp "${ROOT_PATH}"/libs/codetracer-ruby-recorder/src/*.rb "${APP_DIR}/src/"
+# cp "${ROOT_PATH}"/libs/codetracer-ruby-recorder/src/*.rb "${APP_DIR}/src/"
+
 cp "${ROOT_PATH}/src/helpers.js" "${APP_DIR}/src/helpers.js"
 cp "${ROOT_PATH}/src/helpers.js" "${APP_DIR}/helpers.js"
 
@@ -197,6 +201,7 @@ export HERE=$(dirname "$(readlink -f "${0}")")
 export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
 export LINKS_PATH_DIR=$HERE
 export PATH="${HERE}/bin:${PATH}"
+export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
 
 exec ${HERE}/bin/ct "$@"
 EOF
