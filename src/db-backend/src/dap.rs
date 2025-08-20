@@ -1,10 +1,10 @@
+use crate::dap_types;
 use crate::task::{self};
 use log::{error, info};
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use crate::types::Source;
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
@@ -22,6 +22,8 @@ pub struct Request {
     pub arguments: Value, //RequestArguments,
 }
 
+// using this custom definition, not autogenerating one, because we have custom fields for
+// ct launch request (and to handle manually the rename = "__restart" case)
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchRequestArguments {
@@ -49,52 +51,6 @@ pub struct LaunchRequestArguments {
     pub session_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct Thread {
-    pub id: i64,
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct SourceBreakpoint {
-    pub line: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub column: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct SetBreakpointsArguments {
-    pub source: Source,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub breakpoints: Option<Vec<SourceBreakpoint>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lines: Option<Vec<i64>>,
-    #[serde(rename = "sourceModified", skip_serializing_if = "Option::is_none")]
-    pub source_modified: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct Breakpoint {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<i64>,
-    pub verified: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<Source>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct SetBreakpointsResponseBody {
-    pub breakpoints: Vec<Breakpoint>,
-}
-
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
@@ -113,11 +69,6 @@ pub struct Capabilities {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-pub struct ThreadsResponseBody {
-    pub threads: Vec<Thread>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 // #[serde(deny_unknown_fields)]
 pub struct StackTraceArguments {
     #[serde(rename = "threadId")]
@@ -129,7 +80,7 @@ pub struct StackTraceArguments {
 pub struct StackFrame {
     pub id: i64,
     pub name: String,
-    pub source: Option<Source>,
+    pub source: Option<dap_types::Source>,
     pub line: usize,
     pub column: usize,
     pub end_line: Option<usize>,
@@ -165,7 +116,7 @@ pub struct Scope {
     pub indexed_variables: Option<i64>,
     pub expensive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<Source>,
+    pub source: Option<dap_types::Source>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -392,7 +343,7 @@ pub struct OutputEventBody {
     pub variable_reference: Option<i64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<Source>,
+    pub source: Option<dap_types::Source>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
@@ -442,7 +393,10 @@ impl DapClient {
         Ok(self.request("launch", serde_json::to_value(args)?))
     }
 
-    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn set_breakpoints(
+        &mut self,
+        args: dap_types::SetBreakpointsArguments,
+    ) -> Result<DapMessage, Box<dyn std::error::Error>> {
         Ok(self.request("setBreakpoints", serde_json::to_value(args)?))
     }
 
@@ -605,7 +559,7 @@ impl DapClient {
             output: output.to_string(),
             group: None,
             variable_reference: None,
-            source: Some(Source {
+            source: Some(dap_types::Source {
                 name: Some("".to_string()),
                 path: Some(path.to_string()),
                 source_reference: None,

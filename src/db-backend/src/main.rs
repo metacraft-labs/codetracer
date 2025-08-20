@@ -23,6 +23,7 @@ mod calltrace;
 mod core;
 mod dap;
 mod dap_server;
+mod dap_types;
 mod db;
 mod distinct_vec;
 mod event_db;
@@ -36,7 +37,6 @@ mod step_lines_loader;
 mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
-mod types;
 mod value;
 
 /// a custom backend for ruby (maybe others) support
