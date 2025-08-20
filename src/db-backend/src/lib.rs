@@ -8,6 +8,7 @@ pub mod calltrace;
 pub mod core;
 pub mod dap;
 pub mod dap_server;
+pub mod dap_types;
 pub mod db;
 pub mod distinct_vec;
 pub mod event_db;
@@ -20,7 +21,6 @@ pub mod program_search_tool;
 pub mod step_lines_loader;
 pub mod task;
 pub mod trace_processor;
-pub mod types;
 pub mod tracepoint_interpreter;
 pub mod value;
 

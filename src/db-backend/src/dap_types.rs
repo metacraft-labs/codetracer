@@ -267,15 +267,6 @@ pub struct ConfigurationDoneArguments {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct LaunchRequestArguments {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub no_debug: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub __restart: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct AttachRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub __restart: Option<serde_json::Value>,
