@@ -1,16 +1,13 @@
-use crate::dap::{
-    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, Response, SetBreakpointsArguments,
-    SetBreakpointsResponseBody,
-};
+use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
+use crate::dap_types;
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, LoadHistoryArg, LocalStepJump, Location,
-    ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId,
-    UpdateTableArgs, FunctionLocation,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, FunctionLocation, LoadHistoryArg,
+    LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task,
+    TaskKind, TracepointId, UpdateTableArgs,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
-use crate::types::Source;
 use log::{error, info, warn};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -63,11 +60,7 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(
-    trace_folder: &Path,
-    trace_file: &Path,
-    seq: i64,
-) -> Result<Handler, Box<dyn Error>> {
+fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
@@ -258,7 +251,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "setBreakpoints" => {
                 let mut results = Vec::new();
-                let args = req.load_args::<SetBreakpointsArguments>()?;
+                let args = req.load_args::<dap_types::SetBreakpointsArguments>()?;
                 if let Some(path) = args.source.path.clone() {
                     let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
                         bps.into_iter().map(|b| b.line).collect()
@@ -280,11 +273,11 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                                     id: gen_task_id(TaskKind::AddBreak),
                                 },
                             );
-                            results.push(Breakpoint {
+                            results.push(dap_types::Breakpoint {
                                 id: None,
                                 verified: true,
                                 message: None,
-                                source: Some(Source {
+                                source: Some(dap_types::Source {
                                     name: args.source.name.clone(),
                                     path: Some(path.clone()),
                                     source_reference: args.source.source_reference,
@@ -295,6 +288,12 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                                     sources: None,
                                 }),
                                 line: Some(line),
+                                column: None,
+                                end_line: None,
+                                end_column: None,
+                                instruction_reference: None,
+                                offset: None,
+                                reason: None,
                             });
                         }
                     }
@@ -306,16 +305,22 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                         .map(|b| b.line)
                         .collect::<Vec<_>>();
                     for line in lines {
-                        results.push(Breakpoint {
+                        results.push(dap_types::Breakpoint {
                             id: None,
                             verified: false,
                             message: Some("missing source path".to_string()),
                             source: None,
                             line: Some(line),
+                            column: None,
+                            end_line: None,
+                            end_column: None,
+                            instruction_reference: None,
+                            offset: None,
+                            reason: None,
                         });
                     }
                 }
-                let body = SetBreakpointsResponseBody { breakpoints: results };
+                let body = dap_types::SetBreakpointsResponseBody { breakpoints: results };
                 let resp = DapMessage::Response(Response {
                     base: ProtocolMessage {
                         seq,

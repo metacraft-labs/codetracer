@@ -8,6 +8,10 @@ let fs = require('node:fs');
 let process = require('node:process');
 
 
+const IGNORE_TYPES = {
+    'LaunchRequestArguments': true,
+}
+
 class RustGenerator {
     constructor() {
         this.generatedDefinitions = [];
@@ -115,7 +119,8 @@ class RustGenerator {
         return !typeName.endsWith('Request') &&
             !typeName.endsWith('Response') && 
             !typeName.endsWith('Event') &&
-            typeName !== 'ProtocolMessage';
+            typeName !== 'ProtocolMessage' &&
+            IGNORE_TYPES[typeName] === undefined;
     }
     
     generateType(typeName, definition) {
@@ -258,7 +263,7 @@ use std::collections::HashMap;
 
 ${text}
 `;
-    fs.writeFileSync('src/db-backend/src/types.rs', sourceCode);
+    fs.writeFileSync('src/db-backend/src/dap_types.rs', sourceCode);
 
 }
 
@@ -269,3 +274,8 @@ run();
 //   filtering out `XResponse`, `XEvent` leaving only their body, but keeping maybe `XRequest` fields for `XArgs`
 // 2) fix/support more types
 // 3) try to build actual rust types
+
+// TODO: fix _
+// integrate;
+// schemars;
+// nim?

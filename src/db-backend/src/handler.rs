@@ -16,18 +16,18 @@ use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::program_search_tool::ProgramSearchTool;
 // use crate::response::{};
+use crate::dap_types;
+// use crate::dap_types::Source;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{
-    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
-    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo,
-    FunctionLocation, HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg,
-    LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent,
-    RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
-    Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH,
-    NO_POSITION, NO_STEP_ID,
+    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
+    CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, HistoryResult, HistoryUpdate, Instruction,
+    Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
+    Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
+    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
+    UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
-use crate::types::Source;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -130,7 +130,6 @@ impl Handler {
 
     //TaskKind::LoadLocals
     //TaskResult::LoadLocals(HashMap<..>) -> load-locals
-
 
     // pub fn configure(&mut self, arg: ConfigureArg, task: Task) -> Result<(), Box<dyn Error>> {
     //     self.trace = arg.trace.clone();
@@ -1279,10 +1278,7 @@ impl Handler {
                     instructions,
                     error: "".to_string(),
                 };
-                self.respond_dap(
-                    request,
-                    instructions
-                )?;
+                self.respond_dap(request, instructions)?;
                 Ok(())
             }
             Err(e) => Err(Box::new(e)),
@@ -1390,7 +1386,7 @@ impl Handler {
         dap::StackFrame {
             id: call_record.key.0,
             name: location.function_name,
-            source: Some(Source {
+            source: Some(dap_types::Source {
                 name: Some("".to_string()),
                 path: Some(location.path),
                 source_reference: None,
@@ -1412,8 +1408,8 @@ impl Handler {
     pub fn threads(&mut self, request: dap::Request) -> Result<(), Box<dyn Error>> {
         self.respond_dap(
             request,
-            dap::ThreadsResponseBody {
-                threads: vec![dap::Thread {
+            dap_types::ThreadsResponseBody {
+                threads: vec![dap_types::Thread {
                     id: 1,
                     name: "<thread 1>".to_string(),
                 }],
