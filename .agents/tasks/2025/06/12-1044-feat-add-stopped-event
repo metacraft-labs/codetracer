@@ -178,3 +178,5 @@ error: builder for '/nix/store/zxb6x4wjaa11ajylmmfap514yz4i88qw-node-modules-der
        For full logs, run:
          nix log /nix/store/zxb6x4wjaa11ajylmmfap514yz4i88qw-node-modules-derivation.drv
 error: 1 dependencies of derivation '/nix/store/pxd1m285zqyj8chlm66zmb1yy6y2pz2v-nix-shell-env.drv' failed to build
+--- FOLLOW UP TASK ---
+Change the hash in yarn-project.nix from sha512-pqS9NJAVrEh/CN/7fXqzh7WAKXCH7Da2WX19wGQ4IYHCGrFPe/1ewvaHyAXTtjb/4uOwcFTjHgqgizEAqZabsQ== to sha512-mb3MNaaYGbZ1vAGNlV1R6GG1l/gRsVvJVGQxszzhipb+5qYFurkewFIUXY8sCOhEKXw7vB1pa4CnmY4f2EX5QA==

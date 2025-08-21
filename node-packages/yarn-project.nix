@@ -81,7 +81,7 @@ let
       if stdenv.isAarch64 then
         "sha512-+f3z4zwF2YlzskL7uDwVvQ3Fg0EYJ1HGPEqIGNb2VsiQpXoY2tU+EufqX79YRCOW7lXkuDfMQHYI3XcPioAEvg=="
       else
-        "sha512-pqS9NJAVrEh/CN/7fXqzh7WAKXCH7Da2WX19wGQ4IYHCGrFPe/1ewvaHyAXTtjb/4uOwcFTjHgqgizEAqZabsQ=="
+        "sha512-mb3MNaaYGbZ1vAGNlV1R6GG1l/gRsVvJVGQxszzhipb+5qYFurkewFIUXY8sCOhEKXw7vB1pa4CnmY4f2EX5QA=="
     );
   };
 
