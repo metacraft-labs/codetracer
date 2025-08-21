@@ -37,6 +37,10 @@
           libuv
           ;
 
+        # Provide Electron so build scripts can reuse the prebuilt runtime without
+        # hitting the network during installation.
+        electron = pkgs.electron_33;
+
         chromedriver-102 = pkgs.chromedriver.overrideAttrs (_: {
           version = "102.0.5005.27";
           src = builtins.fetchurl {
@@ -413,11 +417,13 @@
             # pkgs.nodejs-18_x
             pkgs.nodejs_20
             node-modules-derivation
+            pkgs.electron_33
           ];
 
           buildPhase = ''
             echo "Transpiling native helpers"
             ln -sf ${node-modules-derivation.out}/bin/node_modules node_modules
+            ln -sf ${node-modules-derivation.out}/bin/node_modules node-packages/node_modules
 
             stylus=${node-modules-derivation.out}/bin/node_modules/.bin/stylus
             webpack=${node-modules-derivation.out}/bin/node_modules/.bin/webpack
@@ -433,6 +439,12 @@
 
             echo "Packaging frontend using webpack"
             node $webpack
+
+            echo "Building electron application"
+            builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder
+            ELECTRON_OVERRIDE_DIST_PATH=${pkgs.electron_33}/lib/electron \
+              ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+              node $builder --projectDir node-packages --linux dir
           '';
 
           installPhase = ''
@@ -469,6 +481,9 @@
 
             mkdir -p $out/config
             mv src/config/* $out/config/
+
+            # Include electron-builder output
+            cp -r dist/linux-unpacked/* $out/
           '';
         };
 

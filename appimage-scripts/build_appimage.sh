@@ -88,12 +88,32 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv"
 LIBUV=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv.out")
 cp -L "${LIBUV}"/lib/libuv.so.1 "${APP_DIR}"/lib
 
-# Copy over electron
-# bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
-bash "${ROOT_PATH}"/appimage-scripts/install_electron.sh
+# Provide Electron from Nix so yarn/electron-builder operate offline
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron"
+ELECTRON=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron.out")
+export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON}/lib/electron"
 
 # Setup node deps
 bash "${ROOT_PATH}"/appimage-scripts/setup_node_deps.sh
+
+# Build electron runtime using electron-builder
+pushd "${ROOT_PATH}/node-packages"
+echo y | npx yarn >/dev/null
+npx electron-builder --linux dir
+popd
+cp -r "${ROOT_PATH}/node-packages/dist/linux-unpacked" "${APP_DIR}/electron"
+rm -rf "${ROOT_PATH}/node-packages/node_modules"
+cat <<'EOF' > "${APP_DIR}/bin/electron"
+#!/usr/bin/env bash
+
+ELECTRON_DIR=${HERE:-..}/electron
+
+export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
+
+"${ELECTRON_DIR}/codetracer-electron" --no-sandbox "$@"
+EOF
+chmod +x "${APP_DIR}/bin/electron"
 
 # Build our css files
 bash "${ROOT_PATH}"/appimage-scripts/build_css.sh

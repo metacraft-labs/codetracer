@@ -53,6 +53,9 @@ let
     export npm_config_build_from_source=true
     # Disable Nixify plugin to save on some unnecessary processing.
     export yarn_enable_nixify=false
+    # Prevent electron's postinstall script from fetching binaries online; the
+    # build scripts provide a system electron via ELECTRON_OVERRIDE_DIST_PATH.
+    export ELECTRON_SKIP_BINARY_DOWNLOAD=1
   '';
 
   cacheDrv = stdenv.mkDerivation rec {
@@ -78,7 +81,7 @@ let
       if stdenv.isAarch64 then
         "sha512-+f3z4zwF2YlzskL7uDwVvQ3Fg0EYJ1HGPEqIGNb2VsiQpXoY2tU+EufqX79YRCOW7lXkuDfMQHYI3XcPioAEvg=="
       else
-        "sha512-J9t4DyOclFAaz0aTrMjLYet64YnVwY3gfV7F1YYZ4GVsF8JvuSBs4w3U6AZBSWvIq24n7Ccxqt8bpS3Do93mnA=="
+        "sha512-pqS9NJAVrEh/CN/7fXqzh7WAKXCH7Da2WX19wGQ4IYHCGrFPe/1ewvaHyAXTtjb/4uOwcFTjHgqgizEAqZabsQ=="
     );
   };
 

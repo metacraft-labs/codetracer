@@ -25,7 +25,20 @@ echo '##########################################################################
 echo "Build:"
 echo '###############################################################################'
 
+# Provide Electron from Nix so electron-builder doesn't attempt network access
+ROOT_PATH=$(git rev-parse --show-toplevel)
+CURRENT_NIX_SYSTEM=$(nix eval --impure --raw --expr 'builtins.currentSystem')
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron" >/dev/null
+ELECTRON_PATH=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron.out")
+export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON_PATH}/lib/electron"
+
 node_modules/.bin/webpack
+
+pushd node-packages >/dev/null
+npx electron-builder --linux dir
+popd >/dev/null
+ln -sf "$(pwd)/node-packages/dist/linux-unpacked/codetracer-electron" src/links/electron
 
 pushd src
 

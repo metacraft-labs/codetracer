@@ -10,3 +10,14 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
+
+- Build scripts across the project now rely on electron-builder to produce
+  platform-specific Electron binaries. On macOS the builder consumes
+  `resources/CodeTracer.icns` and `Info.plist` for proper branding.
+- Electron builds run from the `node-packages` directory; `package.json`
+  now lists `electron` as a dev dependency and defines a `postinstall` step to
+  ensure native modules match the bundled Electron version.
+- Updating Electron or other dependencies requires regenerating `yarn.lock` and updating `yarn-project.nix` with the new cache hash.
+- Nix-based builds skip Electron's binary download by exporting
+  `ELECTRON_SKIP_BINARY_DOWNLOAD=1` and provide the runtime via
+  `ELECTRON_OVERRIDE_DIST_PATH` pointing at `pkgs.electron_33` for offline builds.
