@@ -433,6 +433,10 @@
 
             echo "Packaging frontend using webpack"
             node $webpack
+
+            echo "Building electron application"
+            builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder
+            node $builder --linux dir
           '';
 
           installPhase = ''
@@ -469,6 +473,9 @@
 
             mkdir -p $out/config
             mv src/config/* $out/config/
+
+            # Include electron-builder output
+            cp -r dist/linux-unpacked/* $out/
           '';
         };
 

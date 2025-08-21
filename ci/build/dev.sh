@@ -27,6 +27,11 @@ echo '##########################################################################
 
 node_modules/.bin/webpack
 
+pushd node-packages >/dev/null
+npx electron-builder --linux dir
+popd >/dev/null
+ln -sf "$(pwd)/node-packages/dist/linux-unpacked/codetracer-electron" src/links/electron
+
 pushd src
 
 # Use tup generate, because FUSE may not be supported on the runners

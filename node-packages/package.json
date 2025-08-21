@@ -107,6 +107,10 @@
       "target": [
         "AppImage"
       ]
+    },
+    "mac": {
+      "icon": "../resources/CodeTracer.icns",
+      "extendInfo": "../resources/Info.plist"
     }
   },
   "packageManager": "yarn@4.5.0"

@@ -10,3 +10,7 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
+
+- Build scripts across the project now rely on electron-builder to produce
+  platform-specific Electron binaries. On macOS the builder consumes
+  `resources/CodeTracer.icns` and `Info.plist` for proper branding.
