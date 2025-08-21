@@ -180,3 +180,85 @@ error: builder for '/nix/store/zxb6x4wjaa11ajylmmfap514yz4i88qw-node-modules-der
 error: 1 dependencies of derivation '/nix/store/pxd1m285zqyj8chlm66zmb1yy6y2pz2v-nix-shell-env.drv' failed to build
 --- FOLLOW UP TASK ---
 Change the hash in yarn-project.nix from sha512-pqS9NJAVrEh/CN/7fXqzh7WAKXCH7Da2WX19wGQ4IYHCGrFPe/1ewvaHyAXTtjb/4uOwcFTjHgqgizEAqZabsQ== to sha512-mb3MNaaYGbZ1vAGNlV1R6GG1l/gRsVvJVGQxszzhipb+5qYFurkewFIUXY8sCOhEKXw7vB1pa4CnmY4f2EX5QA==
+--- FOLLOW UP TASK ---
+During the lint nix CI action I get this error:  __        __   _                            _        
+\ \      / /__| | ___ ___  _ __ ___   ___  | |_ ___  
+ \ \ /\ / / _ \ |/ __/ _ \| '_ ` _ \ / _ \ | __/ _ \ 
+  \ V  V /  __/ | (_| (_) | | | | | |  __/ | || (_) |
+   \_/\_/ \___|_|\___\___/|_| |_| |_|\___|  \__\___/ 
+                                                     
+  ____          _     _____                        
+ / ___|___   __| | __|_   _| __ __ _  ___ ___ _ __ 
+| |   / _ \ / _` |/ _ \| || '__/ _` |/ __/ _ \ '__|
+| |__| (_) | (_| |  __/| || | | (_| | (_|  __/ |   
+ \____\___/ \__,_|\___||_||_|  \__,_|\___\___|_|   
+                                                   
+ evaluating flake...
+checking flake output 'devShells'...
+checking derivation devShells.x86_64-linux.default...
+derivation evaluated to /nix/store/14zgvnvzq8bwk15r891xn3d50sn47hhr-nix-shell.drv
+checking derivation devShells.x86_64-linux.ci...
+derivation evaluated to /nix/store/4vwh5h06pp56az4p7pmymbfk2z660a27-nix-shell.drv
+checking flake output 'checks'...
+checking flake output 'legacyPackages'...
+checking flake output 'formatter'...
+checking flake output 'overlays'...
+checking flake output 'nixosModules'...
+checking flake output 'nixosConfigurations'...
+checking flake output 'packages'...
+checking derivation packages.x86_64-linux.noir...
+derivation evaluated to /nix/store/hln14m98mccim7njqgqwcishpaxsihjb-Noir.drv
+checking derivation packages.x86_64-linux.wazero...
+derivation evaluated to /nix/store/cwi3nqd3m095w599bwkal5gdaiqphb74-wazero.drv
+checking derivation packages.x86_64-linux.default...
+error:
+       … while checking flake output 'packages'
+
+       … while checking the derivation 'packages.x86_64-linux.default'
+
+       … while calling the 'derivationStrict' builtin
+         at <nix/derivation-internal.nix>:37:12:
+           36|
+           37|   strict = derivationStrict drvAttrs;
+             |            ^
+           38|
+
+       (stack trace truncated; use '--show-trace' to show the full, detailed trace)
+
+       error: Package ‘electron-33.4.11’ in /nix/store/drmc93qxnzzk5cp3b03ppkk95zw0fanb-source/pkgs/development/tools/electron/binary/generic.nix:43 is marked as insecure, refusing to evaluate.
+
+
+       Known issues:
+        - Electron version 33.4.11 is EOL
+
+       You can install it anyway by allowing this package, using the
+       following methods:
+
+       a) To temporarily allow all insecure packages, you can use an environment
+          variable for a single invocation of the nix tools:
+
+            $ export NIXPKGS_ALLOW_INSECURE=1
+
+          Note: When using `nix shell`, `nix build`, `nix develop`, etc with a flake,
+                then pass `--impure` in order to allow use of environment variables.
+
+       b) for `nixos-rebuild` you can add ‘electron-33.4.11’ to
+          `nixpkgs.config.permittedInsecurePackages` in the configuration.nix,
+          like so:
+
+            {
+              nixpkgs.config.permittedInsecurePackages = [
+                "electron-33.4.11"
+              ];
+            }
+
+       c) For `nix-env`, `nix-build`, `nix-shell` or any other Nix command you can add
+          ‘electron-33.4.11’ to `permittedInsecurePackages` in
+          ~/.config/nixpkgs/config.nix, like so:
+
+            {
+              permittedInsecurePackages = [
+                "electron-33.4.11"
+              ];
+            }
+Error: Process completed with exit code 1.

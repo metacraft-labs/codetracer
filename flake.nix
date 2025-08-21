@@ -100,7 +100,7 @@
               #       unnecessary after a future `flake update`
               allowBroken = true;
               permittedInsecurePackages = [
-                "electron-24.8.6"
+                "electron-33.4.11"
               ];
             };
           };
@@ -109,7 +109,7 @@
             inherit system;
             config = {
               permittedInsecurePackages = [
-                "electron-24.8.6"
+                "electron-33.4.11"
               ];
             };
           };

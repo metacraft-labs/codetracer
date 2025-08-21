@@ -21,3 +21,5 @@
 - Nix-based builds skip Electron's binary download by exporting
   `ELECTRON_SKIP_BINARY_DOWNLOAD=1` and provide the runtime via
   `ELECTRON_OVERRIDE_DIST_PATH` pointing at `pkgs.electron_33` for offline builds.
+- The flake permits `electron-33.4.11` as an insecure package; update
+  `permittedInsecurePackages` when bumping Electron.
