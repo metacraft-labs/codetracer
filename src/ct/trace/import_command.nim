@@ -1,10 +1,10 @@
-import 
+import
   std / [ options, strformat, strutils, osproc, os ],
   json_serialization, json_serialization / std / tables,
   ../utilities/[ env, zip ],
   ../cli/[ interactive_replay ],
   .. / launch / cleanup,
-  ../../common/[ types, trace_index, start_utils, paths ],
+  ../../common/[ types, trace_index, paths ],
   ../codetracerconf,
   shell,
   run

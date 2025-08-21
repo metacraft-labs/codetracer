@@ -20,6 +20,17 @@ var callerProcessPid*: int = -1
 var indexLogPath*: cstring = cstring""
 var logStream*: NodeWriteStream = nil
 
+var backendManagerSocket*: JsObject = nil
+
+proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
+proc wrapJsonForSending*(obj: JsObject): cstring =
+    let stringified_packet = stringify(obj)
+    let len = len(stringified_packet)
+    let header = &"Content-Length: {len}\r\n\r\n"
+    let res = header.cstring & stringified_packet
+    return res.cstring
+
 template debugIndex*(msg: string, taskId: TaskId = NO_TASK_ID): untyped =
   if indexLogPath.len == 0:
     indexLogPath = ensureLogPath(
@@ -422,25 +433,13 @@ type
   #   value*: JsObject
 
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
-  # TODO: send the message
-  # if not dapSocket.isNil:
-
-  #   let stringified_packet = stringify(response)
-
-  #   let len = len(stringified_packet)
-
-  #   let header = &"Content-Length: {len}\r\n\r\n"
-
-  #   let message = header & stringified_packet
-
-  #   echo "SENDING: ", message
-
-  #   dapSocket.write message
-  # else:
-  #   # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
-  #   # if sending from frontend only after dap socket setup here
-  #   errorPrint "dap socket is nil, couldn't send ", response.toJs
-  discard
+  if not backendManagerSocket.isNil:
+    let txt = wrapJsonForSending(response)
+    backendManagerSocket.write txt
+  else:
+    # TODO: put in a queue, or directly make an error, as it might be made hard to happen,
+    # if sending from frontend only after dap socket setup here
+    errorPrint "backend socket is nil, couldn't send ", response.toJs
 
 proc handleFrame(frame: string) =
 

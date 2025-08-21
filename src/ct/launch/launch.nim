@@ -8,9 +8,9 @@ import
   ../codetracerconf,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
+  backends,
   electron,
   results,
-  backends,
   json_serialization
 
 proc eventuallyWrapElectron*: bool =
@@ -140,8 +140,6 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
-    of StartupCommand.start_core:
-      startCore(conf.coreTraceArg, conf.coreCallerPid, conf.coreInTest)
     of StartupCommand.arb:
       case conf.arbCommand:
       of ArbCommand.noCommand:

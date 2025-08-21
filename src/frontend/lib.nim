@@ -509,18 +509,16 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
   proc startProcess*(
     path: cstring,
     args: seq[cstring],
-    options: JsObject = js{}): Future[Result[NodeSubProcess, JsObject]] =
+    options: JsObject = js{"stdio": cstring"ignore"}): Future[Result[NodeSubProcess, JsObject]] =
+    # important to ignore stderr, as otherwise too much of it can lead to
+    # the spawned process hanging: this is a bugfix for such a situation
+
     let futureHandler = proc(resolve: proc(res: Result[NodeSubProcess, JsObject])) =
       # debugPrint "RUN PROGRAM: ", path
       # debugPrint "WITH ARGS: ", args
       # debugPrint "OPTIONS: ", $(options.to(cstring))
 
-      var processOptions = options
-      # important to ignore stderr, as otherwise too much of it can lead to
-      # the spawned process hanging: this is a bugfix for such a situation
-      processOptions.stdio = cstring"ignore"
-
-      let process = nodeStartProcess.spawn(path, args, processOptions)
+      let process = nodeStartProcess.spawn(path, args, options)
 
       process.toJs.on("spawn", proc() =
         resolve(Result[NodeSubProcess, JsObject].ok(process)))
