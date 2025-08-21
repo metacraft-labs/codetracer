@@ -3,7 +3,7 @@ use crate::dap_types;
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, FunctionLocation, LoadHistoryArg,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, FunctionLocation, LoadHistoryArg,
     LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task,
     TaskKind, TracepointId, UpdateTableArgs,
 };
@@ -150,12 +150,12 @@ fn handle_request<W: Write>(
 ) -> Result<(), Box<dyn Error>> {
     handler.dap_client.seq = *seq;
     match req.command.as_str() {
-        "scopes" => handler.scopes(req.clone(), req.load_args::<dap::ScopeArguments>()?)?,
+        "scopes" => handler.scopes(req.clone(), req.load_args::<dap_types::ScopesArguments>()?)?,
         "threads" => handler.threads(req.clone())?,
-        "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap::StackTraceArguments>()?)?,
-        "variables" => handler.variables(req.clone(), req.load_args::<dap::VariablesArguments>()?)?,
+        "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap_types::StackTraceArguments>()?)?,
+        "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?)?,
         "restart" => handler.run_to_entry(req.clone())?,
-        "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<dap::CtLoadLocalsArguments>()?)?,
+        "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
         "ct/load-terminal" => handler.load_terminal(req.clone())?,
@@ -216,6 +216,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
 
         match msg {
             DapMessage::Request(req) if req.command == "initialize" => {
+                // TODO: process client capabilities
                 let capabilities = Capabilities {
                     supports_loaded_sources_request: Some(false),
                     supports_step_back: Some(true),
@@ -398,7 +399,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
             }
             DapMessage::Request(req) if req.command == "disconnect" => {
                 if let Some(h) = handler.as_mut() {
-                    let args = req.load_args::<dap::DisconnectArguments>()?;
+                    let args = req.load_args::<dap_types::DisconnectArguments>()?;
                     h.dap_client.seq = seq;
                     h.respond_to_disconnect(req, args)?;
                     write_dap_messages(writer, h, &mut seq)?;
