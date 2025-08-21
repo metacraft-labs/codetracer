@@ -4212,7 +4212,7 @@ __metadata:
     datatables.net-scroller: "npm:^1.5.1"
     debug: "npm:^4.1.0"
     ejs: "npm:^3.1.9"
-    electron: "npm:^33.4.11"
+    electron: "npm:33.4.11"
     electron-builder: "npm:^22.14.13"
     electron-debug: "npm:^3.2.0"
     env-paths: "npm:^3.0.0"

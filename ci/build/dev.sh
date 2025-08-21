@@ -33,6 +33,8 @@ ELECTRON_PATH=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.elec
 export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON_PATH}/lib/electron"
 
+yarn install --immutable
+
 node_modules/.bin/webpack
 
 pushd src >/dev/null

@@ -275,3 +275,12 @@ codetracer-electron>   • packaging       platform=linux arch=x64 electron=33.4
 codetracer-electron>   • copying Electron  source=/build/a1mklhdrdvbak9mdbcy3v9w3z46a3zw7-source/node-packages/node_modules/.bin destination=/build/a1mklhdrdvbak9mdbcy3v9w3z46a3zw7-source/node-packages/dist/linux-unpacked
 codetracer-electron>   ⨯ Application entry file "index.js" in the "/build/a1mklhdrdvbak9mdbcy3v9w3z46a3zw7-source/node-packages/dist/linux-unpacked/resources/app.asar" does not exist. Seems like a wrong configuration.  failedTask=build stackTrace=Error: Application entry file "index.js" in the "/build/a1mklhdrdvbak9mdbcy3v9w3z46a3zw7-source/node-packages/dist/linux-unpacked/resources/app.asar" does not exist. Seems like a wrong configuration.
 ...
+
+--- FOLLOW UP TASK ---
+Modify all our build scripts:
+1. Nix(for Linux only)
+1. Appimage(for Linux only)
+1. Non-nix-build(for macOS)
+1. Tup(for Linux only)
+
+so that electron is built using electron-builder. For macOS, make sure that electron builder uses the correct resource files such as the icons for our electron binary

@@ -13,7 +13,7 @@ echo "==========="
 #   node modules and webpack/frontend_bundle.js
 pushd "${ROOT_PATH}/node-packages"
 
-echo y | npx yarn
+yarn install
 
 # Build the Electron entry script so electron-builder has something to package
 nim \

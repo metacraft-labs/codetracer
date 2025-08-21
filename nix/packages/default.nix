@@ -446,9 +446,11 @@
 
             echo "Building electron application"
             builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder
+            pushd node-packages >/dev/null
             ELECTRON_OVERRIDE_DIST_PATH=${pkgs.electron_33}/lib/electron \
               ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
-              node $builder --projectDir node-packages --linux dir
+              node $builder --linux dir
+            popd >/dev/null
           '';
 
           installPhase = ''
