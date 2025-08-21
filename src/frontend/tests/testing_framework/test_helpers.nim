@@ -123,6 +123,7 @@ proc startApp*(programName: string, lang: Lang) {.async.} =
     echo fmt"error: no trace for {programName} and {lang} (for program {path})"
     quit(1)
   let traceId = trace.id
+  # TODO: discuss if this code is still relevant and how to rework it?
   let process = start(cstring(linksPath / "bin" / "codetracer"),
     @[cstring"start_core", cstring(path), cstring($currentProcessPid), cstring"--test"],
     js{cwd: cstring(codetracerInstallDir)})

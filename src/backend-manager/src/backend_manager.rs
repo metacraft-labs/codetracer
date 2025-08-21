@@ -132,7 +132,7 @@ impl BackendManager {
     }
 
     fn check_id(&self, id: usize) -> Result<(), Box<dyn Error>> {
-        if id < self.children.len() || self.children[id].is_none() {
+        if id >= self.children.len() || self.children[id].is_none() {
             return Err(Box::new(InvalidID(id)));
         }
 
@@ -304,14 +304,14 @@ impl BackendManager {
                 let args = msg.get("arguments");
 
                 match req_type {
-                    "codetracer-start-replay" => {
-                        // TODO: add args for startring backend
+                    "ct/start-replay" => {
+                        // TODO: read command and args from message
                         self.start_replay("db-backend").await;
                         // TODO: send response
                         return Ok(());
                     }
 
-                    "codetracer-stop-replay" => {
+                    "ct/stop-replay" => {
                         if args.is_none() {
                             // TODO: return error
                         }
@@ -328,7 +328,7 @@ impl BackendManager {
                         return self.stop_replay(arg as usize).await;
                     }
 
-                    "codetracer-select-replay" => {
+                    "ct/select-replay" => {
                         if args.is_none() {
                             // TODO: return error
                         }

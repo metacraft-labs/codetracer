@@ -25,7 +25,6 @@ data.start = now()
 
 var close = false
 var backendManagerProcess: NodeSubProcess = nil
-var backendManagerSocket: JsObject = nil
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc loadExistingRecord(traceId: int) {.async.}
@@ -985,21 +984,13 @@ proc loadExistingRecord(traceId: int) {.async.} =
     debugPrint "warning: exception when starting instance client:"
     debugPrint "  that's ok, if this was not started from shell-ui!"
 
-proc stringify*(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
-
-proc wrapJsonForSending(obj: JsObject): cstring =
-    let stringified_packet = stringify(obj)
-    let len = len(stringified_packet)
-    let header = &"Content-Length: {len}\r\n\r\n"
-    let res = header & stringified_packet
-    return res.cstring
-
 proc prepareForLoadingTrace(traceId: int, pid: int) {.async.} =
   callerProcessPid = pid
   # TODO: use type/function for this
   let packet = wrapJsonForSending js{
     "type": cstring"request",
-    "command": cstring"codetracer-start-replay"
+    "command": cstring"ct/start-replay",
+    "arguments": [cstring"db-backend"]
   }
   backendManagerSocket.write(packet)
 
@@ -1513,7 +1504,7 @@ proc waitForResponseFromInstall: Future[InstallResponse] {.async.} =
 
 
 proc ready {.async.} =
-  let backendManager = await startProcess(backendManagerExe.cstring, @[])
+  let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
   if backendManager.isOk:
     backendManagerProcess = backendManager.value
 

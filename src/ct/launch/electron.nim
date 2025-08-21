@@ -1,5 +1,5 @@
 import std/[sequtils, os, osproc, strutils, strtabs ],
-  ../../common/[paths, types, path_utils, start_utils],
+  ../../common/[paths, types, path_utils ],
   ../globals,
   cleanup
 
@@ -49,7 +49,6 @@ proc launchElectron*(
 
   if args.len > 0:
     if not trace.isNil:
-      let process = startCoreProcess(traceId=trace.id, recordCore=recordCore, callerPid=getCurrentProcessId(), test=test)
       ensureExists(electronExe)
       let args = @[
           electronIndexPath].
@@ -64,7 +63,6 @@ proc launchElectron*(
         options = {poParentStreams})
       electronPid = processUI.processID
       let electronExitCode = waitForExit(processUI)
-      stopCoreProcess(process, recordCore)
       sleep(100)
 
       return electronExitCode == RESTART_EXIT_CODE

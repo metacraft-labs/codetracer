@@ -1,9 +1,9 @@
-import 
+import
   std / [ options, strformat, strutils, osproc, os ],
   ../utilities/[ env ],
   ../cli/[ interactive_replay ],
   .. / launch / cleanup,
-  ../../common/[ types, trace_index, start_utils, paths ],
+  ../../common/[ types, trace_index, paths ],
   ../codetracerconf,
   shell,
   run
@@ -26,7 +26,7 @@ proc hostCommand*(
     traceArg: string) =
 
   putEnv("NODE_PATH", nodeModulesPath)
-  putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir) 
+  putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir)
   putEnv("LINKS_PATH_DIR", linksPath)
 
   let isSetBackendSocketPort = backendSocketPort.isSome
@@ -72,7 +72,8 @@ proc hostCommand*(
 
   let callerPid = getCurrentProcessId()
   let recordCore = envLoadRecordCore()
-  let coreProcess = startCoreProcess(traceId=traceId, recordCore=recordCore, callerPid=callerPid)
+  # TODO: discuss how to start backend manager
+  # let coreProcess = startCoreProcess(traceId=traceId, recordCore=recordCore, callerPid=callerPid)
   echo "server index ", codetracerExeDir
   var process = startProcess(
     nodeExe,
@@ -96,6 +97,6 @@ proc hostCommand*(
     options={poParentStreams})
   var electronPid = process.processID
   echo "status code:", waitForExit(process)
-  let code = waitForExit(coreProcess)
-  echo "core exit code ", code
-  stopCoreProcess(coreProcess, recordCore)
+  # let code = waitForExit(coreProcess)
+  # echo "core exit code ", code
+  # stopCoreProcess(coreProcess, recordCore)

@@ -46,7 +46,6 @@ type
     electron,
 
     # tail,
-    start_core, # TODO .hidden?
     # host,
     # `import`,
     # `import-db-trace`,
@@ -352,20 +351,6 @@ type
         name: "control-id",
         desc: "the trace control id to delete the online trace"
       .}: string
-    of start_core:
-      coreTraceArg* {.
-        argument
-        desc: "Trace id or program name"
-      .} : string
-      coreCallerPid* {.
-        argument
-        desc: "Unique codetracer instance run pid"
-      .}: int
-      coreInTest* {.
-        name: "test",
-        defaultValue: false
-        desc: "Is it in test mode"
-      .}: bool
     of arb:
       arbitrumRpcUrl* {.
         name: "arbitrum-rpc-url"
