@@ -1388,6 +1388,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
+      await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
 
   # if not data.startOptions.welcomeScreen:
     # debugPrint "index: start and setup core ipc"
