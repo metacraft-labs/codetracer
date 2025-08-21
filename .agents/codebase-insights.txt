@@ -14,3 +14,6 @@
 - Build scripts across the project now rely on electron-builder to produce
   platform-specific Electron binaries. On macOS the builder consumes
   `resources/CodeTracer.icns` and `Info.plist` for proper branding.
+- Electron builds run from the `node-packages` directory; `package.json`
+  now lists `electron` as a dev dependency and defines a `postinstall` step to
+  ensure native modules match the bundled Electron version.

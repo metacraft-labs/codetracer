@@ -418,6 +418,7 @@
           buildPhase = ''
             echo "Transpiling native helpers"
             ln -sf ${node-modules-derivation.out}/bin/node_modules node_modules
+            ln -sf ${node-modules-derivation.out}/bin/node_modules node-packages/node_modules
 
             stylus=${node-modules-derivation.out}/bin/node_modules/.bin/stylus
             webpack=${node-modules-derivation.out}/bin/node_modules/.bin/webpack
@@ -436,7 +437,7 @@
 
             echo "Building electron application"
             builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder
-            node $builder --linux dir
+            node $builder --projectDir node-packages --linux dir
           '';
 
           installPhase = ''
