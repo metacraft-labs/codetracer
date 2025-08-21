@@ -154,3 +154,27 @@ To ensure your native dependencies are always matched electron version, simply a
 See https://github.com/electron-userland/electron-builder/issues/3984#issuecomment-504968246
 Performing cleanup...
 Error: Process completed with exit code 1.
+--- FOLLOW UP TASK ---
+now nix develop fails for almost every build or CI action with this error:
+warning: unable to download 'https://metacraft-private-infrastructure.cachix.org/nix-cache-info': HTTP error 401
+
+         response body:
+
+         Binary cache metacraft-private-infrastructure doesn't exist or you're not authorized to access. Please check the name for typos and/or provide an auth token. Contact support on https://cachix.org if you're stuck!
+building '/nix/store/zxb6x4wjaa11ajylmmfap514yz4i88qw-node-modules-derivation.drv'...
+error: builder for '/nix/store/zxb6x4wjaa11ajylmmfap514yz4i88qw-node-modules-derivation.drv' failed with exit code 1;
+       last 11 log lines:
+       > Running phase: unpackPhase
+       > unpacking source archive /nix/store/n9baalmzwn8hn2avqn63dn8whhpqvhhv-node-packages
+       > source root is node-packages
+       > Running phase: patchPhase
+       > Running phase: updateAutotoolsGnuConfigScriptsPhase
+       > Running phase: configurePhase
+       > ➤ YN0000: · Yarn 4.5.0
+       > ➤ YN0000: ┌ Resolution step
+       > ➤ YN0080: │ electron@npm:^33.4.11: Request to 'https://registry.yarnpkg.com/electron' has been blocked because of your configuration settings
+       > ➤ YN0000: └ Completed in 0s 440ms
+       > ➤ YN0000: · Failed with errors in 0s 469ms
+       For full logs, run:
+         nix log /nix/store/zxb6x4wjaa11ajylmmfap514yz4i88qw-node-modules-derivation.drv
+error: 1 dependencies of derivation '/nix/store/pxd1m285zqyj8chlm66zmb1yy6y2pz2v-nix-shell-env.drv' failed to build
