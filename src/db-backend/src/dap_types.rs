@@ -225,10 +225,12 @@ pub struct StartDebuggingRequestArguments {
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct InitializeRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_iD: Option<String>,
+    #[serde(rename = "clientID")]
+    pub client_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
-    pub adapter_iD: String,
+    #[serde(rename = "adapterID")]
+    pub adapter_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -256,7 +258,8 @@ pub struct InitializeRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supports_start_debugging_request: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub supports_aN_sI_styling: Option<bool>,
+    #[serde(rename = "supportsANSIStyling")]
+    pub supports_ansistyling: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -564,6 +567,7 @@ pub struct SetVariableArguments {
 pub struct SetVariableResponseBody {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variables_reference: Option<i64>,
@@ -658,6 +662,7 @@ pub struct EvaluateArguments {
 pub struct EvaluateResponseBody {
     pub result: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation_hint: Option<VariablePresentationHint>,
@@ -688,6 +693,7 @@ pub struct SetExpressionArguments {
 pub struct SetExpressionResponseBody {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation_hint: Option<VariablePresentationHint>,
@@ -927,7 +933,8 @@ pub struct Capabilities {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub breakpoint_modes: Option<Vec<BreakpointMode>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub supports_aN_sI_styling: Option<bool>,
+    #[serde(rename = "supportsANSIStyling")]
+    pub supports_ansistyling: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -993,6 +1000,7 @@ pub struct ColumnDescriptor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<i64>,
@@ -1079,6 +1087,7 @@ pub struct Variable {
     pub name: String,
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation_hint: Option<VariablePresentationHint>,
@@ -1246,6 +1255,7 @@ pub struct CompletionItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub r#type: Option<CompletionItemType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<i64>,
