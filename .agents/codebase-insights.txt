@@ -23,3 +23,6 @@
   `ELECTRON_OVERRIDE_DIST_PATH` pointing at `pkgs.electron_33` for offline builds.
 - The flake permits `electron-33.4.11` as an insecure package; update
   `permittedInsecurePackages` when bumping Electron.
+- Electron-builder requires the Nim-compiled `index.js` to exist and a local
+  `node_modules` tree; build scripts now generate `index.js` and expose
+  `node_modules` before invoking the packager.

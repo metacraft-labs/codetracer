@@ -35,17 +35,18 @@ export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON_PATH}/lib/electron"
 
 node_modules/.bin/webpack
 
-pushd node-packages >/dev/null
-npx electron-builder --linux dir
-popd >/dev/null
-ln -sf "$(pwd)/node-packages/dist/linux-unpacked/codetracer-electron" src/links/electron
-
-pushd src
-
+pushd src >/dev/null
 # Use tup generate, because FUSE may not be supported on the runners
 TUP_OUTPUT_SCRIPT=tup-generated-build-once.sh
 tup generate --config build-debug/tup.config "$TUP_OUTPUT_SCRIPT"
 ./"$TUP_OUTPUT_SCRIPT"
 rm "$TUP_OUTPUT_SCRIPT"
+popd >/dev/null
 
-popd
+cp index.js node-packages/index.js
+ln -sf "$(pwd)/node_modules" node-packages/node_modules
+
+pushd node-packages >/dev/null
+npx electron-builder --linux dir
+popd >/dev/null
+ln -sf "$(pwd)/node-packages/dist/linux-unpacked/codetracer-electron" src/links/electron

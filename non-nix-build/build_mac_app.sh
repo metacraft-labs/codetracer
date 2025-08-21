@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -e
 
+ROOT_DIR=$(git rev-parse --show-toplevel)
+
 # Ensure icons are available for electron-builder
 iconutil -c icns "$ROOT_DIR/resources/Icon.iconset" --output "$ROOT_DIR/resources/CodeTracer.icns"
 
-# Build the macOS application using electron-builder
+# Install dependencies and build entry script
 pushd "$ROOT_DIR/node-packages" >/dev/null
+echo y | npx yarn >/dev/null
+nim \
+    --hints:on --warnings:off --sourcemap:on \
+    -d:ctIndex -d:chronicles_sinks=json \
+    -d:nodejs --out:index.js ../src/frontend/index.nim
 npx electron-builder --mac dir
 popd >/dev/null
 

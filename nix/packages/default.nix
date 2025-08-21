@@ -418,6 +418,7 @@
             pkgs.nodejs_20
             node-modules-derivation
             pkgs.electron_33
+            indexJavascript
           ];
 
           buildPhase = ''
@@ -439,6 +440,9 @@
 
             echo "Packaging frontend using webpack"
             node $webpack
+
+            echo "Preparing Electron entrypoint"
+            cp -L ${indexJavascript}/bin/index.js node-packages/index.js
 
             echo "Building electron application"
             builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder

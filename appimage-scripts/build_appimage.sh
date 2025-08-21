@@ -99,7 +99,6 @@ bash "${ROOT_PATH}"/appimage-scripts/setup_node_deps.sh
 
 # Build electron runtime using electron-builder
 pushd "${ROOT_PATH}/node-packages"
-echo y | npx yarn >/dev/null
 npx electron-builder --linux dir
 popd
 cp -r "${ROOT_PATH}/node-packages/dist/linux-unpacked" "${APP_DIR}/electron"
