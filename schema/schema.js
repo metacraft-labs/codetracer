@@ -18,11 +18,17 @@ class RustGenerator {
     }
 
     toLangFieldName(fieldName) {
-        let rawFieldName = this.to_underscore_case(fieldName);
+        let [rawFieldName, customChange] = this.to_underscore_case(fieldName);
         if (rawFieldName === 'type') { // TODO: other keywords or rename with serde
-            return 'r#type';
+            return {
+                fieldName: 'r#type',
+                customChange: true
+            };
         } else {
-            return rawFieldName;
+            return {
+                fieldName: rawFieldName,
+                customChange: customChange
+            }; 
         }
     }
 
@@ -33,29 +39,40 @@ class RustGenerator {
         return `Option<${internalType}>`;
     }
 
-    to_underscore_case(name) {
+    to_underscore_case(original) {
         let parts = [];
         let lastTokenStart = 0;
-        for (let i = 0; i < name.length; i += 1) {
-            let symbol = name.charAt(i);
+        let isLastSymbolUpper = false;
+        let customChange = false;
+        for (let i = 0; i < original.length; i += 1) {
+            let symbol = original.charAt(i);
             // based on answers from here: https://stackoverflow.com/a/31415820
             // ТОDO: fix adapter_iD , aN_sI and similar
             if (symbol.toUpperCase() === symbol && symbol.toLowerCase() !== symbol) {
-                if (lastTokenStart < i - 1) {
-                    parts.push(name.charAt(lastTokenStart).toLowerCase() + name.slice(lastTokenStart + 1, i));
-                    lastTokenStart = i;
+                if (!isLastSymbolUpper) { // if the last symbol is also upper, don't start a new token: e.g. keep ANSI one token
+                    if (lastTokenStart < i - 1) {
+                        parts.push(original.charAt(lastTokenStart).toLowerCase() + original.slice(lastTokenStart + 1, i).toLowerCase());
+                        lastTokenStart = i;
+                    }
+                } else {
+                    customChange = true; 
+                    // multiple capital letters => hard to turn back to camel case, 
+                    // signify so generator can hint keeping the original field for serialization
                 }
+                isLastSymbolUpper = true;
+            } else {
+                isLastSymbolUpper = false;
             }
         }
-        if (lastTokenStart < name.length) {
-            parts.push(name.charAt(lastTokenStart).toLowerCase() + name.slice(lastTokenStart + 1));
+        if (lastTokenStart < original.length) {
+            parts.push(original.charAt(lastTokenStart).toLowerCase() + original.slice(lastTokenStart + 1).toLowerCase());
         }
-        return parts.join('_');
+        return [parts.join('_'), customChange];
     }
     
-    toTypeName(name) {
+    toTypeName(original) {
         // console.log('type name : ', name);
-        let tokens = name.split('_');
+        let tokens = original.split('_');
         let parts = [];
         for (let rawToken of tokens) {
             let token = String(rawToken);
@@ -141,18 +158,21 @@ class RustGenerator {
         // or if special casing: composition?
     }
 
-    generateFieldSource(fieldName, fieldType) {
-        let annotation = '';
-        if (fieldType.startsWith('Option<')) {
-            annotation = '    #[serde(skip_serializing_if = "Option::is_none")]\n';
+    generateFieldSource(field) {
+        let annotations = '';
+        if (field.type.startsWith('Option<')) {
+            annotations = '    #[serde(skip_serializing_if = "Option::is_none")]\n';
         }
-        return `${annotation}    pub ${fieldName}: ${fieldType},`;
+        if (field.customChange) {
+            annotations += `    #[serde(rename = "${field.original}")]\n`;
+        }
+        return `${annotations}    pub ${field.name}: ${field.type},`;
     }
 
     generateStructSource(typeName, fields) {
         let fieldSources = [];
         for (let field of fields) {
-            fieldSources.push(this.generateFieldSource(field.name, field.type));
+            fieldSources.push(this.generateFieldSource(field));
         }
         let fieldsText = fieldSources.join('\n');
         let derives = `#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -195,8 +215,8 @@ class RustGenerator {
                 let required = definition.required !== undefined && definition.required.includes(name);
                 let fieldType = this.loadType(property, required, name, typeName);
                 if (fieldType !== undefined) {
-                    let fieldName = this.toLangFieldName(name);
-                    fields.push({name: fieldName, type: fieldType});
+                    let {fieldName, customChange} = this.toLangFieldName(name);
+                    fields.push({name: fieldName, type: fieldType, original: name, customChange: customChange});
                 }
             }
         }
@@ -270,12 +290,5 @@ ${text}
 run();
 
 // TODO: 
-// 1) maybe only produce code for arguments/payloads of requests/responses/events and for other types 
-//   filtering out `XResponse`, `XEvent` leaving only their body, but keeping maybe `XRequest` fields for `XArgs`
-// 2) fix/support more types
-// 3) try to build actual rust types
-
-// TODO: fix _
-// integrate;
 // schemars;
 // nim?
