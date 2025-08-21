@@ -1774,3 +1774,24 @@ impl StepArg {
         }
     }
 }
+
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CtUpdatedTableResponseBody {
+    pub table_update: TableUpdate,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsResponseBody {
+    pub locals: Vec<Variable>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsArguments {
+    pub rr_ticks: i64,
+    pub count_budget: i64,
+    pub min_count_limit: i64,
+}

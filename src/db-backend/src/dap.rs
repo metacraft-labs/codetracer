@@ -51,6 +51,8 @@ pub struct LaunchRequestArguments {
     pub session_id: Option<String>,
 }
 
+// TODO: for now easier to initialize those, but when we start processing client capabilities or in 
+// other case, use dap_types::Capabilities
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
@@ -68,211 +70,27 @@ pub struct Capabilities {
     pub supports_restart_request: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-// #[serde(deny_unknown_fields)]
-pub struct StackTraceArguments {
-    #[serde(rename = "threadId")]
-    pub thread_id: i64,
-}
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct StackFrame {
-    pub id: i64,
-    pub name: String,
-    pub source: Option<dap_types::Source>,
-    pub line: usize,
-    pub column: usize,
-    pub end_line: Option<usize>,
-    pub end_column: Option<usize>,
-    pub instruction_pointer_reference: Option<String>,
-    pub module_id: Option<Value>, // number | string;
-    pub presentation_hint: Option<String>,
-}
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct StackTraceResponseBody {
-    pub stack_frames: Vec<StackFrame>,
-    pub total_frames: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ScopeArguments {
-    pub frame_id: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Scope {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presentation_hint: Option<String>,
-    pub variables_reference: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub named_variables: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub indexed_variables: Option<i64>,
-    pub expensive: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<dap_types::Source>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub column: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub end_line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub end_column: Option<usize>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ScopeResponseBody {
-    pub scopes: Vec<Scope>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CtLoadLocalsResponseBody {
-    pub locals: Vec<task::Variable>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CtUpdatedTableResponseBody {
-    pub table_update: task::TableUpdate,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct VariablesArguments {
-    pub variables_reference: i64,
-
-    // 'indexed' or 'named' or null(None)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    start: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    count: Option<usize>,
-    // TODO: eventually add ValueFormat if we need,
-    // but for now we don't set
-    // `supportsValueFormattingOptions` capability
-    #[serde(skip_serializing_if = "Option::is_none")]
-    format: Option<Value>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CtLoadLocalsArguments {
-    pub rr_ticks: i64,
-    pub count_budget: i64,
-    pub min_count_limit: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Variable {
-    pub name: String,
-
-    pub value: String,
-
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub typ: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presentation_hint: Option<VariablePresentationHint>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub evaluate_name: Option<String>,
-
-    pub variables_reference: i64,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub named_variables: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub indexed_variables: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_reference: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub declaration_location_reference: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value_location_reference: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct VariablePresentationHint {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attributes: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub visibility: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lazy: Option<bool>,
-}
-
-impl Variable {
-    pub fn new(name: &str, value: &str, variables_reference: i64) -> Variable {
-        Variable {
-            name: name.to_string(),
-            value: value.to_string(),
-            variables_reference,
-            typ: None,
-            presentation_hint: None,
-            evaluate_name: None,
-            named_variables: None,
-            indexed_variables: None,
-            memory_reference: None,
-            declaration_location_reference: None,
-            value_location_reference: None,
+pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> dap_types::Variable {
+    dap_types::Variable {
+        name: name.to_string(),
+        value: value.to_string(),
+        variables_reference,
+        r#type: None,
+        presentation_hint: None,
+        evaluate_name: None,
+        named_variables: None,
+        indexed_variables: None,
+        memory_reference: None,
+        declaration_location_reference: None,
+        value_location_reference: None,
         }
-    }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-pub struct VariablesResponseBody {
-    pub variables: Vec<Variable>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DisconnectArguments {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub restart: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub terminate_debuggee: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suspend_debuggee: Option<bool>,
-}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 pub struct DisconnectResponseBody {}
-
-// #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-// #[serde(untagged)]
-// pub enum RequestArguments {
-//     Launch(LaunchRequestArguments),
-//     SetBreakpoints(SetBreakpointsArguments),
-//     StackTrace(StackTraceArguments),
-//     Scope(ScopeArguments),
-//     Variables(VariablesArguments),
-//     CtLoadLocals(CtLoadLocalsArguments),
-//     CtLoadCalltraceSection(task::CalltraceLoadArgs),
-//     Disconnect(DisconnectArguments),
-//     Other(Value),
-// }
-
-// impl Default for RequestArguments {
-//     fn default() -> Self {
-//         RequestArguments::Other(Value::Null)
-//     }
-// }
 
 impl Request {
     pub fn load_args<T: DeserializeOwned>(&self) -> Result<T, Box<dyn std::error::Error>> {
@@ -294,19 +112,6 @@ pub struct Response {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct InitializeResponse {
-    #[serde(flatten)]
-    pub base: ProtocolMessage,
-    pub request_seq: i64,
-    pub success: bool,
-    pub command: String,
-    #[serde(default)]
-    pub message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<Capabilities>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Event {
     #[serde(flatten)]
     pub base: ProtocolMessage,
@@ -315,48 +120,6 @@ pub struct Event {
     pub body: Value,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct StoppedEventBody {
-    pub reason: String,
-    #[serde(rename = "threadId")]
-    pub thread_id: i64,
-    #[serde(rename = "allThreadsStopped")]
-    pub all_threads_stopped: bool,
-    #[serde(rename = "hitBreakpointIds", skip_serializing_if = "Option::is_none")]
-    pub hit_breakpoint_ids: Option<Vec<i64>>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct OutputEventBody {
-    // 'console' | 'important' | 'stdout' | 'stderr' | 'telemetry' | string;
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-
-    pub output: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub group: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variable_reference: Option<i64>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<dap_types::Source>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub column: Option<usize>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub location_reference: Option<i64>,
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
@@ -412,11 +175,14 @@ impl DapClient {
     }
 
     pub fn stopped_event(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {
-        let body = StoppedEventBody {
+        let body = dap_types::StoppedEventBody {
             reason: reason.to_string(),
-            thread_id: 1,
-            all_threads_stopped: true,
+            thread_id: Some(1),
+            all_threads_stopped: Some(true),
             hit_breakpoint_ids: Some(vec![]),
+            description: None,
+            preserve_focus_hint: None,
+            text: None,
         };
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
@@ -502,7 +268,7 @@ impl DapClient {
 
     pub fn updated_table_event(
         &mut self,
-        update: &CtUpdatedTableResponseBody,
+        update: &task::CtUpdatedTableResponseBody,
     ) -> Result<DapMessage, serde_json::Error> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
@@ -554,11 +320,11 @@ impl DapClient {
         line: usize,
         output: &str,
     ) -> Result<DapMessage, serde_json::Error> {
-        let body = OutputEventBody {
+        let body = dap_types::OutputEventBody {
             category: Some(category.to_string()),
             output: output.to_string(),
             group: None,
-            variable_reference: None,
+            variables_reference: None,
             source: Some(dap_types::Source {
                 name: Some("".to_string()),
                 path: Some(path.to_string()),
@@ -569,7 +335,7 @@ impl DapClient {
                 presentation_hint: None,
                 sources: None,
             }),
-            line: Some(line),
+            line: Some(line as i64),
             column: Some(1),
             data: None,
             location_reference: None,

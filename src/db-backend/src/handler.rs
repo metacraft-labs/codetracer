@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
-use crate::dap::{self, CtUpdatedTableResponseBody, DapClient, DapMessage};
+use crate::dap::{self, DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
@@ -27,6 +27,7 @@ use crate::task::{
     SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
+use crate::task;
 use crate::tracepoint_interpreter::TracepointInterpreter;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
@@ -275,7 +276,7 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_locals(&mut self, req: dap::Request, _args: dap::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
+    pub fn load_locals(&mut self, req: dap::Request, _args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
             .map(|v| Variable {
@@ -304,7 +305,7 @@ impl Handler {
         // for now just removing duplicated variables/expressions: even if storing different values
         locals.dedup_by(|a, b| a.expression == b.expression);
 
-        self.respond_dap(req, dap::CtLoadLocalsResponseBody { locals })?;
+        self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
         Ok(())
     }
 
@@ -1198,7 +1199,7 @@ impl Handler {
         // info!("table update {:?}", table_update);
         let raw_event = self
             .dap_client
-            .updated_table_event(&CtUpdatedTableResponseBody { table_update })?;
+            .updated_table_event(&task::CtUpdatedTableResponseBody { table_update })?;
         self.send_dap(&raw_event)?;
         Ok(())
     }
@@ -1361,7 +1362,7 @@ impl Handler {
         Ok(res)
     }
 
-    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> dap::StackFrame {
+    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> dap_types::StackFrame {
         // for this simplified scenario:
         // step 1: call 1
         // step 2: call 1
@@ -1383,7 +1384,7 @@ impl Handler {
         } else {
             call.location
         };
-        dap::StackFrame {
+        dap_types::StackFrame {
             id: call_record.key.0,
             name: location.function_name,
             source: Some(dap_types::Source {
@@ -1396,13 +1397,14 @@ impl Handler {
                 presentation_hint: None,
                 sources: None,
             }),
-            line: if location.line >= 0 { location.line as usize } else { 0 },
+            line: if location.line >= 0 { location.line } else { 0 },
             column: 1,
             end_line: None,
             end_column: None,
             instruction_pointer_reference: None,
             module_id: None,
             presentation_hint: None,
+            can_restart: None,
         }
     }
     pub fn threads(&mut self, request: dap::Request) -> Result<(), Box<dyn Error>> {
@@ -1418,8 +1420,8 @@ impl Handler {
         Ok(())
     }
 
-    pub fn stack_trace(&mut self, request: dap::Request, args: dap::StackTraceArguments) -> Result<(), Box<dyn Error>> {
-        let stack_frames: Vec<dap::StackFrame> = if args.thread_id == 1 {
+    pub fn stack_trace(&mut self, request: dap::Request, args: dap_types::StackTraceArguments) -> Result<(), Box<dyn Error>> {
+        let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
             self.calltrace
                 .load_callstack(self.step_id, &self.db)
                 .iter()
@@ -1431,10 +1433,10 @@ impl Handler {
         } else {
             vec![]
         };
-        let total_frames = stack_frames.len();
+        let total_frames = Some(stack_frames.len() as i64);
         self.respond_dap(
             request,
-            dap::StackTraceResponseBody {
+            dap_types::StackTraceResponseBody {
                 stack_frames,
                 total_frames,
             },
@@ -1442,10 +1444,10 @@ impl Handler {
         Ok(())
     }
 
-    pub fn scopes(&mut self, request: dap::Request, arg: dap::ScopeArguments) -> Result<(), Box<dyn Error>> {
+    pub fn scopes(&mut self, request: dap::Request, arg: dap_types::ScopesArguments) -> Result<(), Box<dyn Error>> {
         let call = &self.db.calls[CallKey(arg.frame_id)];
         let function = &self.db.functions[call.function_id];
-        let scope = dap::Scope {
+        let scope = dap_types::Scope {
             name: function.name.clone(),
             presentation_hint: Some("locals".to_string()),
             variables_reference: arg.frame_id,
@@ -1453,22 +1455,22 @@ impl Handler {
             indexed_variables: Some(0),
             expensive: false,
             source: None,
-            line: Some(function.line.0 as usize),
+            line: Some(function.line.0),
             column: Some(1),
             end_line: None,
             end_column: None,
         };
-        self.respond_dap(request, dap::ScopeResponseBody { scopes: vec![scope] })?;
+        self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![scope] })?;
 
         Ok(())
     }
 
-    pub fn to_dap_variable(&self, ct_variable: &Variable) -> dap::Variable {
+    pub fn to_dap_variable(&self, ct_variable: &Variable) -> dap_types::Variable {
         let dap_value_text = ct_variable.value.text_repr();
-        dap::Variable::new(&ct_variable.expression, &dap_value_text, 0)
+        dap::new_dap_variable(&ct_variable.expression, &dap_value_text, 0)
     }
 
-    pub fn variables(&mut self, request: dap::Request, _arg: dap::VariablesArguments) -> Result<(), Box<dyn Error>> {
+    pub fn variables(&mut self, request: dap::Request, _arg: dap_types::VariablesArguments) -> Result<(), Box<dyn Error>> {
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
             .map(|v| Variable {
@@ -1481,7 +1483,7 @@ impl Handler {
 
         self.respond_dap(
             request,
-            dap::VariablesResponseBody {
+            dap_types::VariablesResponseBody {
                 variables: dap_variables,
             },
         )?;
@@ -1492,7 +1494,7 @@ impl Handler {
     pub fn respond_to_disconnect(
         &mut self,
         request: dap::Request,
-        _arg: dap::DisconnectArguments,
+        _arg: dap_types::DisconnectArguments,
     ) -> Result<(), Box<dyn Error>> {
         self.respond_dap(request, dap::DisconnectResponseBody {})?;
 
@@ -1762,7 +1764,7 @@ mod tests {
 
     fn test_load_locals(handler: &mut Handler) {
         handler
-            .load_locals(dap::Request::default(), dap::CtLoadLocalsArguments::default())
+            .load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default())
             .unwrap();
     }
 
