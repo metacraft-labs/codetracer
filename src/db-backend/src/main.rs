@@ -14,6 +14,7 @@ use chrono::Local;
 use clap::Parser;
 use log::LevelFilter;
 use log::{error, info};
+use schemars;
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
@@ -60,6 +61,15 @@ fn panic_handler(info: &PanicHookInfo) {
 
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
+
+    // TODO: separate in a subcommand or separate script/entrypoint:
+    //   schema generation from ct types
+    // let schema = schemars::schema_for!(task::Definitions);
+    // println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+
+    // std::process::exit(0);    
+
+    // end of schema generation
 
     // env_logger setup based and adapted from
     //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
