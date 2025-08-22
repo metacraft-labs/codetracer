@@ -33,7 +33,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match cli.start {
         Some(cmd) => {
             let mut mgr = mgr.lock().await;
-            mgr.start_replay(&cmd).await?;
+            // TODO: add args to cmd
+            mgr.start_replay(&cmd, &[]).await?;
         }
 
         None => {}

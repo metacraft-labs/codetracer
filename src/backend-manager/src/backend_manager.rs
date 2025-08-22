@@ -1,5 +1,6 @@
 use std::{env, error::Error, fmt::Debug, sync::Arc, time::Duration};
 
+use clap::command;
 use serde_json::Value;
 use tokio::{
     fs::{create_dir_all, remove_file},
@@ -139,7 +140,7 @@ impl BackendManager {
         Ok(())
     }
 
-    pub async fn start_replay(&mut self, cmd: &str) -> Result<usize, Box<dyn Error>> {
+    pub async fn start_replay(&mut self, cmd: &str, args: &[&str]) -> Result<usize, Box<dyn Error>> {
         let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
         socket_path.push("codetracer");
         socket_path.push("backend-manager");
@@ -150,6 +151,8 @@ impl BackendManager {
         socket_path.push(self.children.len().to_string() + ".sock");
 
         let mut cmd = Command::new(cmd);
+        cmd.args(args);
+
         match socket_path.to_str() {
             Some(p) => {
                 cmd.arg(p);
@@ -305,8 +308,48 @@ impl BackendManager {
 
                 match req_type {
                     "ct/start-replay" => {
-                        // TODO: read command and args from message
-                        self.start_replay("db-backend").await;
+                        if args.is_none() {
+                            // TODO: return error
+                        }
+
+                        // SAFETY: The if above ensures safety
+                        let args = unsafe { args.unwrap_unchecked() };
+
+                        if !args.is_array() {
+                            // TODO: return error
+                        }
+
+                        // SAFETY: The if above ensures safety
+                        let args = unsafe { args.as_array().unwrap_unchecked() };
+
+                        if args.is_empty() {
+                            // TODO: return error
+                        }
+
+                        // TODO: return error
+                        let command = unsafe { args.first().unwrap_unchecked() };
+
+                        if !command.is_string() {
+                            // TODO: return error
+                        }
+
+                        let command = unsafe { command.as_str().unwrap_unchecked() };
+
+                        let args = &args[1..];
+
+                        let mut cmd_args = vec![];
+
+                        for arg in args {
+                            if !arg.is_string() {
+                                // TODO: return error
+                            }
+
+                            // SAFETY: The if above ensures safety
+                            let arg = unsafe { arg.as_str().unwrap_unchecked() };
+                            cmd_args.push(arg);
+                        }
+
+                        self.start_replay(command, &cmd_args).await;
                         // TODO: send response
                         return Ok(());
                     }
