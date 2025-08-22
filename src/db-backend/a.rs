@@ -1,5 +1,5 @@
 fn f() {
-    println("{}", 1);
+    println("{}", 5);
 }
 
 fn main() {
