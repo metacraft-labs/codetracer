@@ -29,7 +29,7 @@ mkShell {
       # general dependencies
       git
 
-      # rustup
+      rustup
 
       gcc
       binutils
@@ -45,8 +45,6 @@ mkShell {
 
       ourPkgs.noir
 
-      cargo
-      rustc
       capnproto
 
       # stylus
@@ -171,7 +169,7 @@ mkShell {
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
   shellHook = ''
-    rustup override set 1.87
+    rustup override set 1.88
     rustup target add wasm32-unknown-unknown
 
     # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655

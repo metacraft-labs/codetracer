@@ -34,7 +34,7 @@ echo '##########################################################################
 echo 'Checking backend-manager'
 echo '###############################################################################'
 
-pushd src/backend-mamager
+pushd src/backend-manager
 
 # threat warnings as errors here!
 env RUSTFLAGS="-D warnings" cargo check --release

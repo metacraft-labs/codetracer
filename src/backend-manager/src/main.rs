@@ -30,14 +30,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mgr = BackendManager::new().await?;
 
-    match cli.start {
-        Some(cmd) => {
-            let mut mgr = mgr.lock().await;
-            // TODO: add args to cmd
-            mgr.start_replay(&cmd, &[]).await?;
-        }
-
-        None => {}
+    if let Some(cmd) = cli.start {
+        let mut mgr = mgr.lock().await;
+        // TODO: add args to cmd
+        mgr.start_replay(&cmd, &[]).await?;
     }
 
     tokio::select! {
