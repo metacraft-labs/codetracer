@@ -1,6 +1,5 @@
 use std::{env, error::Error, fmt::Debug, sync::Arc, time::Duration};
 
-use clap::command;
 use serde_json::Value;
 use tokio::{
     fs::{create_dir_all, remove_file},
@@ -68,18 +67,16 @@ impl BackendManager {
                 sleep(Duration::from_millis(10)).await;
 
                 let mut res = res2.lock().await;
-                for rx in &mut res.children_receivers {
-                    if let Some(rx) = rx {
-                        if !rx.is_empty() {
-                            if let Some(message) = rx.recv().await {
-                                let write_res =
-                                    socket_write.write_all(&DapParser::to_bytes(&message)).await;
+                for rx in res.children_receivers.iter_mut().flatten() {
+                    if !rx.is_empty() {
+                        if let Some(message) = rx.recv().await {
+                            let write_res =
+                                socket_write.write_all(&DapParser::to_bytes(&message)).await;
 
-                                match write_res {
-                                    Ok(()) => {}
-                                    Err(err) => {
-                                        error!("Can't write to frontend socket! Error: {}", err);
-                                    }
+                            match write_res {
+                                Ok(()) => {}
+                                Err(err) => {
+                                    error!("Can't write to frontend socket! Error: {err}");
                                 }
                             }
                         }
@@ -101,7 +98,8 @@ impl BackendManager {
                                 Some(Ok(val)) => Some(val),
 
                                 Some(Err(err)) => {
-                                    // TODO: log error
+                                    error!("Invalid DAP message received. Error: {err}");
+
                                     None
                                 }
 
@@ -113,7 +111,7 @@ impl BackendManager {
                                 match res.parse_message(x).await {
                                     Ok(()) => {}
                                     Err(err) => {
-                                        // TODO: log error
+                                        error!("Can't handle DAP message. Error: {err}");
                                     }
                                 }
                                 cnt = 0;
@@ -123,7 +121,7 @@ impl BackendManager {
                         }
                     }
                     Err(err) => {
-                        // TODO: log error
+                        error!("Can't read from frontend socket! Error: {err}");
                     }
                 }
             }
@@ -133,14 +131,17 @@ impl BackendManager {
     }
 
     fn check_id(&self, id: usize) -> Result<(), Box<dyn Error>> {
-        if id >= self.children.len() || self.children[id].is_none() {
-            return Err(Box::new(InvalidID(id)));
+        match self.children.get(id).and_then(|c| c.as_ref()) {
+            Some(_) => Ok(()),
+            None => Err(Box::new(InvalidID(id))),
         }
-
-        Ok(())
     }
 
-    pub async fn start_replay(&mut self, cmd: &str, args: &[&str]) -> Result<usize, Box<dyn Error>> {
+    pub async fn start_replay(
+        &mut self,
+        cmd: &str,
+        args: &[&str],
+    ) -> Result<usize, Box<dyn Error>> {
         let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
         socket_path.push("codetracer");
         socket_path.push("backend-manager");
@@ -170,7 +171,7 @@ impl BackendManager {
         let child = match child {
             Ok(c) => c,
             Err(err) => {
-                error!("Can't start replay: {}", err);
+                error!("Can't start replay: {err}");
                 return Err(Box::new(err));
             }
         };
@@ -193,7 +194,7 @@ impl BackendManager {
                 match write_res {
                     Ok(()) => {}
                     Err(err) => {
-                        error!("Can't send message to replay socket! Error: {}", err);
+                        error!("Can't send message to replay socket! Error: {err}");
                     }
                 }
             }
@@ -211,7 +212,7 @@ impl BackendManager {
                             Some(Ok(val)) => Some(val),
 
                             Some(Err(err)) => {
-                                warn!("Recieved malformed DAP message! Error: {}", err);
+                                warn!("Recieved malformed DAP message! Error: {err}");
                                 None
                             }
 
@@ -221,13 +222,13 @@ impl BackendManager {
                             match child_tx.send(x) {
                                 Ok(()) => {}
                                 Err(err) => {
-                                    error!("Can't send to child channel! Error: {}", err);
+                                    error!("Can't send to child channel! Error: {err}");
                                 }
                             };
                         }
                     }
                     Err(err) => {
-                        error!("Can't read from replay socket! Error: {}", err);
+                        error!("Can't read from replay socket! Error: {err}");
                     }
                 }
             }
@@ -239,19 +240,23 @@ impl BackendManager {
     pub async fn stop_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
         self.check_id(id)?;
 
-        // SAFETY: check_id ensures this is safe
-        let child = unsafe { self.children[id].as_mut().unwrap_unchecked() };
-        _ = child.kill().await?;
+        if let Some(child_opt) = self.children.get_mut(id) {
+            if let Some(child) = child_opt.as_mut() {
+                child.kill().await?;
+            }
+            *child_opt = None;
+        }
 
-        self.children[id] = None;
+        if let Some(rx_opt) = self.children_receivers.get_mut(id) {
+            if let Some(rx) = rx_opt {
+                rx.close();
+            }
+            *rx_opt = None;
+        }
 
-        // SAFETY: check_id ensures this is safe
-        let child_receiver = unsafe { self.children_receivers[id].as_mut().unwrap_unchecked() };
-        child_receiver.close();
-
-        self.children_receivers[id] = None;
-
-        self.parent_senders[id] = None;
+        if let Some(tx_opt) = self.parent_senders.get_mut(id) {
+            *tx_opt = None;
+        }
 
         Ok(())
     }
@@ -265,192 +270,92 @@ impl BackendManager {
     }
 
     async fn parse_message(&mut self, message: Value) -> Result<(), Box<dyn Error>> {
-        if !message.is_object() {
-            // Not a DAP message. Forwarding...
-            return self.message_selected(message).await;
-        }
+        let msg = match message.as_object() {
+            Some(obj) => obj,
+            None => return self.message_selected(message).await,
+        };
 
-        // SAFETY: The if above ensures that message is object
-        let msg = unsafe { message.as_object().unwrap_unchecked().clone() };
-
-        // SAFETY: The statement before the OR ensures safety
-        if !msg.contains_key("type") || !unsafe { msg.get("type").unwrap_unchecked().is_string() } {
-            // Not a DAP message. Forwarding...
-            return self.message_selected(message).await;
-        }
-
-        // SAFETY: The if above ensures that message is type exists and is string
-        let msg_type = unsafe {
-            msg.get("type")
-                .unwrap_unchecked()
-                .as_str()
-                .unwrap_unchecked()
+        let msg_type = match msg.get("type").and_then(Value::as_str) {
+            Some(t) => t,
+            None => return self.message_selected(message).await,
         };
 
         match msg_type {
             "request" => {
-                // SAFETY: The statement before the OR ensures safety
-                if !msg.contains_key("command")
-                    || !unsafe { msg.get("command").unwrap_unchecked().is_string() }
-                {
-                    // Malformed DAP request. Forwarding...
-                    return self.message_selected(message).await;
-                }
-
-                let req_type = unsafe {
-                    msg.get("command")
-                        .unwrap_unchecked()
-                        .as_str()
-                        .unwrap_unchecked()
+                let req_type = match msg.get("command").and_then(Value::as_str) {
+                    Some(c) => c,
+                    None => return self.message_selected(message).await,
                 };
 
                 let args = msg.get("arguments");
 
                 match req_type {
                     "ct/start-replay" => {
-                        if args.is_none() {
-                            // TODO: return error
-                        }
-
-                        // SAFETY: The if above ensures safety
-                        let args = unsafe { args.unwrap_unchecked() };
-
-                        if !args.is_array() {
-                            // TODO: return error
-                        }
-
-                        // SAFETY: The if above ensures safety
-                        let args = unsafe { args.as_array().unwrap_unchecked() };
-
-                        if args.is_empty() {
-                            // TODO: return error
-                        }
-
-                        // TODO: return error
-                        let command = unsafe { args.first().unwrap_unchecked() };
-
-                        if !command.is_string() {
-                            // TODO: return error
-                        }
-
-                        let command = unsafe { command.as_str().unwrap_unchecked() };
-
-                        let args = &args[1..];
-
-                        let mut cmd_args = vec![];
-
-                        for arg in args {
-                            if !arg.is_string() {
-                                // TODO: return error
+                        if let Some(Value::Array(arr)) = args {
+                            if let Some(Value::String(command)) = arr.first() {
+                                let mut cmd_args: Vec<&str> = Vec::new();
+                                for arg in arr.iter().skip(1) {
+                                    if let Some(s) = arg.as_str() {
+                                        cmd_args.push(s);
+                                    } else {
+                                        // TODO: return error
+                                        return Ok(());
+                                    }
+                                }
+                                self.start_replay(command, &cmd_args).await?;
+                                // TODO: send response
+                                return Ok(());
                             }
-
-                            // SAFETY: The if above ensures safety
-                            let arg = unsafe { arg.as_str().unwrap_unchecked() };
-                            cmd_args.push(arg);
                         }
-
-                        self.start_replay(command, &cmd_args).await;
-                        // TODO: send response
-                        return Ok(());
+                        // TODO: return error
+                        Ok(())
                     }
-
                     "ct/stop-replay" => {
-                        if args.is_none() {
-                            // TODO: return error
+                        if let Some(Value::Number(num)) = args {
+                            if let Some(id) = num.as_u64() {
+                                self.stop_replay(id as usize).await?;
+                                return Ok(());
+                            }
                         }
-                        // SAFETY: The if above ensures safety
-                        let args = unsafe { args.unwrap_unchecked() };
-
-                        if !args.is_u64() {
-                            // TODO: return error
-                        }
-
-                        // SAFETY: The if above ensures safety
-                        let arg = unsafe { args.as_u64().unwrap_unchecked() };
-
-                        return self.stop_replay(arg as usize).await;
+                        // TODO: return error
+                        Ok(())
                     }
-
                     "ct/select-replay" => {
-                        if args.is_none() {
-                            // TODO: return error
+                        if let Some(Value::Number(num)) = args {
+                            if let Some(id) = num.as_u64() {
+                                self.select_replay(id as usize)?;
+                                return Ok(());
+                            }
                         }
-                        // SAFETY: The if above ensures safety
-                        let args = unsafe { args.unwrap_unchecked() };
-
-                        if !args.is_u64() {
-                            // TODO: return error
-                        }
-
-                        // SAFETY: The if above ensures safety
-                        let arg = unsafe { args.as_u64().unwrap_unchecked() };
-
-                        return self.select_replay(arg as usize);
+                        // TODO: return error
+                        Ok(())
                     }
-
                     _ => {
-                        if args.is_none() {
-                            // No request arguments. Forwarding...
-                            return self.message_selected(message).await;
+                        if let Some(Value::Object(obj_args)) = args {
+                            if let Some(Value::Number(id)) = obj_args.get("replay-id") {
+                                if let Some(id) = id.as_u64() {
+                                    return self.message(id as usize, message).await;
+                                }
+                            }
                         }
-
-                        // SAFETY: The if above ensures that args is not None
-                        let args = unsafe { args.unwrap_unchecked() };
-
-                        if !args.is_object() {
-                            // Irrelevant args. Forwarding...
-                            return self.message_selected(message).await;
-                        }
-
-                        // SAFETY: The if above ensures that args is an object
-                        let args = unsafe { args.as_object().unwrap_unchecked() };
-
-                        if !args.contains_key("replay-id") {
-                            // Not a request to specific backend. Forwarding...
-                            return self.message_selected(message).await;
-                        }
-
-                        // SAFETY: The if above ensures that replay-id exists
-                        let replay_id = unsafe { args.get("replay-id").unwrap_unchecked() };
-
-                        if !replay_id.is_u64() {
-                            // Expected integer ID. IDK what this is. Forwarding...
-                            return self.message_selected(message).await;
-                        }
-
-                        // SAFETY: The if above ensures that args is u64
-                        let replay_id = unsafe { replay_id.as_u64().unwrap_unchecked() };
-
-                        return self.message(replay_id as usize, message).await;
+                        self.message_selected(message).await
                     }
                 }
             }
-
-            "event" => {
-                // TODO: think of any scenarios, where we will do stuff here. Forward for now.
-                return self.message_selected(message).await;
-            }
-
-            "response" => {
-                // TODO: think of any scenarios, where we will do stuff here. Forward for now.
-                return self.message_selected(message).await;
-            }
-
-            _ => {
-                // Unrecognized DAP message type. Forwarding...
-                return self.message_selected(message).await;
-            }
+            "event" | "response" => self.message_selected(message).await,
+            _ => self.message_selected(message).await,
         }
     }
 
     pub async fn message(&self, id: usize, message: Value) -> Result<(), Box<dyn Error>> {
         self.check_id(id)?;
-
-        // SAFETY: check_id ensures this is safe
-        let parent_sender = unsafe { self.parent_senders[id].as_ref().unwrap_unchecked() };
-        parent_sender.send(message)?;
-
-        Ok(())
+        match self.parent_senders.get(id).and_then(|tx| tx.as_ref()) {
+            Some(sender) => {
+                sender.send(message)?;
+                Ok(())
+            }
+            None => Err(Box::new(InvalidID(id))),
+        }
     }
 
     pub async fn message_selected(&self, message: Value) -> Result<(), Box<dyn Error>> {
