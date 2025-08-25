@@ -74,8 +74,8 @@ popd
 
 mkdir -p ../src/links
 pushd ../src/links
-  [ ! -f trace.rb ]     && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/src/trace.rb" trace.rb
-  [ ! -f recorder.rb ]  && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/src/recorder.rb" recorder.rb
+  [ ! -f codetracer-pure-ruby-recorder ]     && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" codetracer-pure-ruby-recorder
+  # [ ! -f recorder.rb ]  && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/src/recorder.rb" recorder.rb
   [ ! -f trace.py ]     && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-python-recorder/src/trace.py" trace.py
 
   [ ! -f bash ]         && ln -sf "$(readlink -f "$(which bash)")" bash
