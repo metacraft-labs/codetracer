@@ -51,6 +51,9 @@ struct Args {
     /// Use stdio transport for DAP communication instead of a Unix socket.
     #[arg(long)]
     stdio: bool,
+
+    #[arg(long)]
+    generate_schema: bool,
 }
 
 // Already panicking so the unwraps won't change anything
@@ -62,20 +65,11 @@ fn panic_handler(info: &PanicHookInfo) {
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
-    // TODO: separate in a subcommand or separate script/entrypoint:
-    //   schema generation from ct types
-    // let schema = schemars::schema_for!(task::Definitions);
-    // println!("{}", serde_json::to_string_pretty(&schema).unwrap());
-
-    // std::process::exit(0);    
-
-    // end of schema generation
-
     // env_logger setup based and adapted from
     //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
     //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
     // TODO: restore old version or make it compatible with our logging format again
-
+    
     // let run_dir = core.run_dir()?;
     // fs::create_dir_all(&run_dir)?;
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
@@ -101,6 +95,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let cli = Args::parse();
     info!("logging from db-backend");
+
+    // TODO: separate in a subcommand or separate script/entrypoint:
+    //   schema generation from ct types
+    if cli.generate_schema {
+        let schema = schemars::schema_for!(task::Definitions);
+        println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+
+        std::process::exit(0);    
+    }
+    // end of schema generation
 
     info!("pid {:?}", std::process::id());
     // let handle =
