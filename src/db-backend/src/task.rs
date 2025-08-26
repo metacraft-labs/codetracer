@@ -12,12 +12,13 @@ use serde_repr::*;
 
 use crate::lang::*;
 use crate::value::{Type, Value};
-use schemars;
+use schemars::JsonSchema;
 
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
 pub const EVENT_KINDS_COUNT: usize = 14;
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+/// documentation
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CoreTrace {
     pub replay: bool,
@@ -39,13 +40,13 @@ pub struct CoreTrace {
     //   pub base: String
 }
 
-#[derive(schemars::JsonSchema)]
-pub struct Definitions {
-    CoreTrace: CoreTrace,
-    ConfigureArg: ConfigureArg,
-}
+// #[derive(schemars::JsonSchema)]
+// pub struct Definitions {
+//     CoreTrace: CoreTrace,
+//     ConfigureArg: ConfigureArg,
+// }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigureArg {
     pub lang: Lang,
