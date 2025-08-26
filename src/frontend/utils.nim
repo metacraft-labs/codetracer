@@ -436,29 +436,31 @@ proc makeChartComponent*(data:Data): ChartComponent =
     pieLabels: @[],
     pieValues: @[])
 
-proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent, name: cstring, line: int): TraceComponent =
-  let offset =
-    if editorUI.lang == LangAsm:
-      editorUI.tabInfo.instructions.instructions[line - 1].offset
-    else:
-      NO_OFFSET
-  let id = data.services.trace.tracePID
-  data.services.trace.tracePID += 1
+proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: cstring = "", line: int = 0, inExtension: bool = false, traceId: int = 0): TraceComponent = # editorUI: EditorViewComponent, name: cstring,
+  # let offset =
+  #   if editorUI.lang == LangAsm:
+  #     editorUI.tabInfo.instructions.instructions[line - 1].offset
+  #   else:
+  #     NO_OFFSET
+  # let traceId = 0 # data.services.trace.tracePID
+  # data.services.trace.tracePID += 1
+
+  let id = if inExtension: traceId else: data.services.trace.tracePID
 
   result = TraceComponent(
     id: id,
     lineCount: 1,
     resultsHeight: 36,
-    name: name,
+    # name: name,
     line: line,
     tracepoint: Tracepoint(
       tracepointId: id,
       mode: TracInlineCode,
       name: name,
       line: line,
-      offset: offset,
-      lang: editorUI.lang,
-      expression: cstring"",
+      # offset: offset,
+      # lang: editorUI.lang, # TODO: Fix this after extension implementation
+      expression: j"",
       lastRender: 0,
       results: @[],
       tracepointError: ""),
@@ -467,10 +469,15 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent, name: cstrin
     service: data.services.trace,
     editorWidth: 50,
     traceHeight: 210,
+    inExtension: inExtension,
     dataTable: DataTableComponent(rowHeight: 30, inputFieldChange: false))
-  result.chart.setId(data.ui.idMap["chart"])
-  data.ui.idMap["chart"] = data.ui.idMap["chart"] + 1
-  data.ui.editors[name].traces[line] = result
+
+  if not inExtension:
+    result.chart.setId(data.ui.idMap["chart"])
+    data.ui.idMap["chart"] = data.ui.idMap["chart"] + 1
+    data.ui.editors[name].traces[line] = result
+  else:
+    result.chart.setId(id)
   data.registerComponent(result, Content.Trace)
 
 proc makeMenuComponent*(data: Data): MenuComponent =

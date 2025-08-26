@@ -8,6 +8,38 @@ import
 
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
+var tracepointMap: JsAssoc[cstring, JsAssoc[int, Tracepoint]] = Jsassoc[cstring, JsAssoc[int, Tracepoint]]{}
+var sessionCounter = 0
+
+proc getTraceSession(name: cstring = "/home/nedy/calls.rb"): TraceSession =
+  var results = JsAssoc[int, seq[Stop]]{}
+  var tracepoints: seq[Tracepoint] = @[]
+
+  for line, trace in tracepointMap[name]:
+    if trace.expression != "" and trace.isChanged:
+      tracepoints.add(trace)
+
+  result = TraceSession(
+    tracepoints: tracepoints,
+    lastCount: 0,
+    results: results,
+    id: sessionCounter
+  )
+  sessionCounter += 1
+
+  return result
+
+proc updateTraceMap(tracepoint: Tracepoint) =
+  if not tracepointMap.hasKey(tracepoint.name):
+    tracepointMap[tracepoint.name] = JsAssoc[int, Tracepoint]{}
+    tracepointMap[tracepoint.name][tracepoint.line] = tracepoint
+    return
+
+  if not tracepointMap[tracepoint.name].hasKey(tracepoint.line):
+    tracepointMap[tracepoint.name][tracepoint.line] = tracepoint
+    return
+
+  tracepointMap[tracepoint.name][tracepoint.line] = tracepoint
 
 when not defined(ctInExtension):
   import utils
@@ -185,6 +217,19 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(InternalLastCompleteMove, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
     if not lastCompleteMove.isNil:
       viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
+  )
+  viewsApi.subscribe(InternalTraceMapUpdate, proc(kind: CtEventKind, value: Tracepoint, sub: Subscriber) =
+    updateTraceMap(value)
+  )
+  viewsApi.subscribe(CtRunTraceSession, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
+    let traceSession = getTraceSession("/home/nedy/calls.rb".cstring)
+    dapApi.sendCtRequest(
+      CtRunTracepoints,
+      RunTracepointsArg(
+        session: traceSession,
+        stopAfter: NO_LIMIT
+      ).toJs
+    )
   )
 
 when defined(ctInExtension):
