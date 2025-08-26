@@ -1,0 +1,1566 @@
+[
+  {
+    "type": "argsPattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "argsPattern",
+          "named": true
+        },
+        {
+          "type": "bindingVariable",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "recordPattern",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "wildcard",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "binaryOperationExpression",
+    "named": true,
+    "fields": {
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "!=",
+            "named": false
+          },
+          {
+            "type": "%",
+            "named": false
+          },
+          {
+            "type": "&&",
+            "named": false
+          },
+          {
+            "type": "*",
+            "named": false
+          },
+          {
+            "type": "+",
+            "named": false
+          },
+          {
+            "type": "-",
+            "named": false
+          },
+          {
+            "type": "/",
+            "named": false
+          },
+          {
+            "type": "<",
+            "named": false
+          },
+          {
+            "type": "<=",
+            "named": false
+          },
+          {
+            "type": "==",
+            "named": false
+          },
+          {
+            "type": ">",
+            "named": false
+          },
+          {
+            "type": ">=",
+            "named": false
+          },
+          {
+            "type": "and",
+            "named": false
+          },
+          {
+            "type": "or",
+            "named": false
+          },
+          {
+            "type": "||",
+            "named": false
+          },
+          {
+            "type": "и",
+            "named": false
+          },
+          {
+            "type": "или",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "bindingVariable",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "booleanLiteral",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "callExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "codeBlock",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "codeInString",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fieldExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fieldPattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "argsPattern",
+          "named": true
+        },
+        {
+          "type": "bindingVariable",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "recordPattern",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "wildcard",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "forExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ifExpression",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "codeBlock",
+            "named": true
+          }
+        ]
+      },
+      "condition": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "(",
+            "named": false
+          },
+          {
+            "type": ")",
+            "named": false
+          },
+          {
+            "type": "binaryOperationExpression",
+            "named": true
+          },
+          {
+            "type": "booleanLiteral",
+            "named": true
+          },
+          {
+            "type": "callExpression",
+            "named": true
+          },
+          {
+            "type": "fieldExpression",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "forExpression",
+            "named": true
+          },
+          {
+            "type": "ifExpression",
+            "named": true
+          },
+          {
+            "type": "indexExpression",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "interpolatedString",
+            "named": true
+          },
+          {
+            "type": "logExpression",
+            "named": true
+          },
+          {
+            "type": "name",
+            "named": true
+          },
+          {
+            "type": "namespacedName",
+            "named": true
+          },
+          {
+            "type": "patternMatchExpression",
+            "named": true
+          },
+          {
+            "type": "rangeExpression",
+            "named": true
+          },
+          {
+            "type": "unaryOperationExpression",
+            "named": true
+          }
+        ]
+      },
+      "else": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "codeBlock",
+            "named": true
+          },
+          {
+            "type": "ifExpression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "indexExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "interpolatedString",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "codeInString",
+          "named": true
+        },
+        {
+          "type": "rawStringPart",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "logExpression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "name",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "namespacedName",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "patternMatchExpression",
+    "named": true,
+    "fields": {
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "=",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "argsPattern",
+          "named": true
+        },
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "bindingVariable",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "recordPattern",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "wildcard",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "rangeExpression",
+    "named": true,
+    "fields": {
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "..<",
+            "named": false
+          },
+          {
+            "type": "..<=",
+            "named": false
+          },
+          {
+            "type": "..>",
+            "named": false
+          },
+          {
+            "type": "..>=",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "recordPattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "fieldPattern",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "restWildcard",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "string",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "unaryOperationExpression",
+    "named": true,
+    "fields": {
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "!",
+            "named": false
+          },
+          {
+            "type": "-",
+            "named": false
+          },
+          {
+            "type": "not",
+            "named": false
+          },
+          {
+            "type": "не",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "binaryOperationExpression",
+          "named": true
+        },
+        {
+          "type": "booleanLiteral",
+          "named": true
+        },
+        {
+          "type": "callExpression",
+          "named": true
+        },
+        {
+          "type": "fieldExpression",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
+          "type": "forExpression",
+          "named": true
+        },
+        {
+          "type": "ifExpression",
+          "named": true
+        },
+        {
+          "type": "indexExpression",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "interpolatedString",
+          "named": true
+        },
+        {
+          "type": "logExpression",
+          "named": true
+        },
+        {
+          "type": "name",
+          "named": true
+        },
+        {
+          "type": "namespacedName",
+          "named": true
+        },
+        {
+          "type": "patternMatchExpression",
+          "named": true
+        },
+        {
+          "type": "rangeExpression",
+          "named": true
+        },
+        {
+          "type": "unaryOperationExpression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "\n",
+    "named": false
+  },
+  {
+    "type": "!",
+    "named": false
+  },
+  {
+    "type": "!=",
+    "named": false
+  },
+  {
+    "type": "\"",
+    "named": false
+  },
+  {
+    "type": "%",
+    "named": false
+  },
+  {
+    "type": "&&",
+    "named": false
+  },
+  {
+    "type": "(",
+    "named": false
+  },
+  {
+    "type": ")",
+    "named": false
+  },
+  {
+    "type": "*",
+    "named": false
+  },
+  {
+    "type": "+",
+    "named": false
+  },
+  {
+    "type": ",",
+    "named": false
+  },
+  {
+    "type": "-",
+    "named": false
+  },
+  {
+    "type": ".",
+    "named": false
+  },
+  {
+    "type": "..<",
+    "named": false
+  },
+  {
+    "type": "..<=",
+    "named": false
+  },
+  {
+    "type": "..>",
+    "named": false
+  },
+  {
+    "type": "..>=",
+    "named": false
+  },
+  {
+    "type": "/",
+    "named": false
+  },
+  {
+    "type": ":",
+    "named": false
+  },
+  {
+    "type": "::",
+    "named": false
+  },
+  {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": "<=",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": "==",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": ">=",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
+    "named": false
+  },
+  {
+    "type": "and",
+    "named": false
+  },
+  {
+    "type": "else",
+    "named": false
+  },
+  {
+    "type": "false",
+    "named": false
+  },
+  {
+    "type": "float",
+    "named": true
+  },
+  {
+    "type": "for",
+    "named": false
+  },
+  {
+    "type": "if",
+    "named": false
+  },
+  {
+    "type": "in",
+    "named": false
+  },
+  {
+    "type": "integer",
+    "named": true
+  },
+  {
+    "type": "let",
+    "named": false
+  },
+  {
+    "type": "log",
+    "named": false
+  },
+  {
+    "type": "not",
+    "named": false
+  },
+  {
+    "type": "or",
+    "named": false
+  },
+  {
+    "type": "rawStringPart",
+    "named": true
+  },
+  {
+    "type": "restWildcard",
+    "named": true
+  },
+  {
+    "type": "true",
+    "named": false
+  },
+  {
+    "type": "wildcard",
+    "named": true
+  },
+  {
+    "type": "{",
+    "named": false
+  },
+  {
+    "type": "||",
+    "named": false
+  },
+  {
+    "type": "}",
+    "named": false
+  },
+  {
+    "type": "~",
+    "named": false
+  },
+  {
+    "type": "ако",
+    "named": false
+  },
+  {
+    "type": "в",
+    "named": false
+  },
+  {
+    "type": "за",
+    "named": false
+  },
+  {
+    "type": "и",
+    "named": false
+  },
+  {
+    "type": "или",
+    "named": false
+  },
+  {
+    "type": "иначе",
+    "named": false
+  },
+  {
+    "type": "не",
+    "named": false
+  },
+  {
+    "type": "покажи",
+    "named": false
+  }
+]

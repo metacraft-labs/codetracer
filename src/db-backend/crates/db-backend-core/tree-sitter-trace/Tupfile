@@ -1,0 +1,4 @@
+include_rules
+
+# TODO: make tup build work
+#: grammar.js |> tree-sitter generate |>   src/grammar.json src/parser.c src/node-types.json src/tree_sitter/alloc.h src/tree_sitter/array.h src/tree_sitter/parser.h
