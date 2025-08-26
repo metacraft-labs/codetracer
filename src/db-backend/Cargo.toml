@@ -35,7 +35,8 @@ tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
 expanduser = "1.2.2"
-schemars = "1.0.4"
+schemars = "0.8.2"
+schemars-zod = "0.1.5"
 
 [lib]
 name = "db_backend"

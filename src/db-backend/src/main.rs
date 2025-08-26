@@ -14,7 +14,8 @@ use chrono::Local;
 use clap::Parser;
 use log::LevelFilter;
 use log::{error, info};
-use schemars;
+use schemars::schema_for;
+use schemars_zod::merge_schemas;
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
@@ -96,10 +97,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Args::parse();
     info!("logging from db-backend");
 
-    // TODO: separate in a subcommand or separate script/entrypoint:
-    //   schema generation from ct types
     if cli.generate_schema {
-        let schema = schemars::schema_for!(task::Definitions);
+        let mut schema = merge_schemas(
+            vec![
+                schema_for!(task::CoreTrace),
+                schema_for!(task::ConfigureArg)
+            ].into_iter(),
+        );
+        // copied from DAP json schema
+        schema.meta_schema = Some("http://json-schema.org/draft-04/schema#".to_string());
+        // "ct types";
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
 
         std::process::exit(0);    
