@@ -1,5 +1,6 @@
-import std/[ os, osproc, strutils, strformat, sequtils, json, oids ],
+import std/[ os, osproc, strutils, strformat, sequtils, json ],
   json_serialization,
+  uuid4,
   ../common/[ lang, paths, types, trace_index ],
   utilities/[ env, language_detection, zip ],
   cli/[ logging, help ],
@@ -490,8 +491,8 @@ proc main*(): Trace =
     if isExported:
       # args override env vars, which exportFolder comes from
       if not isExportedWithArg and exportFolder.len > 0:
-        let oid = $genOid()
-        exportZipPath = exportFolder / fmt"trace-{oid}.zip"
+        let uuid = $uuid4()
+        exportZipPath = exportFolder / fmt"trace-{uuid}.zip"
         createDir(exportFolder)
       exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
 
