@@ -75,3 +75,6 @@
 [submodule "libs/jsony"]
 	path = libs/jsony
 	url = git@github.com:treeform/jsony.git
+[submodule "libs/nim-uuid4"]
+	path = libs/nim-uuid4
+	url = https://github.com/vtbassmatt/nim-uuid4.git
