@@ -51,7 +51,7 @@ pub struct LaunchRequestArguments {
     pub session_id: Option<String>,
 }
 
-// TODO: for now easier to initialize those, but when we start processing client capabilities or in 
+// TODO: for now easier to initialize those, but when we start processing client capabilities or in
 // other case, use dap_types::Capabilities
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(deny_unknown_fields)]
@@ -70,8 +70,6 @@ pub struct Capabilities {
     pub supports_restart_request: Option<bool>,
 }
 
-
-
 pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> dap_types::Variable {
     dap_types::Variable {
         name: name.to_string(),
@@ -85,9 +83,8 @@ pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> da
         memory_reference: None,
         declaration_location_reference: None,
         value_location_reference: None,
-        }
+    }
 }
-
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 pub struct DisconnectResponseBody {}
@@ -119,7 +116,6 @@ pub struct Event {
     #[serde(default)]
     pub body: Value,
 }
-
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]

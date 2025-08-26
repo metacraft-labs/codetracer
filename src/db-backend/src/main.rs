@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
     //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
     // TODO: restore old version or make it compatible with our logging format again
-    
+
     // let run_dir = core.run_dir()?;
     // fs::create_dir_all(&run_dir)?;
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
@@ -98,18 +98,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     if cli.generate_schema {
-        let mut schema = merge_schemas(
-            vec![
-                schema_for!(task::CoreTrace),
-                schema_for!(task::ConfigureArg)
-            ].into_iter(),
-        );
+        let mut schema = merge_schemas(vec![schema_for!(task::CoreTrace), schema_for!(task::ConfigureArg)].into_iter());
         // copied from DAP json schema
         schema.meta_schema = Some("http://json-schema.org/draft-04/schema#".to_string());
-        // "ct types";
-        println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+        // description: "ct types";?
 
-        std::process::exit(0);    
+        #[allow(clippy::unwrap_used)]
+        let json_text = serde_json::to_string_pretty(&schema)?;
+        println!("{}", json_text);
+
+        std::process::exit(0);
     }
     // end of schema generation
 
