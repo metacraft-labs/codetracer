@@ -1,4 +1,5 @@
-use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, StackTraceArguments};
+use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
+use db_backend::dap_types::StackTraceArguments;
 use serde_json::json;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -103,7 +104,13 @@ fn test_backend_dap_server_stdio() {
 
     let stack_trace_request = client.request(
         "stackTrace",
-        serde_json::to_value(StackTraceArguments { thread_id: 1 }).unwrap(),
+        serde_json::to_value(StackTraceArguments {
+            thread_id: 1,
+            format: None,
+            levels: None,
+            start_frame: None,
+        })
+        .unwrap(),
     );
     dap::write_message(&mut writer, &stack_trace_request).unwrap();
     let msg_stack_trace = dap::from_reader(&mut reader).unwrap();
