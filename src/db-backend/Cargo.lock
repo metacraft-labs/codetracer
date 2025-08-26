@@ -318,7 +318,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "db-backend-wasm-worker"
+name = "db-backend-wasm"
 version = "0.1.0"
 dependencies = [
  "serde",
