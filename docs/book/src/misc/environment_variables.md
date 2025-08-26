@@ -10,7 +10,7 @@ for many of the flags, we expect "1" to enable them
 1. `CODETRACER_RECORD_CORE` - this does nothing as it is only related to the unreleased system backend
 1. `CODETRACER_SHELL_SOCKET` - this sets the socket path for sending events to the CI integration from `ct record`(or eventually `ct shell`)
 1. `CODETRACER_SHELL_ADDRESS` - this sets the address for sending events to the CI integration from `ct record`(or eventually `ct shell`)
-1. `CODETRACER_SHELL_EXPORT` - this enables export mode for `ct record` on: exporting the traces into zip files in the folder that is the value of this env variables; (similarly to the `ct record -e=<zippath>` option, but for all records while the variable is enabled)
+1. `CODETRACER_SHELL_EXPORT` - this enables export mode for `ct record` on: exporting the traces into zip files in the folder that is the value of this env variables; (similarly to the `ct record -e=<zippath>` option, but for all records while the variable is enabled). The trace archives try to use a globally unique id in their filenames, from `std/oids` in the nim stdlib: https://nim-lang.org/docs/oids.html
 1. `CODETRACER_DEBUG_CURL` - if "1", print debug output for the raw objects sent with curl for the CI integration from `ct record`(or eventually `ct shell`)
 
 ## CodeTracer Shell
