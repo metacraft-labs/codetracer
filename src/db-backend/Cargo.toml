@@ -1,9 +1,13 @@
-[package]
-name = "db-backend"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+  "crates/db-backend-core",         # your main app
+  "crates/wasm", # your wasm crate
+]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# Only these build when you run `cargo build` at the root:
+default-members = [
+  "crates/db-backend-core"
+]
 
 [build-dependencies]
 cc="*"
