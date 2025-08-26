@@ -12,31 +12,9 @@ const IGNORE_TYPES = {
     'LaunchRequestArguments': true,
 }
 
-class RustGenerator {
+class Generator {
     constructor() {
         this.generatedDefinitions = [];
-    }
-
-    toLangFieldName(fieldName) {
-        let [rawFieldName, customChange] = this.to_underscore_case(fieldName);
-        if (rawFieldName === 'type') { // TODO: other keywords or rename with serde
-            return {
-                fieldName: 'r#type',
-                customChange: true
-            };
-        } else {
-            return {
-                fieldName: rawFieldName,
-                customChange: customChange
-            }; 
-        }
-    }
-
-    optionalType(internalType) {
-        if (internalType === undefined) {
-            return undefined;
-        }
-        return `Option<${internalType}>`;
     }
 
     to_underscore_case(original) {
@@ -70,7 +48,7 @@ class RustGenerator {
         return [parts.join('_'), customChange];
     }
     
-    toTypeName(original) {
+    toPascalCase(original) {
         // console.log('type name : ', name);
         let tokens = original.split('_');
         let parts = [];
@@ -81,10 +59,6 @@ class RustGenerator {
         }
         // console.log('return ', parts.join(''));
         return parts.join('');
-    }
-
-    stringType() {
-        return 'String';
     }
 
     loadType(property, required, propertyName, parentName) {
@@ -122,12 +96,12 @@ class RustGenerator {
                     }
                     case 'array': {
                         let itemType = this.loadType(property.items, true, propertyName, parentName);
-                        return `Vec<${itemType}>`;
+                        return this.arrayType(itemType);
                     }
                     default: return property.type;
                 }
             } else {
-                return 'serde_json::Value'; // serde_json::Value : acting as a dynamic-like JSON any value
+                return this.jsonValueType();
             }
         }
     }
@@ -156,28 +130,6 @@ class RustGenerator {
         }
         // TODO: allOf: combine fields?
         // or if special casing: composition?
-    }
-
-    generateFieldSource(field) {
-        let annotations = '';
-        if (field.type.startsWith('Option<')) {
-            annotations = '    #[serde(skip_serializing_if = "Option::is_none")]\n';
-        }
-        if (field.customChange) {
-            annotations += `    #[serde(rename = "${field.original}")]\n`;
-        }
-        return `${annotations}    pub ${field.name}: ${field.type},`;
-    }
-
-    generateStructSource(typeName, fields) {
-        let fieldSources = [];
-        for (let field of fields) {
-            fieldSources.push(this.generateFieldSource(field));
-        }
-        let fieldsText = fieldSources.join('\n');
-        let derives = `#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]`;
-        return `${derives}\npub struct ${typeName} {\n${fieldsText}\n}\n`;
     }
 
     generateMapping(valueDefinition) {
@@ -249,15 +201,100 @@ class RustGenerator {
     }
 
     toText() {
-        return this.generatedDefinitions.join('\n');
+        let headers = this.headers();
+        let definitions = this.generatedDefinitions.join('\n');
+        let sourceCode = `${headers}\n${definitions}\n`;
+        return sourceCode;
     }
 }
 
+class RustGenerator extends Generator {
+    toTypeName(original) {
+        return this.toPascalCase(original);
+    }
+
+    toLangFieldName(fieldName) {
+        let [rawFieldName, customChange] = this.to_underscore_case(fieldName);
+        if (rawFieldName === 'type') { // TODO: other keywords or rename with serde
+            return {
+                fieldName: 'r#type',
+                customChange: true
+            };
+        } else {
+            return {
+                fieldName: rawFieldName,
+                customChange: customChange
+            }; 
+        }
+    }
+
+    optionalType(internalType) {
+        if (internalType === undefined) {
+            return undefined;
+        }
+        return `Option<${internalType}>`;
+    }
+
+    stringType() {
+        return 'String';
+    }
+
+    arrayType(itemType) {
+        return `Vec<${itemType}>`;
+    }
+
+    jsonValueType() {
+        return 'serde_json::Value'; // serde_json::Value : acting as a dynamic-like JSON any value
+    }
+
+    generateFieldSource(field) {
+        let annotations = '';
+        if (field.type.startsWith('Option<')) {
+            annotations = '    #[serde(skip_serializing_if = "Option::is_none")]\n';
+        }
+        if (field.customChange) {
+            annotations += `    #[serde(rename = "${field.original}")]\n`;
+        }
+        return `${annotations}    pub ${field.name}: ${field.type},`;
+    }
+
+    generateStructSource(typeName, fields) {
+        let fieldSources = [];
+        for (let field of fields) {
+            fieldSources.push(this.generateFieldSource(field));
+        }
+        let fieldsText = fieldSources.join('\n');
+        let derives = `#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]`;
+        return `${derives}\npub struct ${typeName} {\n${fieldsText}\n}\n`;
+    }
+
+    headers() {
+        return `// use num_derive::FromPrimitive;
+use serde::{Deserialize, Serialize};
+// use serde_repr::*;
+
+use std::collections::HashMap;
+// use crate::lang::*;
+// use crate::value::{Type, Value};
+`;
+
+    }
+
+}
+
+
+class NimGenerator extends Generator {
+
+}
 
 function run() {
+    // "debugAdapterProtocol.json"
+    // src/db-backend/ct_types.json
     let schema = fs.readFileSync("debugAdapterProtocol.json", {encoding: 'utf8'});
+    let targetLang = 'rust';
     let definitions = JSON.parse(schema).definitions;
-    let generator = new RustGenerator();
+    let generator = targetLang === 'rust' ? new RustGenerator() : new NimGenerator();
     var i = 0;
     for ( let [typeName, definition] of Object.entries(definitions)) {
         // if (i < 57) {
@@ -270,19 +307,9 @@ function run() {
         // }
         i += 1;
     }
-    let text = generator.toText();
+    let sourceCode = generator.toText();
     // console.log(text);
-    let sourceCode = `
-// use num_derive::FromPrimitive;
-use serde::{Deserialize, Serialize};
-// use serde_repr::*;
-
-use std::collections::HashMap;
-// use crate::lang::*;
-// use crate::value::{Type, Value};
-
-${text}
-`;
+    
     fs.writeFileSync('src/db-backend/src/dap_types.rs', sourceCode);
 
 }
