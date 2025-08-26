@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -43,9 +43,7 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
 
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     info!("dap_server::run {:?}", socket_path);
-    let _ = std::fs::remove_file(socket_path);
-    let listener = UnixListener::bind(socket_path)?;
-    let (stream, _) = listener.accept()?;
+    let stream = UnixStream::connect(socket_path)?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
 

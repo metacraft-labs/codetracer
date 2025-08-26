@@ -4,7 +4,7 @@ use serde_json::Value;
 use tokio::{
     fs::{create_dir_all, remove_file},
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
+    net::UnixListener,
     process::{Child, Command},
     sync::{
         Mutex,
@@ -108,7 +108,7 @@ impl BackendManager {
 
                             if let Some(x) = val {
                                 let mut res = res1.lock().await;
-                                match res.parse_message(x).await {
+                                match res.dispatch_message(x).await {
                                     Ok(()) => {}
                                     Err(err) => {
                                         error!("Can't handle DAP message. Error: {err}");
@@ -167,6 +167,8 @@ impl BackendManager {
             cmd
         );
 
+        let listener = UnixListener::bind(socket_path)?;
+
         let child = cmd.spawn();
         let child = match child {
             Ok(c) => c,
@@ -175,12 +177,20 @@ impl BackendManager {
                 return Err(Box::new(err));
             }
         };
-        sleep(Duration::from_millis(10)).await;
 
         self.children.push(Some(child));
 
-        let (mut socket_read, mut socket_write) =
-            tokio::io::split(UnixStream::connect(socket_path).await?);
+        let mut socket_read;
+        let mut socket_write;
+
+        debug!("Awaiting connection!");
+
+        match listener.accept().await {
+            Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
+            Err(err) => return Err(Box::new(err)),
+        }
+
+        debug!("Accepted connection!");
 
         let (child_tx, child_rx) = mpsc::unbounded_channel();
         self.children_receivers.push(Some(child_rx));
@@ -269,7 +279,7 @@ impl BackendManager {
         Ok(())
     }
 
-    async fn parse_message(&mut self, message: Value) -> Result<(), Box<dyn Error>> {
+    async fn dispatch_message(&mut self, message: Value) -> Result<(), Box<dyn Error>> {
         let msg = match message.as_object() {
             Some(obj) => obj,
             None => return self.message_selected(message).await,
