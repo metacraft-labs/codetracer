@@ -19,6 +19,7 @@ use crate::program_search_tool::ProgramSearchTool;
 use crate::dap_types;
 // use crate::dap_types::Source;
 use crate::step_lines_loader::StepLinesLoader;
+use crate::task;
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
     CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, HistoryResult, HistoryUpdate, Instruction,
@@ -27,7 +28,6 @@ use crate::task::{
     SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
-use crate::task;
 use crate::tracepoint_interpreter::TracepointInterpreter;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
@@ -1420,7 +1420,11 @@ impl Handler {
         Ok(())
     }
 
-    pub fn stack_trace(&mut self, request: dap::Request, args: dap_types::StackTraceArguments) -> Result<(), Box<dyn Error>> {
+    pub fn stack_trace(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::StackTraceArguments,
+    ) -> Result<(), Box<dyn Error>> {
         let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
             self.calltrace
                 .load_callstack(self.step_id, &self.db)
@@ -1470,7 +1474,11 @@ impl Handler {
         dap::new_dap_variable(&ct_variable.expression, &dap_value_text, 0)
     }
 
-    pub fn variables(&mut self, request: dap::Request, _arg: dap_types::VariablesArguments) -> Result<(), Box<dyn Error>> {
+    pub fn variables(
+        &mut self,
+        request: dap::Request,
+        _arg: dap_types::VariablesArguments,
+    ) -> Result<(), Box<dyn Error>> {
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
             .map(|v| Variable {

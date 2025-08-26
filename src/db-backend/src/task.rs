@@ -1783,7 +1783,6 @@ impl StepArg {
     }
 }
 
-
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CtUpdatedTableResponseBody {

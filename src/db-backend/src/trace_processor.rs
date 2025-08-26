@@ -417,14 +417,16 @@ impl<'a> TraceProcessor<'a> {
 }
 
 #[allow(clippy::panic)]
-pub fn load_trace_data(trace_file: &Path, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let mut trace_reader = runtime_tracing::create_trace_reader(file_format); 
+pub fn load_trace_data(
+    trace_file: &Path,
+    file_format: runtime_tracing::TraceEventsFileFormat,
+) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+    let mut trace_reader = runtime_tracing::create_trace_reader(file_format);
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
     let path = expanduser(trace_file.display().to_string())?;
     let trace_events = trace_reader.load_trace_events(&path)?;
     Ok(trace_events)
 }
-
 
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {

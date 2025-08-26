@@ -453,7 +453,11 @@ impl ExprLoader {
 
     fn register_loop(&mut self, _node: &Node, start: Position, end: Position, path: &PathBuf) {
         let lang = self.get_current_language(path);
-        let offset = if lang == Lang::Ruby || lang == Lang::RustWasm { 1 } else { 0 };
+        let offset = if lang == Lang::Ruby || lang == Lang::RustWasm {
+            1
+        } else {
+            0
+        };
         info!("current lang: {lang:?}");
         if self.is_new_loop_shape(&start, &self.processed_files[path]) {
             let loop_shape = LoopShape::new(
