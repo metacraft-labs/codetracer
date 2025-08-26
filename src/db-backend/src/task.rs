@@ -35,6 +35,25 @@ pub struct CtLoadLocalsResponseBody {
 }
 
 
+/// args for `ct/update-table`: actually Datatables.net produces those most of this: `TableArgs`
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct UpdateTableArgs {
+    pub table_args: TableArgs,
+    pub selected_kinds: [bool; EVENT_KINDS_COUNT],
+    pub is_trace: bool,
+    pub trace_id: usize,
+}
+
+
+/// response for `ct/updated-table`: wrapping mostly Datatables.net data (in `TableData` in `table_update.data`)
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtUpdatedTableResponseBody {
+    pub table_update: TableUpdate,
+}
+
+
 /// documentation
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -805,21 +824,27 @@ pub struct StringAndValueTuple {
     pub field1: Value,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// a search value representation for server side processing
+/// for datatables.net from our frontend
+/// https://datatables.net/manual/server-side
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct SearchValue {
     pub value: String,
     pub regex: bool,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// describes `orders` value for datatables.net from our frontend
+/// https://datatables.net/manual/server-side#Sent-parameters
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct OrdValue {
     pub column: usize,
     pub dir: String,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+/// fields for our datatables.net table rows in the frontend
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableRow {
     #[serde(rename = "directLocationRRTicks")]
@@ -859,7 +884,9 @@ impl TableRow {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+/// describes what we use from Datatables.net ajax server side processing arg
+/// https://datatables.net/manual/server-side
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableData {
     pub draw: usize,
@@ -868,7 +895,8 @@ pub struct TableData {
     pub data: Vec<TableRow>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+/// data for a datatable (Datatables.net) update with some ct-specific trace fields
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableUpdate {
     pub data: TableData,
@@ -883,7 +911,9 @@ pub struct TraceValues {
     pub locals: Vec<Vec<StringAndValueTuple>>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// describes some aspects of datatables.net update columns objects
+/// (https://datatables.net/)
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct UpdateColumns {
     pub data: String,
@@ -893,7 +923,10 @@ pub struct UpdateColumns {
     pub searchable: bool,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// describing datatables.net args for server side processing
+/// used from our frontend
+/// https://datatables.net/manual/server-side
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct TableArgs {
     pub columns: Vec<UpdateColumns>,
@@ -902,15 +935,6 @@ pub struct TableArgs {
     pub order: Vec<OrdValue>,
     pub search: SearchValue,
     pub start: usize,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct UpdateTableArgs {
-    pub table_args: TableArgs,
-    pub selected_kinds: [bool; EVENT_KINDS_COUNT],
-    pub is_trace: bool,
-    pub trace_id: usize,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1800,10 +1824,3 @@ impl StepArg {
         }
     }
 }
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CtUpdatedTableResponseBody {
-    pub table_update: TableUpdate,
-}
-

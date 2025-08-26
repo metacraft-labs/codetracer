@@ -103,7 +103,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 schema_for!(task::CoreTrace),
                 schema_for!(task::ConfigureArg),
                 schema_for!(task::CtLoadLocalsArguments),
-                schema_for!(task::CtLoadLocalsResponseBody)].into_iter());
+                schema_for!(task::CtLoadLocalsResponseBody),
+                schema_for!(task::UpdateTableArgs),
+                schema_for!(task::CtUpdatedTableResponseBody)].into_iter());
         // copied from DAP json schema
         schema.meta_schema = Some("http://json-schema.org/draft-04/schema#".to_string());
         // description: "ct types";?
