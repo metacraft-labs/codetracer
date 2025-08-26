@@ -26,10 +26,7 @@ use super::TracepointInterpreter;
 fn log_array() -> Result<(), Box<dyn Error>> {
     let src = "log(arr)";
 
-    let expected = vec![var(
-        "arr",
-        seq_val(vec![int_val(42), int_val(-13), int_val(5)]),
-    )];
+    let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
 
     check_tracepoint_evaluate(src, 3, "array", Lang::Ruby, &expected)?;
     check_tracepoint_evaluate(src, 3, "array", Lang::Noir, &expected)?;
@@ -146,8 +143,8 @@ fn load_db_for_trace(path: &Path) -> Db {
     let trace_metadata_file = path.join("trace_metadata.json");
     let trace = load_trace_data(&trace_file, runtime_tracing::TraceEventsFileFormat::Json)
         .expect("expected that it can load the trace file");
-    let trace_metadata = load_trace_metadata(&trace_metadata_file)
-        .expect("expected that it can load the trace metadata file");
+    let trace_metadata =
+        load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
     let mut db = Db::new(&trace_metadata.workdir);
     let mut trace_processor = TraceProcessor::new(&mut db);
     trace_processor.postprocess(&trace).unwrap();
@@ -164,11 +161,14 @@ fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
 }
 
 fn record_ruby_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
+    println!("TARGET DIR: ${target_dir:#?}");
     let main_path = program_dir.join("main.rb");
     let trace_path = target_dir.join("trace.json");
     let result = Command::new("ruby")
         .args([
-            "../../libs/codetracer-ruby-recorder/src/trace.rb",
+            "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+            "--out-dir",
+            target_dir.to_str().unwrap(),
             main_path.to_str().unwrap(),
         ])
         .env("CODETRACER_DB_TRACE_PATH", trace_path.to_str().unwrap())
@@ -196,11 +196,7 @@ fn record_rust_wasm_trace(_program_dir: &PathBuf, _target_dir: &PathBuf) {
     todo!()
 }
 
-fn record_trace(
-    program_dir: &PathBuf,
-    target_dir: &PathBuf,
-    lang: Lang,
-) -> Result<(), Box<dyn Error>> {
+fn record_trace(program_dir: &PathBuf, target_dir: &PathBuf, lang: Lang) -> Result<(), Box<dyn Error>> {
     match lang {
         Lang::Ruby | Lang::RubyDb => record_ruby_trace(program_dir, target_dir),
         Lang::Noir => record_noir_trace(program_dir, target_dir),
