@@ -1,13 +1,9 @@
-[workspace]
-members = [
-  "crates/db-backend-core",         # your main app
-  "crates/wasm", # your wasm crate
-]
+[package]
+name = "db-backend-core"
+version = "0.1.0"
+edition = "2021"
 
-# Only these build when you run `cargo build` at the root:
-default-members = [
-  "crates/db-backend-core"
-]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
 cc="*"
@@ -30,17 +26,23 @@ tree-sitter-traversal2 = "0.2.0"
 indexmap = "1.9.3"
 once_cell = "1.10.0"
 
-tokio = {version = "1.37.0", features=["full", "rt", "net", "signal"]}
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
-runtime_tracing = "0.14.1"
+# runtime_tracing = "0.14.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-add-evm-event" }
+runtime_tracing = { path = "/home/pesho/code/runtime_tracing/runtime_tracing/"}
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
+
+# [target.'cfg(target_arch = "wasm32")'.dependencies]
+serde-wasm-bindgen = { version = "0.6.5", optional = true}
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2.100", optional = true}
+web-sys = { version = "0.3", optional = true, features = [ "DedicatedWorkerGlobalScope", "WorkerGlobalScope", "console", "MessageEvent", "Worker" ] }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
 expanduser = "1.2.2"
-schemars = "0.8.2"
-schemars-zod = "0.1.5"
 
 [lib]
 name = "db_backend"
@@ -58,3 +60,11 @@ path = "src/bin/virtualization-layers.rs"
 [[bin]]
 name = "schema-generator"
 path = "src/bin/schema_generator.rs"
+
+[features]
+debugging = []
+
+default = ["browser-transport"]
+
+io-transport = []
+browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen", "dep:web-sys"]
