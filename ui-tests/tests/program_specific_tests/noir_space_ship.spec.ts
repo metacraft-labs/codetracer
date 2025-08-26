@@ -1,12 +1,12 @@
 import { test } from "@playwright/test";
-import { page, readyOnEntryTest as readyOnEntry, ctRun } from "../../../test-framework/lib/ct_helpers";
-import { LayoutPage } from "../../../test-framework/page-objects/layout_page";
-import { extractLayoutPageModel } from "../../../test-framework/page-objects/layout_extractors";
+import { page, readyOnEntryTest as readyOnEntry, ctRun } from "../../lib/ct_helpers";
+import { LayoutPage } from "../../page-objects/layout_page";
+import { extractLayoutPageModel } from "../../page-objects/layout_extractors";
 
 // Use the noir example just like the other tests.
 ctRun("noir_space_ship/");
 
-test("TODO: changeTheName", async () => {
+test("noir_space_ship smoke test", async () => {
   await readyOnEntry();
 
   const layout = new LayoutPage(page);
