@@ -98,7 +98,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     if cli.generate_schema {
-        let mut schema = merge_schemas(vec![schema_for!(task::CoreTrace), schema_for!(task::ConfigureArg)].into_iter());
+        let mut schema = merge_schemas(
+            vec![
+                schema_for!(task::CoreTrace),
+                schema_for!(task::ConfigureArg),
+                schema_for!(task::CtLoadLocalsArguments),
+                schema_for!(task::CtLoadLocalsResponseBody)].into_iter());
         // copied from DAP json schema
         schema.meta_schema = Some("http://json-schema.org/draft-04/schema#".to_string());
         // description: "ct types";?

@@ -1,3 +1,4 @@
+
 // use num_derive::FromPrimitive;
 use serde::{Deserialize, Serialize};
 // use serde_repr::*;
@@ -209,7 +210,9 @@ pub struct RunInTerminalResponseBody {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct StartDebuggingRequestArgumentsConfiguration {}
+pub struct StartDebuggingRequestArgumentsConfiguration {
+
+}
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -261,7 +264,9 @@ pub struct InitializeRequestArguments {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct ConfigurationDoneArguments {}
+pub struct ConfigurationDoneArguments {
+
+}
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -272,7 +277,9 @@ pub struct AttachRequestArguments {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct RestartArguments {}
+pub struct RestartArguments {
+
+}
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -622,7 +629,9 @@ pub struct ModulesResponseBody {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct LoadedSourcesArguments {}
+pub struct LoadedSourcesArguments {
+
+}
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -1376,3 +1385,4 @@ pub struct BreakpointMode {
 }
 
 type BreakpointModeApplicability = String;
+

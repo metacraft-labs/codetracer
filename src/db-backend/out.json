@@ -1,0 +1,135 @@
+Schema(Object {"$defs": Object {"ConfigureArg": Object {"properties": Object {"lang": Object {"$ref": String("#/$defs/Lang")}, "trace": Object {"$ref": String("#/$defs/CoreTrace")}}, "required": Array [String("lang"), String("trace")], "type": String("object")}, "CoreTrace": Object {"properties": Object {"binary": Object {"type": String("string")}, "callArgsEnabled": Object {"type": String("boolean")}, "calltrace": Object {"type": String("boolean")}, "debug": Object {"type": String("boolean")}, "eventsEnabled": Object {"type": String("boolean")}, "historyEnabled": Object {"type": String("boolean")}, "imported": Object {"type": String("boolean")}, "paths": Object {"items": Object {"type": String("string")}, "type": String("array")}, "preloadEnabled": Object {"type": String("boolean")}, "program": Object {"items": Object {"type": String("string")}, "type": String("array")}, "replay": Object {"type": String("boolean")}, "telemetry": Object {"type": String("boolean")}, "test": Object {"type": String("boolean")}, "traceEnabled": Object {"type": String("boolean")}, "traceId": Object {"format": String("int64"), "type": String("integer")}, "traceOutputFolder": Object {"type": String("string")}}, "required": Array [String("replay"), String("binary"), String("program"), String("paths"), String("traceId"), String("calltrace"), String("preloadEnabled"), String("callArgsEnabled"), String("traceEnabled"), String("historyEnabled"), String("eventsEnabled"), String("telemetry"), String("imported"), String("test"), String("debug"), String("traceOutputFolder")], "type": String("object")}, "Lang": Object {"enum": Array [String("C"), String("Cpp"), String("Rust"), String("Nim"), String("Go"), String("Pascal"), String("Python"), String("Ruby"), String("RubyDb"), String("Javascript"), String("Lua"), String("Asm"), String("Noir"), String("RustWasm"), String("CppWasm"), String("Small"), String("Unknown")], "type": String("string")}}, "$schema": String("https://json-schema.org/draft/2020-12/schema"), "properties": Object {"ConfigureArg": Object {"$ref": String("#/$defs/ConfigureArg")}, "CoreTrace": Object {"$ref": String("#/$defs/CoreTrace")}}, "required": Array [String("CoreTrace"), String("ConfigureArg")], "title": String("Definitions"), "type": String("object")})
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Definitions",
+  "type": "object",
+  "properties": {
+    "ConfigureArg": {
+      "$ref": "#/$defs/ConfigureArg"
+    },
+    "CoreTrace": {
+      "$ref": "#/$defs/CoreTrace"
+    }
+  },
+  "required": [
+    "CoreTrace",
+    "ConfigureArg"
+  ],
+  "$defs": {
+    "ConfigureArg": {
+      "type": "object",
+      "properties": {
+        "lang": {
+          "$ref": "#/$defs/Lang"
+        },
+        "trace": {
+          "$ref": "#/$defs/CoreTrace"
+        }
+      },
+      "required": [
+        "lang",
+        "trace"
+      ]
+    },
+    "CoreTrace": {
+      "type": "object",
+      "properties": {
+        "binary": {
+          "type": "string"
+        },
+        "callArgsEnabled": {
+          "type": "boolean"
+        },
+        "calltrace": {
+          "type": "boolean"
+        },
+        "debug": {
+          "type": "boolean"
+        },
+        "eventsEnabled": {
+          "type": "boolean"
+        },
+        "historyEnabled": {
+          "type": "boolean"
+        },
+        "imported": {
+          "type": "boolean"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preloadEnabled": {
+          "type": "boolean"
+        },
+        "program": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "telemetry": {
+          "type": "boolean"
+        },
+        "test": {
+          "type": "boolean"
+        },
+        "traceEnabled": {
+          "type": "boolean"
+        },
+        "traceId": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "traceOutputFolder": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "replay",
+        "binary",
+        "program",
+        "paths",
+        "traceId",
+        "calltrace",
+        "preloadEnabled",
+        "callArgsEnabled",
+        "traceEnabled",
+        "historyEnabled",
+        "eventsEnabled",
+        "telemetry",
+        "imported",
+        "test",
+        "debug",
+        "traceOutputFolder"
+      ]
+    },
+    "Lang": {
+      "type": "string",
+      "enum": [
+        "C",
+        "Cpp",
+        "Rust",
+        "Nim",
+        "Go",
+        "Pascal",
+        "Python",
+        "Ruby",
+        "RubyDb",
+        "Javascript",
+        "Lua",
+        "Asm",
+        "Noir",
+        "RustWasm",
+        "CppWasm",
+        "Small",
+        "Unknown"
+      ]
+    }
+  }
+}

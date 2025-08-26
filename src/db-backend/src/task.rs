@@ -17,6 +17,24 @@ use schemars::JsonSchema;
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
 pub const EVENT_KINDS_COUNT: usize = 14;
 
+
+/// args for `ct/load-locals`
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsArguments {
+    pub rr_ticks: i64,
+    pub count_budget: i64,
+    pub min_count_limit: i64,
+}
+
+/// response for `ct/load-locals`
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsResponseBody {
+    pub locals: Vec<Variable>,
+}
+
+
 /// documentation
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +71,7 @@ pub struct ConfigureArg {
     pub trace: CoreTrace,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StepArg {
     pub action: Action,
@@ -67,7 +85,7 @@ pub struct StepArg {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EmptyArg {}
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Variable {
     pub expression: String,
@@ -273,7 +291,7 @@ pub enum RRGDBStopSignal {
     OtherStopSignal,
 }
 
-#[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq, JsonSchema)]
 #[repr(u8)]
 pub enum Action {
     #[default]
@@ -1789,16 +1807,3 @@ pub struct CtUpdatedTableResponseBody {
     pub table_update: TableUpdate,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CtLoadLocalsResponseBody {
-    pub locals: Vec<Variable>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CtLoadLocalsArguments {
-    pub rr_ticks: i64,
-    pub count_budget: i64,
-    pub min_count_limit: i64,
-}
