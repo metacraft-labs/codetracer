@@ -118,10 +118,6 @@ export class EventElement {
 export class EventLogTab extends TabObject {
   private events: EventElement[] = [];
 
-  autoScrollButton(): Locator {
-    return this.root.locator(".checkmark");
-  }
-
   footerContainer(): Locator {
     return this.root.locator(".data-tables-footer");
   }
@@ -130,19 +126,23 @@ export class EventLogTab extends TabObject {
     return this.footerContainer().locator(".data-tables-footer-info");
   }
 
-  async rows(): Promise<number> {
+  rows(): Locator {
+    return this.footerContainer().locator(".data-tables-footer-input")
+  }
+
+  async getRows(): Promise<number> {
     const klass = await this.footerContainer().getAttribute("class");
     const m = klass?.match(/(\d*)to/);
     return m ? parseInt(m[1], 10) : 0;
   }
 
-  async toRow(): Promise<number> {
+  async getToRow(): Promise<number> {
     const text = await this.rowsInfoContainer().textContent();
     const m = text?.match(/(\d*)\sof/);
     return m ? parseInt(m[1], 10) : 0;
   }
 
-  async ofRows(): Promise<number> {
+  async getOfRows(): Promise<number> {
     const text = await this.rowsInfoContainer().textContent();
     const m = text?.match(/of\s(\d*)/);
     return m ? parseInt(m[1], 10) : 0;
