@@ -40,13 +40,11 @@ impl BackendManager {
         let res1 = res.clone();
         let res2 = res.clone();
 
-        let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
-        socket_path.push("codetracer");
-        socket_path.push("backend-manager");
+        let socket_dir = env::temp_dir().join("codetracer").join("backend-manager");
 
-        create_dir_all(&socket_path).await?;
+        create_dir_all(&socket_dir).await?;
 
-        socket_path.push(std::process::id().to_string() + ".sock");
+        let socket_path = socket_dir.join(std::process::id().to_string() + ".sock");
         _ = remove_file(&socket_path).await;
 
         let mut socket_read;
@@ -142,14 +140,15 @@ impl BackendManager {
         cmd: &str,
         args: &[&str],
     ) -> Result<usize, Box<dyn Error>> {
-        let mut socket_path = env::temp_dir(); // TODO: discuss what is the best place for the socket. Maybe /run?
-        socket_path.push("codetracer");
-        socket_path.push("backend-manager");
-        socket_path.push(std::process::id().to_string());
+        let socket_dir = env::temp_dir()
+            .join("codetracer")
+            .join("backend-manager")
+            .join(std::process::id().to_string());
 
-        create_dir_all(&socket_path).await?;
+        create_dir_all(&socket_dir).await?;
 
-        socket_path.push(self.children.len().to_string() + ".sock");
+        let socket_path = socket_dir.join(self.children.len().to_string() + ".sock");
+        _ = remove_file(&socket_path).await;
 
         let mut cmd = Command::new(cmd);
         cmd.args(args);
