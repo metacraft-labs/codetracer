@@ -11,6 +11,7 @@ pushd src/db-backend
 # threat warnings as errors here!
 env RUSTFLAGS="-D warnings" cargo check --release --bin db-backend
 env RUSTFLAGS="-D warnings" cargo check --release --bin virtualization-layers
+env RUSTFLAGS="-D warnings" cargo check --release --bin schema-generator
 
 # TODO: check how to fix it in CI : cargo clippy -- -D warnings
 

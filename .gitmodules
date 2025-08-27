@@ -78,3 +78,6 @@
 [submodule "libs/nim-uuid4"]
 	path = libs/nim-uuid4
 	url = https://github.com/vtbassmatt/nim-uuid4.git
+[submodule "libs/vscode-debugadapter-node"]
+	path = libs/vscode-debugadapter-node
+	url = https://github.com/microsoft/vscode-debugadapter-node.git

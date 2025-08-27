@@ -14,8 +14,6 @@ use chrono::Local;
 use clap::Parser;
 use log::LevelFilter;
 use log::{error, info};
-use schemars::schema_for;
-use schemars_zod::merge_schemas;
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
