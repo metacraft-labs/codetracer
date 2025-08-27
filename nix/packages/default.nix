@@ -489,7 +489,7 @@
             mv src/config/* $out/config/
 
             # Include electron-builder output
-            cp -r dist/linux-unpacked/* $out/
+            cp -r node-packages/dist/linux-unpacked/* $out/
           '';
         };
 

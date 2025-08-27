@@ -12,7 +12,7 @@ yarn install >/dev/null
 nim \
     --hints:on --warnings:off --sourcemap:on \
     -d:ctIndex -d:chronicles_sinks=json \
-    -d:nodejs --out:index.js ../src/frontend/index.nim
+    -d:nodejs --out:index.js js ../src/frontend/index.nim
 npx electron-builder --mac dir
 popd >/dev/null
 

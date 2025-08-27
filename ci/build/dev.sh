@@ -33,7 +33,12 @@ ELECTRON_PATH=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.elec
 export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON_PATH}/lib/electron"
 
+pushd node-packages >/dev/null
 yarn install --immutable
+popd >/dev/null
+
+rm -rf node_modules
+ln -s node-packages/node_modules node_modules
 
 node_modules/.bin/webpack
 
@@ -46,9 +51,9 @@ rm "$TUP_OUTPUT_SCRIPT"
 popd >/dev/null
 
 cp index.js node-packages/index.js
-ln -sf "$(pwd)/node_modules" node-packages/node_modules
 
 pushd node-packages >/dev/null
 npx electron-builder --linux dir
 popd >/dev/null
+
 ln -sf "$(pwd)/node-packages/dist/linux-unpacked/codetracer-electron" src/links/electron

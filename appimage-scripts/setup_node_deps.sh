@@ -19,7 +19,7 @@ yarn install
 nim \
     --hints:on --warnings:off --sourcemap:on \
     -d:ctIndex -d:chronicles_sinks=json \
-    -d:nodejs --out:index.js ../src/frontend/index.nim
+    -d:nodejs --out:index.js js ../src/frontend/index.nim
 
 popd
 

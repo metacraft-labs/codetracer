@@ -26,3 +26,8 @@
 - Electron-builder requires the Nim-compiled `index.js` to exist and a local
   `node_modules` tree; build scripts now generate `index.js` and expose
   `node_modules` before invoking the packager.
+- Yarn installs must run from `node-packages`; creating `node_modules` at the
+  repository root causes read-only filesystem errors. When needed, symlink the
+  directory back to the root.
+- Nim CLI commands require an explicit subcommand like `js`; missing it leads
+  to "invalid command" errors during build scripts.
