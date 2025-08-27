@@ -48,7 +48,7 @@ export async function extractEventLogModel(tab: EventLogTab): Promise<EventLogMo
       const item: EventDataModel = { consoleOutput: await e.consoleOutput() };
       model.events.push(item);
     }
-    model.ofRows = await tab.ofRows();
+    model.ofRows = await tab.getOfRows();
   }
 
   return model;

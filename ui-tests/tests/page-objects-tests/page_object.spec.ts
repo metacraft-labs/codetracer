@@ -49,3 +49,14 @@ test("page object test", async () => {
   await extractLayoutPageModel(layout);
 });
 
+test("Event Log Rows", async () => {
+  await readyOnEntry();
+
+  const layoutPage = new LayoutPage(page);
+
+  const eventLogTab = (await layoutPage.eventLogTabs())[0];
+  const rows = eventLogTab.getRows();
+
+  expect(rows).toBe(1);
+
+});
