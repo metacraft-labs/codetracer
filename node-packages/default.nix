@@ -3,4 +3,8 @@
 
 { pkgs ? import <nixpkgs> { } }:
 
-pkgs.callPackage ./yarn-project.nix { } { src = ./.; }
+pkgs.callPackage ./yarn-project.nix {
+  # Use the pinned Electron runtime during evaluation so builds stay
+  # consistent and electron-builder can reuse it.
+  electron = pkgs.electron_33;
+} { src = ./.; }

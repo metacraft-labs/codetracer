@@ -446,12 +446,12 @@
             cp -L ${indexJavascript}/bin/index.js node-packages/index.js
 
             echo "Building electron application"
-            builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder
             pushd node-packages >/dev/null
+            builder=${node-modules-derivation.out}/bin/node_modules/.bin/electron-builder
             ELECTRON_OVERRIDE_DIST_PATH=${pkgs.electron_33}/lib/electron \
               ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
               npm_config_electron_skip_binary_download=1 \
-              node $builder --linux dir
+              node $builder --projectDir "$(pwd)" --linux dir
             popd >/dev/null
           '';
 

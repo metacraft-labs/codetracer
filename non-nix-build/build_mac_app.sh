@@ -16,6 +16,9 @@ nim \
 npx electron-builder --mac dir
 popd >/dev/null
 
-# Place the resulting .app where the DMG builder expects it
+# Place the resulting .app where the DMG builder expects it. electron-builder
+# emits architecture-specific directories (e.g. mac-arm64), so pick whichever
+# one was produced.
 rm -rf "$ROOT_DIR/non-nix-build/CodeTracer.app"
-cp -R "$ROOT_DIR/node-packages/dist/mac/CodeTracer.app" "$ROOT_DIR/non-nix-build/CodeTracer.app"
+APP_BUNDLE=$(find "$ROOT_DIR/node-packages/dist" -maxdepth 1 -type d -name 'mac*' | head -n 1)/CodeTracer.app
+cp -R "$APP_BUNDLE" "$ROOT_DIR/non-nix-build/CodeTracer.app"

@@ -17,6 +17,9 @@
 - Electron builds run from the `node-packages` directory; `package.json`
   now lists `electron` as a dev dependency and defines a `postinstall` step to
   ensure native modules match the bundled Electron version.
+- macOS bundles from electron-builder are written to architecture-specific
+  subdirectories (e.g. `dist/mac-arm64`); scripts should locate the correct
+  directory before copying the `.app` bundle.
 - Updating Electron or other dependencies requires regenerating `yarn.lock` and updating `yarn-project.nix` with the new cache hash.
 - Nix-based builds skip Electron's binary download by exporting
   `ELECTRON_SKIP_BINARY_DOWNLOAD=1` and provide the runtime via

@@ -288,3 +288,5 @@ so that electron is built using electron-builder. For macOS, make sure that elec
 Modify all our build scripts: Nix(for Linux only), Appimage(for Linux only), Non-nix-build(for macOS), Tup(for Linux only) so that electron is built using electron-builder. For macOS, make sure that electron builder uses the correct resource files such as the icons for our electron binary
 --- FOLLOW UP TASK ---
 Modify all our build scripts:\n1. Nix(for Linux only)\n1. Appimage(for Linux only)\n1. Non-nix-build(for macOS)\n1. Tup(for Linux only)\n\nso that electron is built using electron-builder. For macOS, make sure that electron builder uses the correct resource files such as the icons for our electron binary. During the uploading of the artifact for the app image I get these errors in CI: ... and other build failures.
+--- FOLLOW UP TASK ---
+Modify all our build scripts:\n1. Nix(for Linux only)\n1. Appimage(for Linux only)\n1. Non-nix-build(for macOS)\n1. Tup(for Linux only)\n\nso that electron is built using electron-builder. For macOS, make sure that electron builder uses the correct resource files such as the icons for our electron binary
