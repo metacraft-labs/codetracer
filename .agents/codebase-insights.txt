@@ -21,6 +21,12 @@
 - Nix-based builds skip Electron's binary download by exporting
   `ELECTRON_SKIP_BINARY_DOWNLOAD=1` and provide the runtime via
   `ELECTRON_OVERRIDE_DIST_PATH` pointing at `pkgs.electron_33` for offline builds.
+- Setting `npm_config_electron_skip_binary_download=1` alongside
+  `ELECTRON_SKIP_BINARY_DOWNLOAD` prevents Electron's install script from
+  reaching out to the network during Yarn installs.
+- electron-builder now relies on its default Electron location instead of
+  a custom `electronDist`, avoiding "corrupted Electron dist" errors on
+  macOS.
 - The flake permits `electron-33.4.11` as an insecure package; update
   `permittedInsecurePackages` when bumping Electron.
 - Electron-builder requires the Nim-compiled `index.js` to exist and a local

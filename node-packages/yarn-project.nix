@@ -10,6 +10,7 @@
   fetchurl,
   writeShellScript,
   writeShellScriptBin,
+  electron,
 }:
 {
   src,
@@ -56,6 +57,8 @@ let
     # Prevent electron's postinstall script from fetching binaries online; the
     # build scripts provide a system electron via ELECTRON_OVERRIDE_DIST_PATH.
     export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+    export npm_config_electron_skip_binary_download=1
+    export ELECTRON_OVERRIDE_DIST_PATH='${electron}/lib/electron'
   '';
 
   cacheDrv = stdenv.mkDerivation rec {

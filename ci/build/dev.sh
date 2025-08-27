@@ -32,6 +32,7 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron" >/dev/null
 ELECTRON_PATH=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron.out")
 export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON_PATH}/lib/electron"
+export npm_config_electron_skip_binary_download=1
 
 pushd node-packages >/dev/null
 yarn install --immutable
@@ -41,6 +42,11 @@ rm -rf node_modules
 ln -s node-packages/node_modules node_modules
 
 node_modules/.bin/webpack
+
+nim \
+    --hints:on --warnings:off --sourcemap:on \
+    -d:ctIndex -d:chronicles_sinks=json \
+    -d:nodejs --out:index.js js src/frontend/index.nim
 
 pushd src >/dev/null
 # Use tup generate, because FUSE may not be supported on the runners

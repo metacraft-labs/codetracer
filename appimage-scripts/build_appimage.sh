@@ -93,6 +93,7 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron"
 ELECTRON=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.electron.out")
 export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 export ELECTRON_OVERRIDE_DIST_PATH="${ELECTRON}/lib/electron"
+export npm_config_electron_skip_binary_download=1
 
 # Setup node deps
 bash "${ROOT_PATH}"/appimage-scripts/setup_node_deps.sh

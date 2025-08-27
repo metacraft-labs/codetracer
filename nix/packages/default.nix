@@ -375,6 +375,7 @@
               pkgs.callPackage ../../node-packages/yarn-project.nix
                 {
                   nodejs = pkgs.nodejs_20;
+                  electron = pkgs.electron_33;
                 }
                 {
                   src = ../../node-packages;
@@ -449,6 +450,7 @@
             pushd node-packages >/dev/null
             ELECTRON_OVERRIDE_DIST_PATH=${pkgs.electron_33}/lib/electron \
               ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+              npm_config_electron_skip_binary_download=1 \
               node $builder --linux dir
             popd >/dev/null
           '';

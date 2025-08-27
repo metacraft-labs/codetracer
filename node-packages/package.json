@@ -101,7 +101,6 @@
     "productName": "codetracer-electron",
     "nodeGypRebuild": false,
     "npmRebuild": false,
-    "electronDist": "./node_modules/.bin/",
     "linux": {
       "executableName": "codetracer-electron",
       "category": "Utility",
