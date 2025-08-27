@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -9,7 +8,7 @@ use schemars_zod::merge_schemas;
 
 extern crate db_backend;
 
-use db_backend::ct_types;
+use db_backend::task;
 
 /// JSON schema generator for our types used in custom ct extensions to DAP or in multiple parts of our code
 #[derive(Parser, Debug)]

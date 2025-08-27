@@ -6,6 +6,7 @@
 
 let fs = require('node:fs');
 let process = require('node:process');
+let child_process = require('node:child_process');
 
 
 const IGNORE_TYPES = {
@@ -305,7 +306,12 @@ class NimGenerator extends Generator {
 function run() {
     // "debugAdapterProtocol.json"
     // src/db-backend/ct_types.json
-    let schema = fs.readFileSync("debugAdapterProtocol.json", {encoding: 'utf8'});
+    // 
+    // TODO:
+    // schema-generator ct_types.json
+    // node schema/schema.js ct_types.json --lang=nim -o src/frontend/ct_types.nim
+    
+    let schema = fs.readFileSync("libs/vscode-debugadapter-node/debugProtocol.json", {encoding: 'utf8'});
     let targetLang = 'rust';
     let definitions = JSON.parse(schema).definitions;
     let generator = targetLang === 'rust' ? new RustGenerator() : new NimGenerator();
@@ -323,7 +329,12 @@ function run() {
     let sourceCode = generator.toSourceCode();
 
     fs.writeFileSync('src/db-backend/src/dap_types.rs', sourceCode);
-
+    child_process.exec('rustfmt src/db-backend/src/dap_types.rs', (error) => {
+        if (error) {
+            console.error(`rustfmt process error: ${error}`);
+            process.exit(1);
+        }
+    });
 }
 
 run();
