@@ -9,23 +9,20 @@ import ../common/ct_logging
 # By default we compile in desktop.
 # In server mode we don't have electron, so we immitate or disable some of the code
 # a lot of the logic is in index_config.nim/lib.nim and related
-
 when defined(server):
   var electronDebug: js = undefined
   let app: ElectronApp = ElectronApp()
-  let globalShortcut: js = undefined
 else:
   var electronDebug = require("electron-debug")
   let app = cast[ElectronApp](electron.app)
-  let globalShortcut = electron.globalShortcut
   let Menu = electron.Menu
-
 
 data.start = now()
 
-var close = false
-var backendManagerProcess: NodeSubProcess = nil
-var backendManagerCleanedUp = false
+var
+  close = false
+  backendManagerProcess: NodeSubProcess = nil
+  backendManagerCleanedUp = false
 
 proc stopBackendManager() =
   # Ensure we only attempt cleanup once and guard against nil.
@@ -54,9 +51,6 @@ proc onClose(e: js) =
     mainWindow.webContents.send "CODETRACER::close", js{}
     close = true
 
-
-# proc call(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
-
 # <traceId>
 # --port <port>
 # --frontend-socket-port <frontend-socket-port>
@@ -65,8 +59,6 @@ proc onClose(e: js) =
 # --caller-pid <callerPid>
 # # eventually if needed --backend-socket-host <backend-socket-host>
 proc parseArgs =
-  # echo "parseArgs"
-
   data.startOptions.screen = true
   data.startOptions.loading = false
   data.startOptions.record = false
@@ -81,8 +73,6 @@ proc parseArgs =
     return
   else:
     discard
-
-
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TEST_STRATEGY"):
     data.startOptions.rawTestStrategy = electronProcess.env[cstring"CODETRACER_TEST_STRATEGY"]
@@ -158,14 +148,6 @@ proc parseArgs =
         else:
           errorPrint "expected --backend-socket-port <backend-socket-port>"
           break
-      # elif arg == cstring"--backend-socket-parameters":
-      #   if i + 1 < args.len:
-      #     data.startOptions.backendSocket.parameters = args[i + 1]
-      #     i += 2
-      #     continue
-      #   else:
-      #     errorPrint "expected --backend-socket-parameters <backend-socket-parameters>"
-      #     break
       elif arg == cstring"--caller-pid":
         if i + 1 < args.len:
           callerProcessPid = args[i + 1].parseJsInt
@@ -188,26 +170,14 @@ proc parseArgs =
     data.startOptions.welcomeScreen = true
     data.startOptions.folder = electronprocess.cwd()
 
-  # "traceId=1", "test", "no-sandbox"
-
 proc selectFileOrFolder(options: JsObject): Future[cstring] {.async.} =
   let selection = await electron.dialog.showOpenDialog(mainWindow, options)
   let filePaths = cast[seq[cstring]](selection.filePaths)
+
   if filePaths.len > 0:
     return filePaths[0]
   else:
     return cstring""
-
-proc selectFiles(dialogTitle: cstring): Future[seq[cstring]] {.async.} =
-  let selection = await electron.dialog.showOpenDialog(
-    mainWindow,
-    js{
-      properties: @[j"openFile", j"multiSelections"],
-      title: dialogTitle,
-      buttonLabel: cstring"Select"})
-
-  if not selection.cancelled.to(bool):
-    return cast[seq[cstring]](selection.filePaths)
 
 # tried to return a folder *with* a trailing slash, if it finds one
 proc selectDir(dialogTitle: cstring, defaultPath: cstring = cstring""): Future[cstring] {.async.} =
@@ -232,8 +202,6 @@ proc selectDir(dialogTitle: cstring, defaultPath: cstring = cstring""): Future[c
 
 proc duration*(name: string) =
   infoPrint fmt"index: TIME for {name}: {now() - data.start}ms"
-
-  # If codetracer has a 'broken' installation, only then do we attempt to install it
 
 proc createMainWindow: js =
   when not defined(server):
@@ -280,7 +248,6 @@ proc createMainWindow: js =
     return win.toJs
 
 proc createInstallSubwindow(): js =
-
     let win = jsnew electron.BrowserWindow(
       js{
         "width": 700,
@@ -298,13 +265,10 @@ proc createInstallSubwindow(): js =
         })
 
     let url = "file://" & $codetracerExeDir & "/subwindow.html"
-
     debugPrint "Attempting to load: ", url
-
     win.loadURL(cstring(url))
 
     let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
-
     if inDevEnv:
       electronDebug.devTools(win)
 
@@ -314,43 +278,6 @@ type
   DebuggerInfo = object of JsObject
     path: cstring
     exe: seq[cstring]
-    #lang: Lang
-
-proc onUpdateTable(sender: js, response: UpdateTableArgs) {.async.} =
-  discard debugger.updateTable(response)
-
-proc onTracepointDelete(sender: js, response: TracepointId) {.async.} =
-  discard debugger.tracepointDelete(response)
-
-proc onTracepointToggle(sender: js, response: TracepointId) {.async.} =
-  discard debugger.tracepointToggle(response)
-
-proc onLoadCallstack(sender: js, response: LoadCallstackArg) {.async.} =
-  # debug "load ", id=response.codeID
-  try:
-    var callstack = await debugger.loadCallstack(response)
-    var id = j($response.codeID & " " & $response.withArgs)
-    # debug "ready ", id=id
-
-    mainWindow.webContents.send "CODETRACER::load-callstack-received", js{argId: id, value: callstack}
-  except:
-    errorPrint "loadCallstack: ", getCurrentExceptionMsg()
-    var id = j($response.codeID & " " & $response.withArgs)
-    let callstack: seq[Call] = @[]
-    mainWindow.webContents.send "CODETRACER::load-callstack-received", js{argId: id, value: callstack}
-
-# TODO location?
-proc onLoadCallArgs(sender: js, response: CalltraceLoadArgs) {.async.} =
-  discard debugger.loadCallArgs(response)
-
-proc onCollapseCalls(sender: js, response: CollapseCallsArgs) =
-  discard debugger.collapseCalls(response)
-
-proc onExpandCalls(sender: js, response: CollapseCallsArgs) =
-  discard debugger.expandCalls(response)
-
-proc updateExpand(path: cstring, line: int, expansionFirstLine: int, update: MacroExpansionLevelUpdate) {.async.} =
-  warnPrint "update expansion disabled for now: needs a more stabilized version"
 
 type
   FileFilter = ref object
@@ -365,10 +292,6 @@ when not defined(server):
     f.call(self, cast[cstring](id), data)
 
 # IPC HANDLERS
-proc onAsmLoad(sender: js, response: FunctionLocation) {.async.} =
-  let res = await data.nativeLoadInstructions(response)
-  mainWindow.webContents.send "CODETRACER::asm-load-received", js{argId: cstring(fmt"{response.path}:{response.name}:{response.key}"), value: res.instructions}
-
 proc onTabLoad(sender: js, response: jsobject(location=types.Location, name=cstring, editorView=EditorView, lang=Lang)) {.async.} =
   console.log response
   case response.lang:
@@ -404,15 +327,6 @@ proc onLoadLowLevelTab(sender: js, response: jsobject(pathOrName=cstring, lang=L
       warnPrint fmt"low level view {response.view} not supported for {response.lang}"
   else:
     warnPrint fmt"low level view not supported for {response.lang}"
-
-# TODO: when fixing the nim c level support
-# proc onLoadLowLevelLocations(sender: js, response: jsobject(path=cstring, line=int, lang=Lang, view=EditorView)) {.async.} =
-#   case response.lang:
-#   of LangNim:
-#     let res = await data.nimLoadLowLevelLocations(response.path, response.line, response.view)
-#     mainWindow.webContents.send "CODETRACER::load-low-level-locations-received", js{argId: response.path & j" " & j($response.line) & j" " & j($response.view), value: res}
-#   else:
-#     discard
 
 when defined(ctmacos):
   let modMap* : JsAssoc[cstring, cstring] = JsAssoc[cstring, cstring]{
@@ -467,202 +381,17 @@ when defined(ctmacos):
     let menu = Menu.buildFromTemplate(cast[js](elements))
     Menu.setApplicationMenu(menu)
 
-
 else:
   proc onRegisterMenu(sender: js, response: jsobject(menu=MenuNode)) = discard
 
-proc onUpdateExpansion(sender: js, response: jsobject(path=cstring, line=int, update=MacroExpansionLevelUpdate)) {.async.} =
-  await updateExpand(response.path, response.line, -1, response.update) # TODO expansionFirstLine ?
-
-
-proc onLoadTokens(sender: js, response: jsobject(path=cstring, lang=Lang)) {.async.} =
-  errorPrint "onLoadTokens not working anymore"
-
-
 proc onSaveConfig(sender: js, response: jsobject(name=cstring, layout=cstring)) {.async.} =
-  # await persistConfig(mainWindow, response.name, response.layout)
   warnprint "FOR NOW: persisting config disabled"
-
-
-proc onEventJump(sender: js, response: ProgramEvent) {.async.} =
-  await debugger.eventJump(response)
-
-
-proc onLoadTerminal(sender: js, response: js) {.async.} =
-  discard debugger.loadTerminal(EmptyArg())
-
-# proc onCallstackJump(sender: js, response: CallstackJump) {.async.} =
-  # calls the n-th function in the callstack, 0 is current
-  # await debugger.callstackJump(response)
-
-
-proc onCalltraceJump(sender: js, response: types.Location) {.async.} =
-  await debugger.calltraceJump(response)
-
-
-proc onTraceJump(sender: js, response: ProgramEvent) {.async.} =
-  await debugger.traceJump(response)
-
-
-proc onHistoryJump(sender: js, response: types.Location) {.async.} =
-  await debugger.historyJump(response)
-
-
-# proc onDebugCT(sender: js, response: cstring) {.async.} =
-#   let output = await debugger.debugCT(response)
-#   mainWindow.webContents.send "CODETRACER::debug-output", output
-
-
-# not supported in db-backend for now
-# proc onDebugGdb(sender: js, response: DebugGdbArg) {.async.} =
-  # there is a debug-output event, we ignore this one here for now
-  # let output = await debugger.debugGdb(response)
-  # discard output
-
-
-# TODO also function name/id-based
-
-proc onAddBreak(sender: js, response: SourceLocation) {.async.} =
-  let id = await debugger.addBreak(response)
-  mainWindow.webContents.send "CODETRACER::add-break-response",
-    BreakpointInfo(path: response.path, line: response.line, id: id)
-
-
-proc onDeleteBreak(sender: js, response: SourceLocation) {.async.} =
-  discard debugger.deleteBreak(response)
-
-
-# proc onAddBreakC(sender: js, response: jsobject(path=cstring, line=int)) {.async.} =
-#   let id = await debugger.addBreakC(response.path, response.line)
-#   mainWindow.webContents.send "CODETRACER::add-break-c-response",
-#     BreakpointInfo(path: response.path, line: response.line, id: id)
-
-proc onDeleteBreakC(sender: js, response: SourceLocation) {.async.} =
-  discard debugger.deleteBreak(response)
-
-proc onEnable(sender: js, response: SourceLocation) {.async.} =
-  discard debugger.enable(response)
-
-proc onDisable(sender: js, response: SourceLocation) {.async.} =
-  discard debugger.disable(response)
-
-# proc onLoadCallstackDirectChildrenBefore(sender: js, response: jsobject(codeID=int64, before=int64)) {.async.} =
-  # var calls = await debugger.loadCallstackDirectChildrenBefore(response.codeID, response.before)
-  # mainWindow.webContents.send "CODETRACER::load-callstack-direct-children-before-received", js{argId: j($response.codeID & " " & $response.before), value: calls}
-
-# TODO
-# proc onUpdatedCalltraceArgs(sender: js, response: js) {.async.} =
-#   for element in response.args:
-#     let codeID = cast[int64](element.codeID)
-#     let args = cast[CalltraceArgs](element.args)
-#     graphEngine.args[codeID] = args
-#   mainWindow.webContents.send "CODETRACER::updated-calltrace-args", response
-
-proc onResetOperation(sender: js, response: jsobject(full=bool, taskId=TaskId, resetLastLocation=bool)) {.async.} =
-  await debugger.resetOperation(ResetOperationArg(full: response.full, resetLastLocation: response.resetLastLocation), response.taskId)
-
 
 proc onExitError(sender: js, response: cstring) {.async.} =
   # we call this on fatal errors
   errorPrint fmt"exit: {response}"
   if true: # workaround for unreachable statement and async
     quit(1)
-
-# proc onInlineCallJump(sender: js, response: types.Location) {.async.} =
-  # discard debugger.inlineCallJump(response)
-
-# proc onUpdateTelemetryLog(sender: js, response: jsobject(logs=seq[TelemetryEvent])) {.async.} =
-#   # we save the log in the file
-#   if TELEMETRY_ENABLED:
-#     var text = j""
-#     for log in response.logs:
-#       text = text & toYaml(log)
-#     index_config.fs.appendFile(j"telemetry.log", text, proc = discard)
-#   else:
-#     await fsWriteFile(j"telemetry.log", j"")
-
-proc onUpdateWatches(sender: js, response: jsobject(watchExpressions=seq[cstring])) {.async, exportc.} =
-  discard debugger.updateWatches(response.watchExpressions)
-
-proc onRunTracepoints(sender: js, response: RunTracepointsArg) {.async.} =
-  await debugger.runTracepoints(response)
-
-var files: seq[(cstring, cstring)] = @[]
-
-proc saveAsFile(name: cstring, raw: cstring) {.async.} =
-  electron.dialog.showSaveDialog(js{
-    title: j"save as", defaultPath: name, buttonLabel: j"save"
-    }, proc (file: cstring) {.async.} =
-      if file.len > 0:
-        discard fsWriteFile(file, raw)
-        var files = JsAssoc[cstring, cstring]{}
-        files[name] = file
-        mainWindow.webContents.send "CODETRACER::saved-as", files)
-
-
-proc onSaveFile(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
-  # debug "file register", name=response.name
-  # files.add((response.name, response.raw, response.saveFile))
-  # debugPrint response.name, " ", response.saveAs
-  if response.saveAs:
-    await saveAsFile(response.name, response.raw)
-  else:
-    await fsWriteFile(response.name, response.raw)
-
-
-proc onSaveUntitled(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
-  await saveAsFile(response.name, response.raw)
-
-
-proc onUpdate(sender: js, response: jsobject(build=bool, currentPath=cstring)) {.async.} =
-  for file in files:
-    # debug "save file", name=file[0]
-    if not data.tabs.hasKey(file[0]):
-      data.tabs[file[0]] = ServerTab(path: file[0], lang: LangNim, fileWatched: true)
-    data.tabs[file[0]].ignoreNext = 2
-    await fsWriteFile(file[0], file[1])
-  files = @[]
-
-  # not supported yet
-  # if response.build:
-  #   await initUpdate(data.trace, response.currentPath)
-
-# @FileError, JsonError, ElectronError
-
-# simple examples
-
-# {.pragma: asyncError, raises: [IOError].}
-
-# proc onUpdatedReader(sender: js, response: cstring) {.async.} =
-#   data.reader = Json.parse(await fsReadFile(response)).to(SimpleReader)
-#   mainWindow.webContents.send j"CODETRACER::updated-reader", data.reader
-
-proc onSaveNew(sender: js, response: SaveFile) {.async, raises: [].} =
-  data.save.files.add(response)
-  await cast[Future[void]](0)
-  # await data.saveSave()
-
-
-proc onSaveClose(sender: js, index: int) {.async.} =
-  if not data.config.test:
-    data.save.files.delete(index)
-    await data.saveSave()
-
-
-proc onLoadHistory(sender: js, response: LoadHistoryArg) {.async.} =
-  # TODO: fix in core/use new dsl
-  await debugger.loadHistory(response)
-
-
-proc onLoadFlow(sender: js, response: FlowQuery) {.async.} =
-  await debugger.loadFlow(response.location, response.taskId)
-
-proc onSetupTraceSession(sender: js, response: RunTracepointsArg) {.async.} =
-  discard
-
-proc onLoadFlowShape(sender: js, response: types.Location) {.async.} =
-  # await debugger.loadFlowShape(response)
-  warnPrint "TODO: fix in core/use new dsl: loadFlowShape not working now, also not sure about flow shape reform"
 
 var startedFuture: proc: void
 var startedReceived = false
@@ -673,76 +402,25 @@ proc onStarted(sender: js, response: js) {.async.} =
     startedFuture()
 
 proc onOpenTab(sender: js, response: js) {.async.} =
-
   let options = js{
     properties: @[j"openFile"],
     title: cstring"Select File",
     buttonLabel: cstring"Select"}
 
   let file = await selectFileOrFolder(options)
-
   if file != "":
     if file.slice(-4) == j".nim":
       mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangNim}
     else:
       mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangUnknown}
 
-
-proc onReloadFile(sender: js, response: jsobject(path=cstring)) {.async.} =
-  let lang = if response.path.slice(-4) == j".nim": LangNim else: LangUnknown
-  data.tabs[response.path].waitsPrompt = false
-  discard data.open(mainWindow, types.Location(highLevelPath: response.path, isExpanded: false), ViewSource, "tab-reloaded", false, data.exe, lang, -1)
-
-proc onNoReloadFile(sender: js, response: jsobject(path=cstring)) {.async.} =
-  data.tabs[response.path].waitsPrompt = false
-
 proc onCloseApp(sender: js, response: js) {.async.} =
-  for (name, file) in files:
-    await fsWriteFile(name, file)
-
   # TODO: maybe send shutdown message
   stopBackendManager()
-
   mainWindow.close()
-
-proc onRunToEntry(sender: js, response: js) {.async.} =
-  discard debugger.runToEntry(EmptyArg())
 
 proc onRestart(sender: js, response: js) {.async.} =
   quit(RESTART_EXIT_CODE)
-
-proc onSearch(sender: js, response: SearchQuery) {.async.} = discard
-#   # debugPrint "search ", response
-#   if data.pluginCommands.hasKey(response.value):
-#     if data.pluginClient.isNil:
-#       # debugPrint cstring"plugin client is nil"
-#       return
-#     if data.pluginClient.running:
-#       await data.pluginClient.cancelOrWait()
-#     data.pluginClient.running = true
-#     data.pluginClient.cancelled = false
-#     # debugPrint response.command
-#     await (data.pluginCommands[response.value]).search(response, data.pluginClient)
-#     data.pluginClient.running = false
-#     if not data.pluginClient.cancelOrWaitFunction.isNil:
-#       data.pluginClient.cancelOrWaitFunction()
-#   else:
-#     errorPrint "not found ", response.value
-
-# proc onRunTo(sender: js, response: jsobject(path=cstring, line=int, reverse=bool)) {.async.} =
-  # discard debugger.runTo(response.path, response.line, response.reverse)
-
-# proc onRunToCall(sender: js, re)
-# TODO pass argId?
-
-proc onSearchProgram(sender: js, query: cstring) {.async.} =
-  debugPrint "search program ", query
-  when not defined(server):
-    discard doProgramSearch($query, debugSend, mainWindow)
-  # discard debugger.searchProgram(query)
-
-proc onLoadStepLines(sender: js, response: LoadStepLinesArg) {.async.} =
-  discard debugger.loadStepLines(response)
 
 proc onUploadTraceFile(sender: JsObject, response: UploadTraceArg) =
   runUploadWithStreaming(
@@ -823,32 +501,6 @@ proc onSendBugReportAndLogs(sender: js, response: BugReportArg) {.async.} =
       j($callerProcessPid),
       j"--confirm-send=0"]
   )
-  # debugPrint process
-
-proc onStep(sender: js, response: JsObject) {.async.} =
-  await debugger.step(cast[StepArg](response), cast[TaskId](response.taskId))
-
-proc onDeleteAllBreakpoints(sender: js, response: js) {.async.} =
-  await debugger.deleteAllBreakpoints(EmptyArg())
-
-proc onSourceLineJump(sender: js, response: SourceLineJumpTarget) {.async.} =
-  await debugger.sourceLineJump(response)
-
-proc onSourceCallJump(sender: js, response: SourceCallJumpTarget) {.async.} =
-  await debugger.sourceCallJump(response)
-
-proc onLocalStepJump(sender: js, response: LocalStepJump) {.async.} =
-  await debugger.localStepJump(response)
-
-# TODO: somehow share with codetracer_shell.nim ?
-proc scriptSessionLogPath(sessionId: int): cstring =
-  cstring(codetracerTmpPath / fmt"session-{sessionId}-script.log")
-
-let pty: JsObject = jsundefined # = cast[Pty](jsundefined) # TODO or remove completely require(cstring"node-pty"))
-var afterId = 0
-var sessionId = -1
-var shellXtermProgress = -1
-
 
 let CT_DEBUG_INSTANCE_PATH_BASE*: cstring = cstring(codetracerTmpPath) & cstring"/ct_instance_"
 
@@ -858,8 +510,6 @@ proc newDebugInstancePipe(pid: int): Future[JsObject] {.async.} =
     let path = CT_DEBUG_INSTANCE_PATH_BASE & cstring($pid)
     connections[0] = net.createServer(proc(server: JsObject) =
       infoPrint "index: connected instance server for ", path
-      # connections[0].pipe(connections[0])
-       # js{path: path, encoding: cstring"utf8"},
       resolve(server))
 
     connections[0].on(cstring"error") do (error: js):
@@ -868,7 +518,6 @@ proc newDebugInstancePipe(pid: int): Future[JsObject] {.async.} =
 
     connections[0].listen(path)
   return await future
-  # startSocket(debugger, CT_DEBUG_INSTANCE_PATH_BASE & cstring($pid)) # & cstring"_" & cstring($callerProcessPid))
 
 proc sendOutputJumpIPC(instance: DebugInstance, outputLine: int) {.async.} =
   debugPrint "send output jump ipc ", cast[int](instance.process.pid), " ", outputLine
@@ -886,46 +535,6 @@ proc onShowInDebugInstance(sender: js, response: jsobject(traceId=int, outputLin
   if response.outputLine != -1:
     await sendOutputJumpIPC(data.debugInstances[response.traceId], response.outputLine)
 
-
-proc onOpenTrace(sender: js, traceId: int) {.async.} =
-  # codetracer run <traceId>
-  var process = child_process.spawn(
-    codetracerExe,
-    @[cstring"run", cstring($traceId)])
-
-# proc onUpdatedEventsContent(sender: js, response: cstring) {.async.} =
-#   try:
-#     mainWindow.webContents.send "CODETRACER::updated-events-content", response
-#   except:
-#     errorPrint "error for `onUpdatedEventsContent` ", getCurrentExceptionMsg()
-
-proc onLoadParsedExprs(sender: js, response: LoadParsedExprsArg) {.async.} =
-  let value = await debugger.loadParsedExprs(response)
-  mainWindow.webContents.send "CODETRACER::load-parsed-exprs-received", js{"argId": j($response.path & ":" & $response.line), "value": value}
-
-proc onLoadLocals(sender: js, response: LoadLocalsArg) {.async.} =
-  # debug "load locals"
-  var locals = await debugger.loadLocals(response)
-  mainWindow.webContents.send "CODETRACER::load-locals-received", js{"argId": j($response.rrTicks), "value": locals}
-
-proc onEvaluateExpression(sender: js, response: EvaluateExpressionArg) {.async.} =
-  var value = await debugger.evaluateExpression(response)
-  mainWindow.webContents.send "CODETRACER::evaluate-expression-received", js{"argId": j($response.rrTicks & ":" & $response.expression), "value": value}
-
-proc onEventLoad(sender: js, response: js) {.async.} =
-  discard debugger.eventLoad(EmptyArg())
-
-proc onExpandValue(sender: js, response: ExpandValueTarget) {.async.} =
-  var value = await debugger.expandValue(response)
-  mainWindow.webContents.send "CODETRACER::expand-value-received", js{"argId": j($response.rrTicks & " " & $response.subPath), "value": value}
-
-# proc onExpandValues(sender: js, response: jsobject(expressions=seq[cstring], depth=int, stateCompleteMoveIndex=int)) {.async.} =
-#   var values = await debugger.expandValues(response.expressions, response.depth)
-#   mainWindow.webContents.send(
-#     "CODETRACER::expand-values-received",
-#     js{
-#       "argId": j($response.stateCompleteMoveIndex & " " & $response.expressions),
-#       "value": values})
 
 proc onMinimizeWindow(sender: js, response: JsObject) {.async.} =
   mainWindow.minimize()
@@ -983,9 +592,6 @@ proc loadExistingRecord(traceId: int) {.async.} =
   data.pluginClient.trace = trace
   if data.trace.compileCommand.len == 0:
     data.trace.compileCommand = data.config.defaultBuild
-
-  # debugPrint "index: start and setup core ipc"
-  # await startAndSetupCoreIPC()
 
   if not data.trace.isNil:
     debugPrint "index: init debugger"
@@ -1271,13 +877,11 @@ proc onLoadPathContent(
 proc onOpenDevTools =
   electronDebug.devTools(mainWindow)
 
+# handling incoming messages from frontend:
+#   calls on<actionToCamelCase>
+#   with sender, response
+# ipc.on("maximize-window", onMaximizeWindow.toJs)
 proc configureIpcMain =
-
-  # handling incoming messages from frontend:
-  #   calls on<actionToCamelCase>
-  #   with sender, response
-  # ipc.on("maximize-window", onMaximizeWindow.toJs)
-
   indexIpcHandlers("CODETRACER::"):
     # main window controls
     "minimize-window"
@@ -1285,7 +889,6 @@ proc configureIpcMain =
     "maximize-window"
     "close-window"
 
-    # new-record-screen
     "load-path-for-record"
     "choose-dir"
     "new-record"
@@ -1303,69 +906,15 @@ proc configureIpcMain =
     "load-recent-transaction"
 
     "tab-load"
-    # "asm-load"
     "load-low-level-tab"
 
     "dap-raw-message"
 
-    # "update-expansion"
-    # "load-tokens"
-    # "load-locals"
-    # "evaluate-expression"
-    # "load-parsed-exprs"
-    # "expand-value"
-    # "expand-values"
     "save-config"
-    # "run-tracepoints"
-    # "event-jump"
-    # "event-load"
-    # "load-terminal"
-    # "callstack-jump"
-    # "calltrace-jump"
-    # "trace-jump"
-    # "history-jump"
-    # "add-break"
-    # "delete-break"
-    # "add-break-c"
-    # "delete-break-c"
-    # "delete-all-breakpoints"
-    # "source-line-jump"
-    # "source-call-jump"
-    # "enable"
-    # "disable"
-    # "search-calltrace"
-    # "update-table"
-    # "tracepoint-delete"
-    # "tracepoint-toggle"
-    # "load-callstack"
-    # "load-call-args"
-    # "collapse-calls"
-    # "expand-calls"
-    # "updated-calltrace-args"
-    # "reset-operation"
     "exit-error"
-    # "update-watches"
-    # "save-file"
-    # "save-untitled"
-    # "update"
-    # "save-new"
-    # "save-close"
-    # "load-history"
-    # "load-flow"
-    # "load-flow-shape"
-    # "setup-trace-session"
     "started"
     "open-tab"
-    # "reload-file"
-    # "no-reload-file"
     "close-app"
-    # "run-to-entry"
-    # "search"
-    # "search-program"
-    # "load-step-lines"
-    # "step"
-    # "local-step-jump"
-    # "open-trace"
     "show-in-debug-instance"
     "send-bug-report-and-logs"
 
@@ -1380,9 +929,6 @@ proc configureIpcMain =
 
   indexIpcHandlers("CODETRACER::"):
     "restart"
-
-    # "debug-gdb"
-
     # update filesystem component
     "load-path-content"
 
@@ -1395,14 +941,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
   let bypass = true
 
   data.config = config
-  # config <- file config combined with cli args and other setup
-  # improve this code
-
-  data.config.test = data.config.test #  or data.startOptions.inTest
-  # TELEMETRY_ENABLED = false
-  # data.layout = layout
-  # data.helpers = helpers
-
+  data.config.test = data.config.test
   data.startOptions.isInstalled = isCtInstalled(data.config)
   data.config.skipInstall = data.startOptions.isInstalled
 
@@ -1410,7 +949,6 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
     await wait(1_000)
     await startShellUi(mainWindow, data.config)
     await wait(1_000)
-    # await startAndSetupCoreIPC(debugger)
     await started()
     return
 
@@ -1436,7 +974,6 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
   if not data.trace.isNil:
     discard initDebugger(mainWindow, data.trace, data.config, Helpers())
 
-  # discard startIPCFileRead(debugger)
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     debugPrint "send ", "CODETRACER::init"
     debugPrint data.startOptions
@@ -1468,15 +1005,7 @@ proc init(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.
 
   elif data.startOptions.edit:
     let file = ($data.startOptions.name)
-    # let fs = await cast[Future[js]](fsAsync.lstat(file))
     var folder = data.startOptions.folder
-    # if cast[bool](fs.isFile()):
-    #   folder = ($data.startOptions.name).rsplit("/", 1)[0]
-    # else:
-    #   folder = file
-    #   data.startOptions.name = j""
-    # if not folder.endsWith("/"):
-    #   folder = folder & "/"
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
     var filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
     var functions: seq[Function] = @[] # TODO load with rg or similar?
@@ -1539,7 +1068,6 @@ proc isCtInstalled(config: Config): bool =
 proc waitForResponseFromInstall: Future[InstallResponse] {.async.} =
   return newPromise() do (resolve: proc(response: InstallResponse)):
     installResponseResolve = resolve
-
 
 proc ready {.async.} =
   let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
@@ -1609,12 +1137,6 @@ proc ready {.async.} =
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {serialized}"
       ipc.socket.emit(id, serialized)
 
-  # we load the layout
-  # let layout = if data.startOptions.inTest:
-  #   await mainWindow.loadLayoutConfig(&"{codetracerTestDir}/layouts/{config.layout}.json")
-  # else:
-  #   await mainWindow.loadLayoutConfig(&"{userLayoutDir}{config.layout}.json")
-
   let layout = await mainWindow.loadLayoutConfig(&"{userLayoutDir / $config.layout}.json")
   data.layout = layout
   # we load helpers
@@ -1627,25 +1149,6 @@ proc ready {.async.} =
 # start
 parseArgs()
 
-proc matchRegex(text: string, pattern: string): JsObject {.importjs: "#.match(new RegExp(#, 'm'))".}
-
-# proc extractExecCommandJs(desktopFile: string): string =
-#   let content = readFileJs(cstring(desktopFile))
-#
-#   console.log("CONTENT")
-#   echo content
-#
-#   let matches = matchRegex(content, "^Exec=(.*)$")
-#
-#   console.log(matches)
-#
-#   if matches != nil and matches[1] != nil:
-#     return matches[1].to(string)
-#
-#   echo "NO MATCH FOUND"
-#
-#   return ""  # Return empty if no match found
-
 when not defined(server):
   app.on("ready") do ():
     app.js.setName "CodeTracer"
@@ -1654,4 +1157,3 @@ when not defined(server):
 else:
   readyVar = functionAsJs(ready)
   setupServer()
-  # discard ready()
