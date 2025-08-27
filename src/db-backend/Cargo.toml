@@ -50,3 +50,7 @@ path = "src/main.rs"
 [[bin]]
 name = "virtualization-layers"
 path = "src/bin/virtualization-layers.rs"
+
+[[bin]]
+name = "schema-generator"
+path = "src/bin/schema_generator.rs"

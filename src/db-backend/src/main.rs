@@ -52,9 +52,6 @@ struct Args {
     /// Use stdio transport for DAP communication instead of a Unix socket.
     #[arg(long)]
     stdio: bool,
-
-    #[arg(long)]
-    generate_schema: bool,
 }
 
 // Already panicking so the unwraps won't change anything
@@ -96,27 +93,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let cli = Args::parse();
     info!("logging from db-backend");
-
-    if cli.generate_schema {
-        let mut schema = merge_schemas(
-            vec![
-                schema_for!(task::CoreTrace),
-                schema_for!(task::ConfigureArg),
-                schema_for!(task::CtLoadLocalsArguments),
-                schema_for!(task::CtLoadLocalsResponseBody),
-                schema_for!(task::UpdateTableArgs),
-                schema_for!(task::CtUpdatedTableResponseBody)].into_iter());
-        // copied from DAP json schema
-        schema.meta_schema = Some("http://json-schema.org/draft-04/schema#".to_string());
-        // description: "ct types";?
-
-        #[allow(clippy::unwrap_used)]
-        let json_text = serde_json::to_string_pretty(&schema)?;
-        println!("{}", json_text);
-
-        std::process::exit(0);
-    }
-    // end of schema generation
 
     info!("pid {:?}", std::process::id());
     // let handle =
