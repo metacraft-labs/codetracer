@@ -864,7 +864,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
       MonacoEditorOptions(
         value: self.source,
         # language: toJsLang(self.editorUI.lang),
-        theme: "vs-dark",
+        theme: if self.inExtension: "vs-dark" else: data.ui.editors[data.services.editor.active].monacoEditor.getCurrentMonacoTheme(),
         readOnly: false,
         automaticLayout: true,
         lineNumbers: traceLine,
