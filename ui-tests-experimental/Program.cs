@@ -1,22 +1,33 @@
 using System;
 using System.Threading.Tasks;
-using Microsoft.Playwright;
+using OpenQA.Selenium;
 using UtTestsExperimentalConsoleAppication.Helpers;
 
 namespace UtTestsExperimentalConsoleAppication;
 
-// Console app launching CodeTracer via Playwright.
+// Console app launching CodeTracer via Selenium.
 class Program
 {
     public static async Task Main()
     {
-        if (!PlaywrightCodetracerLauncher.IsCtAvailable)
+        if (!CodetracerLauncher.IsCtAvailable)
         {
-            Console.WriteLine($"ct executable not found at {PlaywrightCodetracerLauncher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
+            Console.WriteLine($"ct executable not found at {CodetracerLauncher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
             return;
         }
 
-        var page = await PlaywrightCodetracerLauncher.LaunchAsync("noir_space_ship");
-        await page.WaitForSelectorAsync(".menu-logo-img", new() { Timeout = 10_000 });
+        using var driver = SeleniumCodetracerLauncher.Launch("noir_space_ship");
+        await Task.Delay(TimeSpan.FromSeconds(10));
+
+        bool isVisible = false;
+        try
+        {
+            var element = driver.FindElement(By.CssSelector(".menu-logo-img"));
+            isVisible = element.Displayed;
+        }
+        catch (NoSuchElementException)
+        {
+            // Element not found; isVisible remains false.
+        }
     }
 }
