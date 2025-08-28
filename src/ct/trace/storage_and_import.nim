@@ -2,7 +2,7 @@ import
   std/[os, json, strutils, strformat, sets, algorithm ],
   ../../common/[trace_index, lang, types, paths],
   ../utilities/git,
-  json_serialization
+  json_serialization, results
 
 proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
   let filesFolder = traceFolder / "files"
@@ -46,7 +46,7 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
 
 proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = ""): seq[string] =
   var folders: seq[string] = @[]
-  let gitRoot = getGitTopLevel(programDir)
+  let gitRootResult = getGitTopLevel(programDir)
   var i = 0
 
   for potentialChild in folderSet:
@@ -61,13 +61,19 @@ proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = 
           ok = false
           break
         k += 1
-    if ok and not potentialChild.startsWith(gitRoot):
-      folders.add(potentialChild)
+    # echo "ok? ", ok, " ", potentialChild, " with? ", gitRootResult
+    if ok:
+      let startsWithGitRoot = if gitRootResult.isOk:
+          potentialChild.startsWith(gitRootResult.value)
+        else:
+          false
+      if not startsWithGitRoot:
+        folders.add(potentialChild)
     i += 1
 
   # Add Git repository roots to the final result
-  if gitRoot != "":
-    folders.add(gitRoot)
+  if gitRootResult.isOk:
+    folders.add(gitRootResult.value)
 
   if folders.len == 0:
     folders.add(getAppFilename().parentDir)
@@ -143,7 +149,6 @@ proc importDbTrace*(
       sourceFoldersInitialSet.incl(path.parentDir)
 
   let sourceFolders = processSourceFoldersList(sourceFoldersInitialSet, workdir)
-  # echo sourceFolders
   let sourceFoldersText = sourceFolders.join(" ")
 
   trace_index.recordTrace(

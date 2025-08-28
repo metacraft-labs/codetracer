@@ -953,6 +953,7 @@ proc loadFile(
   var data: js
   var res: CodetracerFile
 
+  # echo "loadFile ", path, " ", depth, " ", index, " ", traceFilesPath, " ", selfContained
   if path.len == 0:
     return res
 
