@@ -10,3 +10,4 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
+- Experimental Selenium-based launcher added for driving the Electron UI via ChromeDriver.
