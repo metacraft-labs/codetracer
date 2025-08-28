@@ -7,7 +7,7 @@ using Microsoft.Playwright;
 
 namespace UtTestsExperimentalConsoleAppication.Helpers
 {
-    public static class CodetracerLauncher
+    public static class PlaywrightCodetracerLauncher
     {
         private static readonly string RepoRoot =
             Environment.GetEnvironmentVariable("CODETRACER_REPO_ROOT_PATH") ??
