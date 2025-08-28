@@ -29,7 +29,14 @@ proc runInitial*(conf: CodetracerConf) =
 
   case conf.cmd:
     of StartupCommand.install:
-      let rootDir = when defined(withTup): getGitTopLevel(".") & "/" else: linksPath & "/"
+      let rootDir = when defined(withTup):
+          let gitTopLevelResult = getGitTopLevel(".")
+          if gitTopLevelResult.isOk:
+            gitTopLevelResult.value & "/"
+          else:
+            raise newException(ValueError, "no valid git root: " & gitTopLevelResult.error)
+        else:
+          linksPath & "/"
 
       when defined(macosx):
         let
