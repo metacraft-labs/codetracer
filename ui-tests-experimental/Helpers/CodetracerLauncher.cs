@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
-namespace UiTestsExperimental.Helpers
+namespace UtTestsExperimentalConsoleAppication.Helpers
 {
     public static class CodetracerLauncher
     {
@@ -82,4 +82,3 @@ namespace UiTestsExperimental.Helpers
         }
     }
 }
-
