@@ -6,14 +6,63 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
-        pkgs = import nixpkgs { inherit system; };
-      in {
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
+        dotnet-full =
+          with pkgs.dotnetCorePackages;
+          combinePackages [
+            sdk_9_0
+            sdk_8_0
+            runtime_9_0
+            runtime_8_0
+            aspnetcore_9_0
+            aspnetcore_8_0
+          ];
+
+        deps = (
+          ps:
+          with ps;
+          [
+            rustup
+            zlib
+            openssl.dev
+            pkg-config
+            stdenv.cc
+            cmake
+          ]
+          ++ [ dotnet-full ]
+        );
+
+        vscode =
+          (pkgs.vscode.overrideAttrs (prevAttrs: {
+            nativeBuildInputs = prevAttrs.nativeBuildInputs ++ [ pkgs.makeWrapper ];
+            postFixup =
+              prevAttrs.postFixup
+              + ''
+                wrapProgram $out/bin/code \
+                  --set DOTNET_ROOT "${dotnet-full}/share/dotnet" \
+                  --prefix PATH : "~/.dotnet/tools"
+              '';
+          })).fhsWithPackages
+            (ps: deps ps);
+
+      in
+      {
         devShells.default = pkgs.mkShell {
           packages = [
-            pkgs.dotnet-sdk_8
+            vscode
+            dotnet-full
             pkgs.nodejs_22
             pkgs.playwright
             pkgs.playwright-driver.browsers
@@ -23,5 +72,6 @@
             export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1
           '';
         };
-      });
+      }
+    );
 }
