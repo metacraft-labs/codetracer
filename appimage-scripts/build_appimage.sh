@@ -119,6 +119,9 @@ EOF
 # Build/setup db-backend
 bash "${ROOT_PATH}"/appimage-scripts/build_db_backend.sh
 
+# Build/setup backend-manager
+bash "${ROOT_PATH}"/appimage-scripts/build_backend_manager.sh
+
 # Noir
 cp -Lr "${ROOT_PATH}/src/links/nargo" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/nargo"
