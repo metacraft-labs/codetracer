@@ -17,11 +17,10 @@ class Program
         }
 
         var driver = await PlaywrightCodetracerLauncher.LaunchAsync("noir_space_ship");
-        await Task.Delay(TimeSpan.FromSeconds(10));
 
-        // bool isVisible = false;
         try
         {
+            Console.WriteLine($"received driver: {driver}");
             // await driver. ClickAsync("div");
             // var element = driver.FindElement(By.CssSelector(".menu-logo-img"));
             // isVisible = element.Displayed;
