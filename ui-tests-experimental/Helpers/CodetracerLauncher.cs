@@ -42,6 +42,7 @@ internal static class CodetracerLauncher
         proc.WaitForExit();
         var lines = proc.StandardOutput.ReadToEnd().Trim().Split('\n');
         var last = lines.Last();
+        var lastLine = last;
         return int.Parse(last.Split(':')[1].Trim());
     }
 
@@ -99,7 +100,7 @@ public static class SeleniumCodetracerLauncher
             throw new FileNotFoundException($"ct executable not found at {CodetracerLauncher.CtPath}");
 
         int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
-        CodetracerLauncher.StartCore(traceId, 1);
+        // CodetracerLauncher.StartCore(traceId, 1);
 
         var psi = new ProcessStartInfo(CodetracerLauncher.CtPath, "--remote-debugging-port=9222")
         {
@@ -112,11 +113,14 @@ public static class SeleniumCodetracerLauncher
         psi.Environment["CODETRACER_TEST"] = "1";
         psi.Environment["CODETRACER_WRAP_ELECTRON"] = "1";
         psi.Environment["CODETRACER_START_INDEX"] = "1";
-        Process.Start(psi);
+        // Process.Start(psi);
 
         var options = new ChromeOptions();
         options.DebuggerAddress = "127.0.0.1:9222";
-        return new ChromeDriver(options);
+
+        var driverDir = "/home/franz/code/ChromeDrivers/chromedriver-linux64";
+
+        return new ChromeDriver(driverDir, options);
     }
 }
 
