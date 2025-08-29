@@ -10,6 +10,7 @@
   fetchurl,
   writeShellScript,
   writeShellScriptBin,
+  electron,
 }:
 {
   src,
@@ -53,6 +54,11 @@ let
     export npm_config_build_from_source=true
     # Disable Nixify plugin to save on some unnecessary processing.
     export yarn_enable_nixify=false
+    # Prevent electron's postinstall script from fetching binaries online; the
+    # build scripts provide a system electron via ELECTRON_OVERRIDE_DIST_PATH.
+    export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+    export npm_config_electron_skip_binary_download=1
+    export ELECTRON_OVERRIDE_DIST_PATH='${electron}/lib/electron'
   '';
 
   cacheDrv = stdenv.mkDerivation rec {
@@ -78,7 +84,7 @@ let
       if stdenv.isAarch64 then
         "sha512-+f3z4zwF2YlzskL7uDwVvQ3Fg0EYJ1HGPEqIGNb2VsiQpXoY2tU+EufqX79YRCOW7lXkuDfMQHYI3XcPioAEvg=="
       else
-        "sha512-J9t4DyOclFAaz0aTrMjLYet64YnVwY3gfV7F1YYZ4GVsF8JvuSBs4w3U6AZBSWvIq24n7Ccxqt8bpS3Do93mnA=="
+        "sha512-mb3MNaaYGbZ1vAGNlV1R6GG1l/gRsVvJVGQxszzhipb+5qYFurkewFIUXY8sCOhEKXw7vB1pa4CnmY4f2EX5QA=="
     );
   };
 

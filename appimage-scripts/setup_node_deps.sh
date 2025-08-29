@@ -13,7 +13,13 @@ echo "==========="
 #   node modules and webpack/frontend_bundle.js
 pushd "${ROOT_PATH}/node-packages"
 
-echo y | npx yarn
+yarn install
+
+# Build the Electron entry script so electron-builder has something to package
+nim \
+    --hints:on --warnings:off --sourcemap:on \
+    -d:ctIndex -d:chronicles_sinks=json \
+    -d:nodejs --out:index.js js ../src/frontend/index.nim
 
 popd
 
@@ -24,10 +30,7 @@ pushd "${ROOT_PATH}/"
 node-packages/node_modules/.bin/webpack
 
 popd
-
-rm -rf "${ROOT_PATH}/node-packages/node_modules"
-
-# => now we have node_modules, and $ROOT_PATH/src/public/dist/frontend_bundle.js
+# => now we have node_modules and $ROOT_PATH/src/public/dist/frontend_bundle.js
 # <=> $NIX_CODETRACER_EXE_DIR/public/dist/frontend_bundle.js
 
 echo "==========="
