@@ -5,10 +5,13 @@ mod backend_manager;
 mod dap_parser;
 mod errors;
 
-use std::error::Error;
+use std::{error::Error, sync::Arc};
 
 use clap::Parser;
-use tokio::{signal, sync::mpsc};
+use tokio::{
+    signal,
+    sync::{Mutex, mpsc},
+};
 
 use crate::backend_manager::BackendManager;
 
@@ -26,22 +29,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     // TODO: maybe implement shutdown message?
-    let (_shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel::<()>();
+    let (shutdown_send, shutdown_recv) = mpsc::unbounded_channel::<()>();
+    let shutdown_recv = Arc::new(Mutex::new(shutdown_recv));
 
-    let mgr = BackendManager::new().await?;
+    let runner_task = tokio::spawn(async move {
+        let mgr = match BackendManager::new(shutdown_recv).await {
+            Ok(x) => x,
+            Err(err) => {
+                error!("Can't start: {err}");
+                return;
+            }
+        };
 
-    if let Some(cmd) = cli.start {
-        let mut mgr = mgr.lock().await;
-        // TODO: add args to cmd
-        mgr.start_replay(&cmd, &[]).await?;
+        if let Some(cmd) = cli.start {
+            let mut mgr = mgr.lock().await;
+            // TODO: add args to cmd
+            if let Err(err) = mgr.start_replay(&cmd, &[]).await {
+                error!("Can't replay: {err}");
+            }
+        }
+    });
+
+    tokio::pin!(runner_task);
+
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                info!("Ctrl+C detected. Shutting down...");
+                shutdown_send.send(()).inspect_err(|e| {
+                    warn!("Can't perform graceful shutdown! {e}");
+                })?;
+            },
+            _ = &mut runner_task => {
+                info!("Finished");
+                return Ok(());
+            }
+        }
     }
-
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            println!("Ctrl+C detected. Shutting down...")
-        },
-        _ = shutdown_recv.recv() => {},
-    }
-
-    Ok(())
 }

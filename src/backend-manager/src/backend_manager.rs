@@ -27,9 +27,10 @@ pub struct BackendManager {
 }
 
 // TODO: cleanup on exit
-// TODO: Handle signals
 impl BackendManager {
-    pub async fn new() -> Result<Arc<Mutex<Self>>, Box<dyn Error>> {
+    pub async fn new(
+        stop_signal: Arc<Mutex<UnboundedReceiver<()>>>,
+    ) -> Result<Arc<Mutex<Self>>, Box<dyn Error>> {
         let res = Arc::new(Mutex::new(Self {
             children: vec![],
             children_receivers: vec![],
@@ -39,6 +40,13 @@ impl BackendManager {
 
         let res1 = res.clone();
         let res2 = res.clone();
+        let res3 = res.clone();
+
+        tokio::spawn(async move {
+            let mut res = res3.lock().await;
+            _ = stop_signal.lock().await.recv().await;
+            res.stop().await;
+        });
 
         let socket_dir = env::temp_dir().join("codetracer").join("backend-manager");
 
@@ -126,6 +134,11 @@ impl BackendManager {
         });
 
         Ok(res)
+    }
+
+    pub async fn stop(&mut self) {
+        info!("Stopping");
+        // TODO: actually stop managers
     }
 
     fn check_id(&self, id: usize) -> Result<(), Box<dyn Error>> {
