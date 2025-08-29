@@ -17,7 +17,12 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config.allowUnfree = true;
+          config = {
+            allowUnfree = true;
+            permittedInsecurePackages = [
+              "openssl-1.1.1w" # for openssl_1_1
+            ];
+	  };
         };
         dotnet-full =
           with pkgs.dotnetCorePackages;
@@ -40,6 +45,8 @@
             pkg-config
             stdenv.cc
             cmake
+            # openssl_3
+            openssl_1_1
           ]
           ++ [ dotnet-full ]
         );
