@@ -48,9 +48,12 @@ internal static class CodetracerLauncher
 
     public static void StartCore(int traceId, int runPid)
     {
-        var psi = new ProcessStartInfo(CtPath, $"start_core {traceId} {runPid}")
+        var psi = new ProcessStartInfo(CtPath)
         {
-            WorkingDirectory = CtInstallDir
+            WorkingDirectory = CtInstallDir,
+            CreateNoWindow = true,
+            UseShellExecute = true,
+            ArgumentList = {"start_core", $"{traceId}", $"{runPid}"},
         };
         Process.Start(psi);
     }
@@ -61,34 +64,39 @@ public static class PlaywrightCodetracerLauncher
     public static string CtPath => CodetracerLauncher.CtPath;
     public static bool IsCtAvailable => CodetracerLauncher.IsCtAvailable;
 
-    public static async Task<IPage> LaunchAsync(string programRelativePath)
+    public static async Task<IBrowser> LaunchAsync(string programRelativePath)
     {
         if (!IsCtAvailable)
             throw new FileNotFoundException($"ct executable not found at {CtPath}");
 
         int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
-        CodetracerLauncher.StartCore(traceId, 1);
+
+        // CodetracerLauncher.StartCore(traceId, 1);
+
+        var info = new ProcessStartInfo(CtPath)
+        {
+            WorkingDirectory = CodetracerLauncher.CtInstallDir,
+            // UseShellExecute = true,
+            ArgumentList = { "--remote-debugging-port=9222" },
+        };
+
+        info.EnvironmentVariables.Add("CODETRACER_CALLER_PID", "1");
+        info.EnvironmentVariables.Add("CODETRACER_TRACE_ID", traceId.ToString());
+        info.EnvironmentVariables.Add("CODETRACER_IN_UI_TEST", "1");
+        info.EnvironmentVariables.Add("CODETRACER_TEST", "1");
+        info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
+        info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
+
+        Process.Start(info);
 
         var playwright = await Playwright.CreateAsync();
-        var app = await ((dynamic)playwright)._electron.LaunchAsync(new
-        {
-            executablePath = CtPath,
-            cwd = CodetracerLauncher.CtInstallDir,
-            env = new
-            {
-                CODETRACER_CALLER_PID = "1",
-                CODETRACER_TRACE_ID = traceId.ToString(),
-                CODETRACER_IN_UI_TEST = "1",
-                CODETRACER_TEST = "1",
-                CODETRACER_WRAP_ELECTRON = "1",
-                CODETRACER_START_INDEX = "1"
-            }
-        });
+        var app = await playwright.Chromium.ConnectOverCDPAsync("localhost:9223");
 
-        var firstWindow = await app.FirstWindowAsync();
-        return (await firstWindow.TitleAsync()) == "DevTools"
-            ? (await app.WindowsAsync())[1]
-            : firstWindow;
+        return app;
+        // var firstWindow = await app.FirstWindowAsync();
+        // return (await firstWindow.TitleAsync()) == "DevTools"
+        //     ? (await app.WindowsAsync())[1]
+        //     : firstWindow;
     }
 }
 
