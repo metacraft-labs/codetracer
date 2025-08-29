@@ -16,14 +16,15 @@ class Program
             return;
         }
 
-        using var driver = SeleniumCodetracerLauncher.Launch("noir_space_ship");
+        var driver = await PlaywrightCodetracerLauncher.LaunchAsync("noir_space_ship");
         await Task.Delay(TimeSpan.FromSeconds(10));
 
-        bool isVisible = false;
+        // bool isVisible = false;
         try
         {
-            var element = driver.FindElement(By.CssSelector(".menu-logo-img"));
-            isVisible = element.Displayed;
+            // await driver. ClickAsync("div");
+            // var element = driver.FindElement(By.CssSelector(".menu-logo-img"));
+            // isVisible = element.Displayed;
         }
         catch (NoSuchElementException)
         {
