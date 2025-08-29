@@ -71,12 +71,14 @@ public static class PlaywrightCodetracerLauncher
 
         int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
 
-        // CodetracerLauncher.StartCore(traceId, 1);
+        Console.WriteLine("before process");
 
         var info = new ProcessStartInfo(CtPath)
         {
             WorkingDirectory = CodetracerLauncher.CtInstallDir,
-            // UseShellExecute = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
             ArgumentList = { "--remote-debugging-port=9222" },
         };
 
@@ -87,10 +89,17 @@ public static class PlaywrightCodetracerLauncher
         info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
         info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
 
-        Process.Start(info);
+        var process = Process.Start(info)!;
+
+        Console.WriteLine($"process started {process.Id}");
 
         var playwright = await Playwright.CreateAsync();
-        var app = await playwright.Chromium.ConnectOverCDPAsync("localhost:9223");
+        Console.WriteLine($"will try to connect to {process.Id}");
+        var app = await playwright.Chromium.ConnectOverCDPAsync("localhost:9222", options: new() {
+            Timeout = 1
+        });
+
+        Console.WriteLine("connecting succesfully");
 
         return app;
         // var firstWindow = await app.FirstWindowAsync();
