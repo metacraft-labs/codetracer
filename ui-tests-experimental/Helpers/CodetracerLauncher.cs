@@ -53,9 +53,11 @@ internal static class CodetracerLauncher
             WorkingDirectory = CtInstallDir,
             CreateNoWindow = true,
             UseShellExecute = true,
-            ArgumentList = {"start_core", $"{traceId}", $"{runPid}"},
+            ArgumentList = { "start_core", $"{traceId}", $"{runPid}" },
         };
         Process.Start(psi);
+
+        Thread.Sleep(5000);
     }
 }
 
@@ -70,8 +72,6 @@ public static class PlaywrightCodetracerLauncher
             throw new FileNotFoundException($"ct executable not found at {CtPath}");
 
         int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
-
-        Console.WriteLine("before process");
 
         var info = new ProcessStartInfo(CtPath)
         {
@@ -89,23 +89,21 @@ public static class PlaywrightCodetracerLauncher
         info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
         info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
 
-        Thread.Sleep(2000);
-
         var process = Process.Start(info)!;
 
-        Thread.Sleep(2000);
+        Thread.Sleep(10000);
 
         Console.WriteLine($"process started {process.Id}");
 
         var playwright = await Playwright.CreateAsync();
         Console.WriteLine($"will try to connect to {process.Id}");
-        var app = await playwright.Chromium.ConnectOverCDPAsync("http://localhost:9222", options: new() {
+        var electronWindow = await playwright.Chromium.ConnectOverCDPAsync("http://localhost:9222", options: new() {
             Timeout = 20000
         });
 
-        Console.WriteLine("connecting succesfully");
+        Thread.Sleep(10000);
 
-        return app;
+        return electronWindow;
         // var firstWindow = await app.FirstWindowAsync();
         // return (await firstWindow.TitleAsync()) == "DevTools"
         //     ? (await app.WindowsAsync())[1]
