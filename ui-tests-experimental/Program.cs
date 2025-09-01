@@ -10,6 +10,7 @@ class Program
 {
     public static async Task Main()
     {
+        System.Console.WriteLine("debug debug");
         if (!CodetracerLauncher.IsCtAvailable)
         {
             Console.WriteLine($"ct executable not found at {CodetracerLauncher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
