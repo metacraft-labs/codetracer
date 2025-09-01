@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::js_sys;
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 #[derive(Serialize, Deserialize, Debug)]

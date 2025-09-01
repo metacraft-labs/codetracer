@@ -1,7 +1,10 @@
 use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::Write;
+
+#[cfg(target_arch = "x86_64")]
 use std::os::unix::net::UnixStream;
+
 use std::path::PathBuf;
 
 use std::str;

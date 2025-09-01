@@ -700,7 +700,9 @@ pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json:
     from_json(json_text)
 }
 
-pub fn write_message<W: Write>(writer: &mut W, message: &DapMessage) -> Result<(), serde_json::Error> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) -> Result<(), serde_json::Error> {
+    use serde_json::to_string as to_json;
     let json = to_json(message)?;
     let header = format!("Content-Length: {}\r\n\r\n", json.len());
     writer
@@ -709,8 +711,24 @@ pub fn write_message<W: Write>(writer: &mut W, message: &DapMessage) -> Result<(
     writer
         .write_all(json.as_bytes())
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
-
     writer.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
-    info!("DAP -> {:?}", message);
+    log::info!("DAP -> {:?}", message);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn write_message(message: &DapMessage) -> Result<(), wasm_bindgen::JsValue> {
+    use serde_wasm_bindgen::to_value;
+    use wasm_bindgen::JsCast;
+
+    let js_val = to_value(message).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+
+    let global = js_sys::global();
+    let scope: web_sys::DedicatedWorkerGlobalScope = global
+        .dyn_into()
+        .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
+
+    scope.post_message(&js_val)?;
+    web_sys::console::log_1(&format!("DAP -> {:?}", message).into());
     Ok(())
 }

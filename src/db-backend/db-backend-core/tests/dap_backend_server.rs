@@ -2,7 +2,10 @@ use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments, Stack
 use db_backend::dap_server::{self};
 use serde_json::json;
 use std::io::BufReader;
+
+#[cfg(target_arch = "x86_64")]
 use std::os::unix::net::UnixStream;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;

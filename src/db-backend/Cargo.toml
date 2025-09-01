@@ -1,11 +1,11 @@
 [workspace]
 members = [
-  "crates/db-backend-core",
-  "crates/db-backend-wasm",
+  "db-backend-core",
+  "db-backend-wasm",
 ]
 
 default-members = [
-  "crates/db-backend-core"
+  "db-backend-core"
 ]
 
 resolver = "2"

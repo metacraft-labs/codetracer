@@ -1,4 +1,6 @@
+#[cfg(target_arch = "x86_64")]
 use expanduser::expanduser;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
@@ -416,16 +418,20 @@ impl<'a> TraceProcessor<'a> {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[allow(clippy::panic)]
-pub fn load_trace_data(trace_file: &Path, file_format: runtime_tracing::TraceEventsFileFormat) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let mut trace_reader = runtime_tracing::create_trace_reader(file_format); 
+pub fn load_trace_data(
+    trace_file: &Path,
+    file_format: runtime_tracing::TraceEventsFileFormat,
+) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+    let mut trace_reader = runtime_tracing::create_trace_reader(file_format);
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
     let path = expanduser(trace_file.display().to_string())?;
     let trace_events = trace_reader.load_trace_events(&path)?;
     Ok(trace_events)
 }
 
-
+#[cfg(target_arch = "x86_64")]
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     // copied and adapted from https://stackoverflow.com/a/70926549/438099

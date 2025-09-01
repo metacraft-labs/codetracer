@@ -5,18 +5,24 @@ use crate::dap::{
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, LoadHistoryArg, LocalStepJump, Location,
-    ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId,
-    UpdateTableArgs, FunctionLocation,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, FunctionLocation, LoadHistoryArg,
+    LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task,
+    TaskKind, TracepointId, UpdateTableArgs,
 };
+
+#[cfg(target_arch = "x86_64")]
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
+
 use log::{error, info, warn};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
+
+#[cfg(target_arch = "x86_64")]
 use std::os::unix::net::UnixListener;
+
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -62,11 +68,7 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(
-    trace_folder: &Path,
-    trace_file: &Path,
-    seq: i64,
-) -> Result<Handler, Box<dyn Error>> {
+fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
@@ -93,7 +95,6 @@ fn launch(
         let duration2 = start2.elapsed();
         info!("postprocessing trace: duration: {:?}", duration2);
 
-        // eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
         handler.run_to_entry(dap::Request::default())?;

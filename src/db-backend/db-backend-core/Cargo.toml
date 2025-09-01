@@ -26,14 +26,21 @@ tree-sitter-traversal2 = "0.2.0"
 indexmap = "1.9.3"
 once_cell = "1.10.0"
 
-tokio = {version = "1.37.0", features=["full", "rt", "net", "signal"]}
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
-runtime_tracing = "0.14.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-add-evm-event" }
+# runtime_tracing = "0.14.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-add-evm-event" }
+runtime_tracing = { path = "/home/pesho/code/runtime_tracing/runtime_tracing/"}
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde-wasm-bindgen = "0.6.5"
+wasm-bindgen = "0.2.100"
+web-sys = "0.3.77"
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
 expanduser = "1.2.2"
 
 [lib]
