@@ -144,6 +144,7 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordLang, conf.recordOutputFolder,
         conf.recordExportFile, conf.recordStylusTrace,
         conf.recordAddress, conf.recordSocket,
+        conf.recordWithDiff,
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)

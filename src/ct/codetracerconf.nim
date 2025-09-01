@@ -276,6 +276,12 @@ type
         desc: "Path to socket for sending the trace events metadata when in ci mode/environment"
       .}: string
 
+      recordWithDiff* {.
+        name: "with-diff"
+        defaultValue: ""
+        desc: "Record a diff related to this trace and produce a multitrace"
+      .}: string
+      
       recordProgram* {.
         argument
         desc: "Program to record"
