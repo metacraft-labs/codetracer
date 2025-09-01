@@ -40,6 +40,7 @@ proc runWithRestart(
                              stylusTrace="",
                              address="",
                              socketPath="",
+                             withDiff="",
                              program=recordArgs[0],
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:
