@@ -19,9 +19,6 @@
           inherit system;
           config = {
             allowUnfree = true;
-            permittedInsecurePackages = [
-              "openssl-1.1.1w" # for openssl_1_1
-            ];
 	  };
         };
         dotnet-full =
@@ -37,12 +34,10 @@
           [
             rustup
             zlib
-            openssl.dev
             pkg-config
             stdenv.cc
             cmake
-            # openssl_3
-            openssl_1_1
+            openssl
           ]
           ++ [ dotnet-full ]
         );
