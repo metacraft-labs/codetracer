@@ -30,6 +30,9 @@ cd non-nix-build
 # build/setup db-backend
 bash build_db_backend.sh
 
+# build backend-manager
+bash build_backend_manager.sh
+
 # for now just put them in src/
 #   not great, but much easier for now as the public/static files
 #   are just there, no need for special copying/linking
