@@ -141,3 +141,6 @@ proc configureShortcuts* =
 
   Mousetrap.`bind`("alt+v") do ():
     data.focusEditorView()
+
+  Mousetrap.`bind`("ctrl+alt+d") do ():
+    data.ipc.send("CODETRACER::open-devtools", JsObject{})

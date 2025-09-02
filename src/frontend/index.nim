@@ -1268,6 +1268,9 @@ proc onLoadPathContent(
       nodeIndex: response.nodeIndex,
       nodeParentIndices: response.nodeParentIndices}
 
+proc onOpenDevTools =
+  electronDebug.devTools(mainWindow)
+
 proc configureIpcMain =
 
   # handling incoming messages from frontend:
@@ -1382,6 +1385,8 @@ proc configureIpcMain =
 
     # update filesystem component
     "load-path-content"
+
+    "open-devtools"
 
 const NO_LIMIT = (-1)
 
