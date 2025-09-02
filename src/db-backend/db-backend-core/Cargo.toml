@@ -35,10 +35,11 @@ tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+# [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2.100"
-web-sys = "0.3.77"
+web-sys = { version = "0.3", features = [ "DedicatedWorkerGlobalScope",
+  "WorkerGlobalScope", "console" ] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 expanduser = "1.2.2"
@@ -55,3 +56,6 @@ path = "src/main.rs"
 [[bin]]
 name = "virtualization-layers"
 path = "src/bin/virtualization-layers.rs"
+
+[features]
+debugging = []

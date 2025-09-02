@@ -418,7 +418,7 @@ impl<'a> TraceProcessor<'a> {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::panic)]
 pub fn load_trace_data(
     trace_file: &Path,
@@ -431,7 +431,16 @@ pub fn load_trace_data(
     Ok(trace_events)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::panic)]
+pub fn load_trace_data(
+    trace_file: &Path,
+    file_format: runtime_tracing::TraceEventsFileFormat,
+) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+    todo!()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
@@ -442,4 +451,10 @@ pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, 
     let trace_metadata: TraceMetadata = serde_json::from_str(raw)?;
 
     Ok(trace_metadata)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::panic)]
+pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
+    todo!()
 }

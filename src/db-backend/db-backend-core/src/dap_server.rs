@@ -10,7 +10,6 @@ use crate::task::{
     TaskKind, TracepointId, UpdateTableArgs,
 };
 
-#[cfg(target_arch = "x86_64")]
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
 use log::{error, info, warn};
@@ -49,6 +48,7 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
     PathBuf::from(format!("{DAP_SOCKET_PATH}_{}", pid))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     info!("dap_server::run {:?}", socket_path);
     let _ = std::fs::remove_file(socket_path);
@@ -58,6 +58,11 @@ pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     let mut writer = stream;
 
     handle_client(&mut reader, &mut writer)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
+    todo!()
 }
 
 pub fn run_stdio() -> Result<(), Box<dyn Error>> {
@@ -218,7 +223,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     let mut launch_trace_folder = PathBuf::from("");
     let mut launch_trace_file = PathBuf::from("");
     let mut received_configuration_done = false;
-    while let Ok(msg) = dap::from_reader(reader) {
+    while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
         info!("DAP <- {:?}", msg);
 
         match msg {

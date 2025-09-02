@@ -22,6 +22,7 @@ use std::{error::Error, panic};
 mod calltrace;
 mod core;
 mod dap;
+mod dap_error;
 mod dap_server;
 mod db;
 mod distinct_vec;
