@@ -1,7 +1,5 @@
-binaries/
-node_modules/
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
-*.js
+bin/
+obj/
+TestResults/
+playwright-report/
+test-results/
