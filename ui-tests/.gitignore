@@ -3,3 +3,4 @@ obj/
 TestResults/
 playwright-report/
 test-results/
+*.patch
