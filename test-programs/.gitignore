@@ -1,0 +1,52 @@
+# --- Generic binaries & build junk ---
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+**/*.bin
+**/*.out
+**/*.obj
+**/*.o
+**/*.a
+**/*.lo
+**/*.la
+**/*.lib
+**/*.pdb
+**/*.dSYM/
+**/*.class
+
+# --- Noir ---
+**/proofs/
+**/*.proof
+# (add others here if Noir tooling generates them)
+
+# --- Stylus / Rust ---
+**/target/
+**/*.rlib
+**/*.rmeta
+**/*.wasm
+
+# --- Go ---
+**/*.test
+**/*.exe
+**/*.out
+
+# --- C/C++ ---
+# (covered by generic *.o/*.so/*.a above)
+a.out
+
+# --- Nim ---
+**/nimcache/
+**/*.exe
+**/*.out
+
+# --- Ruby (not compiled, but common noise) ---
+**/.bundle/
+**/vendor/bundle/
+**/*.gem
+
+# --- Secrets / env files (keep .env.example) ---
+**/.env
+**/*.key
+**/*.pem
+**/*.der
