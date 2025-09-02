@@ -267,7 +267,7 @@ mkShell {
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
     export PATH=$PWD/src/build-debug/bin:$PATH
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
-    export CODETRACER_OPEN_DEV_TOOLS=1
+    export CODETRACER_DEV_TOOLS=1
     export CODETRACER_LOG_LEVEL=INFO
 
     figlet "Welcome to CodeTracer"
