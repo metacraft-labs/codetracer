@@ -11,7 +11,7 @@ echo "-----------"
 
 pushd "$ROOT_DIR/src/backend-manager"
 cargo build --release
-cp "$ROOT_DIR/src/db-backend/target/release/backend-manager" "$DIST_DIR/bin/backend-manager"
+cp "target/release/backend-manager" "$DIST_DIR/bin/backend-manager"
 popd
 
 echo "==========="
