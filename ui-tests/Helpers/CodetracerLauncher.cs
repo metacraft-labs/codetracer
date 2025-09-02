@@ -24,7 +24,7 @@ internal static class CodetracerLauncher
 
     public static string CtInstallDir { get; } = Path.GetDirectoryName(CtPath)!;
 
-    private static readonly string ProgramsDir = Path.Combine(RepoRoot, "ui-tests", "programs");
+    private static readonly string ProgramsDir = Path.Combine(RepoRoot, "test-programs");
 
     public static bool IsCtAvailable => File.Exists(CtPath);
 
