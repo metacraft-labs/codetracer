@@ -13,7 +13,6 @@ class Program
     {
         try
         {
-
             if (!CodetracerLauncher.IsCtAvailable)
             {
                 Console.WriteLine($"ct executable not found at {CodetracerLauncher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
@@ -44,7 +43,6 @@ class Program
         }
         finally
         {
-
             var kill = new ProcessStartInfo("just")
             {
                 ArgumentList = { "stop" },
