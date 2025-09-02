@@ -269,7 +269,7 @@ proc createMainWindow: js =
     win.on("close", onClose)
     # TODO: eventually add a shortcut and ipc message that lets us
     # open the dev tools directly from the interface, as in browsers
-    let inDevEnv = nodeProcess.env[cstring"CODETRACER_OPEN_DEV_TOOLS"] == cstring"1"
+    let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
     if inDevEnv:
       electronDebug.devTools(win)
     duration("opening the browser window from index")
@@ -303,7 +303,7 @@ proc createInstallSubwindow(): js =
 
     win.loadURL(cstring(url))
 
-    let inDevEnv = nodeProcess.env[cstring"CODETRACER_OPEN_DEV_TOOLS"] == cstring"1"
+    let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
 
     if inDevEnv:
       electronDebug.devTools(win)

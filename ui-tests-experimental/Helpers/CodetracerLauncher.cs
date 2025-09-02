@@ -88,10 +88,9 @@ public static class PlaywrightCodetracerLauncher
         info.EnvironmentVariables.Add("CODETRACER_TEST", "1");
         info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
         info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
+        info.EnvironmentVariables.Add("CODETRACER_DEV_TOOLS", "");
 
         var process = Process.Start(info)!;
-
-        Thread.Sleep(10000);
 
         Console.WriteLine($"process started {process.Id}");
 
@@ -100,8 +99,6 @@ public static class PlaywrightCodetracerLauncher
         var electronWindow = await playwright.Chromium.ConnectOverCDPAsync("http://localhost:9222", options: new() {
             Timeout = 20000
         });
-
-        Thread.Sleep(10000);
 
         return electronWindow;
         // var firstWindow = await app.FirstWindowAsync();
