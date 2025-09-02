@@ -233,6 +233,17 @@
           ];
         };
 
+        backend-manager = pkgs.rustPlatform.buildRustPackage {
+          name = "backend-manager";
+          pname = "backend-manager";
+
+          src = ../../src/backend-manager;
+
+          cargoLock = {
+            lockFile = ../../src/backend-manager/Cargo.lock;
+          };
+        };
+
         console = stdenv.mkDerivation {
           name = "console";
 
@@ -312,6 +323,7 @@
             cargo-stylus
             resources-derivation
             db-backend
+            backend-manager
             codetracer-electron
             node-modules-derivation
             stdenv.cc
