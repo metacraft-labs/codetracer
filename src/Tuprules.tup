@@ -112,6 +112,8 @@ js %f |> %B.js
 
 # C rules:
 !nim_c = |> ^ %f^ $(NIM_DEBUG)\
+-d:ssl \
+-d:useOpenssl3 \
 --out:%o\
 c %f |> %o
 
@@ -124,6 +126,8 @@ c %f |> %o
 --hints:on\
 -d:ctEntrypoint \
 -d:withTup \
+-d:useOpenssl3 \
+-d:ssl \
 --nimcache:/tmp/ct-nim-cache/codetracer_binary\
 --out:%o\
 c %f |> %o
