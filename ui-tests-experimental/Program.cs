@@ -19,25 +19,12 @@ class Program
                 return;
             }
 
-            var window = await PlaywrightCodetracerLauncher.LaunchAsync("noir_space_ship");
-
-            try
-            {
-                Console.WriteLine($"received driver: {window}");
-                // await driver. ClickAsync("div");
-                // var element = driver.FindElement(By.CssSelector(".menu-logo-img"));
-                // isVisible = element.Displayed;
-            }
-            catch (NoSuchElementException)
-            {
-                // Element not found; isVisible remains false.
-            }
-
-            var driver = window.Contexts[0].Pages[0];
+            var browser = await PlaywrightLauncher.LaunchAsync("noir_space_ship");
+            var page = await PlaywrightLauncher.GetAppPageAsync(browser, titleContains: "CodeTracer");
 
             for (int i = 0; i < 5; i++)
             {
-                await driver.Locator("#menu-root").ClickAsync();
+                await page.Locator("#menu-root").ClickAsync();
                 Thread.Sleep(1000);
             }
         }
