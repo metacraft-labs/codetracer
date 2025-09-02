@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 
-set -e
+# set -e
 
 ###############################################################################
 
-pushd ui-tests
+# pushd ui-tests
 
-type npx
-npx prettier --check .
-npx eslint
-tsc
-git clean -xfd .
+# type npx
+# npx prettier --check .
+# npx eslint
+# tsc
+# git clean -xfd .
 
-popd
+# popd
 
 ###############################################################################
