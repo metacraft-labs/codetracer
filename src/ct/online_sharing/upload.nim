@@ -119,15 +119,19 @@ proc uploadCommand*(
     quit(1)
 
   var uploadInfo: UploadedInfo
-  var tracePath: Trace
+  var trace: Trace
 
   if interactive:
-    tracePath = interactiveTraceSelectMenu(StartupCommand.upload)
+    trace = interactiveTraceSelectMenu(StartupCommand.upload)
   else:
-    tracePath = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+    trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+
+  if trace.isNil:
+    echo "ERROR: can't find trace in local database"
+    quit(1)
 
   try:
-    uploadInfo = uploadTrace(tracePath, config)
+    uploadInfo = uploadTrace(trace, config)
   except CatchableError as e:
     echo e.msg
     quit(1)

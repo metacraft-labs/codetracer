@@ -1,7 +1,8 @@
-import std/options,
+import std / [options, os],
   ../utilities/[ env ],
   ../cli/[ interactive_replay ],
-  ../../common/[ types ],
+  ../trace / storage_and_import,
+  ../../common/[ types, common_trace_index, lang ],
   ../codetracerconf,
   shell,
   run
@@ -20,4 +21,10 @@ proc replay*(
     trace = interactiveTraceSelectMenu(StartupCommand.replay);
   else:
     trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+    
+    if trace.isNil and traceFolderArg.isSome:
+      trace = importDbTrace(traceFolderArg.get() / "trace_metadata.json", NO_TRACE_ID, NO_PID, LangUnknown)
+    if trace.isNil:
+      echo "ERROR: can't find or import trace"
+      quit(1)
   return runRecordedTrace(trace, test=false, recordCore=recordCore)

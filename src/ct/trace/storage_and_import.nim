@@ -91,6 +91,7 @@ proc importDbTrace*(
   selfContained: bool = true,
   downloadKey: string = ""
 ): Trace =
+  
   let rawTraceMetadata = readFile(traceMetadataPath)
   let untypedJson = parseJson(rawTraceMetadata)
   let program = untypedJson{"program"}.getStr()
@@ -136,6 +137,11 @@ proc importDbTrace*(
   var paths: seq[string] = @[]
   if rawPaths.len > 0:
     paths = Json.decode(rawPaths, seq[string])
+
+  # var lang = langArg
+
+  # for path in paths:
+  #   path
 
   if selfContained and downloadKey == "":
     # for now assuming it happens on the original machine
