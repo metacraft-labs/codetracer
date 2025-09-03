@@ -87,7 +87,7 @@ proc importDbTrace*(
   traceMetadataPath: string,
   traceIdArg: int,
   recordPid: int,
-  lang: Lang = LangNoir,
+  langArg: Lang = LangNoir,
   selfContained: bool = true,
   downloadKey: string = ""
 ): Trace =
@@ -138,10 +138,14 @@ proc importDbTrace*(
   if rawPaths.len > 0:
     paths = Json.decode(rawPaths, seq[string])
 
-  # var lang = langArg
+  var lang = langArg
 
-  # for path in paths:
-  #   path
+  if lang == LangUnknown:
+    for path in paths:
+      let traceLang = toLangFromFilename(path)
+      if traceLang != LangUnknown:
+        lang = traceLang
+        break # for now assume the first detected lang is ok
 
   if selfContained and downloadKey == "":
     # for now assuming it happens on the original machine
