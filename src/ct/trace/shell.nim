@@ -34,15 +34,14 @@ proc findTraceForArgs*(
     patternArg: Option[string],
     traceIdArg: Option[int],
     traceFolderArg: Option[string]): Trace =
-  # if no trace found, direct error on screen and quit
+  # if no trace found, returning nil for now 
   if traceIdArg.isSome:
     let traceId = traceIdArg.get
     let trace = trace_index.find(traceId, test=false)
     if not trace.isNil:
       return trace
     else:
-      errorMessage fmt"error: trace with id {traceId} not found in local codetracer db"
-      quit(1)
+      return nil
   elif traceFolderArg.isSome:
     let folder = traceFolderArg.get
     var trace = trace_index.findByPath(expandFilename(folder), test=false)
@@ -51,8 +50,7 @@ proc findTraceForArgs*(
     if not trace.isNil:
       return trace
     else:
-      errorMessage fmt"error: trace with output folder {folder} not found in local codetracer db"
-      quit(1)
+      return nil
   else:
     assert patternArg.isSome
     let programPattern = patternArg.get
@@ -98,5 +96,4 @@ proc findTraceForArgs*(
     if not trace.isNil:
       return trace
     else:
-      errorMessage fmt"error: trace matching program with {programPattern} not found in local codetracer db"
-      quit(1)
+      return nil

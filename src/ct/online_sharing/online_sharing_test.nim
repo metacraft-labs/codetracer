@@ -12,6 +12,9 @@ suite "Trace Sharing Commands":
     echo "Uploading"
     let traceId = 0
     let trace = findTraceForArgs(none(string), some(traceId), none(string))
+    if trace.isNil:
+      echo "ERROR: can't find trace in local database"
+      quit(1)
     let info = uploadTrace(trace, conf)
 
     check info.controlId.len > 0
