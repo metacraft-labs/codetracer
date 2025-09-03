@@ -25,6 +25,16 @@ data.start = now()
 
 var close = false
 var backendManagerProcess: NodeSubProcess = nil
+var backendManagerCleanedUp = false
+
+proc stopBackendManager() =
+  # Ensure we only attempt cleanup once and guard against nil.
+  if backendManagerCleanedUp:
+    return
+  backendManagerCleanedUp = true
+  if not backendManagerProcess.isNil:
+    backendManagerProcess.stopProcess()
+    backendManagerProcess = nil
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc loadExistingRecord(traceId: int) {.async.}
@@ -691,8 +701,7 @@ proc onCloseApp(sender: js, response: js) {.async.} =
     await fsWriteFile(name, file)
 
   # TODO: maybe send shutdown message
-  if not backendManagerProcess.isNil:
-    backendManagerProcess.stopProcess()
+  stopBackendManager()
 
   mainWindow.close()
 
@@ -932,7 +941,30 @@ proc onCloseWindow(sender: js, response: JsObject) {.async.} =
 
 when not defined(server):
   app.on("window-all-closed") do ():
+    # Make sure the backend-manager process is killed on window close.
+    stopBackendManager()
     app.quit(0)
+
+  # Proactively stop the backend-manager on any app quit lifecycle event.
+  app.on("before-quit") do ():
+    stopBackendManager()
+
+  # Ensure signal-driven exits also terminate the backend-manager.
+  nodeProcess.on(cstring"SIGINT") do ():
+    stopBackendManager()
+    app.quit(0)
+
+  nodeProcess.on(cstring"SIGTERM") do ():
+    stopBackendManager()
+    app.quit(0)
+
+  nodeProcess.on(cstring"SIGHUP") do ():
+    stopBackendManager()
+    app.quit(0)
+
+  # As a last resort, cleanup on process exit as well.
+  nodeProcess.on(cstring"exit") do (code: int):
+    stopBackendManager()
 
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):

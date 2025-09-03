@@ -10,3 +10,10 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
+
+- Electron lifecycle: the backend-manager process is spawned in
+  `src/frontend/index.nim` during `ready()`. Previously, it was only stopped
+  via an explicit UI action. We now centralize cleanup with `stopBackendManager()`
+  and hook it to `app.on('before-quit')`, `app.on('window-all-closed')`, and
+  Node process signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to ensure the process
+  is always terminated when the app exits.
