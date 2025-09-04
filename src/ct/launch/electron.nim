@@ -1,7 +1,6 @@
 import std/[sequtils, os, osproc, strutils, strtabs ],
   ../../common/[paths, types, path_utils ],
-  ../globals,
-  cleanup
+  ../globals
 
 type
   ElectronLaunchMode* {.pure.} = enum
