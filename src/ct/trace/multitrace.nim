@@ -1,6 +1,7 @@
 import std / [os, osproc, strformat, sequtils, strutils]
 import json_serialization
 import .. / .. / common / trace_index
+import .. / utilities / zip
 
 proc findDiff(diffSpecification: string): string =
   if diffSpecification.len > 0:
@@ -26,8 +27,13 @@ type
     deleteCount*: int
     addFrom*: int
     addCount*: int
-    # TODO lines*: seq[]
+    lines*: seq[DiffLine]
 
+  DiffLineKind* = enum NonChanged, Deleted, Added
+
+  DiffLine* = object
+    kind*: DiffLineKind
+    text*: string
 
 proc parseDiff(rawDiff: string): Diff =
     result = Diff()
@@ -63,11 +69,40 @@ proc parseDiff(rawDiff: string): Diff =
           chunk.addFrom = addToken[0].parseInt
           chunk.addCount = addToken[1].parseInt
         else:
-          echo "TODO ", line
+          if line.startsWith("index ") or line.startsWith("new file mode "): # TODO can be a correct line
+            # for now ignore because of things like `index 0000000..d1b829a`
+            # or `new file mode 100644`
+            # but TODO: ignore for git in a proper way
+            discard
+          elif line.len < 2:
+            # ignore: assume it's always <kind> <text>
+            discard
+          else:
+            let firstCharacter = line[0]
+            let kind = case firstCharacter:
+              of '+': Added
+              of '-': Deleted
+              of ' ': NonChanged
+              else:   NonChanged # not expected to have another symbol..
+            chunk.lines.add(DiffLine(kind: kind, text: line[2..^1]))
+          
+# ct replay can take and pass to index; index can send diff to frontend and keep info (or send trace id) there
+# when replaying, we can import; or we can abstract, so we don't need to always import (for now we can import)
+# and from id-s send and make it work on frontend by replacing trace info
+# vibe coding;
 
 proc makeMultitraceArchive(traceFolders: seq[string], structuredDiff: Diff, outputPath: string) =
-  echo Json.encode(structuredDiff)
-  quit(1)
+  let folder = getTempDir() / "codetracer" / "multitrace-" & outputPath.extractFilename # TODO a more unique name?
+  removeDir(folder)
+  createDir(folder)
+
+  for traceFolder in traceFolders:
+    copyDir(traceFolder, folder / traceFolder.extractFilename)
+  writeFile(folder / "diff.json", Json.encode(structuredDiff, pretty=true))
+  # for now no diff_data.json or other format: eventually from diff-index
+  zipFolder(folder, outputPath)
+
+  removeDir(folder)
 
 proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPath: string) =
   # make a folder , copy those traces , find this diff, eventually parse it and store it
@@ -77,8 +112,9 @@ proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPat
   
   # find the diff, parse
   let rawDiff = findDiff(diffSpecification)
-  echo rawDiff
+  # echo rawDiff
   let structuredDiff = parseDiff(rawDiff)
   let traceFolders = traceIdList.mapIt(trace_index.find(it, test=false).outputFolder)
   makeMultitraceArchive(traceFolders, structuredDiff, outputPath)
   echo fmt"OK: created multitrace in {outputPath}"
+
