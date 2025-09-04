@@ -1,6 +1,6 @@
-import std/[os, osproc, streams]
+import std/[ os, osproc, streams ]
 import arb_node_utils
-import ../../common/[paths, trace_index, types]
+import ../../common/[ trace_index, types ]
 import ../trace/record
 
 # NOTE: remove CatchableError if using custom exception

@@ -1,9 +1,6 @@
 import
-  std/[strformat, strutils, osproc, posix, posix_utils, os, options],
-  ../../common/[ types, trace_index, paths, config],
-  ../utilities/[env],
-  ../cli/[logging],
-  cleanup
+  std/[ osproc, posix, posix_utils, os, options ],
+  ../../common/[ paths, config ]
 
 var coreProcessId* = -1
 

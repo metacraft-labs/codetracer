@@ -96,7 +96,7 @@ proc uploadTrace*(trace: Trace, config: Config): UploadedInfo =
     zipFolder(trace.outputFolder, outputZip, onProgress = onProgress(ratio = 33, start = 0, "Zipping files..", lastPercentSent))
     encryptFile(outputZip, outputEncr, key, iv, onProgress = onProgress(ratio = 33, start = 34, "Encrypting zip file...", lastPercentSent))
     let uploadInfo: UploadedInfo = uploadFile(outputEncr, config, onProgress = onProgress(ratio = 33, start = 67, "Uploading file to server...", lastPercentSent))
-    uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt(it.toHex(2)).join("")
+    uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt((it.uint64).toHex(2)).join("")
 
     updateField(trace.id, "remoteShareDownloadKey", uploadInfo.downloadKey, false)
     updateField(trace.id, "remoteShareControlId", uploadInfo.controlId, false)

@@ -1,13 +1,8 @@
 import
-  std / [ options, strformat, strutils, osproc, os ],
+  std / [ strutils, os ],
   json_serialization, json_serialization / std / tables,
-  ../utilities/[ env, zip ],
-  ../cli/[ interactive_replay ],
-  .. / launch / cleanup,
-  ../../common/[ types, trace_index, paths ],
-  ../codetracerconf,
-  shell,
-  run
+  ../utilities/zip,
+  ../../common/[ types, trace_index ]
 
 proc importTraceInPreparedFolder(traceZipPath: string, outputFolderFullPath: string) =
 #   let res = execProcess(unzipExe, args = @[traceZipPath, "-d", outputFolderFullPath], options={})

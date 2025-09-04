@@ -5,12 +5,9 @@ import ../common/ct_logging
 import types
 # Contains a lot of index process procedures dealing with files and configs
 
-
-let fsPlus* = require("fs-plus")
 let fsAsync* = require("fs").promises
 let child_process* = cast[(ChildProcessLib)](require("child_process"))
 let util = require("util")
-var mmap*: MMap
 let helpers* {.exportc: "helpers".} = require("./helpers")
 
 var mainWindow*: JsObject
@@ -86,12 +83,12 @@ type
     functions*: JsAssoc[cstring, js]
     internalSend*: proc(id: cstring, message: cstring, arg: cstring)
 
+  FrontendIPCSender* = ref object
+    send*: proc(id: cstring, message: js)
+
   FrontendIPC* = ref object
     webContents*: FrontendIPCSender
     socket*: WebSocket # from socket.io
-
-  FrontendIPCSender* = ref object
-    send*: proc(id: cstring, message: js)
 
   WebSocket* = ref object
     emit*: proc(id: cstring, value: cstring)
@@ -150,16 +147,16 @@ else:
   let electron* = ServerElectron().toJs
   let dialog*: js = undefined
 
-var fsReadFile* {.importcpp: "helpers.fsReadFile(#)".}: proc(f: cstring): Future[cstring]
-var fsWriteFile* {.importcpp: "helpers.fsWriteFile(#, #)".}: proc(f: cstring, data: cstring): Future[void]
-var fsReadFileWithErr* {.importcpp: "helpers.fsReadFileWithErr(#)".}: proc(f: cstring): Future[(cstring, js)]
-var fsWriteFileWithErr* {.importcpp: "helpers.fsWriteFileWithErr(#, #)".}: proc(f: cstring, s: cstring): Future[js]
-var fsReaddir* {.importcpp: "helpers.fsReaddir(#, #)".}: proc(f: cstring, options: js): Future[seq[cstring]]
-var fsCopyFileWithErr* {.importcpp: "helpers.fsCopyFileWithErr(#, #)".}: proc(a: cstring, b: cstring): Future[js]
-var fsMkdirWithErr* {.importcpp: "helpers.fsMkdirWithErr(#, #)".}: proc(a: cstring, options: JsObject): Future[JsObject]
-var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
-var newWebSocket* {.importcpp: "new websocket(#)".}: proc(host: cstring): WebSocket
-var newWebSocketServer* {.importcpp: "new websocket.Server({host: '127.0.0.1', port: #})".}: proc(port: int = 3000): WebSocketServer
+var fsReadFile*           {.  importcpp: "helpers.fsReadFile(#)"                              .}:  proc(f: cstring):                                Future[cstring]
+var fsWriteFile*          {.  importcpp: "helpers.fsWriteFile(#, #)"                          .}:  proc(f: cstring, data: cstring):                 Future[void]
+var fsReadFileWithErr*    {.  importcpp: "helpers.fsReadFileWithErr(#)"                       .}:  proc(f: cstring):                                Future[(cstring, js)]
+var fsWriteFileWithErr*   {.  importcpp: "helpers.fsWriteFileWithErr(#, #)"                   .}:  proc(f: cstring, s: cstring):                    Future[js]
+var fsReaddir*            {.  importcpp: "helpers.fsReaddir(#, #)"                            .}:  proc(f: cstring, options: js):                   Future[seq[cstring]]
+var fsCopyFileWithErr*    {.  importcpp: "helpers.fsCopyFileWithErr(#, #)"                    .}:  proc(a: cstring, b: cstring):                    Future[js]
+var fsMkdirWithErr*       {.  importcpp: "helpers.fsMkdirWithErr(#, #)"                       .}:  proc(a: cstring, options: JsObject):             Future[JsObject]
+var childProcessExec*     {.  importcpp: "helpers.childProcessExec(#, #)"                     .}:  proc(cmd: cstring, options: js = jsUndefined):   Future[(cstring, cstring, js)]
+var newWebSocket*         {.  importcpp: "new websocket(#)"                                   .}:  proc(host: cstring):                             WebSocket
+var newWebSocketServer*   {.  importcpp: "new websocket.Server({host: '127.0.0.1', port: #})" .}:  proc(port: int = 3000):                          WebSocketServer
 
 proc newSocketIoServer*(serverClass: JsObject, httpServer: JsObject, options: JsObject): JsObject {.importcpp: "new #(#, #)" .}
 
@@ -230,7 +227,6 @@ when defined(server):
 
     server.toJs.set(cstring"view engine", cstring"ejs")
     server.get(cstring"/", proc(request: JsObject, response: JsObject) =
-      # response.send(cstring"mercy")
       response.render(cstring"server_index", js{
         frontendSocketPort: data.startOptions.frontendSocket.port,
         frontendSocketParameters: data.startOptions.frontendSocket.parameters
@@ -244,7 +240,6 @@ when defined(server):
     server.use(cstring"/node_modules", express.`static`(codetracerInstallDir & cstring"/node_modules"))
     server.use(cstring"/ui.js", express.`static`(userInterfacePath))
     server.listen(data.startOptions.port, proc = infoPrint fmt"listening on localhost:{data.startOptions.port}")
-
 
     debugPrint "in server"
     debugPrint data.startOptions
@@ -271,7 +266,6 @@ when defined(server):
     httpServer.listen(backendSocketPort)
 
 
-
 proc on*(debugger: DebuggerIPC, taskId: TaskId, code: proc) =
   debugger.functions[taskId.cstring] = functionAsJS(code)
 
@@ -287,29 +281,6 @@ proc send*(debugger: DebuggerIPC, message: cstring, taskId: cstring, arg: cstrin
 proc on*(frontend: FrontendIPC, id: cstring, handler: JsObject) =
   let handlerFunction = jsAsFunction[proc(sender: JsObject, response: JsObject): Future[void]](handler)
   frontend.socket.on(id, proc(value: JsObject) = discard handlerFunction(undefined, value))
-
-proc findNimcacheDir(data: var ServerData): Future[cstring] =
-  # we are trying to find the nimcache dir based on dump: I think we should review it
-  if data.nimcacheDir != j"":
-    return cast[Future[cstring]](data.nimcacheDir)
-  var promise = newPromise() do (resolve: proc(response: cstring)):
-    var s = child_process.spawn(j"libs/nim/bin/nim", concat(@[j"dump"], @[data.trace.program]))
-    s.stdout.setEncoding(j"utf8")
-    s.stderr.setEncoding(j"utf8")
-    var finished = false
-    s.stdout.on(j"data") do (raw: cstring):
-      if not finished:
-        data.nimcacheDir = raw.split(jsNl)[0].trim() & j"/"
-        finished = true
-        resolve(data.nimcacheDir)
-  return promise
-
-
-proc toAsm(data: ServerData, name: string): Future[seq[cstring]] {.async.}=
-  # find the asm code for a function
-  let (output, _, _) = await childProcessExec(j(&"gdb -batch -ex 'file {data.trace.program}' -ex 'disassemble {name}'"))
-  var res: seq[cstring] = output.split(jsNl)[1 .. ^3]
-  return res
 
 proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.async.}
 proc loadAsm*(data: ServerData, functionLocation: FunctionLocation): Future[Instructions] {.async.}
@@ -346,63 +317,6 @@ proc readEvent*[EventContent](eventId: EventId): EventContent =
 var unixClient: js
 var unixSender: js
 
-proc setupCoreIPC(debugger: DebuggerIPC) =
-  var message = cstring""
-  var argText = cstring""
-  var received = cstring""
-  var inReceive = false
-  var receiveMessage = cstring""
-  var receiveOutput = cstring""
-
-  unixClient.on(cstring"data") do (data: cstring):
-    # receiving one of:
-    #
-    # return <message> <task-id>
-    # event <event> <event-id>
-    #
-
-    debugPrint "data: ", data
-    let lines = data.split(jsNl)
-    for i, line in lines:
-      if line.len == 0: # empty line: ignore
-        continue
-      debugPrint "<= ", line
-      # debug "line", line=line
-      let tokens = line.split(cstring" ")
-      if tokens.len != 3:
-        let message = fmt"error: invalid line, not 3 tokens: {line}"
-        debugPrint message
-        debugIndex(fmt"error: invalid line, not 3 tokens: {line}")
-      else:
-        let kind = tokens[0]
-        if kind == "return":
-          let rawMessage = tokens[1]
-          let taskId = tokens[2].TaskId
-          let res = JSON.parse(readRawResult(taskId))
-          var handler = debugger.functions[taskId.cstring]
-          if not handler.isNil:
-            handler.call(handler, res)
-        elif kind == "event" or kind == "raw-event":
-          let rawEvent = tokens[1]
-          let eventId = tokens[2].EventId
-          let res = if kind == "event":
-              JSON.parse(readRawEvent(eventId))
-            else:
-              readRawEvent(eventId).toJs
-          # directly delegate to frontend
-          mainWindow.webContents.send fmt"CODETRACER::{rawEvent}", res
-
-
-  debugger.internalSend = proc(message: cstring, taskIdRaw: cstring, arg: cstring) =
-    let taskId = cast[TaskId](taskIdRaw)
-    debugPrint fmt"index ===> ... dispatcher {message} {taskId} {arg}"
-    debugIndex fmt"index ===> ... dispatcher {message} {arg}", taskId
-    writeArgFile(message, taskIdRaw, arg)
-    unixSender.write(
-        message & cstring" " & taskIdRaw & jsNl)
-        # args.mapIt(JSON.stringify(it) & jsNl).join(cstring"") &
-        # cstring"#END" & jsNl)
-
 proc startSocket*(path: cstring, expectPossibleFail: bool = false): Future[JsObject] =
   var future = newPromise() do (resolve: proc(response: JsObject)):
     var connections: seq[JsObject] = @[nil.toJs]
@@ -428,10 +342,6 @@ type
   RawDapMessage* = ref object
     raw*: cstring
 
-  # DapRequest* = ref object
-  #   command*: cstring
-  #   value*: JsObject
-
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   if not backendManagerSocket.isNil:
     let txt = wrapJsonForSending(response)
@@ -442,9 +352,7 @@ proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
     errorPrint "backend socket is nil, couldn't send ", response.toJs
 
 proc handleFrame(frame: string) =
-
   let body: JsObject = Json.parse(frame)
-
   let msgtype = body["type"].to(cstring)
 
   if msgtype == "response":
@@ -457,14 +365,12 @@ proc handleFrame(frame: string) =
 var dapMessageBuffer = ""
 
 proc setupProxyForDap*(socket: JsObject) =
-
   let lineBreakSize = 4
 
   socket.on(cstring"data", proc(data: cstring) =
     dapMessageBuffer.add $data
 
     while true:
-
       # Try and find the `Content-length` header's end
       let hdrEnd = dapMessageBuffer.find("\r\n\r\n")
 
@@ -481,7 +387,6 @@ proc setupProxyForDap*(socket: JsObject) =
       if contentLen < 0:
         # Is this the right kind of exception ???
         raise newException(ValueError, "DAP header without Content-Length")
-
 
       # We try and parse the body
       let frameEnd = hdrEnd + lineBreakSize + contentLen  # 4 = len("\r\n\r\n")
@@ -535,21 +440,17 @@ macro defineAPI*(functions: untyped): untyped =
         taskIdIdent,
         ident("TaskId"),
         default))
-        # ident("NO_TASK_ID")))
-    # args[1].add(quote do: `taskIdIdent`.toJs)
 
     let ipc = ident("debuggerIPC")
     var code: NimNode
     if r.repr == "Future[void]":
       code = quote:
         var promise = newPromise() do (resolve: (proc: void)):
-          # debug "debugger", topics="index", _="CODETRACER::" & `nameText`
           `debugger`.send(
             `nameText`,
             `taskIdIdent`.cstring,
             Json.stringify(`messageArg`.toJs))
 
-          # debug "wait", msg="CODETRACER::" & `nameText` & "-received"
           `ipc`.on(`taskIdIdent`) do (res: JsObject):
             resolve()
         return promise
@@ -557,13 +458,11 @@ macro defineAPI*(functions: untyped): untyped =
       let typ = r[1]
       code = quote:
         var promise = newPromise() do (resolve: (proc(response: `typ`))):
-          # debug "debugger", topics="index", _="CODETRACER::" & `nameText`
           `debugger`.send(
             `nameText`.cstring,
             `taskIdIdent`.cstring,
              Json.stringify(`messageArg`.toJs))
 
-          # debug "wait", msg="CODETRACER::" & `nameText` & "-received"
           `ipc`.on(`taskIdIdent`) do (res: JsObject):
             let response = cast[`typ`](res)
             resolve(response)
@@ -578,8 +477,6 @@ macro defineAPI*(functions: untyped): untyped =
         newEmptyNode(),
         newEmptyNode(),
         nnkStmtList.newTree(code)))
-
-type DOutput = DebugOutput # hack? maybe a bug in macro
 
 defineAPI:
   configure         is proc(arg: ConfigureArg): Future[void]
@@ -625,63 +522,6 @@ defineAPI:
 
   evaluateExpression is proc(target: EvaluateExpressionArg): Future[Value]
 
-  # CRITICAL: CAREFUL: don't expose that out of development
-  # debugGdb          is proc(arg: DebugGdbArg): Future[DOutput]
-
-when false:
-  ## TODO: fix/test expand values
-  #
-  # expandValue       is proc(expression: cstring): Future[Value]
-  # expandValues      is proc(expressions: seq[cstring], depth: int): Future[seq[Value]]
-  # --
-      # TODO: flow shape separation/improvements, not clear when would this happen
-  # maybe in the longer term?
-  # loadFlowShape     is proc(location: Location): Future[void]
-
-  ## c low level related: not sure if going in internal release:
-  #
-  # addBreakC         is proc(location: SourceLocation): Future[int]
-  # nimLoadCLocations is proc(path: cstring, line: int): Future[LowLevelLocations]
-  # --
-
-  ## do we still need it, or is calltraceJump always enough?
-  #
-  # callstackJump     is proc(location: CallstackJump): Future[void]
-  # --
-
-  ## older experiment with trace nim template-like helpers
-  ## like Zahary wanted: think if and how and when would we need
-  ## something like this now
-  #
-  # saveHelpers       is proc(): Future[void]
-  # registerHelper    is proc(name: cstring, helper: Helper, node: QueryNode): Future[void]
-  # --
-
-
-  ## older calltrace/global calltrace ideas: not supported currently,
-  ##   but maybe we can fix them?
-  #
-  # updateCalltrace       is proc(parent: int64, depth: int, length: int, start: int, sectionLength: int): Future[UpdatedCalltrace]
-  # calltraceScrollUp   is proc: Future[void]
-  # calltraceScrollDown is proc: Future[void]
-  # fullCalltraceScrollUp   is proc: Future[FullSection]
-  # fullCalltraceScrollDown is proc: Future[FullSection]
-  # calltraceSearch   is proc(expression: cstring): Future[seq[Call]]
-  # loadCallstackDirectChildrenBefore is proc(codeID: int64, before: int64): Future[seq[Call]]
-  # --
-
-  ## experiment for just walking around the codebase
-  ## automatically, for e.g. testing
-  #
-  # walk              is proc(waitDuration: int): Future[void] # miliseconds
-  # --
-
-  ## macro expansion: maybe not part of internal release?
-  #
-  # loadCodeLocations is proc(pattern: cstring, limit: int): Future[void]
-  # updateExpansionLevel is proc(path: cstring, line: int, update: MacroExpansionLevelUpdate): Future[Location]
-  # --
-
 proc onError*(error: DebuggerError) =
   errorPrint error.kind, " ", error.msg
   mainWindow.webContents.send "CODETRACER::error", error
@@ -718,9 +558,6 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   var err: js
   (source, err) = await fsReadFileWithErr(readPath)
   if not err.isNil:
-    # source = j"<file missing>!"
-    # filename = j"<file missing: " & filename & j">"
-    # missing = true
     console.log "error reading file directly ", filename, " ", err
     if data.trace.imported:
       # try original filename if
@@ -735,25 +572,9 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       # directly stop
       console.log "error: trace not imported, but file couldn't be read ", filename
       return
-    # bug "file missing " & $filename
 
   if err.isNil:
     if not data.tabs.hasKey(filename):
-      # TODO: enable again, but
-      # try to not send event for our own saves/changes
-
-      # fs.watch(filename) do (e: cstring, filenameArg: cstring):
-      #   if e == j"change":
-      #     # debugPrint "change?", filename
-      #     # TODO: try to not send event for our own saves/changes
-      #     if not data.tabs.hasKey(filename):
-      #       data.tabs[filename] = ServerTab(path: filename, lang: LangUnknown, fileWatched: true)
-      #     if data.tabs[filename].fileWatched and data.tabs[filename].ignoreNext == 0 and not data.tabs[filename].waitsPrompt:
-      #       data.tabs[filename].waitsPrompt = true
-      #       mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
-      #     elif data.tabs[filename].ignoreNext > 0:
-      #       data.tabs[filename].ignoreNext = data.tabs[filename].ignoreNext - 1
-
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
 
   echo "index_config open: file read succesfully"
@@ -815,7 +636,6 @@ proc persistConfig*(main: js, name: cstring, layout: cstring): Future[void] {.as
       main.webContents.send "CODETRACER::saved-config"
 
 proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bool): Future[seq[string]] {.async.} =
-  # debug "filenames", paths=paths
   var res: seq[string] = @[]
   var repoPathSet: JsAssoc[cstring, bool] = JsAssoc[cstring, bool]{}
 
@@ -932,7 +752,6 @@ proc loadFile(
   var data: js
   var res: CodetracerFile
 
-  # echo "loadFile ", path, " ", depth, " ", index, " ", traceFilesPath, " ", selfContained
   if path.len == 0:
     return res
 
@@ -946,8 +765,6 @@ proc loadFile(
       # here we want the first behavior!
       nodePath.join(traceFilesPath, path)
 
-  # debugPrint "loadFile ", path, " ", traceFilesPath, " ", selfContained
-  # debugPrint "  real path ", realPath
   try:
     data = await cast[Future[js]](fsAsync.lstat(realPath))
   except:
@@ -960,18 +777,6 @@ proc loadFile(
   let strippedPath = path.stripLastChar(cstring"/")
   let subParts = strippedPath.split(cstring"/")
   let name = subParts[^1]
-
-  # TODO configure?
-
-  # name == j".git" or name == j".tup" or name == j".keep" or
-  # name == j".venv"
-  # j".bin"
-
-  # Viktor: This filter need to be disabled for the component to be tested.
-  # Activate filter when fix issue: https://gitlab.com/metacraft-labs/code-tracer/CodeTracer/-/issues/565
-  # if name.len > 0 and (name == j"public" or name == j"build-debug" or name[0] == '.' or name.slice(-2) == j".o" or
-  #    name == j"test" or name == j"libs" or name == j"csources" or name == j"dist" or name == j"tests"):
-  #   return res
 
   if cast[bool](data.isDirectory()):
     try:
@@ -1061,8 +866,6 @@ proc loadFilesystem*(paths: seq[cstring], traceFilesPath: cstring, selfContained
       text: cstring"source folders",
       path: cstring""))
 
-  # debugPrint "loadFilesystem ", paths, " ", traceFilesPath, " ", selfContained
-
   var parentIndices: seq[int] = @[]
   for index, path in paths:
     let file = await loadPathContentPartially(path, index, parentIndices, traceFilesPath, selfContained)
@@ -1077,8 +880,6 @@ proc sendFilesystem*(main: js, paths: seq[cstring], traceFilesPath: cstring, sel
   main.webContents.send "CODETRACER::filesystem-loaded", js{ folders: folders }
 
 proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
-  # if test:
-  # TODO: think about save functionality/projects
   var save = Save(project: Project(), files: @[], id: -1)
   return save
 proc saveSave*(data: ServerData) {.async.} =
@@ -1091,9 +892,7 @@ proc nativeLoadInstructions*(data: var ServerData, functionLocation: FunctionLoc
   return TabInfo(
     name: functionLocation.name,
     offset: 0,
-    # loading: false,
     error: cstring"",
-    # view: ViewInstructions,
     instructions: instructions,
     received: true,
     lang: LangAsm)
@@ -1181,7 +980,6 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
 
   main.webContents.send "CODETRACER::trace-loaded", js{
     trace: trace,
-    # tags: tags,
     functions: functions,
     save: save,
     dontAskAgain: dontAskAgain
@@ -1208,7 +1006,6 @@ proc findConfig*(folder: cstring, configPath: cstring): cstring =
         config = true
 
 proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send: bool = false): Future[Config] {.async.} =
-  # loads config
   var file = findConfig(startOptions.folder, configPath)
   if file.len == 0:
     file = userConfigDir / configPath
@@ -1217,22 +1014,18 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
     if not errMkdir.isNil:
       errorPrint "mkdir for config folder error: exiting: ", errMkdir
       quit(1)
-    # thanks to Peter for the good advice to use copyFile instead of `cp`
-    # works around an issue i had with wrong libc version and nix
-    # and more clean
+
     let errCopy = await fsCopyFileWithErr(
       cstring(fmt"{configDir / defaultConfigPath}"),
-      cstring(fmt"{userConfigDir / configPath}"));
-     # cstring(&"cp {configDir}{defaultLayoutPath} {filename}"))
+      cstring(fmt"{userConfigDir / configPath}")
+    )
+
     if not errCopy.isNil:
       errorPrint "can't copy .config.yaml to user config dir:"
       errorPrint "  tried to copy from: ", cstring(fmt"{configDir / defaultConfigPath}")
       errorPrint "  to: ", fmt"{userConfigDir / configPath}"
       quit(1)
 
-  # TODO: maybe remove config test logic?
-  # if startOptions.inTest:
-    # file = nodePath.join(j(codetracerTestDir), j(testConfigPath))
   infoPrint "index: load config ", file
   let (s, err) = await fsreadFileWithErr(file)
   if not err.isNil:
@@ -1246,14 +1039,7 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
     quit(1)
 
-proc asyncShowOpenDialog(dialog: js, main: js, options: js): Future[seq[cstring]] =
-  var promise = newPromise() do (resolve: proc(response: seq[cstring])):
-    dialog.showOpenDialog(main, options, resolve)
-  return promise
-
 proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
-  # debug "layout", filename=filename
-  # await fsWriteFile(cstring"index_log", cstring(filename))
   let (data, err) = await fsreadFileWithErr(j(filename))
   if err.isNil:
     let config = JSON.parse(data)
@@ -1264,13 +1050,12 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
     if not errMkdir.isNil:
       errorPrint "mkdir for layout config folder error: exiting: ", errMkdir
       quit(1)
-    # thanks to Peter for the good advice to use copyFile instead of `cp`
-    # works around an issue i had with wrong libc version and nix
-    # and more clean
+
     let errCopy = await fsCopyFileWithErr(
       cstring(fmt"{configDir / defaultLayoutPath}"),
-      cstring(filename));
-     # cstring(&"cp {configDir}{defaultLayoutPath} {filename}"))
+      cstring(filename)
+    )
+
     if errCopy.isNil:
       return await loadLayoutConfig(main, filename)
     else:

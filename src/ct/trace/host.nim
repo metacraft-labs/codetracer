@@ -1,12 +1,7 @@
 import
   std / [ options, strformat, strutils, osproc, os ],
   ../utilities/[ env ],
-  ../cli/[ interactive_replay ],
-  .. / launch / cleanup,
-  ../../common/[ types, trace_index, paths ],
-  ../codetracerconf,
-  shell,
-  run
+  ../../common/[ types, trace_index, paths ]
 
 
 # hosts a codetracer server that can be accessed in the browser
