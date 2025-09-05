@@ -93,13 +93,14 @@ proc parseDiff(rawDiff: string): Diff =
 # and from id-s send and make it work on frontend by replacing trace info
 # vibe coding;
 
-proc makeMultitraceArchive(traceFolders: seq[string], structuredDiff: Diff, outputPath: string) =
+proc makeMultitraceArchive(traceFolders: seq[string], rawDiff: string, structuredDiff: Diff, outputPath: string) =
   let folder = getTempDir() / "codetracer" / "multitrace-" & outputPath.extractFilename # TODO a more unique name?
   removeDir(folder)
   createDir(folder)
 
   for traceFolder in traceFolders:
     copyDir(traceFolder, folder / traceFolder.extractFilename)
+  writeFile(folder / "original_diff.patch", rawDiff)
   writeFile(folder / "diff.json", Json.encode(structuredDiff, pretty=true))
   # for now no diff_data.json or other format: eventually from diff-index
   zipFolder(folder, outputPath)
@@ -117,6 +118,6 @@ proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPat
   # echo rawDiff
   let structuredDiff = parseDiff(rawDiff)
   let traceFolders = traceIdList.mapIt(trace_index.find(it, test=false).outputFolder)
-  makeMultitraceArchive(traceFolders, structuredDiff, outputPath)
+  makeMultitraceArchive(traceFolders, rawDiff, structuredDiff, outputPath)
   echo fmt"OK: created multitrace in {outputPath}"
 
