@@ -70,22 +70,20 @@ proc parseDiff(rawDiff: string): Diff =
           chunk.addFrom = addToken[0].parseInt
           chunk.addCount = addToken[1].parseInt
         else:
-          if line.startsWith("index ") or line.startsWith("new file mode "): # TODO can be a correct line
-            # for now ignore because of things like `index 0000000..d1b829a`
-            # or `new file mode 100644`
-            # but TODO: ignore for git in a proper way
-            discard
-          elif line.len < 2:
-            # ignore: assume it's always <kind> <text>
+          if line.len < 1:
+            # ignore: assume it's always <kind><text>
             discard
           else:
             let firstCharacter = line[0]
-            let kind = case firstCharacter:
-              of '+': Added
-              of '-': Deleted
-              of ' ': NonChanged
-              else:   NonChanged # not expected to have another symbol..
-            chunk.lines.add(DiffLine(kind: kind, text: line[1..^1]))
+            let (isLineDiff, kind) = case firstCharacter:
+              of '+': (true, Added)
+              of '-': (true, Deleted)
+              of ' ': (true, NonChanged)
+              # not expected to have another symbol: probably a diff metadata line, line `diff `, `index`
+              # or `new mode ` or other:
+              else:   (false, NonChanged) 
+            if isLineDiff:
+              chunk.lines.add(DiffLine(kind: kind, text: line[1..^1]))
       if not fileDiff.isNil:
         if chunk.deleteCount != 0:
           fileDiff.chunks.add(chunk)
