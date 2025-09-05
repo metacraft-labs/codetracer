@@ -40,6 +40,18 @@ const WASM_LANGS = {
   "c": LangCppWasm,
 }.toTable()
 
+proc detectLangFromPath*(path: string, isWasm: bool): Lang =
+  let filename = path.extractFilename
+  let extension = rsplit(filename[1..^1], ".", 1)[1].toLowerAscii()
+
+  if isWasm and WASM_LANGS.hasKey(extension):
+    return WASM_LANGS[extension]
+
+  if LANGS.hasKey(extension):
+    result = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
+    if result != LangUnknown:
+      return result
+
 proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
   # TODO: under a debug print flag?
   # echo "detectLang ", program, " ", lang, " isWasm: ", isWasm
@@ -63,15 +75,9 @@ proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
       return result
 
   if not isFolder and "." in filename:
-    let extension = rsplit(filename[1..^1], ".", 1)[1].toLowerAscii()
-
-    if isWasm and WASM_LANGS.hasKey(extension):
-      return WASM_LANGS[extension]
-
-    if LANGS.hasKey(extension):
-      result = LANGS[extension] # TODO detectLangFromTrace(traceId)
-      if result != LangUnknown:
-        return result
+    result = detectLangFromPath(filename, isWasm)
+    if result != LangUnknown:
+      return result
 
   # try with the rr-backend
   let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
