@@ -156,8 +156,11 @@ proc importDbTrace*(
           lang = traceLang
         break # for now assume the first detected lang is ok
 
-  if selfContained and downloadKey == "":
-    # for now assuming it happens on the original machine
+  if existsDir(traceFolder / "files"):
+    copyDir(traceFolder / "files", outputFolder / "files")
+  elif selfContained and downloadKey == "":
+    # for now assuming if no `files/` dir already,
+    # it happens on the original machine
     # when the source files are still available and unchanged
     if paths.len > 0:
       storeTraceFiles(paths, outputFolder, lang)
