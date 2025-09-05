@@ -38,23 +38,24 @@ type
 proc parseDiff(rawDiff: string): Diff =
     result = Diff()
     if rawDiff.len > 0:
-      # TODO most
       let lines = rawDiff.splitLines()
       var fileDiff: FileDiff = nil
       var chunk = Chunk()
       for line in lines:
+        # echo "line ", line
         if line.startsWith("--- a/"):
           let path = line["--- a/".len .. ^1]
-          fileDiff.previousPath = path
+          fileDiff.previousPath = expandFileName(path)
         elif line.startsWith("+++ b/"):
           let path = line["+++ b/".len .. ^1]
-          fileDiff.currentPath = path
+          fileDiff.currentPath = expandFileName(path)
         elif line.startsWith("diff "):
           if not fileDiff.isNil:
             if chunk.deleteCount != 0:
               fileDiff.chunks.add(chunk)
-            result.files.add(fileDiff)
+              chunk = Chunk()
           fileDiff = FileDiff()
+          result.files.add(fileDiff)
         elif line.startsWith("@@ -"):
           if chunk.deleteCount != 0:
             if not fileDiff.isNil:
@@ -84,8 +85,11 @@ proc parseDiff(rawDiff: string): Diff =
               of '-': Deleted
               of ' ': NonChanged
               else:   NonChanged # not expected to have another symbol..
-            chunk.lines.add(DiffLine(kind: kind, text: line[2..^1]))
-          
+            chunk.lines.add(DiffLine(kind: kind, text: line[1..^1]))
+      if not fileDiff.isNil:
+        if chunk.deleteCount != 0:
+          fileDiff.chunks.add(chunk)
+
 # ct replay can take and pass to index; index can send diff to frontend and keep info (or send trace id) there
 # when replaying, we can import; or we can abstract, so we don't need to always import (for now we can import)
 # and from id-s send and make it work on frontend by replacing trace info
