@@ -204,6 +204,8 @@ type
     frontendSocket*: SocketAddressInfo
     backendSocket*: SocketAddressInfo
     rawTestStrategy*: langstring
+    diff*: Diff
+    withDiff*: bool
 
   # The contents of a window in the frontend
   Content* {.pure.} = enum
