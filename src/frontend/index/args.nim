@@ -2,7 +2,8 @@ import
   std / [ jsffi, sequtils ],
   electron_vars, config,
   ../lib,
-  ../../common/ct_logging
+  ../../common/ct_logging,
+  ../types
 
 # <traceId>
 # --port <port>
@@ -45,6 +46,15 @@ proc parseArgs* =
       elif arg == cstring"--test":
         data.startOptions.screen = false
         data.startOptions.inTest = true
+      elif arg == cstring"--diff":
+        if i + 1 < args.len:
+          data.startOptions.diff = cast[Diff](JSON.parse(args[i + 1]))
+          data.startOptions.withDiff = true
+          i += 2
+          continue
+        else:
+          errorPrint "expected --diff <structuredDiffJson>"
+          break
       elif arg == cstring"--no-record":
         data.startOptions.record = false
       elif arg == cstring"edit":

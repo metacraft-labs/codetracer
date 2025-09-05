@@ -63,7 +63,9 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
     trace: trace,
     functions: functions,
     save: save,
-    dontAskAgain: dontAskAgain
+    diff: data.startOptions.diff,
+    withDiff: data.startOptions.withDiff,
+    dontAskAgain: dontAskAgain,
   }
 
 proc loadExistingRecord*(traceId: int) {.async.} =

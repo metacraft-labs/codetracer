@@ -1,6 +1,7 @@
 import std / [os, osproc, strformat, sequtils, strutils]
 import json_serialization
 import .. / .. / common / trace_index
+import .. / .. / common / types
 import .. / utilities / zip
 
 proc findDiff(diffSpecification: string): string =
@@ -13,34 +14,15 @@ proc findDiff(diffSpecification: string): string =
   else:
     ""
 
-type
-  Diff* = ref object
-    files*: seq[FileDiff]
-
-  FileDiff* = ref object
-    chunks*: seq[Chunk]
-    previousPath*: string
-    currentPath*: string
-  
-  Chunk* = object
-    deleteFrom*: int
-    deleteCount*: int
-    addFrom*: int
-    addCount*: int
-    lines*: seq[DiffLine]
-
-  DiffLineKind* = enum NonChanged, Deleted, Added
-
-  DiffLine* = object
-    kind*: DiffLineKind
-    text*: string
-
 proc parseDiff(rawDiff: string): Diff =
     result = Diff()
     if rawDiff.len > 0:
       let lines = rawDiff.splitLines()
       var fileDiff: FileDiff = nil
       var chunk = Chunk()
+      var chunkPreviousFileLineNumber = 0
+      var chunkCurrentFileLineNumber = 0
+
       for line in lines:
         # echo "line ", line
         if line.startsWith("--- a/"):
@@ -51,24 +33,26 @@ proc parseDiff(rawDiff: string): Diff =
           fileDiff.currentPath = expandFileName(path)
         elif line.startsWith("diff "):
           if not fileDiff.isNil:
-            if chunk.deleteCount != 0:
+            if chunk.previousFrom != 0:
               fileDiff.chunks.add(chunk)
               chunk = Chunk()
           fileDiff = FileDiff()
           result.files.add(fileDiff)
         elif line.startsWith("@@ -"):
-          if chunk.deleteCount != 0:
+          if chunk.previousFrom != 0:
             if not fileDiff.isNil:
               fileDiff.chunks.add(chunk)
           let tokens = line.splitWhitespace()
           chunk = Chunk()
-          # @@ -deleteFrom,deleteCount +addFrom,addCount @@
-          let deleteToken = tokens[1][1..^1].split(",")
-          chunk.deleteFrom = deleteToken[0].parseInt
-          chunk.deleteCount = deleteToken[1].parseInt
-          let addToken = tokens[2][1..^1].split(",")
-          chunk.addFrom = addToken[0].parseInt
-          chunk.addCount = addToken[1].parseInt
+          # @@ -previousFrom,previousCount +currentFrom,currentCount @@
+          let previousToken = tokens[1][1..^1].split(",")
+          chunk.previousFrom = previousToken[0].parseInt
+          chunkPreviousFileLineNumber = chunk.previousFrom
+          chunk.previousCount = previousToken[1].parseInt
+          let currentToken = tokens[2][1..^1].split(",")
+          chunk.currentFrom = currentToken[0].parseInt
+          chunkCurrentFileLineNumber = chunk.currentFrom
+          chunk.currentCount = currentToken[1].parseInt
         else:
           if line.len < 1:
             # ignore: assume it's always <kind><text>
@@ -83,15 +67,24 @@ proc parseDiff(rawDiff: string): Diff =
               # or `new mode ` or other:
               else:   (false, NonChanged) 
             if isLineDiff:
-              chunk.lines.add(DiffLine(kind: kind, text: line[1..^1]))
-      if not fileDiff.isNil:
-        if chunk.deleteCount != 0:
-          fileDiff.chunks.add(chunk)
+              var diffLine = DiffLine(
+                kind: kind,
+                text: line[1..^1])
+              if kind in {Deleted, NonChanged}:
+                diffLine.previousLineNumber = chunkPreviousFileLineNumber
+                if kind == Deleted:
+                  diffLine.currentLineNumber = NO_LINE
+                chunkPreviousFileLineNumber += 1
+              if kind in {Added, NonChanged}:
+                if kind == Added:
+                  diffLine.previousLineNumber = NO_LINE
+                diffLine.currentLineNumber = chunkCurrentFileLineNumber
+                chunkCurrentFileLineNumber += 1
+              chunk.lines.add(diffLine)
 
-# ct replay can take and pass to index; index can send diff to frontend and keep info (or send trace id) there
-# when replaying, we can import; or we can abstract, so we don't need to always import (for now we can import)
-# and from id-s send and make it work on frontend by replacing trace info
-# vibe coding;
+      if not fileDiff.isNil:
+        if chunk.previousFrom != 0:
+          fileDiff.chunks.add(chunk)
 
 proc makeMultitraceArchive(traceFolders: seq[string], rawDiff: string, structuredDiff: Diff, outputPath: string) =
   let folder = getTempDir() / "codetracer" / "multitrace-" & outputPath.extractFilename # TODO a more unique name?
@@ -100,9 +93,11 @@ proc makeMultitraceArchive(traceFolders: seq[string], rawDiff: string, structure
 
   for traceFolder in traceFolders:
     copyDir(traceFolder, folder / traceFolder.extractFilename)
+
   writeFile(folder / "original_diff.patch", rawDiff)
   writeFile(folder / "diff.json", Json.encode(structuredDiff, pretty=true))
   # for now no diff_data.json or other format: eventually from diff-index
+
   zipFolder(folder, outputPath)
 
   removeDir(folder)
