@@ -9,9 +9,13 @@ import std/[osproc, strformat, sequtils],
 proc runRecordedTrace*(
   trace: Trace,
   test: bool,
+  structuredDiffJson: string = "",
   recordCore: bool = false
 ): bool =
-  let args = if test: @[$trace.id, "--test"] else: @[$trace.id]
+  var args = if test: @[$trace.id, "--test"] else: @[$trace.id]
+  if structuredDiffJson.len > 0:
+    args.add("--diff")
+    args.add(structuredDiffJson)
   return launchElectron(args, trace, ElectronLaunchMode.Default, recordCore, test)
 
 
@@ -46,7 +50,8 @@ proc runWithRestart(
     if not recordedTrace.isNil:
       let shouldRestart =
         if not afterRestart:
-          runRecordedTrace(recordedTrace, test, recordCore)
+          # for now assume not a multitrace/no diff
+          runRecordedTrace(recordedTrace, test, structuredDiffJson="", recordCore=recordCore)
         else:
           let process = startProcess(codetracerExe, args = @["replay", fmt"--id={recordedTrace.id}"], options = {poParentStreams})
           waitForExit(process) == RESTART_EXIT_CODE
