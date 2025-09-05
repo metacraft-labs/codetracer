@@ -1,7 +1,7 @@
 import
   std/[os, json, strutils, strformat, sets, algorithm ],
   ../../common/[trace_index, lang, types, paths],
-  ../utilities/git,
+  ../utilities/ [git, language_detection],
   json_serialization, results
 
 proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
@@ -142,9 +142,18 @@ proc importDbTrace*(
 
   if lang == LangUnknown:
     for path in paths:
-      let traceLang = toLangFromFilename(path)
+      # `program` from trace_metadata
+      let isWasm = program.extractFilename.split(".")[^1] == "wasm" # Check if language is wasm
+      let traceLang = detectLangFromPath(path, isWasm)
       if traceLang != LangUnknown:
-        lang = traceLang
+        # for now assume this is used only for db traces
+        # and that C/C++/Rust there can come only from wasm targets currently
+        if traceLang == LangRust:
+          lang = LangRustWasm
+        elif traceLang in {LangC, LangCpp}:
+          lang = LangCppWasm
+        else:
+          lang = traceLang
         break # for now assume the first detected lang is ok
 
   if selfContained and downloadKey == "":
