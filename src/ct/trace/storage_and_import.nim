@@ -92,6 +92,7 @@ proc importDbTrace*(
   downloadKey: string = ""
 ): Trace =
   
+  echo traceMetadataPath
   let rawTraceMetadata = readFile(traceMetadataPath)
   let untypedJson = parseJson(rawTraceMetadata)
   let program = untypedJson{"program"}.getStr()
