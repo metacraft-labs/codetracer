@@ -687,9 +687,12 @@ proc onTraceLoaded(
     tags=JsAssoc[cstring, seq[Tag]],
     functions=seq[Function],
     save=Save,
+    diff=Diff,
+    withDiff=bool,
     dontAskAgain=bool)) {.async.} =
 
   clog "trace loaded"
+  console.log response.withDiff, response.diff
 
   data.trace = response.trace
   data.ui.readOnly = true

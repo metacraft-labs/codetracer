@@ -301,7 +301,7 @@ type
      replayTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
-        desc: "the trace output folder"
+        desc: "the trace output folder or a multitrace archive"
       .}: Option[string]
      lastTraceMatchingPattern* {.
         argument,
