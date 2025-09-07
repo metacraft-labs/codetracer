@@ -60,6 +60,7 @@ type
     CtUpdatedFlow,
     CtRunToEntry,
     CtRunTracepoints,
+    CtRunTraceSession,
     CtSetupTraceSession,
     CtLoadAsmFunction,
     CtLoadAsmFunctionResponse,
@@ -68,6 +69,7 @@ type
     InternalAddToScratchpadFromExpression,
     InternalStatusUpdate,
     InternalNewOperation,
+    InternalTraceMapUpdate,
     CtNotification,
     
 when defined(js):

@@ -212,15 +212,24 @@
   position: absolute
   width: 100px !important
 
+.flow-component-container
+  transform: translate(0px, 2px)
+
 .flow-loop-slider
   border-color: FLOW_PARALLEL_SLIDER_COLOR !important
   border-width: 1px !important
   position: fixed !important
   font-size: 0.9em
   height: 2px !important
+  if IS_EXTENSION
+    transform: translate(0px, 8px)
 
   .noUi-base
-    width: 100%
+    if IS_EXTENSION
+      width: 550px
+      margin-left: 220px
+    else
+      width: 100%
     height: 2px !important
     background-color: NOUI_SLIDER_BACKGROUND_COLOR
 
@@ -237,6 +246,8 @@
     background-repeat: no-repeat
     border-radius: 100px
     outline: 2px solid NOUI_SLIDER_HANDLER_BORDER
+    if IS_EXTENSION
+      transform: translate(620px, -4px)
   .noUi-connect
     background: transparent
   .noUi-tooltip

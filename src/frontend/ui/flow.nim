@@ -22,6 +22,7 @@ proc redrawFlow*(self: FlowComponent)
 proc resizeFlowSlider*(self: FlowComponent)
 proc makeSlider(self: FlowComponent, position: int)
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int)
+proc makeLoopLine(self: FlowComponent, step: FlowStep, allIterations: int): VNode
 
 const SLIDER_OFFSET = 6 # in px
 const FLOW_VALUE_LIMIT = 30
@@ -37,6 +38,40 @@ proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value
       return AfterValueMode
     else:
       return BeforeAndAfterValueMode
+
+when defined(ctInExtension):
+  var flowComponentForExtension* {.exportc.}: FlowComponent = makeFlowComponent(data, 13, inExtension = true)
+
+  proc makeFlowComponentForExtension*(id: cstring): FlowComponent {.exportc.} =
+    if flowComponentForExtension.kxi.isNil:
+      flowComponentForExtension.kxi = setRenderer(proc: VNode = flowComponentForExtension.render(), id, proc = discard)
+    result = flowComponentForExtension
+
+method register*(self: FlowComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    self.location = response.location
+    api.emit(CtLoadFlow, self.location)
+    self.redraw()
+  )
+  api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
+    discard self.onUpdatedFlow(response)
+    self.redrawFlow()
+    self.redraw()
+  )
+
+method render*(self: FlowComponent): VNode =
+  let allIterations = if self.flow.isNil: 0 else: self.flow.loops[self.activeStep.loop].rrTicksForIterations.len - 1
+  result = buildHtml(tdiv(class="flow-component-container")):
+    makeLoopLine(self, self.activeStep, allIterations)
+    tdiv(
+      class = "flow-loop-slider-container",
+      id = fmt"flow-loop-slider-container-{self.position}"
+    )
+      
+
+proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
 
 proc getStepDomOffsetLeft*(self: FlowComponent, step: FlowStep): float =
   let flowLine = self.flowLines[step.position]
@@ -457,7 +492,7 @@ proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool
           if step.beforeValues.hasKey(name):
             self.scratchpadUI.registerScratchpadValue(name, step.beforeValues[name])
 
-        self.data.redraw()
+        self.redraw()
 
       else:
         if name == cstring"":
@@ -467,7 +502,7 @@ proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool
           if step.afterValues.hasKey(name):
             self.scratchpadUI.registerScratchpadValue(name, step.afterValues[name])
 
-        self.data.redraw()
+        self.redraw()
 
 proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
   when not defined(server) and not defined(ctInCentralExtensionContext):
@@ -624,6 +659,7 @@ proc getOriginLoopIndex*(self: FlowComponent, loopIndex: int): int =
     self.getOriginLoopIndex(parentId)
 
 proc calculateFlowLineLeftOffset(self:FlowComponent, flowLine: FlowLine): int =
+  if self.inExtension: return 0
   case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     var flowLineOffset =
@@ -1043,7 +1079,7 @@ proc moveRight*(self: FlowComponent) =
   self.selectedStepCount = stepCount
   self.selectedGroup.visibleStart = self.selectedIndex.float * self.selectedGroup.baseWidth
 
-  self.data.redraw()
+  self.redraw()
 
 proc moveLeft*(self: FlowComponent) =
   if self.selectedIndex > 0:
@@ -1051,7 +1087,7 @@ proc moveLeft*(self: FlowComponent) =
     self.selectedStepCount = self.findStepCount()
     self.selectedGroup.visibleStart = self.selectedIndex.float * self.selectedGroup.baseWidth
 
-    self.data.redraw()
+    self.redraw()
 
 
 method onRight*(self: FlowComponent) {.async.} =
@@ -1104,7 +1140,7 @@ proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: 
 
 proc afterJump(self: FlowComponent, stepCount: int) =
   let step = self.flow.steps[stepCount]
-  let location = self.data.services.debugger.location
+  let location = self.location
   let currentStep = self.positionRRTicksToStepCount(location.highLevelLine, location.rrTicks)
   let reverse = if stepCount >= currentStep: false else: true
 
@@ -1113,7 +1149,7 @@ proc afterJump(self: FlowComponent, stepCount: int) =
 
   if lastTimePlusDelay <= currentTime:
     self.redrawFlow()
-    self.jumpToLocalStep(self.tab.name, step.position, stepCount, step.iteration, step.rrTicks, reverse)
+    self.jumpToLocalStep(self.location.path, step.position, stepCount, step.iteration, step.rrTicks, reverse)
 
 
 proc jumpToLocalStep*(self: FlowComponent, stepCount: int) =
@@ -1464,9 +1500,10 @@ proc flowSimpleValue*(
         text afterValue.textRepr(compact=true)
 
 proc clearSliders(self: FlowComponent) =
-  var tab = self.data.services.editor.open[self.editorUI.path]
-  for widget in self.sliderWidgets:
-    tab.monacoEditor.removeContentWidget(widget)
+  if not self.inExtension:
+    var tab = self.data.services.editor.open[self.editorUI.path]
+    for widget in self.sliderWidgets:
+      tab.monacoEditor.removeContentWidget(widget)
   self.sliderWidgets = JsAssoc[int, js]{}
 
 proc clearInline(self: FlowComponent) =
@@ -1485,17 +1522,18 @@ proc clearInline(self: FlowComponent) =
       line.contentWidget = nil
 
 proc clearParallel(self: FlowComponent) =
-  var tab = self.data.services.editor.open[self.editorUI.path]
+  if not self.inExtension:
+    var tab = self.data.services.editor.open[self.editorUI.path]
 
-  if not tab.monacoEditor.isNil:
-    for viewZone in self.loopViewZones:
-      tab.monacoEditor.changeViewZones do (view: js):
-        view.removeZone(viewZone)
-    # clear flow line content widgets
-    for flowLine in self.flowLines:
-      if not flowLine.contentWidget.isNil:
-        tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
-        flowLine.contentWidget = nil
+    if not tab.monacoEditor.isNil:
+      for viewZone in self.loopViewZones:
+        tab.monacoEditor.changeViewZones do (view: js):
+          view.removeZone(viewZone)
+      # clear flow line content widgets
+      for flowLine in self.flowLines:
+        if not flowLine.contentWidget.isNil:
+          tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
+          flowLine.contentWidget = nil
   self.flowDom = JsAssoc[int, Node]{}
   self.lineWidgets = JsAssoc[int, JsObject]{}
   self.flowLoops = JsAssoc[int, FlowLoop]{}
@@ -1529,12 +1567,13 @@ proc clearViewZones(self: FlowComponent) =
 
 proc resetFlow*(self: FlowComponent) =
   self.clearSliders()
-  self.clearInline()
+  # self.clearInline()
   self.clearMultiline()
   self.clearParallel()
 
   self.clearLoopStates()
-  self.clearWidgets()
+  if not self.inExtension:
+    self.clearWidgets()
   self.clearFlowLines()
   self.clearStepNodes()
   self.clearViewZones()
@@ -1566,7 +1605,7 @@ proc switchFlowUI*(self: FlowComponent, flowUI: FlowUI) =
 
   self.data.config.flow.ui = flowUINames[flowUI]
   self.data.config.flow.realFlowUI = flowUI
-  self.data.redraw()
+  self.redraw()
 
 proc addContentWidget*(
   self: FlowComponent,
@@ -2918,10 +2957,10 @@ proc flowLoopValue*(
   allIterations: int,
   style: VStyle
 ): VNode =
-  let flowMode =
-    ($self.data.config.flow.realFlowUI)
-      .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
-      .toLowerAscii()
+  # let flowMode =
+  #   ($self.data.config.flow.realFlowUI)
+  #     .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
+  #     .toLowerAscii()
   var iteration = step.iteration
   var width = len(intToStr(allIterations))
 
@@ -2954,7 +2993,8 @@ proc flowLoopValue*(
           (StyleAttr.width, cstring($(width+1) & "ch")),
           (StyleAttr.textAlign, cstring("right"))),
       )
-      span(class = &"flow-{flowMode}-loop-iteration-end"): text fmt"from {allIterations}"
+      # TODO: FOR NOW HARDCODE THE PARALLEL
+      span(class = &"flow-parallel-loop-iteration-end"): text fmt"from {allIterations}"
 
 proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): VNode =
   let iteration = step.iteration
@@ -2970,7 +3010,7 @@ proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): 
         self.activeStep = previousIterationStepCount
         self.jumpToLocalStep(self.activeStep.stepCount + 1)
         self.redrawFlow()
-        self.data.redraw()
+        self.redraw()
     )
   )
 
@@ -2989,7 +3029,7 @@ proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): 
         self.activeStep = nextIterationStepCount
         self.jumpToLocalStep(self.activeStep.stepCount + 1)
         self.redrawFlow()
-        self.data.redraw()
+        self.redraw()
     )
   )
 
@@ -2997,15 +3037,13 @@ proc makeLoopLine(
   self: FlowComponent,
   step: FlowStep,
   allIterations: int
-): Node =
-  let editor = self.editorUI.monacoEditor
-  let positionColumn = editor.getOffsetForColumn(step.position, 0)
-  let editorConfiguration = editor.config
-  let editorLeftOffset = editorConfiguration.layoutInfo.contentLeft
+): VNode =
+  let fontSize = if self.fontSize != 0: cstring($(self.fontSize) & "px") else: cstring("inherit")
   let style = style(
-    (StyleAttr.fontSize, cstring($(self.fontSize) & "px")),
+    (StyleAttr.fontSize, fontSize),
     (StyleAttr.lineHeight, cstring($self.lineHeight & "px")),
-    (StyleAttr.height, cstring($self.lineHeight & "px"))
+    (StyleAttr.height, cstring($self.lineHeight & "px")),
+    (StyleAttr.width, cstring("fit-content"))
   )
 
   let vNode = buildHtml(
@@ -3014,21 +3052,22 @@ proc makeLoopLine(
       class = "flow-multiline-value-container"
     )
   ):
-    backLoopControlButton(self, step, style)
-    flowLoopValue(self, step, allIterations, style)
-    nextLoopControlButton(self, step, style)
+    if step.rrTicks != -1:
+      backLoopControlButton(self, step, style)
+      flowLoopValue(self, step, allIterations, style)
+      nextLoopControlButton(self, step, style)
 
-  self.data.redraw()
+    # self.redraw()
 
-  return vnodeToDom(vNode, KaraxInstance())
+  return vNode
 
 proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   let expression = &"for-{step.position}"
   # render variable lines in the viewZone
   let allIterations = self.flow.loops[step.loop].rrTicksForIterations.len - 1
-  let dom = self.makeLoopLine(
+  let dom = vnodeToDom(self.makeLoopLine(
     step,
-    allIterations)
+    allIterations), KaraxInstance())
   cast[Node](self.flowLoops[step.position].flowZones.dom).appendChild(dom)
 
   self.flowLoops[step.position].flowDom = dom
@@ -3038,8 +3077,6 @@ proc addLoopInfo(self: FlowComponent, step: FlowStep) =
   # create viewZone for this step if there is not any yet
   if not self.flowLoops.hasKey(step.position):
     self.flowLoops[step.position] = FlowLoop(loopStep: step)
-    let lineHeight =
-      self.editorUI.monacoEditor.config.lineHeight
     let position = self.flow.loops[step.loop].first
     let newZoneDom =
       createFlowViewZone(
@@ -3080,14 +3117,14 @@ proc updateIterationStepCount*(self: FlowComponent, line: int, stepCount: int, l
 
 proc getCurrentStepCount*(self: FlowComponent, line: int): int =
   var stepCount: int
-  stepCount = self.positionRRTicksToStepCount(line, self.data.services.debugger.location.rrTicks)
+  stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
   let step = self.flow.steps[stepCount]
 
   if self.flowLoops.hasKey(self.flow.loops[step.loop].first):
     let loopStep = self.flowLoops[self.flow.loops[step.loop].first].loopStep
     stepCount = self.updateIterationStepCount(line, stepCount, loopStep.loop, loopStep.iteration)
   elif self.activeStep.rrTicks == NO_TICKS:
-    stepCount = self.positionRRTicksToStepCount(line, self.data.services.debugger.location.rrTicks)
+    stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
   else:
     stepCount = self.positionRRTicksToStepCount(line, self.activeStep.rrTicks)
     let activeStep = self.flow.steps[stepCount]
@@ -3110,7 +3147,10 @@ proc getCurrentStepCount*(self: FlowComponent, line: int): int =
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
   let editorContentLeft =
-    self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
+    if self.inExtension:
+      0.0
+    else:
+      self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   self.createLoopStates()
 
@@ -3120,32 +3160,35 @@ proc renderFlowLines*(self: FlowComponent) =
     let loopId = step.loop
     let loopIteration = step.iteration
 
-    # calculate variables position on the line
-    if toSeq(self.flowLines[step.position].variablesPositions.keys()).len == 0:
-      for expression, values in step.beforeValues:
-        discard calculateVariablePosition(self, step.position, expression)
-      self.sortVariablesPositions(step, false)
+    # TODO: FOR NOW DISCARD THIS PART: calculate variables position on the line
+    # if toSeq(self.flowLines[step.position].variablesPositions.keys()).len == 0:
+    #   for expression, values in step.beforeValues:
+    #     discard calculateVariablePosition(self, step.position, expression)
+    #   self.sortVariablesPositions(step, false)
 
     # add step values
-    let monacoEditorRange = self.editorUI.monacoEditor.getVisibleRanges()[0]
-    let flowViewStartLine = monacoEditorRange.startLineNumber.to(int)
-    let flowViewEndLine = monacoEditorRange.endLineNumber.to(int)
+    # let monacoEditorRange = self.editorUI.monacoEditor.getVisibleRanges()[0]
+    # let flowViewStartLine = monacoEditorRange.startLineNumber.to(int)
+    # let flowViewEndLine = monacoEditorRange.endLineNumber.to(int)
 
     if not self.stepNodes.hasKey(step.stepCount):
       if step.position == self.flow.loops[loopId].registeredLine:
         self.addLoopInfo(step)
-      if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
-        self.addStepValues(step)
+      # if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
+      #   self.addStepValues(step)
 
 proc reloadFlow*(self:FlowComponent) =
   self.renderFlowLines()
 
 proc createFlowLines(self: FlowComponent) =
   let editorContentLeft =
-    self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
+    if self.inExtension:
+      0.0
+    else:
+      self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   for line, stepCounts in self.flow.positionStepCounts:
-    if line < self.tab.sourceLines.len:
+    if self.inExtension or line < self.tab.sourceLines.len:
       for stepCount in stepCounts:
         let step = self.flow.steps[stepCount]
         if step.loop == 0 and step.iteration == 0:
@@ -3197,10 +3240,11 @@ proc calculateLineHeight(self: FlowComponent) =
 proc recalculateAndRedrawFlow*(self: FlowComponent) =
   if not self.flow.isNil:
     self.createFlowLines()
-    self.calculateLineHeight()
+    if not self.inExtension:
+      self.calculateLineHeight()
     self.renderFlowLines()
 
-    if self.mutationObserver.isNil:
+    if self.mutationObserver.isNil and not self.inExtension:
       setEditorMutationObserver(self)
 
 proc adjustFlow(self: FlowComponent) =
@@ -3220,35 +3264,36 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     if update.location.toJs.isNil:
       cdebug "flow: update location is nil: stopping"
       return
-    let updateLocationName = if self.editorUI.editorView != ViewInstructions:
+    let updateLocationName = if self.inExtension or self.editorUI.editorView != ViewInstructions:
         update.location.highLevelPath
       else:
         # should be always path:name
         update.location.highLevelPath & cstring":" & update.location.functionName
 
-    if self.editorUI.name != updateLocationName:
+    if not self.inExtension and self.editorUI.name != updateLocationName:
       cdebug "flow: editor name not equal to update location name: stopping"
       return
 
     self.status = update.status
 
+    let editorView = if self.inExtension: EditorView.ViewSource else: self.editorUI.editorView
     if update.location.key != self.key:
       self.resetFlow()
       self.key = update.location.key
-
       if self.flow.isNil:
-        self.flow = update.view_updates[self.editorUI.editorView]
+        self.flow = update.view_updates[editorView]
     else:
-      self.flow = update.view_updates[self.editorUI.editorView]
+      self.flow = update.view_updates[editorView]
 
-    self.editorUI.flowUpdate = update
+    if not self.inExtension:
+      self.editorUI.flowUpdate = update
 
     self.recalculateAndRedrawFlow()
 
     self.redrawFlow()
 
     self.recalculate = true
-    self.data.redraw()
+    self.redraw()
   except:
     console.error lastJSError
     console.error lastJSError.stack
@@ -3261,23 +3306,26 @@ proc varStyle(self: FlowComponent, fields: seq[cstring]): VStyle =
 
 proc makeSliderDom(self: FlowComponent, position: int): Node =
   var dom = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
-
+  var style = if self.inExtension: style() else: loopSliderStyle(self, position)
+  var leftStyle = if self.inExtension: style() else: flowLeftStyle(self, position, true)
   if dom.isNil:
     let vNode = buildHtml(tdiv(class = "flow-loop-slider-container",
       id = &"flow-loop-slider-container-{position}",
-      style = flowLeftStyle(self, position, true))):
+      style = leftStyle)):
         tdiv(class = "flow-loop-slider",
              id = &"flow-loop-slider-{position}",
-             style = loopSliderStyle(self, position))
+             style = style)
 
     dom = vnodeToDom(vNode, KaraxInstance())
   else:
-    let childVNode = buildHtml(tdiv(class = "flow-loop-slider",
-      id = &"flow-loop-slider-{position}",
-      style = loopSliderStyle(self, position))): text ""
-    let childDom = vnodeToDom(childVNode, KaraxInstance())
+    let domCheck = cast[Node](jq(&"flow-loop-slider-{position}"))
+    if domCheck.isNil:
+      let childVNode = buildHtml(tdiv(class = "flow-loop-slider",
+        id = &"flow-loop-slider-{position}",
+        style = style)): text ""
+      let childDom = vnodeToDom(childVNode, KaraxInstance())
 
-    dom.appendChild(childDom)
+      dom.appendChild(childDom)
 
   self.flowLoops[position].sliderDom = dom.childNodes[0]
 
@@ -3287,7 +3335,7 @@ proc addSliderWidget(self: FlowComponent, position:int) =
   let id = &"flow-slider-widget-{position}"
   let dom = makeSliderDom(self, position)
 
-  self.flowLoops[position].flowDom.appendChild(dom)
+  self.flowLoops[position].flowDom = dom
 
 proc resizeEditorHandler(self:FlowComponent, position: int) =
   # get new monaco editor config
@@ -3317,35 +3365,35 @@ proc calculateLineIndentations(self: FlowComponent, position: int) : int =
 
 proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, isLoop: bool = false): Node =
   #create viewZone
-  let editorLineNumbersWidth =
-    self.editorUI.monacoEditor.config.layoutInfo.contentLeft
   var zoneDom = document.createElement("div")
 
   zoneDom.id = fmt"flow-view-zone-{position}"
   zoneDom.class = "flow-view-zone"
   zoneDom.style.display = "flex"
 
-  let viewZone = js{
-        afterLineNumber: position,
-        heightInPx: heightInPx + 3,
-        domNode: zoneDom
-      }
+  if not self.inExtension:
+    let viewZone = js{
+          afterLineNumber: position,
+          heightInPx: heightInPx + 3,
+          domNode: zoneDom
+        }
 
-  if isLoop:
-    self.editorUI.monacoEditor.changeViewZones do (view: js):
-      var zoneId = cast[int](view.addZone(viewZone))
-      self.loopViewZones[position] = zoneId
-  else:
-    self.editorUI.monacoEditor.changeViewZones do (view: js):
-      var zoneId = cast[int](view.addZone(viewZone))
-      self.viewZones[position] = zoneId
+    if isLoop:
+      self.editorUI.monacoEditor.changeViewZones do (view: js):
+        var zoneId = cast[int](view.addZone(viewZone))
+        self.loopViewZones[position] = zoneId
+    else:
+      self.editorUI.monacoEditor.changeViewZones do (view: js):
+        var zoneId = cast[int](view.addZone(viewZone))
+        self.viewZones[position] = zoneId
 
   # calculate previous position indentations count
   let lineNumberDom = document.createElement("div")
 
   lineNumberDom.class = "line-numbers"
   lineNumberDom.style.height = "100%"
-  lineNumberDom.style.width = jq(".line-numbers").style.width
+  if not self.inExtension:
+    lineNumberDom.style.width = jq(".line-numbers").style.width
   lineNumberDom.style.position = "absolute"
   lineNumberDom.style.left = "0px"
   zoneDom.appendChild(lineNumberDom)
@@ -3371,7 +3419,6 @@ proc makeSlider(self: FlowComponent, position: int) =
   var element = self.flowLoops[position].sliderDom
   let step = self.flowLoops[position].loopStep
   let loop = self.flow.loops[step.loop]
-  var maxLength = self.editorUI.monacoEditor.config.layoutInfo.contentWidth
 
   # tooltip function
   proc sliderEncoder(value: float): int =
@@ -3381,7 +3428,7 @@ proc makeSlider(self: FlowComponent, position: int) =
     return
 
   if not element.toJs.noUiSlider.isNil:
-   element.toJs.noUiSlider.destroy()
+    element.toJs.noUiSlider.destroy()
   else:
     noUiSlider.create(element, js{
       "start": step.iteration,
@@ -3400,8 +3447,8 @@ proc makeSlider(self: FlowComponent, position: int) =
       let newStepCount = self.flow.loopIterationSteps[step.loop][loopIteration].table[step.position]
       let activeStep = self.flow.steps[newStepCount]
 
-      if self.data.ui.activeFocus != self:
-        self.data.ui.activeFocus = self
+      # if self.data.ui.activeFocus != self:
+      #   self.data.ui.activeFocus = self
 
       self.flowLoops[position].loopStep = activeStep
       self.activeStep = activeStep
@@ -3417,7 +3464,8 @@ proc makeSlider(self: FlowComponent, position: int) =
 
     let elementSlider = cast[JsObject](element).noUiSlider
     elementSlider.on(cstring"slide", onUpdate)
-    setEditorResizeObserver(self, position)
+    if not self.inExtension:
+      setEditorResizeObserver(self, position)
 
 proc resizeLineSlider(self: FlowComponent, position: int) =
   let editor = self.editorUI.monacoEditor
