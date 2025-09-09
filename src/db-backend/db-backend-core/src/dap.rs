@@ -660,6 +660,11 @@ pub fn to_json(message: &DapMessage) -> DapResult<String> {
     Ok(serde_json::to_string(message)?)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
+    todo!()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
     info!("from_reader");
@@ -693,8 +698,7 @@ pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<Dap
     from_json(json_text)
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn read_dap_message_from_reader<R: BufRead>(_reader: &mut R) -> Result<DapMessage, DapError> {
+pub fn setup_read_dap_message_from_reader<R: BufRead>(_reader: &mut R) -> Result<(), DapError> {
     use wasm_bindgen::{prelude::Closure, JsCast};
     use web_sys::{
         js_sys::{self, Function},
@@ -718,7 +722,7 @@ pub fn read_dap_message_from_reader<R: BufRead>(_reader: &mut R) -> Result<DapMe
 
     scope.set_onmessage(Some(&callback));
 
-    todo!()
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -738,7 +742,55 @@ pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) ->
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) -> Result<(), DapError> {
+pub fn send_dap_message<W: std::io::Write>(message: &DapMessage) -> Result<(), DapError> {
+    use serde_wasm_bindgen::to_value;
+    use wasm_bindgen::JsCast;
+
+    let js_val = to_value(message).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+
+    let global = js_sys::global();
+    let scope: web_sys::DedicatedWorkerGlobalScope = global
+        .dyn_into()
+        .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
+
+    scope.post_message(&js_val)?;
+    web_sys::console::log_1(&format!("DAP -> {:?}", message).into());
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn setup_onmessage_callback() -> Result<(), DapError> {
+    use wasm_bindgen::{prelude::Closure, JsCast};
+    use web_sys::{
+        js_sys::{self, Function},
+        MessageEvent,
+    };
+
+    web_sys::console::log_1(&"Sneed".into());
+
+    let global = js_sys::global();
+
+    let scope: web_sys::DedicatedWorkerGlobalScope = global
+        .dyn_into()
+        .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
+
+    let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
+        let dap_message_raw = event.data();
+
+        web_sys::console::log_1(&format!("Raw DAP <- {:?}", dap_message_raw).into());
+
+        let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned()));
+    }) as Box<dyn FnMut(_)>)
+    .into_js_value()
+    .unchecked_into::<Function>();
+
+    scope.set_onmessage(Some(&callback));
+
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn write_message<W: std::io::Write>(_writer: &mut W, message: &DapMessage) -> Result<(), DapError> {
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::JsCast;
 
