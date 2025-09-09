@@ -341,7 +341,7 @@ pub struct DisconnectResponseBody {}
 // }
 
 impl Request {
-    pub fn load_args<T: DeserializeOwned>(&self) -> Result<T, Box<dyn std::error::Error>> {
+    pub fn load_args<T: DeserializeOwned>(&self) -> DapResult<T> {
         Ok(serde_json::from_value::<T>(self.arguments.clone())?)
     }
 }
@@ -455,15 +455,15 @@ impl DapClient {
         })
     }
 
-    pub fn launch(&mut self, args: LaunchRequestArguments) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn launch(&mut self, args: LaunchRequestArguments) -> DapResult<DapMessage> {
         Ok(self.request("launch", serde_json::to_value(args)?))
     }
 
-    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> DapResult<DapMessage> {
         Ok(self.request("setBreakpoints", serde_json::to_value(args)?))
     }
 
-    pub fn updated_trace_event(&mut self, args: task::TraceUpdate) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn updated_trace_event(&mut self, args: task::TraceUpdate) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -660,7 +660,7 @@ pub fn to_json(message: &DapMessage) -> DapResult<String> {
     Ok(serde_json::to_string(message)?)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
     info!("from_reader");
     let mut header = String::new();
@@ -693,17 +693,30 @@ pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<Dap
     from_json(json_text)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, DapError> {
-    use wasm_bindgen::JsCast;
-    use web_sys::js_sys;
+#[cfg(target_arch = "wasm32")]
+pub fn read_dap_message_from_reader<R: BufRead>(_reader: &mut R) -> Result<DapMessage, DapError> {
+    use wasm_bindgen::{prelude::Closure, JsCast};
+    use web_sys::{
+        js_sys::{self, Function},
+        MessageEvent,
+    };
 
     let global = js_sys::global();
     let scope: web_sys::DedicatedWorkerGlobalScope = global
         .dyn_into()
         .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
 
-    sc
+    let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
+        let dap_message_raw = event.data();
+
+        web_sys::console::log_1(&format!("Raw DAP <- {:?}", dap_message_raw).into());
+
+        let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned()));
+    }) as Box<dyn FnMut(_)>)
+    .into_js_value()
+    .unchecked_into::<Function>();
+
+    scope.set_onmessage(Some(&callback));
 
     todo!()
 }
@@ -725,7 +738,7 @@ pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) ->
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn write_message<W: std::io::Write>(_writer: &mut W, message: &DapMessage) -> Result<(), DapError> {
+pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) -> Result<(), DapError> {
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::JsCast;
 
