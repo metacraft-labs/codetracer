@@ -332,11 +332,6 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
 proc navigationMenuView*(self: MenuComponent): VNode =
   let menu = self.data.ui.menuNode
 
-  # proc search(value: cstring) {.async.} =
-  #   self.searchQuery = value
-  #   self.data.redraw()
-  #   jq("#menu-search-text").focus()
-
   result = buildHtml(
     tdiv(
       id = "navigation-menu",
