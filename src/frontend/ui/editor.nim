@@ -1303,6 +1303,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       )
 
       document.querySelector(selector).addEventListener(j"contextmenu", proc(ev: Event) =
+        ev.preventDefault()
         ev.stopPropagation()
         for element in cast[seq[cstring]](ev.toJs.target.classList):
           if element == j"gutter-line" or element == j"gutter-breakpoint":

@@ -332,11 +332,6 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
 proc navigationMenuView*(self: MenuComponent): VNode =
   let menu = self.data.ui.menuNode
 
-  # proc search(value: cstring) {.async.} =
-  #   self.searchQuery = value
-  #   self.data.redraw()
-  #   jq("#menu-search-text").focus()
-
   result = buildHtml(
     tdiv(
       id = "navigation-menu",
@@ -401,36 +396,6 @@ proc navigationMenuView*(self: MenuComponent): VNode =
                   menu.elements.len,
                   nameAndShortcutWidths.name,
                   nameAndShortcutWidths.shortcut)
-          # For now disable search input
-          # tdiv(
-          #   id="menu-search",
-          #   onmousedown = proc(ev: Event, tg: VNode) =
-          #     ev.stopPropagation()
-          #     self.search = true
-          #     self.openMainMenu()):
-          #   input(
-          #     id="menu-search-text",
-          #     `type`="text",
-          #     placeholder="Search menu",
-          #     onkeydown = proc(e: KeyboardEvent, v: VNode) =
-          #       # self.openMainMenu()
-          #       if e.keyCode == UP_KEY_CODE:
-          #         discard self.onUp()
-          #       elif e.keyCode == DOWN_KEY_CODE:
-          #         discard self.onDown()
-          #       elif e.keyCode == ENTER_KEY_CODE:
-          #         discard self.onEnter()
-          #       elif e.keyCode == ESC_KEY_CODE:
-          #         document.toJs.activeElement.blur(),
-          #     oninput = proc(e: Event, v: VNode) =
-          #         # echo e.keyCode
-          #         # TODO learn about target coming from right place?
-          #       let value = jq("#menu-search-text").toJs.value.to(cstring)
-          #       discard search(value))
-            # span(class="menu-search-icon", onclick = proc =
-            #   let value = jq("#menu-search-text").toJs.value.to(cstring)
-            #   discard search(value)):
-            #   fa "search"
 
         var current = menu
         var sum = 0
