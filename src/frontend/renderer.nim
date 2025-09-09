@@ -49,24 +49,6 @@ else:
 var escapeHandler*: proc: void
 escapeHandler = nil
 
-
-const TRACEDEPTH* = 2
-const HISTORYDEPTH* = 2
-# const STATEDEPTH = 2
-
-# var uiGraphEngine* {.exportc: "graphEngine".}: GraphEngine
-# var oldGraphEngine* {.exportc.}: GraphEngine
-
-# proc contextMenuHandler*(self: ContextMenu, event: MouseEvent) =
-#   let clientX = event.clientX
-#   let clientY = event.clientY
-
-#   self.dom.style.top = &"{clientY}px"
-#   self.dom.style.left = &"{clientX}px"
-
-#   self.dom.toJs.classList.add("visible")
-#   cast[kdom.Node](self.dom).focus()
-
 proc contextMenuOption(self: ContextMenu, key: int): VNode =
   buildHtml(
     tdiv(class = "context-menu-option",
@@ -1034,31 +1016,34 @@ proc isWindowMaximized(): bool {.importjs: "(window.outerWidth == screen.availWi
   false
 
 proc windowMenu*(data: Data, fromWelcomeScreen: bool = false): VNode =
-  buildHtml(tdiv(class = "window-menu")):
-    tdiv(
-      class = "menu-button-svg minimize",
-      onclick = proc =
-        data.ipc.send "CODETRACER::minimize-window")
-    if isWindowMaximized():
+  if inElectron:
+    return buildHtml(tdiv(class = "window-menu")):
       tdiv(
-        class = "menu-button-svg restore",
+        class = "menu-button-svg minimize",
         onclick = proc =
-          data.ipc.send "CODETRACER::restore-window"
-          if fromWelcomeScreen:
-            discard setTimeout(proc() = data.redraw(), 100)
-      )
-    else:
+          data.ipc.send "CODETRACER::minimize-window")
+      if isWindowMaximized():
+        tdiv(
+          class = "menu-button-svg restore",
+          onclick = proc =
+            data.ipc.send "CODETRACER::restore-window"
+            if fromWelcomeScreen:
+              discard setTimeout(proc() = data.redraw(), 100)
+        )
+      else:
+        tdiv(
+          class = "menu-button-svg maximize",
+          onclick = proc =
+            data.ipc.send "CODETRACER::maximize-window"
+            if fromWelcomeScreen:
+              discard setTimeout(proc() = data.redraw(), 100)
+        )
       tdiv(
-        class = "menu-button-svg maximize",
+        class = "menu-button-svg close",
         onclick = proc =
-          data.ipc.send "CODETRACER::maximize-window"
-          if fromWelcomeScreen:
-            discard setTimeout(proc() = data.redraw(), 100)
-      )
-    tdiv(
-      class = "menu-button-svg close",
-      onclick = proc =
-        data.ipc.send "CODETRACER::close-app")
+          data.ipc.send "CODETRACER::close-app")
+  else:
+    discard
 
 proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
   let y = yPos - 30
