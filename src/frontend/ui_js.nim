@@ -662,6 +662,8 @@ proc onTraceLoaded(
   data.save.fileMap = JsAssoc[cstring, int]{}
   data.ui.menuNode = data.webTechMenu(baseName(response.trace.program))
 
+  dom.document.title = cstring(fmt"CodeTracer | Trace {data.trace.id}: {data.trace.program}")
+
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
 
