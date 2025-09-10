@@ -392,7 +392,15 @@ proc navigationMenuView*(self: MenuComponent): VNode =
             self.activePathOffsets[0] = 0
 
             for i, element in menu.elements:
-              if element.menuOs != ord(MenuNodeOSMacOS):
+              var shouldRender = false
+              if inElectron:
+                if not cast[bool]((element.menuOs and ord(MenuNodeOSHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
+                  shouldRender = true
+              else:
+                if not cast[bool]((element.menuOs and ord(MenuNodeOSNonHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
+                  shouldRender = true
+
+              if shouldRender:
                 menuNodeView(
                   self,
                   element,
@@ -401,36 +409,6 @@ proc navigationMenuView*(self: MenuComponent): VNode =
                   menu.elements.len,
                   nameAndShortcutWidths.name,
                   nameAndShortcutWidths.shortcut)
-          # For now disable search input
-          # tdiv(
-          #   id="menu-search",
-          #   onmousedown = proc(ev: Event, tg: VNode) =
-          #     ev.stopPropagation()
-          #     self.search = true
-          #     self.openMainMenu()):
-          #   input(
-          #     id="menu-search-text",
-          #     `type`="text",
-          #     placeholder="Search menu",
-          #     onkeydown = proc(e: KeyboardEvent, v: VNode) =
-          #       # self.openMainMenu()
-          #       if e.keyCode == UP_KEY_CODE:
-          #         discard self.onUp()
-          #       elif e.keyCode == DOWN_KEY_CODE:
-          #         discard self.onDown()
-          #       elif e.keyCode == ENTER_KEY_CODE:
-          #         discard self.onEnter()
-          #       elif e.keyCode == ESC_KEY_CODE:
-          #         document.toJs.activeElement.blur(),
-          #     oninput = proc(e: Event, v: VNode) =
-          #         # echo e.keyCode
-          #         # TODO learn about target coming from right place?
-          #       let value = jq("#menu-search-text").toJs.value.to(cstring)
-          #       discard search(value))
-            # span(class="menu-search-icon", onclick = proc =
-            #   let value = jq("#menu-search-text").toJs.value.to(cstring)
-            #   discard search(value)):
-            #   fa "search"
 
         var current = menu
         var sum = 0
@@ -454,7 +432,15 @@ proc navigationMenuView*(self: MenuComponent): VNode =
             style = menuNestedStyle(self, sum, depth + 1, separators, submenuWidth)
           ):
             for i2, element in current.elements:
-              if element.menuOs != ord(MenuNodeOSMacOS):
+              var shouldRender = false
+              if inElectron:
+                if not cast[bool]((element.menuOs and ord(MenuNodeOSHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
+                  shouldRender = true
+              else:
+                if not cast[bool]((element.menuOs and ord(MenuNodeOSNonHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
+                  shouldRender = true
+
+              if shouldRender:
                 menuNodeView(
                   self,
                   element,
