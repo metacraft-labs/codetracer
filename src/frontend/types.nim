@@ -43,7 +43,6 @@ type
     overlayExpanded*: int
     monacoEditor*:    MonacoEditor
     lang*:            Lang
-    # lowLevelMap*:     LowLevelMap
     name*:            cstring
     changed*:          bool
     reloadChange*:    bool
@@ -1269,12 +1268,14 @@ type
   MenuData* = ref object
     node*:    MenuNode
 
-  # MenuEnabled* = enum enabled, Disabled, MCalltrace
 
   MenuNodeOS* = enum
-    MenuNodeOSAny,
-    MenuNodeOSMacOS,
-    MenuNodeOSNonMacOS
+    MenuNodeOSAny       = 0,
+    MenuNodeOSMacOS     = 1 shl 0,
+    MenuNodeOSNonMacOS  = 1 shl 1,
+    MenuNodeOSHost      = 1 shl 2,
+    MenuNodeOSNonHost   = 1 shl 3,
+    MenuNodeOSMax       = ord(MenuNodeOSMacOS) or ord(MenuNodeOSNonMacOS) or ord(MenuNodeOSHost) or ord(MenuNodeOSNonHost)
 
   MenuNodeKind* = enum MenuFolder, MenuElement
 

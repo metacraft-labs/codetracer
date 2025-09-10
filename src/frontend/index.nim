@@ -438,7 +438,7 @@ when defined(ctmacos):
     if node.kind == MenuFolder:
       var items: seq[js] = @[]
       for child in node.elements:
-        if child.menuOs != ord(MenuNodeOSNonMacOS):
+        if not cast[bool](child.menuOs and ord(MenuNodeOSNonMacOS)) and not cast[bool](child.menuOs and ord(MenuNodeOSHost)):
           items.add(menuNodeToItem(child))
           if child.isBeforeNextSubGroup:
             items.add(js{type: cstring"separator"})

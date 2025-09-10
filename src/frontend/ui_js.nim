@@ -33,6 +33,12 @@ when defined(ctmacos):
 else:
   proc registerMenu*(menu: MenuNode) = discard
 
+proc `or`*(a: MenuNodeOS, b: MenuNodeOS): MenuNodeOS =
+  return MenuNodeOS(ord(a) or ord(b))
+
+proc `and`*(a: MenuNodeOS, b: MenuNodeOS): MenuNodeOS =
+  return MenuNodeOS(ord(a) and ord(b))
+
 proc defineMenuImpl(node: NimNode): (NimNode, bool) =
   case node.kind:
   of nnkCommand:
@@ -40,11 +46,34 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
     let nameNode = node[1]
     var currentParent: MenuNode
 
-    if kindOriginal.repr == "folder" or kindOriginal.repr == "macexclude_folder" or kindOriginal.repr == "macfolder":
-      let bMacFolder: bool = kindOriginal.repr == "macfolder"
+    if kindOriginal.repr == "folder"                  or
+       kindOriginal.repr == "macexclude_folder"       or
+       kindOriginal.repr == "macfolder"               or
+       kindOriginal.repr == "hostexclude_folder"      or
+       kindOriginal.repr == "hostfolder"              or
+       kindOriginal.repr == "mac_and_host_exclude_folder":
+
+      var folderType: MenuNodeOS = MenuNodeOSAny;
+
+      if kindOriginal.repr == "macfolder":
+        folderType = folderType or MenuNodeOSMacOs
+
+      if kindOriginal.repr == "macexclude_folder":
+        folderType = folderType or MenuNodeOSNonMacOS
+
+      if kindOriginal.repr == "hostfolder":
+        folderType = folderType or MenuNodeOSHost
+
+      if kindOriginal.repr == "hostexclude_folder":
+        folderType = folderType or MenuNodeOSNonHost
+
+      if kindOriginal.repr == "mac_and_host_exclude_folder":
+        folderType = folderType or MenuNodeOSNonHost or MenuNodeOSNonMacOS
+
       var elementsNode: NimNode = quote do: @[]
       if node.len > 2:
-        let index = if bMacFolder: 3 else: 2
+        # One more entry for text labels
+        let index = if bool(ord(folderType and MenuNodeOSMacOs)): 3 else: 2
         if node.len > index:
           for element in node[index]:
             let (element, isSeparator) = defineMenuImpl(element)
@@ -53,17 +82,9 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
             else:
               elementsNode[1][^1].add(nnkExprColonExpr.newTree(ident"isBeforeNextSubGroup", newLit(true)))
 
-      let os =
-        if kindOriginal.repr == "macfolder":
-          MenuNodeOs.MenuNodeOSMacOS
-        elif kindOriginal.repr == "macexclude_folder":
-          MenuNodeOs.MenuNodeOSNonMacOS
-        else:
-          MenuNodeOs.MenuNodeOSAny
-
       let tmpcstr = quote do: cast[cstring]("")
       let roleExpr: NimNode =
-        if bMacFolder:
+        if bool(ord(folderType and MenuNodeOSMacOs)):
           node[2]
         else:
           tmpcstr
@@ -74,11 +95,35 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
           name: `nameNode`,
           elements: `elementsNode`,
           enabled: true,
-          menuOs: `os`,
+          menuOs: `folderType`,
           role: `roleExpr`
         )
       result = (r, false)
-    elif kindOriginal.repr == "element" or kindOriginal.repr == "macexclude_element" or kindOriginal.repr == "macelement" or kindOriginal.repr == "macrole":
+    elif  kindOriginal.repr == "element"              or
+          kindOriginal.repr == "macexclude_element"   or
+          kindOriginal.repr == "macelement"           or
+          kindOriginal.repr == "macrole"              or
+          kindOriginal.repr == "hostexclude_element"  or
+          kindOriginal.repr == "hostelement"          or
+          kindOriginal.repr == "mac_and_host_exclude_element":
+
+      var elementType: MenuNodeOS = MenuNodeOSAny;
+
+      if kindOriginal.repr == "macelement" or kindOriginal.repr == "macrole":
+        elementType = elementType or MenuNodeOSMacOs
+
+      if kindOriginal.repr == "macexclude_element":
+        elementType = elementType or MenuNodeOSNonMacOS
+
+      if kindOriginal.repr == "hostelement":
+        elementType = elementType or MenuNodeOSHost
+
+      if kindOriginal.repr == "hostexclude_element":
+        elementType = elementType or MenuNodeOSNonHost
+
+      if kindOriginal.repr == "mac_and_host_exclude_element":
+        elementType = elementType or MenuNodeOSNonHost or MenuNodeOSNonMacOS
+
       let bMacRole: bool = kindOriginal.repr == "macrole"
       if node.len < 3 and not bMacRole:
         macros.error "no action " & node.repr & " "
@@ -87,14 +132,6 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
       let actionNode = if not bMacRole: node[2] else: newLit(ClientAction.forwardContinue)
       let last = if node.len == 3 or bMacRole: newLit(true) else: node[^1]
 
-      let os =
-        if kindOriginal.repr == "macelement" or kindOriginal.repr == "macrole":
-          MenuNodeOs.MenuNodeOSMacOS
-        elif kindOriginal.repr == "macexclude_element":
-          MenuNodeOs.MenuNodeOSNonMacOS
-        else:
-          MenuNodeOs.MenuNodeOSAny
-
       var r = quote:
         MenuNode(
           kind: MenuElement,
@@ -102,7 +139,7 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
           action: `actionNode`,
           elements: @[],
           enabled: `last`,
-          menuOs: `os`,
+          menuOs: `elementType`,
           role: if bool(`bMacRole`): `nameNode` else: cast[cstring]("")
         )
       result = (r, false)
@@ -163,7 +200,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Switch File", switchTabHistory
           --sub
           # element "Close All Documents", closeAllDocuments
-          macexclude_element "Exit CodeTracer", aExit
+          mac_and_host_exclude_element "Exit CodeTracer", aExit
         folder "Edit":
           # element "Undo", aUndo, false
           # element "Redo", aRedo, false
