@@ -4,6 +4,7 @@ extern crate log;
 mod backend_manager;
 mod dap_parser;
 mod errors;
+mod paths;
 
 use std::error::Error;
 
