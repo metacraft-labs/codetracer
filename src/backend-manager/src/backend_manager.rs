@@ -1,4 +1,4 @@
-use std::{env, error::Error, fmt::Debug, sync::Arc, time::Duration};
+use std::{error::Error, fmt::Debug, sync::Arc, time::Duration};
 
 use serde_json::Value;
 use tokio::{
@@ -15,6 +15,7 @@ use tokio::{
 
 use crate::{
     dap_parser::DapParser,
+    paths::CODETRACER_PATHS,
     errors::{InvalidID, SocketPathError},
 };
 
@@ -40,7 +41,11 @@ impl BackendManager {
         let res1 = res.clone();
         let res2 = res.clone();
 
-        let socket_dir = env::temp_dir().join("codetracer").join("backend-manager");
+        let socket_dir: std::path::PathBuf;
+        {
+            let path = &CODETRACER_PATHS.lock()?;
+            socket_dir = path.tmp_path.join("backend-manager");
+        }
 
         create_dir_all(&socket_dir).await?;
 
@@ -140,10 +145,11 @@ impl BackendManager {
         cmd: &str,
         args: &[&str],
     ) -> Result<usize, Box<dyn Error>> {
-        let socket_dir = env::temp_dir()
-            .join("codetracer")
-            .join("backend-manager")
-            .join(std::process::id().to_string());
+        let socket_dir: std::path::PathBuf;
+        {
+            let path = &CODETRACER_PATHS.lock()?.tmp_path;
+            socket_dir = path.join("backend-manager").join(std::process::id().to_string());
+        }
 
         create_dir_all(&socket_dir).await?;
 

@@ -18,6 +18,8 @@ use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
 use std::{error::Error, panic};
+use std::path::PathBuf;
+use crate::paths::CODETRACER_PATHS;
 
 mod calltrace;
 mod core;
@@ -71,7 +73,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
     // eprintln!("{}", log_path.display());
 
-    let target = Box::new(File::create("/tmp/codetracer/db-backend.log")?);
+    let tmp_path: PathBuf = {
+        CODETRACER_PATHS.lock()?.tmp_path.clone()
+    };
+
+    let target = Box::new(File::create(tmp_path.join("db-backend.log"))?);
 
     env_logger::Builder::new()
         .format(|buf, record| {

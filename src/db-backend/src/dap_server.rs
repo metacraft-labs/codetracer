@@ -7,6 +7,7 @@ use crate::task::{
     LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
     StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
 };
+use crate::paths::CODETRACER_PATHS;
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info, warn};
 use serde_json::json;
@@ -18,27 +19,10 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-// fn forward_raw_events<W: Write>(
-//     rx: &mpsc::Receiver<BackendResponse>,
-//     writer: &mut W,
-//     seq: &mut i64,
-// ) -> Result<(), Box<dyn Error>> {
-//     while let Ok(BackendResponse::EventResponse((kind, _id, payload, raw))) = rx.try_recv() {
-//         if raw && matches!(kind, EventKind::MissingEventKind) {
-//             if let Ok(DapMessage::Event(mut ev)) = dap::from_json(&payload) {
-//                 ev.base.seq = *seq;
-//                 *seq += 1;
-//                 dap::write_message(writer, &DapMessage::Event(ev))?;
-//             }
-//         }
-//     }
-//     Ok(())
-// }
-
-pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
+pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
 pub fn socket_path_for(pid: usize) -> PathBuf {
-    PathBuf::from(format!("{DAP_SOCKET_PATH}_{}", pid))
+    CODETRACER_PATHS.lock().unwrap().tmp_path.join(format!("{DAP_SOCKET_NAME}_{}", pid))
 }
 
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
