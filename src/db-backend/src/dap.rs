@@ -1,7 +1,9 @@
 use crate::task::{self};
+use crate::transport;
 use log::{error, info};
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
+use std::io;
 use std::io::BufRead;
 use std::path::PathBuf;
 
@@ -742,23 +744,6 @@ pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) ->
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn send_dap_message<W: std::io::Write>(message: &DapMessage) -> Result<(), DapError> {
-    use serde_wasm_bindgen::to_value;
-    use wasm_bindgen::JsCast;
-
-    let js_val = to_value(message).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
-
-    let global = js_sys::global();
-    let scope: web_sys::DedicatedWorkerGlobalScope = global
-        .dyn_into()
-        .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
-
-    scope.post_message(&js_val)?;
-    web_sys::console::log_1(&format!("DAP -> {:?}", message).into());
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
     use wasm_bindgen::{prelude::Closure, JsCast};
     use web_sys::{
@@ -774,12 +759,17 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         .dyn_into()
         .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
 
+    let scope_for_cb = scope.clone();
+
     let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
         let dap_message_raw = event.data();
 
         web_sys::console::log_1(&format!("Raw DAP <- {:?}", dap_message_raw).into());
 
-        let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned()));
+        let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned())).unwrap();
+
+        let mut devnull = io::sink();
+        write_message(&mut devnull, &dap_message);
     }) as Box<dyn FnMut(_)>)
     .into_js_value()
     .unchecked_into::<Function>();

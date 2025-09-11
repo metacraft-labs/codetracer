@@ -145,6 +145,7 @@ pub fn wasm_start() -> Result<(), JsValue> {
     // forward a marker to main thread
     let scope: web_sys::DedicatedWorkerGlobalScope =
         global.dyn_into().map_err(|_| JsValue::from_str("Not in a worker"))?;
+
     scope.post_message(&JsValue::from_str("wasm_start reached"))?;
     scope.post_message(&"wasm_start reached".into())?;
 

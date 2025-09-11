@@ -27,6 +27,7 @@ pub mod step_lines_loader;
 pub mod task;
 pub mod trace_processor;
 pub mod tracepoint_interpreter;
+pub mod transport;
 pub mod value;
 
 // use event_db::{DbEventKind, EventDb};
@@ -120,9 +121,11 @@ pub fn wasm_start() -> Result<(), JsValue> {
     // forward a marker to main thread
     let scope: web_sys::DedicatedWorkerGlobalScope =
         global.dyn_into().map_err(|_| JsValue::from_str("Not in a worker"))?;
+
     scope.post_message(&JsValue::from_str("wasm_start reached"))?;
     scope.post_message(&"wasm_start reached".into())?;
 
     setup_onmessage_callback().map_err(|e| JsValue::from_str(&format!("{e}")))?;
+
     Ok(())
 }

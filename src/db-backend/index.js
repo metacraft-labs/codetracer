@@ -5,6 +5,10 @@ worker.onmessage = (e) => {
   console.log('FROM WORKER: ', e.data); // responses/events from the worker (Rust)
 };
 
+myWorker.onerror = (event) => {
+  console.log("Something went wrong in the worker!");
+};
+
 // Example: send an "initialize" request (DAP)
 const req = {
   seq: 1,
