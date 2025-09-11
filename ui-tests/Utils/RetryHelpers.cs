@@ -16,7 +16,7 @@ public static class RetryHelpers
     /// <param name="maxAttempts">Maximum number of attempts.</param>
     /// <param name="delayMs">Delay in milliseconds between attempts.</param>
     /// <exception cref="TimeoutException">Thrown when the condition never evaluates to <c>true</c>.</exception>
-    public static async Task RetryAsync(Func<Task<bool>> condition, int maxAttempts = 50, int delayMs = 100)
+    public static async Task RetryAsync(Func<Task<bool>> condition, int maxAttempts = 20, int delayMs = 500)
     {
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
