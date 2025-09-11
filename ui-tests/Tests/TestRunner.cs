@@ -24,8 +24,9 @@ public static class TestRunner
 
         // await PageObjectTests.PageObjectsSmokeTestAsync(page);
 
-        await NoirSpaceShipTests.EditorLoadedMainNrFile(page);
         await NoirSpaceShipTests.JumpToAllEvents(page);
+        await NoirSpaceShipTests.EditorLoadedMainNrFile(page);
+
 
         await browser.CloseAsync();
     }

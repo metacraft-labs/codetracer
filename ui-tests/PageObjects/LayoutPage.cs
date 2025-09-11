@@ -6,6 +6,7 @@ using Microsoft.Playwright;
 using UtTestsExperimentalConsoleAppication.PageObjects.Panes.EventLog;
 using UtTestsExperimentalConsoleAppication.PageObjects.Panes.VariableState;
 using UtTestsExperimentalConsoleAppication.PageObjects.Panes.CallTrace;
+using UtTestsExperimentalConsoleAppication.Utils;
 
 namespace UtTestsExperimentalConsoleAppication.PageObjects;
 
@@ -19,6 +20,39 @@ public class LayoutPage : BasePage
     private List<EditorTab> _editorTabs = new();
 
     public LayoutPage(IPage page) : base(page) { }
+
+    public Task WaitForFilesystemLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='filesystemComponent-']").CountAsync() > 0);
+
+    public Task WaitForStateLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='stateComponent-']").CountAsync() > 0);
+
+    public Task WaitForCallTraceLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='calltraceComponent-']").CountAsync() > 0);
+
+    public Task WaitForEventLogLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='eventLogComponent-']").CountAsync() > 0);
+
+    public Task WaitForEditorLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='editorComponent-']").CountAsync() > 0);
+
+    public Task WaitForAllComponentsLoadedAsync()
+    {
+        var waits = new[]
+        {
+            // WaitForFilesystemLoadedAsync(),
+            // WaitForStateLoadedAsync(),
+            // WaitForCallTraceLoadedAsync(),
+            // WaitForEventLogLoadedAsync(),
+            WaitForEditorLoadedAsync()
+        };
+        return Task.WhenAll(waits);
+    }
 
     #region Debug Buttons
     public ILocator RunToEntryButton() => Page.Locator("#run-to-entry-debug");
