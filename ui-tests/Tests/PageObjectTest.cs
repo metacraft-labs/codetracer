@@ -4,10 +4,10 @@ using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.PageObjects;
-using UtTestsExperimentalConsoleAppication.PageObjects.Models;
+using UiTests.PageObjects;
+using UiTests.PageObjects.Models;
 
-namespace UtTestsExperimentalConsoleAppication.Tests;
+namespace UiTests.Tests;
 
 /// <summary>
 /// Test methods exercising the page objects.

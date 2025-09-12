@@ -7,7 +7,7 @@ using Microsoft.Playwright;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 
-namespace UtTestsExperimentalConsoleAppication.Helpers;
+namespace UiTests.Helpers;
 
 internal static class CodetracerLauncher
 {

@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.PageObjects;
+using UiTests.PageObjects;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Panes.CallTrace;
+namespace UiTests.PageObjects.Panes.CallTrace;
 
 /// <summary>
 /// Pane representing the call trace view.

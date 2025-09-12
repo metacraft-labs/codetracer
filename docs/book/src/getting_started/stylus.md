@@ -77,7 +77,7 @@ In your **second terminal**, navigate to the directory of the example program an
 
 ```bash
 # Navigate to the example contract
-cd ui-tests/programs/stylus_fund_tracker
+cd test-programs/stylus_fund_tracker
 
 # Deploy it to the local devnode
 ct arb deploy

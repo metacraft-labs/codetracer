@@ -203,3 +203,6 @@ csources_v1/
 # Emacs
 *~
 .aider*
+
+# Temporary .patch file, used to coppy results from codex and applied using git apply <file name>.patch
+*.patch

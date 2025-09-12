@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
-namespace UtTestsExperimentalConsoleAppication.Utils;
+namespace UiTests.Utils;
 
 /// <summary>
 /// Helper utilities for retrying flaky asynchronous operations.

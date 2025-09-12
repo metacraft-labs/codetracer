@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.PageObjects;
+using UiTests.PageObjects;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Panes.VariableState;
+namespace UiTests.PageObjects.Panes.VariableState;
 
 /// <summary>
 /// Program state pane holding variables and watch expressions.

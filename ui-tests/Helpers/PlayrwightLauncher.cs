@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.Helpers;
+using UiTests.Helpers;
 
 public static class PlaywrightLauncher
 {
