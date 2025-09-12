@@ -4,7 +4,7 @@
 
 ###############################################################################
 
-# pushd ui-tests
+# pushd tsc-ui-tests
 
 # type npx
 # npx prettier --check .

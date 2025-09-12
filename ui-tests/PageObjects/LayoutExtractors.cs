@@ -1,9 +1,9 @@
 using System.Threading.Tasks;
-using UtTestsExperimentalConsoleAppication.PageObjects.Models;
-using UtTestsExperimentalConsoleAppication.PageObjects.Panes.EventLog;
-using UtTestsExperimentalConsoleAppication.PageObjects.Panes.VariableState;
+using UiTests.PageObjects.Models;
+using UiTests.PageObjects.Panes.EventLog;
+using UiTests.PageObjects.Panes.VariableState;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects;
+namespace UiTests.PageObjects;
 
 /// <summary>
 /// Helper methods that convert page objects to their model representations.

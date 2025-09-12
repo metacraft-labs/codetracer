@@ -1,6 +1,6 @@
 using System;
 
-namespace UtTestsExperimentalConsoleAppication.Tests
+namespace UiTests.Tests
 {
     /// <summary>
     /// Exception thrown when a test condition is not met.

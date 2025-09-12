@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Panes.VariableState;
+namespace UiTests.PageObjects.Panes.VariableState;
 
 /// <summary>
 /// Represents a single variable entry in the Program State pane.

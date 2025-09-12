@@ -3,9 +3,9 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.PageObjects;
+using UiTests.PageObjects;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Panes.EventLog;
+namespace UiTests.PageObjects.Panes.EventLog;
 
 /// <summary>
 /// Event log pane containing multiple event rows.

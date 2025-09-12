@@ -1,1 +1,1 @@
-# ui-tests
+# tsc-ui-tests
