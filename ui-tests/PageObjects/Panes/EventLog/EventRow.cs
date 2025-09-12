@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Panes.EventLog;
+namespace UiTests.PageObjects.Panes.EventLog;
 
 /// <summary>
 /// Type of event element within an event log style table.

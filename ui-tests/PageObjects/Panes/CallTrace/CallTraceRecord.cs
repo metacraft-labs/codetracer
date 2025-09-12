@@ -1,6 +1,6 @@
 using Microsoft.Playwright;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Panes.CallTrace;
+namespace UiTests.PageObjects.Panes.CallTrace;
 
 /// <summary>
 /// Represents a single record in the call trace pane.

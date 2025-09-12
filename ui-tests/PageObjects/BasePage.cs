@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects;
+namespace UiTests.PageObjects;
 
 /// <summary>
 /// Base class for all pages in the Playwright test suite.

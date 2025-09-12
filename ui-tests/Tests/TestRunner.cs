@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.Helpers;
+using UiTests.Helpers;
 
-namespace UtTestsExperimentalConsoleAppication.Tests;
+namespace UiTests.Tests;
 
 /// <summary>
 /// Simple test runner that launches CodeTracer and executes the page object tests.

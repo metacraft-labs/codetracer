@@ -18,10 +18,10 @@ let electronApp; // eslint-disable-line @typescript-eslint/init-declarations
 export let window: Page; // eslint-disable-line @typescript-eslint/init-declarations
 export let page: Page; // eslint-disable-line @typescript-eslint/init-declarations
 
-export const currentDir = path.resolve(); // the ui-tests dir
+export const currentDir = path.resolve(); // the tsc-ui-tests dir
 export const codetracerInstallDir = path.dirname(currentDir);
 export const codetracerTestDir = path.join(currentDir, "tests");
-export const testProgramsPath = path.join(currentDir, "programs");
+export const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 export const testBinariesPath = path.join(currentDir, "binaries");
 
 // in the sense of `linksPath`, NOT dev build src/links !
@@ -54,17 +54,10 @@ export function debugCodetracer(name: string, langExtension: string): void {
 export function getTestProgramNameFromPath(filePath: string): string {
   if (filePath.startsWith("noir_")) {
     return path.basename(filePath);
-  } else {
-    const relativePath = path.relative("programs", filePath);
-
-    // Split the relative path into segments
-    const pathSegments = relativePath.split(path.sep);
-
-    // The first segment is the folder inside 'programs'
-    // eslint-disable-next-line @typescript-eslint/no-magic-numbers
-    const folderName = pathSegments[0];
-    return folderName;
   }
+  const pathSegments = filePath.split(path.sep);
+  // The first segment is the folder inside 'test-programs'
+  return pathSegments[0];
 }
 
 export function ctRun(relativeSourcePath: string): void {

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects.Models;
+namespace UiTests.PageObjects.Models;
 
 /// <summary>
 /// Models representing the extracted state of UI components.

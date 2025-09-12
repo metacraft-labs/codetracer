@@ -834,9 +834,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ui-tests@workspace:.":
+"tsc-ui-tests@workspace:.":
   version: 0.0.0-use.local
-  resolution: "ui-tests@workspace:."
+  resolution: "tsc-ui-tests@workspace:."
   dependencies:
     "@playwright/test": "npm:^1.48.1"
     "@types/node": "npm:^22.7.6"

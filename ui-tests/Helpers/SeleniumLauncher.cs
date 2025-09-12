@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
-using UtTestsExperimentalConsoleAppication.Helpers;
+using UiTests.Helpers;
 
 public static class SeleniumLauncher
 {

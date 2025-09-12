@@ -3,12 +3,12 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.PageObjects.Panes.EventLog;
-using UtTestsExperimentalConsoleAppication.PageObjects.Panes.VariableState;
-using UtTestsExperimentalConsoleAppication.PageObjects.Panes.CallTrace;
-using UtTestsExperimentalConsoleAppication.Utils;
+using UiTests.PageObjects.Panes.EventLog;
+using UiTests.PageObjects.Panes.VariableState;
+using UiTests.PageObjects.Panes.CallTrace;
+using UiTests.Utils;
 
-namespace UtTestsExperimentalConsoleAppication.PageObjects;
+namespace UiTests.PageObjects;
 
 /// <summary>
 /// Main layout page that contains all tabs and menu elements.

@@ -4,10 +4,10 @@ using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
-using UtTestsExperimentalConsoleAppication.PageObjects;
-using UtTestsExperimentalConsoleAppication.PageObjects.Panes.EventLog;
-using UtTestsExperimentalConsoleAppication.Utils;
-using UtTestsExperimentalConsoleAppication.Tests;
+using UiTests.PageObjects;
+using UiTests.PageObjects.Panes.EventLog;
+using UiTests.Utils;
+using UiTests.Tests;
 
 public static class NoirSpaceShipTests
 {

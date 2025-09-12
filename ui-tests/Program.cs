@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Threading.Tasks;
-using UtTestsExperimentalConsoleAppication.Tests;
+using UiTests.Tests;
 
-namespace UtTestsExperimentalConsoleAppication;
+namespace UiTests;
 
 class Program
 {

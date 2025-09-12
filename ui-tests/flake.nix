@@ -1,5 +1,5 @@
 {
-  description = "Dev shell for experimental C# Playwright UI console app";
+  description = "Dev shell for C# Playwright UI tests";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
