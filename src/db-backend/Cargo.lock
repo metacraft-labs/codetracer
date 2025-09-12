@@ -263,6 +263,7 @@ dependencies = [
  "futures",
  "futures-timer",
  "indexmap",
+ "js-sys",
  "log",
  "num-bigint",
  "num-derive",

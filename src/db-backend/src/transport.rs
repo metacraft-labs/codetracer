@@ -10,14 +10,25 @@ pub trait DapTransport {
 //
 #[cfg(feature = "io-transport")]
 mod io_transport {
+    use serde::de::Error;
+
+    use crate::dap::to_json;
+
     use super::*;
     use std::io::Write;
 
     // Blanket impl: any `Write` is a DapTransport
     impl<T: Write> DapTransport for T {
         fn send(&mut self, msg: &DapMessage) -> Result<(), DapError> {
-            let bytes = serialize_to_bytes(msg)?;
-            self.write_all(&bytes).map_err(|e| DapError::Io(e.to_string()))
+            let json = to_json(msg)?;
+            let header = format!("Content-Length: {}\r\n\r\n", json.len());
+            self.write_all(header.as_bytes())
+                .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+            self.write_all(json.as_bytes())
+                .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+            self.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
+            log::info!("DAP -> {:?}", msg);
+            Ok(())
         }
     }
 }
@@ -27,9 +38,11 @@ mod io_transport {
 //
 #[cfg(feature = "browser-transport")]
 mod browser_transport {
+
     use super::*;
+    use serde_wasm_bindgen::to_value;
     use wasm_bindgen::JsCast;
-    use wasm_bindgen::JsValue;
+    use web_sys::js_sys;
     use web_sys::DedicatedWorkerGlobalScope;
 
     /// A transport that posts messages to the worker's main thread.
@@ -43,25 +56,19 @@ mod browser_transport {
             let global = js_sys::global();
             let scope: DedicatedWorkerGlobalScope = global
                 .dyn_into()
-                .map_err(|_| DapError::Js("Not running inside DedicatedWorkerGlobalScope".into()))?;
+                .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
             Ok(Self { scope })
         }
     }
 
     impl DapTransport for BrowserTransport {
         fn send(&mut self, msg: &DapMessage) -> Result<(), DapError> {
-            // Decide how you want to pass across the worker boundary:
-            // 1) Send bytes (e.g., Uint8Array)
-            let bytes = serialize_to_bytes(msg)?;
-            let array = js_sys::Uint8Array::from(bytes.as_slice());
-            self.scope
-                .post_message(&JsValue::from(array))
-                .map_err(|e| DapError::Js(format!("{e:?}")))?;
-
             // 2) OR send as string (simpler, but pick one path)
-            // self.scope
-            //     .post_message(&JsValue::from_str(&msg.payload))
-            //     .map_err(|e| DapError::Js(format!("{e:?}")))?;
+
+            let js_val = to_value(msg).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+            self.scope
+                .post_message(&js_val)
+                .map_err(|_| wasm_bindgen::JsValue::from_str("Could not send message from worker"))?;
 
             Ok(())
         }
