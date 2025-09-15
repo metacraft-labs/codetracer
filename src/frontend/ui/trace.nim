@@ -562,7 +562,7 @@ proc refreshLine(self: TraceComponent) =
     self.viewZone.heightInLines = self.viewZone.heightInLines
     view.layoutZone(self.zoneId)
 
-proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int): cstring =
+proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isWidget: bool = false, lineNumber: int = NO_LINE): cstring =
   let realLine =
     if not self.isExpansion:
       line
@@ -597,9 +597,10 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int): cst
     else:
       breakpointHtml = j"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
 
-  let lineHtml = j"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & toCString(realLine) & j"</div>"
+  let trueLineNumber = if not isWidget: toCString(realLine) else: toCString(line + lineNumber - 1)
+  let lineHtml = j"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & j"</div>"
 
-  result = j"<div class='gutter' data-line=" & toCString(realLine) & j" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & tracepointHtml & breakpointHtml & j"</div>"
+  result = j"<div class='gutter' data-line=" & trueLineNumber & j" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & tracepointHtml & breakpointHtml & j"</div>"
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor
