@@ -395,6 +395,7 @@ proc makeEditorViewComponent*(
     # monacoJsonSchemes: JsAssoc[cstring, js]{},
     service: data.services.editor,
     viewZones: JsAssoc[int, int]{},
+    diffViewZones: JsAssoc[int, MultilineZone]{},
     lastScrollFireTime: now())
   if not isExpansion:
     result.topLevelEditor = result
