@@ -1168,7 +1168,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: string, id: int, lineN
         minimap: js{ enabled: false },
         find: js{ addExtraSpaceOnTop: false },
         renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
-        lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line + id),
+        lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
         lineDecorationsWidth: 20,
         contextmenu: false
         # overflowWidgetsDomNode: overflowHost,
@@ -1185,44 +1185,51 @@ proc clearDiffViewZones(self: EditorViewComponent) =
     self.monacoEditor.changeViewZones do (view: js):
       view.removeZone(self.diffViewZones[line].zoneId)
 
+proc addDiffView(self: EditorViewComponent, source: string, removedLinesNumber: int, startLineNumber: int, firstDeletedLineNumber: int) =
+  var offset = 1 # Offset for proper line placement and number
+  var newZoneDom = self.drawDiffViewZones(source, startLineNumber, firstDeletedLineNumber)
+  let viewZone = js{
+    afterLineNumber: startLineNumber,
+    heightInLines: removedLinesNumber + offset,
+    domNode: newZoneDom
+  }
+  self.monacoEditor.changeViewZones do (view: js):
+    var zoneId = cast[int](view.addZone(viewZone))
+    self.diffViewZones[startLineNumber] =
+      MultilineZone(
+        dom: newZoneDom,
+        zoneId: zoneId,
+        variables: JsAssoc[cstring, bool]{}
+      )
+
 proc makeDiffViewZones(self: EditorViewComponent) =
   for file in self.data.startOptions.diff.files:
     if file.currentPath == self.path:
       for chunk in file.chunks:
+        var isInDeleteChunk = false
         var removedLinesNumber = NO_LINE # Number for lines to be included
-        var lastDeletedLineNumber = NO_LINE
+        var firstDeletedLineNumber = NO_LINE
         var startLineNumber = chunk.currentFrom # initial start line for the viewZones
-        var offset = 1 # Offset for proper line placement and number
         var source = "" # Source code
         for diffLine in chunk.lines:
           case diffLine.kind:
           of DiffLineKind.Deleted:
             removedLinesNumber.inc()
             source = source & diffLine.text & "\n"
-            if lastDeletedLineNumber == NO_LINE:
-              lastDeletedLineNumber = diffLine.previousLineNumber
+            if firstDeletedLineNumber == NO_LINE:
+              firstDeletedLineNumber = diffLine.previousLineNumber
+            isInDeleteChunk = true
           else:
             if removedLinesNumber != NO_LINE:
-              var newZoneDom = self.drawDiffViewZones(source, startLineNumber, lastDeletedLineNumber)
-              let viewZone = js{
-                afterLineNumber: startLineNumber,
-                heightInLines: removedLinesNumber + offset,
-                domNode: newZoneDom
-              }
-              self.monacoEditor.changeViewZones do (view: js):
-                var zoneId = cast[int](view.addZone(viewZone))
-                self.diffViewZones[startLineNumber] =
-                  MultilineZone(
-                    dom: newZoneDom,
-                    zoneId: zoneId,
-                    variables: JsAssoc[cstring, bool]{}
-                  )
+              self.addDiffView(source, removedLinesNumber, startLineNumber, firstDeletedLineNumber)
               source = ""
               removedLinesNumber = NO_LINE
-              lastDeletedLineNumber = NO_LINE
+              firstDeletedLineNumber = NO_LINE
             else:
               startLineNumber = diffLine.currentLineNumber
-          
+            isInDeleteChunk = false
+        if isInDeleteChunk:
+          self.addDiffView(source, removedLinesNumber, startLineNumber, firstDeletedLineNumber)
 
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
