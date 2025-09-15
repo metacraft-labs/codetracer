@@ -564,7 +564,9 @@ proc refreshLine(self: TraceComponent) =
 
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isWidget: bool = false, lineNumber: int = NO_LINE): cstring =
   let realLine =
-    if not self.isExpansion:
+    if isWidget:
+      lineNumber + line - 1
+    elif not self.isExpansion:
       line
     else:
       line + self.tabInfo.location.expansionFirstLine - 1
