@@ -266,7 +266,7 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
     newDecorations.add(DeltaDecoration(
       `range`: newMonacoRange(line.line, startIndex, line.line, endIndex),
       options: js{
-        isWholeLine: line.class.isNil or line.class.startsWith("on"),
+        isWholeLine: line.class.isNil or line.class.startsWith("on") or line.class == "diff-added",
         className: line.class,
         inlineClassName: line.inlineClass}))
 
@@ -451,11 +451,28 @@ proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
 
   lines
 
+proc diffStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
+  var lines: seq[MonacoLineStyle] = @[]
+  for file in self.data.startOptions.diff.files:
+    if file.currentPath == self.path:
+      for chunk in file.chunks:
+        for diffLine in chunk.lines:
+          case diffLine.kind:
+          of DiffLineKind.NonChanged:
+            discard
+          of DiffLineKind.Deleted:
+            discard
+          of DiffLineKind.Added:
+            lines.add(MonacoLineStyle(line: diffLine.currentLineNumber, class: cstring"diff-added"))
+
+  lines
+
 proc applyEventualStylesLines(self: EditorViewComponent) =
   var colorLineList = self.colorLines()
   var conditionFlowLines = self.conditionStyleLines()
+  var diffLineList = self.diffStyleLines()
   var flowLineList = self.flowStyleLines(conditionFlowLines)
-  let lines = concat(colorLineList, concat(flowLineList, conditionFlowLines))
+  let lines = concat(colorLineList, concat(flowLineList, concat(conditionFlowLines, diffLineList)))
 
   self.styleLines(self.monacoEditor, lines)
 
@@ -1124,6 +1141,89 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   self.api.emit(CtLoadFlow, self.location)
   cdebug "start load-flow", taskId
 
+proc drawDiffViewZones(self: EditorViewComponent, source: string, id: int, lineNumber: int): Node =
+  var zoneDom = document.createElement("div")
+  zoneDom.id = fmt"diff-view-zone-{id}"
+  zoneDom.class = "diff-view-zone"
+  zoneDom.style.display = "flex"
+  var editorDom = document.createElement("div")
+  var selector = fmt"editorComponent-{id}"
+  editorDom.id = selector
+  editorDom.style.width = "100%"
+  editorDom.style.height = "100%"
+  zoneDom.appendChild(editorDom)
+  var lang = fromPath(self.data.services.debugger.location.path)
+  let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
+  discard setTimeout(proc () =
+    discard monaco.editor.create(
+      jq("#" & editorDom.id),
+      MonacoEditorOptions(
+        value: source,
+        language: lang.toCLang(),
+        readOnly: true,
+        theme: theme,
+        automaticLayout: true,
+        folding: true,
+        fontSize: j($self.data.ui.fontSize) & j"px",
+        minimap: js{ enabled: false },
+        find: js{ addExtraSpaceOnTop: false },
+        renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
+        lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line + id),
+        lineDecorationsWidth: 20,
+        contextmenu: false
+        # overflowWidgetsDomNode: overflowHost,
+        # fixedOverflowWidgets: true
+      )
+    ),
+    0
+  )
+
+  return zoneDom
+
+proc clearDiffViewZones(self: EditorViewComponent) =
+ for line, zone in self.diffViewZones:
+    self.monacoEditor.changeViewZones do (view: js):
+      view.removeZone(self.diffViewZones[line].zoneId)
+
+proc makeDiffViewZones(self: EditorViewComponent) =
+  for file in self.data.startOptions.diff.files:
+    if file.currentPath == self.path:
+      for chunk in file.chunks:
+        var removedLinesNumber = NO_LINE # Number for lines to be included
+        var lastDeletedLineNumber = NO_LINE
+        var startLineNumber = chunk.currentFrom # initial start line for the viewZones
+        var offset = 1 # Offset for proper line placement and number
+        var source = "" # Source code
+        for diffLine in chunk.lines:
+          case diffLine.kind:
+          of DiffLineKind.Deleted:
+            removedLinesNumber.inc()
+            source = source & diffLine.text & "\n"
+            if lastDeletedLineNumber == NO_LINE:
+              lastDeletedLineNumber = diffLine.previousLineNumber
+          else:
+            if removedLinesNumber != NO_LINE:
+              var newZoneDom = self.drawDiffViewZones(source, startLineNumber, lastDeletedLineNumber)
+              let viewZone = js{
+                afterLineNumber: startLineNumber,
+                heightInLines: removedLinesNumber + offset,
+                domNode: newZoneDom
+              }
+              self.monacoEditor.changeViewZones do (view: js):
+                var zoneId = cast[int](view.addZone(viewZone))
+                self.diffViewZones[startLineNumber] =
+                  MultilineZone(
+                    dom: newZoneDom,
+                    zoneId: zoneId,
+                    variables: JsAssoc[cstring, bool]{}
+                  )
+              source = ""
+              removedLinesNumber = NO_LINE
+              lastDeletedLineNumber = NO_LINE
+            else:
+              startLineNumber = diffLine.currentLineNumber
+          
+
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
 
@@ -1327,6 +1427,10 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       if self.shouldLoadFlow and not self.tabInfo.monacoEditor.isNil:
         self.loadFlow(tabInfo.location)
         self.shouldLoadFlow = false
+
+      if self.data.startOptions.diff.files.len() >= 1:
+        self.clearDiffViewZones()
+        self.makeDiffViewZones()
 
       self.applyEventualStylesLines()
 
