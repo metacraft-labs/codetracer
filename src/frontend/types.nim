@@ -785,6 +785,7 @@ type
     viewZones*:     JsAssoc[int, int]
     shouldLoadFlow*: bool
     lastScrollFireTime*: int64
+    diffViewZones*: JsAssoc[int, MultilineZone]
 
   # LowLevelComponent* = ref object of Component
     # levels*:        array[LowLevelView, LLViewComponent]
