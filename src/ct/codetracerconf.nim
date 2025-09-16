@@ -279,7 +279,8 @@ type
       recordWithDiff* {.
         name: "with-diff"
         defaultValue: ""
-        desc: "Record a diff related to this trace and produce a multitrace"
+        desc: "Record a diff related to this trace and produce a multitrace. " &
+          "Arg can be `last-commit`, path to a diff file (must be from the current repo!) or a valid `git diff <arg>` arg"
       .}: string
       
       recordProgram* {.
