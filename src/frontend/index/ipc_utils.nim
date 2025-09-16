@@ -1,40 +1,10 @@
 import
-  std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat],
-  traces, files, startup, install, menu, online_sharing, tabs, window,
+  std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
+  electron_vars, traces, files, startup, install, menu, online_sharing, tabs, window, logging, config, debugger, server_config, base_handlers,
+  ipc_types/[ dap, socket ],
   results,
-  ../../[ index_config, lib, types, config, trace_metadata ],
-  ../../../common/[ ct_logging, paths ]
-
-proc newDebugInstancePipe(pid: int): Future[JsObject] {.async.} =
-  var future = newPromise() do (resolve: proc(response: JsObject)):
-    var connections: seq[JsObject] = @[nil.toJs]
-    let path = CT_DEBUG_INSTANCE_PATH_BASE & cstring($pid)
-    connections[0] = net.createServer(proc(server: JsObject) =
-      infoPrint "index: connected instance server for ", path
-      resolve(server))
-
-    connections[0].on(cstring"error") do (error: js):
-      errorPrint "index: socket instance server error: ", error
-      resolve(nil.toJs)
-
-    connections[0].listen(path)
-  return await future
-
-proc sendOutputJumpIPC(instance: DebugInstance, outputLine: int) {.async.} =
-  debugPrint "send output jump ipc ", cast[int](instance.process.pid), " ", outputLine
-  instance.pipe.write(cstring($outputLine & "\n"))
-
-proc onShowInDebugInstance*(sender: js, response: jsobject(traceId=int, outputLine=int)) {.async.} =
-  if not data.debugInstances.hasKey(response.traceId):
-    var process = child_process.spawn(
-      codetracerExe,
-      @[cstring"run", cstring($response.traceId)])
-    var pipe = await newDebugInstancePipe(process.pid)
-    data.debugInstances[response.traceId] = DebugInstance(process: process, pipe: pipe)
-    await wait(5_000)
-
-  if response.outputLine != -1:
-    await sendOutputJumpIPC(data.debugInstances[response.traceId], response.outputLine)
+  ../[ lib, types, config, trace_metadata ],
+  ../../common/[ ct_logging, paths ]
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>
@@ -91,6 +61,14 @@ proc configureIpcMain* =
     # update filesystem component
     "load-path-content"
 
+
+proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
+  var file = j(userConfigDir & filename)
+  let (raw, err) = await fsReadFileWithErr(file)
+  if not err.isNil:
+    return JsAssoc[cstring, Helper]{}
+  var res = cast[Helpers](yaml.load(raw)[j"helpers"])
+  return res
 
 proc ready* {.async.} =
   let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
@@ -160,7 +138,7 @@ proc ready* {.async.} =
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {serialized}"
       ipc.socket.emit(id, serialized)
 
-  let layout = await index_config.mainWindow.loadLayoutConfig(string(fmt"{userLayoutDir / $config.layout}.json"))
+  let layout = await mainWindow.loadLayoutConfig(string(fmt"{userLayoutDir / $config.layout}.json"))
   data.layout = layout
   # we load helpers
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
