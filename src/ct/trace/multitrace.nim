@@ -1,8 +1,8 @@
 import std / [os, osproc, strformat, sequtils, strutils]
-import json_serialization
+import json_serialization, result
 import .. / .. / common / trace_index
 import .. / .. / common / types
-import .. / utilities / zip
+import .. / utilities / [git, zip]
 
 proc findDiff(diffSpecification: string): string =
   if diffSpecification.len > 0:
@@ -35,14 +35,23 @@ proc parseDiff(rawDiff: string): Diff =
       var chunkPreviousFileLineNumber = 0
       var chunkCurrentFileLineNumber = 0
 
+      let repoRootPathResult = getGitTopLevel(getCurrentDir())
+      if not repoRootPathResult.isOk:
+        echo "ERROR: maybe not called from a git repo?"
+        echo "  error, trying to load the git top level directory: ", repoRootPathResult.error
+        quit(1)
+      let repoRootPath = repoRootPathResult.value
+
       for line in lines:
         # echo "line ", line
         if line.startsWith("--- a/"):
-          let path = line["--- a/".len .. ^1]
-          fileDiff.previousPath = expandFileName(path)
+          # for now assume it's relative to the repo root
+          let file = line["--- a/".len .. ^1]
+          fileDiff.previousPath = repoRootPath / file
         elif line.startsWith("+++ b/"):
-          let path = line["+++ b/".len .. ^1]
-          fileDiff.currentPath = expandFileName(path)
+          # for now assume it's relative to the repo root
+          let file = line["+++ b/".len .. ^1]
+          fileDiff.currentPath = repoRootPath / file
         elif line.startsWith("diff "):
           if not fileDiff.isNil:
             if chunk.previousFrom != 0:
