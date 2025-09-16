@@ -54,7 +54,7 @@ public static class PageObjectTests
         foreach (var ed in editors)
         {
             await ed.HighlightedLineNumberAsync();
-            await ed.VisibleTextRowsAsync();
+            await ed.VisibleLinesAsync();
         }
 
         // run extractor as a final step

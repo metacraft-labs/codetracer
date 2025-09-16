@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using UiTests.PageObjects.Models;
 using UiTests.PageObjects.Panes.EventLog;
 using UiTests.PageObjects.Panes.VariableState;
+using UiTests.PageObjects.Panes.Editor;
 
 namespace UiTests.PageObjects;
 
@@ -59,17 +60,17 @@ public static class LayoutExtractors
         return model;
     }
 
-    public static async Task<TracePointEditorModel> ExtractModelAsync(LayoutPage.TracePointEditor editor)
+    public static async Task<TracePointEditorModel> ExtractModelAsync(TraceLogPanel panel)
     {
         var model = new TracePointEditorModel
         {
-            LineNumber = editor.LineNumber,
-            FileName = editor.ParentEditorTab.FileName,
-            Code = await editor.EditTextBox.TextContentAsync() ?? string.Empty,
+            LineNumber = panel.LineNumber,
+            FileName = panel.ParentPane.FileName,
+            Code = await panel.EditTextBox().TextContentAsync() ?? string.Empty,
             Events = new()
         };
 
-        var events = await editor.EventElementsAsync(true);
+        var events = await panel.EventRowsAsync();
         foreach (var e in events)
         {
             model.Events.Add(new EventDataModel { ConsoleOutput = await e.ConsoleOutputAsync() });
@@ -78,7 +79,7 @@ public static class LayoutExtractors
         return model;
     }
 
-    public static async Task<EditorModel> ExtractModelAsync(LayoutPage.EditorTab tab)
+    public static async Task<EditorModel> ExtractModelAsync(EditorPane tab)
     {
         var model = new EditorModel
         {
@@ -90,8 +91,8 @@ public static class LayoutExtractors
         if (model.IsVisible)
         {
             model.HiglitedLineNumber = await tab.HighlightedLineNumberAsync();
-            var rows = await tab.VisibleTextRowsAsync();
-            _ = rows.Count; // ensure traversal
+            var lines = await tab.VisibleLinesAsync();
+            _ = lines.Count; // ensure traversal
         }
         return model;
     }
