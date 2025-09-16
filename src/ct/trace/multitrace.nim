@@ -9,8 +9,20 @@ proc findDiff(diffSpecification: string): string =
     if diffSpecification == "last-commit":
       execProcess(findExe("git"), args = @["diff", "HEAD~..HEAD"], options = {poEchoCmd})
     else:
-      # for now assume git range syntax
-      execProcess(findExe("git"), args = @["diff", diffSpecification], options = {poEchoCmd})
+      var path = diffSpecification
+      try:
+        # try to support arguments like `~/<path>`
+        path = expandFileName(diffSpecification)
+      except OsError:
+        discard
+
+      if existsFile(path):
+        # assume it contains a diff
+        # AND that we're in the actual repo as well
+        readFile(path)
+      else:
+        # for now assume git range syntax
+        execProcess(findExe("git"), args = @["diff", diffSpecification], options = {poEchoCmd})
   else:
     ""
 
