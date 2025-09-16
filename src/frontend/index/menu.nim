@@ -1,5 +1,6 @@
 import
-  std/jsffi,
+  std/[ jsffi, strutils, sequtils ],
+  config, electron_vars,
   ../[ lib, types ]
 
 when defined(ctmacos):
