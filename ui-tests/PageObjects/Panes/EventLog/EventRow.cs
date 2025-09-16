@@ -44,8 +44,9 @@ public class EventRow
         var selector = ".eventLog-text";
         if (_elementType == EventElementType.TracePointEditor)
         {
-            selector = "td.trace-values";
-            return await _root.Locator(selector).GetAttributeAsync("innerHTML") ?? string.Empty;
+            selector = ".trace-values";
+            //return await _root.Locator(selector).GetAttributeAsync("innerHTML") ?? string.Empty;
+            return await _root.Locator(selector).TextContentAsync() ?? string.Empty;
         }
         return await _root.Locator(selector).TextContentAsync() ?? string.Empty;
     }

@@ -26,6 +26,7 @@ public static class TestRunner
 
         await NoirSpaceShipTests.JumpToAllEvents(page);
         await NoirSpaceShipTests.EditorLoadedMainNrFile(page);
+        await NoirSpaceShipTests.CreateSimpleTracePoint(page);
 
 
         await browser.CloseAsync();

@@ -1,0 +1,19 @@
+I got a runtime error on line 265 in RunTracepointsJsAsync in EditorPane.cs:
+
+Exception has occurred: CLR/Microsoft.Playwright.PlaywrightException
+An exception of type 'Microsoft.Playwright.PlaywrightException' occurred in System.Private.CoreLib.dll but was not handled in user code: 'TypeError: Cannot read properties of undefined (reading 'services')
+    at runTracepointsIMLP (file:///home/franz/code/repos/codetracer/src/build-debug//ui.js:33380:98)
+    at runTracepoints (file:///home/franz/code/repos/codetracer/src/build-debug//ui.js:33306:55)
+    at eval (eval at evaluate (:291:30), <anonymous>:5:17)
+    at UtilityScript.evaluate (<anonymous>:298:18)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)'
+   at Microsoft.Playwright.Transport.Connection.<InnerSendMessageToServerAsync>d__401.MoveNext()
+   at Microsoft.Playwright.Core.Frame.<EvaluateAsync>d__84.MoveNext()
+   at UiTests.PageObjects.Panes.Editor.EditorPane.<RunTracepointsJsAsync>d__31.MoveNext() in /home/franz/code/repos/codetracer/ui-tests/PageObjects/Panes/Editor/EditorPane.cs:line 265
+   at NoirSpaceShipTests.<CreateSimpleTracePoint>d__2.MoveNext() in /home/franz/code/repos/codetracer/ui-tests/Tests/ProgramSpecific/NoirSpaceShipTests.cs:line 90
+   at UiTests.Tests.TestRunner.<RunAsync>d__0.MoveNext() in /home/franz/code/repos/codetracer/ui-tests/Tests/TestRunner.cs:line 29
+   at UiTests.Program.<Main>d__0.MoveNext() in /home/franz/code/repos/codetracer/ui-tests/Program.cs:line 13
+
+The frontend function runTracepoints requires the global data object as an argument, but RunTracepointsJsAsync calls it without passing that parameter. As a result, runTracepoints receives undefined, and its attempt to access data.services throws the TypeError observed.
+
+Update the RunTracepointsJsAsync function so that this problem does not occur again
