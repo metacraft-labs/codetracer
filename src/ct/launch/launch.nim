@@ -1,5 +1,5 @@
 import
-  std/[ json, os ],
+  std/[ json, os, strutils ],
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],

@@ -1,7 +1,6 @@
 import
   std/[strformat, strutils, os, options],
-  ../../common/[trace_index, types, paths],
-  ../cli/logging
+  ../../common/[trace_index, types, paths]
 
 proc scriptSessionLogPath*(sessionId: int): string =
   let bashLogFile = getEnv("CODETRACER_SHELL_BASH_LOG_FILE", "")

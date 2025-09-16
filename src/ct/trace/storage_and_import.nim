@@ -1,7 +1,7 @@
 import
-  std/[os, json, strutils, strformat, sets, algorithm ],
-  ../../common/[trace_index, lang, types, paths],
-  ../utilities/ [git, language_detection],
+  std/[ os, json, strutils, strformat, sets, algorithm ],
+  ../../common/[ trace_index, lang, types, paths ],
+  ../utilities/[ git, language_detection ],
   json_serialization, results
 
 proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
@@ -156,7 +156,7 @@ proc importDbTrace*(
           lang = traceLang
         break # for now assume the first detected lang is ok
 
-  if existsDir(traceFolder / "files"):
+  if dirExists(traceFolder / "files"):
     copyDir(traceFolder / "files", outputFolder / "files")
   elif selfContained and downloadKey == "":
     # for now assuming if no `files/` dir already,
