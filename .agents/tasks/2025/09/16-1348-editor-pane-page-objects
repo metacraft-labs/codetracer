@@ -1,0 +1,75 @@
+Create a page object for the layouts page editor panes
+For this create a folder for the Edditor pane
+Inside create page objects for the pane itself, the lines of code, the trace log panel and the omniscient loop controlls
+
+Add locators for the following features:
+
+Lines of code
+
+#editorComponent-{id} .monaco-editor .view-lines > .view-line – each rendered source line.
+
+Gutter and line numbers
+
+.monaco-editor .margin-view-overlays > .gutter[data-line="{line}"] – wrapper for icons & line number.
+
+Child elements inside each gutter:
+
+.gutter-line – line number text.
+
+.gutter-trace – enabled tracepoint icon.
+
+.gutter-disabled-trace – disabled tracepoint icon.
+
+.gutter-breakpoint-enabled, .gutter-breakpoint-disabled, .gutter-breakpoint-error – breakpoint states.
+
+.gutter-no-breakpoint, .gutter-no-trace – empty placeholders.
+
+.gutter-highlight-active – marker showing the current debugger location.
+
+Currently selected line
+
+.monaco-editor .view-overlays .current-line – overlay for active line background.
+
+.monaco-editor .margin .line-numbers.active-line-number (or Monaco’s default active-line-number) – active line in the gutter.
+
+Highlighted lines (executed or emphasized)
+
+.line-flow-hit – bold/highlighted lines hit during execution.
+
+.highlight – generic highlight decoration applied by editor code.
+
+.gutter-highlight-active – gutter arrow pointing at highlighted line.
+
+Grayed-out lines
+
+.line-flow-skip – lines skipped during execution (opacity 0.5).
+
+.line-flow-unknown – lines with unknown flow information (opacity 0.5).
+
+Omniscient loop controls
+
+.flow-loop-button.backward / .flow-loop-button.forward – step backward/forward within a loop.
+
+.flow-loop-slider-container with child .flow-loop-slider – slide through loop iterations.
+
+.flow-loop-step-container, .flow-loop-shrinked-iteration, .flow-loop-continuous-iteration – containers for loop iteration blocks.
+
+Omniscience value displays next to code
+
+.flow-loop-value / .flow-parallel-value – container for logged values.
+
+.flow-loop-value-name / .flow-parallel-value-name – variable name labels.
+
+.flow-loop-textarea – editable expression field (semi-transparent until focused).
+
+.flow-multiline-value-box and .flow-multiline-value-pointer – value boxes with pointers for multi-line results.
+
+In addition add functions that:
+Returns if the current edditor has a currently selected line active
+Returns the line number of the currently selected active line
+Returns a list of the the currently highlited lines of code
+Returns a list of the currenlty grayed out lines of code
+Returns the line number of a line of code
+Returns a list of flow parralel values from the omiscience that is attached to the line of code
+Returns a list of active Omniscient loop controlls
+Accepts a line of code and opens a trace point at that line of code

@@ -1,0 +1,21 @@
+for the EditorLine.cs :
+Create a function (task) that:
+returns true or false depending on if the line has a breakpoint or not
+returns true or false if the line has a tracepoint or not
+returns true or false depending on if the trace point on the line is disabled, return false if there is no race point at all
+returns true or false if there is an error icon on that line
+returns the line text
+Move the FlowParallelValuesAsync function to the EditorLine.cs and rewrite it accordingly
+
+For the EditorPane.cs
+Add a method that accepts a line number as an argument and makes CodeTracer jump to the line by using playwright to invoke a javascript function. Find out which javascript function is exposed to do so from the front-end code. Call the method JumpToLineJs and add Async to the name if the function ends up being asynchronious
+
+Add a method that accepts a line number as an argument and makes CodeTracer open a trace point by using playwright to invoke a javascript function. Find out which javascript function is exposed from the frontend code. Call the function OpenTrace
+
+Add a method that runs all the tracepoints using javascript again, see from the frontend code which function to invoke and name the method accordingly
+
+create a new method in the NoirSpaceShipTests.cs called "CreateSimpleTracePoint"
+The test method should open a trace point at line 13 and enter `log("This is a simple trace point")`
+Run the tracepoints by invoking the method mentioned before and after that check if the first event in the event log contains the string "This is a simple trace point" and also check if the same is true for the trace rows in the trace log component
+
+Then it should open another trace point at line 37 and enter the text `log("This is another simple trace point")` Run the trace points again and check if the first event in the event log still contains "This is a simple trace point" and that the trace row from the first trace log component is still present and that the last event in the event log contains the text "This is another simple trace point" and that the second trace point contains a event row that contains "This is another simple trace point"
