@@ -1,24 +1,20 @@
 import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
-  install,
-  electron_vars,
   results,
-  window,
-  traces,
-  ../../[ lib, index_config, config, types, trace_metadata ],
-  ../../../common/[ paths, ct_logging ]
+  window, traces, files, config, install, electron_vars, debugger,
+  ipc_types/socket,
+  ../[ lib, config, types, trace_metadata ],
+  ../../common/[ paths, ct_logging ]
+
+const NO_LIMIT = (-1)
+var
+  startedFuture: proc: void
+  startedReceived = false
 
 proc asyncSleep*(ms: int): Future[void] =
   let future = newPromise() do (resolve: (proc: void)):
     discard windowSetTimeout(resolve, ms)
   return future
-
-
-const NO_LIMIT = (-1)
-
-var
-  startedFuture: proc: void
-  startedReceived = false
 
 when not defined(server):
   proc debugSend*(self: js, f: js, id: cstring, data: js) =
@@ -41,6 +37,10 @@ proc started*: Future[void] =
       if not startedReceived:
         discard started(), 100)
   return future
+
+proc startShellUi*(main: js, config: Config): Future[void] {.async.} =
+  debugPrint "start shell ui"
+  main.webContents.send "CODETRACER::start-shell-ui", js{config: config}
 
 proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
   await wait(1_000)
@@ -77,14 +77,7 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
         data.trace.compileCommand = data.config.defaultBuild
       await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
 
-  # if not data.startOptions.welcomeScreen:
-    # debugPrint "index: start and setup core ipc"
-    # await startAndSetupCoreIPC()
-
   await started()
-
-  if not data.trace.isNil:
-    discard initDebugger(mainWindow, data.trace, data.config, Helpers())
 
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     debugPrint "send ", "CODETRACER::init"
@@ -124,7 +117,6 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
     var save = await getSave(@[folder], data.config.test)
     data.save = save
 
-    # debug "folder", folder
     mainWindow.webContents.send "CODETRACER::no-trace", js{
       path: data.startOptions.name,
       lang: save.project.lang,

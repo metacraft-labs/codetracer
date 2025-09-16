@@ -1,14 +1,115 @@
 import
-  std / [ async, jsffi, strutils, sequtils ],
-  ../../[ trace_metadata, index_config, config, types, lib ],
-  electron_vars,
+  std / [ async, jsffi, strutils, sequtils, strformat, os, json ],
+  electron_vars, files, config, debugger,
   results,
-  files,
-  ../../../common/[ ct_logging, paths ]
+  ipc_types/[ dap, socket ],
+  ../[ trace_metadata, config, types, lib ],
+  ../../common/[ ct_logging, paths ]
 
 
-let
-  CT_DEBUG_INSTANCE_PATH_BASE*: cstring = cstring(codetracerTmpPath) & cstring"/ct_instance_"
+var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
+
+proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bool): Future[seq[string]] {.async.} =
+  var res: seq[string] = @[]
+  var repoPathSet: JsAssoc[cstring, bool] = JsAssoc[cstring, bool]{}
+
+  if not selfContained:
+    for path in paths:
+      try:
+        let (stdoutRev, stderrRev, errRev) = await childProcessExec(j(&"git rev-parse --show-toplevel"), js{cwd: path})
+        repoPathSet[stdoutRev.trim] = true
+      except Exception as e:
+        errorPrint "git rev-parse error for ", path, ": ", e.repr
+    for path, _ in repoPathSet:
+      let (stdout, stderr, err) = await childProcessExec(j(&"git ls-tree HEAD -r --name-only"), js{cwd: path})
+      if err.isNil:
+        res = res.concat(($stdout).splitLines().mapIt($path & "/" & it))
+      else:
+        discard
+        #res = cast[seq[string]](@[])
+        # if not a git repo: just load some files? empty for now
+        # for now for self-contained load files from trace
+        # TODO discuss
+  else:
+    # for now assume db-backend, otherwise empty
+    if traceFolder.len > 0:
+      var pathSet = JsAssoc[cstring, bool]{}
+      let tracePathsPath = $traceFolder / "trace_paths.json"
+      let (rawTracePaths, err) = await fsReadFileWithErr(cstring(tracePathsPath))
+      if err.isNil:
+        let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
+        for path in tracePaths:
+          pathSet[path] = true
+      else:
+        # leave pathSet empty
+        warnPrint "loadFilenames for self contained trace trying to read ", tracePathsPath, ":", err
+
+      for path, _ in pathSet:
+        res.add($path)
+    else:
+      # leave res empty
+      discard
+  return res
+
+proc loadSymbols(traceFolder: cstring): Future[seq[Symbol]] {.async.} =
+  if traceFolder.len > 0:
+    let symbolsPath = $traceFolder / "symbols.json"
+    let (rawSymbols, err) = await fsReadFileWithErr(cstring(symbolsPath))
+    if err.isNil:
+      return ($rawSymbols).parseJson.to(seq[Symbol])
+    else:
+      # leave pathSet empty
+      errorPrint "loadSymbols for self contained trace trying to read from ", symbolsPath, ": ", err
+      return cast[seq[Symbol]](@[])
+
+
+proc loadFunctions(path: cstring): Future[seq[Function]] {.async.} =
+  let (raw, err) = await fsReadFileWithErr(path)
+  if err.isNil:
+    return cast[seq[Function]](Json.parse(raw))
+  else:
+    return cast[seq[Function]](@[])
+
+proc sendFilenames(main: js, paths: seq[cstring], traceFolder: cstring, selfContained: bool) {.async.} =
+  let filenames = await loadFilenames(paths, traceFolder, selfContained)
+  main.webContents.send "CODETRACER::filenames-loaded", js{filenames: filenames}
+
+proc sendFilesystem(main: js, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
+  let folders = await loadFilesystem(paths, traceFilesPath, selfContained)
+  main.webContents.send "CODETRACER::filesystem-loaded", js{ folders: folders }
+
+proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
+  try:
+    let symbols = await loadSymbols(traceFolder)
+    main.webContents.send "CODETRACER::symbols-loaded", js{symbols: symbols}
+  except:
+    errorPrint "loading symbols: ", getCurrentExceptionMsg()
+
+proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
+  # set title
+  when not defined(server):
+    main.setTitle(trace.program)
+
+  let traceFilesPath = cstring($trace.outputFolder / "files")
+  discard sendFilenames(main, trace.sourceFolders, trace.outputFolder, trace.imported)
+  discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
+  discard sendSymbols(main, trace.outputFolder)
+
+  var functions = await loadFunctions(cstring($trace.outputFolder / "function_index.json"))
+  var save = await getSave(trace.sourceFolders, config.test)
+  data.save = save
+
+  let dir = getHomeDir() / ".config" / "codetracer"
+  let configFile = dir / "dont_ask_again.txt"
+
+  let dontAskAgain = fs.existsSync(configFile)
+
+  main.webContents.send "CODETRACER::trace-loaded", js{
+    trace: trace,
+    functions: functions,
+    save: save,
+    dontAskAgain: dontAskAgain
+  }
 
 proc loadExistingRecord*(traceId: int) {.async.} =
   debugPrint "[info]: load existing record with ID: ", $traceId
@@ -17,10 +118,6 @@ proc loadExistingRecord*(traceId: int) {.async.} =
   data.pluginClient.trace = trace
   if data.trace.compileCommand.len == 0:
     data.trace.compileCommand = data.config.defaultBuild
-
-  if not data.trace.isNil:
-    debugPrint "index: init debugger"
-    discard initDebugger(mainWindow, data.trace, data.config, Helpers())
 
   debugPrint "index: init frontend"
   mainWindow.webContents.send(

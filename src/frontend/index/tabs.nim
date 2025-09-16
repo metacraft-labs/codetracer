@@ -1,8 +1,11 @@
 import
   std / [ async, jsffi, json, jsconsole, strformat ],
-  files,
-  ../../[ lib, lang, types, index_config ],
-  ../../../common/ct_logging
+  files, electron_vars, config,
+  ../[ lib, lang, types ],
+  ../../common/ct_logging
+
+proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1): Future[void] {.async.} =
+  await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line)
 
 proc onTabLoad*(sender: js, response: jsobject(location=types.Location, name=cstring, editorView=EditorView, lang=Lang)) {.async.} =
   console.log response
@@ -12,10 +15,6 @@ proc onTabLoad*(sender: js, response: jsobject(location=types.Location, name=cst
       discard mainWindow.openTab(response.location, response.lang, response.editorView)
     else:
      discard
-  of LangAsm:
-    if response.editorView == ViewInstructions:
-      let res = await data.nativeLoadInstructions(FunctionLocation(path: response.location.path, name: response.location.functionName, key: response.location.key))
-      mainWindow.webContents.send "CODETRACER::tab-load-received", js{argId: response.name, value: res}
   else:
     discard mainWindow.openTab(response.location, response.lang, response.editorView)
 
@@ -25,18 +24,10 @@ proc onLoadLowLevelTab*(sender: js, response: jsobject(pathOrName=cstring, lang=
     case response.view:
     of ViewTargetSource:
       warnPrint fmt"low level view source not supported for {response.lang}"
-    of ViewInstructions:
-      let res = await data.nativeLoadInstructions(FunctionLocation(name: response.pathOrName))
-      mainWindow.webContents.send "CODETRACER::low-level-tab-received", js{argId: response.pathOrName & j" " & j($response.view), value: res}
     else:
       warnPrint fmt"low level view {response.view} not supported for {response.lang}"
   of LangNim:
-    case response.view:
-    of ViewTargetSource, ViewInstructions:
-      let res = await data.nimLoadLowLevel(response.pathOrName, response.view)
-      mainWindow.webContents.send "CODETRACER::low-level-tab-received", js{argId: response.pathOrName & j" " & j($response.view), value: res}
-    else:
-      warnPrint fmt"low level view {response.view} not supported for {response.lang}"
+    warnPrint fmt"low level view {response.view} not supported for {response.lang}"
   else:
     warnPrint fmt"low level view not supported for {response.lang}"
 

@@ -1,8 +1,8 @@
 import
   std / [ async, jsffi, json, strutils, strformat ],
-  electron_vars,
-  ../../[ index_config, types, lib ],
-  ../../../common/[ paths, ct_logging ]
+  electron_vars, server_config, base_handlers, config,
+  ../[ types, lib ],
+  ../../common/[ paths, ct_logging ]
 
 var
   close = false

@@ -1,6 +1,6 @@
 import
-  std / [ jsffi ],
-  ../../[ lib, index_config, types ]
+  std/jsffi,
+  ../[ lib, types ]
 
 when defined(ctmacos):
   let modMap* : JsAssoc[cstring, cstring] = JsAssoc[cstring, cstring]{

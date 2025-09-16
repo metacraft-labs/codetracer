@@ -1,5 +1,6 @@
 import std / [async, sequtils, strutils, os, jsre]
 import index_config, jsffi, lib, types
+import index/ipc_events/traces
 
 let fs = cast[FS](require("fs"))
 

@@ -2,8 +2,9 @@ import
   std / [ async, jsffi, json, strutils, sequtils ],
   results,
   traces,
-  ../../[ types, lib, index_config ],
-  ../../../common/[ paths ]
+  electron_vars,
+  ../[ types, lib ],
+  ../../common/[ paths ]
 
 proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
   runUploadWithStreaming(

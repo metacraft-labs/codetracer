@@ -2,8 +2,23 @@ import
   std / [ async, jsffi, json, os, sequtils ],
   results,
   electron_vars,
-  ../../[ index_config, types, lib ],
-  ../../../common/[ paths, ct_logging ]
+  ../[ types, lib ],
+  ../../common/[ paths, ct_logging ]
+
+type
+  InstallResponseKind* {.pure.} = enum Ok, Problem, Dismissed
+
+  InstallResponse = object
+    case kind*: InstallResponseKind
+    of Ok, Dismissed:
+      discard
+    of Problem:
+      message*: string
+
+var
+  installResponseResolve: proc(response: InstallResponse)
+  installDialogWindow*: JsObject
+  process {.importc.}: js
 
 proc createInstallSubwindow*(): js =
     let win = jsnew electron.BrowserWindow(
@@ -35,18 +50,6 @@ proc createInstallSubwindow*(): js =
 
 proc onInstallCt*(sender: js, response: js) {.async.} =
   installDialogWindow = createInstallSubwindow()
-
-type
-  InstallResponseKind* {.pure.} = enum Ok, Problem, Dismissed
-
-  InstallResponse = object
-    case kind*: InstallResponseKind
-    of Ok, Dismissed:
-      discard
-    of Problem:
-      message*: string
-
-var installResponseResolve: proc(response: InstallResponse)
 
 proc onDismissCtFrontend*(sender: js, dontAskAgain: bool) {.async.} =
   # very important, otherwise we might try to send a message to it
@@ -91,8 +94,6 @@ proc onInstallCtFrontend*(sender: js, response: js) {.async.} =
     installDialogWindow.webContents.send "CODETRACER::ct-install-status", status
   else:
     echo status[1]
-
-var process {.importc.}: js
 
 proc isCtInstalled*(config: Config): bool =
   when defined(server):
