@@ -7,6 +7,9 @@
 - Added initial SetBreakpoints handling in db-backend DAP server.
 - When using the DAP stdio transport, all diagnostic output must go to stderr
   to avoid corrupting the message stream.
+- `DapParser` now buffers data via `add_bytes` and exposes parsed payloads with
+  `get_message()`, so callers need to drain messages until `None` after feeding
+  new bytes.
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.

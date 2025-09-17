@@ -95,34 +95,27 @@ impl BackendManager {
 
             loop {
                 match socket_read.read(&mut buff).await {
-                    Ok(mut cnt) => {
-                        loop {
-                            let val = match parser.parse_bytes(&buff[..cnt]) {
-                                Some(Ok(val)) => Some(val),
+                    Ok(cnt) => {
+                        parser.add_bytes(&buff[..cnt]);
 
+                        loop {
+                            let message = match parser.get_message() {
+                                Some(Ok(message)) => Some(message),
                                 Some(Err(err)) => {
                                     error!("Invalid DAP message received. Error: {err}");
-
                                     None
                                 }
-
                                 None => None,
                             };
 
-                            if let Some(x) = val {
-                                let mut res = res1.lock().await;
-                                match res.dispatch_message(x).await {
-                                    Ok(()) => {}
-                                    Err(err) => {
-                                        error!("Can't handle DAP message. Error: {err}");
-                                    }
-                                }
+                            let Some(message) = message else {
+                                break;
+                            };
 
-                                cnt = 0;
-                                continue; // Having goto would be nice here...
+                            let mut res = res1.lock().await;
+                            if let Err(err) = res.dispatch_message(message).await {
+                                error!("Can't handle DAP message. Error: {err}");
                             }
-
-                            break;
                         }
                     }
                     Err(err) => {
@@ -226,31 +219,28 @@ impl BackendManager {
 
             loop {
                 match socket_read.read(&mut buff).await {
-                    Ok(mut cnt) => loop {
-                        let val = match parser.parse_bytes(&buff[..cnt]) {
-                            Some(Ok(val)) => Some(val),
+                    Ok(cnt) => {
+                        parser.add_bytes(&buff[..cnt]);
 
-                            Some(Err(err)) => {
-                                warn!("Recieved malformed DAP message! Error: {err}");
-                                None
-                            }
-
-                            None => None,
-                        };
-                        if let Some(x) = val {
-                            match child_tx.send(x) {
-                                Ok(()) => {}
-                                Err(err) => {
-                                    error!("Can't send to child channel! Error: {err}");
+                        loop {
+                            let message = match parser.get_message() {
+                                Some(Ok(message)) => Some(message),
+                                Some(Err(err)) => {
+                                    warn!("Recieved malformed DAP message! Error: {err}");
+                                    None
                                 }
+                                None => None,
                             };
 
-                            cnt = 0;
-                            continue; // Having goto would be nice here...
-                        }
+                            let Some(message) = message else {
+                                break;
+                            };
 
-                        break;
-                    },
+                            if let Err(err) = child_tx.send(message) {
+                                error!("Can't send to child channel! Error: {err}");
+                            }
+                        }
+                    }
                     Err(err) => {
                         error!("Can't read from replay socket! Error: {err}");
                     }
