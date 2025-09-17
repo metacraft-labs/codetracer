@@ -12,11 +12,12 @@ fn looper(x: Field, y: Field) -> Field {
     let mut result = x;
     for i in 0..10 {
         println(i + 1);
-        if i % 2 == 0 {
-            result = result + y;
-        } else {
-            result = result - y;
+        println(i + 1);
+        if i % 3 == 0 {
+            result = result + y + 2;
         }
+
+
     }
     result
 }
