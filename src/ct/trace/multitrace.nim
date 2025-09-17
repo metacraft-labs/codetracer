@@ -44,14 +44,37 @@ proc parseDiff(rawDiff: string): Diff =
 
       for line in lines:
         # echo "line ", line
-        if line.startsWith("--- a/"):
+        if line.startsWith("--- "):
           # for now assume it's relative to the repo root
-          let file = line["--- a/".len .. ^1]
-          fileDiff.previousPath = repoRootPath / file
-        elif line.startsWith("+++ b/"):
+          let file = if line.startsWith("--- a/"):
+              line["--- a/".len .. ^1]
+            elif line == "--- /dev/null":
+              "" # for now assume this is created
+            else:
+              # not sure ..  TODO?
+              ""
+          fileDiff.previousPath = if file.len > 0: repoRootPath / file else: ""
+        elif line.startsWith("+++ "):
           # for now assume it's relative to the repo root
-          let file = line["+++ b/".len .. ^1]
-          fileDiff.currentPath = repoRootPath / file
+          let file = if line.startsWith("+++ b/"):
+              line["+++ b/".len .. ^1]
+            elif line == "+++ /dev/null":
+              "" # for now assume this is deleted
+            else:
+              # not sure ..  TODO?
+              ""
+          fileDiff.currentPath = if file.len > 0: repoRootPath / file else: ""
+          if fileDiff.currentPath != "" and fileDiff.previousPath != "":
+            if fileDiff.previousPath != fileDiff.currentPath:
+              fileDiff.change = FileRenamed
+            else:
+              fileDiff.change = FileChanged
+          elif fileDiff.previousPath == "":
+            fileDiff.change = FileAdded
+          else: # currentPath should be ""
+            assert fileDiff.currentPath == ""
+            fileDiff.change = FileDeleted
+
         elif line.startsWith("diff "):
           if not fileDiff.isNil:
             if chunk.previousFrom != 0:
@@ -80,6 +103,18 @@ proc parseDiff(rawDiff: string): Diff =
             chunk.currentCount = currentToken[1].parseInt
           else:
             chunk.currentCount = 1
+        elif line.startsWith("rename "):
+          let tokens = line.split(" ", 2)
+          let file = tokens[2]
+          let direction = tokens[1]
+          if direction == "from":
+            fileDiff.previousPath = repoRootPath / file
+          elif direction == "to":
+            fileDiff.currentPath = repoRootPath / file
+            fileDiff.change = FileRenamed
+          else:
+            # not supported/valid?
+            discard
         else:
           if line.len < 1:
             # ignore: assume it's always <kind><text>

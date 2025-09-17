@@ -4,10 +4,17 @@ type
   Diff* = ref object
     files*: seq[FileDiff]
 
+  FileChange* = enum
+    FileAdded,
+    FileDeleted,
+    FileRenamed,
+    FileChanged
+
   FileDiff* = ref object
     chunks*: seq[Chunk]
     previousPath*: langstring
     currentPath*: langstring
+    change*: FileChange
 
   Chunk* = object
     previousFrom*: int
