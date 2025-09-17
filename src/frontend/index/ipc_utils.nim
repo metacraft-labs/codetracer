@@ -1,7 +1,7 @@
 import
   std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
-  electron_vars, traces, files, startup, install, menu, online_sharing, tabs, window, logging, config, debugger, server_config, base_handlers,
-  ipc_types/[ dap, socket ],
+  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers,
+  ipc_subsystems/[ dap, socket ],
   results,
   ../[ lib, types, config, trace_metadata ],
   ../../common/[ ct_logging, paths ]
