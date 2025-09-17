@@ -16,7 +16,7 @@ pub struct DapParser {
     remaining: usize,
 }
 
-const CONTENT_LENTGH_HEADER: &str = "Content-Length: ";
+const CONTENT_LENGTH_HEADER: &str = "Content-Length: ";
 
 impl DapParser {
     pub fn new() -> Self {
@@ -33,7 +33,7 @@ impl DapParser {
         let json = val_str.as_bytes();
 
         let mut res = Vec::new();
-        res.extend(CONTENT_LENTGH_HEADER.as_bytes());
+        res.extend(CONTENT_LENGTH_HEADER.as_bytes());
         res.extend(json.len().to_string().as_bytes());
         res.extend("\r\n\r\n".as_bytes());
 
@@ -42,14 +42,15 @@ impl DapParser {
         res
     }
 
-    // Returns None when more bytes are needed for the message?
-    pub fn parse_bytes(&mut self, bytes: &[u8]) -> Option<Result<Value, Box<dyn Error>>> {
+    /// Adds raw bytes to the internal buffer so that `get_message` can attempt to
+    /// decode a full DAP payload later on.
+    pub fn add_bytes(&mut self, bytes: &[u8]) {
         self.buffer.extend(bytes);
-
-        self.parse_buffer()
     }
 
-    fn parse_buffer(&mut self) -> Option<Result<Value, Box<dyn Error>>> {
+    /// Attempts to extract a single JSON message from the buffered byte stream.
+    /// Returns `None` when more bytes are required to finish a frame.
+    pub fn get_message(&mut self) -> Option<Result<Value, Box<dyn Error>>> {
         while !self.buffer.is_empty() {
             // SAFETY: The condition of the loop ensures that the buffer is not empty
             self.curr
@@ -79,11 +80,11 @@ impl DapParser {
                         let curr = &self.curr.clone()[..self.curr.len() - 4];
                         self.curr.clear();
 
-                        if !curr.starts_with(CONTENT_LENTGH_HEADER.as_bytes()) {
+                        if !curr.starts_with(CONTENT_LENGTH_HEADER.as_bytes()) {
                             return Some(Err(Box::new(InvalidLengthHeader)));
                         }
 
-                        let len_str = str::from_utf8(&curr[CONTENT_LENTGH_HEADER.len()..]);
+                        let len_str = str::from_utf8(&curr[CONTENT_LENGTH_HEADER.len()..]);
 
                         if let Ok(len_str) = len_str {
                             match len_str.parse::<usize>() {
@@ -126,7 +127,8 @@ mod tests {
         let bytes = DapParser::to_bytes(&value);
 
         let mut parser = DapParser::new();
-        let result = parser.parse_bytes(&bytes);
+        parser.add_bytes(&bytes);
+        let result = parser.get_message();
 
         assert!(result.is_some());
         let parsed = result.unwrap().unwrap();
@@ -141,12 +143,15 @@ mod tests {
         let mut parser = DapParser::new();
         // send first part of header
         let split1 = 10.min(bytes.len());
-        assert!(parser.parse_bytes(&bytes[..split1]).is_none());
+        parser.add_bytes(&bytes[..split1]);
+        assert!(parser.get_message().is_none());
         // send rest of header and part of body
         let split2 = split1 + 5.min(bytes.len() - split1);
-        assert!(parser.parse_bytes(&bytes[split1..split2]).is_none());
+        parser.add_bytes(&bytes[split1..split2]);
+        assert!(parser.get_message().is_none());
         // send remaining bytes
-        let result = parser.parse_bytes(&bytes[split2..]);
+        parser.add_bytes(&bytes[split2..]);
+        let result = parser.get_message();
 
         assert!(result.is_some());
         let parsed = result.unwrap().unwrap();
@@ -161,11 +166,12 @@ mod tests {
         bytes.extend(DapParser::to_bytes(&value2));
 
         let mut parser = DapParser::new();
-        let first = parser.parse_bytes(&bytes);
+        parser.add_bytes(&bytes);
+        let first = parser.get_message();
         assert!(first.is_some());
         assert_eq!(first.unwrap().unwrap(), value1);
 
-        let second = parser.parse_bytes(&[]);
+        let second = parser.get_message();
         assert!(second.is_some());
         assert_eq!(second.unwrap().unwrap(), value2);
     }
@@ -179,7 +185,8 @@ mod tests {
         data.extend(header);
         data.extend(json);
 
-        let res = parser.parse_bytes(&data);
+        parser.add_bytes(&data);
+        let res = parser.get_message();
         assert!(matches!(res, Some(Err(_))));
     }
 
@@ -192,7 +199,8 @@ mod tests {
         data.extend(header);
         data.extend(json);
 
-        let res = parser.parse_bytes(&data);
+        parser.add_bytes(&data);
+        let res = parser.get_message();
         assert!(matches!(res, Some(Err(_))));
     }
 
@@ -207,7 +215,8 @@ mod tests {
         bytes.extend(header);
         bytes.extend(body);
 
-        let res = parser.parse_bytes(&bytes);
+        parser.add_bytes(&bytes);
+        let res = parser.get_message();
         assert!(matches!(res, Some(Err(_))));
     }
 }
