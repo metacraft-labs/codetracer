@@ -10,7 +10,6 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
-use crate::dap::setup_onmessage_callback;
 use chrono::Local;
 use clap::Parser;
 use log::LevelFilter;
@@ -21,11 +20,6 @@ use std::panic::PanicHookInfo;
 use std::{error::Error, panic};
 use std::path::PathBuf;
 use crate::paths::CODETRACER_PATHS;
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{prelude::*, JsCast};
-#[cfg(target_arch = "wasm32")]
-use web_sys::{js_sys, MessageEvent, Worker};
 
 mod calltrace;
 mod core;
@@ -46,6 +40,7 @@ mod step_lines_loader;
 mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
+mod transport;
 mod value;
 
 /// a custom backend for ruby (maybe others) support
@@ -67,6 +62,12 @@ fn panic_handler(info: &PanicHookInfo) {
     error!("PANIC!!! {}", info);
 }
 
+#[cfg(feature = "browser-transport")]
+fn main() {}
+
+// #[cfg(not(any(feature = "io-transport", feature = "browser-transport")))]
+
+#[cfg(feature = "io-transport")]
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
@@ -106,56 +107,34 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
-    // let handle =
     if cli.stdio {
-        // thread::spawn(move || {
-        let _ = db_backend::dap_server::run_stdio();
-        // })
+        use std::io::BufReader;
+
+        let stdin = std::io::stdin();
+        let stdout = std::io::stdout();
+        let mut reader = BufReader::new(stdin.lock());
+
+        let _ = db_backend::dap_server::run(&mut reader);
     } else {
+        use std::os::unix::net::UnixListener;
+
+        use std::io::BufReader;
+
         let socket_path = if let Some(p) = cli.socket_path {
             p
         } else {
             let pid = std::process::id() as usize;
             db_backend::dap_server::socket_path_for(pid)
         };
-        // thread::spawn(move || {
-        let _ = db_backend::dap_server::run(&socket_path);
-        // })
+
+        info!("dap_server::run {:?}", socket_path);
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = UnixListener::bind(socket_path)?;
+
+        let (stream, _) = listener.accept()?;
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let _ = db_backend::dap_server::run(&mut reader);
     };
 
-    // match handle.join() {
-    //     Ok(_) => Ok(()),
-    //     Err(err) => Err(format!("dap server thread panicked {err:?}").into()),
-    // }
-    Ok(())
-}
-
-// #[cfg(target_arch = "wasm32")]
-// #[wasm_bindgen(start)]
-// pub fn wasm_start() -> Result<(), JsValue> {
-//     console_error_panic_hook::set_once();
-//
-//     worker::init_worker()
-// }
-//
-//
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_start() -> Result<(), JsValue> {
-    // Spawn the worker that runs the DAP server logic.
-
-    use web_sys::js_sys;
-    web_sys::console::log_1(&"wasm worker started".into());
-
-    let global = js_sys::global();
-
-    // forward a marker to main thread
-    let scope: web_sys::DedicatedWorkerGlobalScope =
-        global.dyn_into().map_err(|_| JsValue::from_str("Not in a worker"))?;
-
-    scope.post_message(&JsValue::from_str("wasm_start reached"))?;
-    scope.post_message(&"wasm_start reached".into())?;
-
-    setup_onmessage_callback().map_err(|e| JsValue::from_str(&format!("{e}")))?;
     Ok(())
 }
