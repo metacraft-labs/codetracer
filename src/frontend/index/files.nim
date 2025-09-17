@@ -1,7 +1,7 @@
 import
-  std / [ async, jsffi, json, strutils ],
+  std / [ async, jsffi, json, strutils, strformat, sequtils, jsconsole, os ],
   electron_vars, config,
-  ../[ types, lib ],
+  ../[ types, lib, lang ],
   ../../common/ct_logging
 
 type FileFilter = ref object
@@ -257,3 +257,87 @@ proc onLoadPathContent*(
       nodeId: response.nodeId,
       nodeIndex: response.nodeIndex,
       nodeParentIndices: response.nodeParentIndices}
+
+proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1): Future[void] {.async.} =
+  await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line)
+
+proc onTabLoad*(sender: js, response: jsobject(location=types.Location, name=cstring, editorView=EditorView, lang=Lang)) {.async.} =
+  console.log response
+  case response.lang:
+  of LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb:
+    if response.editorView in {ViewSource, ViewTargetSource, ViewCalltrace}:
+      discard mainWindow.openTab(response.location, response.lang, response.editorView)
+    else:
+     discard
+  else:
+    discard mainWindow.openTab(response.location, response.lang, response.editorView)
+
+proc onLoadLowLevelTab*(sender: js, response: jsobject(pathOrName=cstring, lang=Lang, view=EditorView)) {.async.} =
+  case response.lang:
+  of LangC, LangCpp, LangRust, LangGo:
+    case response.view:
+    of ViewTargetSource:
+      warnPrint fmt"low level view source not supported for {response.lang}"
+    else:
+      warnPrint fmt"low level view {response.view} not supported for {response.lang}"
+  of LangNim:
+    warnPrint fmt"low level view {response.view} not supported for {response.lang}"
+  else:
+    warnPrint fmt"low level view not supported for {response.lang}"
+
+proc onOpenTab*(sender: js, response: js) {.async.} =
+  let options = js{
+    properties: @[j"openFile"],
+    title: cstring"Select File",
+    buttonLabel: cstring"Select"}
+
+  let file = await selectFileOrFolder(options)
+  if file != "":
+    if file.slice(-4) == j".nim":
+      mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangNim}
+    else:
+      mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangUnknown}
+
+var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
+
+proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bool): Future[seq[string]] {.async.} =
+  var res: seq[string] = @[]
+  var repoPathSet: JsAssoc[cstring, bool] = JsAssoc[cstring, bool]{}
+
+  if not selfContained:
+    for path in paths:
+      try:
+        let (stdoutRev, stderrRev, errRev) = await childProcessExec(j(&"git rev-parse --show-toplevel"), js{cwd: path})
+        repoPathSet[stdoutRev.trim] = true
+      except Exception as e:
+        errorPrint "git rev-parse error for ", path, ": ", e.repr
+    for path, _ in repoPathSet:
+      let (stdout, stderr, err) = await childProcessExec(j(&"git ls-tree HEAD -r --name-only"), js{cwd: path})
+      if err.isNil:
+        res = res.concat(($stdout).splitLines().mapIt($path & "/" & it))
+      else:
+        discard
+        #res = cast[seq[string]](@[])
+        # if not a git repo: just load some files? empty for now
+        # for now for self-contained load files from trace
+        # TODO discuss
+  else:
+    # for now assume db-backend, otherwise empty
+    if traceFolder.len > 0:
+      var pathSet = JsAssoc[cstring, bool]{}
+      let tracePathsPath = $traceFolder / "trace_paths.json"
+      let (rawTracePaths, err) = await fsReadFileWithErr(cstring(tracePathsPath))
+      if err.isNil:
+        let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
+        for path in tracePaths:
+          pathSet[path] = true
+      else:
+        # leave pathSet empty
+        warnPrint "loadFilenames for self contained trace trying to read ", tracePathsPath, ":", err
+
+      for path, _ in pathSet:
+        res.add($path)
+    else:
+      # leave res empty
+      discard
+  return res

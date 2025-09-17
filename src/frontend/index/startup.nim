@@ -2,7 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger,
-  ipc_types/socket,
+  ipc_subsystems/socket,
   ../[ lib, config, types, trace_metadata ],
   ../../common/[ paths, ct_logging ]
 

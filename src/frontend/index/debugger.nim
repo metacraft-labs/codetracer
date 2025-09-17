@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, os ],
-  ipc_types/socket,
+  ipc_subsystems/socket,
   config,
   ../[ lib, types ],
   ../../common/[ paths, ct_logging ]
