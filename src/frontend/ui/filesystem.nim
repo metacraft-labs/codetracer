@@ -192,3 +192,12 @@ method render*(self: FilesystemComponent): VNode =
       onclick = proc(ev: Event, tg: VNode) =
         ev.currentTarget.focus()
     )
+    if self.data.startOptions.diff.files.len() > 0:
+      tdiv(class = "diff-files-list"):
+        for fileDiff in self.data.startOptions.diff.files:
+          tdiv(
+            class = "diff-file-path",
+            onclick = proc(ev: Event, tg: VNode) =
+              data.openTab(fileDiff.currentPath, ViewSource)
+          ):
+            text fileDiff.currentPath.split("/")[^1]
