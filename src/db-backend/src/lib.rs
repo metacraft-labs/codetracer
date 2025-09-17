@@ -112,7 +112,7 @@ pub mod value;
 //
 
 #[cfg(feature = "browser-transport")]
-#[wasm_bindgen]
+#[wasm_bindgen(start)]
 pub fn wasm_start() -> Result<(), JsValue> {
     // Spawn the worker that runs the DAP server logic.
 
@@ -120,13 +120,15 @@ pub fn wasm_start() -> Result<(), JsValue> {
     use web_sys::js_sys;
     web_sys::console::log_1(&"wasm worker started".into());
 
+    setup_onmessage_callback().map_err(|e| JsValue::from_str(&format!("{e}")))?;
+
     let global = js_sys::global();
 
-    // forward a marker to main thread
-    let scope: web_sys::DedicatedWorkerGlobalScope =
-        global.dyn_into().map_err(|_| JsValue::from_str("Not in a worker"))?;
+    let scope: web_sys::DedicatedWorkerGlobalScope = global
+        .dyn_into()
+        .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
 
-    setup_onmessage_callback().map_err(|e| JsValue::from_str(&format!("{e}")))?;
+    scope.post_message(&JsValue::from_str("ready")).unwrap();
 
     Ok(())
 }

@@ -215,7 +215,7 @@ fn handle_request<T: DapTransport>(
                     // TODO: eventually support? or if this is the last  branch
                     // in the top `match`
                     // assume all request left here are unsupported
-                    error!("unsupported dap command: {}", req.command);
+                    // error!("unsupported dap command: {}", req.command);
                     return Err(format!("command {} not supported here", req.command).into());
                 }
             }
@@ -375,7 +375,7 @@ pub fn handle_message<T: DapTransport>(
                     ctx.launch_trace_file = "trace.json".into();
                 }
 
-                info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder);
+                // info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder);
 
                 if ctx.received_configuration_done {
                     ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
@@ -387,10 +387,10 @@ pub fn handle_message<T: DapTransport>(
                 // eprintln!("PID: {}", pid);
                 // }
             }
-            info!(
-                "received launch; configuration done? {0:?}; req: {1:?}",
-                ctx.received_configuration_done, req
-            );
+            // info!(
+            //     "received launch; configuration done? {0:?}; req: {1:?}",
+            //     ctx.received_configuration_done, req
+            // );
 
             let resp = DapMessage::Response(Response {
                 base: ProtocolMessage {
@@ -423,10 +423,10 @@ pub fn handle_message<T: DapTransport>(
             ctx.seq += 1;
             transport.send(&resp)?;
 
-            info!(
-                "configuration done sent response; received_launch: {0:?}",
-                ctx.received_launch
-            );
+            // info!(
+            //     "configuration done sent response; received_launch: {0:?}",
+            //     ctx.received_launch
+            // );
             if ctx.received_launch {
                 ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
                 if let Some(h) = ctx.handler.as_mut() {
@@ -450,14 +450,17 @@ pub fn handle_message<T: DapTransport>(
                 // we allow it for now here, but if additional cleanup is needed, maybe we'd need
                 // to return to upper functions
                 #[allow(clippy::exit)]
-                std::process::exit(0);
+                ()
+
+                // NOTE: HANDLE THIS FOR WASM!
+                // std::process::exit(0);
             }
         }
         DapMessage::Request(req) => {
             if let Some(h) = ctx.handler.as_mut() {
                 let res = handle_request(h, req.clone(), &mut ctx.seq, transport);
                 if let Err(e) = res {
-                    warn!("handle_request error: {e:?}");
+                    // warn!("handle_request error: {e:?}");
                 }
             }
         }

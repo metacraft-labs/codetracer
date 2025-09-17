@@ -440,15 +440,6 @@ pub fn load_trace_data(
     todo!()
 }
 
-// 1)
-// HashMap { path => content };
-TraceLoader { read_trace_file(); read_source_file(..); }
-
-// 2)
-// wasi: min amount of read primitives impl
-// fs::read
-//
-// db format:
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {

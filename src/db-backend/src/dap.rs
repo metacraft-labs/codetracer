@@ -7,9 +7,6 @@ use std::path::PathBuf;
 
 type DapResult<T> = std::result::Result<T, DapError>;
 
-#[cfg(target_arch = "wasm32")]
-use web_sys::js_sys;
-
 use crate::dap_error::DapError;
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
@@ -716,16 +713,20 @@ pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<Dap
 
 #[cfg(feature = "browser-transport")]
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
-    use std::collections::{HashMap, HashSet};
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, HashSet},
+        rc::Rc,
+    };
 
-    use wasm_bindgen::{prelude::Closure, JsCast};
+    use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
     use web_sys::{
         js_sys::{self, Function},
         MessageEvent,
     };
 
     use crate::{
-        dap_server::Ctx,
+        dap_server::{make_transport, Ctx},
         handler::Handler,
         transport::{DapTransport, WorkerTransport},
     };
@@ -736,13 +737,13 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         .dyn_into()
         .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
 
-    let mut seq = 1i64;
-    let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
-    let mut handler: Option<Handler> = None;
-    let mut received_launch = false;
-    let mut launch_trace_folder = PathBuf::from("");
-    let mut launch_trace_file = PathBuf::from("");
-    let mut received_configuration_done = false;
+    let seq = 1i64;
+    let breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
+    let handler: Option<Handler> = None;
+    let received_launch = false;
+    let launch_trace_folder = PathBuf::from("");
+    let launch_trace_file = PathBuf::from("");
+    let received_configuration_done = false;
 
     // NOTE: This does not have to be wrapped in a lock
     // This will run in the browser and JS callback code blocks are "critical sections".
@@ -757,14 +758,22 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
     };
 
     // TODO: Handle error
-    let mut transport = WorkerTransport::new().unwrap();
+    let mut transport = make_transport().unwrap();
+
+    let t = Rc::new(scope);
+
+    let t_clone = t.clone();
 
     let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
+        use wasm_bindgen::JsValue;
+
         use crate::dap_server::handle_message;
 
         let dap_message_raw = event.data();
 
-        web_sys::console::log_1(&format!("Raw DAP <- {:?}", dap_message_raw).into());
+        t_clone
+            .post_message(&JsValue::from_str("This is a message from the worker!"))
+            .unwrap();
 
         let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned())).unwrap();
 
@@ -774,7 +783,7 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
     .into_js_value()
     .unchecked_into::<Function>();
 
-    scope.set_onmessage(Some(&callback));
+    t.set_onmessage(Some(&callback));
 
     Ok(())
 }

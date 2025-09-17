@@ -19,11 +19,6 @@ use std::io::Write;
 use std::panic::PanicHookInfo;
 use std::{error::Error, panic};
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{prelude::*, JsCast};
-#[cfg(target_arch = "wasm32")]
-use web_sys::{js_sys, MessageEvent, Worker};
-
 mod calltrace;
 mod core;
 mod dap;
@@ -67,10 +62,10 @@ fn panic_handler(info: &PanicHookInfo) {
 #[cfg(feature = "browser-transport")]
 fn main() {}
 
+// #[cfg(not(any(feature = "io-transport", feature = "browser-transport")))]
+
 #[cfg(feature = "io-transport")]
 fn main() -> Result<(), Box<dyn Error>> {
-    use crate::transport::DapTransport;
-
     panic::set_hook(Box::new(panic_handler));
 
     // env_logger setup based and adapted from
