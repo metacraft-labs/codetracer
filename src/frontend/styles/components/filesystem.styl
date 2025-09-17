@@ -1,6 +1,9 @@
 
 .filesystem-container
   height: 100%
+  display: flex
+  flex-direction: column
+  justify-content: space-between
 
 .filesystem
   font-family: "SpaceGrotesk" !important
@@ -10,7 +13,7 @@
   overflow: auto
   //border: 1px solid silver
   min-height: 100px
-  height: 100%
+  height: -webkit-fill-available
   overflow-y: scroll
   // background-color: BACKGROUND_COLOR
   color: TEXT_CONTENT_COLOR
@@ -24,3 +27,13 @@
 
 .diff-file
   color: orange !important
+
+.diff-files-list
+  height: 20%
+  display: flex
+  flex-direction: column
+  border-top: 4px solid black
+  overflow: scroll
+
+.diff-file-path
+  cursor: pointer
