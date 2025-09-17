@@ -116,6 +116,15 @@ proc changeIcons*(file: CodetracerFile) =
 
     child.changeIcons()
 
+
+proc mapDiff(service: EditorService, node: CodetracerFile) =
+  for child in node.children:
+    service.index += 1
+    for fileDiff in data.startOptions.diff.files:
+      if child.original.path == fileDiff.currentPath:
+        service.diffId.add(&"1_{service.index}_anchor")
+    mapDiff(service, child)
+
 method render*(self: FilesystemComponent): VNode =
   if not self.initFilesystem:
     kxiMap["filesystemComponent"].afterRedraws.add(proc =
@@ -124,6 +133,7 @@ method render*(self: FilesystemComponent): VNode =
           not self.service.filesystem.isNil:
             try:
               self.service.filesystem.changeIcons()
+              self.service.mapDiff(self.service.filesystem)
               jqFind(".filesystem").jstree(js{
                   core: js{
                     check_callback: true,
@@ -132,6 +142,13 @@ method render*(self: FilesystemComponent): VNode =
                   },
                   plugins: @[j"contextmenu", j"search"]
               })
+
+              jqFind(".filesystem").toJs.on(
+                "ready.jstree",
+                proc(e: js, node: jsobject(node=CodetracerFile)) = 
+                  for id in self.service.diffId:
+                    jqFind("#j" & id).addClass("diff-file")
+              )
 
               jqFind(".filesystem").toJs.on(j"changed.jstree",
                 proc(e: js, nodeData: jsobject(node=CodetracerFile)) =
@@ -175,5 +192,3 @@ method render*(self: FilesystemComponent): VNode =
       onclick = proc(ev: Event, tg: VNode) =
         ev.currentTarget.focus()
     )
-
-
