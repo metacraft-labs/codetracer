@@ -15,8 +15,8 @@ use tokio::{
 
 use crate::{
     dap_parser::DapParser,
-    paths::CODETRACER_PATHS,
     errors::{InvalidID, SocketPathError},
+    paths::CODETRACER_PATHS,
 };
 
 #[derive(Debug)]
@@ -117,9 +117,11 @@ impl BackendManager {
                                         error!("Can't handle DAP message. Error: {err}");
                                     }
                                 }
+
                                 cnt = 0;
                                 continue; // Having goto would be nice here...
                             }
+
                             break;
                         }
                     }
@@ -148,7 +150,9 @@ impl BackendManager {
         let socket_dir: std::path::PathBuf;
         {
             let path = &CODETRACER_PATHS.lock()?.tmp_path;
-            socket_dir = path.join("backend-manager").join(std::process::id().to_string());
+            socket_dir = path
+                .join("backend-manager")
+                .join(std::process::id().to_string());
         }
 
         create_dir_all(&socket_dir).await?;
@@ -222,7 +226,7 @@ impl BackendManager {
 
             loop {
                 match socket_read.read(&mut buff).await {
-                    Ok(cnt) => {
+                    Ok(mut cnt) => loop {
                         let val = match parser.parse_bytes(&buff[..cnt]) {
                             Some(Ok(val)) => Some(val),
 
@@ -240,8 +244,13 @@ impl BackendManager {
                                     error!("Can't send to child channel! Error: {err}");
                                 }
                             };
+
+                            cnt = 0;
+                            continue; // Having goto would be nice here...
                         }
-                    }
+
+                        break;
+                    },
                     Err(err) => {
                         error!("Can't read from replay socket! Error: {err}");
                     }
