@@ -65,15 +65,21 @@ proc parseDiff(rawDiff: string): Diff =
               fileDiff.chunks.add(chunk)
           let tokens = line.splitWhitespace()
           chunk = Chunk()
-          # @@ -previousFrom,previousCount +currentFrom,currentCount @@
+          # @@ -previousFrom[,previousCount] +currentFrom[,currentCount] @@
           let previousToken = tokens[1][1..^1].split(",")
           chunk.previousFrom = previousToken[0].parseInt
           chunkPreviousFileLineNumber = chunk.previousFrom
-          chunk.previousCount = previousToken[1].parseInt
+          if previousToken.len > 1:
+            chunk.previousCount = previousToken[1].parseInt
+          else:
+            chunk.previousCount = 1
           let currentToken = tokens[2][1..^1].split(",")
           chunk.currentFrom = currentToken[0].parseInt
           chunkCurrentFileLineNumber = chunk.currentFrom
-          chunk.currentCount = currentToken[1].parseInt
+          if currentToken.len > 1:
+            chunk.currentCount = currentToken[1].parseInt
+          else:
+            chunk.currentCount = 1
         else:
           if line.len < 1:
             # ignore: assume it's always <kind><text>
