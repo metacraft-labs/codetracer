@@ -41,6 +41,9 @@ src/tests/trace_test.js
 plugins/ruby
 plugins/nim
 
+# trace files and folders
+multitrace-*.zip
+
 .solution.json
 *.pyc
 
