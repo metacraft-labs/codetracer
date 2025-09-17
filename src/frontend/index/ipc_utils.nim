@@ -60,6 +60,7 @@ proc configureIpcMain* =
     "restart"
     # update filesystem component
     "load-path-content"
+    "open-devtools"
 
 
 proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
