@@ -11,7 +11,7 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
-use crate::dap::setup_onmessage_callback;
+use crate::paths::CODETRACER_PATHS;
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
@@ -19,14 +19,8 @@ use log::{error, info};
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
-use std::{error::Error, panic};
 use std::path::PathBuf;
-use crate::paths::CODETRACER_PATHS;
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{prelude::*, JsCast};
-#[cfg(target_arch = "wasm32")]
-use web_sys::{js_sys, MessageEvent, Worker};
+use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
@@ -35,8 +29,8 @@ mod dap_error;
 mod dap_server;
 mod dap_types;
 mod db;
-mod distinct_vec;
 mod diff;
+mod distinct_vec;
 mod event_db;
 mod expr_loader;
 mod flow_preloader;
@@ -48,6 +42,7 @@ mod step_lines_loader;
 mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
+mod transport;
 mod value;
 
 /// a custom backend for ruby (maybe others) support
@@ -73,7 +68,7 @@ enum Commands {
         structured_diff_path: std::path::PathBuf,
         trace_folder: std::path::PathBuf,
         multitrace_folder: std::path::PathBuf,
-    }
+    },
 }
 
 // Already panicking so the unwraps won't change anything
@@ -82,6 +77,12 @@ fn panic_handler(info: &PanicHookInfo) {
     error!("PANIC!!! {}", info);
 }
 
+#[cfg(feature = "browser-transport")]
+fn main() {}
+
+// #[cfg(not(any(feature = "io-transport", feature = "browser-transport")))]
+
+#[cfg(feature = "io-transport")]
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
@@ -95,9 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
     // eprintln!("{}", log_path.display());
 
-    let tmp_path: PathBuf = {
-        CODETRACER_PATHS.lock()?.tmp_path.clone()
-    };
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
 
     let target = Box::new(File::create(tmp_path.join("db-backend.log"))?);
 
@@ -121,65 +120,34 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
+    if cli.stdio {
+        use std::io::BufReader;
 
-    match cli.cmd {
-        Commands::DapServer { socket_path, stdio } => {
-            if stdio {
-                // thread::spawn(move || {
-                let _ = db_backend::dap_server::run_stdio();
-                // })
-            } else {
-                let socket_path = if let Some(p) = socket_path {
-                    p
-                } else {
-                    let pid = std::process::id() as usize;
-                    db_backend::dap_server::socket_path_for(pid)
-                };
-                // thread::spawn(move || {
-                let _ = db_backend::dap_server::run(&socket_path);
-                // })
-            };
-        }
-        Commands::IndexDiff { structured_diff_path, trace_folder, multitrace_folder } =>{
-            let raw = std::fs::read_to_string(structured_diff_path)?;
-            info!("raw {raw:?}");
-            let structured_diff = serde_json::from_str::<diff::Diff>(&raw)?;
-            diff::index_diff(structured_diff, &trace_folder, &multitrace_folder)?;
-        }
-    }
-    // match handle.join() {
-    //     Ok(_) => Ok(()),
-    //     Err(err) => Err(format!("dap server thread panicked {err:?}").into()),
-    // }
-    Ok(())
-}
+        let stdin = std::io::stdin();
+        let stdout = std::io::stdout();
+        let mut reader = BufReader::new(stdin.lock());
 
-// #[cfg(target_arch = "wasm32")]
-// #[wasm_bindgen(start)]
-// pub fn wasm_start() -> Result<(), JsValue> {
-//     console_error_panic_hook::set_once();
-//
-//     worker::init_worker()
-// }
-//
-//
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_start() -> Result<(), JsValue> {
-    // Spawn the worker that runs the DAP server logic.
+        let _ = db_backend::dap_server::run(&mut reader);
+    } else {
+        use std::os::unix::net::UnixListener;
 
-    use web_sys::js_sys;
-    web_sys::console::log_1(&"wasm worker started".into());
+        use std::io::BufReader;
 
-    let global = js_sys::global();
+        let socket_path = if let Some(p) = cli.socket_path {
+            p
+        } else {
+            let pid = std::process::id() as usize;
+            db_backend::dap_server::socket_path_for(pid)
+        };
 
-    // forward a marker to main thread
-    let scope: web_sys::DedicatedWorkerGlobalScope =
-        global.dyn_into().map_err(|_| JsValue::from_str("Not in a worker"))?;
+        info!("dap_server::run {:?}", socket_path);
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = UnixListener::bind(socket_path)?;
 
-    scope.post_message(&JsValue::from_str("wasm_start reached"))?;
-    scope.post_message(&"wasm_start reached".into())?;
+        let (stream, _) = listener.accept()?;
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let _ = db_backend::dap_server::run(&mut reader);
+    };
 
-    setup_onmessage_callback().map_err(|e| JsValue::from_str(&format!("{e}")))?;
     Ok(())
 }
