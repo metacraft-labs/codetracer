@@ -286,6 +286,8 @@ type
     hasSaveHistoryTimeout*: bool
     switchTabHistoryLimit*: int
     cachedFiles*: JsAssoc[cstring, TabInfo]
+    diffId*: seq[cstring]
+    index*: int
     # commandData*: CommandData
 
 
@@ -1584,7 +1586,9 @@ when defined(ctRenderer):
         # lowLevelTabs: JsAssoc[cstring, LowLevelTab]{},
         # lowLevel: LowLevel(),
         expandedOpen: JsAssoc[cstring, TabInfo]{},
-        cachedFiles: JsAssoc[cstring, TabInfo]{}),
+        cachedFiles: JsAssoc[cstring, TabInfo]{},
+        diffId: @[],
+        index: 1),
       calltrace: CalltraceService(
         callstackCollapse: (name: j"", level: -1),
         callstackLimit: CALLSTACK_DEFAULT_LIMIT,
