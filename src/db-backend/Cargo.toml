@@ -15,7 +15,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"
 log = "0.4.21"
-env_logger = "0.11.3"
+env_logger = { version = "0.11.3", optional = true}
 # log2 = "0.1.11"
 regex = "1"
 tree-sitter = "0.24"
@@ -64,7 +64,7 @@ path = "src/bin/schema_generator.rs"
 [features]
 debugging = []
 
-default = ["browser-transport"]
+default = ["io-transport"]
 
-io-transport = []
+io-transport = ["dep:env_logger"]
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen", "dep:web-sys"]
