@@ -10,15 +10,6 @@ import
 import ../common/ct_logging
 
 type
-  PyCommand* = object of RootEffect
-
-  ExitError* = object of RootEffect
-
-  NormalError* = object of RootEffect
-
-  EventTarget* = ref object
-    value*: cstring
-
   ElectronApp* {.importc.} = ref object of JsObject
     quit*: proc(code: int): void
 
@@ -28,33 +19,11 @@ type
     env*: JsAssoc[cstring, cstring]
     cwd*: proc: cstring
 
-  Electron* = ref object of JsObject
-    app*: ElectronApp
-    BrowserWindow*: BrowserWindow
-
   NodeSubProcess* = ref object
     pid*: int
     stdout*: JsObject
     stderr*: JsObject
     kill*: proc(): bool # TODO: add signal parameter if needed (string | number) Default: "SIGTERM"
-
-  BrowserWindow* {.importcpp.} = ref object of JsObject
-    loadURL*: proc(url: cstring): void
-
-    width*, height*, x*, y*: int
-
-    useContentSize*, center*, resizable*, focusable*, thickFrame*: bool
-
-    parent*: ref BrowserWindow
-
-    backgroundColor*: cstring
-
-  # NodeFS* = ref object of js
-    # readFile*: proc(filename: cstring, encoding: cstring, handler: proc(err: js, file: js): void): void
-
-  Screen* = ref object of js
-    height*: int
-    width*: int
 
   JSONObj* = ref object of js
     # probably not really -1
@@ -64,39 +33,10 @@ type
       level: js = jsUndefined): cstring {.noSideEffect, tags: [].}
     parse*: proc(s: cstring): js {.noSideEffect, tags: [].}
 
-  VoidJS* = ref object of js
-
   DateJS* = ref object of js
     now*: proc: int
 
-  UInt16Array* {.importc.} = ref object
-
-  UInt32Array* {.importc.} = ref object
-
-  ArrayBuffer* {.importc.} = ref object
-    byteLength*: uint
-
-  DataView*[T] {.importc.} = ref object
-    length*: uint
-
   JsSet*[T] {.importc.} = JsAssoc[T, bool]
-
-  FsStats* {.importc.} = ref object
-    isFile*: proc(): bool
-
-  FS* {.importc.} = ref object
-    readFile*: proc(s: cstring, encoding: cstring, cb: proc(err: js, data: cstring))
-    read*: proc(fd: uint, buffer: Buffer, offset: uint, length: uint, position: uint, cb: proc(err: js, bytesRead: uint, buffer: Buffer))
-    write*: proc(fd: uint, buffer: Buffer, offset: uint, length: uint, position: uint, cb: proc(err: js, bytesWritten: uint, buffer: Buffer))
-    open*: proc(path: cstring, flags: cstring, cb: proc(err: js, fd: uint))
-    close*: proc(fd: uint, cb: proc(err: js))
-    stat*: proc(filename: cstring, cb: proc(err: js, stats: Stats))
-    writeFile*: proc(s: cstring, data: cstring, cb: proc(err: js))
-    readFileSync*: proc(s: cstring, encoding: cstring): cstring
-    writeFileSync*: proc(s: cstring, data: cstring)
-    existsSync*: proc(s: cstring): bool
-    appendFileSync*: proc(s: cstring, data: cstring)
-    lstatSync*: proc(s: cstring): FsStats
 
   Chalk* {.importc.} = ref object
     yellow*: proc(s: cstring): cstring
@@ -121,22 +61,9 @@ type
     writeUIntLE*: proc(value: uint, start: uint, count: uint)
     toString*: proc(a: cstring): cstring
 
-  Stats* {.importc.} = ref object
-    blocks*: uint
-    size*: uint
-
-  DB* {.importc.} = ref object
-    run*: proc(code: cstring)
-    serialize*: proc(handler: proc: void)
-    prepare*: proc(code: cstring): Stmt
-    # each*: proc[T](code: cstring, handler: proc(err: js, row: T): void)
-    # all*: proc[T](code: cstring, handler: proc(err: js, rows: seq[T]): void)
-
   Stmt* {.importc.} = ref object
     finalize*: proc: void
     run*: proc(args: varargs[cstring])
-
-  D3* {.importc.} = ref object of js
 
   JSMath* {.importc.} = ref object
     random*: proc(max: int): float
@@ -311,22 +238,9 @@ type
     viewModel*:            MonacoViewModel
     executeEdits*:         proc(source: cstring, edits: seq[MonacoEditOperation]): void
 
-
-  MonacoCursor* = ref object
-    getPosition*:          proc: MonacoPosition {.noSideEffect.}
-
   MonacoPosition* = ref object
     lineNumber*:           int
     column*:               int
-
-  WebSocket* = ref object
-    on*: proc(name: cstring, code: (proc(message: js): void))
-
-  WebSocketServer* = ref object
-    on*: proc(name: cstring, code: (proc(ws: WebSocket)))
-
-  IPC* {.importc.} = ref object
-    send*: proc(label: cstring, arg: js): void
 
   NodeFilesystemPromises* = ref object
     access*: proc(path: cstring, mode: JsObject): Future[JsObject]
@@ -415,12 +329,6 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
   let util = require("util")
 
   let execWithPromise* = jsAsFunction[proc(command: cstring): Future[JsObject]](util.promisify(nodeStartProcess.exec))
-
-# let p = await startProcess()
-# send p.pid to frontend
-# # await waitForExit(p)
-
-  # let child_process* = cast[(ChildProcessLib)](require("child_process"))
 
   proc setupLdLibraryPath* =
     # originally in src/tester/tester.nim
@@ -519,12 +427,7 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
     # the spawned process hanging: this is a bugfix for such a situation
 
     let futureHandler = proc(resolve: proc(res: Result[NodeSubProcess, JsObject])) =
-      # debugPrint "RUN PROGRAM: ", path
-      # debugPrint "WITH ARGS: ", args
-      # debugPrint "OPTIONS: ", $(options.to(cstring))
-
       let process = nodeStartProcess.spawn(path, args, options)
-
       process.toJs.on("spawn", proc() =
         resolve(Result[NodeSubProcess, JsObject].ok(process)))
 
@@ -547,38 +450,22 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
     return future
 
   proc runProcess*(path: cstring, args: seq[cstring]): Future[JsObject] {.async.} =
-
     let processStart = await startProcess(path, args)
-
     if not processStart.isOk:
       return processStart.error
-
     return await waitProcessResult(processStart.value)
 
 var
-  jstypeof* {.importcpp: "typeof(#)".}: proc(s: js): cstring
   electronProcess* {.importcpp: "process".}: ElectronOrNodeProcess
   jsthis* {.importcpp: "this".}: js
-  requireModule* {.importcpp: "require".}: js
   windowSetTimeout* {.importcpp: "setTimeout(#, #)".}: proc (f: (proc: void), i: int): int
   windowClearTimeout* {.importcpp: "clearTimeout(#)".}: proc (f: int): void
   windowSetInterval* {.importcpp: "setInterval(#, #)".}: proc (f: (proc: void), i: int): int
-  windowClearInterval* {.importcpp: "clearInterval(#)".}: proc (f: int): void
-  Object* {.importc.}: js
-  RegExp* {.importc.}: proc (source: cstring, flag: cstring): js
-  # jsconsole* {.importcpp: "console".}: js
-  screen* {.importc.}: Screen
   null* {.importc.}: js
   undefined* {.importc.}: js
   JSON* {.importc.}: JSONObj
   Date* {.importc.}: DateJS
   Math* {.importc.}: JSMath
-  vex* {.importc.}: js
-  jsNaN* {. importcpp: "NaN" .}: int
-  jsobj* {.importcpp: "Object".}: js
-  jsdebugger* {.importcpp: "debugger".}: js
-  requireCall* {.importcpp: "require(#)(#, #)".}: proc(a: cstring, b: kdom.Window, c: js): js
-  fetch* {.importc.}: proc(a: cstring): js
 
 proc createResizeObserver*(handler: proc) : ResizeObserver {.importjs:"new ResizeObserver(#)".}
 
@@ -592,19 +479,8 @@ proc observe*(observer: MutationObserver, domElement: kdom.Element, options: js)
 
 proc disconnect*(observer: MutationObserver) {.importjs:"#.disconnect()".}
 
-proc on*[T](subProcess: NodeSubProcess, eventKind: cstring, handler: proc(arg: T): void) {.importc.}
-
 proc initJsSet*[T]: JsSet[T] =
   JsAssoc[T, bool]{}
-
-proc incl*[T](aSet: JsSet[T], value: T) =
-  aSet[value] = true
-
-proc excl*[T](aSet: JsSet[T], value: T) =
-  discard jsDelete(aSet[value])
-
-proc contains*[T](aSet: JsSet[T], value: T): bool =
-  aSet.hasKey(value)
 
 var nodePath*: NodePath
 
@@ -616,9 +492,6 @@ else:
   var loadScripts*: bool = false
 
 proc `$`*(a: js): string {.importcpp: "cstrToNimstr(JSON.stringify(#))".}
-
-proc jsGetEnv*(a: cstring): cstring {.importcpp: "process.env[#]".}
-
 
 if inElectron:
   nodePath = cast[NodePath](require("path"))
@@ -636,25 +509,6 @@ else:
   let basedir* = cstring(basedirText)
   let currentPath* = if not jsDirname.isNil: ($jsDirname).rsplit("/", 3)[0] & "/" else: ""
 
-# dump currentPath
-# var codetracerInstallDir*: string
-# if "build-debug" notin currentPath:
-#   codetracerInstallDir = currentPath.rsplit("/", 3)[0] & "/"
-# else:
-#   if getEnv("CODETRACER_IN_TEST", "") == "1":
-#     codetracerInstallDir = currentPath.rsplit("/", 3)[0] & "/"
-#   else:
-#     codetracerInstallDir = currentPath.rsplit("/", 4)[0] & "/"
-
-# when defined(ctTest):
-#   codetracerInstallDir = currentPath #.rsplit("/", 1)[0] & "/"
-
-debugPrint "lib.nim: codetracerInstallDir ", codetracerInstallDir
-
-# let codetracerExeDir* = if "build-debug" notin basedirText: basedirText & "/build-debug/" else: basedirText & "/../"
-# let linksPath* = codetracerExeDir
-
-let pluginsDir* = codetracerExeDir & "/plugins/"
 let chomedriverExe* = linksPath & "/bin/chromedriver"
 
 when defined(ctRenderer):
@@ -673,38 +527,14 @@ var helpers* {.exportc: "helpers".}: js
 if inElectron:
   helpers = require("./helpers")
 
-proc `$`*(u: uint): string =
-  $(u.int)
-
-
-type
-  DistinctInt = concept a
-      a is distinct
-      a.int
-
-
-proc newMessage*(cap: js, buffer: Buffer, b: bool): js {.importcpp: "new #.Message(#, #)".}
-proc toJsKey*[T: DistinctInt](text: cstring, t: type T): T {.importcpp: "parseInt(#)".}
-
-template safeString*(a: cstring): string =
-  if not a.isNone:
-    $a
-  else:
-    ""
-
 template componentContainerClass*(class: string = ""): cstring =
   cstring("component-container " & class)
 
-var d3* {.importc.}: D3
 var Mousetrap* {.importc.}: js
 
 proc isNaN*[T](n: T): bool {.importcpp: "isNaN(#)", noSideEffect, tags: [].}
 
 proc isNone*[T](a: T): bool {.importcpp: "(# == null)", noSideEffect, tags: [].}
-
-proc newSqlite*(sqlite: js, name: cstring): js {.importcpp: "(new #(#))".}
-
-proc bufferconcat*(buffers: seq[Buffer]): Buffer {.importcpp: "(Buffer.concat(#))".}
 
 proc functionAsJS*[T](handler: T): js {.importcpp: "#".}
 
@@ -714,11 +544,7 @@ proc keysOf*[A, B](a: JsAssoc[A, B]): seq[cstring] {. importcpp: "(Object.keys(#
 
 func hasKey*[A, B](a: JsAssoc[A, B], key: A): bool {. importcpp: "(#[#] != undefined)", noSideEffect.}
 
-proc merge*[A, B](a: JsAssoc[A, B], b: JsAssoc[A, B]) {. importcpp: "Object.assign(#, #)".}
-
 proc newMonacoRange*(startLineNumber: int, startColumn: int, endLineNumber: int, endColumn: int): MonacoRange {.importcpp: "new monaco.Range(#, #, #, #)".}
-
-proc newClusterize*(b: js): js {.importcpp: "new Clusterize(#)".}
 
 proc jsSpawn*(childProcess: js, name: cstring, cmd: seq[cstring], errorHandler: (proc: void)): js {.raises: [Exception], tags: [RootEffect].} =
   result = childProcess.spawn(name, cmd)
@@ -727,54 +553,21 @@ proc jsSpawn*(childProcess: js, name: cstring, cmd: seq[cstring], errorHandler: 
       errorHandler()
 
 when defined(ctIndex):
-  # proc startProcess*(name: cstring, cmd: seq[cstring]): js =
-  #   result = nodeStartProcess.spawn(name, cmd)
-
   proc stopProcess*(process: NodeSubProcess) =
     process.toJs.kill()
 
 template j*(x: typed): untyped =
   cstring(x)
 
-template mkey*(key, command) =
-  Mousetrap.`bind`(key, proc =
-    ipc.send command, js{})
-
-
-
-proc isNotUndefined*[T](s: T): bool {. importcpp: "((#) != undefined)" .}
-
-
-template toElement*(s: untyped): untyped =
-  cast[dom.Element](`s`)
-
-template toNode*(s: untyped): untyped =
-  cast[dom.Node](`s`)
-
 var jsNl* = j($("\n"[0]))
-var jsTab* = j($("\t"[0]))
-
-# await wait(5000)
-
-# await startProcess(a, b) -> promise <-----------------------|
-#                                       |
-# promise.handler(promise.resolve)      |
-#                                       |
-# promise.resolve() --------------------|
-
-
 
 # milliseconds
 proc wait*(duration: int): Future[void] =
-  # debugPrint "wait ", duration
   return newPromise do (resolve: (proc: void)):
-    # debugPrint "start ", duration
     discard windowSetTimeout(resolve, duration)
 
 proc chr*(i: int): cstring {.importcpp: "String.fromCharCode(#)".}
 proc toCString*[T](s: T): cstring {.importcpp: "#.toString()", noSideEffect, tags: [].}
-
-# proc `&`*(s: cstring, t: char): cstring {.importcpp: "# + #", noSideEffect, tags: [].}
 
 proc parseJSInt*(s: cstring): int {.importcpp: "parseInt(#)".}
 proc parseJSInt*(i: int): int {.importcpp: "parseInt(#)".}
@@ -783,16 +576,9 @@ proc parseJSFloat*(s: cstring): float {.importcpp: "parseFloat(#)".}
 
 proc split*(s: cstring, separator: cstring): seq[cstring] {.importcpp: "#.split(#)".}
 
-# TODO: pass correctly, not as a number
-# proc split*(s: cstring, separator: char): seq[cstring] {.importcpp: "#.split(#)".}
-
-proc split*(s: cstring, separator: js): seq[cstring] {.importcpp: "#.split(#)".}
-
 proc slice*(s: cstring, start: int): cstring {.importcpp: "#.slice(#)".}
 
 proc slice*(s: cstring, start: int, finish: int): cstring {.importcpp: "#.slice(#, #)".}
-
-proc slice*[T](s: seq[T], start: int): seq[T] {.importcpp: "#.slice(#)".}
 
 proc slice*[T](s: seq[T], start: int, finish: int): seq[T] {.importcpp: "#.slice(#, #)".}
 
@@ -807,30 +593,7 @@ proc capitalize*(s: cstring): cstring =
 
 proc trim*(s: cstring): cstring {.importcpp: "#.trim()".}
 
-proc replace*(s: cstring, pattern: js, with: cstring): cstring {.importcpp: "#.replace(#, #)", noSideEffect.}
-
 proc replaceCString*(s: cstring, pattern: cstring, with: cstring): cstring {.importcpp: "#.replace(#, #)", noSideEffect.}
-
-func isArray*(a: JsObject): bool {.importcpp: "Array.isArray(#)".}
-
-#proc indexOf*(s: cstring, e: char, )
-proc `[]`*(s: cstring, index: int): cstring {.importcpp: "#[#]".}
-
-proc `[]`*[T](elements: DataView[T], index: uint): T {.importcpp: "#[#]".}
-
-proc `[]=`*[T](elements: DataView[T], index: uint, value: T) {.importcpp: "#[#] = #".}
-
-proc `[]`*(buffer: Buffer, index: uint): char {.importcpp: "#[#]".}
-
-proc `[]=`*(buffer: Buffer, index: uint, value: char) {.importcpp: "#[#] = #".}
-
-proc uint16Array*(buffer: ArrayBuffer): DataView[uint16] {.importcpp: "new Uint16Array(#)".}
-
-proc uint32Array*(buffer: ArrayBuffer): DataView[uint32] {.importcpp: "new Uint32Array(#)".}
-
-proc newBuffer*(a: uint): Buffer {.importcpp: "Buffer.alloc(#)".}
-
-proc arrayBuffer*(size: uint): ArrayBuffer {.importcpp: "new ArrayBuffer(#)".}
 
 proc regex*(a: cstring): js {.importcpp: "new RegExp(#, 'g')", noSideEffect.}
 
@@ -844,47 +607,11 @@ proc `[]`*(match: RegexMatch, index: uint): cstring {.importcpp: "#[#]".}
 
 proc matchAll*(a: cstring, regex: js): seq[RegexMatch] {.importcpp: "[...#.matchAll(#)]".}
 
-proc exec*(regExp: js, text: cstring): js {.importcpp: "#.exec(#)".}
-
-proc shallowCopy*[T](t: T): T {.importcpp: "Object.assign({}, #)".}
-
-proc dump*[T](yaml: Yaml, a: T, indent: int): cstring {.importcpp: "#.dump(#, #)".}
-
-
-proc jqueryFind*(a: cstring): js {.importcpp: "jQuery(#)".}
-
 proc len*[B, A](a: JsAssoc[B, A]): int {.noSideEffect.} =
   if a.isNone:
     0
   else:
     keysOf(a).len
-
-proc obj*(a: js, depth: int = 4): js =
-  if isUndefined(a):
-    return undefined
-  var b = cast[JsAssoc[cstring, js]](a)
-  var txt = js{}
-  if isNotUndefined(b.toJs.length) and len(b) > 10:
-    return (j"..").toJs
-
-  for name, value in b:
-    try:
-      if jstypeof(value) == j"function" or name == j"m_type" or not b.toJs.hasOwnProperty(name):
-        continue
-      elif jstypeof(value) == j"object":
-        if depth > 0:
-          txt[name] = obj(value, depth - 1)
-        else:
-          txt[name] = j"object"
-      else:
-        txt[name] = value
-    except:
-      # heidenbug ?
-      warnPrint "surprising exception ", getCurrentExceptionMsg()
-      # debugPrint b.toJs.hasOwnProperty
-      continue
-  return txt
-
 
 proc isJsArray*(a: js): bool {.importcpp: "(# instanceof Array)".}
 
@@ -896,22 +623,9 @@ proc now*: int64 {.importcpp: "(new Date()).getTime()".}
 
 proc delta*(a: BiggestInt, b: BiggestInt): BiggestInt {.importcpp: "(# - #)".}
 
-proc toISO*(time: int64): cstring {.importcpp: "new Date(#).toISOString()".}
-
 proc newChart*(ctx: js, config: js): js {.importcpp: "new Chart(#, #)".}
 
-proc jsmul*(a: BiggestInt, b: BiggestInt): BiggestInt {.importcpp: "(# * #)".}
-
-proc jsdiv*(a: BiggestInt, b: BiggestInt): BiggestInt {.importcpp: "Math.trunc(# / #)".}
-
 proc floor*(a: float): int {.importcpp: "Math.floor(#)".}
-
-proc ceil*(a: float): int {.importcpp: "Math.ceil(#)".}
-
-proc kout2*[T](a: T): void {.importcpp: "console.log(#)".}
-
-proc kout2*[T](a: T, b: T): void {.importcpp: "console.log(#, #)".}
-
 
 template taskLog*(taskId: TaskId): cstring =
   let taskIdString = taskId.cstring
@@ -985,9 +699,6 @@ const
 
 var domwindow* {.importc: "window".}: JsObject
 
-proc jsFalse*(value: js): bool =
-  isUndefined(value) or not cast[bool](value)
-
 proc loadValues*(a: js, id: cstring): JsAssoc[cstring, cstring] =
   var fields = JsAssoc[cstring, js]{}
   var values = JsAssoc[cstring, cstring]{}
@@ -1010,11 +721,6 @@ proc loadValues*(a: js, id: cstring): JsAssoc[cstring, cstring] =
     else:
       values[field] = j"nil"
   return values
-
-
-let PYTHON_PATCH_PATH* = "~/cpython/debug/python"
-let PYTHON_PATCH_DIR* = "~/cpython/debug/"
-let PYTHON_PATCH_PARENT_DIR* = "~/cpython/"
 
 proc generateJsObject(properties: NimNode): NimNode =
   var empty = newEmptyNode()
@@ -1039,123 +745,7 @@ proc generateJsObject(properties: NimNode): NimNode =
   result.add(first)
   result.add(second)
 
-when defined(ctIndex) or defined(ctTest):
-  var app*: cstring
-  # if inElectron:
-  app = getEnv("XDG_DATA_HOME", $paths.home & "/.local/share") & "/codetracer"
-
-
 macro jsobject*(args: varargs[untyped]): untyped =
   generateJsObject(args)
-
-
-macro cView*(node: untyped): untyped =
-  expectKind node, {nnkObjConstr, nnkCall}
-
-  let z = ident"zspecial"
-  let componentName = node[0]
-
-  result = quote:
-    let `z` = newComponent(`componentName`)
-  # let section
-  result = nnkStmtList.newTree(result)
-
-  for i, arg in node:
-    if i > 0:
-      expectKind arg, nnkExprColonExpr
-
-      let name = arg[0]
-      let value = arg[1]
-      let a = quote:
-        `z`.`name` = `value`
-      result.add(a)
-  # let render = ident(&"render{componentName}")
-  # let a = quote:
-  #   `z`.renderImpl = `render`
-  # result.add(a)
-  result.add(z)
-  result = nnkBlockStmt.newTree(newEmptyNode(), result)
-
-
-macro renderc*(component: untyped, code: untyped): untyped =
-  expectKind component, {nnkIdent, nnkBracketExpr}
-
-  let name = if component.kind == nnkIdent: $component else: $component[0]
-  let c = ident"component"
-  let function = nnkPostfix.newTree(ident"*", ident(&"render{name}"))
-  let empty = newEmptyNode()
-  let functionGenerics =
-    if component.kind == nnkIdent:
-      empty
-   else:
-      let g = nnkGenericParams.newTree()
-      for z, t in component:
-        if z > 0:
-          g.add(nnkIdentDefs.newTree(t, empty, empty))
-      g
-  let functionCode = quote:
-    let self {.inject.} = `component`(`c`)
-    `code`
-  result = nnkProcDef.newTree(
-    function,
-    empty,
-    functionGenerics,
-    nnkFormalParams.newTree(
-      ident"VNode",
-      nnkIdentDefs.newTree(
-        c,
-        ident"VComponent",
-        empty)),
-    empty,
-    empty,
-    functionCode)
-
-    # proc `function`(`c`: VComponent): VNode =
-    #   let self {.inject.} = `component`(`c`)
-    #   `code`
-
-
-macro time*(f: untyped): untyped =
-  # a pragma for logging time of a function
-  # proc a(b: string) {.time.} =
-  #   log b
-  # a: 23 ms
-  # TODO: it doesn't work with return
-  result = f
-  let originalCode = f.body
-  var label = f[0]
-  let startNode = ident("start")
-  let finishNode = ident("finish")
-  if label.kind == nnkPostfix:
-    label = label[1]
-  label = newLit(label.repr)
-  let first = quote:
-    let `startNode` = now()
-  let last = quote:
-    let `finishNode` = now()
-    # debugPrint `label`, ":", delta(`finishNode`, `startNode`), " ms"
-  result.body = nnkStmtList.newTree(first, originalCode, last)
-
-macro update*(value: untyped, fields: untyped): untyped =
-  # merges fields into value
-  # a = A(e: 4, f: 2)
-  # a.update
-  #   e = 2
-  #   f = 1
-  result = nnkStmtList.newTree()
-  for field in fields:
-    expectKind(field, nnkAsgn)
-    let line = nnkAsgn.newTree(nnkDotExpr.newTree(value, field[0]), field[1])
-    result.add(line)
-
-
-proc add*[T, U](a: var JsAssoc[T, U], element: (T, U)) =
-  a[element[0]] = element[1]
-
-proc mapPairs*[K, V](a: JsAssoc[K, V]): seq[(K, V)] =
-  result = @[]
-  for k, v in a:
-    result.add((k, v))
-
 
 export sugar, task_and_event
