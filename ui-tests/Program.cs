@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Threading.Tasks;
+using UiTests.Helpers;
 using UiTests.Tests;
 
 namespace UiTests;
@@ -16,15 +16,11 @@ class Program
         {
             try
             {
-                var kill = new ProcessStartInfo("just")
-                {
-                    ArgumentList = { "stop" },
-                };
-                Process.Start(kill);
+                await CodeTracerSessionRegistry.TerminateAllAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore cleanup failures when 'just' is not installed.
+                Console.Error.WriteLine($"Failed to terminate CodeTracer sessions: {ex}");
             }
         }
     }

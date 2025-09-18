@@ -1,0 +1,16 @@
+there is an issue on line 88 in Playwright Launcher.cs:
+
+'IPlaywright' does not contain a definition for 'DisposeAsync' and no accessible extension method 'DisposeAsync' accepting a first argument of type 'IPlaywright' could be found (are you missing a using directive or an assembly reference?)CS1061
+
+in the LaunchAsync function in:
+            if (playwright is not null)
+            {
+                try
+                {
+                    await playwright.DisposeAsync();
+                }
+                catch
+                {
+                    // Swallow cleanup errors during launch failure.
+                }
+            }

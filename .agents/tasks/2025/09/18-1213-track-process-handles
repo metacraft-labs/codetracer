@@ -1,0 +1,4 @@
+try implementing the first approach - 1. Track CodeTracer process handles and terminate their trees
+Idea: Store the Process returned by Process.Start, keep a registry for each test run, and on shutdown call Kill(entireProcessTree: true) for each tracked root.
+
+CodeTracer is supposed to run in linux, windows and macos

@@ -32,7 +32,7 @@ public static class PlaywrightLauncher
     public static string CtPath => CodetracerLauncher.CtPath;
     public static bool IsCtAvailable => CodetracerLauncher.IsCtAvailable;
 
-    public static async Task<IBrowser> LaunchAsync(string programRelativePath)
+    public static async Task<CodeTracerSession> LaunchAsync(string programRelativePath)
     {
         if (!IsCtAvailable)
             throw new FileNotFoundException($"ct executable not found at {CtPath}");
@@ -58,21 +58,66 @@ public static class PlaywrightLauncher
         // info.EnvironmentVariables.Add("CODETRACER_DEV_TOOLS", "");
 
         var process = Process.Start(info)!;
+        IPlaywright? playwright = null;
 
-        await WaitForCdpAsync(port, TimeSpan.FromSeconds(20));
-
-        Console.WriteLine($"process started {process.Id}");
-
-        var pw = await Playwright.CreateAsync();
-
-        Console.WriteLine($"Playwright will try to connect to {process.Id}");
-
-        var browser = await pw.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", options: new()
+        try
         {
-            Timeout = 20000
-        });
+            await WaitForCdpAsync(port, TimeSpan.FromSeconds(20));
 
-        return browser;
+            Console.WriteLine($"process started {process.Id}");
+
+            playwright = await Playwright.CreateAsync();
+
+            Console.WriteLine($"Playwright will try to connect to {process.Id}");
+
+            var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", options: new()
+            {
+                Timeout = 20000
+            });
+
+            var session = new CodeTracerSession(process, browser, playwright);
+            CodeTracerSessionRegistry.Register(session);
+            return session;
+        }
+        catch
+        {
+            if (playwright is not null)
+            {
+                try
+                {
+                    playwright.Dispose();
+                }
+                catch
+                {
+                    // Swallow cleanup errors during launch failure.
+                }
+            }
+
+            try
+            {
+                if (!process.HasExited)
+                {
+                    try
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                    catch (PlatformNotSupportedException)
+                    {
+                        process.Kill();
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore termination failures during launch errors.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+
+            throw;
+        }
         // var firstWindow = await app.FirstWindowAsync();
         // return (await firstWindow.TitleAsync()) == "DevTools"
         //     ? (await app.WindowsAsync())[1]

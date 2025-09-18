@@ -19,7 +19,8 @@ public static class TestRunner
             return;
         }
 
-        var browser = await PlaywrightLauncher.LaunchAsync("noir_space_ship");
+        await using var session = await PlaywrightLauncher.LaunchAsync("noir_space_ship");
+        var browser = session.Browser;
         var page = await PlaywrightLauncher.GetAppPageAsync(browser, titleContains: "CodeTracer");
 
         // await PageObjectTests.PageObjectsSmokeTestAsync(page);
@@ -27,8 +28,5 @@ public static class TestRunner
         await NoirSpaceShipTests.JumpToAllEvents(page);
         await NoirSpaceShipTests.EditorLoadedMainNrFile(page);
         await NoirSpaceShipTests.CreateSimpleTracePoint(page);
-
-
-        await browser.CloseAsync();
     }
 }
