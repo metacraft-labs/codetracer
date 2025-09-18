@@ -61,6 +61,7 @@
           packages = [
             vscode
             dotnet-full
+            pkgs.xvfb-run
             pkgs.nodejs_22
             pkgs.playwright
             pkgs.playwright-driver.browsers

@@ -19,5 +19,5 @@ echo
 echo '###############################################################################'
 echo "Lint dotnet_build script:"
 echo '###############################################################################'
-shellcheck ui-tests/dotnet_build.sh
+shellcheck ui-tests/*.sh
 echo OK
