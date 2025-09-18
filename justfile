@@ -291,6 +291,16 @@ test-nimsuggest:
     exit 1
   fi
 
+build-frontend-lib output_path="ct_frontend.js":
+  nim -d:chronicles_enabled=off \
+    -d:ctRenderer \
+    -d:ctInExtension \
+    -d:ctInCentralExtensionContext \
+    --debugInfo:on \
+    --lineDir:on \
+    --hotCodeReloading:on \
+    --out:{{output_path}} js src/frontend/ui_js.nim
+
 # ===========================
 # trace folder helpers
 
