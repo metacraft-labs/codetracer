@@ -3,7 +3,6 @@
 
 Available downloads:
 
-<a href="https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
 <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
 <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
 <a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
@@ -11,6 +10,7 @@ Available downloads:
 <a href="https://github.com/metacraft-labs/metacraft-overlay"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/4/48/Gentoo_Linux_logo_matte.svg"></a>
 <a href="https://aur.archlinux.org/packages/codetracer"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/13/Arch_Linux_%22Crystal%22_icon.svg"></a>
 <a href="https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a>
+<a href="https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
 
 Key signatures:
 
