@@ -2,11 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
-## Next release
-???
+## 25.09.1 - 2025-09-19
 
-Other new developments:
 
+We are releasing our initial version with DAP support and reformed frontend architecture!
+
+- DAP support and frontend architecture reform:
+  Our backend and frontend have been reformed: now we use DAP instead of our older custom protocol, and
+  our frontend components are more self contained and independent: needed for our work on a CodeTracer extension.
+  Our DAP support is tested more under VsCode. We don't implement many optional aspects yet, but we do implement our custom
+  functionalities and queries, defining our custom extensions to DAP: `ct/`-namespaced custom requests and events.
+
+- A new backend multiplexer:
+  We have also added an experimental new backend multiplexer, which gets us closer to the ability to replay multiple traces/backend instances
+  in the same session and window.
+
+We have also many other important improvements:
+
+- Integrated a reformed version of the Ruby recorder
+- Support for our newer trace binary trace format "version 1", based on CBOR and Zstd seekable compression
+- Generate packages for some of the mainstream Linux distributions: https://github.com/metacraft-labs/codetracer/issues/56 :
+  please look at the README for links/more info!
+
+- codetracer-wasm-recorder
+ - Hotfix the locals array to resize itself dynamically, resolving an array out of bounds crash for our Stylus wasm recorder
+- various bugfixes:
+  - some fixes for `ct host`: the browser mode of codetracer and for our cloud integration
+  - a bugfix for `ct record`: store sensible source folders if the context is not a git repo
+  - various build fixes
 - Various UI improvements:
   - Fixed certain tooltips and popups produced by the editor widget being clipped in the first lines of code
   - Fixed incorrect text highlighting persistance after selecting a file in the global search bar
