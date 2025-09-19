@@ -7,7 +7,7 @@
 
 ### Linux
 You can download the Linux AppImage from our website:
-[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-amd64.AppImage)
+[![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.09.1-amd64.AppImage)
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g. `~/.local/bin`)
@@ -15,7 +15,7 @@ You can download the Linux AppImage from our website:
 ### macOS
 macOS binaries are temporarily unavailable but will be restored soon.
 You can download a `.dmg` app bundle from our website:
-[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-arm64.dmg)
+[![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.09.1-arm64.dmg)
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS).
