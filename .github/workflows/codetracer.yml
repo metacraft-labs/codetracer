@@ -491,9 +491,9 @@ jobs:
       - name: Create tag
         if: ${{ github.ref == 'refs/heads/main' }}
         run: |
-          YEAR=$(nix develop .#devShells.x86_64-linux.default --command bash -c 'grep "CodeTracerYear\*" src/ct/version.nim | sed "s/.*CodeTracerYear\* = //g"')
-          MONTH=$(nix develop .#devShells.x86_64-linux.default --command bash -c "printf '%02d' \$(grep \"CodeTracerMonth\*\" src/ct/version.nim | sed \"s/.*CodeTracerMonth\* = //g\")")
-          BUILD=$(nix develop .#devShells.x86_64-linux.default --command bash -c 'grep "CodeTracerBuild\*" src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g"')
+          YEAR=$(bash -c 'grep "CodeTracerYear\*" src/ct/version.nim | sed "s/.*CodeTracerYear\* = //g"')
+          MONTH=$(bash -c "printf '%02d' \$(grep \"CodeTracerMonth\*\" src/ct/version.nim | sed \"s/.*CodeTracerMonth\* = //g\")")
+          BUILD=$(bash -c 'grep "CodeTracerBuild\*" src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g"')
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
