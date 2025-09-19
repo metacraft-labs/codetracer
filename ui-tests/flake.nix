@@ -70,17 +70,10 @@
             export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
             export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1
 
+            # used in dotnet_build.sh
             export NIX_NODE=${pkgs.nodejs_22.outPath}/bin/node
           '';
         };
       }
     );
 }
-
-# # TODO: eventually check if node already the correct nix one?
-
-#             dotnet build
-#             rm bin/Debug/net8.0/.playwright/node/linux-x64/node && \
-#               cp ${pkgs.nodejs_22.outPath}/bin/node bin/Debug/net8.0/.playwright/node/linux-x64/node
-            
-# TODO add similar for now to ui-tests run script
