@@ -765,20 +765,33 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
     let t_clone = t.clone();
 
     let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
-        use wasm_bindgen::JsValue;
+        use serde_wasm_bindgen::to_value;
+        use wasm_bindgen::{JsValue, UnwrapThrowExt};
 
         use crate::dap_server::handle_message;
 
         let dap_message_raw = event.data();
 
+        web_sys::console::log_1(&"RAW DAP MESSAGE".into());
+        web_sys::console::log_1(&dap_message_raw);
+
         t_clone
             .post_message(&JsValue::from_str("This is a message from the worker!"))
-            .unwrap();
+            .map_err(|_| "Could not convert message")
+            .unwrap_throw();
 
-        let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned())).unwrap();
+        let dap_message = from_json(&dap_message_raw.as_string().unwrap_or("Invalid DAP message".to_owned()))
+            .map_err(|_| "Could not convert message")
+            .unwrap_throw();
+
+        // let payload = to_value(&dap_message)
+        //     .map_err(|_| "Could not convert message")
+        //     .unwrap_throw();
+
+        // t_clone.post_message(&payload).unwrap_throw();
 
         // TODO: Handle error
-        handle_message(&dap_message, &mut transport, &mut ctx).unwrap();
+        // handle_message(&dap_message, &mut transport, &mut ctx).unwrap();
     }) as Box<dyn FnMut(_)>)
     .into_js_value()
     .unchecked_into::<Function>();

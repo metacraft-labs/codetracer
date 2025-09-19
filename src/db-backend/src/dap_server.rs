@@ -96,7 +96,7 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
         load_trace_data(&trace_path, trace_file_format),
     ) {
         let duration = start.elapsed();
-        info!("loading trace: duration: {:?}", duration);
+        // info!("loading trace: duration: {:?}", duration);
 
         let start2 = Instant::now();
         let mut db = Db::new(&meta.workdir);
@@ -104,7 +104,7 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
         proc.postprocess(&trace)?;
 
         let duration2 = start2.elapsed();
-        info!("postprocessing trace: duration: {:?}", duration2);
+        // info!("postprocessing trace: duration: {:?}", duration2);
 
         let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
@@ -123,6 +123,7 @@ fn write_dap_messages<T: DapTransport>(
     for message in &handler.resulting_dap_messages {
         transport.send(message)?;
     }
+
     handler.reset_dap();
     *seq = handler.dap_client.seq;
     Ok(())

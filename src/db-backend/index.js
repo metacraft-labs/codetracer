@@ -8,14 +8,13 @@ console.log("Initialized the worker");
 let workerPromise =
   new Promise((resolve, reject) => {
     worker.onmessage = (e) => {
-      console.log(e);
       console.assert(e.data == "ready");
       if (e.data == "ready") {
-        resolve();
         worker.onmessage = (e) => {
           console.log("I JUST RECEIVED FROM THE WORKER");
           console.log(e);
         }
+        resolve();
       } else {
         reject();
       };
@@ -36,15 +35,11 @@ const req = {
   arguments: { clientName: 'WebClient', linesStartAt1: true },
 };
 
-console.log("Sending message", req);
-// const banica = () => worker.postMessage(req)
-//
-// setTimeout(banica, 5000);
-// banica()
 
 let blq = () => {
-  console.log(":(((((")
-  worker.postMessage("HAHAHA");
+  console.log(":(((((");
+  console.log("Sending message", req);
+  worker.postMessage(req);
 }
 
 (async () => { await workerPromise; blq() })()

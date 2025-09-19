@@ -110,9 +110,17 @@ pub mod value;
 // }
 //
 //
+//
+#[cfg(feature = "browser-transport")]
+#[wasm_bindgen]
+pub fn test() -> Result<(), JsValue> {
+    web_sys::console::log_1(&"wasm worker started".into());
+
+    Ok(())
+}
 
 #[cfg(feature = "browser-transport")]
-#[wasm_bindgen(start)]
+#[wasm_bindgen]
 pub fn wasm_start() -> Result<(), JsValue> {
     // Spawn the worker that runs the DAP server logic.
 
