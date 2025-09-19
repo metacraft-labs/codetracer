@@ -8,10 +8,9 @@
 
 dotnet build
 
-# TODO: eventually check if node already the correct nix one?
-#   and replace only if not?
-#   possible maybe with readelf -d binary | grep RUNPATH
-#   or comparing the binaries?
+# checking if node already the correct nix one, and replace only if not
+#   TODO: possible maybe to check if valid for nix with readelf -d binary | grep RUNPATH ? or other
+#   for now comparing the binaries?
 
 if ! diff "$NIX_NODE" bin/Debug/net8.0/.playwright/node/linux-x64/node ; then
   #   echo "different"
