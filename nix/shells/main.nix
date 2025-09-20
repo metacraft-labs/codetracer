@@ -55,6 +55,7 @@ mkShell {
 
       gnugrep
       gawk
+      wget
       coreutils
       killall
       ripgrep
