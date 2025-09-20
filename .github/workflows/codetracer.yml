@@ -432,7 +432,7 @@ jobs:
           git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
 
           (git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
-          git push upstream "$YEAR.$MONTH.$BUILD" || echo "Tag already exists"
+          git push origin "$YEAR.$MONTH.$BUILD" || echo "Tag already exists"
 
   create-release:
     runs-on: [ self-hosted, nixos ]
