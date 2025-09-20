@@ -419,10 +419,46 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh"
-  create-release:
+
+  push-tag:
     runs-on: [ self-hosted, nixos ]
     needs: [ dev-build, nix-build, appimage-build, dmg-build ]
-    if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && !github.event['codetracer-ci'] }}
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Nix
+        uses: metacraft-labs/nixos-modules/.github/install-nix@main
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+      - name: Create tag
+        if: ${{ github.ref == 'refs/heads/main' }}
+        id: tag
+        run: |
+          YEAR=$(bash -c 'grep "CodeTracerYear\*" src/ct/version.nim | sed "s/.*CodeTracerYear\* = //g"')
+          MONTH=$(bash -c "printf '%02d' \$(grep \"CodeTracerMonth\*\" src/ct/version.nim | sed \"s/.*CodeTracerMonth\* = //g\")")
+          BUILD=$(bash -c 'grep "CodeTracerBuild\*" src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g"')
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global init.defaultBranch main
+          
+          git remote add upstream https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
+          git fetch upstream
+          
+          (git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
+          git push upstream "$YEAR.$MONTH.$BUILD" || echo "Tag already exists"
+
+  create-release:
+    runs-on: [ self-hosted, nixos ]
+    needs: [ push-tag ]
+    if: ${{ ((startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || needs.push-tag.outputs.tag != '') && !github.event['codetracer-ci'] }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -447,19 +483,19 @@ jobs:
 
           Available downloads:
 
-          <a href="https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
+          <a href="https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
           <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
           <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
           <a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
           <a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
           <a href="https://github.com/metacraft-labs/metacraft-overlay"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/4/48/Gentoo_Linux_logo_matte.svg"></a>
           <a href="https://aur.archlinux.org/packages/codetracer"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/13/Arch_Linux_%22Crystal%22_icon.svg"></a>
-          <a href="https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a>
+          <a href="https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a>
 
           Key signatures:
 
-          [![Download macOS Signature](https://img.shields.io/badge/Download-macOS%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg.asc)
-          [![Download AppImage Signature](https://img.shields.io/badge/Download-AppImage%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage.asc)
+          [![Download macOS Signature](https://img.shields.io/badge/Download-macOS%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc)
+          [![Download AppImage Signature](https://img.shields.io/badge/Download-AppImage%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc)
           [![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)" >> release_changelog.md
 
       - name: Create Release
@@ -472,35 +508,4 @@ jobs:
             resources.tar.xz
             resources.tar.xz.asc
           generate_release_notes: false
-
-  push-tag:
-    runs-on: [ self-hosted, nixos ]
-    needs: [ dev-build, nix-build, appimage-build, dmg-build ]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install Nix
-        uses: metacraft-labs/nixos-modules/.github/install-nix@main
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-      - name: Create tag
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          YEAR=$(bash -c 'grep "CodeTracerYear\*" src/ct/version.nim | sed "s/.*CodeTracerYear\* = //g"')
-          MONTH=$(bash -c "printf '%02d' \$(grep \"CodeTracerMonth\*\" src/ct/version.nim | sed \"s/.*CodeTracerMonth\* = //g\")")
-          BUILD=$(bash -c 'grep "CodeTracerBuild\*" src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g"')
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global init.defaultBranch main
-          
-          git remote add upstream https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
-          git fetch upstream
-          
-          git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
-          git push upstream "$YEAR.$MONTH.$BUILD" || echo "Tag already exists"
+          tag_name: "${{ needs.push-tag.outputs.tag }}"
