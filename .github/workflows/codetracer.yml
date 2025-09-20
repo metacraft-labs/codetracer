@@ -210,16 +210,6 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
 
-      - name: Upload latest
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && !github.event['codetracer-ci'] }}
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc
-
-
   dmg-build:
     runs-on: macos-latest
     needs:
@@ -260,16 +250,6 @@ jobs:
           #   adding `--checksum-algorithm CRC32`
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg --checksum-algorithm CRC32
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
-
-      - name: Upload latest
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && !github.event['codetracer-ci'] }}
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
-        run: |
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
-
 
   dmg-lib-check:
     runs-on: macos-latest
@@ -469,10 +449,34 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
+      - name: "Import GPG key for signing commits"
+        id: import-gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.CODETRACER_AUR_GPG_PRIVATE_KEY_PASS }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
       - name: Create resource tarball
         run: |
           nix develop .#devShells.x86_64-linux.default --command bash -c "tar cfJ resources.tar.xz resources/"
           nix develop .#devShells.x86_64-linux.default --command bash -c "gpg --detach-sign resources.tar.xz"
+      - name: Upload latest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg"
+          wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc"
+          wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage"
+          wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc"
+
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc --checksum-algorithm CRC32
+
       - name: Get changelog text
         id: changelog
         run: |
