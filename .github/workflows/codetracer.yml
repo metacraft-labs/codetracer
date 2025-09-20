@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "*.*.*"
   pull_request:
 
 jobs:
@@ -466,15 +464,20 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage"
-          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc"
+          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-arm64.dmg"
+          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-arm64.dmg.asc"
+          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-amd64.AppImage"
+          nix develop .#devShells.x86_64-linux.default --command wget "https://downloads.codetracer.com/CodeTracer-main-amd64.AppImage.asc"
 
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage --checksum-algorithm CRC32
-          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-arm64.dmg.asc --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ needs.push-tag.outputs.tag }}-amd64.AppImage.asc --checksum-algorithm CRC32
+
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-arm64.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-arm64.dmg.asc --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage --checksum-algorithm CRC32
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer-main-amd64.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-latest-amd64.AppImage.asc --checksum-algorithm CRC32
 
       - name: Get changelog text
         id: changelog
