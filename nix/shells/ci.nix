@@ -12,5 +12,6 @@ in
       gnutar
       pkgs.gawk
       gnupg
+      wget
     ];
   }
