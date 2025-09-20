@@ -429,9 +429,8 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global init.defaultBranch main
           
-          git remote add upstream https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
-          git fetch upstream
-          
+          git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
+
           (git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" && echo "tag=$YEAR.$MONTH.$BUILD" >> $GITHUB_OUTPUT) || echo "Tag already exists"
           git push upstream "$YEAR.$MONTH.$BUILD" || echo "Tag already exists"
 
