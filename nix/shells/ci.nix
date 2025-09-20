@@ -12,6 +12,6 @@ in
       gnutar
       pkgs.gawk
       gnupg
-      wget
+      pkgs.wget
     ];
   }
