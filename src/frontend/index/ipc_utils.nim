@@ -76,7 +76,7 @@ proc ready* {.async.} =
   if backendManager.isOk:
     backendManagerProcess = backendManager.value
 
-  let backendManagerSocketPath = getTempDir() / "codetracer" / "backend-manager" / $backendManagerProcess.pid & ".sock"
+  let backendManagerSocketPath = codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".sock"
 
   await asyncSleep(100)
   while true:
