@@ -52,10 +52,6 @@
 [submodule "libs/nim-result"]
 	path = libs/nim-result
 	url = https://github.com/metacraft-labs/nim-result.git
-[submodule "libs/nim-confutils"]
-	path = libs/nim-confutils
-	url = https://github.com/alehander92/nim-confutils
-	branch = rest-of-args-improvements
 [submodule "libs/runtime_tracing"]
 	path = libs/runtime_tracing
 	url = https://github.com/metacraft-labs/runtime_tracing.git
@@ -81,3 +77,6 @@
 [submodule "libs/vscode-debugadapter-node"]
 	path = libs/vscode-debugadapter-node
 	url = https://github.com/microsoft/vscode-debugadapter-node.git
+[submodule "libs/nim-confutils"]
+	path = libs/nim-confutils
+	url = https://github.com/metacraft-labs/nim-confutils
