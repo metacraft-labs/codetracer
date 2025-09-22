@@ -88,8 +88,6 @@ when defined(ctInExtension):
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
 
   when defined(ctInCentralExtensionContext):
-    # let EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
-
     proc parseCTJson(raw: cstring): js =
       let rawString = $raw
       let idx = rawString.find(".AppImage installed")

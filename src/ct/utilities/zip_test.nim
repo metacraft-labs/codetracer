@@ -1,12 +1,13 @@
-import std/[unittest, os, strutils, streams]
-import ../utilities/zip
+import 
+  std/[unittest, os, strutils, streams]
+  ../utilities/zip
+  ../../common/paths
 
 suite "zipFolder / unzipIntoFolder":
   test "zip and unzip with progress":
-    let tmp = getTempDir()
-    let inputDir = tmp / "zip_test_input"
-    let outputDir = tmp / "zip_test_output"
-    let unzipDir = tmp / "zip_test_unzipped"
+    let inputDir = codetracerTmpPath / "zip_test_input"
+    let outputDir = codetracerTmpPath / "zip_test_output"
+    let unzipDir = codetracerTmpPath / "zip_test_unzipped"
     createDir(inputDir)
 
     let testFile = inputDir / "test.txt"

@@ -1,11 +1,12 @@
 import std/[httpclient, json, net, strutils, parseutils, times, sets, os]
-import ../../common/[types]
+import ../../common/[types, paths]
 
 const DEFAULT_NODE_URL* = "http://localhost:8547"
 
 # TODO: get name from config? Maybe use SQLite?
-let CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
-let EVM_TRACE_DIR_PATH* = getTempDir() / "codetracer"
+let 
+  CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
+  EVM_TRACE_DIR_PATH* = codetracerTmpPath
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode {.raises: [IOError, ValueError].} =
   # TODO: add random/uniqie stuff to id
