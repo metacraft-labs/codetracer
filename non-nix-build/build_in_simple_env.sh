@@ -43,7 +43,7 @@ bash build_backend_manager.sh
 cp "$ROOT_DIR"/resources/electron "$DIST_DIR"/bin/
 
 # The built-in macOS ruby binary is too old and has to be hacked around
-cp "$(brew --prefix ruby)/bin/ruby" "$DIST_DIR/bin/ruby"
+ln -s "$(brew --prefix ruby)"/bin/ruby "$DIST_DIR"/bin/ruby
 cp -Lr "${ROOT_DIR}"/libs/codetracer-ruby-recorder "$DIST_DIR"/
 cp "$(which ctags)" "$DIST_DIR"/bin/ctags
 cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/src/helpers.js
