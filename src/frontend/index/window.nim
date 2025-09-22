@@ -7,6 +7,17 @@ import
 var
   close = false
   backendManagerProcess*: NodeSubProcess = nil
+  backendManagerCleanedUp = false
+
+
+proc stopBackendManager* =
+  # Ensure we only attempt cleanup once and guard against nil.
+  if backendManagerCleanedUp:
+    return
+  backendManagerCleanedUp = true
+  if not backendManagerProcess.isNil:
+    backendManagerProcess.stopProcess()
+    backendManagerProcess = nil
 
 proc duration*(name: string) =
   infoPrint fmt"index: TIME for {name}: {now() - data.start}ms"
@@ -68,8 +79,7 @@ proc createMainWindow*: js =
 
 
 proc onCloseApp*(sender: js, response: js) {.async.} =
-  if not backendManagerProcess.isNil:
-    backendManagerProcess.stopProcess()
+  stopBackendManager()
   mainWindow.close()
 
 proc onRestart*(sender: js, response: js) {.async.} =
