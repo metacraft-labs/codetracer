@@ -7,6 +7,7 @@ type
     Default
     ArbExplorer = "arb.explorer"
 
+# returns true only if it should restart
 proc launchElectron*(
     args: seq[string] = @[],
     trace: Trace = nil,

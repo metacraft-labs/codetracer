@@ -6,6 +6,7 @@ import std/[osproc, strformat, sequtils],
   record
 
 # run a recorded trace based on args, a saving project for it in the process
+# returns true only if it should restart
 proc runRecordedTrace*(
   trace: Trace,
   test: bool,
@@ -51,6 +52,7 @@ proc runWithRestart(
       let shouldRestart =
         if not afterRestart:
           # for now assume not a multitrace/no diff
+          # .. returns true if it should restart
           runRecordedTrace(recordedTrace, test, structuredDiffJson="", recordCore=recordCore)
         else:
           let process = startProcess(codetracerExe, args = @["replay", fmt"--id={recordedTrace.id}"], options = {poParentStreams})

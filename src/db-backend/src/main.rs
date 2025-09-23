@@ -11,7 +11,7 @@
 // specific allows
 // #![deny(dead_code)]
 use chrono::Local;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use log::{error, info};
 use std::fs::File;
@@ -46,12 +46,24 @@ mod value;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Path to the Unix domain socket for DAP communication.
-    /// If omitted, a path based on the process id will be used.
-    socket_path: Option<std::path::PathBuf>,
-    /// Use stdio transport for DAP communication instead of a Unix socket.
-    #[arg(long)]
-    stdio: bool,
+    #[command(subcommand)]
+    cmd: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    DapServer {
+        /// Path to the Unix domain socket for DAP communication.
+        /// If omitted, a path based on the process id will be used.
+        socket_path: Option<std::path::PathBuf>,
+        /// Use stdio transport for DAP communication instead of a Unix socket.
+        #[arg(long)]
+        stdio: bool,
+    },
+    IndexDiff {
+        structured_diff_path: std::path::PathBuf,
+        output_folder: std::path::PathBuf,
+    }
 }
 
 // Already panicking so the unwraps won't change anything
@@ -100,22 +112,31 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("pid {:?}", std::process::id());
     // let handle =
-    if cli.stdio {
-        // thread::spawn(move || {
-        let _ = db_backend::dap_server::run_stdio();
-        // })
-    } else {
-        let socket_path = if let Some(p) = cli.socket_path {
-            p
-        } else {
-            let pid = std::process::id() as usize;
-            db_backend::dap_server::socket_path_for(pid)
-        };
-        // thread::spawn(move || {
-        let _ = db_backend::dap_server::run(&socket_path);
-        // })
-    };
 
+    match cli.cmd {
+        DapServer { socket_path, stdio } => {
+            if stdio {
+                // thread::spawn(move || {
+                let _ = db_backend::dap_server::run_stdio();
+                // })
+            } else {
+                let socket_path = if let Some(p) = socket_path {
+                    p
+                } else {
+                    let pid = std::process::id() as usize;
+                    db_backend::dap_server::socket_path_for(pid)
+                };
+                // thread::spawn(move || {
+                let _ = db_backend::dap_server::run(&socket_path);
+                // })
+            };
+        }
+        IndexDiff { structured_diff_path, output_folder } =>{
+            let raw = fs::read(structured_diff_path)?;
+            let structured_diff = serde_json::from_value::<Diff>(raw)?;
+            index_diff(structured_diff, output_folder.join("diff_index.json"))?;
+        }
+    }
     // match handle.join() {
     //     Ok(_) => Ok(()),
     //     Err(err) => Err(format!("dap server thread panicked {err:?}").into()),

@@ -29,6 +29,7 @@ type
     host,
     `import`,
     arb,
+    `index-diff`,
 
     # `g++`,
     # gcc,
@@ -51,6 +52,7 @@ type
     # `import-db-trace`,
     # summary,
     # `report-bug`,
+
     `trace-metadata`, # TODO .hidden?
     start_backend,
 
@@ -386,6 +388,12 @@ type
         discard
       of listRecentTx:
         discard
+    of `index-diff`:
+      indexDiffMultitracePath* {.
+        argument
+        desc: "Path to a multitrace: for now indexing only a single(the first) trace"
+      .}: string
+
     # of `import`:
     #   importTraceZipPath* {.
     #     argument
