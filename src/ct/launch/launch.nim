@@ -166,6 +166,8 @@ proc runInitial*(conf: CodetracerConf) =
         let transactions = getTrackableTransactions()
         let res = Json.encode(transactions)
         echo res
+    of StartupCommand.`index-diff`:
+      indexDiff(conf.indexDiffMultitracePath)
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,

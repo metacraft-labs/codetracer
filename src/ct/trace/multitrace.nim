@@ -3,6 +3,7 @@ import json_serialization, result
 import .. / .. / common / trace_index
 import .. / .. / common / types
 import .. / utilities / [git, zip]
+import replay
 
 proc findDiff(diffSpecification: string): string =
   if diffSpecification.len > 0:
@@ -177,4 +178,3 @@ proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPat
   let traceFolders = traceIdList.mapIt(trace_index.find(it, test=false).outputFolder)
   makeMultitraceArchive(traceFolders, rawDiff, structuredDiff, outputPath)
   echo fmt"OK: created multitrace in {outputPath}"
-
