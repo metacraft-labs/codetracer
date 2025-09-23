@@ -788,6 +788,8 @@ type
     shouldLoadFlow*: bool
     lastScrollFireTime*: int64
     diffViewZones*: JsAssoc[int, MultilineZone]
+    diffAddedLines*: seq[int]
+    diffEditors*: JsAssoc[int, MonacoEditor]
 
   # LowLevelComponent* = ref object of Component
     # levels*:        array[LowLevelView, LLViewComponent]

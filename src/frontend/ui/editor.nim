@@ -470,9 +470,9 @@ proc diffStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
 proc applyEventualStylesLines(self: EditorViewComponent) =
   var colorLineList = self.colorLines()
   var conditionFlowLines = self.conditionStyleLines()
-  var diffLineList = self.diffStyleLines()
+  # var diffLineList = self.diffStyleLines()
   var flowLineList = self.flowStyleLines(conditionFlowLines)
-  let lines = concat(colorLineList, concat(flowLineList, concat(conditionFlowLines, diffLineList)))
+  let lines = concat(colorLineList, concat(flowLineList, conditionFlowLines))
 
   self.styleLines(self.monacoEditor, lines)
 
@@ -1141,21 +1141,23 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   self.api.emit(CtLoadFlow, self.location)
   cdebug "start load-flow", taskId
 
-proc drawDiffViewZones(self: EditorViewComponent, source: string, id: int, lineNumber: int): Node =
+proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, lineNumber: int): Node =
   var zoneDom = document.createElement("div")
   zoneDom.id = fmt"diff-view-zone-{id}"
   zoneDom.class = "diff-view-zone"
   zoneDom.style.display = "flex"
+  zoneDom.style.fontSize = $self.data.ui.fontSize & "px"
   var editorDom = document.createElement("div")
   var selector = fmt"editorComponent-{id}"
   editorDom.id = selector
-  editorDom.style.width = "100%"
+  editorDom.style.width = "calc(100% + 9.2ch)"
+  editorDom.style.transform = "translate(-9.2ch, 0ch)"
   editorDom.style.height = "100%"
   zoneDom.appendChild(editorDom)
   var lang = fromPath(self.data.services.debugger.location.path)
   let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
   discard setTimeout(proc () =
-    discard monaco.editor.create(
+    self.diffEditors[lineNumber] = monaco.editor.create(
       jq("#" & editorDom.id),
       MonacoEditorOptions(
         value: source,
@@ -1185,7 +1187,7 @@ proc clearDiffViewZones(self: EditorViewComponent) =
     self.monacoEditor.changeViewZones do (view: js):
       view.removeZone(self.diffViewZones[line].zoneId)
 
-proc addDiffView(self: EditorViewComponent, source: string, removedLinesNumber: int, startLineNumber: int, firstDeletedLineNumber: int) =
+proc addDiffView(self: EditorViewComponent, source: cstring, removedLinesNumber: int, startLineNumber: int, firstDeletedLineNumber: int) =
   var offset = 1 # Offset for proper line placement and number
   var newZoneDom = self.drawDiffViewZones(source, startLineNumber, firstDeletedLineNumber)
   let viewZone = js{
@@ -1210,16 +1212,18 @@ proc makeDiffViewZones(self: EditorViewComponent) =
         var removedLinesNumber = NO_LINE # Number for lines to be included
         var firstDeletedLineNumber = NO_LINE
         var startLineNumber = chunk.currentFrom # initial start line for the viewZones
-        var source = "" # Source code
+        var source = "".cstring # Source code
         for diffLine in chunk.lines:
           case diffLine.kind:
           of DiffLineKind.Deleted:
             removedLinesNumber.inc()
-            source = source & diffLine.text & "\n"
+            source = source & diffLine.text.toCString() & "\n".cstring
             if firstDeletedLineNumber == NO_LINE:
               firstDeletedLineNumber = diffLine.previousLineNumber
             isInDeleteChunk = true
           else:
+            if diffLine.kind == DiffLineKind.Added and diffLine.currentLineNumber notin self.diffAddedLines:
+              self.diffAddedLines.add(diffLine.currentLineNumber)
             if removedLinesNumber != NO_LINE:
               self.addDiffView(source, removedLinesNumber, startLineNumber, firstDeletedLineNumber)
               source = ""

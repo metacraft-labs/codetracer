@@ -1318,6 +1318,12 @@ proc zoomInEditors*(data: Data) =
     for path, editor in data.ui.editors:
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
+      for line, diffEditor in editor.diffEditors:
+        let options = cast[MonacoEditorOptions](diffEditor.getOptions())
+        options.fontSize = j($(data.ui.fontSize)) & j"px"
+        diffEditor.updateOptions(options)
+      for line, zone in editor.diffViewZones:
+        zone.dom.style.fontSize = j($(data.ui.fontSize)) & j"px"
     clog "editor: zoom in!"
 
 proc zoomOutEditors*(data: Data) =
@@ -1334,6 +1340,12 @@ proc zoomOutEditors*(data: Data) =
     for path, editor in data.ui.editors:
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
+      for line, diffEditor in editor.diffEditors:
+        let options = cast[MonacoEditorOptions](diffEditor.getOptions())
+        options.fontSize = j($(data.ui.fontSize)) & j"px"
+        diffEditor.updateOptions(options)
+      for line, zone in editor.diffViewZones:
+        zone.dom.style.fontSize = j($(data.ui.fontSize)) & j"px"
     clog "editor: zoom out!"
 
 proc zoomFlowLoopIn*(data: Data) =

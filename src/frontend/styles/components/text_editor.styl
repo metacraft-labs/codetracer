@@ -19,8 +19,24 @@
   width: 100% !important
 
 .diff-view-zone
-  .view-lines
-    background-color: red
+  .mtk1
+    color: BREAKPOINT_COLOR !important
+
+  .line-numbers
+    border-right: 1px solid BREAKPOINT_COLOR !important
+
+  .diff-deleted-gutter
+    color: BREAKPOINT_COLOR
+
+  .current-line
+    background-color: transparent !important
+
+.diff-added-gutter
+  color: STATUS_SUCCESS
+
+.line-numbers
+  &:has(.diff-added-gutter)
+    border-right: 1px solid STATUS_SUCCESS !important
 
 .monaco-editor
   .slider
