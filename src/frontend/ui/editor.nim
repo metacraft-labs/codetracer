@@ -1439,9 +1439,11 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         self.loadFlow(tabInfo.location)
         self.shouldLoadFlow = false
 
-      if self.data.startOptions.diff.files.len() >= 1:
-        self.clearDiffViewZones()
-        self.makeDiffViewZones()
+      if self.data.startOptions.diff.files.len() > 0 and
+        self.diffViewZones.len() == 0 and
+        self.diffAddedLines.len() == 0:
+          self.clearDiffViewZones()
+          self.makeDiffViewZones()
 
       self.applyEventualStylesLines()
 
