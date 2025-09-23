@@ -396,6 +396,7 @@ proc makeEditorViewComponent*(
     service: data.services.editor,
     viewZones: JsAssoc[int, int]{},
     diffViewZones: JsAssoc[int, MultilineZone]{},
+    diffEditors: JsAssoc[int, MonacoEditor]{},
     lastScrollFireTime: now())
   if not isExpansion:
     result.topLevelEditor = result

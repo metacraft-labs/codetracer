@@ -562,9 +562,9 @@ proc refreshLine(self: TraceComponent) =
     self.viewZone.heightInLines = self.viewZone.heightInLines
     view.layoutZone(self.zoneId)
 
-proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isWidget: bool = false, lineNumber: int = NO_LINE): cstring =
+proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
   let realLine =
-    if isWidget:
+    if isDeleteChunk:
       -1
     elif not self.isExpansion:
       line
@@ -599,10 +599,12 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isWi
     else:
       breakpointHtml = j"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
 
-  let trueLineNumber = if not isWidget: toCString(realLine) else: toCString(line + lineNumber - 1)
+  let trueLineNumber = if not isDeleteChunk: toCString(realLine) else: toCString(line + lineNumber - 1)
   let lineHtml = j"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & j"</div>"
+  let diffHtml = j"<div class='diff-line' onmousedown='event.stopPropagation()'>" & j"</div>"
+  let klass = if isDeleteChunk: j"diff-deleted-gutter" elif line in self.diffAddedLines: j"diff-added-gutter" else: j""
 
-  result = j"<div class='gutter' data-line=" & trueLineNumber & j" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & tracepointHtml & breakpointHtml & j"</div>"
+  result = j"<div class='gutter " & klass & "' data-line=" & trueLineNumber & j" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & diffHtml & tracepointHtml & breakpointHtml & j"</div>"
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor
