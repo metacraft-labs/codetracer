@@ -7,6 +7,9 @@ using UiTests.PageObjects.Panes.EventLog;
 using UiTests.PageObjects.Panes.VariableState;
 using UiTests.PageObjects.Panes.CallTrace;
 using UiTests.PageObjects.Panes.Editor;
+using UiTests.PageObjects.Panes.Filesystem;
+using UiTests.PageObjects.Panes.Terminal;
+using UiTests.PageObjects.Panes.Scratchpad;
 using UiTests.Utils;
 
 namespace UiTests.PageObjects;
@@ -19,6 +22,10 @@ public class LayoutPage : BasePage
     private List<EventLogPane> _eventLogTabs = new();
     private List<VariableStatePane> _programStateTabs = new();
     private List<EditorPane> _editorTabs = new();
+    private List<CallTracePane> _callTraceTabs = new();
+    private List<FilesystemPane> _filesystemTabs = new();
+    private List<TerminalOutputPane> _terminalTabs = new();
+    private List<ScratchpadPane> _scratchpadTabs = new();
 
     public LayoutPage(IPage page) : base(page) { }
 
@@ -38,12 +45,22 @@ public class LayoutPage : BasePage
         RetryHelpers.RetryAsync(async () =>
             await Page.Locator("div[id^='eventLogComponent-']").CountAsync() > 0);
 
+    public Task WaitForTerminalLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='terminalComponent-']").CountAsync() > 0);
+
+    public Task WaitForScratchpadLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='scratchpadComponent-']").CountAsync() > 0);
+
     public Task WaitForEditorLoadedAsync() =>
         RetryHelpers.RetryAsync(async () =>
             await Page.Locator("div[id^='editorComponent-']").CountAsync() > 0);
 
-    public Task WaitForAllComponentsLoadedAsync()
+    public async Task WaitForAllComponentsLoadedAsync()
     {
+        // TODO: improve wait
+        await Task.Delay(5000);
         var waits = new[]
         {
             // WaitForFilesystemLoadedAsync(),
@@ -52,7 +69,7 @@ public class LayoutPage : BasePage
             // WaitForEventLogLoadedAsync(),
             WaitForEditorLoadedAsync()
         };
-        return Task.WhenAll(waits);
+        await Task.WhenAll(waits);
     }
 
     #region Debug Buttons
@@ -77,6 +94,28 @@ public class LayoutPage : BasePage
         return _eventLogTabs;
     }
 
+    public async Task<IReadOnlyList<CallTracePane>> CallTraceTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _callTraceTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='calltraceComponent-']").AllAsync();
+            _callTraceTabs = roots.Select(r => new CallTracePane(Page, r, "PROGRAM CALL TRACE")).ToList();
+        }
+
+        return _callTraceTabs;
+    }
+
+    public async Task<IReadOnlyList<FilesystemPane>> FilesystemTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _filesystemTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='filesystemComponent-']").AllAsync();
+            _filesystemTabs = roots.Select(r => new FilesystemPane(Page, r, "FILE EXPLORER")).ToList();
+        }
+
+        return _filesystemTabs;
+    }
+
     public async Task<IReadOnlyList<VariableStatePane>> ProgramStateTabsAsync(bool forceReload = false)
     {
         if (forceReload || _programStateTabs.Count == 0)
@@ -85,6 +124,28 @@ public class LayoutPage : BasePage
             _programStateTabs = roots.Select(r => new VariableStatePane(Page, r, "STATE")).ToList();
         }
         return _programStateTabs;
+    }
+
+    public async Task<IReadOnlyList<TerminalOutputPane>> TerminalTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _terminalTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='terminalComponent-']").AllAsync();
+            _terminalTabs = roots.Select(r => new TerminalOutputPane(Page, r, "TERMINAL OUTPUT")).ToList();
+        }
+
+        return _terminalTabs;
+    }
+
+    public async Task<IReadOnlyList<ScratchpadPane>> ScratchpadTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _scratchpadTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='scratchpadComponent-']").AllAsync();
+            _scratchpadTabs = roots.Select(r => new ScratchpadPane(Page, r, "SCRATCHPAD")).ToList();
+        }
+
+        return _scratchpadTabs;
     }
 
     public async Task<IReadOnlyList<EditorPane>> EditorTabsAsync(bool forceReload = false)
