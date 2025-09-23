@@ -1,14 +1,14 @@
-import std / [options, os, strutils, strformat ],
+import std / [options, os, osproc, strutils, strformat ],
   ../utilities/[ env, zip ],
   ../cli/[ interactive_replay ],
   ../trace / storage_and_import,
-  ../../common/[ types, common_trace_index, lang ],
+  ../../common/[ types, common_trace_index, lang, paths, config ],
   ../codetracerconf,
   shell,
   run
 
 
-proc replayMultitrace*(archivePath: string): bool =
+proc replayMultitrace*(archivePath: string, indexDiff: bool = false): bool =
   # TODO: a more unique path? or is this enough
   let outputFolder = getTempDir() / "codetracer" / archivePath.extractFilename.changeFileExt("")
   unzipIntoFolder(archivePath, outputFolder)
@@ -39,12 +39,41 @@ proc replayMultitrace*(archivePath: string): bool =
     # in the future
     structuredDiffJson = ""
 
-  # trace imported, diff copied: archive still accessible
-  # remove only the temp extracted folder
-  removeDir(outputFolder)
+  if indexDiff:
+    let backend = if trace.lang.isDbBased:
+        dbBackendExe
+      else:
+        let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
+        if ctConfig.rrBackend.enabled:
+          ctConfig.rrBackend.path
+        else:
+          echo fmt"ERROR: rr backend not configured, but required for this trace lang: {trace.lang}"
+          quit(1)
 
-  let recordCore = envLoadRecordCore()
-  return runRecordedTrace(trace, test=false, structuredDiffJson=structuredDiffJson, recordCore=recordCore)
+    let structuredDiffJsonPath = outputFolder / "diff.json"
+    let process = startProcess(backend, args = @["index-diff", structuredDiffJsonPath, outputFolder], options={poParentStreams})
+    let exitCode = waitForExit(process)
+
+    if exitCode == 0:
+      # replace with an archive with the indexed data
+      removeFile(archivePath)
+      zipFolder(outputFolder, archivePath)
+
+    # if ok: trace patched, diff indexed: archive still accessible
+    # remove only the temp extracted folder
+    removeDir(outputFolder)
+    return false # this means it shouldn't restart: for now restart maybe supported in dev mode only for replays
+  else:
+    # trace imported, diff copied: archive still accessible
+    # remove only the temp extracted folder
+    removeDir(outputFolder)
+
+    let recordCore = envLoadRecordCore()
+
+    return runRecordedTrace(trace, test=false, structuredDiffJson=structuredDiffJson, recordCore=recordCore)
+
+proc indexDiff*(multitracePath: string) =
+  discard replayMultitrace(multitracePath, indexDiff=true)
 
 proc replay*(
   patternArg: Option[string],
