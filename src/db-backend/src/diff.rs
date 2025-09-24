@@ -1,9 +1,15 @@
 use std::path::PathBuf;
 use std::error::Error;
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_repr::*;
 use num_derive::FromPrimitive;
+use runtime_tracing::FunctionId;
+use log::info;
+
+use crate::db::Db;
+use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Diff {
@@ -57,8 +63,73 @@ pub struct DiffLine {
     pub current_line_number: i64,
 }
 
+pub fn load_and_postprocess_trace(trace_folder: &PathBuf) -> Result<Db, Box<dyn Error>> {
+    let metadata_path = trace_folder.join("trace_metadata.json");
+    let mut trace_path = trace_folder.join("trace.json");
+    let mut trace_file_format = runtime_tracing::TraceEventsFileFormat::Json;
+    if !trace_path.exists() {
+        trace_path = trace_folder.join("trace.bin");
+        trace_file_format = runtime_tracing::TraceEventsFileFormat::Binary;
+    }
+    let metadata_path = trace_folder.join("trace_metadata.json");
+    
+    let meta = load_trace_metadata(&metadata_path)?;
+    let trace = load_trace_data(&trace_path, trace_file_format)?;
+    let mut db = Db::new(&meta.workdir);
+    let mut processor = TraceProcessor::new(&mut db);
+    processor.postprocess(&trace)?;
 
-pub fn index_diff(diff: Diff, output_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    // todo!();
-    unimplemented!();
+    Ok(db)
+}
+
+fn index_function_flow(db: &Db, function_id: FunctionId) -> Result<(), Box<dyn Error>> {
+    // recursion?
+    todo!("index function flow for {function_id:?}");
+}
+
+pub fn index_diff(diff: Diff, trace_folder: &PathBuf, multitrace_folder: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let db = load_and_postprocess_trace(trace_folder)?;
+
+    // breakpoint on each diff line or at least track it for db-backend
+    // collect flow data
+    // .. maybe for db-backend; easier for now to collect for all function calls there!
+
+    // either rewrite part of flow
+    // or add a new impl of a preloader
+    // or somehow construct for now a simpler type
+    // or try to fix nestedness and send it
+
+    // or
+    // load individual flows for each call and send a new kind of object
+    // containing `functions: Vec<FunctionGlobalFlow>` and 
+    // Vec<FlowUpdate> ? with special handling
+    // or a function flow with loop for each repetition still (but maybe then assumptions for call key etc..? maybe easy to parametrize call keys)
+
+    let mut diff_lines: HashSet<(PathBuf, i64)> = HashSet::new();
+    for file in diff.files {
+        for chunk in file.chunks {
+            for line in chunk.lines {
+                // (alexander): TODO: think more: i think `Added`` is most important, otherwise we might get
+                //   flow for functions without actual added lines if they accidentally have non-changed lines in the diff chunks
+                //
+                // for now we also add `NonChanged` , because
+                // however sometimes there can be a changed line without a step in the trace, but with steps around it from the same function..
+                // in this case non-changed lines can help, but maybe it's better to somehow detect near steps, or
+                // to ignore such functions (?)
+                if line.kind == DiffLineKind::Added || line.kind == DiffLineKind::NonChanged {
+                    diff_lines.insert((file.current_path.clone(), line.current_line_number));
+                }
+            }
+        }
+    }    
+    
+    info!("diff_lines {diff_lines:?}");
+    for step in db.step_from(runtime_tracing::StepId(0), true) {
+        info!("check {:?}", (PathBuf::from(db.paths[step.path_id].clone()), step.line.0));
+        if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
+            index_function_flow(&db, db.calls[step.call_key].function_id)?;
+        }
+    }
+
+    todo!("store diff index");
 }
