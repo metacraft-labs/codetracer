@@ -133,7 +133,8 @@ method render*(self: FilesystemComponent): VNode =
           not self.service.filesystem.isNil:
             try:
               self.service.filesystem.changeIcons()
-              self.service.mapDiff(self.service.filesystem)
+              if not self.data.startOptions.diff.isNil:
+                self.service.mapDiff(self.service.filesystem)
               jqFind(".filesystem").jstree(js{
                   core: js{
                     check_callback: true,
@@ -192,7 +193,7 @@ method render*(self: FilesystemComponent): VNode =
       onclick = proc(ev: Event, tg: VNode) =
         ev.currentTarget.focus()
     )
-    if self.data.startOptions.diff.files.len() > 0:
+    if not self.data.startOptions.diff.isNil:
       tdiv(class = "diff-files-list"):
         for fileDiff in self.data.startOptions.diff.files:
           tdiv(
