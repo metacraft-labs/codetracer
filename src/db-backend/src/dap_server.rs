@@ -2,12 +2,12 @@ use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Respons
 use crate::dap_types;
 use crate::db::Db;
 use crate::handler::Handler;
+use crate::paths::CODETRACER_PATHS;
 use crate::task::{
     gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, FunctionLocation,
     LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
     StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
 };
-use crate::paths::CODETRACER_PATHS;
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info, warn};
 use serde_json::json;
@@ -22,7 +22,11 @@ use std::time::Instant;
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
 pub fn socket_path_for(pid: usize) -> PathBuf {
-    CODETRACER_PATHS.lock().unwrap().tmp_path.join(format!("{DAP_SOCKET_NAME}_{}", pid))
+    CODETRACER_PATHS
+        .lock()
+        .unwrap()
+        .tmp_path
+        .join(format!("{DAP_SOCKET_NAME}_{}", pid))
 }
 
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {

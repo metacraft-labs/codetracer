@@ -11,6 +11,7 @@ pub mod dap_server;
 pub mod dap_types;
 pub mod db;
 pub mod distinct_vec;
+pub mod diff;
 pub mod event_db;
 pub mod expr_loader;
 pub mod flow_preloader;

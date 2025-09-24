@@ -17,7 +17,6 @@ use schemars::JsonSchema;
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
 pub const EVENT_KINDS_COUNT: usize = 14;
 
-
 /// args for `ct/load-locals`
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +33,6 @@ pub struct CtLoadLocalsResponseBody {
     pub locals: Vec<Variable>,
 }
 
-
 /// args for `ct/update-table`: actually Datatables.net produces those most of this: `TableArgs`
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -45,14 +43,12 @@ pub struct UpdateTableArgs {
     pub trace_id: usize,
 }
 
-
 /// response for `ct/updated-table`: wrapping mostly Datatables.net data (in `TableData` in `table_update.data`)
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CtUpdatedTableResponseBody {
     pub table_update: TableUpdate,
 }
-
 
 /// documentation
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
