@@ -28,6 +28,7 @@ mod dap_server;
 mod dap_types;
 mod db;
 mod distinct_vec;
+mod diff;
 mod event_db;
 mod expr_loader;
 mod flow_preloader;
@@ -111,10 +112,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
-    // let handle =
 
     match cli.cmd {
-        DapServer { socket_path, stdio } => {
+        Commands::DapServer { socket_path, stdio } => {
             if stdio {
                 // thread::spawn(move || {
                 let _ = db_backend::dap_server::run_stdio();
@@ -131,10 +131,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // })
             };
         }
-        IndexDiff { structured_diff_path, output_folder } =>{
-            let raw = fs::read(structured_diff_path)?;
-            let structured_diff = serde_json::from_value::<Diff>(raw)?;
-            index_diff(structured_diff, output_folder.join("diff_index.json"))?;
+        Commands::IndexDiff { structured_diff_path, output_folder } =>{
+            let raw = std::fs::read_to_string(structured_diff_path)?;
+            info!("raw {raw:?}");
+            let structured_diff = serde_json::from_str::<diff::Diff>(&raw)?;
+            diff::index_diff(structured_diff, &output_folder.join("diff_index.json"))?;
         }
     }
     // match handle.join() {
