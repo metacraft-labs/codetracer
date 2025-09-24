@@ -28,6 +28,7 @@ fn with_line_numbers(lines: &[String]) -> Vec<String> {
 }
 
 mod dap_client;
+mod paths;
 use dap_client::DapClient;
 
 #[derive(Debug)]

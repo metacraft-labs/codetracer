@@ -6,6 +6,9 @@ use std::os::unix::net::UnixStream;
 use std::process::{Child, Command};
 use tokio::sync::mpsc;
 
+//mod paths;
+use crate::paths::CODETRACER_PATHS;
+
 pub struct DapClient {
     child: Child,
     reader: BufReader<UnixStream>,
@@ -16,7 +19,12 @@ pub struct DapClient {
 impl DapClient {
     pub fn start(server_bin: &str) -> Result<Self, Box<dyn Error>> {
         let pid = std::process::id();
-        let socket_path = format!("/tmp/ct_dap_socket_{pid}");
+        let tmp_path =
+        {
+            CODETRACER_PATHS.lock()?.tmp_path.clone()
+        };
+        let tmp_path_str = tmp_path.display();
+        let socket_path = format!("{tmp_path_str}/ct_dap_socket_{pid}");
         let _ = std::fs::remove_file(&socket_path);
 
         let child = if server_bin.ends_with("dlv") {
