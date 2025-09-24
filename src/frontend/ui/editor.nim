@@ -1146,12 +1146,15 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
   zoneDom.id = fmt"diff-view-zone-{id}"
   zoneDom.class = "diff-view-zone"
   zoneDom.style.display = "flex"
-  zoneDom.style.fontSize = $self.data.ui.fontSize & "px"
+  zoneDom.style.fontSize = j($self.data.ui.fontSize) & j"px"
   var editorDom = document.createElement("div")
   var selector = fmt"editorComponent-{id}"
   editorDom.id = selector
-  editorDom.style.width = "calc(100% + 9.2ch)"
-  editorDom.style.transform = "translate(-9.2ch, 0ch)"
+  zoneDom.style.width = "calc(100% + 9ch)"
+  zoneDom.style.height = "100%"
+  zoneDom.style.transform = "translate(-9ch, 0rem)"
+  # editorDom.style.fontSize = $(self.data.ui.fontSize) & "px"
+  editorDom.style.width = "100%"
   editorDom.style.height = "100%"
   zoneDom.appendChild(editorDom)
   var lang = fromPath(self.data.services.debugger.location.path)
@@ -1439,7 +1442,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         self.loadFlow(tabInfo.location)
         self.shouldLoadFlow = false
 
-      if self.data.startOptions.diff.files.len() > 0 and
+      if not self.data.startOptions.diff.isNil and
         self.diffViewZones.len() == 0 and
         self.diffAddedLines.len() == 0:
           self.clearDiffViewZones()
