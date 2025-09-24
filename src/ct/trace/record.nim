@@ -32,7 +32,7 @@ proc recordInternal(exe: string, args: seq[string], configPath: string): Trace =
 proc record*(lang: string,
              outputFolder: string,
              exportFile: string,
-             stylusTrace: string,
+             stylusTxHash: string,
              address: string,
              socketPath: string,
              program: string,
@@ -48,9 +48,9 @@ proc record*(lang: string,
   if exportFile != "":
     pargs.add("-e")
     pargs.add(exportFile)
-  if stylusTrace != "":
-    pargs.add("--stylus-trace")
-    pargs.add(stylusTrace)
+  if stylusTxHash != "":
+    pargs.add("--stylus-tx")
+    pargs.add(stylusTxHash)
   if address != "":
     pargs.add("--address")
     pargs.add(address)

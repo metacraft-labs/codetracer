@@ -20,3 +20,5 @@
   and hook it to `app.on('before-quit')`, `app.on('window-all-closed')`, and
   Node process signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to ensure the process
   is always terminated when the app exits.
+- Stylus traces now pass transaction hashes via `--stylus-tx`; the backend
+  injects the default RPC URL `http://localhost:8547`.

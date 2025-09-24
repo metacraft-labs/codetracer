@@ -142,7 +142,7 @@ proc runInitial*(conf: CodetracerConf) =
     of StartupCommand.record:
       discard record(
         conf.recordLang, conf.recordOutputFolder,
-        conf.recordExportFile, conf.recordStylusTrace,
+        conf.recordExportFile, conf.recordStylusTx,
         conf.recordAddress, conf.recordSocket,
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:

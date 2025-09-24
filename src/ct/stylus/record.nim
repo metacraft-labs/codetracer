@@ -1,42 +1,7 @@
-import std/[ os, osproc, streams ]
+import std/[ os ]
 import arb_node_utils
 import ../../common/[ trace_index, types ]
 import ../trace/record
-
-# NOTE: remove CatchableError if using custom exception
-proc getEvmTrace(hash: string): string {.raises: [OSError, IOError, CatchableError, Exception].} =
-  # TODO: get endpoint and private key and other params from args
-  let process = startProcess(
-    "cargo",
-    args=["stylus", "trace", "--use-native-tracer", "--tx", hash],
-    options={poEchoCmd, poUsePath, poStdErrToStdOut}
-  )
-  defer: process.close()
-
-  let outStream = process.outputStream
-
-  var output = ""
-
-  while process.running:
-    output.add(outStream.readAll())
-
-  let exitCode = process.peekExitCode()
-
-  if exitCode != 0:
-    echo "Can't get EVM trace! Output:"
-    echo output
-    # TODO: maybe specific exception
-    raise newException(CatchableError, "Can't get EVM trace!")
-
-  # TODO: maybe validate output?
-
-  let outputDir = EVM_TRACE_DIR_PATH / hash
-  let outputFile = outputDir / "evm_trace.json"
-
-  createDir(outputDir)
-  writeFile(outputFile, output)
-
-  return outputFile
 
 proc getContractWasmPath(deploymentAddr: string): string {.raises: [].} =
   return CONTRACT_WASM_PATH / deploymentAddr / "debug.wasm"
@@ -44,11 +9,10 @@ proc getContractWasmPath(deploymentAddr: string): string {.raises: [].} =
 # NOTE: remove CatchableError if using custom exception
 proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError, CatchableError, Exception].} =
   let wasm = getContractWasmPath(getTransactionContractAddress(hash))
-  let evmTrace = getEvmTrace(hash)
 
-  echo "WASM with debug info: ", wasm, " EVM trace: ", evmTrace
+  echo "WASM with debug info: ", wasm, " tx hash: ", hash
 
-  result = record("", ".", "", evmTrace, "", "", wasm, @[])
+  result = record("", ".", "", hash, "", "", wasm, @[])
   updateField(result.id, "program", hash, false)
   result.program = hash
 

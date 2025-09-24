@@ -6,7 +6,8 @@ import std/[ os, osproc, strutils, strformat, sequtils, json ],
   cli/[ logging, help ],
   globals,
   trace/storage_and_import,
-  trace/shell
+  trace/shell,
+  stylus/arb_node_utils
 
 
 proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
@@ -58,7 +59,8 @@ proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
 proc recordDb(
     lang: Lang, vmExe: string,
     program: string, args: seq[string],
-    backend: string, traceFolder: string, stylusTrace: string,
+    backend: string, traceFolder: string,
+    stylusTxHash: string, stylusRpcUrl: string,
     traceId: int): Trace =
 
   createDir(traceFolder)
@@ -80,9 +82,12 @@ proc recordDb(
       #if program.endsWith(".wasm"):
       #  # wazero
       var vmArgs = @["run"]
-      if stylusTrace.len > 0:
+      if stylusTxHash.len > 0:
         vmArgs.add("-stylus")
-        vmArgs.add(stylusTrace)
+        vmArgs.add(stylusTxHash)
+        if stylusRpcUrl.len > 0:
+          vmArgs.add("-stylus-rpc")
+          vmArgs.add(stylusRpcUrl)
       vmArgs = vmArgs.concat(@["--trace-dir", traceFolder, program])
       vmArgs
     of LangNoir:
@@ -153,7 +158,7 @@ proc recordDb(
 # record a program run
 proc record(
     cmd: string, args: seq[string], compileCommand: string,
-    langArg: Lang, backend: string, stylusTrace: string,
+    langArg: Lang, backend: string, stylusTxHash: string, stylusRpcUrl: string,
     test = false, basic = false,
     traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = ""): Trace =
   var traceID: int
@@ -225,7 +230,7 @@ proc record(
 
   try:
     if lang == LangRubyDb:
-      return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, "", traceId)
+      return recordDb(LangRubyDb, rubyExe, executable, args, backend, outputFolder, "", "", traceId)
     elif lang in {LangNoir, LangRustWasm, LangCppWasm}:
       if lang == LangNoir:
         # TODO: base the first arg: source folder for record symbols on
@@ -238,9 +243,9 @@ proc record(
         # echo "wasm vm path ", vmPath
       else:
         vmPath = noirExe
-      return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
+      return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTxHash, stylusRpcUrl, traceId)
     elif lang == LangSmall:
-      return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, stylusTrace, traceId)
+      return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, stylusTxHash, stylusRpcUrl, traceId)
     else:
       echo fmt"ERROR: unsupported lang {lang}"
       quit(1)
@@ -322,7 +327,7 @@ proc main*(): Trace =
   #   [--lang <lang>] [-o/--output-folder <output-folder>]
   #   [--backend <backend>]
   #   [-e/--export <export-zip>] [-c/--cleanup-output-folder]
-  #   [-t/--stylus-trace <trace-path>]
+  #   [-t/--stylus-tx <transaction-hash>]
   #   [-a/--address <address>] [--socket <socket-path>]
   #   <program> [<args>]
   let args = os.commandLineParams()
@@ -340,7 +345,7 @@ proc main*(): Trace =
   var cleanupOutputFolder = false
   var exportZipPath = ""
   var backend = ""
-  var stylusTrace = ""
+  var stylusTxHash = ""
   var address = ""
   var socketPath = ""
   var isExportedWithArg = false
@@ -379,11 +384,11 @@ proc main*(): Trace =
         return
       backend = args[i + 1]
       i += 2
-    elif arg == "--stylus-trace" or arg == "-t":
+    elif arg == "--stylus-tx" or arg == "-t":
       if args.len() < i + 2:
         displayHelp()
         return
-      stylusTrace = args[i + 1]
+      stylusTxHash = args[i + 1]
       i += 2
     elif arg == "--address" or arg == "-a":
       if args.len() < i + 2:
@@ -483,7 +488,7 @@ proc main*(): Trace =
 
   try:
     var trace = record(
-      program, recordArgs, "", lang, backend, stylusTrace,
+      program, recordArgs, "", lang, backend, stylusTxHash, DEFAULT_NODE_URL,
       traceIDRecord=traceID, outputFolderArg=outputFolder)
     traceId = trace.id
     outputFolder = trace.outputFolder

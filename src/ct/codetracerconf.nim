@@ -256,11 +256,11 @@ type
         desc: "Export zip file for the recording"
       .} : string
 
-      recordStylusTrace* {.
-        name: "stylus-trace"
+      recordStylusTx* {.
+        name: "stylus-tx"
         abbr: "t"
         defaultValue: ""
-        desc: "Path to a stylus emv trace json file"
+        desc: "Hash of the Stylus transaction to replay"
       .} : string
 
       recordAddress* {.

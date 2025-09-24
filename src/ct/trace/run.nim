@@ -37,7 +37,7 @@ proc runWithRestart(
       recordedTrace = record(lang=extension,
                              outputFolder="",
                              exportFile="",
-                             stylusTrace="",
+                             stylusTxHash="",
                              address="",
                              socketPath="",
                              program=recordArgs[0],

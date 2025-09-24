@@ -1714,16 +1714,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1758199783,
-        "narHash": "sha256-CtYezlNMhXlTLIZaVQiUKRjQyKTN5YGRNXUlZUYN44U=",
+        "lastModified": 1758711664,
+        "narHash": "sha256-ZIMgoqe01snvN9F5cJ/hmwBpy774OCp1W8Ve7H32hWg=",
         "owner": "metacraft-labs",
         "repo": "codetracer-wasm-recorder",
-        "rev": "5cf6e2a1e601338224ba8eda2bf0fc02857cea00",
+        "rev": "17d2a602d296009488bf7947b14521b0a6855d54",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "wasm-tracing",
+        "ref": "feat-storage-visualisation",
         "repo": "codetracer-wasm-recorder",
         "type": "github"
       }
