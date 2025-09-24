@@ -13,8 +13,7 @@ use crate::task::{gen_task_id, to_event_kind, to_task_kind_text, EventId, TaskId
 use serde::Serialize;
 use tokio;
 use tokio::sync::mpsc;
-
-pub const CODETRACER_TMP_PATH: &str = "/tmp/codetracer";
+use crate::paths::CODETRACER_PATHS;
 
 #[derive(Debug, Default)]
 pub struct Core {
@@ -44,7 +43,8 @@ impl Core {
     }
 
     fn run_dir(&self) -> PathBuf {
-        PathBuf::from(CODETRACER_TMP_PATH).join(format!("run-{}", self.caller_process_pid))
+        let tmp_path = CODETRACER_PATHS.lock().unwrap().tmp_path.clone();
+        tmp_path.join(format!("run-{}", self.caller_process_pid))
     }
 
     fn ensure_arg_path_for(&self, task_id: TaskId) -> Result<PathBuf, Box<dyn Error>> {

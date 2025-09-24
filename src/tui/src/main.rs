@@ -35,18 +35,19 @@ mod status_component;
 mod task;
 mod value;
 mod window;
+mod paths;
 
 use crate::dap_client::DapClient;
 use component::Component;
-use core::{caller_process_pid, Core, CODETRACER_TMP_PATH};
+use core::{caller_process_pid, Core};
 use editor_component::EditorComponent;
 use event::{CtEvent, Event};
 use lang::Lang;
 use panel::{coord, panel, size};
-use serde_json::Value;
 use state_component::StateComponent;
 use status_component::StatusComponent;
 use task::{Action, EventId, EventKind, FlowUpdate, Location, MoveState, StepArg, TaskKind};
+use paths::CODETRACER_PATHS;
 
 #[derive(Debug, Default)]
 pub struct Trace {
@@ -98,9 +99,6 @@ impl Default for App {
         }
     }
 }
-
-const CT_SOCKET_PATH: &str = "/tmp/ct_socket";
-const CT_CLIENT_SOCKET_PATH: &str = "/tmp/ct_client_socket";
 
 const EDITOR_COMPONENT: usize = 0;
 
@@ -274,8 +272,18 @@ impl App {
     fn process_incoming_messages(&mut self) {}
 
     fn start_core(&mut self) -> Result<(), Box<dyn Error>> {
-        let last_start_pid_path = format!("{CODETRACER_TMP_PATH}/last-start-pid");
-        let _ = std::fs::create_dir(CODETRACER_TMP_PATH);
+        let tmp_path: PathBuf;
+        let socket_path_tmp: PathBuf;
+        {
+            let paths = CODETRACER_PATHS.lock()?;
+            tmp_path = paths.tmp_path.clone();
+            socket_path_tmp = paths.socket_path.clone();
+        }
+
+        let tmp_socket_path_str = socket_path_tmp.display();
+
+        let last_start_pid_path = format!("{tmp_socket_path_str}/last-start-pid");
+        let _ = std::fs::create_dir(tmp_path);
         std::fs::write(
             last_start_pid_path,
             format!("{}\n", self.caller_process_pid),
@@ -286,13 +294,9 @@ impl App {
         env::set_var("CODETRACER_DISPATCHER_READ_CLIENT", "STDIN");
         env::set_var("CODETRACER_DISPATCHER_SEND_CLIENT", "FILE");
 
-        // https://stackoverflow.com/a/73224567/438099
-        // let file = std::fs::File::create("/tmp/codetracer/out.txt").unwrap();
-        // let file_out_stdio = Stdio::from(file);
-
         let caller_pid = self.caller_process_pid;
 
-        let socket_path = format!("{CT_SOCKET_PATH}_{caller_pid}");
+        let socket_path = format!("{tmp_socket_path_str}_{caller_pid}");
         eprintln!("{socket_path:?}");
         let socket = UnixStream::connect(&socket_path)?;
         eprintln!("{socket:?}");
@@ -648,7 +652,11 @@ mod tests {
 
     #[test]
     fn register_trace_in_db() {
-        let base = env::temp_dir().join("ct_tui_test_db");
+        let tmp_path =
+        {
+            CODETRACER_PATHS.lock()?.tmp_path.clone()
+        };
+        let base = tmp_path.join("ct_tui_test_db");
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         let temp_home = base.join("home");
