@@ -1,11 +1,14 @@
 import
-  std/[posix, osproc, os, strformat],
+  std/[posix, osproc, os, strformat, terminal],
   ../../common/[types],
   ../globals
 
 var onInterrupt: proc: void
 proc cleanup*: void {.noconv.} =
   echo "codetracer: cleanup!"
+  resetAttributes()
+  showCursor()
+  stdout.flushFile()
   if not onInterrupt.isNil:
     onInterrupt()
   # important: signal handlers should be
