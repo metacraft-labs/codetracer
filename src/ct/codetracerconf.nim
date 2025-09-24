@@ -276,6 +276,13 @@ type
         desc: "Path to socket for sending the trace events metadata when in ci mode/environment"
       .}: string
 
+      recordWithDiff* {.
+        name: "with-diff"
+        defaultValue: ""
+        desc: "Record a diff related to this trace and produce a multitrace. " &
+          "Arg can be `last-commit`, path to a diff file (must be from the current repo!) or a valid `git diff <arg>` arg"
+      .}: string
+      
       recordProgram* {.
         argument
         desc: "Program to record"
@@ -295,7 +302,7 @@ type
      replayTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
-        desc: "the trace output folder"
+        desc: "the trace output folder or a multitrace archive"
       .}: Option[string]
      lastTraceMatchingPattern* {.
         argument,

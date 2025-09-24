@@ -1,9 +1,10 @@
-import std/[os, osproc, strutils, sequtils, strtabs],
+import std/[os, osproc, strutils, sequtils, strtabs, strformat],
+  multitrace,
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
   ../cli/build
 
-proc recordInternal(exe: string, args: seq[string], configPath: string): Trace =
+proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath: string): Trace =
   let env = if configPath.len > 0:
       setupEnv(configPath)
     else:
@@ -29,12 +30,16 @@ proc recordInternal(exe: string, args: seq[string], configPath: string): Trace =
       let traceId = parseInt(lastLine[8..^1])
       result = trace_index.find(traceId, test=false)
 
+      if withDiff.len > 0:
+        makeMultitrace(@[traceId], withDiff, fmt"multitrace-with-diff-for-trace-{traceId}.zip")
+
 proc record*(lang: string,
              outputFolder: string,
              exportFile: string,
              stylusTrace: string,
              address: string,
              socketPath: string,
+             withDiff: string,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
@@ -77,11 +82,11 @@ proc record*(lang: string,
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
-    return recordInternal(dbBackendRecordExe, pargs, "")
+    return recordInternal(dbBackendRecordExe, pargs, withDiff, "")
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
       let configPath = ctConfig.rrBackend.ctPaths
-      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), configPath)
+      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), withDiff, configPath)
     else:
       echo "This functionality requires a codetracer-rr-backend installation"
