@@ -51,7 +51,7 @@ proc replayMultitrace*(archivePath: string, indexDiff: bool = false): bool =
           quit(1)
 
     let structuredDiffJsonPath = outputFolder / "diff.json"
-    let process = startProcess(backend, args = @["index-diff", structuredDiffJsonPath, outputFolder], options={poParentStreams})
+    let process = startProcess(backend, args = @["index-diff", structuredDiffJsonPath, traceDir, outputFolder], options={poParentStreams})
     let exitCode = waitForExit(process)
 
     if exitCode == 0:
