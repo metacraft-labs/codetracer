@@ -24,9 +24,9 @@
     <string>APPL</string>
 
     <!-- CAUTION: DO NOT MOVE THE VALUE TO A NEW LINE!!! THIS NEEDS TO BE EDITABLE WITH SED! -->
-    <key>CFBundleShortVersionString</key><string>25.07.1</string>
+    <key>CFBundleShortVersionString</key><string>25.09.2</string>
 
-    <key>CFBundleVersion</key><string>25.07.1</string>
+    <key>CFBundleVersion</key><string>25.09.2</string>
 
     <key>DTCompiler</key>
     <string>com.apple.compilers.llvm.clang.1_0</string>
