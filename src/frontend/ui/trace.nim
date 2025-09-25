@@ -779,7 +779,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
         lineNumbers: traceLine,
         folding: false,
         glyphMargin: false,
-        fontSize: j($data.ui.fontSize) & j"px",
+        fontSize: data.ui.fontSize,
         minimap: js{ enabled: false },
         scrollbar: js{
           horizontalScrollbarSize: 4,
