@@ -139,7 +139,7 @@ proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
   let packet = wrapJsonForSending js{
     "type": cstring"request",
     "command": cstring"ct/start-replay",
-    "arguments": [cstring(dbBackendExe)]
+    "arguments": [cstring(dbBackendExe), cstring"dap-server"]
   }
   backendManagerSocket.write(packet)
 
