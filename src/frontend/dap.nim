@@ -100,6 +100,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtUpdatedFlow: "ct/updated-flow",
   CtRunToEntry: "ct/run-to-entry",
   CtRunTracepoints: "ct/run-tracepoints",
+  CtRunTraceSession: "ct/run-trace-session",
   CtSetupTraceSession: "ct/setup-trace-session",
   CtLoadAsmFunction: "ct/load-asm-function",
   CtLoadAsmFunctionResponse: "",
@@ -108,6 +109,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   InternalAddToScratchpadFromExpression: "",
   InternalStatusUpdate: "",
   InternalNewOperation: "",
+  InternalTraceMapUpdate: "",
   CtNotification: "ct/notification",
 ]
 

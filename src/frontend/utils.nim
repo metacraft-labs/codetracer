@@ -523,28 +523,80 @@ proc makeChartComponent*(data:Data): ChartComponent =
     pieLabels: @[],
     pieValues: @[])
 
-proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent, name: cstring, line: int): TraceComponent =
-  let offset =
-    if editorUI.lang == LangAsm:
-      editorUI.tabInfo.instructions.instructions[line - 1].offset
-    else:
-      NO_OFFSET
-  let id = data.services.trace.tracePID
-  data.services.trace.tracePID += 1
+proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): FlowComponent =
+  FlowComponent(
+    # api: self.api,
+    # id: self.id,
+    flow: nil,
+    # tab: self.tabInfo,
+    # location: location,
+    inExtension: inExtension,
+    multilineZones: JsAssoc[int, MultilineZone]{},
+    flowDom: JsAssoc[int, Node]{},
+    shouldRecalcFlow: false,
+    flowLoops: JsAssoc[int, FlowLoop]{},
+    flowLines: JsAssoc[int, FlowLine]{},
+    activeStep: FlowStep(rrTicks: -1),
+    selectedLine: -1,
+    selectedLineInGroup: -1,
+    selectedStepCount: -1,
+    lineHeight: 20,
+    # multilineFlowLines: multilineFlowLines(),
+    multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
+    loopLineSteps: JsAssoc[int, int]{},
+    inlineDecorations: JsAssoc[int, InlineDecorations]{},
+    # editorUI: self,
+    # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
+    # editor: self.service,
+    # service: self.data.services.flow,
+    # data: self.data,
+    lineGroups: JsAssoc[int, Group]{},
+    status: FlowUpdateState(kind: FlowWaitingForStart),
+    statusWidget: nil,
+    sliderWidgets: JsAssoc[int, js]{},
+    lineWidgets: JsAssoc[int, js]{},
+    multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
+    stepNodes: JsAssoc[int, kdom.Node]{},
+    loopStates: JsAssoc[int, LoopState]{},
+    viewZones: JsAssoc[int, int]{},
+    loopViewZones: JsAssoc[int, int]{},
+    loopColumnMinWidth: 15,
+    shrinkedLoopColumnMinWidth: 8,
+    pixelsPerSymbol: 8,
+    distanceBetweenValues: 10,
+    distanceToSource: 50,
+    inlineValueWidth: 80,
+    bufferMaxOffsetInPx: 300,
+    maxWidth: 0,
+    modalValueComponent: JsAssoc[cstring, ValueComponent]{},
+    valueMode: BeforeValueMode,
+    position: position
+  )
+
+proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: cstring = "", line: int = 0, inExtension: bool = false, traceId: int = 0): TraceComponent = # editorUI: EditorViewComponent, name: cstring,
+  # let offset =
+  #   if editorUI.lang == LangAsm:
+  #     editorUI.tabInfo.instructions.instructions[line - 1].offset
+  #   else:
+  #     NO_OFFSET
+  # let traceId = 0 # data.services.trace.tracePID
+  # data.services.trace.tracePID += 1
+
+  let id = if inExtension: traceId else: data.services.trace.tracePID
 
   result = TraceComponent(
     id: id,
     lineCount: 1,
     resultsHeight: 36,
-    name: name,
+    # name: name,
     line: line,
     tracepoint: Tracepoint(
       tracepointId: id,
       mode: TracInlineCode,
       name: name,
       line: line,
-      offset: offset,
-      lang: editorUI.lang,
+      # offset: offset,
+      # lang: editorUI.lang, # TODO: Fix this after extension implementation
       expression: j"",
       lastRender: 0,
       results: @[],
@@ -554,10 +606,15 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent, name: cstrin
     service: data.services.trace,
     editorWidth: 50,
     traceHeight: 210,
+    inExtension: inExtension,
     dataTable: DataTableComponent(rowHeight: 30, inputFieldChange: false))
-  result.chart.setId(data.ui.idMap["chart"])
-  data.ui.idMap["chart"] = data.ui.idMap["chart"] + 1
-  data.ui.editors[name].traces[line] = result
+
+  if not inExtension:
+    result.chart.setId(data.ui.idMap["chart"])
+    data.ui.idMap["chart"] = data.ui.idMap["chart"] + 1
+    data.ui.editors[name].traces[line] = result
+  else:
+    result.chart.setId(id)
   data.registerComponent(result, Content.Trace)
 
 proc makeMenuComponent*(data: Data): MenuComponent =
