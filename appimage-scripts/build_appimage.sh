@@ -110,7 +110,6 @@ cat << 'EOF' > "${APP_DIR}/bin/ct"
 HERE=${HERE:-$(dirname "$(readlink -f "${0}")")}
 
 # TODO: This includes references to x86_64. What about aarch64?
-export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
 
 exec "${HERE}"/bin/ct_unwrapped "$@"
 
@@ -201,7 +200,6 @@ cat << 'EOF' > "${APP_DIR}/AppRun"
 export HERE=$(dirname "$(readlink -f "${0}")")
 
 # TODO: This includes references to x86_64. What about aarch64?
-export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/lib/x86_64-linux-gnu/:${LD_LIBRARY_PATH}"
 export LINKS_PATH_DIR=$HERE
 export PATH="${HERE}/bin:${PATH}"
 export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
@@ -257,6 +255,7 @@ fi
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct_unwrapped
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-record
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/backend-manager
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
@@ -269,6 +268,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 patchelf --remove-rpath "${APP_DIR}"/bin/ct_unwrapped
 patchelf --remove-rpath "${APP_DIR}"/bin/db-backend
 patchelf --remove-rpath "${APP_DIR}"/bin/db-backend-record
+patchelf --remove-rpath "${APP_DIR}"/bin/backend-manager
 patchelf --remove-rpath "${APP_DIR}"/bin/nargo
 patchelf --remove-rpath "${APP_DIR}"/bin/wazero
 patchelf --remove-rpath "${APP_DIR}"/bin/ctags
@@ -276,7 +276,17 @@ patchelf --remove-rpath "${APP_DIR}"/bin/curl
 patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
 
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/node"
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct_unwrapped
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/db-backend
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/db-backend-record
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/backend-manager
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/nargo
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/wazero
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ctags
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/curl
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/ruby/bin/ruby
 
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
