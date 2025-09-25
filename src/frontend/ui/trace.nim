@@ -695,7 +695,7 @@ proc traceMenuView(self: TraceComponent): VNode =
         onclick = proc() =
           self.api.emit(InternalTraceMapUpdate, self.getTracepointInfo())
           self.refreshTrace()
-          self.api.emit(CtRunTraceSession, EmptyArg())
+          self.api.emit(CtRunTraceSession, SourceLocation(path: self.name))
           # runTracepoints(self.data)
       ):
         tdiv(class = "trace-run-button-svg")

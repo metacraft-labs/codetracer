@@ -184,8 +184,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(InternalTraceMapUpdate, proc(kind: CtEventKind, value: Tracepoint, sub: Subscriber) =
     updateTraceMap(value)
   )
-  viewsApi.subscribe(CtRunTraceSession, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
-    let traceSession = getTraceSession("/home/nedy/calls.rb".cstring)
+  viewsApi.subscribe(CtRunTraceSession, proc(kind: CtEventKind, value: SourceLocation, sub: Subscriber) =
+    let traceSession = getTraceSession(value.path)
     dapApi.sendCtRequest(
       CtRunTracepoints,
       RunTracepointsArg(
