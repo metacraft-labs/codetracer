@@ -2,35 +2,19 @@
 
 set -e
 
+echo '###############################################################################'
+echo 'Running ui e2e playwright tests'
+echo '###############################################################################'
+
 # TODO: maybe pass the result from the build stage as artifact to this job?
-# ./ci/build/build.sh
+# TODO: tup generate seems problematic with variants: we need to fix/change the resulting dirs to work correctly
+# ./ci/build/dev.sh
 
-# reset processes before running the ui tests
-# stop_processes
-# DISPLAY: ":99" in .gitlab-ci.yml?
-# not sure if relevant
+./ci/build/nix.sh
 
-# cleanup before recording in local folder
-# which is shard with normal user recordings and
-# with other job/pipeline non-test recordings
-# (the ui playwright tests record in a normal non-test mode!)
-# (alexander:
-#  without that it seems we had problems when changing the db schema in a MR
-#  or at least that's my theory: ct record seemed to be hanging or problematic (?))
-# rm -rf "$HOME"/.local/share/codetracer
-# dont cleanup this: /tmp/codetracer, as it's useful for looking at logs!
-# hopefully it doesn't interfere, usually the problem should be in
-# the local share dir, where the db is
-# # rm -rf /tmp/codetracer
-# rm -rf /dev/shm/codetracer
+CODETRACER_E2E_CT_PATH="$(pwd)/result/bin/ct"
+export CODETRACER_E2E_CT_PATH
 
-echo "========================"
-# echo "RUNNING tsc ui e2e tests"
-
-# TODO nix-shell --command "xvfb-run just test-e2e"
-
-echo TODO 
-
-echo "========================"
-
-# stop_processes
+pushd ui-tests
+nix develop --command ./ci.sh
+popd
