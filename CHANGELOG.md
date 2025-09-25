@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 25.09.2 - 2025-09-25(hotfix)
+
+Introduced a number of hotfixes for critical bugs:
+
+- AppImage
+  - Introduced additional points of termination for backend-manager(fixed fatal crash)
+  - Removed raw usages of `/tmp` in parts of our codebase
+  - Set relative rpath instead of depending on `LD_LIBRARY_PATH`(fixed fatal crash)
+- macOS
+  - Fix ruby not being symlinked
+  - Removed raw usages of `/tmp` in parts of our codebase
+  - Introduced additional points of termination for backend-manager
+- Other fixes
+  - The help message no longer uses the internal executable name instead of `ct`
+  - The Gentoo package was renamed to `codetracer-bin` from `codetracer`
+  - The AUR package now upgrades without having to uninstall it and delete its pacman caches
+
 ## 25.09.1 - 2025-09-19
 
 
