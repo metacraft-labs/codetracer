@@ -24,6 +24,7 @@ const MONACO_SHORTCUTS_WHITELIST: seq[cstring] =
       "SHIFT+F11",
       "SHIFT+F12",
   ]
+const EDITOR_GUTTER_PADDING = 2 #px
 
 method render*(self: EditorViewComponent): VNode
 proc removeClasses(index: int, class: cstring, name: string)
@@ -470,9 +471,9 @@ proc diffStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
 proc applyEventualStylesLines(self: EditorViewComponent) =
   var colorLineList = self.colorLines()
   var conditionFlowLines = self.conditionStyleLines()
-  var diffLineList = self.diffStyleLines()
+  # var diffLineList = self.diffStyleLines()
   var flowLineList = self.flowStyleLines(conditionFlowLines)
-  let lines = concat(colorLineList, concat(flowLineList, concat(conditionFlowLines, diffLineList)))
+  let lines = concat(colorLineList, concat(flowLineList, conditionFlowLines))
 
   self.styleLines(self.monacoEditor, lines)
 
@@ -1141,21 +1142,28 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   self.api.emit(CtLoadFlow, self.location)
   cdebug "start load-flow", taskId
 
-proc drawDiffViewZones(self: EditorViewComponent, source: string, id: int, lineNumber: int): Node =
+proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, lineNumber: int): Node =
   var zoneDom = document.createElement("div")
   zoneDom.id = fmt"diff-view-zone-{id}"
   zoneDom.class = "diff-view-zone"
   zoneDom.style.display = "flex"
+  zoneDom.style.fontSize = j($self.data.ui.fontSize) & j"px"
+
   var editorDom = document.createElement("div")
   var selector = fmt"editorComponent-{id}"
   editorDom.id = selector
-  editorDom.style.width = "100%"
+
+  let editorContentLeft = self.monacoEditor
+    .getOption(LAYOUT_INFO).contentLeft + EDITOR_GUTTER_PADDING
+  zoneDom.style.left = fmt"-{editorContentLeft}px"
   editorDom.style.height = "100%"
+
   zoneDom.appendChild(editorDom)
+
   var lang = fromPath(self.data.services.debugger.location.path)
   let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
   discard setTimeout(proc () =
-    discard monaco.editor.create(
+    self.diffEditors[lineNumber] = monaco.editor.create(
       jq("#" & editorDom.id),
       MonacoEditorOptions(
         value: source,
@@ -1164,15 +1172,22 @@ proc drawDiffViewZones(self: EditorViewComponent, source: string, id: int, lineN
         theme: theme,
         automaticLayout: true,
         folding: true,
-        fontSize: j($self.data.ui.fontSize) & j"px",
+        fontSize: self.data.ui.fontSize,
         minimap: js{ enabled: false },
         find: js{ addExtraSpaceOnTop: false },
         renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
         lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
         lineDecorationsWidth: 20,
-        contextmenu: false
-        # overflowWidgetsDomNode: overflowHost,
-        # fixedOverflowWidgets: true
+        contextmenu: false,
+        mouseWheelScrollSensitivity: 0,
+        fastScrollSensitivity: 0,
+        scrollBeyondLastLine: false,
+        smoothScrolling: false,
+        scrollbar: js{
+          "vertical": "hidden",
+          "horizontal": "hidden",
+          "useShadows": false
+        }
       )
     ),
     0
@@ -1185,7 +1200,7 @@ proc clearDiffViewZones(self: EditorViewComponent) =
     self.monacoEditor.changeViewZones do (view: js):
       view.removeZone(self.diffViewZones[line].zoneId)
 
-proc addDiffView(self: EditorViewComponent, source: string, removedLinesNumber: int, startLineNumber: int, firstDeletedLineNumber: int) =
+proc addDiffView(self: EditorViewComponent, source: cstring, removedLinesNumber: int, startLineNumber: int, firstDeletedLineNumber: int) =
   var offset = 1 # Offset for proper line placement and number
   var newZoneDom = self.drawDiffViewZones(source, startLineNumber, firstDeletedLineNumber)
   let viewZone = js{
@@ -1202,6 +1217,12 @@ proc addDiffView(self: EditorViewComponent, source: string, removedLinesNumber: 
         variables: JsAssoc[cstring, bool]{}
       )
 
+proc removeLastChar(cs: cstring): cstring =
+  var str = $cs
+  if str.len > 0:
+    str.setLen(str.len - 1)
+  result = str.cstring
+
 proc makeDiffViewZones(self: EditorViewComponent) =
   for file in self.data.startOptions.diff.files:
     if file.currentPath == self.path:
@@ -1210,18 +1231,20 @@ proc makeDiffViewZones(self: EditorViewComponent) =
         var removedLinesNumber = NO_LINE # Number for lines to be included
         var firstDeletedLineNumber = NO_LINE
         var startLineNumber = chunk.currentFrom # initial start line for the viewZones
-        var source = "" # Source code
+        var source = "".cstring # Source code
         for diffLine in chunk.lines:
           case diffLine.kind:
           of DiffLineKind.Deleted:
             removedLinesNumber.inc()
-            source = source & diffLine.text & "\n"
+            source = source & diffLine.text.toCString() & "\n".cstring
             if firstDeletedLineNumber == NO_LINE:
               firstDeletedLineNumber = diffLine.previousLineNumber
             isInDeleteChunk = true
           else:
+            if diffLine.kind == DiffLineKind.Added and diffLine.currentLineNumber notin self.diffAddedLines:
+              self.diffAddedLines.add(diffLine.currentLineNumber)
             if removedLinesNumber != NO_LINE:
-              self.addDiffView(source, removedLinesNumber, startLineNumber, firstDeletedLineNumber)
+              self.addDiffView(source.removeLastChar(), removedLinesNumber, startLineNumber, firstDeletedLineNumber)
               source = ""
               removedLinesNumber = NO_LINE
               firstDeletedLineNumber = NO_LINE
@@ -1297,7 +1320,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
             theme: theme,
             automaticLayout: true,
             folding: true,
-            fontSize: j($self.data.ui.fontSize) & j"px",
+            fontSize: self.data.ui.fontSize,
             minimap: js{ enabled: false },
             find: js{ addExtraSpaceOnTop: false },
             renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
@@ -1435,9 +1458,11 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         self.loadFlow(tabInfo.location)
         self.shouldLoadFlow = false
 
-      if self.data.startOptions.diff.files.len() >= 1:
-        self.clearDiffViewZones()
-        self.makeDiffViewZones()
+      if not self.data.startOptions.diff.isNil and
+        self.diffViewZones.len() == 0 and
+        self.diffAddedLines.len() == 0:
+          self.clearDiffViewZones()
+          self.makeDiffViewZones()
 
       self.applyEventualStylesLines()
 

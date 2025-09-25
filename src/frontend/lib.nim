@@ -163,7 +163,7 @@ type
     theme*:                  cstring
     readOnly*:               bool
     lineNumbers*:            proc(line: int): cstring
-    fontSize*:               cstring
+    fontSize*:               int
     fontFamily*:             cstring
     contextmenu*:            bool
     minimap*:                JsObject
@@ -176,6 +176,10 @@ type
     scrollBeyondLastColumn*: int
     overflowWidgetsDomNode*: JsObject
     fixedOverflowWidgets*:   bool
+    fastScrollSensitivity*:  int
+    scrollBeyondLastLine*:   bool
+    smoothScrolling*:        bool
+    mouseWheelScrollSensitivity*: int
 
   MonacoScrollType* = enum Smooth, Immediate
 
@@ -237,6 +241,7 @@ type
     width*: int
     lineHeight*: int
     fontSize*: int
+    decorationsLeft*: int
 
   MonacoMinimapConfig* = ref object
     minimapWidth*: int

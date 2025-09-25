@@ -26,6 +26,7 @@ var vex* {.importc.}: js
 const TAB_LIMIT = 20
 const MIN_FONTSIZE = 10
 const MAX_FONTSIZE = 18
+const EDITOR_GUTTER_PADDING = 2 #px
 
 when defined(ctmacos):
   proc registerMenu*(menu: MenuNode) =
@@ -1309,15 +1310,25 @@ proc zoomInEditors*(data: Data) =
     data.ui.fontSize += 1
     for path, editor in data.ui.monacoEditors:
       let options = cast[MonacoEditorOptions](editor.getOptions())
-      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      options.fontSize = data.ui.fontSize
       editor.updateOptions(options)
     for path, editor in data.ui.traceMonacoEditors:
       let options = cast[MonacoEditorOptions](editor.getOptions())
-      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      options.fontSize = data.ui.fontSize
       editor.updateOptions(options)
     for path, editor in data.ui.editors:
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
+      for line, zone in editor.diffViewZones:
+        zone.dom.style.fontSize = j($data.ui.fontSize) & j"px"
+        let editorContentLeft = editor.monacoEditor
+          .getOption(LAYOUT_INFO).contentLeft + EDITOR_GUTTER_PADDING
+        zone.dom.style.left = fmt"-{editorContentLeft}px"
+      for line, diffEditor in editor.diffEditors:
+        let options = cast[MonacoEditorOptions](diffEditor.getOptions())
+        options.fontSize = data.ui.fontSize
+        diffEditor.updateOptions(options)
+    redrawAll()
     clog "editor: zoom in!"
 
 proc zoomOutEditors*(data: Data) =
@@ -1325,15 +1336,25 @@ proc zoomOutEditors*(data: Data) =
     data.ui.fontSize -= 1
     for path, editor in data.ui.monacoEditors:
       let options = cast[MonacoEditorOptions](editor.getOptions())
-      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      options.fontSize = data.ui.fontSize
       editor.updateOptions(options)
     for path, editor in data.ui.traceMonacoEditors:
       let options = cast[MonacoEditorOptions](editor.getOptions())
-      options.fontSize = j($(data.ui.fontSize)) & j"px"
+      options.fontSize = data.ui.fontSize
       editor.updateOptions(options)
     for path, editor in data.ui.editors:
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
+      for line, zone in editor.diffViewZones:
+        zone.dom.style.fontSize = j($(data.ui.fontSize)) & j"px"
+        let editorContentLeft = editor.monacoEditor
+          .getOption(LAYOUT_INFO).contentLeft + EDITOR_GUTTER_PADDING
+        zone.dom.style.left = fmt"-{editorContentLeft}px"
+      for line, diffEditor in editor.diffEditors:
+        let options = cast[MonacoEditorOptions](diffEditor.getOptions())
+        options.fontSize = data.ui.fontSize
+        diffEditor.updateOptions(options)
+    redrawAll()
     clog "editor: zoom out!"
 
 proc zoomFlowLoopIn*(data: Data) =
