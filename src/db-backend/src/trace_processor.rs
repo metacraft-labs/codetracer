@@ -450,7 +450,7 @@ pub fn load_trace_data(
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
     let path = expanduser(trace_metadata_file.display().to_string())?;
-    let raw_bytes = fs::read(&path).unwrap_or_else(|_| panic!("metadata file {path:?} read error"));
+    let raw_bytes = fs::read(&path)?; //.unwrap_or_else(|_| panic!("metadata file {path:?} read error"));
     let raw = str::from_utf8(&raw_bytes)?;
 
     let trace_metadata: TraceMetadata = serde_json::from_str(raw)?;
