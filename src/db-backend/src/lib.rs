@@ -1,3 +1,4 @@
+#![allow(clippy::uninlined_format_args)]
 #![allow(dead_code)]
 // use std::ffi::{c_char, CStr, CString};
 // use std::slice;

@@ -21,6 +21,8 @@ use std::time::Instant;
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
+// assuming the lock must work
+#[allow(clippy::unwrap_used)]
 pub fn socket_path_for(pid: usize) -> PathBuf {
     CODETRACER_PATHS
         .lock()

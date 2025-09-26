@@ -12,6 +12,7 @@ fn test_backend_dap_server_stdio() {
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
 
     let mut child = Command::new(bin)
+        .arg("dap-server")
         .arg("--stdio")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::error::Error;
 use std::collections::HashSet;
 
@@ -66,7 +66,7 @@ pub struct DiffLine {
 
 
 // loop shape 1:
-pub fn load_and_postprocess_trace(trace_folder: &PathBuf) -> Result<Db, Box<dyn Error>> {
+pub fn load_and_postprocess_trace(trace_folder: &Path) -> Result<Db, Box<dyn Error>> {
     let mut trace_path = trace_folder.join("trace.json");
     let mut trace_file_format = runtime_tracing::TraceEventsFileFormat::Json;
     if !trace_path.exists() {
@@ -106,7 +106,7 @@ fn index_function_flow(_db: &Db, function_id: FunctionId) -> Result<(), Box<dyn 
 }
 
 
-pub fn index_diff(diff: Diff, trace_folder: &PathBuf, multitrace_folder: &PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn index_diff(diff: Diff, trace_folder: &Path, multitrace_folder: &Path) -> Result<(), Box<dyn Error>> {
     let db = load_and_postprocess_trace(trace_folder)?;
 
     // breakpoint on each diff line or at least track it for db-backend
