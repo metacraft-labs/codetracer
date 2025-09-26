@@ -1,6 +1,6 @@
 import
   ui_imports, value, datatable,
-  ../[ ui_helpers, types, lang, utils, renderer, communication, dap, event_helpers ],
+  ../[ types, lang, utils, renderer, communication, dap, event_helpers ],
   ../../common/ct_event
 
 let

@@ -2,7 +2,7 @@ import
   strutils, os,
   ui_imports,
   value, scratchpad,
-  ../[ ui_helpers, renderer, communication, dap, event_helpers],
+  ../[ renderer, communication, dap, event_helpers],
   ../../common/ct_event
 
 # thank, God!

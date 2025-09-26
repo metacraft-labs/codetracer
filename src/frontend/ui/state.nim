@@ -1,10 +1,9 @@
 import
-  ../ui_helpers,
   ui_imports,
   show_code,
   value,
-  .. / communication, 
-  .. / .. / common / ct_event
+  ../communication,
+  ../../common/ct_event
 
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
 

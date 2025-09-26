@@ -1,8 +1,8 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
-  ../types, ../renderer, ../config, ../ui_helpers,
   state, editor, debug, menu, status, command, search_results, shell,
+  ../[ types, renderer, config ],
   ../lib/[ logging, misc_lib, jslib ]
 
 import kdom except Location

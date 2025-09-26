@@ -1,7 +1,7 @@
 import
   std / [strformat, strutils, jsffi],
   kdom, vdom, karax, karaxdsl,
-  ../types, ../ui_helpers,
+  ../types,
   ../lib/[ logging, jslib ]
 
 proc rowTimestamp*(row: Element, event: ProgramEvent, rrTicks: int) =
