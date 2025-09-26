@@ -15,6 +15,7 @@ use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::program_search_tool::ProgramSearchTool;
+use crate::rr_dispatcher::{RRDispatcher};
 // use crate::response::{};
 use crate::dap_types;
 // use crate::dap_types::Source;
@@ -51,8 +52,17 @@ pub struct Handler {
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
 
+    pub trace_kind: TraceKind,
+    pub rr: RRDispatcher,
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
+
+#[derive(Debug, Clone)]
+pub enum TraceKind {
+    DB,
+    RR
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BreakpointRecord {
@@ -80,11 +90,11 @@ type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 //   sender.
 
 impl Handler {
-    pub fn new(db: Box<Db>) -> Handler {
-        Self::construct(db, false)
+    pub fn new(trace_kind: TraceKind, db: Box<Db>) -> Handler {
+        Self::construct(trace_kind, db, false)
     }
 
-    pub fn construct(db: Box<Db>, indirect_send: bool) -> Handler {
+    pub fn construct(trace_kind: TraceKind, db: Box<Db>, indirect_send: bool) -> Handler {
         let calltrace = Calltrace::new(&db);
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
@@ -93,6 +103,7 @@ impl Handler {
         let step_lines_loader = StepLinesLoader::new(&db, &mut expr_loader);
         // let sender = sender::Sender::new();
         Handler {
+            trace_kind,
             db,
             step_id: StepId(0),
             last_call_key: CallKey(0),
@@ -107,6 +118,7 @@ impl Handler {
             step_lines_loader,
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
+            rr: RRDispatcher::new(),
             resulting_dap_messages: vec![],
             raw_diff_index: None,
         }
@@ -273,7 +285,14 @@ impl Handler {
     }
 
     pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(0));
+        match self.trace_kind {
+            TraceKind::DB => {
+                self.step_id_jump(StepId(0));
+            },
+            TraceKind::RR => {
+                self.rr.run_to_entry()?;
+            },
+        }
         self.complete_move(true)?;
         Ok(())
     }
@@ -1814,6 +1833,7 @@ mod tests {
         }
         let trace_metadata_file = path.join("trace_metadata.json");
         let trace = load_trace_data(&trace_file, trace_file_format).expect("expected that it can load the trace file");
+        info!("trace {:?}", trace);
         let trace_metadata =
             load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
         let mut db = Db::new(&trace_metadata.workdir);
