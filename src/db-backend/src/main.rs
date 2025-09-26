@@ -4,6 +4,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::exit)]
+#![allow(clippy::uninlined_format_args)]
 #![allow(dead_code)]
 
 // TODO: deny when we cleanup
