@@ -1,17 +1,19 @@
-import ui_imports, show_code, value, ../utils
-import ../communication, ../../common/ct_event
+import
+  ui_imports, show_code, value, ../utils,
+  ../communication, ../../common/ct_event
 
 
 let returnValueName: cstring = "<return value>"
 
-const CALL_OFFSET_WIDTH_PX = 20
-const LOCAL_CALL_HEIGHT_PX = 24
-const CALL_HEIGHT_PX = 24
-const CALL_BUFFER = 20
-const START_BUFFER = 10
-const TRACE_LINE_OFFSET = 10
-const EXPAND_CALLS_KIND = CtExpandCalls
-const COLLAPSE_CALLS_KIND = CtCollapseCalls
+const
+  CALL_OFFSET_WIDTH_PX  = 20
+  LOCAL_CALL_HEIGHT_PX  = 24
+  CALL_HEIGHT_PX        = 24
+  CALL_BUFFER           = 20
+  START_BUFFER          = 10
+  TRACE_LINE_OFFSET     = 10
+  EXPAND_CALLS_KIND     = CtExpandCalls
+  COLLAPSE_CALLS_KIND   = CtCollapseCalls
 
 proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
 proc redrawCallLines(self: CalltraceComponent)
@@ -173,7 +175,7 @@ proc codeCallView(id: cstring, path: cstring, line: int): VNode =
   showCode(id, path, line-3, line+5, line)
 
 proc callOffset(depth: int): VStyle =
-  style((StyleAttr.minWidth, j(&"{depth * 8}px")))
+  style((StyleAttr.minWidth, cstring(&"{depth * 8}px")))
 
 proc setCallOffset(
   depth: int,
@@ -788,7 +790,7 @@ func findCall(call: Call, key: cstring): Call =
   return nil
 
 proc calltraceScroll(self: CalltraceComponent, height: int) =
-  let calltraceElement = jqFind(j"#" & "calltraceScroll-" & $self.id)
+  let calltraceElement = jqFind(cstring"#" & "calltraceScroll-" & $self.id)
   if not calltraceElement.isNil and not calltraceElement.toJs[0].isNil:
     calltraceElement.toJs[0].scrollTop = height
 

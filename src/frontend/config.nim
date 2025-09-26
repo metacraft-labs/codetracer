@@ -1,24 +1,24 @@
 import
   std / [json, strutils, sequtils, jsffi],
-  lib, types,
+  types,
+  lib/jslib,
   .. / common / ct_logging
 
-let configPath* = ".config.yaml"
-
-let testConfigPath* = ".config.yaml"
-
-let defaultConfigPath* = "default_config.yaml"
-
-let defaultLayoutPath* = "default_layout.json"
+let
+  configPath* = ".config.yaml"
+  testConfigPath* = ".config.yaml"
+  defaultConfigPath* = "default_config.yaml"
+  defaultLayoutPath* = "default_layout.json"
 
 when not defined(ctRenderer):
   import 
     std / os,
     paths
 
-  let configDir* = linksPath / "config"
-  let userConfigDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
-  let userLayoutDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
+  let
+    configDir* = linksPath / "config"
+    userConfigDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
+    userLayoutDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
 
 
 func normalize(shortcut: string): string =
@@ -38,15 +38,15 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
       continue
     for raw in rawShortcuts:
       let normalShortcut = normalize(raw).cstring
-      var l = j""
-      if normalShortcut == j"Delete":
-        l = j"del"
-      elif normalShortcut == j"RightArrow":
-        l = j"right"
-      elif normalShortcut == j"LeftArrow":
-        l = j"left"
+      var l = cstring""
+      if normalShortcut == cstring"Delete":
+        l = cstring"del"
+      elif normalShortcut == cstring"RightArrow":
+        l = cstring"right"
+      elif normalShortcut == cstring"LeftArrow":
+        l = cstring"left"
       else:
-        l = j(($normalShortcut).toLowerAscii)
+        l = cstring(($normalShortcut).toLowerAscii)
 
       let shortcut = Shortcut(renderer: l, editor: normalShortcut)
       if result.shortcutActions.hasKey(normalShortcut):

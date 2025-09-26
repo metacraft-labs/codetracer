@@ -1,4 +1,7 @@
-import ui_imports, ../types, ../ui_helpers, ../renderer, ../communication, ../../common/ct_event
+import
+  ui_imports,
+  ../[ types, ui_helpers, renderer, communication],
+  ../../common/ct_event
 
 const NO_LINE = -1
 

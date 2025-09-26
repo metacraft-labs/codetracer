@@ -1,16 +1,14 @@
 import
-  ../ui_helpers, ../types, ../lang,
-  ui_imports, value, ../utils, ../renderer,
-  datatable
-import ../communication, ../../common/ct_event, ../dap
-import ../event_helpers
+  ui_imports, value, datatable,
+  ../[ ui_helpers, types, lang, utils, renderer, communication, dap, event_helpers ],
+  ../../common/ct_event
 
-let MIN_EDITOR_WIDTH: float = 20 #%
-let MAX_EDITOR_WIDTH: float = 70 #%
-# let LINE_NUMBERS_COLUMN_WIDTH: int = 81 #px
-
-let RUN_TRACE_MESSAGE: cstring = "Press Ctrl+Enter to run the trace."
-let NO_RESULTS_MESSAGE: cstring = "No results. Line was not reached (or errors while evaluating logs)."
+let
+  MIN_EDITOR_WIDTH: float = 20 #%
+  MAX_EDITOR_WIDTH: float = 70 #%
+# LINE_NUMBERS_COLUMN_WIDTH: int = 81 #px
+  RUN_TRACE_MESSAGE: cstring = "Press Ctrl+Enter to run the trace."
+  NO_RESULTS_MESSAGE: cstring = "No results. Line was not reached (or errors while evaluating logs)."
 
 proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
 proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int)
@@ -286,7 +284,7 @@ proc renderTableResults(
           data: cstring"directLocationRRTicks",
         },
         js{
-          className: j"trace-values",
+          className: cstring"trace-values",
           data: cstring"content",
         }
       ]
@@ -384,7 +382,7 @@ proc renderTableResults(
     let denseWrapper = cstring(fmt"#trace-table-{self.id}_wrapper")
 
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
-        .addEventListener(j"wheel", proc(ev: Event) = 
+        .addEventListener(cstring"wheel", proc(ev: Event) = 
           ev.stopPropagation()
           self.dataTable.updateTableRows()
           self.dataTable.updateTableFooter())
@@ -527,7 +525,7 @@ proc saveSource*(self: TraceComponent) =
 
 proc ensureEdit*(self: TraceComponent) =
   if self.selectorId.len == 0:
-    self.selectorId = j(&"edit-trace-{self.editorUI.id}-{self.line}")
+    self.selectorId = cstring(&"edit-trace-{self.editorUI.id}-{self.line}")
     self.isChanged = true
 
 proc ensureChart(self: TraceComponent) =
@@ -552,10 +550,10 @@ proc ensureChart(self: TraceComponent) =
         tableFooter(self.dataTable)
 
     self.chart.tableView = tableView
-    self.chart.id = self.data.ui.idMap[j"chart"]
+    self.chart.id = self.data.ui.idMap[cstring"chart"]
     self.chart.stateID = -1
     self.chart.trace = self
-    self.chart.expression = j"trace"
+    self.chart.expression = cstring"trace"
 
 proc refreshLine(self: TraceComponent) =
   self.monacoEditor.changeViewZones do (view: js):
@@ -571,40 +569,40 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
     else:
       line + self.tabInfo.location.expansionFirstLine - 1
 
-  var tracepointHtml = j"<div class='gutter-no-trace' onmousedown='event.stopPropagation()'></div>"
-  var breakpointHtml = j"<div class='gutter-no-breakpoint' onmousedown='event.stopPropagation()'></div>"
-  var highlightHtml = j"<div class='gutter-no-highlight' onmousedown='event.stopPropagation()'></div>"
+  var tracepointHtml = cstring"<div class='gutter-no-trace' onmousedown='event.stopPropagation()'></div>"
+  var breakpointHtml = cstring"<div class='gutter-no-breakpoint' onmousedown='event.stopPropagation()'></div>"
+  var highlightHtml = cstring"<div class='gutter-no-highlight' onmousedown='event.stopPropagation()'></div>"
 
   if self.traces.hasKey(realLine):
     var editor = self.traces[realLine]
 
     if not editor.isDisabled:
-      tracepointHtml = j"<div class='gutter-trace' onmousedown='event.stopPropagation()'></div>"
+      tracepointHtml = cstring"<div class='gutter-trace' onmousedown='event.stopPropagation()'></div>"
     else:
-      tracepointHtml = j"<div class='gutter-disabled-trace' onmousedown='event.stopPropagation()'></div>"
+      tracepointHtml = cstring"<div class='gutter-disabled-trace' onmousedown='event.stopPropagation()'></div>"
 
   if line == self.location.line and
       path == self.location.path:
-    highlightHtml = j"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
+    highlightHtml = cstring"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
 
   if self.data.services.debugger.hasBreakpoint(path, realLine):
     let breakpoint = self.data.services.debugger.breakpointTable[path][realLine]
 
     if breakpoint.enabled:
       if not breakpoint.error:
-        breakpointHtml = j"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
+        breakpointHtml = cstring"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
       else:
-        breakpointHtml = j"<div class='gutter-breakpoint-error' onmousedown='event.stopPropagation()'></div>"
+        breakpointHtml = cstring"<div class='gutter-breakpoint-error' onmousedown='event.stopPropagation()'></div>"
 
     else:
-      breakpointHtml = j"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
+      breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
 
   let trueLineNumber = if not isDeleteChunk: toCString(realLine) else: toCString(line + lineNumber - 1)
-  let lineHtml = j"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & j"</div>"
-  let diffHtml = j"<div class='diff-line' onmousedown='event.stopPropagation()'>" & j"</div>"
-  let klass = if isDeleteChunk: j"diff-deleted-gutter" elif line in self.diffAddedLines: j"diff-added-gutter" else: j""
+  let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
+  let diffHtml = cstring"<div class='diff-line' onmousedown='event.stopPropagation()'>" & cstring"</div>"
+  let klass = if isDeleteChunk: cstring"diff-deleted-gutter" elif line in self.diffAddedLines: cstring"diff-added-gutter" else: cstring""
 
-  result = j"<div class='gutter " & klass & "' data-line=" & trueLineNumber & j" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & diffHtml & tracepointHtml & breakpointHtml & j"</div>"
+  result = cstring"<div class='gutter " & klass & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & diffHtml & tracepointHtml & breakpointHtml & cstring"</div>"
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor

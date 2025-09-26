@@ -1,8 +1,9 @@
-import std / jsffi
-import .. / common / ct_event
-import types
-import communication, dap
-import lib
+import
+  std / jsffi,
+  .. / common / ct_event,
+  types,
+  communication, dap,
+  lib/[ jslib ]
 
 const HISTORY_JUMP_VALUE*: string = "history-jump"
 

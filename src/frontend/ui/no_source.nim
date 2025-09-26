@@ -1,10 +1,12 @@
-import ui_imports, strutils
-import ../communication, ../../common/ct_event
+import
+  ui_imports, strutils,
+  ../[ communication, event_helpers ],
+  ../../common/ct_event
 from ../rr_gdb import RRGDBStopSignal
-import ../event_helpers
 
-const NO_CODE = -1
-const NO_PATH = ""
+const
+  NO_CODE = -1
+  NO_PATH = ""
 
 proc getAsmCode(self: NoSourceComponent, location: types.Location) {.async.} =
   self.instructions = await data.services.editor.asmLoad(location)

@@ -1,49 +1,48 @@
 import
-  ../types,
+  ../[ types, communication ],
+  ../../common/ct_event,
   ui_imports, colors, events, trace, typetraits, strutils, jsconsole,
   datatable, strutils, base64
 
-import ../communication, ../../common/ct_event
-
 var arg: js
 
-const CLICK_DELAY_TIMER = 5
+const
+  CLICK_DELAY_TIMER = 5
+  EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
+    "std streams:",
+    "read events:",
+    "write events:",
+    "network:",
+    "trace:",
+    "file:",
+    "errors:",
+    "evm events:"
+  ]
 
-const EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
-  "std streams:",
-  "read events:",
-  "write events:",
-  "network:",
-  "trace:",
-  "file:",
-  "errors:",
-  "evm events:"
-]
+  EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
+    "write",
+    "write file",
+    "write(other)",
+    "read",
+    "read file",
+    "read(other)",
+    "read dir",
+    "open dir",
+    "close dir",
+    "socket",
+    "open",
+    "error",
 
-const EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
-  "write",
-  "write file",
-  "write(other)",
-  "read",
-  "read file",
-  "read(other)",
-  "read dir",
-  "open dir",
-  "close dir",
-  "socket",
-  "open",
-  "error",
+    "trace log event",
+    "messages",
+  ]
 
-  "trace log event",
-  "messages",
-]
-
-const EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
-  "Filter",
-  "Trace events",
-  "Recorded events",
-  "_"
-]
+  EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
+    "Filter",
+    "Trace events",
+    "Recorded events",
+    "_"
+  ]
 
 let kindTags: array[EventLogKind, seq[EventTag]] = [
   @[EventWrites, EventStd],   #Write
@@ -81,13 +80,13 @@ proc events(self: EventLogComponent)
 proc resizeEventLogHandler(self: EventLogComponent)
 
 proc denseId*(context: EventLogComponent): cstring =
-  j("eventLog-" & $context.id & "-dense-table-" & $context.index)
+  cstring("eventLog-" & $context.id & "-dense-table-" & $context.index)
 
 proc detailedId*(context: EventLogComponent): cstring =
-  j("eventLog-" & $context.id & "-detailed-table-" & $context.index)
+  cstring("eventLog-" & $context.id & "-detailed-table-" & $context.index)
 
 template local*(expression: untyped): untyped {.dirty.} =
-  j(self.type.name[0 .. 0].toLowerAscii() & self.type.name[1..^10] & "-" & expression)
+  cstring(self.type.name[0 .. 0].toLowerAscii() & self.type.name[1..^10] & "-" & expression)
 
 proc recalculateKinds(self: EventLogComponent)
 
@@ -389,29 +388,29 @@ proc events(self: EventLogComponent) =
               renderRRTicksLine(directLocationRRTicks, self.data.minRRTicks, self.data.maxRRTicks, "event-rr-ticks-line")
           },
           js{
-            className: j"eventLog-index eventLog-cell",
-            data: j"rrEventId",
-            title: j"rr event id"
+            className: cstring"eventLog-index eventLog-cell",
+            data: cstring"rrEventId",
+            title: cstring"rr event id"
           },
       ]
       if self.isDbBasedTrace:
-        let lower = j("FullPath".toLowerAscii())
+        let lower = cstring("FullPath".toLowerAscii())
 
         denseColumns.add(
           js{
-            className: j"eventLog-" & lower & " " & local("cell"),
+            className: cstring"eventLog-" & lower & " " & local("cell"),
             searchable: true,
             title: lower,
-            data: j"fullPath",
+            data: cstring"fullPath",
           }
         )
       denseColumns.add(
         @[
           js{
-            className: j"eventLog-event eventLog-cell",
+            className: cstring"eventLog-event eventLog-cell",
             searchable: true,
-            data: j"kind",
-            title: j"event-image",
+            data: cstring"kind",
+            title: cstring"event-image",
             render: proc(kind: EventLogKind, t: js, event: ProgramEvent): cstring =
               if event.content.split("\n").len() == 2 and event.content.split("\n")[^1] == "":
                 cstring""
@@ -421,10 +420,10 @@ proc events(self: EventLogComponent) =
                 cstring""
           },
           js{
-            className: j"eventLog-text eventLog-cell",
+            className: cstring"eventLog-text eventLog-cell",
             searchable: true,
             data: cstring"content",
-            title: j"text",
+            title: cstring"text",
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
                 of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
@@ -441,12 +440,12 @@ proc events(self: EventLogComponent) =
 
       var detailedColumns = @[
           js{
-            className: j"eventLog-detailed-index eventLog-cell",
-            data: j"rrEventId"},
+            className: cstring"eventLog-detailed-index eventLog-cell",
+            data: cstring"rrEventId"},
           js{
-            className: j"eventLog-detailed-event eventLog-cell",
+            className: cstring"eventLog-detailed-event eventLog-cell",
             searchable: true,
-            data: j"kind",
+            data: cstring"kind",
             render: proc(event: EventLogKind): cstring =
               cstring""
           },
@@ -472,32 +471,32 @@ proc events(self: EventLogComponent) =
         ]
 
       # if self.isDbBasedTrace:
-      #   let lower = j("FullPath".toLowerAscii())
+      #   let lower = cstring("FullPath".toLowerAscii())
 
       #   denseColumns.add(
       #     js{
-      #       className: j"eventLog-" & lower & " " & local("cell"),
+      #       className: cstring"eventLog-" & lower & " " & local("cell"),
       #       searchable: true,
       #       title: lower,
-      #       data: j"fullPath",
+      #       data: cstring"fullPath",
       #     }
       #   )
       #   if false:
-      #     let lower = j("LowLevelLocation".toLowerAscii())
+      #     let lower = cstring("LowLevelLocation".toLowerAscii())
 
       #     denseColumns.add(
       #       js{
-      #         className: j"eventLog-" & lower & " " & local("cell"),
+      #         className: cstring"eventLog-" & lower & " " & local("cell"),
       #         searchable: true,
       #         title: lower,
-      #         data: j"lowLevelLocation",
+      #         data: cstring"lowLevelLocation",
       #       }
       #     )
 
       console.timeEnd(cstring"new events: load in datatable: optional columns")
       console.time(cstring"new events: load in datatable: dense datatable preparation and call")
 
-      let denseTableElement = jqFind(j"#" & self.denseId)
+      let denseTableElement = jqFind(cstring"#" & self.denseId)
 
       denseTableElement.DataTable.ext.errMode = cstring"throw"
       self.denseTable.context = denseTableElement.DataTable(
@@ -560,17 +559,17 @@ proc events(self: EventLogComponent) =
     console.time(cstring"new events: load in datatable: context changes and handlers")
 
     context.init = true
-    context.denseTable.context = jqFind(j"#" & context.denseId).DataTable()
-    context.detailedTable.context = jqFind(j"#" & context.detailedId).DataTable()
+    context.denseTable.context = jqFind(cstring"#" & context.denseId).DataTable()
+    context.detailedTable.context = jqFind(cstring"#" & context.detailedId).DataTable()
     context.redrawColumns = context.tableCallback.isNil
     context.eventsIndex = self.programEvents.len
 
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
-    jqFind(j"#" & context.denseId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.denseTable.context, e))
-    jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
-    jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
-    jqFind(j"#" & context.denseId & j" tbody").on(j"contextmenu", j"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
+    jqFind(cstring"#" & context.detailedId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
 
     console.timeEnd(cstring"new events: load in datatable: context changes and handlers")
 
@@ -583,18 +582,18 @@ proc events(self: EventLogComponent) =
     console.timeEnd(cstring"new events: load in datatable: redraw")
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
-    jqFind(j"#" & context.denseId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.denseTable.context, e))
-    let denseWrapper = j"#" & self.denseId & j"_wrapper"  
+    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
+    let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"  
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
       .addEventListener(
-        j"scroll",
+        cstring"scroll",
         proc () =
           self.denseTable.updateTableRows(redraw = true)
           self.redraw()
       )
-    jqFind(j"#" & context.detailedId & j" tbody").on(j"click", j"tr", proc(e: js) = handler(context.detailedTable.context, e))
-    jqFind(j"#" & context.denseId & j" tbody").on(j"mouseover", j"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
-    jqFind(j"#" & context.denseId & j" tbody").on(j"contextmenu", j"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
+    jqFind(cstring"#" & context.detailedId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
+    jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
     if self.resizeObserver.isNil:
       let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
       let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
@@ -1066,9 +1065,9 @@ method restart*(self: EventLogComponent) =
 
 proc eventLogAfterRedraws(self: EventLogComponent) =
   self.events()
-  let denseWrapper = j"#" & self.denseId & j"_wrapper"
-  let detailedWrapper = j"#" & self.detailedId & j"_wrapper"
-  let eventId = j"eventLogComponent-" & $self.id
+  let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
+  let detailedWrapper = cstring"#" & self.detailedId & cstring"_wrapper"
+  let eventId = cstring"eventLogComponent-" & $self.id
 
   if not self.inExtension:
     if not self.isDetailed:

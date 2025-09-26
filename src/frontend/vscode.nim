@@ -87,6 +87,7 @@ when defined(ctInExtension):
     # viewsApi.receive called in message handler in `getOrCreatePanel` in initPanels.ts
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=transport)
 
+
   when defined(ctInCentralExtensionContext):
     proc parseCTJson(raw: cstring): js =
       let rawString = $raw
@@ -97,6 +98,25 @@ when defined(ctInExtension):
           let jsonText = rawString[jsonIdx + 1..^1]
           return JSON.parse(jsonText)
       return JSON.parse(raw)
+
+    proc readCTOutput(
+        codetracerExe: cstring,
+        args: seq[cstring],
+        isNixOS: bool = false,
+        options: JsObject = js{}
+      ): Future[Result[cstring, JsObject]] =
+        if not isNixOS or not ($codetracerExe).endsWith(".AppImage"):
+          readProcessOutput(
+            codetracerExe,
+            args,
+            options
+          )
+        else:
+          readProcessOutput(
+            "appimage-run",
+            @[codetracerExe].concat(args),
+            options
+          )
 
     proc getRecentTraces*(codetracerExe: cstring, isNixOS: bool): Future[seq[JsObject]] {.async, exportc.} =
       let res = await readCTOutput(

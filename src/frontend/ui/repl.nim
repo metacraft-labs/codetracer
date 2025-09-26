@@ -1,9 +1,7 @@
 import
+  std/strutils,
   ../ui_helpers,
   ui_imports, value
-import strutils
-#
-
 
 method onDebugOutput(self: ReplComponent, response: DebugOutput) {.async.} =
   self.history[^1].output = response

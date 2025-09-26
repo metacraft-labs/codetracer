@@ -1,8 +1,8 @@
 import
-  ../types,
   ui_imports, colors, events, trace, typetraits, strutils,
-  datatable
-import ../communication, ../../common/ct_event
+  datatable,
+  ../[ types, communication ],
+  ../../common/ct_event
 
 proc refreshTraces(self: TraceLogComponent) =
   if self.table.context.isNil:
@@ -58,19 +58,19 @@ proc refreshTraces(self: TraceLogComponent) =
               data: cstring"functionName"
             },
             js{
-              className: j"trace-values",
-              data: j"locals",
+              className: cstring"trace-values",
+              data: cstring"locals",
               render: proc(data: seq[(cstring, Value)]): cstring =
-                var res = j""
+                var res = cstring""
                 for (name, value) in data:
                   if value.kind != types.Error:
                     if value.isLiteral and value.kind == types.String:
                       res.add(value.text & cstring" ")
                     else:
-                      res.add(name & j"=" & textRepr(value) & cstring" ")
+                      res.add(name & cstring"=" & textRepr(value) & cstring" ")
                   else:
-                    res.add(name & j"=" & j"<span class=error-trace>" & value.msg & j"</span>")
-                    res.add(j" ")
+                    res.add(name & cstring"=" & cstring"<span class=error-trace>" & value.msg & cstring"</span>")
+                    res.add(cstring" ")
                 return res
             }
           ]
@@ -126,9 +126,9 @@ proc resizeTraceLogHandler(self: TraceLogComponent) =
   self.table.resizeTable()
 
 method render*(self: TraceLogComponent): VNode =
-  if kxiMap[j("traceLogComponent-" & $self.id)].afterRedraws.len == 0:
+  if kxiMap[cstring("traceLogComponent-" & $self.id)].afterRedraws.len == 0:
 
-    kxiMap[j("traceLogComponent-" & $self.id)].afterRedraws.add(proc =
+    kxiMap[cstring("traceLogComponent-" & $self.id)].afterRedraws.add(proc =
       self.refreshTraces()
 
       if self.resizeObserver.isNil:
@@ -144,7 +144,7 @@ method render*(self: TraceLogComponent): VNode =
 
       # add scroll event listeners to both tables
       jq(&"#traceLogComponent-{self.id} .dataTables_scrollBody").toJs
-        .addEventListener(j"scroll", proc = self.table.updateTableRows())
+        .addEventListener(cstring"scroll", proc = self.table.updateTableRows())
 
       self.table.updateTableRows(redraw = false))
 

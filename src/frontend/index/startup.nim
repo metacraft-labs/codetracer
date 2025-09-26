@@ -3,7 +3,8 @@ import
   results,
   window, traces, files, config, install, electron_vars, debugger,
   ipc_subsystems/socket,
-  ../[ lib, config, types, trace_metadata ],
+  ../[ config, types, trace_metadata ],
+  ../lib/[ jslib, electron_lib ],
   ../../common/[ paths, ct_logging ]
 
 const NO_LIMIT = (-1)

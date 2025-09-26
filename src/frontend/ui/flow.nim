@@ -1,9 +1,9 @@
 import
-  ../ui_helpers, ui_imports,
-  ../renderer, value, scratchpad
-
-import ../communication, ../../common/ct_event, ../dap, ../event_helpers
-import strutils, os
+  strutils, os,
+  ui_imports,
+  value, scratchpad,
+  ../[ ui_helpers, renderer, communication, dap, event_helpers],
+  ../../common/ct_event
 
 # thank, God!
 
@@ -23,9 +23,10 @@ proc resizeFlowSlider*(self: FlowComponent)
 proc makeSlider(self: FlowComponent, position: int)
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int)
 
-const SLIDER_OFFSET = 6 # in px
-const FLOW_VALUE_LIMIT = 30
-const FLOW_VALUE_MAX_WIDTH = fmt"{FLOW_VALUE_LIMIT}ch"
+const
+  SLIDER_OFFSET = 6 # in px
+  FLOW_VALUE_LIMIT = 30
+  FLOW_VALUE_MAX_WIDTH = fmt"{FLOW_VALUE_LIMIT}ch"
 
 proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value): ValueMode =
   if testEq(beforeValue, afterValue):
@@ -345,7 +346,7 @@ let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
   emptyKeywords,
   emptyKeywords,
   emptyKeywords,
-  JsAssoc[cstring, bool]{j"func": true, j"proc": true, j"int": true, j"seq": true, j"for": true, j"in": true, j"var": true},
+  JsAssoc[cstring, bool]{cstring"func": true, cstring"proc": true, cstring"int": true, cstring"seq": true, cstring"for": true, cstring"in": true, cstring"var": true},
   emptyKeywords,
   emptyKeywords,
   emptyKeywords,
@@ -376,7 +377,7 @@ func isStringSymbol(c: char, lang: Lang): bool =
 func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
   result = @[]
   var state: TokenState
-  var token = j""
+  var token = cstring""
 
   for i in 0 ..< source.len:
     let c = source[i]
@@ -385,7 +386,7 @@ func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
       of TAny:
         state = TExpression
         token = cstring($c)
-        result.add((j"", i))
+        result.add((cstring"", i))
       of TExpression:
         token = token & cstring($c)
       else:
@@ -399,7 +400,7 @@ func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
             result[^1] = (token, result[^1][1])
           else:
             discard result.pop
-        token = j""
+        token = cstring""
         state = TString
 
       of TAny:
@@ -415,7 +416,7 @@ func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
             result[^1] = (token, result[^1][1])
           else:
             discard result.pop
-        token = j""
+        token = cstring""
         state = TAny
 
       else:
@@ -480,7 +481,7 @@ proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
         self.tippyElement = nil
 
     if self.tippyElement.isNil:
-      let obj = tippy(cstring(&"#{containerId}"), JsAssoc[cstring, JsObject]{
+      let obj = ui_imports.misc_lib.tippy(cstring(&"#{containerId}"), JsAssoc[cstring, JsObject]{
         allowHTML: cast[JsObject](true),
         followCursor: cast[JsObject](cstring"horizontal"),
         content: cast[JsObject](content),
@@ -553,7 +554,7 @@ proc directRedraw(self: FlowComponent) =
 
         if not element.isNil:
           element.style.width = widthStyle
-          element.toJs.classList.add(j"refresh")
+          element.toJs.classList.add(cstring"refresh")
 
 proc focusLoopID(self: FlowComponent, stepCount: int) =
   if stepCount in self.flow.steps.low .. self.flow.steps.high:
@@ -1014,10 +1015,10 @@ proc moveStepValuesInVisibleArea(self: FlowComponent) = # TODO: needs refeactori
             let stepValueIndent = self.stepValueIndentation(step, variableValue, valueContainer)
             if stepValueIndent != 0:
               valueContainer.style.textIndent = cstring(&"{stepValueIndent}px")
-              valueContainer.style.textAlign = j"left"
+              valueContainer.style.textAlign = cstring"left"
             else:
-              valueContainer.style.textIndent = j""
-              valueContainer.style.textAlign = j""
+              valueContainer.style.textIndent = cstring""
+              valueContainer.style.textAlign = cstring""
 
 proc move*(
   self: FlowComponent,
@@ -1562,7 +1563,7 @@ proc switchFlowUI*(self: FlowComponent, flowUI: FlowUI) =
 
   self.resetFlow()
 
-  let flowUINames: array[FlowUI, cstring] = [j"parallel", j"inline", j"multiline"]
+  let flowUINames: array[FlowUI, cstring] = [cstring"parallel", cstring"inline", cstring"multiline"]
 
   self.data.config.flow.ui = flowUINames[flowUI]
   self.data.config.flow.realFlowUI = flowUI
@@ -1642,8 +1643,8 @@ proc makeLegend(self: FlowComponent, step: FlowStep): Node =
 
 proc makeFlowLineContainer*(self: FlowComponent, step: FlowStep) =
   # create content widget for
-  var dom = cast[Node](document.createElement(j"div"))
-  let id = j(&"ct-flow-{self.id}-{step.position}")
+  var dom = cast[Node](document.createElement(cstring"div"))
+  let id = cstring(&"ct-flow-{self.id}-{step.position}")
 
   self.flowDom[step.position] = dom
 
@@ -3257,7 +3258,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
 
 proc varStyle(self: FlowComponent, fields: seq[cstring]): VStyle =
   let width = 70 / fields.len.float
-  style((StyleAttr.cssFloat, j"left"))
+  style((StyleAttr.cssFloat, cstring"left"))
 
 proc makeSliderDom(self: FlowComponent, position: int): Node =
   var dom = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
@@ -3742,7 +3743,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
               else:
                 (group.loopWidths[loopID][i] * group.baseWidth)
             let columnStyle = style(
-              (StyleAttr.width, j($width & "px")))
+              (StyleAttr.width, cstring($width & "px")))
 
             # change class on width change to make sure it's re-rendered
             let flowWidthClass = fmt"flow-parallel-values-width-{width}"

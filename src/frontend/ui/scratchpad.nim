@@ -1,6 +1,7 @@
-import ui_imports, ../types
-import ../communication
-import ../../common/ct_event
+import
+  ui_imports,
+  ../[ types, communication ],
+  ../../common/ct_event
 
 when defined(ctInExtension):
   var scratchpadComponentForExtension* {.exportc.}: ScratchpadComponent = makeScratchpadComponent(data, 0, inExtension = true)

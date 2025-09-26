@@ -1,7 +1,9 @@
-import std / [jsffi, jsconsole, async, strformat]
-import results
-import lib, types, paths
-import ../common/ct_logging
+import
+  std / [jsffi, jsconsole, async, strformat],
+  results,
+  types, paths,
+  lib/[ jslib, electron_lib ],
+  ../common/ct_logging
 
 proc findRawTraceWithCodetracer(app: ElectronApp, traceId: int): Future[cstring] {.async.} =
   let res = await readProcessOutput(

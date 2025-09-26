@@ -1,6 +1,6 @@
 import
   std/jsffi,
-  lib,
+  lib/[ jslib, electron_lib ],
   index/[ args, ipc_utils, electron_vars, server_config, config, window ]
 
 data.start = now()

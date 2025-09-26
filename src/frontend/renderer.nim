@@ -8,12 +8,14 @@ import
   # third party
   karax, karaxdsl, kdom, vdom, results,
   # internal
-  lib, ui_helpers, types, utils, lang,
+  ui_helpers, types, utils, lang,
   communication, dap,
   .. / common / ct_event,
   services / [
     event_log_service, debugger_service, editor_service,
-    flow_service, search_service, shell_service]
+    flow_service, search_service, shell_service
+  ],
+  lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ]
   # ui / datatable
 
 # (alexander): if i remember correctly: to prevent clashes with other dom-related modules 
@@ -49,6 +51,9 @@ else:
 var escapeHandler*: proc: void
 escapeHandler = nil
 
+template componentContainerClass*(class: string = ""): cstring =
+  cstring("component-container " & class)
+
 proc contextMenuOption(self: ContextMenu, key: int): VNode =
   buildHtml(
     tdiv(class = "context-menu-option",
@@ -81,7 +86,7 @@ proc loadMonacoTheme*(themeName: cstring) =
 proc gotoLine*(line: int, highlight: bool = false, change: bool = false) {.exportc.}
 proc lowAsm*(data: Data): bool
 proc highlightLine*(path: cstring, line: int)
-proc saveFiles*(data: Data, path: cstring = j"", saveAs: bool = false)
+proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false)
 proc step*(data: Data, action: CtEventKind, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
 proc openLocation*(data: Data, path: cstring, line: int) {.async.}
 
@@ -110,8 +115,8 @@ proc currentLine*(data: Data): int =
 
 proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, editorView: EditorView, lang: Lang) =
   let tab = GoldenLayoutConfig(
-    `type`: j"component",
-    componentName: j"genericUiComponent",
+    `type`: cstring"component",
+    componentName: cstring"genericUiComponent",
     componentState: GoldenItemState(
       id: 0,
       label: cstring"calls",
@@ -134,7 +139,7 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # kout layoutConfig.toJs
   if data.ui.mode == DebugMode:
     ipc.send "CODETRACER::save-config", js{
-      name: j"default_layout",
+      name: cstring"default_layout",
       layout: JSON.stringify(layoutConfig.toJs)}
 
 
@@ -205,7 +210,7 @@ proc maybeRedrawTraces*(length: int) =
 
 
   # TODO tabInfo.lowLevelMap = map
-  # TODO tabInfo.name = if lowLevel == 2: map.name else: j""
+  # TODO tabInfo.name = if lowLevel == 2: map.name else: cstring""
 
 
 proc asmTabLoad*(path: cstring, name: cstring): Future[void] =
@@ -223,9 +228,9 @@ proc getColumn*(element: kdom.Node): int =
 # INIT
 
 proc loadFlowUI*(ui: cstring): FlowUI =
-  if ui == j"parallel":
+  if ui == cstring"parallel":
     FlowParallel
-  elif ui == j"inline":
+  elif ui == cstring"inline":
     FlowInline
   else:
     FlowMultiline
@@ -247,7 +252,7 @@ proc createUIComponent(componentState: JsObject) =
     cerror "createUIComponent: " & getCurrentExceptionMsg()
 
 proc createUILayoutComponents(content: JsObject) =
-  if content["type"].to(cstring) == j"component":
+  if content["type"].to(cstring) == cstring"component":
       createUIComponent(content.componentState)
   else:
     for key, contentConfig in content.content:
@@ -325,7 +330,7 @@ proc onContextStartTrace*(sender: js, response: seq[Tracepoint]) =
     id: data.services.trace.traceSessions.len))
   data.pointList.lastTracepoint = 0
   data.pointList.redrawTracepoints = true
-  # TODO inline toggleIn(response[0].line, text=j(&"log {response[0].expression}"))
+  # TODO inline toggleIn(response[0].line, text=cstring(&"log {response[0].expression}"))
 
 proc onContextStartHistory*(sender: js, response: jsobject(inState=bool, expression=cstring)) =
   # TODO
@@ -464,7 +469,7 @@ proc jumpInlineCall*(path: cstring, line: int, name: cstring) =
 
 # TODO
 #proc macroExpansionJump*(path: cstring, line: int) {.async.} =
-  #await tabLoad(path, j"", data.lang)
+  #await tabLoad(path, cstring"", data.lang)
   #highlightLine(path, line)
 
 
@@ -472,7 +477,7 @@ proc codeIDJump*(codeID: int64) =
   ipc.send "CODETRACER::codeID-jump", js{codeID: codeID}
 
 proc jumpLocation*(location: types.Location) {.async.} =
-  # TODO await tabLoad(location.path, j"", data.lang)
+  # TODO await tabLoad(location.path, cstring"", data.lang)
   highlightLine(location.path, location.line)
 
 ## MOVE
@@ -548,15 +553,15 @@ proc loadTheme*(name: cstring) =
     cast[js](link).dataset.theme = name
 
 
-let monacoThemeNames* = JsAssoc[cstring, cstring]{"mac classic": j"codetracerWhite", # TODO
-                                                  "default white": j"codetracerWhite",
-                                                  "default black": j"codetracerDark", # TODO
-                                                  "default dark": j"codetracerDark"}
+let monacoThemeNames* = JsAssoc[cstring, cstring]{"mac classic": cstring"codetracerWhite", # TODO
+                                                  "default white": cstring"codetracerWhite",
+                                                  "default black": cstring"codetracerDark", # TODO
+                                                  "default dark": cstring"codetracerDark"}
 
-let themeProgramNames* = JsAssoc[cstring, cstring]{"mac classic": j"mac_classic",
-                                                   "default white": j"default_white",
-                                                   "default black": j"default_black",
-                                                   "default dark": j"default_dark"}
+let themeProgramNames* = JsAssoc[cstring, cstring]{"mac classic": cstring"mac_classic",
+                                                   "default white": cstring"default_white",
+                                                   "default black": cstring"default_black",
+                                                   "default dark": cstring"default_dark"}
 
 let themeNames*: array[4, cstring] = [cstring"mac classic",
                                       cstring"default white",
@@ -799,7 +804,7 @@ proc removeTextAtCurrentPosition*(monaco: MonacoEditor, numChars: int) =
   )
 
   # Execute the delete operation
-  monaco.executeEdits(j"", @[
+  monaco.executeEdits(cstring"", @[
     MonacoEditOperation(
       forceMoveMarkers: true,
       `range`: editRange,
@@ -814,7 +819,7 @@ proc insertTextAtCurrentPosition*(monaco: MonacoEditor, text: cstring) =
     currentPosition.lineNumber,
     currentPosition.column)
 
-  monaco.executeEdits(j"", @[
+  monaco.executeEdits(cstring"", @[
     MonacoEditOperation(
       forceMoveMarkers: true,
       `range`: editRange,
@@ -828,7 +833,7 @@ proc clipboardPaste*(data: Data) =
   let activeElement = cast[dom.Node](dom.window.document.activeElement)
   let clipboardText = electron.clipboard.readText().to(cstring)
 
-  if activeElement.isNil or clipboardText == j"":
+  if activeElement.isNil or clipboardText == cstring"":
     return
 
   let monaco = data.getMonacoOfActiveEditor()
@@ -848,8 +853,8 @@ proc openPreferences*(data: Data) =
 
 proc saveDialog*(data: Data, path: cstring, handler: proc: void) =
   vex.dialog.open(js{
-    message: j"",
-    input: j(&"{path} changed, save?"),
+    message: cstring"",
+    input: cstring(&"{path} changed, save?"),
     buttons: @[
       vex.dialog.buttons.YES, vex.dialog.buttons.NO
     ],
@@ -911,18 +916,18 @@ proc onCommandSearch*(query: cstring) {.async.} =
 proc loadFileDialog*(options: js) =
   electron.dialog.showOpenDialogSync(options)
 
-proc search*(data: Data, mode: SearchMode, query: cstring = j"") =
+proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
   cdebug fmt"search: {query}"
   data.ui.commandPalette.active = not data.ui.commandPalette.active
   if not data.ui.commandPalette.active:
-    # data.services.search.queries[mode] = j""
+    # data.services.search.queries[mode] = cstring""
     data.ui.commandPalette.results = @[]
     # TODO command component
     # data.activeFocus = Content.EditorView
   else:
     data.ui.commandPalette.selected = 0
-    let name = j"menu"
-    let input = j"#command-query-text"
+    let name = cstring"menu"
+    let input = cstring"#command-query-text"
     if query.len == 0:
       kxiMap[name].afterRedraws.add(proc =
         discard windowSetTimeout(
@@ -947,8 +952,8 @@ proc search*(data: Data, mode: SearchMode, query: cstring = j"") =
         discard windowSetTimeout(proc =
          let element = jq(input)
          element.toJs.value = query
-         let event = dom.window.toJs.document.createEvent(j"Event")
-         event.initEvent(j"keydown")
+         let event = dom.window.toJs.document.createEvent(cstring"Event")
+         event.initEvent(cstring"keydown")
          event.keyCode = ENTER_KEY_CODE # enter
          # TODO do we need event.which
          element.toJs.dispatchEvent(event), 50))
@@ -956,19 +961,19 @@ proc search*(data: Data, mode: SearchMode, query: cstring = j"") =
   data.redraw()
 
 
-proc commandSearch*(data: Data, query: cstring = j"") =
+proc commandSearch*(data: Data, query: cstring = cstring"") =
   data.search(SearchCommandRealTime, query)
 
-proc fileSearch*(data: Data, query: cstring = j"") =
+proc fileSearch*(data: Data, query: cstring = cstring"") =
   data.search(SearchFileRealTime, query)
 
-proc fixedSearch*(data: Data, query: cstring = j"") =
+proc fixedSearch*(data: Data, query: cstring = cstring"") =
   data.search(SearchFixed, query)
 
-proc findInFiles*(data: Data, query: cstring = j"") =
+proc findInFiles*(data: Data, query: cstring = cstring"") =
   data.search(SearchFindInFiles, query)
 
-proc findSymbol*(data: Data, query: cstring = j"") =
+proc findSymbol*(data: Data, query: cstring = cstring"") =
   data.search(SearchFindSymbol, query)
 
 proc toggleTraceSettings*(id: int) =
@@ -1164,8 +1169,8 @@ proc onStarted*(sender: js, response: js) =
 
 proc updateDialog(data: Data, path: cstring) =
   vex.dialog.open(js{
-    message: j"",
-    input: j(&"{path} changed, update?"),
+    message: cstring"",
+    input: cstring(&"{path} changed, update?"),
     buttons: @[
       vex.dialog.buttons.YES, vex.dialog.buttons.NO
     ],
@@ -1188,7 +1193,7 @@ proc openNormalEditor* =
   # TODO
   discard
 
-proc saveFiles*(data: Data, path: cstring = j"", saveAs: bool = false) =
+proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false) =
   for name, tab in data.services.editor.open:
     if path.len == 0 or name == path:
       tab.source = tab.monacoEditor.toJs.getValue().to(cstring)

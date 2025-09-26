@@ -1,15 +1,15 @@
 import
   jsffi,
-  karax, ui_imports
-import trace
+  karax, ui_imports, trace
 
-const NO_CODE: int = -1
-const BROWSER_FORWARD: int = 3
-const BROWSER_BACK: int = 4
+const
+  NO_CODE: int = -1
+  BROWSER_FORWARD: int = 3
+  BROWSER_BACK: int = 4
 
 proc shortcut*(shortcut: string): int =
   let tokens = shortcut.split("+", 2)
-  var buttonToken = if tokens[^1].len == 1: j(&"Key{tokens[^1].toUpperAscii}") else: j(tokens[^1])
+  var buttonToken = if tokens[^1].len == 1: cstring(&"Key{tokens[^1].toUpperAscii}") else: cstring(tokens[^1])
 
   if tokens[^1] == "=":
     buttonToken = "Equal"

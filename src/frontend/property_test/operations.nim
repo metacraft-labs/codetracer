@@ -1,6 +1,6 @@
 from std / strformat import fmt
 from std / dom import click
-import ../lib
+import ../lib/[ jslib, logging ]
 from loaders import nil
 
 type

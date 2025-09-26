@@ -1,7 +1,8 @@
 import
   std/[ jsffi, strutils, sequtils ],
   config, electron_vars,
-  ../[ lib, types ]
+  ../lib/[ jslib, electron_lib ],
+  ../[ types ]
 
 when defined(ctmacos):
   let modMap* : JsAssoc[cstring, cstring] = JsAssoc[cstring, cstring]{

@@ -1,9 +1,0 @@
-include_rules
-
-: foreach regression_tests/*.nim |> !nim_test_js |> ../../../tests/test_suits/regression_tests/%B.js
-: foreach testing_framework_tests/*.nim |> !nim_test_js |> ../../../tests/test_suits/testing_framework_tests/%B.js
-#: regression_tests/event_log_jump_to_all_events.nim |> !nim_test_js |>
-#: regression_tests/run_to_entry.nim |> !nim_test_js |>
-#: testing_framework_tests/testing_framework_smoke_test.nim |> !nim_test_js |>
-
-: foreach *.yaml |> !tup_preserve |> ../../../tests/test_suits/

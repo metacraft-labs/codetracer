@@ -1,16 +1,15 @@
 import
-  ../ui_helpers,
-  ../../ct/version,
-  ui_imports, ../types
-import std/options
-import std/jsffi
-import std/enumerate
+  std/[ options, jsffi, enumerate ],
+  ui_imports,
+  ../[ ui_helpers, types ],
+  ../../ct/version
 import std/times except now
 
-const PROGRAM_NAME_LIMIT = 45
-const NO_EXPIRE_TIME = -1
-const EMPTY_STRING = ""
-const ERROR_DOWNLOAD_KEY = "Errored"
+const
+  PROGRAM_NAME_LIMIT = 45
+  NO_EXPIRE_TIME = -1
+  EMPTY_STRING = ""
+  ERROR_DOWNLOAD_KEY = "Errored"
 
 proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   var uploadedData = await self.data.asyncSend(
@@ -470,7 +469,7 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
           self.newDownload.args = e.target.value.split(" ")
           handler(cast[Event](e), tg),
       hasButton = false,
-      inputText = self.newDownload.args.join(j" ")
+      inputText = self.newDownload.args.join(cstring" ")
     )
     renderRecordResult(self, self.newDownload.status, true)
     tdiv(class = "new-record-form-row"):
@@ -519,7 +518,7 @@ proc newRecordFormView(self: WelcomeScreenComponent): VNode =
       proc(ev: Event, tg: VNode) = discard,
       proc(ev: Event, tg: VNode) = self.newRecord.args = ev.target.value.split(" "),
       hasButton = false,
-      inputText = self.newRecord.args.join(j" ")
+      inputText = self.newRecord.args.join(cstring" ")
     )
     renderInputRow(
       "workDir",

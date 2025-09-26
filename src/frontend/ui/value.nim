@@ -1,10 +1,12 @@
-import ui_imports, ../types, ../renderer, ../utils
-import ../communication, ../../common/ct_event
-import ../event_helpers
+import
+  ui_imports,
+  ../[ types, renderer, utils, communication, event_helpers],
+  ../../common/ct_event
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
-  types.Error, TypeKind.Raw, FunctionKind, TypeKind.None} # temp Function
+  types.Error, TypeKind.Raw, FunctionKind, TypeKind.None
+} # temp Function
 
 proc view(
   self: ValueComponent,
@@ -227,7 +229,7 @@ proc ensureLine*(self: ChartComponent) =
       gradient.addColorStop(0.3, cstring"transparent")
       self.lineConfig = 
         js{
-          "type": j"line",
+          "type": cstring"line",
           "data": js{
             "labels": self.lineLabels,
             "datasets": self.datasets,
@@ -252,14 +254,14 @@ proc colorLabel*(self: ChartComponent, label: cstring): cstring =
   let g = if label.len >= 2: label[1].int * 100 mod 256 else: 0
   let b = if label.len >= 3: label[2].int * 100 mod 256 else: 0
 
-  j(&"rgba({r}, {g}, {b}, 1)")
+  cstring(&"rgba({r}, {g}, {b}, 1)")
 
 proc pieLabelsColor*(labels: seq[cstring]): seq[cstring] =
   var colors: seq[cstring]
   var r = 255
 
   for i in 0..<labels.len:
-    colors.add(j(&"rgba({r}, 169, 145, 1)"))
+    colors.add(cstring(&"rgba({r}, 169, 145, 1)"))
     r -= 20
 
   result = colors
@@ -268,7 +270,7 @@ proc ensurePie*(self: ChartComponent) =
   if self.pie.isNil and self.viewKind == ViewPie:
     self.pieConfig =
       js{
-        "type": j"pie",
+        "type": cstring"pie",
         "data":
           js{
             "labels": self.pieLabels,
@@ -317,7 +319,7 @@ proc ensure*(self: ChartComponent) =
 
   # if self.stateID != -1:
   #   # TODO: think how this would work in extension
-  #   kxiMap[j("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
+  #   kxiMap[cstring("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
   #     discard windowSetTimeout(proc = self.ensureBase(), 500)
   #   )
   # else:
@@ -602,7 +604,7 @@ proc addChart(self: ValueComponent, expression: cstring): ChartComponent =
   let chart = self.charts[expression]
 
   chart.setId(self.data.ui.idMap["chart"])
-  self.data.ui.idMap[j"chart"] = self.data.ui.idMap[j"chart"] + 1
+  self.data.ui.idMap[cstring"chart"] = self.data.ui.idMap[cstring"chart"] + 1
   chart.stateID = self.stateID
   chart.expression = expression
 
@@ -625,7 +627,7 @@ method ensureCollectionElementsChart*(
     chart.ensure()
     chart.addValues(expression, value.elements)
 
-    self.data.ui.idMap[j"chart"] = self.data.ui.idMap[j"chart"] + 1
+    self.data.ui.idMap[cstring"chart"] = self.data.ui.idMap[cstring"chart"] + 1
   else:
     if self.charts.hasKey(expression):
       self.charts[expression].tableView = tableView
@@ -897,7 +899,7 @@ proc view(
         var children: seq[(cstring, Value)]
 
         for i, element in value.elements:
-          children.add((j("[" & $i & "]"), element))
+          children.add((cstring("[" & $i & "]"), element))
 
         if children.len == 0:
           atom = "value-expanded-atom-parent"
@@ -964,7 +966,7 @@ proc view(
       buildHtml(
         tdiv(class = "value-bug")
       ):
-        text j"bug in proc view -> value.nim"
+        text cstring"bug in proc view -> value.nim"
 
     of TypeKind.Raw:
       buildHtml(
@@ -1005,9 +1007,9 @@ proc view(
   #         self.selected = true
   #         self.data.focusComponent(self)
 
-  #         kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
+  #         kxiMap[cstring"stateComponent-" & cstring($self.stateID)].afterRedraws.add(proc =
   #           discard windowSetTimeout(proc =
-  #             jq(j".value-name-selected").focus(), 50)
+  #             jq(cstring".value-name-selected").focus(), 50)
   #         )
 
   #     self.data.redraw()
@@ -1022,9 +1024,9 @@ proc view(
   #         self.selected = true
   #         self.data.focusComponent(self)
 
-  #         kxiMap[j"stateComponent-" & j($self.stateID)].afterRedraws.add(proc =
+  #         kxiMap[cstring"stateComponent-" & cstring($self.stateID)].afterRedraws.add(proc =
   #           discard windowSetTimeout(proc =
-  #             jq(j".value-name-selected").focus(), 50)
+  #             jq(cstring".value-name-selected").focus(), 50)
   #         )
 
   #       self.data.redraw()
@@ -1041,10 +1043,10 @@ proc view(
 
   #   self.data.redraw()
 
-  var isWatch = if value.isWatch: j"value-watch" else: j""
-  var isSelected = if self.selected: j"value-selected" else: j""
-  # var nameSelected = if self.selected: j"value-name-selected" else: j""
-  var fresh = if self.fresh: j("value-fresh-" & $self.freshIndex) else: j""
+  var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
+  var isSelected = if self.selected: cstring"value-selected" else: cstring""
+  # var nameSelected = if self.selected: cstring"value-name-selected" else: cstring""
+  var fresh = if self.fresh: cstring("value-fresh-" & $self.freshIndex) else: cstring""
 
   # let ensureCollectionElementsChart = proc: VNode =
   #   if isExpandedCompoundParent:

@@ -5,7 +5,8 @@ import
   ],
   # third party
   karax, karaxdsl, vstyles, lookuptables, # lookuptables is from karax 
-  ../lib, ../types, ../renderer, ../config, ../ui_helpers, ../utils, ../lang,
+  ../[ types, renderer, config, ui_helpers, utils, lang ],
+  ../lib/[ jslib, logging, monaco_lib, electron_lib, misc_lib ],
   ../ services / [event_log_service, debugger_service, editor_service, flow_service, search_service, shell_service]
 
 import kdom except Location
@@ -18,7 +19,9 @@ proc fa*(typ: string, kl: string = ""): VNode =
 
 proc jqFind*(a: cstring): js {.importcpp: "jQuery(#)".}
 
-export karax, karaxdsl, kdom, async, strformat, strutils, sequtils, vstyles, jsffi, algorithm, lookuptables, vdom, sugar, os, jsconsole
-export lib, types, renderer, config, ui_helpers, utils, focus, lang
-export event_log_service, debugger_service, editor_service, flow_service, shell_service
-export search_service
+export
+  karax, karaxdsl, kdom, async, strformat, strutils, sequtils, vstyles, jsffi, algorithm, lookuptables, vdom, sugar, os, jsconsole,
+  types, renderer, config, ui_helpers, utils, focus, lang,
+  jslib, logging, monaco_lib, electron_lib, misc_lib,
+  event_log_service, debugger_service, editor_service, flow_service, shell_service,
+  search_service

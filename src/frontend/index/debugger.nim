@@ -2,7 +2,8 @@ import
   std / [ async, jsffi, os ],
   ipc_subsystems/socket,
   config,
-  ../[ lib, types ],
+  ../lib/[ jslib, electron_lib ],
+  ../[ types ],
   ../../common/[ paths, ct_logging ]
 
 let

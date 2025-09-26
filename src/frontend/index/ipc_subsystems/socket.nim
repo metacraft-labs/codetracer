@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, json, strformat, strutils ],
-  ../../[ lib ],
+  ../../lib/jslib,
   ../../../common/ct_logging
 
 let net* = require("net")

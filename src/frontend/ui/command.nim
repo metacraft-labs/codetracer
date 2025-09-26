@@ -297,7 +297,7 @@ method render*(self: CommandPaletteComponent): VNode =
           text "Navigate to file (ctrl+p) / Run command (alt+p)"
 
       var resultsClass =
-        if self.results.len == 0 and self.inputValue == j"":
+        if self.results.len == 0 and self.inputValue == cstring"":
           "no-results"
         else:
           ""

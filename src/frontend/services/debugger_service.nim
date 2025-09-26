@@ -1,7 +1,9 @@
-import std / [jsconsole, os]
-import ../dap
-import ../../common/ct_event
-import service_imports
+import
+  std / [jsconsole, os],
+  ../dap,
+  ../lib/[ logging, jslib ],
+  ../../common/ct_event,
+  service_imports
 
 proc restart*(self: DebuggerService) =
   self.locals = @[]
@@ -66,7 +68,7 @@ proc debugRepl*(self: DebuggerService, cmd: cstring) {.exportc.} =
   if not self.stableBusy:
     self.stableBusy = true
     inc self.operationCount
-    self.data.ipc.send "CODETRACER::debug-gdb", js{process: j"stable", cmd: cmd}
+    self.data.ipc.send "CODETRACER::debug-gdb", js{process: cstring"stable", cmd: cmd}
 
 proc internalDeleteBreakpoint*(self: DebuggerService, path: cstring, line: int) =
   self.data.ipc.send "CODETRACER::delete-break", js{
@@ -104,7 +106,7 @@ proc step*(
     taskId: TaskId = NO_TASK_ID) =
 
   if not self.stableBusy:
-    if self.finished and action != j"continue":
+    if self.finished and action != cstring"continue":
       echo &"program is finished: please add a breakpoint and continue or jump"
       return
 
@@ -133,11 +135,11 @@ proc step*(
     if not reverse:
       self.lastDirection = DebForward
 
-      self.lastAction = j(realAction)
+      self.lastAction = cstring(realAction)
     else:
       self.lastDirection = DebReverse
 
-      self.lastAction = j(&"reverse-{realAction}")
+      self.lastAction = cstring(&"reverse-{realAction}")
 
     cdebug "debugger: send to core step: " & $realActionEnum &
       " reverse: " & $reverse & " repeat: " & $repeat &
