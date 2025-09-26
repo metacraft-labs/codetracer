@@ -8,7 +8,7 @@ use crate::{
 };
 use log::{info, warn};
 use runtime_tracing::{CallKey, FullValueRecord, Line, StepId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -24,13 +24,13 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load(&mut self, location: Location, line: Line, db: &Db) -> FlowUpdate {
+    pub fn load(&mut self, location: Location, line: Line, mode: FlowMode, db: &Db) -> FlowUpdate {
         info!("flow: load: {:?}", location);
         let path_buf = PathBuf::from(&location.path);
         match self.expr_loader.load_file(&path_buf) {
             Ok(_) => {
                 info!("Expression loader complete!");
-                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location);
+                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location, HashSet::new(), HashSet::new(), mode);
                 call_flow_preloader.load_flow(line, db)
             }
             Err(e) => {
@@ -38,6 +38,30 @@ impl FlowPreloader {
                 FlowUpdate::error(&format!("can't process file {}", location.path))
             }
         }
+    }
+
+    pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db) -> FlowUpdate {
+        for diff_line in &diff_lines {
+            match self.expr_loader.load_file(&diff_line.0) {
+                Ok(_) => {
+                    continue;
+                }
+                Err(e) => {
+                    warn!("can't process file {}: error {}", diff_line.0.display(), e);
+                    return FlowUpdate::error(&format!("can't process file {}", diff_line.0.display()));
+                }
+            }
+        }
+
+        let mut diff_call_keys = HashSet::new();
+        for step in db.step_from(runtime_tracing::StepId(0), true) {
+            if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
+                diff_call_keys.insert(step.call_key.0);
+            }
+        }
+       
+        let mut call_flow_preloader = CallFlowPreloader::new(self, Location::default(), diff_lines, diff_call_keys, FlowMode::Diff);
+        call_flow_preloader.load_flow(Line(1), db)
     }
 
     // fn load_file(&mut self, path: &str) {
@@ -53,22 +77,35 @@ impl FlowPreloader {
     // }
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum FlowMode {
+    Call,
+    Diff,
+}
+
 pub struct CallFlowPreloader<'a> {
     flow_preloader: &'a FlowPreloader,
     location: Location,
     active_loops: Vec<Position>,
     last_step_id: StepId,
     last_expr_order: Vec<String>,
+    diff_lines: HashSet<(PathBuf, i64)>,
+    diff_call_keys: HashSet<i64>, //  TODO: if we add Eq, Hash it seems we can do CallKey
+    mode: FlowMode,
 }
 
 impl<'a> CallFlowPreloader<'a> {
-    pub fn new(flow_preloader: &'a FlowPreloader, location: Location) -> Self {
+    pub fn new(flow_preloader: &'a FlowPreloader, location: Location, diff_lines: HashSet<(PathBuf, i64)>, diff_call_keys: HashSet<i64>, mode: FlowMode) -> Self {
         CallFlowPreloader {
             flow_preloader,
             location,
             active_loops: vec![],
             last_step_id: StepId(-1),
             last_expr_order: vec![],
+            diff_lines,
+            diff_call_keys,
+            mode,
         }
     }
 
@@ -88,10 +125,12 @@ impl<'a> CallFlowPreloader<'a> {
     #[allow(clippy::unwrap_used)]
     pub fn load_flow(&mut self, line: Line, db: &Db) -> FlowUpdate {
         // Update location on flow load
-        self.location = self
-            .flow_preloader
-            .expr_loader
-            .find_function_location(&self.location, &line);
+        if self.mode == FlowMode::Call {
+            self.location = self
+                .flow_preloader
+                .expr_loader
+                .find_function_location(&self.location, &line);
+        }
 
         // info!("location flow {:?}", self.location);
 
@@ -143,10 +182,48 @@ impl<'a> CallFlowPreloader<'a> {
         flow_view_update
     }
 
+    fn next_diff_flow_step(&self, from_step_id: StepId, including_from: bool, db: &Db) -> (StepId, bool) {
+        if from_step_id.0 >= db.steps.len() as i64 {
+            (from_step_id, false)
+        } else {
+            // TODO: next diff step
+            let mut next_step_id = if !including_from { from_step_id + 1 } else { from_step_id };
+            loop {
+                if next_step_id.0 >= db.steps.len() as i64 { // must be + 1! then we assume we should stay and report not progressing
+                    return (from_step_id, false);
+                }
+                let next_step = db.steps[next_step_id];
+                info!("check {:?}", (PathBuf::from(db.paths[next_step.path_id].clone()), next_step.line.0));
+                if self.diff_call_keys.contains(&next_step.call_key.0) {
+                    // &(PathBuf::from(db.paths[next_step.path_id].clone()), next_step.line.0)) {
+                    return (next_step_id, true);
+                } else {
+                    next_step_id = next_step_id + 1;
+                    continue;
+                }
+            }
+        }
+    }
+
+    fn find_first_step(&self, from_step_id: StepId, db: &Db) -> (StepId, bool) {
+        match self.mode {
+            FlowMode::Call => (from_step_id, true),
+            FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, db),
+        }
+    }
+
+    fn find_next_step(&self, from_step_id: StepId, db: &Db) -> (StepId, bool) {
+        let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
+        match self.mode {
+            FlowMode::Call => db.next_step_id_relative_to(from_step_id, true, step_to_different_line),
+            FlowMode::Diff => self.next_diff_flow_step(from_step_id, false, db),
+        }
+    }
+
     fn load_view_update(&mut self, db: &Db) -> FlowViewUpdate {
         let start_step_id = StepId(self.location.rr_ticks.0);
         let call_key: CallKey = db.steps[start_step_id].call_key;
-        let path_buf = &PathBuf::from(&self.location.path);
+        // let mut path_buf = &PathBuf::from(&self.location.path);
         let mut iter_step_id = db.calls[call_key].step_id;
         let mut flow_view_update = FlowViewUpdate::new(self.location.clone());
         let mut step_count = 0;
@@ -155,14 +232,17 @@ impl<'a> CallFlowPreloader<'a> {
         loop {
             let (step_id, progressing) = if first {
                 first = false;
-                (iter_step_id, true)
+                self.find_first_step(iter_step_id, db)
             } else {
-                let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
-                db.next_step_id_relative_to(iter_step_id, true, step_to_different_line)
+                self.find_next_step(iter_step_id, db)
             };
             iter_step_id = step_id;
             let step = db.steps[step_id];
-            if call_key != step.call_key || !progressing {
+            if self.mode == FlowMode::Diff {
+                let mut expr_loader = ExprLoader::new(CoreTrace::default());
+                self.location = db.load_location(step_id, step.call_key, &mut expr_loader);
+            }
+            if self.mode == FlowMode::Call && call_key != step.call_key || !progressing {
                 flow_view_update = self.add_return_value(flow_view_update, db, call_key);
                 info!("break flow");
                 break;
@@ -184,10 +264,13 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update.relevant_step_count.push(step.line.0 as usize);
             flow_view_update.add_step_count(step.line.0, step_count);
             info!("process loops");
+            let path_buf = &PathBuf::from(&self.location.path);
             flow_view_update = self.process_loops(flow_view_update.clone(), step, path_buf, step_count);
             flow_view_update = self.log_expressions(flow_view_update.clone(), step, db, step_id);
             step_count += 1;
         }
+        let path_buf = &PathBuf::from(&self.location.path);
+        // TODO: maybe not true for diff flow, we can have multiple files/paths there 
         flow_view_update.comment_lines = self.flow_preloader.expr_loader.get_comment_positions(path_buf);
         flow_view_update.add_branches(
             0,

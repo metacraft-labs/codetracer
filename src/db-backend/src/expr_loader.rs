@@ -414,6 +414,7 @@ impl ExprLoader {
     }
 
     pub fn get_loop_shape(&self, step: &DbStep, path: &PathBuf) -> Option<LoopShape> {
+        info!("path {}", path.display());
         info!(
             "get_loop_shape {} {:?}",
             step.line.0, self.processed_files[path].position_loops
@@ -451,7 +452,7 @@ impl ExprLoader {
         !file_info.position_loops.contains_key(start) && !file_info.active_loops.contains(start)
     }
 
-    fn register_loop(&mut self, _node: &Node, start: Position, end: Position, path: &PathBuf) {
+    pub fn register_loop(&mut self, _node: &Node, start: Position, end: Position, path: &PathBuf) {
         let lang = self.get_current_language(path);
         let offset = if lang == Lang::Ruby || lang == Lang::RustWasm {
             1
