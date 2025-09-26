@@ -39,6 +39,7 @@ pub mod handler;
 pub mod lang;
 pub mod paths;
 pub mod program_search_tool;
+pub mod rr_dispatcher;
 pub mod step_lines_loader;
 pub mod task;
 pub mod trace_processor;
