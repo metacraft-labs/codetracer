@@ -20,7 +20,7 @@ use std::path::PathBuf;
 extern crate db_backend;
 use db_backend::core::Core;
 use db_backend::db::Db;
-use db_backend::handler::Handler;
+use db_backend::handler::{Handler, TraceKind};
 // use db_backend::receiver::Receiver;
 // use db_backend::response::Response;
 
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let db = Db::new(&PathBuf::from(""));
     // receiver.setup_for_virtualization_layers(&cli.socket_path, cli.caller_process_pid)?;
 
-    let mut _handler = Handler::construct(Box::new(db), true);
+    let mut _handler = Handler::construct(TraceKind::DB, Box::new(db), true);
 
     // receiver.receive_loop(&mut handler)?;
 
