@@ -1,6 +1,6 @@
 import
   ui_imports,
-  ../[ types, ui_helpers, renderer, communication],
+  ../[ types, renderer, communication],
   ../../common/ct_event
 
 const NO_LINE = -1

@@ -1,6 +1,6 @@
 import
   kdom,
-  ../ui_helpers, ui_imports,
+  ui_imports,
   ../renderer
 
 var

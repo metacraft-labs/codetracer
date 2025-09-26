@@ -1,6 +1,6 @@
 from std / dom import Document
 import
-  ui_imports, ../ui_helpers, debug
+  ui_imports, debug
 
 const FONT_UPPERCASE_WIDTH_FACTOR = 1.5
 

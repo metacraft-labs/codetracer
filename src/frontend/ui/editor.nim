@@ -1,7 +1,7 @@
 import
   std/[ cstrutils, jsre ],
   ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom,
-  ../[ ui_helpers, renderer, communication, event_helpers ],
+  ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
 
 from dom import createElement

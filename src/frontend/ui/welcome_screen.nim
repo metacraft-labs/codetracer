@@ -1,7 +1,7 @@
 import
   std/[ options, jsffi, enumerate ],
   ui_imports,
-  ../[ ui_helpers, types ],
+  ../[ types ],
   ../../ct/version
 import std/times except now
 

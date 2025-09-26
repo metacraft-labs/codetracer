@@ -8,7 +8,7 @@ import
   # third party
   karax, karaxdsl, kdom, vdom, results,
   # internal
-  ui_helpers, types, utils, lang,
+  types, utils, lang,
   communication, dap,
   .. / common / ct_event,
   services / [

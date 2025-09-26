@@ -1,6 +1,8 @@
 import
-  std/[ jsffi, async, macros ],
-  kdom
+  std/[ jsffi, async, macros, sequtils, strutils ],
+  dom, vdom
+
+import kdom except Location, document
 
 type
   JSONObj* = ref object of js
@@ -160,6 +162,7 @@ const
   ESC_KEY_CODE* = 27
   TAB_KEY_CODE* = 9
   BACKSPACE_KEY_CODE* = 8
+  commandPrefix* = ":"
 
 var domwindow* {.importc: "window".}: JsObject
 
@@ -193,3 +196,57 @@ func startsWith*(a, b: cstring): bool {.importjs: "#.startsWith(#)".}
 func endsWith*(a, b: cstring): bool {.importjs: "#.endsWith(#)".}
 
 proc jsAsFunction*[T](handler: js): T {.importcpp: "#".}
+
+template byId*(id: typed): untyped =
+  document.getElementById(`id`)
+
+template findElement*(selector: cstring): kdom.Element =
+  kdom.document.querySelector(`selector`)
+
+template jq*(selector: typed): untyped =
+  dom.document.querySelector(`selector`)
+
+template jqall*(selector: typed): untyped =
+  dom.document.querySelectorAll(`selector`)
+
+proc findAllNodesInElement*(element: kdom.Node, selector: cstring): seq[kdom.Node] {.importjs:"Array.from(#.querySelectorAll(#))".}
+
+proc findNodeInElement*(element: kdom.Node, selector: cstring): js {.importjs:"#.querySelector(#)".}
+
+proc isHidden*(e: kdom.Element): bool =
+  e.classList.contains(cstring("hidden"))
+
+proc hideDomElement*(e: kdom.Element) =
+  e.classList.add(cstring("hidden"))
+
+proc showDomElement*(e: kdom.Element) =
+  e.classList.remove(cstring("hidden"))
+
+proc isActive*(e: kdom.Element): bool =
+  e.classList.contains(cstring("active"))
+
+proc activateDomElement*(e: kdom.Element) =
+  e.classList.add(cstring("active"))
+
+proc deactivateDomElement*(e: kdom.Element) =
+  e.classList.remove(cstring("active"))
+
+proc hide*(e: dom.Element) =
+  e.style.display = cstring"none"
+
+proc show*(e: dom.Element) =
+  e.style.display = cstring"block"
+
+proc eattr*(e: dom.Node, s: string): cstring {.importcpp: "#.getAttribute('data-' + toJSStr(#))" .}
+proc eattr*(e: kdom.Node, s: string): cstring {.importcpp: "#.getAttribute('data-' + toJSStr(#))" .}
+proc createElementNS*(document: dom.Document, a: cstring, b: cstring): dom.Element {.importcpp: "(#.createElementNS(#, #))".}
+proc append*(element: dom.Element, other: dom.Element) {.importcpp: "(#.append(#))".}
+
+proc convertStringToHtmlClass*(input : cstring): cstring =
+  var normalString: string
+  let pattern =  regex("([a-zA-Z][a-zA-Z0-9-]+)")
+  var matches = input.matchAll(pattern)
+
+  normalString = ($(matches.mapIt(it[0]).join(cstring"-"))).toLowerAscii()
+
+  return normalString.cstring

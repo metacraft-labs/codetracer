@@ -1,6 +1,5 @@
 import
   std/strutils,
-  ../ui_helpers,
   ui_imports, value
 
 method onDebugOutput(self: ReplComponent, response: DebugOutput) {.async.} =

@@ -1,6 +1,4 @@
-import
-  ../ui_helpers,
-  ui_imports, ../types
+import ui_imports, ../types
 
 proc focusBuild*(self: BuildComponent) =
   discard
