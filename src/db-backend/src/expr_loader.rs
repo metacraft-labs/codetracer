@@ -286,7 +286,7 @@ impl ExprLoader {
                 self.loop_index = 1;
             }
         } else if NODE_NAMES[&lang].loops.contains(&node.kind().to_string()) && start != end {
-            self.register_loop(node, start, end, path)
+            self.register_loop(start, end, path)
         } else if lang == Lang::Ruby && node.kind() == "call" {
             if let Some(block_node) = node.child_by_field_name("block") {
                 if let Some(method_node) = node.child_by_field_name("method") {
@@ -295,7 +295,7 @@ impl ExprLoader {
                     if method_name == "each" {
                         let start = self.get_first_line(&block_node);
                         let end = self.get_last_line(&block_node);
-                        self.register_loop(&block_node, start, end, path);
+                        self.register_loop(start, end, path);
                     }
                 }
             }
@@ -314,7 +314,7 @@ impl ExprLoader {
         //             let name = self.extract_expr(name_node, path, self.get_first_line(name_node).0 as usize);
         //             // info!("name ::::::::::: {name}");
         //             if name == "loop" {
-        //                 self.register_loop(node, start, end, path);
+        //                 self.register_loop(start, end, path);
         //             }
         //         }
         //     }
@@ -452,7 +452,7 @@ impl ExprLoader {
         !file_info.position_loops.contains_key(start) && !file_info.active_loops.contains(start)
     }
 
-    pub fn register_loop(&mut self, _node: &Node, start: Position, end: Position, path: &PathBuf) {
+    pub fn register_loop(&mut self, start: Position, end: Position, path: &PathBuf) {
         let lang = self.get_current_language(path);
         let offset = if lang == Lang::Ruby || lang == Lang::RustWasm {
             1
