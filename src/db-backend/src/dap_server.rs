@@ -1,7 +1,7 @@
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
 use crate::dap_types;
 use crate::db::Db;
-use crate::handler::Handler;
+use crate::handler::{Handler, TraceKind};
 use crate::paths::CODETRACER_PATHS;
 use crate::task::{
     gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, CtLoadFlowArguments, FunctionLocation,
@@ -76,13 +76,23 @@ fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>
         info!("postprocessing trace: duration: {:?}", duration2);
 
         // eprintln!("TRACE METADATA: {:?}", meta);
-        let mut handler = Handler::new(Box::new(db));
+        let mut handler = Handler::new(TraceKind::DB, Box::new(db));
         handler.dap_client.seq = seq;
         handler.raw_diff_index = raw_diff_index;
         handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
     } else {
-        Err("problem with reading metadata or path trace files".into())
+        warn!("problem with reading metadata or path trace files: try rr?");
+        let path  = trace_folder.join("rr");
+        if path.exists() {
+            let db = Db::new(&PathBuf::from("")); 
+            let mut handler = Handler::new(TraceKind::RR, Box::new(db));
+            handler.dap_client.seq = seq;
+            handler.run_to_entry(dap::Request::default())?;
+            Ok(handler)
+        } else {
+            Err("problem with reading metadata or path trace files".into())
+        }
     }
 }
 
