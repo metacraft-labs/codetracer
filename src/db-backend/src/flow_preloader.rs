@@ -57,6 +57,11 @@ impl FlowPreloader {
         for step in db.step_from(runtime_tracing::StepId(0), true) {
             if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
                 diff_call_keys.insert(step.call_key.0);
+                let location = db.load_location(step.step_id, step.call_key, &mut self.expr_loader);
+                // register an artifficial loop for each function from the diff,
+                //   that we track, so we can visualize different global calls to those functions
+                //   with sliders/count etc: 
+                self.expr_loader.register_loop(Position(location.function_first), Position(location.function_last), &PathBuf::from(&db.paths[step.path_id]));
             }
         }
        
