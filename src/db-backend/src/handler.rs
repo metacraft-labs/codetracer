@@ -13,7 +13,7 @@ use crate::dap::{self, DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
-use crate::flow_preloader::FlowPreloader;
+use crate::flow_preloader::{FlowPreloader, FlowMode};
 use crate::program_search_tool::ProgramSearchTool;
 // use crate::response::{};
 use crate::dap_types;
@@ -408,7 +408,7 @@ impl Handler {
         let call_key = self.db.steps[step_id].call_key;
         let function_id = self.db.calls[call_key].function_id;
         let function_first = self.db.functions[function_id].line;
-        let flow_update = self.flow_preloader.load(location, function_first, &self.db);
+        let flow_update = self.flow_preloader.load(location, function_first, FlowMode::Call, &self.db);
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
 
         self.send_dap(&raw_event)?;

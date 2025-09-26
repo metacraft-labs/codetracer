@@ -10,6 +10,7 @@ use log::info;
 
 use crate::db::Db;
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
+use crate::flow_preloader::FlowPreloader;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Diff {
@@ -63,8 +64,9 @@ pub struct DiffLine {
     pub current_line_number: i64,
 }
 
+
+// loop shape 1:
 pub fn load_and_postprocess_trace(trace_folder: &PathBuf) -> Result<Db, Box<dyn Error>> {
-    let metadata_path = trace_folder.join("trace_metadata.json");
     let mut trace_path = trace_folder.join("trace.json");
     let mut trace_file_format = runtime_tracing::TraceEventsFileFormat::Json;
     if !trace_path.exists() {
@@ -82,10 +84,27 @@ pub fn load_and_postprocess_trace(trace_folder: &PathBuf) -> Result<Db, Box<dyn 
     Ok(db)
 }
 
-fn index_function_flow(db: &Db, function_id: FunctionId) -> Result<(), Box<dyn Error>> {
+// loop shape 2:
+fn index_function_flow(_db: &Db, function_id: FunctionId) -> Result<(), Box<dyn Error>> {
     // recursion?
+    // each call: load current flow view update(eventually first N, but also the total count)
+    // send a vector with those and the count
+    // step_id: RRTicks & path/line;
+    // while 1 {
+    //   simple;
+    // }
+
+    // IPT: 
+    // step_id: RR
+    // call_key: name/ticks/depth/origin address
+    // global flow: (call index/key, step_count)
+    // call_index
+    // call_key => Nth function call;
+    // (call_key) => index;
+
     todo!("index function flow for {function_id:?}");
 }
+
 
 pub fn index_diff(diff: Diff, trace_folder: &PathBuf, multitrace_folder: &PathBuf) -> Result<(), Box<dyn Error>> {
     let db = load_and_postprocess_trace(trace_folder)?;
@@ -124,12 +143,10 @@ pub fn index_diff(diff: Diff, trace_folder: &PathBuf, multitrace_folder: &PathBu
     }    
     
     info!("diff_lines {diff_lines:?}");
-    for step in db.step_from(runtime_tracing::StepId(0), true) {
-        info!("check {:?}", (PathBuf::from(db.paths[step.path_id].clone()), step.line.0));
-        if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
-            index_function_flow(&db, db.calls[step.call_key].function_id)?;
-        }
-    }
+    let mut flow_preloader = FlowPreloader::new();
+    let flow_update = flow_preloader.load_diff_flow(diff_lines, &db);
 
-    todo!("store diff index");
+    let raw = serde_json::to_string(&flow_update)?;
+    std::fs::write(multitrace_folder.join("diff_index.json"), raw)?;
+    Ok(())
 }

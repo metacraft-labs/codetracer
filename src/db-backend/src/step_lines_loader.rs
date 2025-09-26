@@ -8,7 +8,7 @@ use runtime_tracing::{CallKey, StepId};
 use crate::db::{Db, DbStep};
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
-use crate::flow_preloader::FlowPreloader;
+use crate::flow_preloader::{FlowPreloader, FlowMode};
 use crate::task::{LineStep, LineStepKind, LineStepValue, Location};
 
 #[derive(Debug, Clone)]
@@ -86,7 +86,7 @@ impl StepLinesLoader {
                 let location = self.global_line_steps[step_id].location.clone();
                 let function_id = db.calls[call_key].function_id;
                 let function_first = db.functions[function_id].line;
-                let flow_update = flow_preloader.load(location, function_first, db);
+                let flow_update = flow_preloader.load(location, function_first, FlowMode::Call, db);
                 if !flow_update.error && !flow_update.view_updates.is_empty() {
                     let flow_view_update = &flow_update.view_updates[0];
                     for flow_step in flow_view_update.steps.iter() {
