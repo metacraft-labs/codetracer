@@ -1,7 +1,8 @@
 import
   std / [ async, jsffi, json, strutils, strformat, sequtils, jsconsole, os ],
   electron_vars, config,
-  ../[ types, lib, lang ],
+  ../[ types, lang ],
+  ../lib/[ jslib, electron_lib ],
   ../../common/ct_logging
 
 type FileFilter = ref object
@@ -14,6 +15,15 @@ let
 
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc getClass(icons: js, name: cstring, options: js): Future[cstring] {.importjs: "#.getClass(#,#)".}
+
+when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
+  proc pathExists*(path: cstring): Future[bool] {.async.} =
+    var hasAccess: JsObject
+    try:
+      hasAccess = await fsPromises.access(path, fs.constants.F_OK)
+    except:
+      return false
+    return hasAccess == jsUndefined
 
 proc stripLastChar(text: cstring, c: cstring): cstring =
   if cstring($(text[text.len - 1])) == c:
@@ -218,7 +228,7 @@ proc onLoadPathForRecord*(sender: js, response: jsobject(fieldName=cstring)) {.a
       # This option does not provide a proper way to filter files that are able to be selected to be only binaries.
       # May be we should implement form field validation with a warning message if the user selects a file that is not a binary.
       # name: "binaries",
-      # extensions: @[j"bin", j"exe"]
+      # extensions: @[cstring"bin", cstring"exe"]
     # )]
   }
 
@@ -287,13 +297,13 @@ proc onLoadLowLevelTab*(sender: js, response: jsobject(pathOrName=cstring, lang=
 
 proc onOpenTab*(sender: js, response: js) {.async.} =
   let options = js{
-    properties: @[j"openFile"],
+    properties: @[cstring"openFile"],
     title: cstring"Select File",
     buttonLabel: cstring"Select"}
 
   let file = await selectFileOrFolder(options)
   if file != "":
-    if file.slice(-4) == j".nim":
+    if file.slice(-4) == cstring".nim":
       mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangNim}
     else:
       mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangUnknown}
@@ -307,12 +317,12 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
   if not selfContained:
     for path in paths:
       try:
-        let (stdoutRev, stderrRev, errRev) = await childProcessExec(j(&"git rev-parse --show-toplevel"), js{cwd: path})
+        let (stdoutRev, stderrRev, errRev) = await childProcessExec(cstring(&"git rev-parse --show-toplevel"), js{cwd: path})
         repoPathSet[stdoutRev.trim] = true
       except Exception as e:
         errorPrint "git rev-parse error for ", path, ": ", e.repr
     for path, _ in repoPathSet:
-      let (stdout, stderr, err) = await childProcessExec(j(&"git ls-tree HEAD -r --name-only"), js{cwd: path})
+      let (stdout, stderr, err) = await childProcessExec(cstring(&"git ls-tree HEAD -r --name-only"), js{cwd: path})
       if err.isNil:
         res = res.concat(($stdout).splitLines().mapIt($path & "/" & it))
       else:

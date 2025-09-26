@@ -2,7 +2,8 @@ import
   std / [ async, jsffi, json, os, sequtils ],
   results,
   electron_vars,
-  ../[ types, lib ],
+  ../lib/[ jslib, electron_lib ],
+  ../[ types ],
   ../../common/[ paths, ct_logging ]
 
 type

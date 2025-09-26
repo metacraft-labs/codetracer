@@ -1,8 +1,7 @@
 import
-  ../types,
-  ui_imports, colors, typetraits, strutils, base64
-
-import ../communication, ../../common/ct_event
+  ui_imports, colors, typetraits, strutils, base64,
+  ../[ types, communication ],
+  ../../common/ct_event
 
 var newAnsiUp* {.importcpp: "new AnsiUp".}: proc: js
 let ansiUp {.exportc.} = newAnsiUp()

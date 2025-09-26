@@ -1,7 +1,8 @@
 import
   std / [ async, jsffi, macros, jsconsole, strformat ],
   electron_vars, base_handlers, config,
-  ../[ lib, types ],
+  ../lib/[ jslib, electron_lib, misc_lib ],
+  ../[ types ],
   ../../common/[ paths, ct_logging ]
 
 when defined(server):
@@ -16,12 +17,12 @@ when defined(server):
 
 
 when not defined(server):
-  var chalk* = cast[Chalk](require(j"chalk"))
+  var chalk* = cast[Chalk](require(cstring"chalk"))
   type DebugMainIPC = ref object
     electron*: js
 
   proc on*(ipc: DebugMainIPC, id: cstring, handler: JsObject) =
-    ipc.electron[j"on2"] = ipc.electron[j"on"]
+    ipc.electron[cstring"on2"] = ipc.electron[cstring"on"]
     ipc.electron.on2(id) do (sender: js, data: js):
       var values = loadValues(data, id)
       let kind = cast[cstring](id)

@@ -1,8 +1,9 @@
-import std / [jsffi, jsconsole, strformat, async]
-import .. / common / ct_event
-import lib
-import types
-import communication
+import
+  std/[ jsffi, jsconsole, strformat, async ],
+  ../common/ct_event,
+  lib/jslib,
+  types,
+  communication
 
 when not defined(ctInExtension):
 

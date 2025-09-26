@@ -1,11 +1,14 @@
-import async, strutils, strformat, sequtils, async, algorithm, jsffi, jsconsole
-import karax, vdom, kdom
-import types, lang, lib
+import
+  async, strutils, strformat, sequtils, async, algorithm, jsffi, jsconsole,
+  karax, vdom, kdom,
+  types, lang,
+  lib / [ logging, monaco_lib, jslib ]
 
 var kxiMap* = JsAssoc[cstring, KaraxInstance]{}
 
-const VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
-const VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
+const
+  VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
+  VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
 
 proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCache: bool = false): Future[U]
 proc removeEditorFromClosedTabs*(data: Data, path: cstring)
@@ -224,7 +227,7 @@ proc makeStatusComponent*(
     activeNotificationDuration: 3_000,
     # searchResults: searchResults -> not yet implemented
     searchResults: searchResults,
-    versionControlBranch: j"master",
+    versionControlBranch: cstring"master",
     service: data.services.debugger,
     copyMessageActive: false,
     state: StatusState(
@@ -547,7 +550,7 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent, name: cstrin
       line: line,
       offset: offset,
       lang: editorUI.lang,
-      expression: j"",
+      expression: cstring"",
       lastRender: 0,
       results: @[],
       tracepointError: ""),
@@ -753,10 +756,10 @@ proc openPanel*(
   # works for non-viewer tabs, TODO?
   # cdebug "tabs: openPanel " & label & " " & $content & " " & $editorView
 
-  let componentName = if isEditor: j"editorComponent" else: j"genericUiComponent"
+  let componentName = if isEditor: cstring"editorComponent" else: cstring"genericUiComponent"
 
   var itemConfig = GoldenLayoutConfig(
-    `type`: j"component",
+    `type`: cstring"component",
     componentName: componentName,
     componentState: GoldenItemState(
       id: componentId,
@@ -876,7 +879,7 @@ proc openLayoutTab*(
       not data.ui.editorPanels[EditorView.ViewSource].isNil:
       parent = cast[GoldenContentItem](data.ui.editorPanels[EditorView.ViewSource])
     else:
-      parent = data.openNewLayoutContainer(j"stack", isEditor)
+      parent = data.openNewLayoutContainer(cstring"stack", isEditor)
       if content == Content.EditorView:
         data.ui.editorPanels[EditorView.ViewSource] = parent
 
@@ -1144,12 +1147,12 @@ proc convertTracepointEventToProgramEvent*(tracepointEvent: Stop): ProgramEvent 
         if value.isLiteral and value.kind == types.String:
           res.add(value.text & cstring" ")
         else:
-          res.add(name & j"=" & textRepr(value).cstring & cstring"; ")
+          res.add(name & cstring"=" & textRepr(value).cstring & cstring"; ")
       else:
-        res.add(name & j"=" & j"<span class=error-trace>" & value.msg & j"</span>")
-        res.add(j" ")
+        res.add(name & cstring"=" & cstring"<span class=error-trace>" & value.msg & cstring"</span>")
+        res.add(cstring" ")
   else:
-    res.add(j"<span class=error-trace>" & tracepointEvent.errorMessage & j"</span>")
+    res.add(cstring"<span class=error-trace>" & tracepointEvent.errorMessage & cstring"</span>")
 
   return ProgramEvent(
     kind: TraceLogEvent,
@@ -1189,24 +1192,24 @@ proc addTraceResultsInEventLog*(eventLog: EventLogComponent, results: seq[Stop])
   #     $newTraceLogs & ": " & getCurrentExceptionMsg()
 
 proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCache: bool = false): Future[U] =
-  if data.asyncSendCache.hasKey(j(id)) and data.asyncSendCache[j(id)].hasKey(j(argId)):
-    return cast[Future[U]](data.asyncSendCache[j(id)][j(argId)])
+  if data.asyncSendCache.hasKey(cstring(id)) and data.asyncSendCache[cstring(id)].hasKey(cstring(argId)):
+    return cast[Future[U]](data.asyncSendCache[cstring(id)][cstring(argId)])
   result = newPromise() do (resolve: proc(response: U)):
-    if not data.network.futures.hasKey(j(id)):
-      data.network.futures[j(id)] = JsAssoc[cstring, JsObject]{}
-    if not noCache and data.network.futures[j(id)].hasKey(j(argId)):
+    if not data.network.futures.hasKey(cstring(id)):
+      data.network.futures[cstring(id)] = JsAssoc[cstring, JsObject]{}
+    if not noCache and data.network.futures[cstring(id)].hasKey(cstring(argId)):
       cerror &"asyncSend: existing future {id} {argId}"
       return
-    data.network.futures[j(id)][j(argId)] = functionAsJs(proc(value: JsObject): U =
-      discard jsdelete data.asyncSendCache[j(id)][j(argId)]
-      discard jsdelete data.network.futures[j(id)][j(argId)]
+    data.network.futures[cstring(id)][cstring(argId)] = functionAsJs(proc(value: JsObject): U =
+      discard jsdelete data.asyncSendCache[cstring(id)][cstring(argId)]
+      discard jsdelete data.network.futures[cstring(id)][cstring(argId)]
       resolve(value.to(U)))
 
-    data.ipc.send j("CODETRACER::" & id), arg
+    data.ipc.send cstring("CODETRACER::" & id), arg
     echo "<- sent: ", "CODETRACER::" & id
-  if not data.asyncSendCache.hasKey(j(id)):
-    data.asyncSendCache[j(id)] = JsAssoc[cstring, Future[JsObject]]{}
-  data.asyncSendCache[j(id)][j(argId)] = cast[Future[JsObject]](result)
+  if not data.asyncSendCache.hasKey(cstring(id)):
+    data.asyncSendCache[cstring(id)] = JsAssoc[cstring, Future[JsObject]]{}
+  data.asyncSendCache[cstring(id)][cstring(argId)] = cast[Future[JsObject]](result)
 
 proc refreshEditorLine*(self: EditorViewComponent, line: int) =
   # moved here from ui/editor, so it can be used from here
@@ -1214,7 +1217,7 @@ proc refreshEditorLine*(self: EditorViewComponent, line: int) =
   var editor = self.monacoEditor
   var zone = 0
   editor.changeViewZones do (view: js):
-    zone = cast[int](view.addZone(js{afterLineNumber: line, heightInLines: 0, domNode: kdom.document.createElement(j"div")}))
+    zone = cast[int](view.addZone(js{afterLineNumber: line, heightInLines: 0, domNode: kdom.document.createElement(cstring"div")}))
   editor.changeViewZones do (view: js):
     view.removeZone(zone)
   # refresh editor

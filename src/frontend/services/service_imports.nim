@@ -1,11 +1,9 @@
-import ../types, strutils, sequtils, strformat, sugar, async, ../utils, ../lang #, chronicles
+import
+  ../types, strutils, sequtils, strformat, sugar, async, ../utils, ../lang, # chronicles,
+  jsffi, asyncjs,
+  ../lib/[ logging, jslib ]
 
-#when defined(js):
-import ../lib, jsffi, asyncjs
-
-
-
-export types, strutils, sequtils, strformat, sugar, async, utils, lang #, chronicles
-
-#when defined(js):
-export lib, jsffi, asyncjs
+export
+  types, strutils, sequtils, strformat, sugar, async, utils, lang, # chronicles,
+  jsffi, asyncjs,
+  logging, jslib

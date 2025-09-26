@@ -1,18 +1,20 @@
-import ui_imports
-import editor
-import ../jsstrings
+import
+  ui_imports,
+  editor
 
-let COMMAND_FUZZY_OPTIONS = FuzzyOptions(
-  limit: 20,
-  allowTypo: true,
-  threshold: -10000,
-  all: false)
-
-let SUBCOMMANDS_FUZZY_OPTIONS = FuzzyOptions(
-  limit: 20,
-  allowTypo: true,
-  threshold: -10000,
-  all: true)
+let
+  COMMAND_FUZZY_OPTIONS = FuzzyOptions(
+    limit: 20,
+    allowTypo: true,
+    threshold: -10000,
+    all: false
+  )
+  SUBCOMMANDS_FUZZY_OPTIONS = FuzzyOptions(
+    limit: 20,
+    allowTypo: true,
+    threshold: -10000,
+    all: true
+  )
 
 proc clearEmptyTokens(tokens: var seq[string]): seq[string] =
   var whiteSpaceIndex = tokens.find(cstring(" "))

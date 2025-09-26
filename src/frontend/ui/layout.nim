@@ -1,8 +1,9 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
-  ../lib, ../types, ../renderer, ../config, ../ui_helpers,
-  state, editor, debug, menu, status, command, search_results, shell
+  ../types, ../renderer, ../config, ../ui_helpers,
+  state, editor, debug, menu, status, command, search_results, shell,
+  ../lib/[ logging, misc_lib, jslib ]
 
 import kdom except Location
 import vdom except Event
@@ -45,7 +46,7 @@ proc contextBind*(shortcut: string, arg: js, handler: ContextHandler) =
     c = JsAssoc[cstring, ContextHandler]{}
     contextHandlers[shortcut] = c
 
-    Mousetrap.`bind`(j(shortcut)) do ():
+    Mousetrap.`bind`(cstring(shortcut)) do ():
       var focused = focus()
       if focused.isNil: return
 
@@ -66,7 +67,7 @@ proc convertTabTitle(content: cstring): cstring =
   let pattern = regex("[A-Z][a-z0-9]*")
   var matches = label.matchAll(pattern)
 
-  return (matches.mapIt(it[0].toUpperCase())).join(j" ")
+  return (matches.mapIt(it[0].toUpperCase())).join(cstring" ")
 
 proc clearSaveHistoryTimeout(editorService: EditorService) =
   if editorService.hasSaveHistoryTimeout:
@@ -169,7 +170,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
     data.ui.welcomeScreen.kxi = kxiMap["welcome-screen"]
     return
 
-  let root = document.getElementById(j"ROOT")
+  let root = document.getElementById(cstring"ROOT")
 
   var layout = newGoldenLayout(
     root,
@@ -351,7 +352,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
         # container.tab.contentItem reference to golden layout item
         lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-      tab.setTitle(j(convertTabTitle($state.content)))
+      tab.setTitle(cstring(convertTabTitle($state.content)))
 
     var containerId: cstring
     containerId = state.label
@@ -387,11 +388,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
       mainContainer.contentItems[0].contentItems.len == 1 and
       mainContainer.contentItems[0].contentItems[0].isComponent:
       mainContainer.contentItems[0].contentItems[0]
-        .tab.element.style.pointerEvents = j"none"
+        .tab.element.style.pointerEvents = cstring"none"
     else:
       let tabElements = jqAll(".lm_tab")
       for element in tabElements:
-        element.style.pointerEvents = j"auto"
+        element.style.pointerEvents = cstring"auto"
 
     if not data.ui.layout.isNil and data.ui.saveLayout:
       data.ui.resolvedConfig = data.ui.layout.saveLayout()

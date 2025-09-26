@@ -3,8 +3,9 @@ import
   ../ui_helpers, ui_imports,
   ../renderer
 
-var xtermLib {.importc.}: XtermJsLib
-var fitAddonLib {.importc.}: XtermFitAddonLib
+var
+  xtermLib {.importc.}: XtermJsLib
+  fitAddonLib {.importc.}: XtermFitAddonLib
 
 proc createTerminal(terminal: Terminal, terminalOptions: js): Terminal {.importjs: "new #(#)".}
 proc createFitAddon(fitAddon: XtermFitAddon): XtermFitAddon {.importjs: "new #()".}
@@ -28,13 +29,13 @@ proc createShellLayoutContainer*(self: ShellComponent) =
     Content.Shell, self.data.ui.componentMapping[Content.Shell].len
   )
   let childConfig = GoldenLayoutConfig(
-    `type`: j"component",
-    componentName: j"genericUiComponent",
+    `type`: cstring"component",
+    componentName: cstring"genericUiComponent",
     componentState: GoldenItemState(
       id: self.data.ui.componentMapping[Content.Shell].len,
       label: label,
       content: Content.Shell,
-      fullPath: j"",
+      fullPath: cstring"",
       name: label)
   )
 
@@ -144,11 +145,11 @@ proc createShell*(self: ShellComponent) =
   let rowsDom = cast[Node](jq(&"#shellComponent-{self.id} .xterm-rows"))
 
   try:
-    rowsDom.addEventListener(j"mousedown", proc(ev: Event) =
+    rowsDom.addEventListener(cstring"mousedown", proc(ev: Event) =
       if ev.target.nodeName == "SPAN":
         self.rowIsClicked = true
         self.clickedRow = self.determineClickedShellRow(ev.target.parentNode))
-    rowsDom.addEventListener(j"mouseup", proc(ev: Event) =
+    rowsDom.addEventListener(cstring"mouseup", proc(ev: Event) =
       let target = ev.target
       if target.nodeName == "SPAN" and
         self.rowIsClicked and

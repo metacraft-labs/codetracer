@@ -1,6 +1,7 @@
 import
   std / [ async, jsffi, json, strformat, strutils ],
-  ../../[ types, config, lib ],
+  ../../[ types, config ],
+  ../../lib/[ jslib ],
   ../../../common/ct_logging,
   ../electron_vars
 

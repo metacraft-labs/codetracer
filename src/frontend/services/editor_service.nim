@@ -1,6 +1,7 @@
-import service_imports
-import ../types
-
+import
+  service_imports,
+  ../types,
+  ../lib/[ logging, jslib ]
 
 proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) =
   clog "tabs: switchHistory: " & $path & " " & $editorView

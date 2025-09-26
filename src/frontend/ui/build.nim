@@ -7,12 +7,12 @@ proc focusBuild*(self: BuildComponent) =
   # TODO move to search somehow
   #var parent = self.data.ui.layout.root.contentItems[0].contentItems[0].contentItems[2]
   # taken from golden layout source
-  #jsAsFunction[proc(a: int)](parent.childElementContainer[cast[cstring](parent[j"_docker"].dimension)])(cast[int](parent[j"_docker"].realSize))
+  #jsAsFunction[proc(a: int)](parent.childElementContainer[cast[cstring](parent[cstring"_docker"].dimension)])(cast[int](parent[cstring"_docker"].realSize))
 
 proc matchLocation*(self: BuildComponent, raw: string): (bool, types.Location, cstring, cstring) =
   var l = types.Location(line: 0)
   if "Hint" in raw:
-    return (false, l, j"", j"")
+    return (false, l, cstring"", cstring"")
       
   if raw.startsWith("/"):
     var after = raw.find(") ")
@@ -37,12 +37,12 @@ proc matchLocation*(self: BuildComponent, raw: string): (bool, types.Location, c
           return (
               true,
               types.Location(path: maybeLocation[0 ..< left], line: line),
-              j(maybeLocation),
-              j(raw[after + 1 .. ^1]))
+              cstring(maybeLocation),
+              cstring(raw[after + 1 .. ^1]))
         except:
           discard
 
-  return (false, l, j"", j"")
+  return (false, l, cstring"", cstring"")
 
 template appendBuild(self: BuildComponent, line: string, stdout: bool): untyped =
   let klass = if stdout: "build-stdout" else: "build-stderr"
@@ -55,7 +55,7 @@ template appendBuild(self: BuildComponent, line: string, stdout: bool): untyped 
     self.build.errors.add((location, rawLocation, other))
   else:
     if line.len > 0:
-      self.build.output.add((j(line), stdout))
+      self.build.output.add((cstring(line), stdout))
 
 method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   self.build.command = response.command

@@ -7,9 +7,10 @@ import
       build, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code],
-  lib, types, lang, renderer, config, dap,
-  property_test / test
-import event_helpers
+  lib/[ jslib ],
+  types, lang, renderer, config, dap,
+  property_test / test,
+  event_helpers
 
 when defined(ctInExtension):
   import vscode
@@ -510,12 +511,12 @@ proc configure(data: Data) =
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config
   # if we update config it should effect it
-  result = j""
+  result = cstring""
   for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
     if index == 0:
       result = result & shortcutValue.renderer.toUpperCase()
     else:
-      result = result & j" " & shortcutValue.renderer.toUpperCase()
+      result = result & cstring" " & shortcutValue.renderer.toUpperCase()
 
 proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Command = nil) =
   # check if node has children and is enabled
@@ -556,7 +557,7 @@ proc followMouse(event: dom.Event) =
   if ev == nil:
     ev = dom.window.event
   # data.mouseCoords = (ev.pageX, ev.pageY)
-  # dom.document.toJs.body.classList.remove(j"global-no-cursor")
+  # dom.document.toJs.body.classList.remove(cstring"global-no-cursor")
   # if TELEMETRY_ENABLED:
   #   telemetryBackupIndex += 1
   #   if telemetryBackupIndex == 10:
@@ -583,12 +584,12 @@ proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
   receiveEvent(data.dapApi, raw["event"].to(cstring), raw["body"])
 
 proc onReady(event: dom.Event) =
-  if cast[cstring](cast[js](dom.document).readyState) == j"complete":
+  if cast[cstring](cast[js](dom.document).readyState) == cstring"complete":
     data.ui.pageLoaded = true
     data.tryInitLayout()
     cast[js](dom.document).onmousemove = followMouse
 
-    # jqueryFind("body").toJs.on(j"click", onGlobalClick)
+    # jqueryFind("body").toJs.on(cstring"click", onGlobalClick)
 
     discard windowsetInterval(proc =
       if not data.services.editor.active.isNil:
@@ -738,7 +739,7 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   data.startOptions.loading = false
   data.startOptions.shellUi = true
   data.config = response.config
-  data.ui.menuNode = data.webTechMenu(j"Shell")
+  data.ui.menuNode = data.webTechMenu(cstring"Shell")
   loadTheme(data.config.theme)
   var shellComponent = data.shellComponent(0)
 
@@ -903,13 +904,13 @@ proc onNoTrace(
   data.services.editor.filesystem = response.filesystem
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
-  data.config.layout = j"default_white"
+  data.config.layout = cstring"default_white"
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.save = response.save
   data.save.fileMap = JsAssoc[cstring, int]{}
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
-  loadTheme(j"default_white")
+  loadTheme(cstring"default_white")
   # data.tabManager.tabs = JsAssoc[cstring, TabInfo]{}
   # data.tabManager.tabList = @[]
   if response.path.len > 0:
@@ -925,9 +926,9 @@ proc onNoTrace(
   # for i, file in data.save.files:
     # if i < TAB_LIMIT:
       # if ($file.path).endsWith(ext):
-        # data.openTab(file.path, j"", 0, response.lang)
+        # data.openTab(file.path, cstring"", 0, response.lang)
       # else:
-        # data.openTab(file.path, j"", 0, LangUnknown)
+        # data.openTab(file.path, cstring"", 0, LangUnknown)
     # else:
       # remember those and be able to load them on ctrl+page etc
       # TODO
@@ -1090,7 +1091,7 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     var label = $newPath
     if tokens.len >= 2:
       label = tokens[1]
-    data.ui.editors[newPath].contentItem.setTitle(j(label))
+    data.ui.editors[newPath].contentItem.setTitle(cstring(label))
     data.ui.editors[newPath].contentItem.config.componentState.label = newPath
     data.ui.editors[newPath].contentItem.config.componentState.fullPath = newPath
   data.redraw()
@@ -1109,8 +1110,8 @@ proc saveAllFiles*(data: Data): Future[void] =
 
     if i > 0:
       vex.dialog.open(js{
-        message: j"",
-        input: j(&"close: files changed, save?\n{input}"),
+        message: cstring"",
+        input: cstring(&"close: files changed, save?\n{input}"),
         buttons: @[
           vex.dialog.buttons.YES, vex.dialog.buttons.NO
         ],
@@ -1119,7 +1120,7 @@ proc saveAllFiles*(data: Data): Future[void] =
             return
           for name, check in checkbox:
             let i = ($name)[4 .. ^1].parseInt
-            if check == j"on":
+            if check == cstring"on":
               data.saveFiles(changed[i].name)
             changed[i].changed = false
           resolve()
@@ -1320,7 +1321,7 @@ proc zoomInEditors*(data: Data) =
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
       for line, zone in editor.diffViewZones:
-        zone.dom.style.fontSize = j($data.ui.fontSize) & j"px"
+        zone.dom.style.fontSize = cstring($data.ui.fontSize) & cstring"px"
         let editorContentLeft = editor.monacoEditor
           .getOption(LAYOUT_INFO).contentLeft + EDITOR_GUTTER_PADDING
         zone.dom.style.left = fmt"-{editorContentLeft}px"
@@ -1346,7 +1347,7 @@ proc zoomOutEditors*(data: Data) =
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
       for line, zone in editor.diffViewZones:
-        zone.dom.style.fontSize = j($(data.ui.fontSize)) & j"px"
+        zone.dom.style.fontSize = cstring($(data.ui.fontSize)) & cstring"px"
         let editorContentLeft = editor.monacoEditor
           .getOption(LAYOUT_INFO).contentLeft + EDITOR_GUTTER_PADDING
         zone.dom.style.left = fmt"-{editorContentLeft}px"

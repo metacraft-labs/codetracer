@@ -1,8 +1,9 @@
-import std / [jsffi, jsconsole, async, strformat, strutils]
-import karax, vdom, karaxdsl, kdom, vstyles, dom, jsffi, jsconsole, paths
-import lib, types, lang
-import results
-import utils
+import
+  std/[ jsffi, jsconsole, async, strformat, strutils ],
+  karax, vdom, karaxdsl, kdom, vstyles, dom, jsffi, jsconsole, paths,
+  types, lang,
+  results,
+  utils
 
 when defined(linux):
   var startMenuChecked = true

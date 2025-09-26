@@ -1,6 +1,6 @@
 import
   std / [ jsffi, jsconsole ],
-  ../lib
+  ../lib/[ jslib, electron_lib ]
 
 
 # We have two main modes: server and desktop.

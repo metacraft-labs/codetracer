@@ -1,7 +1,8 @@
 import
   std / [ async, jsffi, json, strutils, strformat ],
   electron_vars, server_config, base_handlers, config,
-  ../[ types, lib ],
+  ../lib/[ jslib, electron_lib ],
+  ../[ types ],
   ../../common/[ paths, ct_logging ]
 
 var
@@ -9,6 +10,8 @@ var
   backendManagerProcess*: NodeSubProcess = nil
   backendManagerCleanedUp = false
 
+proc stopProcess(process: NodeSubProcess) =
+  process.toJs.kill()
 
 proc stopBackendManager* =
   # Ensure we only attempt cleanup once and guard against nil.
@@ -41,7 +44,7 @@ proc createMainWindow*: js =
 
     let win = jsnew electron.BrowserWindow(
       js{
-        "title": j"CodeTracer",
+        "title": cstring"CodeTracer",
         "icon": iconPath,
         "width": 1900,
         "height": 1400,

@@ -1,9 +1,8 @@
-import results
-import 
+import
+  results,
   ui_imports, 
-  ../renderer, ../communication,
-  .. / .. / common / ct_event
-import .. / event_helpers
+  ../[ renderer, communication, event_helpers ],
+  ../../common/ct_event
 
 proc messageView(self: DebugComponent): VNode =
   var current = now()
@@ -254,7 +253,7 @@ method render*(self: DebugComponent): VNode =
             class = "debug-button",
             onclick = click
           ):
-            buttons[j(id)]
+            buttons[cstring(id)]
             tdiv(
               class = "custom-tooltip",
             ):

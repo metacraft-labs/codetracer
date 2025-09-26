@@ -1,6 +1,7 @@
 import
   std / [ async, jsffi, os, strformat, strutils, sequtils, jsconsole ],
-  ../[ lib, config, types, lang ],
+  ../[ config, types, lang ],
+  ../lib/[ jslib, electron_lib, misc_lib ],
   ../../common/[ paths, ct_logging ]
 
 type
@@ -46,7 +47,7 @@ var data* = ServerData(
     inTest: false,
     record: false,
     edit: false,
-    name: j"",
+    name: cstring"",
     frontendSocket: SocketAddressInfo(),
     backendSocket: SocketAddressInfo(),
     rawTestStrategy: cstring""
@@ -63,10 +64,10 @@ var
   fsReadFileWithErr*   {.  importcpp: "helpers.fsReadFileWithErr(#)"                       .}:  proc(f: cstring):                                Future[(cstring, js)]
 
 proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int): Future[void] {.async.} =
-  var source = j""
+  var source = cstring""
   # var tokens: seq[seq[Token]] = @[]
   var symbols = JsAssoc[cstring, seq[js]]{}
-  if location.highLevelPath == j"unknown":
+  if location.highLevelPath == cstring"unknown":
     return
   let filename = location.highLevelPath
   # TODO path for low level?
@@ -87,8 +88,8 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   var err: js
   (source, err) = await fsReadFileWithErr(readPath)
   if not err.isNil:
-    # source = j"<file missing>!"
-    # filename = j"<file missing: " & filename & j">"
+    # source = cstring"<file missing>!"
+    # filename = cstring"<file missing: " & filename & cstring">"
     # missing = true
     console.log "error reading file directly ", filename, " ", err
     if data.trace.imported:
@@ -112,7 +113,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       # try to not send event for our own saves/changes
 
       # fs.watch(filename) do (e: cstring, filenameArg: cstring):
-      #   if e == j"change":
+      #   if e == cstring"change":
       #     # debugPrint "change?", filename
       #     # TODO: try to not send event for our own saves/changes
       #     if not data.tabs.hasKey(filename):
@@ -176,13 +177,13 @@ proc findConfig(folder: cstring, configPath: cstring): cstring =
       return path
     else:
       if config:
-        return j""
+        return cstring""
       current = nodePath.dirname(current)
-      if current == j"/":
+      if current == cstring"/":
         current = userConfigDir
         config = true
 
-proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send: bool = false): Future[Config] {.async.} =
+proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring"", send: bool = false): Future[Config] {.async.} =
   var file = findConfig(startOptions.folder, configPath)
   if file.len == 0:
     file = userConfigDir / configPath
@@ -217,7 +218,7 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
     quit(1)
 
 proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
-  let (data, err) = await fsreadFileWithErr(j(filename))
+  let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
     let config = JSON.parse(data)
     return config
@@ -238,3 +239,26 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
     else:
       errorPrint "index: load layout config error: ", errCopy
       quit(1)
+
+proc loadValues*(a: js, id: cstring): JsAssoc[cstring, cstring] =
+  var fields = JsAssoc[cstring, js]{}
+  var values = JsAssoc[cstring, cstring]{}
+  if id == cstring"CODETRACER::updated-slice":
+    return values
+  if isJsObject(a):
+    fields = cast[JsAssoc[cstring, js]](a)
+  elif isJsArray(a):
+    for i, element in a:
+      fields[i.toCString] = element
+  else:
+    fields[cstring""] = a
+  for field, value in fields:
+    if field == cstring"source":
+      continue
+    elif not value.isNil:
+      values[field] = value.toCString
+    elif value.isNil:
+      values[field] = cstring"undefined"
+    else:
+      values[field] = cstring"nil"
+  return values

@@ -1,5 +1,6 @@
-import ui_imports
-import tables
+import
+  ui_imports,
+  tables
 
 # var testData: js
 const ICON_MAP = {
@@ -141,7 +142,7 @@ method render*(self: FilesystemComponent): VNode =
                     data: self.service.filesystem.toJs,
                     animation: false,
                   },
-                  plugins: @[j"contextmenu", j"search"]
+                  plugins: @[cstring"contextmenu", cstring"search"]
               })
 
               jqFind(".filesystem").toJs.on(
@@ -151,13 +152,13 @@ method render*(self: FilesystemComponent): VNode =
                     jqFind("#j" & id).addClass("diff-file")
               )
 
-              jqFind(".filesystem").toJs.on(j"changed.jstree",
+              jqFind(".filesystem").toJs.on(cstring"changed.jstree",
                 proc(e: js, nodeData: jsobject(node=CodetracerFile)) =
                   let ext = ($nodeData.node.original.path).rsplit(".", 1)[1]
                   let lang = toLang(ext)
                   data.openTab(nodeData.node.original.path, ViewSource)) #, lang))
 
-              jqFind(".filesystem").toJs.on(j"before_open.jstree",
+              jqFind(".filesystem").toJs.on(cstring"before_open.jstree",
                 proc(e: js, node: jsobject(node=CodetracerFile)) =
                   let nodeId = node.toJs.node.id
                   let nodeChildren = node.toJs.node.children.to(seq[cstring])

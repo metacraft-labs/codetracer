@@ -1,8 +1,8 @@
-import ../ui_helpers, ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom, ../renderer
-  # ../public/third_party/monaco-themes/themes/customThemes/nim/customThemes
-import std/[ cstrutils, jsre ]
-import ../communication, ../../common/ct_event
-import ../event_helpers
+import
+  std/[ cstrutils, jsre ],
+  ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom,
+  ../[ ui_helpers, renderer, communication, event_helpers ],
+  ../../common/ct_event
 
 from dom import createElement
 
@@ -60,7 +60,7 @@ proc loadKeyPlugins*(self: Component) =
         let path = if not self.toJs.path.isNil: cast[cstring](self.toJs.path) else: cast[cstring](self.toJs.lowLevelTab.path)
         let line = cast[int](position.lineNumber)
         let column = cast[int](position.column)
-        let word = if not wordInfo.isNil: cast[cstring](wordInfo.word) else: j""
+        let word = if not wordInfo.isNil: cast[cstring](wordInfo.word) else: cstring""
         let startColumn = if not wordInfo.isNil: cast[int](wordInfo.startColumn) else: -1
         let endColumn = if not wordInfo.isNil: cast[int](wordInfo.endColumn) else: -1
         let context = KeyPluginContext(
@@ -71,7 +71,7 @@ proc loadKeyPlugins*(self: Component) =
           endColumn: endColumn,
           word: word,
           data: self.data)
-        discard plugin(context), j"")
+        discard plugin(context), cstring"")
 
 func getLine(editor: MonacoEditor): int =
   editor.getPosition().lineNumber
@@ -248,7 +248,7 @@ proc highlightTag(path: cstring, tag: Tag, name: cstring) =
     let regex = if tag.kind == TagRegex: tag.regex else: name
     let location = cast[seq[js]](highlightEditor.getModel().findMatches(regex, false, true, false, false))
     if location.len > 0:
-      line = cast[int](location[0][j"range"].startLineNumber)
+      line = cast[int](location[0][cstring"range"].startLineNumber)
   if line != -1:
     highlightLine(data.services.editor.active, line)
     gotoLine(line)
@@ -267,7 +267,7 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
     newDecorations.add(DeltaDecoration(
       `range`: newMonacoRange(line.line, startIndex, line.line, endIndex),
       options: js{
-        isWholeLine: line.class.isNil or line.class.startsWith("on") or line.class == "diff-added",
+        isWholeLine: line.class.isNil or ui_imports.jslib.startsWith(line.class, "on") or line.class == "diff-added",
         className: line.class,
         inlineClassName: line.inlineClass}))
 
@@ -478,10 +478,10 @@ proc applyEventualStylesLines(self: EditorViewComponent) =
   self.styleLines(self.monacoEditor, lines)
 
 proc statusWidgetDom(self: FlowComponent, line: int): Node =
-  var dom = cast[Node](document.createElement(j"div"))
-  var target = cast[Node](document.createElement(j"div"))
+  var dom = cast[Node](document.createElement(cstring"div"))
+  var target = cast[Node](document.createElement(cstring"div"))
   dom.appendChild(target)
-  let id = j(&"flow-status-widget-{line}")
+  let id = cstring(&"flow-status-widget-{line}")
   target.id = id
   cast[Element](target).classList.add(cstring"flow-status-widget")
   self.statusDom = dom
@@ -1147,7 +1147,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
   zoneDom.id = fmt"diff-view-zone-{id}"
   zoneDom.class = "diff-view-zone"
   zoneDom.style.display = "flex"
-  zoneDom.style.fontSize = j($self.data.ui.fontSize) & j"px"
+  zoneDom.style.fontSize = cstring($self.data.ui.fontSize) & cstring"px"
 
   var editorDom = document.createElement("div")
   var selector = fmt"editorComponent-{id}"
@@ -1384,7 +1384,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           let position = e.target.position
           let target = cast[cstring](e.target.element.classList.value).split(" ")[0]
           let line = cast[int](position.lineNumber)
-          if target != "fa" and not target.startsWith("value"):
+          if target != "fa" and not ui_imports.jslib.startsWith(target, "value"):
             self.lastMouseClickLine = line
             self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
             self.data.redraw()
@@ -1420,23 +1420,23 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       except:
         cerror "loadKeyPlugins " & getCurrentExceptionMsg()
 
-      document.querySelector(selector).addEventListener(j"click", proc(ev: Event) =
+      document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
         ev.stopPropagation()
         for element in cast[seq[cstring]](ev.toJs.target.classList):
-          if ($element).contains("gutter") and element != j"gutter-line":
+          if ($element).contains("gutter") and element != cstring"gutter-line":
             self.lineActionClick(tabInfo, ev.target.toJs)
       )
 
-      document.addEventListener(j"mouseup", proc(ev: Event) =
+      document.addEventListener(cstring"mouseup", proc(ev: Event) =
         ev.preventDefault()
         ev.stopPropagation()
       )
 
-      document.querySelector(selector).addEventListener(j"contextmenu", proc(ev: Event) =
+      document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
         ev.preventDefault()
         ev.stopPropagation()
         for element in cast[seq[cstring]](ev.toJs.target.classList):
-          if element == j"gutter-line" or element == j"gutter-breakpoint":
+          if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
             self.lineActionContextMenu(tabInfo, ev.target.toJs)
       )
     )
@@ -1499,7 +1499,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
 
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int) =
   if expanded.viewZone.isNil:
-    let id = j(&"expanded-{line}")
+    let id = cstring(&"expanded-{line}")
     var expandedViewZoneNode = createElement(dom.document, cstring"div")
     var editorNode = createElement(dom.document, cstring"div")
 

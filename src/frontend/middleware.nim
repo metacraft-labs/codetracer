@@ -1,8 +1,10 @@
-import std / [jsffi, jsconsole]
-import .. / common / ct_event
-import types, lib
-import communication, dap
-import event_helpers
+import
+  std/[jsffi, jsconsole],
+  ../common/ct_event,
+  lib/jslib,
+  types,
+  communication, dap,
+  event_helpers
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 

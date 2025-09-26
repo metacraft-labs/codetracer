@@ -3,8 +3,40 @@ import
   electron_vars, files, config, debugger,
   results,
   ipc_subsystems/[ dap, socket ],
-  ../[ trace_metadata, config, types, lib ],
+  ../lib/[ jslib, electron_lib ],
+  ../[ trace_metadata, config, types ],
   ../../common/[ ct_logging, paths ]
+
+when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
+  proc startProcess*(
+    path: cstring,
+    args: seq[cstring],
+    options: JsObject = js{"stdio": cstring"ignore"}): Future[Result[NodeSubProcess, JsObject]] =
+    # important to ignore stderr, as otherwise too much of it can lead to
+    # the spawned process hanging: this is a bugfix for such a situation
+
+    let futureHandler = proc(resolve: proc(res: Result[NodeSubProcess, JsObject])) =
+      let process = nodeStartProcess.spawn(path, args, options)
+      process.toJs.on("spawn", proc() =
+        resolve(Result[NodeSubProcess, JsObject].ok(process)))
+
+      process.toJs.on("error", proc(error: JsObject) =
+        resolve(Result[NodeSubProcess, JsObject].err(error)))
+
+    var future = newPromise(futureHandler)
+    return future
+
+  proc waitProcessResult*(process: NodeSubProcess): Future[JsObject] =
+    let futureHandler = proc(resolve: proc(res: JsObject)) =
+
+      process.toJs.on("exit", proc(code: int, signal: cstring) =
+        if code == 0:
+          resolve(nil)
+        else:
+          resolve(cstring(&"Exit with code {code}").toJs))
+
+    var future = newPromise(futureHandler)
+    return future
 
 proc loadSymbols(traceFolder: cstring): Future[seq[Symbol]] {.async.} =
   if traceFolder.len > 0:
@@ -170,7 +202,7 @@ proc onStopRecordingProcess*(sender: js, response: js) {.async.} =
     warnPrint "There is not any recording process"
 
 proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
-  let selection = await selectDir(j"Select Trace Output Folder", codetracerTraceDir)
+  let selection = await selectDir(cstring"Select Trace Output Folder", codetracerTraceDir)
   if selection.len == 0:
     errorPrint "no folder selected"
   else:
@@ -187,7 +219,7 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
 proc onNewRecord*(sender: js, response: jsobject(args=seq[cstring], options=JsObject)) {.async.}=
   let processResult = await startProcess(
     codetracerExe,
-    @[j"record"].concat(response.args),
+    @[cstring"record"].concat(response.args),
     response.options)
 
   if processResult.isOk:

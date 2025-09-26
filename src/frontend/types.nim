@@ -1,8 +1,9 @@
-import std / [jsffi, dom, async, typetraits, tables]
-import vdom, karax, kdom
-import lib, lang, communication, dap
-
-import rr_gdb
+import
+  std/[ jsffi, dom, async, typetraits, tables ],
+  vdom, karax, kdom,
+  lang, communication, dap,
+  lib/[ monaco_lib, jslib ],
+  rr_gdb
 
 type
   defaultstring = cstring
@@ -1592,9 +1593,9 @@ when defined(ctRenderer):
         diffId: @[],
         index: 1),
       calltrace: CalltraceService(
-        callstackCollapse: (name: j"", level: -1),
+        callstackCollapse: (name: cstring"", level: -1),
         callstackLimit: CALLSTACK_DEFAULT_LIMIT,
-        calltraceJumps: @[j""],
+        calltraceJumps: @[cstring""],
         nonLocalJump: true,
         isCalltrace: true,
         loadingArgs: initJsSet[cstring]()),
@@ -1616,7 +1617,7 @@ when defined(ctRenderer):
       inTest: false,
       record: false,
       edit: false,
-      name: j"",
+      name: cstring"",
       frontendSocket: SocketAddressInfo(),
       backendSocket: SocketAddressInfo()),
     pointList: PointListData(
@@ -2028,4 +2029,4 @@ proc toEnum*(langType: string, i: int, n: defaultstring): Value =
   discard
 
 proc baseName*(a: cstring): cstring =
-  cast[seq[cstring]](a.toJs.split(j"/"))[^1]
+  cast[seq[cstring]](a.toJs.split(cstring"/"))[^1]

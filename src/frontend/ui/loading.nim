@@ -1,17 +1,17 @@
 import ui_imports
 
-let media = if inElectron: "media" else: "/resources/media"
+let media = if ui_imports.electron_lib.inElectron: "media" else: "/resources/media"
 
 # Faith!
 let TIPS = @[
-  (j"Conditions for traces",
-   j("If you right click advanced trace you can add a condition in pure Nim"),
+  (cstring"Conditions for traces",
+   cstring("If you right click advanced trace you can add a condition in pure Nim"),
    &"{media}/condition.gif"),
-  (j"Jumping on calls",
-    j("If you click on a call in call graphs you can jump in its frame"),
+  (cstring"Jumping on calls",
+    cstring("If you click on a call in call graphs you can jump in its frame"),
     &"{media}/call_jump.gif"),
-  (j"Jumping to output",
-    j("You can click on a symbol of output and jump to the place which started the write"),
+  (cstring"Jumping to output",
+    cstring("You can click on a symbol of output and jump to the place which started the write"),
     &"{media}/jump.png")
 ]
 

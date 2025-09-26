@@ -1,4 +1,6 @@
-import service_imports, jsconsole
+import
+  service_imports, jsconsole,
+  ../lib/jslib
 
 proc eventJump*(self: EventLogService, event: ProgramEvent) =
   # we use codeID to determine if we need to reset flow

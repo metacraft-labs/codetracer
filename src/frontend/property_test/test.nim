@@ -1,7 +1,7 @@
 import std / [jsffi, async]
 from std / jsconsole import console, log
 from std / strformat import fmt
-import ../lib
+import ../lib/[ jslib, logging ]
 from operations import Operation, runOperation, `$`
 from strategies import Strategy, parseStrategy, generateOperation
 

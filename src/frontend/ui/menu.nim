@@ -1,5 +1,6 @@
 from std / dom import Document
-import ui_imports, ../ui_helpers, debug
+import
+  ui_imports, ../ui_helpers, debug
 
 const FONT_UPPERCASE_WIDTH_FACTOR = 1.5
 
@@ -15,7 +16,7 @@ proc closeMenu(self: MenuComponent) =
   self.activeLength = 0
   self.searchResults = @[]
   self.activeSearchIndex = 0
-  self.searchQuery = j""
+  self.searchQuery = cstring""
 
 proc openMainMenu(self: MenuComponent) =
   self.data.focusComponent(self)
@@ -53,10 +54,10 @@ proc loadShortcut*(action: ClientAction, config: Config): cstring =
     if index == 0:
       result = result & shortcutName
     else:
-      result = result & j" " & shortcutName
+      result = result & cstring" " & shortcutName
 
 proc iconClass(name: cstring): cstring =
-  ui_imports.lib.join(name.toLowerCase().split(" "), "-")
+  ui_imports.jslib.join(name.toLowerCase().split(" "), "-")
 
 proc menuElementView*(
   self: MenuComponent,
@@ -150,9 +151,9 @@ proc menuNodeView*(
   let activeNode =
     if (self.activePath.len == depth and self.activeIndex == i) or
         (self.activePath.len() > 0 and self.activePath.len() != depth and self.activePath[depth] == i):
-      j"menu-active-node"
+      cstring"menu-active-node"
     else:
-      j""
+      cstring""
 
   buildHtml(tdiv(class = "menu-node-container " & activeNode)):
     if node.kind == MenuElement:
@@ -175,9 +176,9 @@ proc menuSearchResultView*(self: MenuComponent, res: cstring, i: int): VNode =
     let shortcut = loadShortcut(self.nameMap[res], self.data.config)
     let activeSearchResult =
       if self.activeSearchIndex == i:
-        j"menu-active-search-result"
+        cstring"menu-active-search-result"
       else:
-        j""
+        cstring""
     tdiv(class = "menu-node-icon"):
       tdiv(class = "icon " & iconClass(res))
     span(class = "menu-node-name " & activeSearchResult):
@@ -314,7 +315,7 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
 
     let shortcut =
       if node.kind == MenuFolder:
-        j""
+        cstring""
       else:
         loadShortcut(node.action, self.data.config)
     let shortcutWidth =
@@ -388,7 +389,7 @@ proc navigationMenuView*(self: MenuComponent): VNode =
 
             for i, element in menu.elements:
               var shouldRender = false
-              if inElectron:
+              if ui_imports.electron_lib.inElectron:
                 if not cast[bool]((element.menuOs and ord(MenuNodeOSHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
                   shouldRender = true
               else:
@@ -428,7 +429,7 @@ proc navigationMenuView*(self: MenuComponent): VNode =
           ):
             for i2, element in current.elements:
               var shouldRender = false
-              if inElectron:
+              if ui_imports.electron_lib.inElectron:
                 if not cast[bool]((element.menuOs and ord(MenuNodeOSHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
                   shouldRender = true
               else:

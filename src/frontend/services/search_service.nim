@@ -1,4 +1,5 @@
-import service_imports
+import
+  service_imports
 
 #data.services.search.pluginCommands = rendererPluginCommands
 
@@ -10,11 +11,11 @@ proc run*(self: SearchService) {.async.} =
 
 # proc parseSearch*(self: SearchService, query: cstring, includePattern: cstring, excludePattern: cstring): SearchQuery =
 #   let tokens = ($query).split(" ", 1)
-#   var command = j"text"
+#   var command = cstring"text"
 #   var searchQuery = query
-#   if tokens.len > 0 and self.pluginCommands.hasKey(j(tokens[0])):
-#     command = j(tokens[0])
-#     searchQuery = j(tokens[1])
+#   if tokens.len > 0 and self.pluginCommands.hasKey(cstring(tokens[0])):
+#     command = cstring(tokens[0])
+#     searchQuery = cstring(tokens[1])
 
 #   SearchQuery(command: command, query: searchQuery, includePattern: includePattern, excludePattern: excludePattern)
 

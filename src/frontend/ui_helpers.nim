@@ -1,5 +1,6 @@
 import
-  dom, lib, jsffi, vdom, strutils, sequtils
+  dom, jsffi, vdom, strutils, sequtils,
+  lib/jslib
 
 import kdom except Location, document
 
@@ -100,6 +101,6 @@ proc convertStringToHtmlClass*(input : cstring): cstring =
   let pattern =  regex("([a-zA-Z][a-zA-Z0-9-]+)")
   var matches = input.matchAll(pattern)
 
-  normalString = ($(matches.mapIt(it[0]).join(j"-"))).toLowerAscii()
+  normalString = ($(matches.mapIt(it[0]).join(cstring"-"))).toLowerAscii()
 
   return normalString.cstring

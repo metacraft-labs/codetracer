@@ -1,6 +1,7 @@
 include ../common/common_lang
-import jsffi
-import lib
+import
+  std/jsffi,
+  lib/jslib
 
 proc toLang*(lang: cstring): Lang =
   var langs = JsAssoc[cstring, Lang]{
@@ -65,7 +66,7 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[]),
   toSet(@[]),
   toSet(@[]),
-  toSet(@[j"for", j"if", j"while", j"proc"]),
+  toSet(@[cstring"for", cstring"if", cstring"while", cstring"proc"]),
   toSet(@[]),
   toSet(@[]), # LangGo: TODO
   toSet(@[]),
@@ -106,7 +107,7 @@ proc getExtension*(lang: Lang): cstring =
 proc fromPath*(path: cstring): Lang =
   # TODO: replace with toLangFromFilename fully?
   # assume file.name.ext
-  let tokens = path.split(j".")
+  let tokens = path.split(cstring".")
   echo tokens
   let ext = tokens[tokens.len - 1]
   echo ext

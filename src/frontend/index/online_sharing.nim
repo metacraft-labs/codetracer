@@ -3,15 +3,53 @@ import
   results,
   traces,
   electron_vars,
-  ../[ types, lib ],
+  ../[ types ],
+  ../lib/[ jslib, electron_lib ],
   ../../common/[ paths ]
+
+when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
+
+
+  proc runUploadWithStreaming(
+      path: cstring,
+      args: seq[cstring],
+      onData: proc(data: string),
+      onDone: proc(success: bool, result: string)
+  ) =
+    setupLdLibraryPath()
+
+    let process = nodeStartProcess.spawn(path, args)
+    process.stdout.setEncoding("utf8")
+
+    var fullOutput = ""
+
+    process.stdout.toJs.on("data", proc(data: cstring) =
+      let str = $data
+      fullOutput.add(str)
+      onData(str)
+    )
+
+    process.stderr.toJs.on("data", proc(err: cstring) =
+      echo "[stderr]: ", err
+      fullOutput.add($err)
+    )
+
+    process.toJs.on("exit", proc(code: int, _: cstring) =
+      onDone(code == 0, fullOutput)
+    )
+
+  proc runProcess*(path: cstring, args: seq[cstring]): Future[JsObject] {.async.} =
+    let processStart = await startProcess(path, args)
+    if not processStart.isOk:
+      return processStart.error
+    return await waitProcessResult(processStart.value)
 
 proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
   runUploadWithStreaming(
     codetracerExe.cstring,
     @[
-      j"upload",
-      j"--trace-folder=" & response.trace.outputFolder
+      cstring"upload",
+      cstring"--trace-folder=" & response.trace.outputFolder
     ],
     onData = proc(data: string) =
       let jsonLine = parseJson(data.split("\n")[^2].strip())
@@ -33,12 +71,12 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
           expireTime: $parsed["storedUntilEpochSeconds"].getInt()
         )
         mainWindow.webContents.send("CODETRACER::upload-trace-file-received", js{
-          "argId": j(response.trace.program & ":" & $response.trace.id),
+          "argId": cstring(response.trace.program & ":" & $response.trace.id),
           "value": uploadData
         })
       else:
         mainWindow.webContents.send("CODETRACER::uploaded-trace-file-received", js{
-          "argId": j(response.trace.program & ":" & $response.trace.id),
+          "argId": cstring(response.trace.program & ":" & $response.trace.id),
           "value": UploadedTraceData(downloadKey: "Errored")
         })
   )
@@ -46,7 +84,7 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
 proc onDownloadTraceFile*(sender: js, response: jsobject(downloadKey = seq[cstring])) {.async.} =
   let res = await readProcessOutput(
     codetracerExe.cstring,
-    @[j"download"].concat(response.downloadKey)
+    @[cstring"download"].concat(response.downloadKey)
   )
 
   if res.isOk:
@@ -62,16 +100,16 @@ proc onDeleteOnlineTraceFile*(sender: js, response: DeleteTraceArg) {.async.} =
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[
-      j"cmdDelete",
-      j"--trace-id=" & $response.traceId,
-      j"--control-id=" & response.controlId
+      cstring"cmdDelete",
+      cstring"--trace-id=" & $response.traceId,
+      cstring"--control-id=" & response.controlId
     ]
   )
 
   mainWindow.webContents.send(
     "CODETRACER::delete-online-trace-file-received",
     js{
-      "argId": j($response.traceId & ":" & response.controlId),
+      "argId": cstring($response.traceId & ":" & response.controlId),
       "value": res.isOk
     }
   )
@@ -79,9 +117,9 @@ proc onDeleteOnlineTraceFile*(sender: js, response: DeleteTraceArg) {.async.} =
 proc onSendBugReportAndLogs*(sender: js, response: BugReportArg) {.async.} =
   let process = await runProcess(
     codetracerExe.cstring,
-    @[j"report-bug",
-      j"--title=" & response.title,
-      j"--description=" & response.description,
-      j($callerProcessPid),
-      j"--confirm-send=0"]
+    @[cstring"report-bug",
+      cstring"--title=" & response.title,
+      cstring"--description=" & response.description,
+      cstring($callerProcessPid),
+      cstring"--confirm-send=0"]
   )

@@ -249,7 +249,7 @@ proc excerpt(self: StateComponent): VNode =
 #             self.locals = locals
 #             service.locals = locals
 #             self.redraw())
-#           jq("#watch").toJs.value = j"",
+#           jq("#watch").toJs.value = cstring"",
 #       onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
 #       onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()
 #     ):

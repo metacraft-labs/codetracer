@@ -1,6 +1,7 @@
 import
   std / [ async, jsffi, macros ],
-  ../[ types, lib ],
+  ../lib/[ jslib ],
+  ../[ types ],
   ../../common/[ ct_logging ]
 
 

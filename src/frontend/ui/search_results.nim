@@ -1,7 +1,7 @@
 import ui_imports
 
 proc fixedSearchView*: VNode =
-  let active = if data.services.search.active[SearchFixed]: j"" else: j"fixed-search-non-active"
+  let active = if data.services.search.active[SearchFixed]: cstring"" else: cstring"fixed-search-non-active"
   # TODO active
   buildHtml(
     tdiv(
@@ -66,7 +66,7 @@ proc renderSearchResult(self: SearchResultsComponent, res: SearchResult): VNode 
 
 method render*(self: SearchResultsComponent): VNode =
   if self.service.results[SearchFixed].len > 0:
-    kxiMap[j"search-results"].afterRedraws.add(proc =
+    kxiMap[cstring"search-results"].afterRedraws.add(proc =
       discard
     )
   let maybeActiveClass =

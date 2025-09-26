@@ -1,6 +1,7 @@
 import
   std / [ json ],
-  ../lib,
+  ../task_and_event,
+  ../lib/[ logging, electron_lib ],
   ../../common/path_utils
 
 from electron_vars import callerProcessPid

@@ -3,7 +3,8 @@ import
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers,
   ipc_subsystems/[ dap, socket ],
   results,
-  ../[ lib, types, config, trace_metadata ],
+  ../lib/[ jslib, misc_lib ],
+  ../[ types, config, trace_metadata ],
   ../../common/[ ct_logging, paths ]
 
 # handling incoming messages from frontend:
@@ -64,11 +65,11 @@ proc configureIpcMain* =
 
 
 proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
-  var file = j(userConfigDir & filename)
+  var file = cstring(userConfigDir & filename)
   let (raw, err) = await fsReadFileWithErr(file)
   if not err.isNil:
     return JsAssoc[cstring, Helper]{}
-  var res = cast[Helpers](yaml.load(raw)[j"helpers"])
+  var res = cast[Helpers](yaml.load(raw)[cstring"helpers"])
   return res
 
 proc ready* {.async.} =

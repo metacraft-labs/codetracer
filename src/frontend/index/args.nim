@@ -1,9 +1,9 @@
 import
   std / [ jsffi, sequtils ],
   electron_vars, config,
-  ../lib,
-  ../../common/ct_logging,
-  ../types
+  ../types,
+  ../lib/[ jslib, electron_lib ],
+  ../../common/ct_logging
 
 # <traceId>
 # --port <port>
