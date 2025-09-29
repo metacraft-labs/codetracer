@@ -4,6 +4,7 @@ use crate::dap_types::{self, Breakpoint, SetBreakpointsArguments, SetBreakpoints
 use crate::db::Db;
 use crate::handler::{Handler, TraceKind};
 use crate::paths::CODETRACER_PATHS;
+use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
     gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments,
     CtLoadLocalsArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
@@ -17,7 +18,7 @@ use crate::transport::DapTransport;
 #[cfg(feature = "browser-transport")]
 use crate::transport::{DapResult, WorkerTransport};
 
-use log::info;
+use log::{info, warn};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -86,8 +87,13 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>, seq: i64) -> Result<Handler, Box<dyn Error>> {
-    // TODO: log this when logging logic is properly abstracted
+fn launch(
+    trace_folder: &Path,
+    trace_file: &Path,
+    raw_diff_index: Option<String>,
+    ct_rr_worker_exe: &Path,
+    seq: i64,
+) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
@@ -106,18 +112,23 @@ fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
 
-        let mut handler = Handler::new(TraceKind::DB, Box::new(db));
+        let mut handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.dap_client.seq = seq;
         handler.raw_diff_index = raw_diff_index;
         handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
     } else {
         warn!("problem with reading metadata or path trace files: try rr?");
-        let path  = trace_folder.join("rr");
+        let path = trace_folder.join("rr").join("latest-trace");
         if path.exists() {
-            let db = Db::new(&PathBuf::from("")); 
-            let mut handler = Handler::new(TraceKind::RR, Box::new(db));
+            let db = Db::new(&PathBuf::from(""));
+            let ct_rr_args = CtRRArgs {
+                worker_exe: PathBuf::from(ct_rr_worker_exe),
+                rr_trace_folder: path,
+            };
+            let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
             handler.dap_client.seq = seq;
+            handler.raw_diff_index = raw_diff_index;
             handler.run_to_entry(dap::Request::default())?;
             Ok(handler)
         } else {
@@ -245,6 +256,7 @@ pub struct Ctx {
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
     pub launch_raw_diff_index: Option<String>,
+    pub ct_rr_worker_exe: PathBuf,
     pub received_configuration_done: bool,
 }
 
@@ -258,6 +270,7 @@ impl Default for Ctx {
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
+            ct_rr_worker_exe: PathBuf::from(""),
             received_configuration_done: false,
         }
     }
@@ -406,9 +419,15 @@ pub fn handle_message<T: DapTransport>(
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
 
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
+                ctx.ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
 
                 if ctx.received_configuration_done {
-                    ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.launch_raw_diff_index.clone(), ctx.seq)?);
+                    ctx.handler = Some(launch(
+                        &ctx.launch_trace_folder,
+                        &ctx.launch_trace_file,
+                        ctx.launch_raw_diff_index.clone(),
+                        &ctx.ct_rr_worker_exe,
+                        ctx.seq)?);
                     if let Some(h) = ctx.handler.as_mut() {
                         write_dap_messages(transport, h, &mut ctx.seq)?;
                     }
@@ -457,7 +476,12 @@ pub fn handle_message<T: DapTransport>(
             //     ctx.received_launch
             // );
             if ctx.received_launch {
-                ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.launch_raw_diff_index.clone(), ctx.seq)?);
+                ctx.handler = Some(launch(
+                    &ctx.launch_trace_folder,
+                    &ctx.launch_trace_file,
+                    ctx.launch_raw_diff_index.clone(),
+                    &ctx.ct_rr_worker_exe,
+                    ctx.seq)?);
                 if let Some(h) = ctx.handler.as_mut() {
                     write_dap_messages(transport, h, &mut ctx.seq)?;
                 }
