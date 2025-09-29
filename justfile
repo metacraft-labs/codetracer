@@ -263,6 +263,7 @@ stop:
   killall -9 virtualization-layers db-backend node .electron-wrapped || true
   killall -9 electron || true
   killall -9 backend-manager || true
+  killall -9 ct-rr-worker || true
 
 reset-config:
   rm --force  ~/.config/codetracer/.config.yaml && \
