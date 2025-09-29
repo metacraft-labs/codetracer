@@ -37,6 +37,8 @@ pub struct LaunchRequestArguments {
     pub trace_file: Option<PathBuf>,
     #[serde(rename = "rawDiffIndex", skip_serializing_if = "Option::is_none")]
     pub raw_diff_index: Option<String>,
+    #[serde(rename = "ctRRWorkerExe", skip_serializing_if = "Option::is_none")]
+    pub ct_rr_worker_exe: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
