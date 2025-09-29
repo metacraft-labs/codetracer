@@ -1527,6 +1527,14 @@ type
     showMinimap*:             bool
     traceSharing*:            TraceSharingConfigObj
     skipInstall*:             bool
+    rrBackend*:               RRBackendConfig
+
+  RRBackendConfig* = ref object
+    enabled*: bool
+    path*: cstring
+    ctPaths*: cstring
+    debugInfoToolPath*: cstring
+    ctRRWorkerExe*: cstring
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint

@@ -116,6 +116,7 @@ rrBackend:
   path: ""
   ctPaths: ""
   debugInfoToolPath: ""
+  ctRRWorkerExe: ""
 
 skipInstall: true
 

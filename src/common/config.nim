@@ -11,6 +11,7 @@ type
     path*:              string
     ctPaths*:           string
     debugInfoToolPath*: string
+    ctRRWorkerExe*:     string
 
   FlowConfigObjWrapper* = object
     enabled*:                             bool
@@ -63,7 +64,8 @@ type
       enabled: false,
       path: "",
       ctPaths: "",
-      debugInfoToolPath: ""
+      debugInfoToolPath: "",
+      ctRRWorkerExe: "",
     ).}:                                                  RRBackendConfig
     skipInstall:                                          bool
 
