@@ -11,6 +11,7 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
+use crate::paths::CODETRACER_PATHS;
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
@@ -18,9 +19,8 @@ use log::{error, info};
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
-use std::{error::Error, panic};
 use std::path::PathBuf;
-use crate::paths::CODETRACER_PATHS;
+use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
@@ -28,8 +28,8 @@ mod dap;
 mod dap_server;
 mod dap_types;
 mod db;
-mod distinct_vec;
 mod diff;
+mod distinct_vec;
 mod event_db;
 mod expr_loader;
 mod flow_preloader;
@@ -37,6 +37,7 @@ mod handler;
 mod lang;
 mod paths;
 mod program_search_tool;
+mod query;
 mod rr_dispatcher;
 mod step_lines_loader;
 mod task;
@@ -67,7 +68,7 @@ enum Commands {
         structured_diff_path: std::path::PathBuf,
         trace_folder: std::path::PathBuf,
         multitrace_folder: std::path::PathBuf,
-    }
+    },
 }
 
 // Already panicking so the unwraps won't change anything
@@ -89,9 +90,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
     // eprintln!("{}", log_path.display());
 
-    let tmp_path: PathBuf = {
-        CODETRACER_PATHS.lock()?.tmp_path.clone()
-    };
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
 
     let target = Box::new(File::create(tmp_path.join("db-backend.log"))?);
 
@@ -134,7 +133,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // })
             };
         }
-        Commands::IndexDiff { structured_diff_path, trace_folder, multitrace_folder } =>{
+        Commands::IndexDiff {
+            structured_diff_path,
+            trace_folder,
+            multitrace_folder,
+        } => {
             let raw = std::fs::read_to_string(structured_diff_path)?;
             info!("raw {raw:?}");
             let structured_diff = serde_json::from_str::<diff::Diff>(&raw)?;
