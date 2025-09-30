@@ -1,5 +1,9 @@
+// copied from Stan's paths.rs in src/db-backend in the public codetracer repo
+//   added run_dir/ct_rr_worker_socket_path (and copied to db-backend too)
+
 use std::env;
-use std::path::PathBuf;
+use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 pub struct Paths {
@@ -24,3 +28,24 @@ impl Default for Paths {
 }
 
 pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> = LazyLock::new(|| Mutex::new(Paths::default()));
+
+pub fn run_dir_for(tmp_path: &Path, run_id: usize) -> Result<PathBuf, Box<dyn Error>> {
+    let run_dir = tmp_path.join(format!("run-{run_id}"));
+    std::fs::create_dir_all(&run_dir)?;
+    Ok(run_dir)
+}
+
+pub fn ct_rr_worker_socket_path(from: &str, worker_name: &str, run_id: usize) -> Result<PathBuf, Box<dyn Error>> {
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+    let run_dir = run_dir_for(&tmp_path, run_id)?;
+    // eventually: TODO: unique index or better cleanup
+    //  if worker with the same name started/restarted multiple times
+    //  by the same backend instance
+    Ok(run_dir.join(format!("ct_rr_worker_{worker_name}_from_{from}.sock")))
+
+    // TODO: decide if we need to check/eventually remove or the unique run folder/paths are enough:
+    //
+    // if std::fs::metadata(&receiving_socket_path).is_ok() {
+    // let _ = std::fs::remove_file(&receiving_socket_path); // try to remove if existing: ignore error
+    // }
+}
