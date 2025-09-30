@@ -126,7 +126,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     match cli.cmd {
         Commands::DapServer { socket_path, stdio } => {
             if stdio {
-                let _ = db_backend::dap_server::run_stdio();
+                // thread::spawn(move || {
+                let res = db_backend::dap_server::run_stdio();
+                if let Err(e) = res {
+                    error!("dap server run error: {e:?}");
+                }
+                // })
             } else {
                 let socket_path = if let Some(p) = socket_path {
                     p
@@ -134,10 +139,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let pid = std::process::id() as usize;
                     db_backend::dap_server::socket_path_for(pid)
                 };
-
-                info!("dap_server::run {:?}", socket_path);
-
-                let _ = db_backend::dap_server::run(&socket_path);
+                // thread::spawn(move || {
+                let res = db_backend::dap_server::run(&socket_path);
+                if let Err(e) = res {
+                    error!("dap server run error: {e:?}");
+                }
+                // })
             };
         }
         Commands::IndexDiff {
