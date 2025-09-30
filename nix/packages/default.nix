@@ -320,6 +320,7 @@
           name = "runtime-deps";
 
           paths = [
+            pkgs.cargo-expand
             cargo-stylus
             resources-derivation
             db-backend
