@@ -6,6 +6,7 @@ use core::cmp::min;
 use core::ffi::{c_char, c_int, c_void};
 use core::mem::{align_of, size_of};
 use core::ptr::null_mut;
+use std::ffi::CStr;
 
 #[cfg(feature = "browser-transport")]
 #[global_allocator]
@@ -179,4 +180,103 @@ pub extern "C" fn abort() -> ! {
 
     #[cfg(feature = "io-transport")]
     std::process::abort()
+}
+
+#[inline]
+unsafe fn cstr_prefix_len(mut p: *const u8, limit: usize) -> usize {
+    // Count up to first NUL or `limit` bytes (whichever comes first).
+    let mut i = 0usize;
+    while i < limit {
+        let b = *p;
+        if b == 0 {
+            break;
+        }
+        i += 1;
+        p = p.add(1);
+    }
+    i
+}
+
+/// int strncmp(const char *s1, const char *s2, size_t n)
+#[no_mangle]
+pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
+    if n == 0 {
+        return 0;
+    }
+    if s1.is_null() || s2.is_null() {
+        return 0;
+    } // benign stub behavior
+
+    // SAFETY: caller promises valid C strings; we only touch up to `n` bytes or NUL.
+    let a = s1 as *const u8;
+    let b = s2 as *const u8;
+    let len = unsafe {
+        let l1 = cstr_prefix_len(a, n);
+        let l2 = cstr_prefix_len(b, n);
+        core::cmp::min(core::cmp::min(l1, l2), n)
+    };
+
+    // Compare common prefix (unsigned char semantics)
+    for i in 0..len {
+        let av = unsafe { *a.add(i) } as u8;
+        let bv = unsafe { *b.add(i) } as u8;
+        if av != bv {
+            return (av as c_int) - (bv as c_int);
+        }
+    }
+
+    // If we stopped early (before n), one string may have ended (NUL) earlier.
+    if len < n {
+        let av = unsafe { *a.add(len) } as u8; // 0 if NUL, else next byte
+        let bv = unsafe { *b.add(len) } as u8;
+        return (av as c_int) - (bv as c_int);
+    }
+
+    0
+}
+
+// -------------------- clock --------------------
+// Minimal clock() that returns milliseconds (truncated to i32).
+// If you need POSIX ticks (CLOCKS_PER_SEC=1_000_000), scale here.
+
+#[no_mangle]
+pub extern "C" fn clock() -> c_int {
+    #[cfg(feature = "browser-transport")]
+    {
+        // js_sys::Date::now() -> f64 milliseconds since epoch
+
+        use web_sys::js_sys;
+        let ms = js_sys::Date::now() as u64;
+        return (ms & 0x7fff_ffff) as c_int;
+    }
+}
+
+#[inline]
+fn write_host(_s: &str, _stream: *mut c_void) {
+    // no-op
+}
+
+/// int fputc(int c, FILE *stream)
+#[no_mangle]
+pub extern "C" fn fputc(c: c_int, stream: *mut c_void) -> c_int {
+    let ch = (c as u8) as char;
+    let mut buf = [0u8; 4];
+    let s = ch.encode_utf8(&mut buf);
+    write_host(s, stream);
+    // C fputc returns the written character cast to unsigned char as int
+    (c as u8) as c_int
+}
+
+/// int fputs(const char *s, FILE *stream)
+#[no_mangle]
+pub extern "C" fn fputs(s: *const c_char, stream: *mut c_void) -> c_int {
+    if s.is_null() {
+        return -1;
+    }
+    // SAFETY: caller promises valid NUL-terminated string
+    let bytes = unsafe { CStr::from_ptr(s) }.to_bytes();
+    let text = core::str::from_utf8(bytes).unwrap_or("<invalid utf-8>");
+    write_host(text, stream);
+    // C fputs returns a nonnegative value on success (commonly a non-portable value, so we return len)
+    bytes.len() as c_int
 }
