@@ -1,33 +1,13 @@
-// index.js (ESM)
-// const worker = new Worker("./worker.js");
+// worker.js (ES module)
+import init, {
+  test,
+  wasm_start
+} from './pkg/db_backend.js';
 
-const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
 
-console.log("Initialized the worker");
+// Point init at the .wasm file so paths work from inside the worker
+const ready = init(new URL('./pkg/db_backend_bg.wasm', import.meta.url));
 
-let workerPromise =
-  new Promise((resolve, reject) => {
-    worker.onmessage = (e) => {
-      console.assert(e.data == "ready");
-      if (e.data == "ready") {
-        worker.onmessage = (e) => {
-          console.log("I JUST RECEIVED FROM THE WORKER");
-          console.log(e);
-        }
-        resolve();
-      } else {
-        reject();
-      };
-      console.log('FROM WORKER: ', e.data); // responses/events from the worker (Rust)
-    }
-  })
-
-worker.onerror = (event) => {
-  console.log("Something went wrong in the worker!");
-  console.log(event);
-};
-
-// Example: send an "initialize" request (DAP)
 const req = {
   seq: 1,
   type: 'request',
@@ -35,11 +15,10 @@ const req = {
   arguments: { clientName: 'WebClient', linesStartAt1: true },
 };
 
-
-let blq = () => {
-  console.log(":(((((");
-  console.log("Sending message", req);
-  worker.postMessage(req);
-}
-
-(async () => { await workerPromise; blq() })()
+(async () => {
+  await ready;   // ⬅️ crucial
+  // wasm_start() is already called inside init() via __wbindgen_start.
+  // Call your exports only after init completes:
+  test();
+  // window.postMessage(req);
+})();
