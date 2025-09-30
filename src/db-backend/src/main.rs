@@ -119,7 +119,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         Commands::DapServer { socket_path, stdio } => {
             if stdio {
                 // thread::spawn(move || {
-                let _ = db_backend::dap_server::run_stdio();
+                let res = db_backend::dap_server::run_stdio();
+                if let Err(e) = res {
+                    error!("dap server run error: {e:?}");
+                }
                 // })
             } else {
                 let socket_path = if let Some(p) = socket_path {
@@ -129,7 +132,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     db_backend::dap_server::socket_path_for(pid)
                 };
                 // thread::spawn(move || {
-                let _ = db_backend::dap_server::run(&socket_path);
+                let res = db_backend::dap_server::run(&socket_path);
+                if let Err(e) = res {
+                    error!("dap server run error: {e:?}");
+                }
                 // })
             };
         }
