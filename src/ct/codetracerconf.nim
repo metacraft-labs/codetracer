@@ -263,6 +263,12 @@ type
         desc: "Path to a stylus emv trace json file"
       .} : string
 
+      recordStylusSignatureMap* {.
+        name: "stylus-signature-map"
+        defaultValue: ""
+        desc: "Path to a stylus signature map json file"
+      .} : string
+
       recordAddress* {.
         name: "address"
         abbr: "a"

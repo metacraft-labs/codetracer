@@ -38,6 +38,7 @@ proc runWithRestart(
                              outputFolder="",
                              exportFile="",
                              stylusTrace="",
+                             stylusSignatureMap="",
                              address="",
                              socketPath="",
                              program=recordArgs[0],

@@ -1,4 +1,4 @@
-import std/[os, osproc, streams, strutils]
+import std/[json, os, osproc, re, streams, strutils, tables]
 import arb_node_utils
 
 # NOTE: remove CatchableError if using custom exception
@@ -91,18 +91,56 @@ proc doDebugBuild(): string {.raises: [OSError, IOError, CatchableError, Excepti
 
   return possibleFiles[0]
 
-proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string) {.raises: [OSError, IOError].} =
-  let currDir = CONTRACT_WASM_PATH / deploymentAddr
-  let currFile = currDir / "debug.wasm"
+# NOTE: remove CatchableError if using custom exception
+proc doSignatureMap(): Table[string, string] {.raises: [OSError, IOError, CatchableError, Exception].} =
+  let process = startProcess(
+    "cargo",
+    args=["expand", "--lib"],
+    options={poEchoCmd, poUsePath, poStdErrToStdOut}
+  )
+  defer: process.close()
 
-  createDir(currDir)
-  copyFile(wasmWithDebug, currFile)
+  let outStream = process.outputStream
 
-  echo "Debug executable for ", deploymentAddr, " saved at ", currFile
+  var output = ""
+
+  while process.running:
+    output.add(outStream.readAll())
+
+  output.add(outStream.readAll())
+
+  let exitCode = process.peekExitCode()
+
+  if exitCode != 0:
+    echo "Can't extract event signatures! cargo expand output:"
+    echo output
+    return
+
+  let signatureRegex = re"Event with signature `(.*)` and selector `(.*)`.\n```solidity\n(.*)\n```"
+  var matches = @["", "", ""]
+
+  for eventComment in output.findAll(signatureRegex):
+    discard eventComment.match(signatureRegex, matches)
+    result[matches[1]] = matches[2]
+
+proc saveContractDebugWasm(deploymentAddr: string, wasmWithDebug: string, signatureMapJson: string) {.raises: [OSError, IOError].} =
+  let debugDataDir = CONTRACT_DEBUG_DATA_PATH / deploymentAddr
+  let debugWasmFile = debugDataDir / "debug.wasm"
+  let signatureMapFile = debugDataDir / "signature_map.json"
+
+  createDir(debugDataDir)
+
+  copyFile(wasmWithDebug, debugWasmFile)
+  echo "Debug executable for ", deploymentAddr, " saved at ", debugWasmFile
+
+  writeFile(signatureMapFile, signatureMapJson)
+  echo "Signature map for ", deploymentAddr, " saved at ", signatureMapFile
+
 
 # NOTE: remove CatchableError if using custom exception
 proc deployStylus*() {.raises: [OSError, IOError, CatchableError, Exception].} =
   let wasmWithDebug = doDebugBuild()
+  let signatureMapJson = $(%doSignatureMap())
   let deploymentAddr = doDeploy()
 
-  saveContractDebugWasm(deploymentAddr, wasmWithDebug)
+  saveContractDebugWasm(deploymentAddr, wasmWithDebug, signatureMapJson)

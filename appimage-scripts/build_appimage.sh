@@ -137,6 +137,12 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.cargo-stylus"
 CARGO_STYLUS=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.cargo-stylus.out")
 cp -L "${CARGO_STYLUS}"/bin/cargo-stylus "${APP_DIR}"/bin
 
+# cargo-expand
+nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.cargo-expand"
+
+CARGO_EXPAND=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.cargo-expand.out")
+cp -L "${CARGO_EXPAND}"/bin/cargo-expand "${APP_DIR}"/bin
+
 # ctags
 cp -Lr "${ROOT_PATH}/src/links/ctags" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/ctags"
@@ -261,6 +267,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/curl
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-expand
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/node
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 

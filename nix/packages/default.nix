@@ -26,6 +26,8 @@
         cargo-stylus =
           inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus;
 
+        cargo-expand = pkgs.cargo-expand;
+
         # curl = pkgs.curl;
         inherit (pkgs) curl;
 
@@ -320,6 +322,7 @@
           name = "runtime-deps";
 
           paths = [
+            pkgs.cargo-expand
             cargo-stylus
             resources-derivation
             db-backend

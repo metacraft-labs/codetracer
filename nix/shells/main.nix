@@ -49,6 +49,7 @@ mkShell {
 
       # stylus
       ourPkgs.cargo-stylus
+      cargo-expand
 
       yarn
       yarn2nix

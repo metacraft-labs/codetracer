@@ -19,6 +19,8 @@ build-*/
 # Direnv or shell hook + Nix Flake generated files
 .direnv/
 result
+result-bin
+result-man
 
 docs/book/book
 src/index.js
