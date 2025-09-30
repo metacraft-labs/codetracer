@@ -2,7 +2,6 @@
 extern crate alloc;
 
 use alloc::alloc::{alloc as sys_alloc, dealloc as sys_dealloc, realloc as sys_realloc, Layout};
-use core::cmp::min;
 use core::ffi::{c_char, c_int, c_void};
 use core::mem::{align_of, size_of};
 use core::ptr::null_mut;
@@ -12,7 +11,6 @@ use std::ffi::CStr;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-// We store the requested payload size in a word just before the user pointer.
 // Layout: [ usize: size ][ payload... ]
 const HEADER_ALIGN: usize = align_of::<usize>();
 const HEADER_SIZE: usize = size_of::<usize>();
@@ -134,8 +132,6 @@ pub extern "C" fn calloc(nmemb: usize, size: usize) -> *mut c_void {
     }
 }
 
-// ------- Minimal I/O stubs (no real stdio on wasm32-unknown-unknown) -------
-
 #[no_mangle]
 pub extern "C" fn fprintf(_stream: *mut c_void, _fmt: *const c_char, _arg: *const c_void) -> c_int {
     // Pretend 0 chars written.
@@ -177,14 +173,11 @@ pub extern "C" fn vsnprintf(buf: *mut c_char, n: usize, _fmt: *const c_char, _ap
 pub extern "C" fn abort() -> ! {
     #[cfg(feature = "browser-transport")]
     wasm_bindgen::throw_str("abort");
-
-    #[cfg(feature = "io-transport")]
-    std::process::abort()
 }
 
 #[inline]
 unsafe fn cstr_prefix_len(mut p: *const u8, limit: usize) -> usize {
-    // Count up to first NUL or `limit` bytes (whichever comes first).
+    // Count up to first NUL or `limit` bytes.
     let mut i = 0usize;
     while i < limit {
         let b = *p;
@@ -197,7 +190,6 @@ unsafe fn cstr_prefix_len(mut p: *const u8, limit: usize) -> usize {
     i
 }
 
-/// int strncmp(const char *s1, const char *s2, size_t n)
 #[no_mangle]
 pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
     if n == 0 {
@@ -231,13 +223,8 @@ pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_i
         let bv = unsafe { *b.add(len) } as u8;
         return (av as c_int) - (bv as c_int);
     }
-
     0
 }
-
-// -------------------- clock --------------------
-// Minimal clock() that returns milliseconds (truncated to i32).
-// If you need POSIX ticks (CLOCKS_PER_SEC=1_000_000), scale here.
 
 #[no_mangle]
 pub extern "C" fn clock() -> c_int {
