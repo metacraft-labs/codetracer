@@ -14,6 +14,9 @@ use wasm_bindgen::JsValue;
 #[cfg(feature = "browser-transport")]
 use crate::dap::setup_onmessage_callback;
 
+#[cfg(feature = "browser-transport")]
+pub mod c_compat;
+
 pub mod calltrace;
 pub mod core;
 pub mod dap;
@@ -114,10 +117,24 @@ pub mod value;
 //
 //
 //
+//#[cfg(feature = "browser-transport")]
+#[wasm_bindgen(start)]
+pub fn _start() {
+    console_error_panic_hook::set_once();
+
+    wasm_logger::init(wasm_logger::Config::default());
+}
+
 #[cfg(feature = "browser-transport")]
 #[wasm_bindgen]
 pub fn test() -> Result<(), JsValue> {
+    use crate::dap::setup_onmessage_callback_test;
+
+    let _ = 2 + 2;
+
     web_sys::console::log_1(&"wasm worker started".into());
+
+    setup_onmessage_callback_test().map_err(|e| JsValue::from_str(&format!("{e}")))?;
 
     Ok(())
 }
