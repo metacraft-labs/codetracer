@@ -33,7 +33,7 @@
     };
 
     wazero = {
-      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=wasm-tracing";
+      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=feat-decode-events"; # TODO: restore to wasm-tracing
       inputs.nixpkgs.follows = "nixpkgs-unstable";
       flake = true;
     };

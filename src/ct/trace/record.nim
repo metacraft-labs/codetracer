@@ -33,6 +33,7 @@ proc record*(lang: string,
              outputFolder: string,
              exportFile: string,
              stylusTrace: string,
+             stylusSignatureMap: string,
              address: string,
              socketPath: string,
              program: string,
@@ -51,6 +52,9 @@ proc record*(lang: string,
   if stylusTrace != "":
     pargs.add("--stylus-trace")
     pargs.add(stylusTrace)
+  if stylusSignatureMap != "":
+    pargs.add("--stylus-signature-map")
+    pargs.add(stylusSignatureMap)
   if address != "":
     pargs.add("--address")
     pargs.add(address)

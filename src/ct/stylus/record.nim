@@ -41,14 +41,22 @@ proc getEvmTrace(hash: string): string {.raises: [OSError, IOError, CatchableErr
 proc getContractWasmPath(deploymentAddr: string): string {.raises: [].} =
   return CONTRACT_DEBUG_DATA_PATH / deploymentAddr / "debug.wasm"
 
+proc getContractSignatureMapPath(deploymentAddr: string): string {.raises: [].} =
+  return CONTRACT_DEBUG_DATA_PATH / deploymentAddr / "signature_map.json"
+
 # NOTE: remove CatchableError if using custom exception
 proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError, CatchableError, Exception].} =
-  let wasm = getContractWasmPath(getTransactionContractAddress(hash))
+  let contractAddress = getTransactionContractAddress(hash)
+  let wasm = getContractWasmPath(contractAddress)
+  let signatureMap = getContractSignatureMapPath(contractAddress)
   let evmTrace = getEvmTrace(hash)
+
+  if not fileExists(signatureMap):
+    raise newException(CatchableError, "Signature map not found at " & signatureMap)
 
   echo "WASM with debug info: ", wasm, " EVM trace: ", evmTrace
 
-  result = record("", ".", "", evmTrace, "", "", wasm, @[])
+  result = record("", ".", "", evmTrace, signatureMap, "", "", wasm, @[])
   updateField(result.id, "program", hash, false)
   result.program = hash
 
