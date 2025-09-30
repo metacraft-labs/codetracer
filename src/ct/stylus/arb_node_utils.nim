@@ -4,8 +4,8 @@ import ../../common/[types, paths]
 const DEFAULT_NODE_URL* = "http://localhost:8547"
 
 # TODO: get name from config? Maybe use SQLite?
-let 
-  CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
+let
+  CONTRACT_DEBUG_DATA_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-data"
   EVM_TRACE_DIR_PATH* = codetracerTmpPath
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode {.raises: [IOError, ValueError].} =
@@ -55,7 +55,7 @@ proc getPermittedToHashes(): HashSet[string] {.raises: [].} =
   init(toHashes)
 
   try:
-    for file in walkDir(CONTRACT_WASM_PATH):
+    for file in walkDir(CONTRACT_DEBUG_DATA_PATH):
       if file.kind == pcDir:
         let toAddr = splitPath(file.path)[1]
         toHashes.incl(toAddr)

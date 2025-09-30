@@ -39,7 +39,7 @@ proc getEvmTrace(hash: string): string {.raises: [OSError, IOError, CatchableErr
   return outputFile
 
 proc getContractWasmPath(deploymentAddr: string): string {.raises: [].} =
-  return CONTRACT_WASM_PATH / deploymentAddr / "debug.wasm"
+  return CONTRACT_DEBUG_DATA_PATH / deploymentAddr / "debug.wasm"
 
 # NOTE: remove CatchableError if using custom exception
 proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError, CatchableError, Exception].} =
@@ -58,4 +58,4 @@ proc replayStylus*(hash: string) {.raises: [IOError, ValueError, OSError, Catcha
   let recordedTrace = recordStylus(hash)
   # for now it prints `traceId:<traceId>` which is read by index(from ct arb explorer) which starts the replay in its instance
   #   for example
-  #   traceId:479  
+  #   traceId:479
