@@ -4,4 +4,5 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind")]
 pub enum CtRRQuery {
     RunToEntry,
+    LoadLocation,
 }
