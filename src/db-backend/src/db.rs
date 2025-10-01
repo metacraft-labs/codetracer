@@ -14,8 +14,8 @@ use runtime_tracing::{
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
-use crate::replay::Replay;
-use crate::task::{Call, CallArg, Location, RRTicks, NO_INDEX};
+use crate::replay::{Events, Replay};
+use crate::task::{Call, CallArg, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION};
 use crate::value::{Type, Value};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -789,6 +789,67 @@ impl DbReplay {
             self.step_id = step_id;
         }
     }
+
+    fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
+        let step_id_int = event_record.step_id.0;
+        let (path, line) = if step_id_int != NO_INDEX {
+            let step_record = &self.db.steps[event_record.step_id];
+            (
+                self.db
+                    .workdir
+                    .join(self.db.load_path_from_id(&step_record.path_id))
+                    .display()
+                    .to_string(),
+                step_record.line.0,
+            )
+        } else {
+            (NO_PATH.to_string(), NO_POSITION)
+        };
+
+        ProgramEvent {
+            kind: event_record.kind,
+            content: event_record.content.clone(),
+            bytes: event_record.content.len(),
+            rr_event_id: index,
+            direct_location_rr_ticks: step_id_int,
+            metadata: event_record.metadata.to_string(),
+            stdout: true,
+            event_index: index,
+            tracepoint_result_index: NO_INDEX,
+            high_level_path: path,
+            high_level_line: line,
+            base64_encoded: false,
+            max_rr_ticks: self
+                .db
+                .steps
+                .last()
+                .unwrap_or(&DbStep {
+                    step_id: StepId(0),
+                    path_id: PathId(0),
+                    line: Line(0),
+                    call_key: CallKey(0),
+                    global_call_key: CallKey(0),
+                })
+                .step_id
+                .0,
+        }
+    }
+
+    fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
+        // taking note of db.lines limits: returning a valid step id always
+        if forward {
+            if step_index < self.db.steps.len() - 1 {
+                step_index + 1
+            } else {
+                step_index
+            }
+        } else if step_index > 0 {
+            step_index - 1
+        } else {
+            // auto-returning the same 0 if stepping backwards from 0
+            step_index
+        }
+    }
 }
 
 impl Replay for DbReplay {
@@ -801,5 +862,36 @@ impl Replay for DbReplay {
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
         self.step_id_jump(StepId(0));
         Ok(())
+    }
+
+    fn load_events(&mut self) -> Result<Events, Box<dyn Error>> {
+        let mut events: Vec<ProgramEvent> = vec![];
+        let mut first_events: Vec<ProgramEvent> = vec![];
+        let mut contents: String = "".to_string();
+
+        for (i, event_record) in self.db.events.iter().enumerate() {
+            let mut event = self.to_program_event(event_record, i);
+            event.content = event_record.content.to_string();
+            events.push(event.clone());
+            if i < 20 {
+                first_events.push(event);
+                contents.push_str(&format!("{}\\n\n", event_record.content));
+            }
+        }
+
+        Ok(Events {
+            events,
+            first_events,
+            contents,
+        })
+    }
+
+    fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
+        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
+        Ok(())
+    }
+
+    fn current_step_id(&self) -> StepId {
+        self.step_id
     }
 }

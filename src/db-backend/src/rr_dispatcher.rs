@@ -7,12 +7,13 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use log::info;
+use log::{info, warn};
+use runtime_tracing::StepId;
 
 use crate::expr_loader::ExprLoader;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
-use crate::replay::Replay;
+use crate::replay::{Events, Replay};
 use crate::task::Location;
 
 #[derive(Debug)]
@@ -156,5 +157,25 @@ impl Replay for RRDispatcher {
         self.ensure_active_stable()?;
         let _ok = self.stable.run_query(CtRRQuery::RunToEntry)?;
         Ok(())
+    }
+
+    fn load_events(&mut self) -> Result<Events, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        warn!("TODO load_events rr");
+        Ok(Events {
+            events: vec![],
+            first_events: vec![],
+            contents: "".to_string(),
+        })
+    }
+
+    fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
+        todo!()
+    }
+
+    fn current_step_id(&self) -> StepId {
+        // cache location or step_id and return
+        // OR always load from worker
+        todo!()
     }
 }
