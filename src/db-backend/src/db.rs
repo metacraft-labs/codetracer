@@ -1,23 +1,26 @@
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::error::Error;
 use std::path::PathBuf;
 use std::vec::Vec;
 
-use crate::distinct_vec::DistinctVec;
-use crate::expr_loader::ExprLoader;
-use crate::lang::Lang;
-use crate::task::{Call, CallArg, Location, RRTicks};
-use crate::value::{Type, Value};
 use log::{error, info, warn};
 use runtime_tracing::{
     CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, Place, StepId, TypeId, TypeKind,
     TypeRecord, TypeSpecificInfo, ValueRecord, VariableId, NO_KEY,
 };
 
+use crate::distinct_vec::DistinctVec;
+use crate::expr_loader::ExprLoader;
+use crate::lang::Lang;
+use crate::replay::Replay;
+use crate::task::{Call, CallArg, Location, RRTicks, NO_INDEX};
+use crate::value::{Type, Value};
+
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Db {
     pub workdir: PathBuf,
     pub functions: DistinctVec<FunctionId, FunctionRecord>,
@@ -769,3 +772,34 @@ pub enum EndOfProgram {
 //     pub step_id: StepId,
 //     pub place: Place,
 // }
+
+#[derive(Debug)]
+pub struct DbReplay {
+    pub db: Box<Db>,
+    pub step_id: StepId,
+}
+
+impl DbReplay {
+    pub fn new(db: Box<Db>) -> DbReplay {
+        DbReplay { db, step_id: StepId(0) }
+    }
+
+    pub fn step_id_jump(&mut self, step_id: StepId) {
+        if step_id.0 != NO_INDEX {
+            self.step_id = step_id;
+        }
+    }
+}
+
+impl Replay for DbReplay {
+    fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
+        info!("load_location: db replay");
+        let call_key = self.db.call_key_for_step(self.step_id);
+        Ok(self.db.load_location(self.step_id, call_key, expr_loader))
+    }
+
+    fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
+        self.step_id_jump(StepId(0));
+        Ok(())
+    }
+}
