@@ -39,6 +39,7 @@ mod lang;
 mod paths;
 mod program_search_tool;
 mod query;
+mod replay;
 mod rr_dispatcher;
 mod step_lines_loader;
 mod task;

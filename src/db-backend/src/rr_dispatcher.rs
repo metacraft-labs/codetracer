@@ -9,8 +9,11 @@ use std::time::Duration;
 
 use log::info;
 
+use crate::expr_loader::ExprLoader;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
+use crate::replay::Replay;
+use crate::task::Location;
 
 #[derive(Debug)]
 pub struct RRDispatcher {
@@ -90,8 +93,8 @@ impl CtRRWorker {
         Ok(())
     }
 
-    // for now: don't return a typed value here, only ok or an error
-    pub fn run_query(&mut self, query: CtRRQuery) -> Result<(), Box<dyn Error>> {
+    // for now: don't return a typed value here, only Ok(raw value) or an error
+    pub fn run_query(&mut self, query: CtRRQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
         info!("send to worker {raw_json}\n");
@@ -110,8 +113,8 @@ impl CtRRWorker {
 
         info!("res {res}");
 
-        if res == "ok" {
-            Ok(())
+        if !res.starts_with("error:") {
+            Ok(res)
         } else {
             Err(format!("run_query ct rr worker error: {}", res).into())
         }
@@ -127,11 +130,6 @@ impl RRDispatcher {
         }
     }
 
-    pub fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
-        self.ensure_active_stable()?;
-        self.stable.run_query(CtRRQuery::RunToEntry)
-    }
-
     pub fn ensure_active_stable(&mut self) -> Result<(), Box<dyn Error>> {
         // start stable process if not active, store fields, setup ipc? store in stable
         if !self.stable.active {
@@ -142,6 +140,21 @@ impl RRDispatcher {
             return Err("stable started, but still not active without an obvious error".into());
         }
 
+        Ok(())
+    }
+}
+
+impl Replay for RRDispatcher {
+    fn load_location(&mut self, _expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<Location>(
+            &self.stable.run_query(CtRRQuery::LoadLocation)?,
+        )?)
+    }
+
+    fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let _ok = self.stable.run_query(CtRRQuery::RunToEntry)?;
         Ok(())
     }
 }
