@@ -10,11 +10,12 @@ use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, N
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
+use crate::db::{Db, DbCall, DbRecordEvent, DbReplay, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::program_search_tool::ProgramSearchTool;
+use crate::replay::Replay;
 use crate::rr_dispatcher::{CtRRArgs, RRDispatcher};
 // use crate::response::{};
 use crate::dap_types;
@@ -53,11 +54,13 @@ pub struct Handler {
     pub previous_step_id: StepId,
 
     pub trace_kind: TraceKind,
-    pub rr: RRDispatcher,
+    // pub rr: RRDispatcher,
+    pub replay: Box<dyn Replay>,
+
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TraceKind {
     DB,
     RR,
@@ -100,10 +103,15 @@ impl Handler {
         let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
         let step_lines_loader = StepLinesLoader::new(&db, &mut expr_loader);
+        let replay: Box<dyn Replay> = if trace_kind == TraceKind::DB {
+            Box::new(DbReplay::new(db.clone()))
+        } else {
+            Box::new(RRDispatcher::new(ct_rr_args))
+        };
         // let sender = sender::Sender::new();
         Handler {
             trace_kind,
-            db,
+            db: db.clone(),
             step_id: StepId(0),
             last_call_key: CallKey(0),
             indirect_send,
@@ -117,7 +125,8 @@ impl Handler {
             step_lines_loader,
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
-            rr: RRDispatcher::new(ct_rr_args),
+            // rr: RRDispatcher::new(ct_rr_args),
+            replay,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
         }
@@ -215,29 +224,28 @@ impl Handler {
         self.send_dap(&response)
     }
 
-    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
-        let call_key = self.db.call_key_for_step(self.step_id);
-        let reset_flow = is_main || call_key != self.last_call_key;
-        self.last_call_key = call_key;
-        info!("complete move: step_id: {:?}", self.step_id);
-        let move_state = MoveState {
-            status: "".to_string(),
-            location: self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
-            c_location: Location::default(),
-            main: is_main,
-            reset_flow,
-            stop_signal: RRGDBStopSignal::OtherStopSignal,
-            frame_info: FrameInfo::default(),
-        };
-
-        // info!("move_state {:?}", move_state);
+    // will be sent after completion of query
+    fn prepare_stopped_event(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         let reason = if is_main { "entry" } else { "step" };
         info!("generate stopped event");
         let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
         self.send_dap(&raw_event)?;
-        let raw_complete_move_event = self.dap_client.complete_move_event(&move_state)?;
+        Ok(())
+    }
+
+    fn prepare_complete_move_event(&mut self, move_state: &MoveState) -> Result<(), Box<dyn Error>> {
+        let raw_complete_move_event = self.dap_client.complete_move_event(move_state)?;
         self.send_dap(&raw_complete_move_event)?;
+        Ok(())
+    }
+
+    fn prepare_output_events(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("prepare_output_events not implemented for rr");
+            return Ok(()); // TODO
+        }
+
         if self.step_id.0 > self.previous_step_id.0 {
             let mut raw_output_events: Vec<dap::DapMessage> = vec![];
             for event in self.db.events.iter() {
@@ -264,9 +272,14 @@ impl Handler {
                 self.send_dap(raw_output_event)?;
             }
         }
-        self.previous_step_id = self.step_id;
+        Ok(())
+    }
 
-        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+    fn prepare_eventual_error_event(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("prepare_eventual_error_event not implemented for rr");
+            return Ok(()); // TODO
+        }
 
         let exact = false; // or for now try as flow // true just for this exact step
         let step_events = self.db.load_step_events(self.step_id, exact);
@@ -283,15 +296,44 @@ impl Handler {
         Ok(())
     }
 
+    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
+        info!("complete_move");
+
+        // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        // let call_key = location.call_key; // self.db.call_key_for_step(self.step_id);
+        // TODO: change if we need to support non-int keys
+        let call_key = CallKey(location.key.parse::<i64>()?);
+        let reset_flow = is_main || call_key != self.last_call_key;
+        self.last_call_key = call_key;
+        info!("  location: {location:?}");
+
+        let move_state = MoveState {
+            status: "".to_string(),
+            location,
+            c_location: Location::default(),
+            main: is_main,
+            reset_flow,
+            stop_signal: RRGDBStopSignal::OtherStopSignal,
+            frame_info: FrameInfo::default(),
+        };
+
+        self.prepare_stopped_event(is_main)?;
+        self.prepare_complete_move_event(&move_state)?;
+        self.prepare_output_events()?;
+
+        self.previous_step_id = self.step_id;
+
+        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+
+        self.prepare_eventual_error_event()?;
+
+        Ok(())
+    }
+
     pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        match self.trace_kind {
-            TraceKind::DB => {
-                self.step_id_jump(StepId(0));
-            }
-            TraceKind::RR => {
-                self.rr.run_to_entry()?;
-            }
-        }
+        self.replay.run_to_entry()?;
+        self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
         self.complete_move(true)?;
         Ok(())
     }

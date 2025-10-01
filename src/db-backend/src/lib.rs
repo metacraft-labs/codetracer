@@ -40,6 +40,7 @@ pub mod lang;
 pub mod paths;
 pub mod program_search_tool;
 pub mod query;
+pub mod replay;
 pub mod rr_dispatcher;
 pub mod step_lines_loader;
 pub mod task;
