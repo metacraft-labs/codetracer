@@ -339,6 +339,13 @@ impl Handler {
     }
 
     pub fn load_locals(&mut self, req: dap::Request, _args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            let locals: Vec<Variable> = vec![];
+            warn!("load_locals not implemented for rr yet");
+            self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+            return Ok(());
+        }
+
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
             .map(|v| Variable {
@@ -448,6 +455,11 @@ impl Handler {
         _req: dap::Request,
         args: CalltraceLoadArgs,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("load_calltrace_section not implemented for rr");
+            return Ok(());
+        }
+
         let start_call_line_index = args.start_call_line_index;
         let call_lines = self.load_local_calltrace(args)?;
         let total_count = self.calc_total_calls();
@@ -466,6 +478,19 @@ impl Handler {
     }
 
     pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("flow not implemented for rr");
+            return Ok(());
+        }
+        // TODO: something like this for db/rr:
+        // {
+        // // TODO: pass step_id to load_location and let it jump for RR if needed?
+        // // or have a separate jump_to when it's not self.step_id?
+        // self.replay.jump_to(step_id)?;
+        // let location = self.replay.load_location(&mut self.expr_loader)?;
+        // let flow_update = self.flow_preloader.load(location, FlowMode::Call, &self.replay);
+        // }
+
         let flow_update = if arg.flow_mode == FlowMode::Call {
             let step_id = StepId(arg.location.rr_ticks.0);
             let call_key = self.db.steps[step_id].call_key;
@@ -538,7 +563,9 @@ impl Handler {
     }
 
     pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
+        self.replay.step_in(forward)?;
+        self.step_id = self.replay.current_step_id();
+
         Ok(())
     }
 
@@ -670,19 +697,11 @@ impl Handler {
     }
 
     pub fn event_load(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        let mut events: Vec<ProgramEvent> = vec![];
-        let mut first_events: Vec<ProgramEvent> = vec![];
-        let mut contents: String = "".to_string();
+        let events_data = self.replay.load_events()?;
 
-        for (i, event_record) in self.db.events.iter().enumerate() {
-            let mut event = self.to_program_event(event_record, i);
-            event.content = event_record.content.to_string();
-            events.push(event.clone());
-            if i < 20 {
-                first_events.push(event);
-                contents.push_str(&format!("{}\\n\n", event_record.content));
-            }
-        }
+        let events = events_data.events;
+        let first_events = events_data.first_events;
+        let contents = events_data.contents;
 
         self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
         self.event_db.refresh_global();
