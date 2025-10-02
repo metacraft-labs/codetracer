@@ -14,7 +14,7 @@ use crate::expr_loader::ExprLoader;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::{Events, Replay};
-use crate::task::Location;
+use crate::task::{Action, Location, CtLoadLocalsArguments, Variable};
 
 #[derive(Debug)]
 pub struct RRDispatcher {
@@ -143,14 +143,18 @@ impl RRDispatcher {
 
         Ok(())
     }
+
+    fn load_location_directly(&mut self) -> Result<Location, Box<dyn Error>> {
+        Ok(serde_json::from_str::<Location>(
+            &self.stable.run_query(CtRRQuery::LoadLocation)?,
+        )?)
+    }
 }
 
 impl Replay for RRDispatcher {
     fn load_location(&mut self, _expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        Ok(serde_json::from_str::<Location>(
-            &self.stable.run_query(CtRRQuery::LoadLocation)?,
-        )?)
+        self.load_location_directly()
     }
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
@@ -169,13 +173,23 @@ impl Replay for RRDispatcher {
         })
     }
 
-    fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        todo!()
+    fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let res = serde_json::from_str::<bool>(&self.stable.run_query(CtRRQuery::Step { action, forward })?)?;
+        Ok(res)
     }
 
-    fn current_step_id(&self) -> StepId {
+    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let res = serde_json::from_str::<Vec<Variable>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
+        Ok(res)
+    }
+
+    fn current_step_id(&mut self) -> StepId {
         // cache location or step_id and return
         // OR always load from worker
-        todo!()
+        // TODO: return result or do something else or cache ?
+        let location = self.load_location_directly().expect("access to step_id");
+        StepId(location.rr_ticks.0)
     }
 }
