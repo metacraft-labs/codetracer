@@ -2,7 +2,7 @@ use runtime_tracing::StepId;
 use std::error::Error;
 
 use crate::expr_loader::ExprLoader;
-use crate::task::{Location, ProgramEvent};
+use crate::task::{Action, Location, ProgramEvent, CtLoadLocalsArguments, Variable};
 
 #[derive(Debug, Clone)]
 pub struct Events {
@@ -15,6 +15,7 @@ pub trait Replay: std::fmt::Debug {
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>>;
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>>;
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
-    fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>>;
-    fn current_step_id(&self) -> StepId;
+    fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
+    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>>;
+    fn current_step_id(&mut self) -> StepId;
 }
