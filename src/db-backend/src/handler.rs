@@ -10,7 +10,7 @@ use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, N
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{Db, DbCall, DbRecordEvent, DbReplay, DbStep};
+use crate::db::{BreakpointRecord, Db, DbCall, DbRecordEvent, DbReplay, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
@@ -65,13 +65,6 @@ pub enum TraceKind {
     DB,
     RR,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BreakpointRecord {
-    pub is_active: bool,
-}
-
-type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 
 // two choices:
 //   return results and potentially
@@ -338,44 +331,17 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_locals(&mut self, req: dap::Request, _args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
-        if self.trace_kind == TraceKind::RR {
-            let locals: Vec<Variable> = vec![];
-            warn!("load_locals not implemented for rr yet");
+    pub fn load_locals(&mut self, req: dap::Request, args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
+        // if self.trace_kind == TraceKind::RR {
+            // let locals: Vec<Variable> = vec![];
+            // warn!("load_locals not implemented for rr yet");
+            let locals = self.replay.load_locals(args)?;
             self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
-            return Ok(());
-        }
+            Ok(())
+        // }
 
-        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
-            .iter()
-            .map(|v| Variable {
-                expression: self.db.variable_name(v.variable_id).to_string(),
-                value: self.db.to_ct_value(&v.value),
-            })
-            .collect();
-
-        // TODO: fix random order here as well: ensure order(or in final locals?)
-        let value_tracking_locals: Vec<Variable> = self.db.variable_cells[self.step_id]
-            .iter()
-            .map(|(variable_id, place)| {
-                let name = self.db.variable_name(*variable_id);
-                info!("log local {variable_id:?} {name} place: {place:?}");
-                let value = self.db.load_value_for_place(*place, self.step_id);
-                Variable {
-                    expression: self.db.variable_name(*variable_id).to_string(),
-                    value: self.db.to_ct_value(&value),
-                }
-            })
-            .collect();
-        // based on https://stackoverflow.com/a/56490417/438099
-        let mut locals: Vec<Variable> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
-
-        locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
-        // for now just removing duplicated variables/expressions: even if storing different values
-        locals.dedup_by(|a, b| a.expression == b.expression);
-
-        self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
-        Ok(())
+        // self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+        // Ok(())
     }
 
     // pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
@@ -563,7 +529,7 @@ impl Handler {
     }
 
     pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        self.replay.step_in(forward)?;
+        self.replay.step(Action::StepIn, forward)?;
         self.step_id = self.replay.current_step_id();
 
         Ok(())
@@ -596,57 +562,23 @@ impl Handler {
     }
 
     pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        let step_to_different_line = true; // which is better/should be let the user configure it?
-        (self.step_id, _) = self
-            .db
-            .next_step_id_relative_to(self.step_id, forward, step_to_different_line);
+        self.replay.step(Action::Next, forward)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
     pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        (self.step_id, _) = self.db.step_out_step_id_relative_to(self.step_id, forward);
+        self.replay.step(Action::StepOut, forward)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
     #[allow(clippy::expect_used)]
     pub fn step_continue(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        for step in self.db.step_from(self.step_id, forward) {
-            if !self.breakpoint_list.is_empty() {
-                if let Some(is_active) = self.breakpoint_list[step.path_id.0]
-                    .get(&step.line.into())
-                    .map(|bp| bp.is_active)
-                {
-                    if is_active {
-                        self.step_id_jump(step.step_id);
-                        self.complete_move(false)?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                break;
-            }
+        if !self.replay.step(Action::Continue, forward)? {
+            self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
         }
-
-        // If the continue step doesn't find a valid breakpoint.
-        if forward {
-            self.step_id_jump(
-                self.db
-                    .steps
-                    .last()
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            );
-        } else {
-            self.step_id_jump(
-                self.db
-                    .steps
-                    .first()
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            )
-        }
-        self.complete_move(false)?;
-        self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
@@ -663,21 +595,23 @@ impl Handler {
             Action::Continue => self.step_continue(!arg.reverse)?,
             _ => error!("action {:?} not implemented", arg.action),
         }
-        if arg.complete && arg.action != Action::Continue {
+        if arg.complete { // && arg.action != Action::Continue {
             self.complete_move(false)?;
         }
 
-        if original_step_id == self.step_id {
-            let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
-            self.send_notification(
-                NotificationKind::Warning,
-                &format!("Limit of record at the {location} already reached!"),
-                false,
-            )?;
-        } else if self.step_id == StepId(0) {
-            self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
-        } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
-            self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+        if self.trace_kind == TraceKind::DB {
+            if original_step_id == self.step_id {
+                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                )?;
+            } else if self.step_id == StepId(0) {
+                self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
+            } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
+                self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+            }
         }
         // } else if arg.action == Action::Next {
         //     let new_step = self.db.steps[self.step_id];
