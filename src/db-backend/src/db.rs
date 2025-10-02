@@ -15,7 +15,7 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::{Events, Replay};
-use crate::task::{Call, CallArg, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION};
+use crate::task::{Action, Call, CallArg, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, Variable};
 use crate::value::{Type, Value};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -773,15 +773,25 @@ pub enum EndOfProgram {
 //     pub place: Place,
 // }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BreakpointRecord {
+    pub is_active: bool,
+}
+
+// type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
+
 #[derive(Debug)]
 pub struct DbReplay {
     pub db: Box<Db>,
     pub step_id: StepId,
+    pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
 
 impl DbReplay {
     pub fn new(db: Box<Db>) -> DbReplay {
-        DbReplay { db, step_id: StepId(0) }
+        let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
+        breakpoint_list.resize_with(db.paths.len(), HashMap::new);
+        DbReplay { db, step_id: StepId(0), breakpoint_list }
     }
 
     pub fn step_id_jump(&mut self, step_id: StepId) {
@@ -850,6 +860,65 @@ impl DbReplay {
             step_index
         }
     }
+
+    fn step_in(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
+        Ok(true)
+    }
+
+    fn step_out(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        (self.step_id, _) = self.db.step_out_step_id_relative_to(self.step_id, forward);
+        Ok(true)
+    }
+
+    fn next(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        let step_to_different_line = true; // which is better/should be let the user configure it?
+        (self.step_id, _) = self
+            .db
+            .next_step_id_relative_to(self.step_id, forward, step_to_different_line);
+        Ok(true)
+    }
+
+    // returns if it has hit any breakpoints
+    fn step_continue(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        for step in self.db.step_from(self.step_id, forward) {
+            if !self.breakpoint_list.is_empty() {
+                if let Some(is_active) = self.breakpoint_list[step.path_id.0]
+                    .get(&step.line.into())
+                    .map(|bp| bp.is_active)
+                {
+                    if is_active {
+                        self.step_id_jump(step.step_id);
+                        // true: has hit a breakpoint
+                        return Ok(true);
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        // If the continue step doesn't find a valid breakpoint.
+        if forward {
+            self.step_id_jump(
+                self.db
+                    .steps
+                    .last()
+                    .expect("unexpected 0 steps in trace for step_continue")
+                    .step_id,
+            );
+        } else {
+            self.step_id_jump(
+                self.db
+                    .steps
+                    .first()
+                    .expect("unexpected 0 steps in trace for step_continue")
+                    .step_id,
+            )
+        }
+        // false: hasn't hit a breakpoint
+        Ok(false)
+    }
 }
 
 impl Replay for DbReplay {
@@ -886,12 +955,50 @@ impl Replay for DbReplay {
         })
     }
 
-    fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
-        Ok(())
+    // for Ok cases:
+    //   continue returns if it has hit any breakpoints, others return always true
+    fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>> {
+        match action {
+            Action::StepIn => self.step_in(forward),
+            Action::StepOut => self.step_out(forward),
+            Action::Next => self.next(forward),
+            Action::Continue => self.step_continue(forward),
+            _ => todo!(),
+        }
     }
 
-    fn current_step_id(&self) -> StepId {
+    fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>> {
+        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
+            .iter()
+            .map(|v| Variable {
+                expression: self.db.variable_name(v.variable_id).to_string(),
+                value: self.db.to_ct_value(&v.value),
+            })
+            .collect();
+
+        // TODO: fix random order here as well: ensure order(or in final locals?)
+        let value_tracking_locals: Vec<Variable> = self.db.variable_cells[self.step_id]
+            .iter()
+            .map(|(variable_id, place)| {
+                let name = self.db.variable_name(*variable_id);
+                info!("log local {variable_id:?} {name} place: {place:?}");
+                let value = self.db.load_value_for_place(*place, self.step_id);
+                Variable {
+                    expression: self.db.variable_name(*variable_id).to_string(),
+                    value: self.db.to_ct_value(&value),
+                }
+            })
+            .collect();
+        // based on https://stackoverflow.com/a/56490417/438099
+        let mut locals: Vec<Variable> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
+
+        locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
+        // for now just removing duplicated variables/expressions: even if storing different values
+        locals.dedup_by(|a, b| a.expression == b.expression);
+
+        Ok(locals)
+    }
+    fn current_step_id(&mut self) -> StepId {
         self.step_id
     }
 }
