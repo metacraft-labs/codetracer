@@ -10,6 +10,7 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
+use crate::paths::CODETRACER_PATHS;
 use chrono::Local;
 use clap::Parser;
 use log::LevelFilter;
@@ -17,9 +18,8 @@ use log::{error, info};
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
-use std::{error::Error, panic};
 use std::path::PathBuf;
-use crate::paths::CODETRACER_PATHS;
+use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
@@ -81,9 +81,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
     // eprintln!("{}", log_path.display());
 
-    let tmp_path: PathBuf = {
-        CODETRACER_PATHS.lock()?.tmp_path.clone()
-    };
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
 
     let target = Box::new(File::create(tmp_path.join("db-backend.log"))?);
 
@@ -108,13 +106,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("pid {:?}", std::process::id());
     if cli.stdio {
-        use std::io::BufReader;
-
-        let stdin = std::io::stdin();
-        let stdout = std::io::stdout();
-        let mut reader = BufReader::new(stdin.lock());
-
-        let _ = db_backend::dap_server::run(&mut reader);
+        // use std::io::BufReader;
+        //
+        // let stdin = std::io::stdin();
+        // let stdout = std::io::stdout();
+        // let mut reader = BufReader::new(stdin.lock());
+        //
+        // let _ = db_backend::dap_server::run(&mut reader);
     } else {
         use std::os::unix::net::UnixListener;
 
@@ -128,12 +126,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         info!("dap_server::run {:?}", socket_path);
-        let _ = std::fs::remove_file(&socket_path);
-        let listener = UnixListener::bind(socket_path)?;
 
-        let (stream, _) = listener.accept()?;
-        let mut reader = BufReader::new(stream.try_clone()?);
-        let _ = db_backend::dap_server::run(&mut reader);
+        let _ = db_backend::dap_server::run(&socket_path);
     };
 
     Ok(())

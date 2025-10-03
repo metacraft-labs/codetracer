@@ -25,9 +25,6 @@ log = "0.4.21"
 env_logger = "0.11.3"
 # log2 = "0.1.11"
 regex = "1"
-# tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter", rev = "24c8feba3ea2e0e054de3f64333e554ca9353e38" }
-# tree-sitter-rust = { git = "https://github.com/tree-sitter/tree-sitter-rust", rev = "00d7cbc95f0b8ea2703129550fbd1853a13e0e29" }
-# tree-sitter-ruby = { git = "https://github.com/tree-sitter/tree-sitter-ruby", rev = "89bd7a8e5450cb6a942418a619d30469f259e5d6" }
 tree-sitter = "*"
 tree-sitter-rust = "0.24"
 tree-sitter-ruby = "0.23.1"
@@ -41,16 +38,20 @@ wee_alloc = "0.4"
 console_error_panic_hook = { version = "0.1", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 
+schemars = "0.8.2"
+schemars-zod = "0.1.5"
+
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
 # runtime_tracing = "0.14.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-add-evm-event" }
-runtime_tracing = { path = "/home/pesho/code/runtime_tracing/runtime_tracing/"}
+
+# runtime_tracing = { path = "/home/pesho/code/runtime_tracing/runtime_tracing/"}
+runtime_tracing = "0.14.1"
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
 
-# [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde-wasm-bindgen = { version = "0.6.5", optional = true}
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2.100", optional = true}
@@ -81,7 +82,7 @@ path = "src/bin/schema_generator.rs"
 [features]
 debugging = []
 
-default = ["browser-transport"]
+default = ["io-transport"]
 
 io-transport = []
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",

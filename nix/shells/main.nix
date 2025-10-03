@@ -30,6 +30,8 @@ mkShell {
       git
 
       rustup
+      binaryen
+      wasm-pack
 
       gcc
       binutils
@@ -171,112 +173,108 @@ mkShell {
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
   shellHook = ''
-    <<<<<<< HEAD
-        rustup override set 1.88
-    =======
-        rustup override set 1.89
-    >>>>>>> ae88d3f (WIP)
-        rustup target add wasm32-unknown-unknown
-        rustup target add wasm32-unknown-emscripten
+    rustup override set 1.89
+    rustup target add wasm32-unknown-unknown
+    rustup target add wasm32-unknown-emscripten
 
-        # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
-        ROOT_PATH=$(git rev-parse --show-toplevel)
+    # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
+    ROOT_PATH=$(git rev-parse --show-toplevel)
 
-        # copied case for libstdc++.so (needed by better-sqlite3) from
-        # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
-        # gcc.cc.lib ..
-        export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
+    # copied case for libstdc++.so (needed by better-sqlite3) from
+    # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
+    # gcc.cc.lib ..
+    export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
 
-        export RUST_LOG=info
+    export RUST_LOG=info
 
-        # NODE MODULES
-        export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"
-        export NODE_PATH="$NODE_PATH:$NIX_NODE_PATH"
+    # NODE MODULES
+    export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"
+    export NODE_PATH="$NODE_PATH:$NIX_NODE_PATH"
 
-        # =========
-        # (copied from original commit that comments it out):
-        #
-        # fix: don't set LD_LIBRARY_PATH in shell, but only for needed ops
-        #
-        # in https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/5
-        # and from our xp this seems true even if i didn't think
-        # it's important: setting things like this can break other software
-        # e.g. nix wasn't working because of clash between itc GLIBC version
-        # and some from those LD_LIBRARY_PATH
-        #
-        # so we pass it in tester explicitly where needed
-        # and this already happens in `ct`: however this breaks for now
-        # `codetracer`, but not sure what to do there: maybe pass it as well?
-        # (however it itself needs the sqlite path)
+    # =========
+    # (copied from original commit that comments it out):
+    #
+    # fix: don't set LD_LIBRARY_PATH in shell, but only for needed ops
+    #
+    # in https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/5
+    # and from our xp this seems true even if i didn't think
+    # it's important: setting things like this can break other software
+    # e.g. nix wasn't working because of clash between itc GLIBC version
+    # and some from those LD_LIBRARY_PATH
+    #
+    # so we pass it in tester explicitly where needed
+    # and this already happens in `ct`: however this breaks for now
+    # `codetracer`, but not sure what to do there: maybe pass it as well?
+    # (however it itself needs the sqlite path)
 
-        # export LD_LIBRARY_PATH = $CT_LD_LIBRARY_PATH
+    # export LD_LIBRARY_PATH = $CT_LD_LIBRARY_PATH
 
-        # ====
+    # ====
 
-        export CODETRACER_LINKS_PATH=$PWD/src/build-debug/
+    export CODETRACER_LINKS_PATH=$PWD/src/build-debug/
 
-        echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
+    echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
 
-        # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
+    # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
 
-        # ==== src/links for tup
+    # ==== src/links for tup
 
-        # make sure we have the correct up to date links
-        # each time for now
-        rm -rf src/links;
-        # TODO
-        # ln -s "$ {ourPkgs TODO .shellLinksDeps.outPath}" src/links;
+    # make sure we have the correct up to date links
+    # each time for now
+    rm -rf src/links;
+    # TODO
+    # ln -s "$ {ourPkgs TODO .shellLinksDeps.outPath}" src/links;
 
-        mkdir -p src/links
+    mkdir -p src/links
 
-        cd src;
+    cd src;
 
-        [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
-        [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
-        [ ! -f links/node ] && ln -s ${nodejs_22.outPath}/bin/node links/node
-        [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
-        [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
-        [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
-        [ ! -f links/wazero ] && ln -s ${ourPkgs.wazero.outPath}/bin/wazero links/wazero
-        [ ! -f links/electron ] && ln -s ${electron.outPath}/bin/electron links/electron
-        [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
-        [ ! -f links/curl ] && ln -s ${curl.outPath}/bin/curl links/curl
+    [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
+    [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
+    [ ! -f links/node ] && ln -s ${nodejs_22.outPath}/bin/node links/node
+    [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
+    [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
+    [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
+    [ ! -f links/wazero ] && ln -s ${ourPkgs.wazero.outPath}/bin/wazero links/wazero
+    [ ! -f links/electron ] && ln -s ${electron.outPath}/bin/electron links/electron
+    [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
+    [ ! -f links/curl ] && ln -s ${curl.outPath}/bin/curl links/curl
 
-        # TODO: try to add an option to link to libs/upstream-nim, libs/rr
-        #   for faster iteration when patching them as Zahary suggested?
-        [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
-        # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
+    # TODO: try to add an option to link to libs/upstream-nim, libs/rr
+    #   for faster iteration when patching them as Zahary suggested?
+    [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
+    # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
-        [ ! -f links/codetracer-pure-ruby-recorder ] && ln -s \
-        $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
-        links/codetracer-pure-ruby-recorder
+    [ ! -f links/codetracer-pure-ruby-recorder ] && ln -s \
+    $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
+    links/codetracer-pure-ruby-recorder
 
-        # [ ! -f links/ ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
+    # [ ! -f links/ ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
-        [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
-        [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py
+    [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
+    [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py
 
-        cd ..;
+    cd ..;
 
-        # ==== END of src/links for tup
+    # ==== END of src/links for tup
 
-        # ui-test shell hooks
-        export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
-        export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+    # ui-test shell hooks
+    export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
+    export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 
-        # workaround to reuse devshell node_modules for tup build
-        # make sure it's always updated
-        rm -rf $ROOT_PATH/node_modules
-        ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
+    # workaround to reuse devshell node_modules for tup build
+    # make sure it's always updated
+    rm -rf $ROOT_PATH/node_modules
+    ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
 
-        export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
-        export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
-        export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-        export PATH=$PWD/src/build-debug/bin:$PATH
-        export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
-        export CODETRACER_DEV_TOOLS=0
-        export CODETRACER_LOG_LEVEL=INFO
+    export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
+    export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
+    export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+    export PATH=$PWD/src/build-debug/bin:$PATH
+    export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
+    export CODETRACER_DEV_TOOLS=0
+    export CODETRACER_LOG_LEVEL=INFO
 
-        figlet "Welcome to CodeTracer"
+    figlet "Welcome to CodeTracer"
   '';
 }

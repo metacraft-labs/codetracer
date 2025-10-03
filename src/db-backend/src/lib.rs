@@ -115,7 +115,7 @@ pub mod value;
 //
 //
 //
-//#[cfg(feature = "browser-transport")]
+#[cfg(feature = "browser-transport")]
 #[wasm_bindgen(start)]
 pub fn _start() {
     console_error_panic_hook::set_once();
