@@ -28,6 +28,8 @@ use std::fmt;
 use std::io::BufRead;
 
 #[cfg(feature = "io-transport")]
+use std::io::BufReader;
+#[cfg(feature = "io-transport")]
 use std::os::unix::net::UnixStream;
 
 use std::path::{Path, PathBuf};
@@ -53,8 +55,13 @@ use std::time::Instant;
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
 #[cfg(feature = "io-transport")]
-pub fn make_io_transport() -> Result<std::io::Stdout, Box<dyn Error>> {
-    Ok(std::io::stdout())
+pub fn make_io_transport() -> Result<(BufReader<std::io::StdinLock<'static>>, std::io::Stdout), Box<dyn Error>> {
+    use std::io::BufReader;
+
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut reader = BufReader::new(stdin.lock());
+    Ok((reader, stdout))
 }
 
 #[cfg(feature = "io-transport")]
@@ -81,6 +88,17 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
         .unwrap()
         .tmp_path
         .join(format!("{DAP_SOCKET_NAME}_{}", pid))
+}
+
+#[cfg(feature = "io-transport")]
+pub fn run_stdio() -> Result<(), Box<dyn Error>> {
+    // let mut transport = make_io_transport().unwrap();
+
+    let (mut reader, mut writer) = make_io_transport().unwrap();
+
+    info!("Starting db-backend");
+
+    handle_client(&mut reader, &mut writer)
 }
 
 #[cfg(feature = "io-transport")]

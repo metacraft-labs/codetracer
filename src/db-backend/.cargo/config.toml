@@ -1,0 +1,3 @@
+[alias]
+native = "build --features io-transport"
+wasm = "build --target wasm32-unknown-unknown --no-default-features --features browser-transport"
