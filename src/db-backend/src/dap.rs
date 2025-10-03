@@ -1,5 +1,5 @@
-use crate::dap_types;
-use crate::task::{self};
+use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
+use crate::task::{self, CtUpdatedTableResponseBody};
 use log::{error, info};
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;

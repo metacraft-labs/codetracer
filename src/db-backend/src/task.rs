@@ -48,7 +48,7 @@ pub enum FlowMode {
 pub struct CtLoadFlowArguments {
     pub flow_mode: FlowMode,
     pub location: Location,
-} 
+}
 
 /// args for `ct/update-table`: actually Datatables.net produces those most of this: `TableArgs`
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]

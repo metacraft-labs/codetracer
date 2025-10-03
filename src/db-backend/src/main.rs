@@ -121,13 +121,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("pid {:?}", std::process::id());
     if cli.stdio {
-        use std::io::BufReader;
-
-        let stdin = std::io::stdin();
-        let stdout = std::io::stdout();
-        let mut reader = BufReader::new(stdin.lock());
-
-        let _ = db_backend::dap_server::run(&mut reader);
+        // use std::io::BufReader;
+        //
+        // let stdin = std::io::stdin();
+        // let stdout = std::io::stdout();
+        // let mut reader = BufReader::new(stdin.lock());
+        //
+        // let _ = db_backend::dap_server::run(&mut reader);
     } else {
         use std::os::unix::net::UnixListener;
 
@@ -141,12 +141,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         info!("dap_server::run {:?}", socket_path);
-        let _ = std::fs::remove_file(&socket_path);
-        let listener = UnixListener::bind(socket_path)?;
 
-        let (stream, _) = listener.accept()?;
-        let mut reader = BufReader::new(stream.try_clone()?);
-        let _ = db_backend::dap_server::run(&mut reader);
+        let _ = db_backend::dap_server::run(&socket_path);
     };
 
     Ok(())
