@@ -4,7 +4,7 @@ use std::error::Error;
 
 use log::{error, info, warn};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
 
