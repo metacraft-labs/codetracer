@@ -121,13 +121,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("pid {:?}", std::process::id());
     if cli.stdio {
-        // use std::io::BufReader;
-        //
-        // let stdin = std::io::stdin();
-        // let stdout = std::io::stdout();
-        // let mut reader = BufReader::new(stdin.lock());
-        //
-        // let _ = db_backend::dap_server::run(&mut reader);
+        use std::io::BufReader;
+
+        let stdin = std::io::stdin();
+        let stdout = std::io::stdout();
+        let mut reader = BufReader::new(stdin.lock());
+
+        let _ = db_backend::dap_server::run_stdio();
     } else {
         use std::os::unix::net::UnixListener;
 

@@ -1,5 +1,5 @@
 [package]
-name = "db-backend-core"
+name = "db-backend"
 version = "0.1.0"
 edition = "2021"
 
@@ -91,7 +91,7 @@ CFLAGS_wasm32_unknown_unknown = "-I{cwd}/wasm-sysroot/include -DNDEBUG -Wbad-fun
 [features]
 debugging = []
 
-default = ["browser-transport"]
+default = ["io-transport"]
 
 io-transport = []
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",
