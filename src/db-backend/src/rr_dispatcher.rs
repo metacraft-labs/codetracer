@@ -102,7 +102,8 @@ impl CtRRWorker {
         self.stream
             .as_mut()
             .expect("valid sending stream")
-            .write(&format!("{raw_json}\n").into_bytes())?;
+            .write_all(&format!("{raw_json}\n").into_bytes())?;
+        // `clippy::unused_io_amount` catched we need write_all, not write
 
         let mut res = "".to_string();
         info!("wait to read");
