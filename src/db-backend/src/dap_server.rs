@@ -1,8 +1,5 @@
-use crate::dap::{
-    self, Breakpoint, Capabilities, DapMessage, Event, ProtocolMessage, Response, SetBreakpointsArguments,
-    SetBreakpointsResponseBody, Source,
-};
-use crate::dap_types;
+use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
+use crate::dap_types::{self, Breakpoint, SetBreakpointsArguments, SetBreakpointsResponseBody, Source};
 
 #[cfg(feature = "browser-transport")]
 use crate::dap_error::DapError;
@@ -23,12 +20,15 @@ use crate::transport::DapTransport;
 #[cfg(feature = "browser-transport")]
 use crate::transport::WorkerTransport;
 
-use log::{error, info, warn};
+use log::{error, info};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::io::BufRead;
+
+#[cfg(feature = "io-transport")]
+use std::os::unix::net::UnixStream;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -50,18 +50,30 @@ use std::time::Instant;
 //     Ok(())
 // }
 
+pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
+
 #[cfg(feature = "io-transport")]
 pub fn make_io_transport() -> Result<std::io::Stdout, Box<dyn Error>> {
     Ok(std::io::stdout())
+}
+
+#[cfg(feature = "io-transport")]
+pub fn make_socket_transport(
+    socket_path: &PathBuf,
+) -> Result<(std::io::BufReader<UnixStream>, UnixStream), Box<dyn Error>> {
+    use std::io::BufReader;
+
+    info!("Dap server starting on socket: {:?}", socket_path);
+    let stream = UnixStream::connect(socket_path)?;
+    let reader = BufReader::new(stream.try_clone()?);
+    let writer = stream;
+    Ok((reader, writer))
 }
 
 #[cfg(feature = "browser-transport")]
 pub fn make_transport() -> Result<WorkerTransport, DapError> {
     WorkerTransport::new()
 }
-
-pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
-pub const DAP_SOCKET_PATH: &str = "/tmp/ct_dap_socket";
 
 pub fn socket_path_for(pid: usize) -> PathBuf {
     CODETRACER_PATHS
@@ -72,10 +84,14 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
 }
 
 #[cfg(feature = "io-transport")]
-pub fn run<R: BufRead>(reader: &mut R) -> Result<(), Box<dyn Error>> {
-    let mut transport = make_io_transport().unwrap();
+pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    // let mut transport = make_io_transport().unwrap();
 
-    handle_client(reader, &mut transport)
+    let (mut reader, mut writer) = make_socket_transport(socket_path).unwrap();
+
+    info!("Starting db-backend");
+
+    handle_client(&mut reader, &mut writer)
 }
 
 // pub fn run_stdio() -> Result<(), Box<dyn Error>> {
@@ -273,6 +289,7 @@ pub fn handle_message<T: DapTransport>(
     transport: &mut T,
     ctx: &mut Ctx,
 ) -> Result<(), Box<dyn Error>> {
+    info!("Handling message: {:?}", msg);
     match msg {
         DapMessage::Request(req) if req.command == "initialize" => {
             let capabilities = Capabilities {
@@ -341,8 +358,19 @@ pub fn handle_message<T: DapTransport>(
                                 name: args.source.name.clone(),
                                 path: Some(path.clone()),
                                 source_reference: args.source.source_reference,
+                                presentation_hint: None,
+                                origin: None,
+                                sources: None,
+                                adapter_data: None,
+                                checksums: None,
                             }),
                             line: Some(line),
+                            column: None,
+                            end_line: None,
+                            end_column: None,
+                            instruction_reference: None,
+                            offset: None,
+                            reason: None,
                         });
                     }
                 }
@@ -360,6 +388,12 @@ pub fn handle_message<T: DapTransport>(
                         message: Some("missing source path".to_string()),
                         source: None,
                         line: Some(line),
+                        column: None,
+                        end_line: None,
+                        end_column: None,
+                        instruction_reference: None,
+                        offset: None,
+                        reason: None,
                     });
                 }
             }
@@ -450,7 +484,7 @@ pub fn handle_message<T: DapTransport>(
         }
         DapMessage::Request(req) if req.command == "disconnect" => {
             if let Some(h) = ctx.handler.as_mut() {
-                let args = req.load_args::<dap::DisconnectArguments>()?;
+                let args: dap_types::DisconnectArguments = req.load_args()?;
                 h.dap_client.seq = ctx.seq;
                 h.respond_to_disconnect(req.clone(), args)?;
                 write_dap_messages(transport, h, &mut ctx.seq)?;
@@ -505,7 +539,8 @@ fn handle_client<R: BufRead, T: DapTransport>(reader: &mut R, transport: &mut T)
     };
 
     while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
-        handle_message(&msg, writer, &mut ctx);
+        info!("Handling msg: {:?}", msg);
+        let _ = handle_message(&msg, transport, &mut ctx);
 
         // forward_raw_events(&rx, writer, &mut seq)?;
     }
