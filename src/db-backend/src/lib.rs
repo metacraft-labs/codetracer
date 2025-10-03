@@ -123,19 +123,19 @@ pub fn _start() {
     wasm_logger::init(wasm_logger::Config::default());
 }
 
-#[cfg(feature = "browser-transport")]
-#[wasm_bindgen]
-pub fn test() -> Result<(), JsValue> {
-    use crate::dap::setup_onmessage_callback_test;
-
-    let _ = 2 + 2;
-
-    web_sys::console::log_1(&"wasm worker started".into());
-
-    setup_onmessage_callback_test().map_err(|e| JsValue::from_str(&format!("{e}")))?;
-
-    Ok(())
-}
+// #[cfg(feature = "browser-transport")]
+// #[wasm_bindgen]
+// pub fn test() -> Result<(), JsValue> {
+//     use crate::dap::setup_onmessage_callback_test;
+//
+//     let _ = 2 + 2;
+//
+//     web_sys::console::log_1(&"wasm worker started".into());
+//
+//     setup_onmessage_callback_test().map_err(|e| JsValue::from_str(&format!("{e}")))?;
+//
+//     Ok(())
+// }
 
 #[cfg(feature = "browser-transport")]
 #[wasm_bindgen]

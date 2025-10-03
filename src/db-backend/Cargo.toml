@@ -79,10 +79,19 @@ path = "src/bin/virtualization-layers.rs"
 name = "schema-generator"
 path = "src/bin/schema_generator.rs"
 
+[env]
+SYSROOT = { value = "{cwd}/wasm-sysroot", relative = true }
+
+CC_wasm32_unknown_unknown = "clang"
+AR_wasm32_unknown_unknown = "llvm-ar"
+
+CPPFLAGS_wasm32_unknown_unknown = "--target=wasm32 --sysroot={cwd}/wasm-sysroot -isystem {cwd}/wasm-sysroot/include"
+CFLAGS_wasm32_unknown_unknown = "-I{cwd}/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
+
 [features]
 debugging = []
 
-default = ["io-transport"]
+default = ["browser-transport"]
 
 io-transport = []
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",
