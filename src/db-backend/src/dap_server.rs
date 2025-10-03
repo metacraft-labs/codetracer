@@ -70,7 +70,6 @@ pub fn make_socket_transport(
 ) -> Result<(std::io::BufReader<UnixStream>, UnixStream), Box<dyn Error>> {
     use std::io::BufReader;
 
-    info!("Dap server starting on socket: {:?}", socket_path);
     let stream = UnixStream::connect(socket_path)?;
     let reader = BufReader::new(stream.try_clone()?);
     let writer = stream;
@@ -96,8 +95,6 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
 
     let (mut reader, mut writer) = make_io_transport().unwrap();
 
-    info!("Starting db-backend");
-
     handle_client(&mut reader, &mut writer)
 }
 
@@ -106,8 +103,6 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     // let mut transport = make_io_transport().unwrap();
 
     let (mut reader, mut writer) = make_socket_transport(socket_path).unwrap();
-
-    info!("Starting db-backend");
 
     handle_client(&mut reader, &mut writer)
 }
