@@ -43,11 +43,6 @@ type
     sqrt*: proc(f: float): float
     round*: proc(f: float): int
 
-  MMap* = ref object
-    map*:  proc(size: int, a: int, b: int, c: int, d: int): Buffer
-    PROT_READ*: int
-    MAP_SHARED*: int
-
   ResizeObserver* {.importc.} = ref object
   MutationObserver* {.importc.} = ref object
   MutationRecord* {.importc.} = ref object
