@@ -4,6 +4,8 @@ import
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
 
+from welcome_screen import resetView
+from event_log import findTRNode
 from dom import createElement
 
 type langstring = cstring
@@ -31,12 +33,16 @@ proc removeClasses(index: int, class: cstring, name: string)
 proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
-# proc adjustEditorWidth(self: EditorViewComponent)
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
   x >= location.left and x <= location.right and y >= location.top and y <= location.bottom
+
+proc clearViewZones*(self: EditorViewComponent) =
+  self.monacoEditor.changeViewZones do (view: js):
+    for viewZone in self.viewZones:
+      view.removeZone(viewZone)
 
 proc toggleMacroExpansion*(self: EditorViewComponent) =
   if self.lastMouseMoveLine != -1:

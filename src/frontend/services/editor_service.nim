@@ -1,6 +1,6 @@
 import
   service_imports,
-  ../types,
+  ../[ types, utils ],
   ../lib/[ logging, jslib ]
 
 proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) =

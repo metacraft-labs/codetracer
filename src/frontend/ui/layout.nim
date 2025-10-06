@@ -153,6 +153,20 @@ proc makeNestedButton(layout: js, ev: Event): VNode =
     ):
       text "Maximise container"
 
+proc closeLayoutTab(data: Data, content: Content, id: int) =
+  if not data.ui.componentMapping[content].hasKey(id):
+    raise newException(Exception, "There is not any component with the given id.")
+
+  # remove component from registry
+  discard jsDelete(data.ui.componentMapping[content][id])
+
+  # remove component karax instance
+  discard jsDelete(kxiMap[convertComponentLabel(content, id)])
+
+  # remove component from open components registry from the same content type (if there is any)
+  if data.ui.openComponentIds[content].find(id) != -1:
+    data.ui.openComponentIds[content].delete(id)
+
 # Triage: rename to initGoldenLayout
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
 

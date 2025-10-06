@@ -102,16 +102,3 @@ proc findByPath*(app: ElectronApp, path: cstring): Future[Trace] {.async.} =
   else:
     echo "error: trying to run the codetracer trace metadata command: ", res.error
     app.quit(1)
-
-proc findByProgram*(app: ElectronApp, program: cstring, test: bool): Future[Trace] {.async.} =
-  let res = await readProcessOutput(
-    codetracerExe.cstring,
-    @[cstring"trace-metadata", "--test", cstring(fmt("--program=\"{program}\""))])
-
-  if res.isOk:
-    let raw = res.value
-    let trace = cast[Trace](JSON.parse(raw))
-    return trace
-  else:
-    echo "error: trying to run the codetracer trace metadata command: ", res.error
-    app.quit(1)

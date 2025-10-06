@@ -381,6 +381,27 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
       tdiv(class = "call-arg-text", id = &"call-arg-text-{keyOrIndex}-{arg.name}"):
         text value
 
+proc ensureValueComponent(self: CallExpandedValuesComponent, name: cstring, value: Value) =
+  if not self.values.hasKey(name):
+     self.values[name] = ValueComponent(
+       expanded: JsAssoc[cstring, bool]{},
+       charts: JsAssoc[cstring, ChartComponent]{},
+       showInline: JsAssoc[cstring, bool]{},
+       baseExpression: name,
+       baseValue: value,
+       stateID: -1,
+       data: self.data,
+       nameWidth: VALUE_COMPONENT_NAME_WIDTH,
+       valueWidth: VALUE_COMPONENT_VALUE_WIDTH)
+     self.data.registerComponent(self.values[name], Content.Value)
+
+proc makeCallExpandedValueComponent(data: Data, callDepth: int): CallExpandedValuesComponent =
+  result = CallExpandedValuesComponent(
+    values: JsAssoc[cstring, ValueComponent]{},
+    depth: callDepth
+  )
+  data.registerComponent(result, Content.CallExpandedValue)
+
 proc callArgListView(
   self: CalltraceComponent,
   arg: CallArg,

@@ -8,6 +8,19 @@ const
   NO_CODE = -1
   NO_PATH = ""
 
+proc asmLoad(self: EditorService, location: types.Location): Future[Instructions] {.async.} =
+  var name = cstring""
+  var functionLocation = FunctionLocation(
+    path: location.path,
+    name: location.functionName,
+    key: location.key,
+    forceReload: location.path.split(".")[^1] == "nr"  # Force reload on move for noir files
+  )
+  name = cstring(fmt"{functionLocation.path}:{functionLocation.name}:{functionLocation.key}")
+
+  let instructions = await self.data.asyncSend("asm-load", functionLocation, $name, Instructions)
+  return instructions
+
 proc getAsmCode(self: NoSourceComponent, location: types.Location) {.async.} =
   self.instructions = await data.services.editor.asmLoad(location)
   self.data.redraw()

@@ -269,6 +269,10 @@ proc programEventJump(self: EventLogComponent, event: ProgramEvent) =
 
 const DELAY: int64 = 200 # milliseconds
 
+proc findTRNode*(node: js): js =
+  return if node.tagName.to(cstring) == cstring("TR"):
+    node else: findTRNode(node.parentNode)
+
 proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
   cdebug "event_log: handler jump"
   var node = e.target
@@ -302,6 +306,16 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
 
 proc events(self: EventLogComponent) =
   var context = self
+
+  proc reinit(self: EventLogComponent) =
+    self.kinds = JsAssoc[EventLogKind, bool]{}
+    self.kindsEnabled = JsAssoc[EventLogKind, bool]{}
+    self.tags = JsAssoc[EventTag, bool]{}
+    for kind in EventLogKind.low .. EventLogKind.high:
+      self.kinds[kind] = true
+      self.kindsEnabled[kind] = true
+    for tag in EventTag.low .. EventTag.high:
+      self.tags[tag] = true
 
   proc handler(table: js, e: js) =
     let currentTime: int64 = now()

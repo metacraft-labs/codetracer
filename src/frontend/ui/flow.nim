@@ -5,8 +5,9 @@ import
   ../[ renderer, communication, dap, event_helpers],
   ../../common/ct_event
 
-# thank, God!
+from trace import getConfiguration
 
+# thank, God!
 proc resizeLineSlider(self: FlowComponent, position: int)
 proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int)
 proc createLoopViewZones(self: FlowComponent, loopIndex:int)
@@ -27,6 +28,31 @@ const
   SLIDER_OFFSET = 6 # in px
   FLOW_VALUE_LIMIT = 30
   FLOW_VALUE_MAX_WIDTH = fmt"{FLOW_VALUE_LIMIT}ch"
+
+proc calculateMaxWidth*(self: FlowComponent, stepNodeWidth: int) =
+  let editor = self.editorUI.monacoEditor
+  let editorLayout = editor.config.layoutInfo
+  let minimapWidth = editorLayout.minimapWidth
+
+  self.maxWidth = max(
+    self.maxWidth,
+    stepNodeWidth
+  )
+
+proc adjustEditorWidth*(self: EditorViewComponent) =
+  let path = self.tabInfo.name
+  let options = cast[MonacoEditorOptions](self.monacoEditor.getOptions())
+
+  for flowDom in self.flow.flowDom:
+    if not flowDom.firstChild.isNil and not flowDom.firstChild.toJs.firstElementChild.isNil:
+      self.flow.calculateMaxWidth(cast[Element](flowDom.firstChild.toJs.firstElementChild).clientWidth)
+
+  let charWidth = data.ui.fontSize.float * 0.55
+  let scrollBeyondLastColumn =
+    self.flow.maxWidth
+
+  options.scrollBeyondLastColumn = floor(scrollBeyondLastColumn.float / charWidth)
+  self.monacoEditor.updateOptions(options)
 
 proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value): ValueMode =
   if testEq(beforeValue, afterValue):
@@ -445,6 +471,19 @@ proc removeExpandedFlow(self: FlowComponent, line: int) =
 
   if self.multilineFlowLines.hasKey(line):
     discard jsDelete(self.multilineFlowLines[line])
+
+proc registerScratchpadValue(self: ScratchpadComponent, expression: cstring, value: Value) =
+  self.programValues.add((expression, value))
+  self.values.add(ValueComponent(
+    expanded: JsAssoc[cstring, bool]{},
+    charts: JsAssoc[cstring, ChartComponent]{},
+    showInline: JsAssoc[cstring, bool]{},
+    baseExpression: expression,
+    baseValue: value,
+    nameWidth: VALUE_COMPONENT_NAME_WIDTH,
+    valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
+    stateID: -1,
+    data: self.data))
 
 proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool) =
   if not self.flow.isNil and stepCount in self.flow.steps.low .. self.flow.steps.high:

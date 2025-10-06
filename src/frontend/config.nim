@@ -20,11 +20,6 @@ when not defined(ctRenderer):
     userConfigDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
     userLayoutDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
 
-
-func normalize(shortcut: string): string =
-  # for now we expect to write editor-style monaco shortcuts
-  shortcut
-
 proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
   result = ShortcutMap(shortcutActions: JsAssoc[cstring, ClientAction]{}, conflictList: @[])
   var conflicts = JsAssoc[cstring, seq[ClientAction]]{}
@@ -37,7 +32,7 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
       warnPrint "config: invalid shortcut action ", $key
       continue
     for raw in rawShortcuts:
-      let normalShortcut = normalize(raw).cstring
+      let normalShortcut = raw.cstring
       var l = cstring""
       if normalShortcut == cstring"Delete":
         l = cstring"del"
