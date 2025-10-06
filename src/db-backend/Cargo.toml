@@ -8,13 +8,6 @@ edition = "2021"
 [build-dependencies]
 cc="*"
 
-# [patch.crates-io]
-#
-# tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter", rev = "24c8feba3ea2e0e054de3f64333e554ca9353e38" }
-# tree-sitter-rust = { git = "https://github.com/tree-sitter/tree-sitter-rust", rev = "00d7cbc95f0b8ea2703129550fbd1853a13e0e29" }
-# tree-sitter-ruby = { git = "https://github.com/tree-sitter/tree-sitter-ruby", rev = "89bd7a8e5450cb6a942418a619d30469f259e5d6" }
-# tree-sitter-traversal = { git = "https://github.com/skmendez/tree-sitter-traversal", rev = "79ae415626c929e1c7b7c7c3a162ed45c21710bd"}
-
 [dependencies]
 num-traits = "0.2"
 num-derive = "0.4"
@@ -28,8 +21,6 @@ regex = "1"
 tree-sitter = "*"
 tree-sitter-rust = "0.24"
 tree-sitter-ruby = "0.23.1"
-# tree-sitter-elisp = "1.5.0"
-# tree-sitter-traversal = { git = "https://github.com/skmendez/tree-sitter-traversal", rev = "79ae415626c929e1c7b7c7c3a162ed45c21710bd"}
 tree-sitter-traversal2 = "0.2.0"
 indexmap = "1.9.3"
 once_cell = "1.10.0"
@@ -44,9 +35,6 @@ schemars-zod = "0.1.5"
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
-# runtime_tracing = "0.14.0" # { git = "https://github.com/metacraft-labs/runtime_tracing.git", branch = "feat-add-evm-event" }
-
-# runtime_tracing = { path = "/home/pesho/code/runtime_tracing/runtime_tracing/"}
 runtime_tracing = "0.14.1"
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
