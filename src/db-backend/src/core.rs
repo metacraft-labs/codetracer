@@ -2,7 +2,6 @@ use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::Write;
 
-#[cfg(not(target_arch = "wasm32"))]
 use std::os::unix::net::UnixStream;
 
 use std::path::PathBuf;
@@ -21,7 +20,6 @@ pub const NO_CALLER_PROCESS_PID: usize = 0;
 
 #[derive(Debug, Default)]
 pub struct Core {
-    #[cfg(not(target_arch = "wasm32"))]
     pub socket: Option<UnixStream>,
     pub caller_process_pid: usize,
 }
@@ -101,18 +99,11 @@ impl Core {
     // setup should be called before send_loop !
     // eventually we can check explicitly or initialize
     // Sender with setup to make socket not Option
-    #[cfg(not(target_arch = "wasm32"))]
     #[allow(clippy::unwrap_used)]
     fn send_task_message(&self, task_kind: TaskKind, task_id: TaskId) -> Result<(), Box<dyn Error>> {
         let raw = format!("{} {}\n", to_task_kind_text(task_kind), task_id.as_string());
         // info!("send socket {raw}");
         self.socket.as_ref().unwrap().write_all(raw.as_bytes())?;
         Ok(())
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[allow(clippy::unwrap_used)]
-    fn send_task_message(&self, task_kind: TaskKind, task_id: TaskId) -> Result<(), Box<dyn Error>> {
-        todo!()
     }
 }
