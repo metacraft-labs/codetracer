@@ -267,16 +267,6 @@ fn handle_request<T: DapTransport>(
     write_dap_messages(transport, handler, seq)
 }
 
-// pub struct Ctx<'a> {
-//     pub(crate) seq: &'a mut i64,
-//     pub(crate) breakpoints: &'a mut HashMap<String, HashSet<i64>>,
-//     pub(crate) handler: &'a mut Option<Handler>,
-//     pub(crate) received_launch: &'a mut bool,
-//     pub(crate) launch_trace_folder: &'a mut PathBuf,
-//     pub(crate) launch_trace_file: &'a mut PathBuf,
-//     pub(crate) received_configuration_done: &'a mut bool,
-// }
-
 pub struct Ctx {
     pub seq: i64,
     pub breakpoints: HashMap<String, HashSet<i64>>,
@@ -286,16 +276,6 @@ pub struct Ctx {
     pub launch_trace_file: PathBuf,
     pub received_configuration_done: bool,
 }
-
-// pub struct Ctx {
-//     pub seq: RefCell<i64>,
-//     pub breakpoints: RefCell<HashMap<String, HashSet<i64>>>,
-//     pub handler: RefCell<Handler>,
-//     pub received_launch: Cell<bool>,
-//     pub launch_trace_folder: RefCell<Option<String>>,
-//     pub launch_trace_file: RefCell<Option<String>>,
-//     pub received_configuration_done: Cell<bool>,
-// }
 
 pub fn handle_message<T: DapTransport>(
     msg: &DapMessage,
@@ -532,14 +512,14 @@ pub fn handle_message<T: DapTransport>(
 }
 
 fn handle_client<R: BufRead, T: DapTransport>(reader: &mut R, transport: &mut T) -> Result<(), Box<dyn Error>> {
-    let mut seq = 1i64;
-    let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
+    let seq = 1i64;
+    let breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
     // let (tx, _rx) = mpsc::channel();
-    let mut handler: Option<Handler> = None;
-    let mut received_launch = false;
-    let mut launch_trace_folder = PathBuf::from("");
-    let mut launch_trace_file = PathBuf::from("");
-    let mut received_configuration_done = false;
+    let handler: Option<Handler> = None;
+    let received_launch = false;
+    let launch_trace_folder = PathBuf::from("");
+    let launch_trace_file = PathBuf::from("");
+    let received_configuration_done = false;
 
     let mut ctx = Ctx {
         seq,
@@ -554,9 +534,8 @@ fn handle_client<R: BufRead, T: DapTransport>(reader: &mut R, transport: &mut T)
     while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
         info!("Handling msg: {:?}", msg);
         let _ = handle_message(&msg, transport, &mut ctx);
-
-        // forward_raw_events(&rx, writer, &mut seq)?;
     }
+
     error!("maybe error from reader");
     Ok(())
 }
