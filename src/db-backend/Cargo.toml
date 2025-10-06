@@ -58,14 +58,17 @@ crate-type   = ["rlib", "cdylib"]
 [[bin]]
 name = "db-backend"
 path = "src/main.rs"
+required-features = ["io-transport"]
 
 [[bin]]
 name = "virtualization-layers"
 path = "src/bin/virtualization-layers.rs"
+required-features = ["io-transport"]
 
 [[bin]]
 name = "schema-generator"
 path = "src/bin/schema_generator.rs"
+required-features = ["io-transport"]
 
 [env]
 SYSROOT = { value = "{cwd}/wasm-sysroot", relative = true }
