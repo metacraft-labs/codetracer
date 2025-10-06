@@ -1563,7 +1563,7 @@ mod tests {
     #[test]
     fn test_struct_handling() {
         let db = setup_db();
-        let handler: Handler = Handler::new(Box::new(db));
+        let handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let value = handler.db.to_ct_value(&ValueRecord::Struct {
             field_values: vec![],
             type_id: TypeId(1),
@@ -1576,7 +1576,7 @@ mod tests {
         let db = setup_db();
 
         // Act: Create a new Handler instance
-        let handler: Handler = Handler::new(Box::new(db));
+        let handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
@@ -1587,7 +1587,7 @@ mod tests {
     #[test]
     fn test_run_single_tracepoint() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0))?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
@@ -1598,7 +1598,7 @@ mod tests {
     #[test]
     fn test_multiple_tracepoints() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         // TODO
         // this way we are resetting them after reforms
@@ -1633,7 +1633,7 @@ mod tests {
     fn test_multile_tracepoints_with_multiline_logs() -> Result<(), Box<dyn Error>> {
         let size: usize = 10000;
         let db: Db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             dap::Request::default(),
@@ -1660,7 +1660,7 @@ mod tests {
     fn test_tracepoint_in_loop() -> Result<(), Box<dyn Error>> {
         let size = 10000;
         let db: Db = setup_db_loop(size);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0))?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
@@ -1674,7 +1674,7 @@ mod tests {
         // Number of tracepoints and steps
         let count: usize = 10000;
         let db: Db = setup_db_with_step_count(count);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count))?;
 
@@ -1687,7 +1687,7 @@ mod tests {
         let db = setup_db();
 
         // Act: Create a new Handler instance
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let request = dap::Request::default();
         handler.step(request, make_step_in())?;
         assert_eq!(handler.step_id, StepId(1_i64));
@@ -1697,7 +1697,7 @@ mod tests {
     #[test]
     fn test_source_jumps() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let path = "/test/workdir";
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
@@ -1728,7 +1728,7 @@ mod tests {
     #[test]
     fn test_local_calltrace() -> Result<(), Box<dyn Error>> {
         let db = setup_db_with_calls();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         let calltrace_load_args = CalltraceLoadArgs {
             location: handler
@@ -1770,7 +1770,7 @@ mod tests {
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/alexander92/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // step-in from 1 to end(maybe also a parameter?)
         // on each step check validity, load locals, load callstack
