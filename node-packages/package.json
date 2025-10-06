@@ -62,11 +62,6 @@
     "@types/node": "^22.7.6",
     "@typescript-eslint/eslint-plugin": "^5.30.3",
     "@typescript-eslint/parser": "^5.30.3",
-    "@wdio/cli": "^7.25.1",
-    "@wdio/cucumber-framework": "^7.25.1",
-    "@wdio/local-runner": "^7.25.1",
-    "@wdio/mocha-framework": "^7.20.3",
-    "@wdio/spec-reporter": "^7.25.1",
     "css-loader": "6.10.0",
     "electron-builder": "^22.14.13",
     "electron-rebuild": "^3.2.7",
@@ -88,8 +83,7 @@
     "vite": "5.0.0",
     "wdio-electron-service": "^3.5.0",
     "webpack": "5.90.3",
-    "webpack-cli": "5.1.4",
-    "xo": "^0.16.0"
+    "webpack-cli": "5.1.4"
   },
   "scripts": {
     "test": "ava",
