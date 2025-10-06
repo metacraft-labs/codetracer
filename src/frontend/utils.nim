@@ -1,20 +1,14 @@
 import
-  async, strutils, strformat, sequtils, async, algorithm, jsffi, jsconsole,
+  async, strutils, strformat, sequtils, algorithm, jsffi, jsconsole,
   karax, vdom, kdom,
   types, lang,
   lib / [ logging, monaco_lib, jslib ]
 
 var kxiMap* = JsAssoc[cstring, KaraxInstance]{}
-
 const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
 
-proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCache: bool = false): Future[U]
-proc removeEditorFromClosedTabs*(data: Data, path: cstring)
-proc removeEditorFromLoading*(data: Data, path: cstring)
-proc openNewLayoutContainer*(data: Data, itemType: cstring, isEditor: bool = false): GoldenContentItem
-proc destroy(self: JsObject) {.importjs:"#.destroy()".}
 proc openLayoutTab*(
   data: Data,
   content: Content,
@@ -24,6 +18,27 @@ proc openLayoutTab*(
   editorView: EditorView = ViewSource,
   noInfoMessage: cstring = ""
 )
+
+proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCache: bool = false): Future[U] =
+  if data.asyncSendCache.hasKey(cstring(id)) and data.asyncSendCache[cstring(id)].hasKey(cstring(argId)):
+    return cast[Future[U]](data.asyncSendCache[cstring(id)][cstring(argId)])
+  result = newPromise() do (resolve: proc(response: U)):
+    if not data.network.futures.hasKey(cstring(id)):
+      data.network.futures[cstring(id)] = JsAssoc[cstring, JsObject]{}
+    if not noCache and data.network.futures[cstring(id)].hasKey(cstring(argId)):
+      cerror &"asyncSend: existing future {id} {argId}"
+      return
+    data.network.futures[cstring(id)][cstring(argId)] = functionAsJs(proc(value: JsObject): U =
+      discard jsdelete data.asyncSendCache[cstring(id)][cstring(argId)]
+      discard jsdelete data.network.futures[cstring(id)][cstring(argId)]
+      resolve(value.to(U)))
+
+    data.ipc.send cstring("CODETRACER::" & id), arg
+    echo "<- sent: ", "CODETRACER::" & id
+  if not data.asyncSendCache.hasKey(cstring(id)):
+    data.asyncSendCache[cstring(id)] = JsAssoc[cstring, Future[JsObject]]{}
+  data.asyncSendCache[cstring(id)][cstring(argId)] = cast[Future[JsObject]](result)
+
 proc openPanel*(
   data: Data,
   content: Content,
@@ -36,77 +51,12 @@ proc openPanel*(
 ): GoldenContentItem
 
 proc makeEditorViewDetailed(
-    data: Data,
-    name: cstring,
-    editorView: EditorView,
-    tabInfo: TabInfo,
-    location: types.Location
+  data: Data,
+  name: cstring,
+  editorView: EditorView,
+  tabInfo: TabInfo,
+  location: types.Location
 )
-
-proc focusLine(editor: EditorViewComponent, line: int) =
-  editor.monacoEditor.revealLineInCenter(line)
-  editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: 0))
-  editor.monacoEditor.focus()
-
-proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE) =
-  if tab.isNil:
-    cerror "tabs: tab is nil in showTab"
-    return
-  if not data.ui.editors.hasKey(tab):
-     # not data.ui.lowLevels.hasKey(tab):
-    cerror "tabs: no editor in showTab for " & $tab
-    return
-
-  var contentItem: GoldenContentItem
-
-  if data.ui.editors.hasKey(tab):
-    var editor: EditorViewComponent
-    if not data.ui.editors[tab].layoutItem.isNil:
-      editor = data.ui.editors[tab]
-    else:
-      editor = data.ui.editors[tab].topLevelEditor
-
-    if editor.isNil:
-      cwarn "editor is nil in showTab " & $tab
-      return
-
-    if editor.layoutItem.isNil:
-      cwarn "editor.layoutItem is nil in showTab " & $tab
-      return
-    contentItem = editor.layoutItem
-    if not editor.noInfo.isNil:
-      editor.noInfo.message = noInfoMessage
-
-    if line != -1:
-      editor.focusLine(line)
-
-    # else:
-    #   # TODO expansions in low level editors?
-    #   var editor: LLViewComponent
-    #   if not data.ui.lowLevels[tab].contentItem.isNil:
-    #     editor = data.ui.lowLevels[tab]
-    #   else:
-    #     editor = nil
-
-    #   if editor.isNil:
-    #     cwarn "editor is nil in showTab ", tab
-    #     return
-
-    #   if editor.contentItem.isNil:
-    #     cwarn "editor.contentItem is nil in showTab ", tab
-    #     return
-    #   contentItem = editor.contentItem
-  else:
-    cwarn "no editor for " & $tab
-    return
-
-  assert not contentItem.isNil
-
-  if not contentItem.parent.isNil and contentItem.parent.isStack:
-    # TODO: bug sometimes here
-    contentItem.parent.toJs.setActiveContentItem(contentItem)
-  else:
-    contentItem.container.show()
 
 proc generateId*(data: Data, content: Content): int =
   if data.ui.componentMapping[content].len > 0:
@@ -119,39 +69,38 @@ proc generateId*(data: Data, content: Content): int =
     return 0
 
 proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
+  var dropDownsInit: array[EventDropDownBox,bool]
+  dropDownsInit.fill(false);
 
-    var dropDownsInit: array[EventDropDownBox,bool]
-    dropDownsInit.fill(false);
+  var selectedKinds: array[EventLogKind,bool]
+  selectedKinds.fill(true)
 
-    var selectedKinds: array[EventLogKind,bool]
-    selectedKinds.fill(true)
+  # TODO: Remove hardcode bool value
+  if inExtension:
+    data.services.eventLog.updatedContent = true
 
-    # TODO: Remove hardcode bool value
-    if inExtension:
-      data.services.eventLog.updatedContent = true
-
-    result = EventLogComponent(
-      id: id,
-      service: data.services.eventLog,
-      traceService: data.services.trace,
-      kinds: JsAssoc[EventLogKind, bool]{},
-      kindsEnabled: JsAssoc[EventLogKind, bool]{},
-      columns: JsAssoc[EventOptionalColumn, bool]{},
-      tags: JsAssoc[EventTag, bool]{},
-      traceRenderedLength: 0,
-      dropDowns: dropDownsInit,
-      selectedKinds: selectedKinds,
-      denseTable: DataTableComponent(rowHeight: 35, autoScroll: true),
-      detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
-      traceSessionID: -1,
-      traceUpdateId: -1,
-      lastJumpFireTime: 0,
-      inExtension: inExtension,
-      drawId: 0,
-      started: false,
-      isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
-    )
-    data.registerComponent(result, Content.EventLog)
+  result = EventLogComponent(
+    id: id,
+    service: data.services.eventLog,
+    traceService: data.services.trace,
+    kinds: JsAssoc[EventLogKind, bool]{},
+    kindsEnabled: JsAssoc[EventLogKind, bool]{},
+    columns: JsAssoc[EventOptionalColumn, bool]{},
+    tags: JsAssoc[EventTag, bool]{},
+    traceRenderedLength: 0,
+    dropDowns: dropDownsInit,
+    selectedKinds: selectedKinds,
+    denseTable: DataTableComponent(rowHeight: 35, autoScroll: true),
+    detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
+    traceSessionID: -1,
+    traceUpdateId: -1,
+    lastJumpFireTime: 0,
+    inExtension: inExtension,
+    drawId: 0,
+    started: false,
+    isDbBasedTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
+  )
+  data.registerComponent(result, Content.EventLog)
 
 proc makeShellComponent*(data: Data, id: int): ShellComponent =
   result = ShellComponent(
@@ -262,26 +211,6 @@ proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
     traceUpdateId: -1)
   data.registerComponent(result, Content.TraceLog)
 
-proc formatLine(instruction: Instruction): cstring =
-  # TODO : address? 10 length?
-  cstring(align($instruction.offset, 4, ' ') & " " & alignLeft($instruction.name, 10, ' ') & alignLeft($instruction.args, 10, ' ') & alignLeft($instruction.other, 0, ' '))
-
-proc asmLoad*(self: EditorService, location: types.Location): Future[Instructions] {.async.} =
-  var name = cstring""
-  var functionLocation = FunctionLocation(
-    path: location.path,
-    name: location.functionName,
-    key: location.key,
-    forceReload: location.path.split(".")[^1] == "nr"  # Force reload on move for noir files
-  )
-  name = cstring(fmt"{functionLocation.path}:{functionLocation.name}:{functionLocation.key}")
-  # if not location.isExpanded:
-  #   name = cstring(fmt"{location.path}:{location.functionName}")
-  # else:
-  #   name = location.functionName # using it for expanded-<firstLine>
-  let instructions = await self.data.asyncSend("asm-load", functionLocation, $name, Instructions)
-
-  return instructions
 
 # lowLevel: enum TODO
 proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorView, lang: Lang): Future[TabInfo] {.async.} =
@@ -310,12 +239,16 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
 
   # TODO refactor out in smaller functions
   var tabInfo = await self.data.asyncSend("tab-load", js{location: location, name: name, editorView: editorView, lang: lang}, $name, TabInfo)
- # TODO do we need location here
+  # TODO do we need location here
   tabInfo.viewLine = location.line # if tabInfo.fileInfo.isNil or tabInfo.fileInfo.line == -1: -1 else: tabInfo.fileInfo.line
   # if editorView != ViewCalltrace:
   #   tabInfo.index = len(self.open) + len(self.expandedOpen) - 1
   # else:
   #   tabInfo.index = len(self.open) + len(self.expandedOpen)
+
+  proc formatLine(instruction: Instruction): cstring =
+    # TODO : address? 10 length?
+    cstring(align($instruction.offset, 4, ' ') & " " & alignLeft($instruction.name, 10, ' ') & alignLeft($instruction.args, 10, ' ') & alignLeft($instruction.other, 0, ' '))
 
   tabInfo.highlightLine = -1
   # tabInfo.fileInfo = if not tabInfo.fileLoaded.isNil: fileLoaded else: FileLoaded(tokens: @[], symbols: JsAssoc[cstring, seq[Symbol]]{}, sourceLines: @[], exe: @[])
@@ -335,25 +268,6 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
 
     self.data.redraw()
   return tabInfo
-
-  # TODO?
-  # data.switchHistory(path)
-  # TODO
-  #   if not data.save.fileMap.hasKey(path):
-#     data.save.files.add(SaveFile(path: path, line: 1))
-#     data.save.fileMap[path] = data.save.files.len - 1
-#     data.saveNew(data.save.files[^1])
-
-
-proc reinit*(self: EventLogComponent) =
-  self.kinds = JsAssoc[EventLogKind, bool]{}
-  self.kindsEnabled = JsAssoc[EventLogKind, bool]{}
-  self.tags = JsAssoc[EventTag, bool]{}
-  for kind in EventLogKind.low .. EventLogKind.high:
-    self.kinds[kind] = true
-    self.kindsEnabled[kind] = true
-  for tag in EventTag.low .. EventTag.high:
-    self.tags[tag] = true
 
 proc makeEditorViewComponent*(
   data: Data,
@@ -407,53 +321,6 @@ proc makeEditorViewComponent*(
   data.ui.editors[editorName] = result
   data.registerComponent(result, Content.EditorView)
 
-# proc makeLLSourceComponent*(data: Data, tab: cstring, view: LowLevelView): LLSourceComponent =
-#   if data.ui.lowLevels.hasKey(tab):
-#     raise newException(ValueError, &"low level source {tab} exists")
-#   result = LLSourceComponent(
-#     id: len(data.ui.lowLevels),
-#     view: view,
-#     decorations: @[],
-#     service: data.services.editor)
-#   data.ui.lowLevels[tab] = result
-#   data.registerComponent(result)
-  # discard data.services.editor.tabLoad(path, name, LangNim, lowLevel)
-
-# proc makeLLInstructionsComponent*(data: Data, tab: cstring, view: LowLevelView): LLInstructionsComponent =
-#   if data.ui.lowLevels.hasKey(tab):
-#     raise newException(ValueError, &"low level instructions {tab} exists")
-#   result = LLInstructionsComponent(
-#     id: len(data.ui.lowLevels),
-#     view: view,
-#     decorations: @[], # important for monaco
-#     service: data.services.editor)
-#   data.ui.lowLevels[tab] = result
-#   data.registerComponent(result)
-
-proc makeCallExpandedValueComponent*(data: Data, callDepth: int): CallExpandedValuesComponent =
-  result = CallExpandedValuesComponent(
-    values: JsAssoc[cstring, ValueComponent]{},
-    depth: callDepth
-  )
-  data.registerComponent(result, Content.CallExpandedValue)
-
-proc ensureValueComponent*(self: CallExpandedValuesComponent, name: cstring, value: Value) =
-  if not self.values.hasKey(name):
-     self.values[name] = ValueComponent(
-       expanded: JsAssoc[cstring, bool]{},
-       charts: JsAssoc[cstring, ChartComponent]{},
-       showInline: JsAssoc[cstring, bool]{},
-       baseExpression: name,
-       baseValue: value,
-       stateID: -1,
-       data: self.data,
-       nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-       valueWidth: VALUE_COMPONENT_VALUE_WIDTH)
-     self.data.registerComponent(self.values[name], Content.Value)
-
-proc ensureValueComponent*(self: ValueComponent) =
-  self.data.registerComponent(self, Content.Value)
-
 proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): CalltraceComponent =
   result = CalltraceComponent(
     id: id,
@@ -503,20 +370,8 @@ proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): S
   )
   data.registerComponent(result, Content.Scratchpad)
 
-func getId*(c: ChartComponent): int =
-  c.chartId
-
 func setId*(c: ChartComponent, id: int) =
   c.chartId = id
-
-proc clearChartData*(self: TraceComponent) =
-  if not self.chart.line.isNil:
-    self.chart.line.destroy()
-  self.chart.line = nil
-  self.chart.lineConfig = nil
-  self.chart.lineLabels = @[]
-  self.chart.datasets = @[]
-  self.chart.lineDatasetIndices = JsAssoc[cstring, int]{}
 
 proc makeChartComponent*(data:Data): ChartComponent =
   result = ChartComponent(
@@ -737,12 +592,6 @@ data.keyPlugins[Content.EditorView] = JsAssoc[cstring, proc(context: KeyPluginCo
 
 data.asyncSendCache = JsAssoc[cstring, JsAssoc[cstring, Future[JsObject]]]{}
 
-proc addNewContentItemAtFirstRow*(data: Data, config: js): GoldenContentItem =
-  let locationSelectors = @[
-    GoldenLayoutLocationSelector(typeId: FirstRow)
-  ]
-  data.ui.layout.newItemAtLocation(config, locationSelectors)
-
 # example - if it is an event log component content will be set to 8 which coresponds to Content enumeration in types.nim
 proc openPanel*(
   data: Data,
@@ -911,23 +760,6 @@ proc openLayoutTab*(
   except CatchableError:
     cerror "tabs: open panel: " & $getCurrentExceptionMsg()
 
-proc closeLayoutTab*(data: Data, content: Content, id: int) =
-  if not data.ui.componentMapping[content].hasKey(id):
-    raise newException(Exception, "There is not any component with the given id.")
-
-  # get editor component
-  # let component = data.ui.componentMapping[content][id]
-
-  # remove component from registry
-  discard jsDelete(data.ui.componentMapping[content][id])
-
-  # remove component karax instance
-  discard jsDelete(kxiMap[convertComponentLabel(content, id)])
-
-  # remove component from open components registry from the same content type (if there is any)
-  if data.ui.openComponentIds[content].find(id) != -1:
-    data.ui.openComponentIds[content].delete(id)
-
 proc openNoSourceView*(data: Data, name: cstring, noInfoMessage: cstring) =
   # should be usually a singleton-like no info page,
   # as we should usually pass always "NO SOURCE" as a name
@@ -1015,6 +847,11 @@ proc makeEditorView*(
   cdebug "editor: make editor view: active = " & $name
   data.services.editor.active = name
 
+proc focusLine(editor: EditorViewComponent, line: int) =
+  editor.monacoEditor.revealLineInCenter(line)
+  editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: 0))
+  editor.monacoEditor.focus()
+
 proc openNewEditorView*(
     data: Data,
     name: cstring,
@@ -1086,24 +923,83 @@ proc makeEditorViewDetailed(
     tabInfo: TabInfo,
     location: types.Location
 ) =
-    data.services.editor.open[name] = tabInfo
-    var editorComponent = data.makeEditorViewComponent(
-      data.generateId(Content.EditorView),
-      name,
-      1,
-      name,
-      editorView,
-      false,
-      location,
-      tabInfo.lang)
-    editorComponent.tabInfo = tabInfo
-    # if not self.data.ui.editors[name].flow.isNil:
-      # self.data.ui.editors[name].flow.tab = tabInfo
-    cdebug "editor: openLayoutTab.."
-    data.openLayoutTab(Content.EditorView, isEditor = true, path = name, editorView = editorView)
-    cdebug "editor: after open layout tab, active = " & $name
-    data.services.editor.active = name
+  data.services.editor.open[name] = tabInfo
+  var editorComponent = data.makeEditorViewComponent(
+    data.generateId(Content.EditorView),
+    name,
+    1,
+    name,
+    editorView,
+    false,
+    location,
+    tabInfo.lang)
+  editorComponent.tabInfo = tabInfo
+  # if not self.data.ui.editors[name].flow.isNil:
+    # self.data.ui.editors[name].flow.tab = tabInfo
+  cdebug "editor: openLayoutTab.."
+  data.openLayoutTab(Content.EditorView, isEditor = true, path = name, editorView = editorView)
+  cdebug "editor: after open layout tab, active = " & $name
+  data.services.editor.active = name
 
+proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE) =
+  if tab.isNil:
+    cerror "tabs: tab is nil in showTab"
+    return
+  if not data.ui.editors.hasKey(tab):
+     # not data.ui.lowLevels.hasKey(tab):
+    cerror "tabs: no editor in showTab for " & $tab
+    return
+
+  var contentItem: GoldenContentItem
+
+  if data.ui.editors.hasKey(tab):
+    var editor: EditorViewComponent
+    if not data.ui.editors[tab].layoutItem.isNil:
+      editor = data.ui.editors[tab]
+    else:
+      editor = data.ui.editors[tab].topLevelEditor
+
+    if editor.isNil:
+      cwarn "editor is nil in showTab " & $tab
+      return
+
+    if editor.layoutItem.isNil:
+      cwarn "editor.layoutItem is nil in showTab " & $tab
+      return
+    contentItem = editor.layoutItem
+    if not editor.noInfo.isNil:
+      editor.noInfo.message = noInfoMessage
+
+    if line != -1:
+      editor.focusLine(line)
+
+    # else:
+    #   # TODO expansions in low level editors?
+    #   var editor: LLViewComponent
+    #   if not data.ui.lowLevels[tab].contentItem.isNil:
+    #     editor = data.ui.lowLevels[tab]
+    #   else:
+    #     editor = nil
+
+    #   if editor.isNil:
+    #     cwarn "editor is nil in showTab ", tab
+    #     return
+
+    #   if editor.contentItem.isNil:
+    #     cwarn "editor.contentItem is nil in showTab ", tab
+    #     return
+    #   contentItem = editor.contentItem
+  else:
+    cwarn "no editor for " & $tab
+    return
+
+  assert not contentItem.isNil
+
+  if not contentItem.parent.isNil and contentItem.parent.isStack:
+    # TODO: bug sometimes here
+    contentItem.parent.toJs.setActiveContentItem(contentItem)
+  else:
+    contentItem.container.show()
 
 # a function for opening various kinds of editor viewer tabs:
 #   the `name` here is relatively generic:
@@ -1139,78 +1035,6 @@ proc openTab*(
   # elif data.services.editor.open.hasKey(id):
   #   data.showTab(id)
 
-proc convertTracepointEventToProgramEvent*(tracepointEvent: Stop): ProgramEvent =
-  var res: cstring
-  if tracepointEvent.errorMessage == "":
-    for (name, value) in tracepointEvent.locals:
-      if value.kind != types.Error:
-        if value.isLiteral and value.kind == types.String:
-          res.add(value.text & cstring" ")
-        else:
-          res.add(name & cstring"=" & textRepr(value).cstring & cstring"; ")
-      else:
-        res.add(name & cstring"=" & cstring"<span class=error-trace>" & value.msg & cstring"</span>")
-        res.add(cstring" ")
-  else:
-    res.add(cstring"<span class=error-trace>" & tracepointEvent.errorMessage & cstring"</span>")
-
-  return ProgramEvent(
-    kind: TraceLogEvent,
-    content: res,
-    rrEventId: tracepointEvent.event,
-    highLevelPath: tracepointEvent.path,
-    highLevelLine: tracepointEvent.line,
-    directLocationRRTicks: tracepointEvent.rrTicks,
-    tracepointResultIndex: tracepointEvent.resultIndex,
-    eventIndex: tracepointEvent.iteration,
-    base64Encoded: false,
-    maxRRTicks: data.maxRRTicks,
-  )
-
-proc addTraceResultsInEventLog*(eventLog: EventLogComponent, results: seq[Stop]) =
-  # TODO: refactor more
-  discard
-  # var newTraceLogs: seq[ProgramEvent] = @[]
-  # # transform the results in defined datatable data type
-  # for index, stop in results:
-  #   newTraceLogs.add(
-  #     DatatableEventElement(
-  #       kind: TraceLogEvent,
-  #       event: stop.event,
-  #       escapedContent: cstring"",
-  #       content: cstring"",
-  #       eventIndex: -1,
-  #       stop: stop,
-  #       line: stop.line,
-  #       directLocationRRTicks: stop.rrTicks))
-  # try:
-  #   # add results to the data table
-  #   eventLog.denseTable.context.rows.add(newTraceLogs).draw()
-  #   eventLog.detailedTable.context.rows.add(newTraceLogs).draw()
-  # except:
-  #   cerror "event_log: adding trace results to event log: " &
-  #     $newTraceLogs & ": " & getCurrentExceptionMsg()
-
-proc asyncSend*[T](data: Data, id: string, arg: T, argId: string, U: type, noCache: bool = false): Future[U] =
-  if data.asyncSendCache.hasKey(cstring(id)) and data.asyncSendCache[cstring(id)].hasKey(cstring(argId)):
-    return cast[Future[U]](data.asyncSendCache[cstring(id)][cstring(argId)])
-  result = newPromise() do (resolve: proc(response: U)):
-    if not data.network.futures.hasKey(cstring(id)):
-      data.network.futures[cstring(id)] = JsAssoc[cstring, JsObject]{}
-    if not noCache and data.network.futures[cstring(id)].hasKey(cstring(argId)):
-      cerror &"asyncSend: existing future {id} {argId}"
-      return
-    data.network.futures[cstring(id)][cstring(argId)] = functionAsJs(proc(value: JsObject): U =
-      discard jsdelete data.asyncSendCache[cstring(id)][cstring(argId)]
-      discard jsdelete data.network.futures[cstring(id)][cstring(argId)]
-      resolve(value.to(U)))
-
-    data.ipc.send cstring("CODETRACER::" & id), arg
-    echo "<- sent: ", "CODETRACER::" & id
-  if not data.asyncSendCache.hasKey(cstring(id)):
-    data.asyncSendCache[cstring(id)] = JsAssoc[cstring, Future[JsObject]]{}
-  data.asyncSendCache[cstring(id)][cstring(argId)] = cast[Future[JsObject]](result)
-
 proc refreshEditorLine*(self: EditorViewComponent, line: int) =
   # moved here from ui/editor, so it can be used from here
   cdebug "editor: refreshEditorLine " & $line
@@ -1222,99 +1046,3 @@ proc refreshEditorLine*(self: EditorViewComponent, line: int) =
     view.removeZone(zone)
   # refresh editor
 
-# openTab => if existing, open, if not => loading/opened => tabLoad => asyncSend(cache?) =>
-#  if existing, if not => addEditorViewTab() => [ change state, new panel/contentitem(?), make editor, render ]
-
-# openTab => change state => new panel/contentitem(?)
-#                           => make editor => tabLoad => asyncSend
-
-# -> tab panel where first editor tab with same level is or where editor is
-
-proc updateAvgTime(self: DebuggerService, currentTicks: float, count: float): void =
-  let lastTime = self.lastRRTickTime
-  self.avgRRTickTime = (self.avgRRTickTime * (count - 1) + (lastTime / currentTicks) * 1) / count
-
-proc rrTicksDiff(startLocation: int, targetLocation: int): float =
-  let a = max(startLocation, targetLocation)
-  let b = min(startLocation, targetLocation)
-  return float(a - b)
-
-proc avgTimePerRRTick*(self: DebuggerService, targetTicks: int): void =
-  let count = self.operationCount
-  let ticksCount = rrTicksDiff(targetTicks, self.location.rrTicks)
-
-  updateAvgTime(self, ticksCount, float(count))
-  # let timeEstimation = ticksCount * self.avgRRTickTime
-  # document.getElementById("timer-eta").innerHtml = fmt"ETA={timeEstimation:.3f}s"
-
-proc registerScratchpadValue*(self: ScratchpadComponent, expression: cstring, value: Value) =
-  self.programValues.add((expression, value))
-  self.values.add(ValueComponent(
-    expanded: JsAssoc[cstring, bool]{},
-    charts: JsAssoc[cstring, ChartComponent]{},
-    showInline: JsAssoc[cstring, bool]{},
-    baseExpression: expression,
-    baseValue: value,
-    nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-    valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    stateID: -1,
-    data: self.data))
-
-
-proc findTRNode*(node: js): js =
-  return if node.tagName.to(cstring) == cstring("TR"):
-    node else: findTRNode(node.parentNode)
-
-proc convertNotificationKind*(notificationKind: NotificationKind): cstring =
-  return cstring(($notificationKind)["Notification".len .. ^1])
-
-proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig =
-  domwindow.editor = editor
-  let layoutInfo = editor.getOption(LAYOUT_INFO)
-  let lineHeight = cast[int](editor.getOption(LINE_HEIGHT))
-
-  MonacoEditorConfig(
-    lineHeight: lineHeight,
-    layoutInfo: MonacoEditorLayoutInfo(
-      contentLeft: layoutInfo.contentLeft,
-      contentWidth: layoutInfo.contentWidth,
-      height: layoutInfo.height,
-      width: layoutInfo.width,
-      minimapWidth: layoutInfo.minimap.minimapWidth,
-      minimapLeft: layoutInfo.minimap.minimapLeft))
-
-proc clearViewZones*(self: EditorViewComponent) =
-  self.monacoEditor.changeViewZones do (view: js):
-    for viewZone in self.viewZones:
-      view.removeZone(viewZone)
-
-proc resetView*(self: WelcomeScreenComponent) =
-  self.loading = false
-  self.welcomeScreen = false
-  self.newRecordScreen = false
-  self.openOnlineTrace = false
-
-proc calculateMaxWidth*(self: FlowComponent, stepNodeWidth: int) =
-  let editor = self.editorUI.monacoEditor
-  let editorLayout = editor.config.layoutInfo
-  let minimapWidth = editorLayout.minimapWidth
-
-  self.maxWidth = max(
-    self.maxWidth,
-    stepNodeWidth
-  )
-
-proc adjustEditorWidth*(self: EditorViewComponent) =
-  let path = self.tabInfo.name
-  let options = cast[MonacoEditorOptions](self.monacoEditor.getOptions())
-
-  for flowDom in self.flow.flowDom:
-    if not flowDom.firstChild.isNil and not flowDom.firstChild.toJs.firstElementChild.isNil:
-      self.flow.calculateMaxWidth(cast[Element](flowDom.firstChild.toJs.firstElementChild).clientWidth)
-
-  let charWidth = data.ui.fontSize.float * 0.55
-  let scrollBeyondLastColumn =
-    self.flow.maxWidth
-
-  options.scrollBeyondLastColumn = floor(scrollBeyondLastColumn.float / charWidth)
-  self.monacoEditor.updateOptions(options)

@@ -1,8 +1,10 @@
 import 
-  std /  sequtils,
-  .. / communication,
-  .. / .. / common / ct_event,
+  std/sequtils,
+  ../communication,
+  ../../common/ct_event,
   ui_imports, flow, shell
+
+from editor import clearViewZones
 
 const NOTIFICATION_LIMIT = 3
 
@@ -370,6 +372,9 @@ proc deactivateNotification*(self: StatusComponent, notification: Notification) 
   windowClearTimeout(notification.timeoutId)
 
   self.redraw()
+
+proc convertNotificationKind(notificationKind: NotificationKind): cstring =
+  return cstring(($notificationKind)["Notification".len .. ^1])
 
 proc buttonActionView(self: StatusComponent, notification: Notification, buttonAction: NotificationAction): VNode =
 

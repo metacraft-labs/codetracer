@@ -216,6 +216,9 @@ proc switchChartKindView*(self: ChartComponent): VNode =
         ):
           text "pie"
 
+func getId(c: ChartComponent): int =
+  c.chartId
+
 proc ensureLine*(self: ChartComponent) =
   if self.line.isNil and self.viewKind == ViewLine:
     var canvasElement = jq(cstring(fmt"#chart-line-canvas-{self.getId}")).toJs

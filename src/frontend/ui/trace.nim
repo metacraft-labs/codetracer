@@ -95,6 +95,21 @@ proc removeTraceLogsFromEventLog() =
     data.ui.componentMapping[Content.EventLog][i] = eventLogComponent
   data.redraw()
 
+proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig =
+  domwindow.editor = editor
+  let layoutInfo = editor.getOption(LAYOUT_INFO)
+  let lineHeight = cast[int](editor.getOption(LINE_HEIGHT))
+
+  MonacoEditorConfig(
+    lineHeight: lineHeight,
+    layoutInfo: MonacoEditorLayoutInfo(
+      contentLeft: layoutInfo.contentLeft,
+      contentWidth: layoutInfo.contentWidth,
+      height: layoutInfo.height,
+      width: layoutInfo.width,
+      minimapWidth: layoutInfo.minimap.minimapWidth,
+      minimapLeft: layoutInfo.minimap.minimapLeft))
+
 proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
   self.editorUI.monacoEditor.changeViewZones do (view: js):
     view.removeZone(self.zoneId)
@@ -119,6 +134,34 @@ proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
     1
   )
 
+proc convertTracepointEventToProgramEvent(tracepointEvent: Stop): ProgramEvent =
+  var res: cstring
+  if tracepointEvent.errorMessage == "":
+    for (name, value) in tracepointEvent.locals:
+      if value.kind != types.Error:
+        if value.isLiteral and value.kind == types.String:
+          res.add(value.text & cstring" ")
+        else:
+          res.add(name & cstring"=" & textRepr(value).cstring & cstring"; ")
+      else:
+        res.add(name & cstring"=" & cstring"<span class=error-trace>" & value.msg & cstring"</span>")
+        res.add(cstring" ")
+  else:
+    res.add(cstring"<span class=error-trace>" & tracepointEvent.errorMessage & cstring"</span>")
+
+  return ProgramEvent(
+    kind: TraceLogEvent,
+    content: res,
+    rrEventId: tracepointEvent.event,
+    highLevelPath: tracepointEvent.path,
+    highLevelLine: tracepointEvent.line,
+    directLocationRRTicks: tracepointEvent.rrTicks,
+    tracepointResultIndex: tracepointEvent.resultIndex,
+    eventIndex: tracepointEvent.iteration,
+    base64Encoded: false,
+    maxRRTicks: data.maxRRTicks,
+  )
+
 proc runTracepoints*(data: Data) {.exportc.} =
   tracepointStart = now()
   var tracepoints: seq[Tracepoint] = @[]
@@ -141,23 +184,18 @@ proc runTracepoints*(data: Data) {.exportc.} =
       if trace.resultsHeight == 36:
         trace.updateViewZoneHeight(cast[int](trace.viewZone.heightInPx) + 180)
         data.ui.activeFocus = trace
+
       trace.isRan = true
       trace.isLoading = trace.isChanged
       trace.forceReload = false
-      # if not trace.dataTable.context.isNil:
-      #   # echo "remove"
-      #   trace.dataTable.context.rows().remove()
-      #   trace.dataTable.context.rows().draw()
-      #   trace.clearChartData()
-      #   trace.chart.pie = nil
-      #   trace.chart.pieConfig = nil
-      #   trace.chart.results = @[]
       trace.indexInSession = i
+
       trace.tracepoint.expression = code
       trace.tracepoint.lastRender = 0
       trace.tracepoint.isChanged = trace.isChanged
       trace.tracepoint.results = @[]
       trace.tracepoint.tracepointError = cstring""
+
       # so we generate json-safe structure, it has problems with assigning null to other branch fields
       # trace.tracepoint.query = cast[QueryNode](js{kind: QNone, label: cstring"", code: js{sons: cast[seq[QueryNode]](@[])}})
       # QueryNode(kind: QNone, label: cstring"", code: QueryCode(sons: @[])) # placeholder

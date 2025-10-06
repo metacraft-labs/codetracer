@@ -2,6 +2,23 @@ import
   service_imports, jsconsole,
   ../lib/jslib
 
+proc updateAvgTime(self: DebuggerService, currentTicks: float, count: float): void =
+  let lastTime = self.lastRRTickTime
+  self.avgRRTickTime = (self.avgRRTickTime * (count - 1) + (lastTime / currentTicks) * 1) / count
+
+proc rrTicksDiff(startLocation: int, targetLocation: int): float =
+  let a = max(startLocation, targetLocation)
+  let b = min(startLocation, targetLocation)
+  return float(a - b)
+
+proc avgTimePerRRTick(self: DebuggerService, targetTicks: int): void =
+  let count = self.operationCount
+  let ticksCount = rrTicksDiff(targetTicks, self.location.rrTicks)
+
+  updateAvgTime(self, ticksCount, float(count))
+  # let timeEstimation = ticksCount * self.avgRRTickTime
+  # document.getElementById("timer-eta").innerHtml = fmt"ETA={timeEstimation:.3f}s"
+
 proc eventJump*(self: EventLogService, event: ProgramEvent) =
   # we use codeID to determine if we need to reset flow
   self.debugger.stableBusy = true

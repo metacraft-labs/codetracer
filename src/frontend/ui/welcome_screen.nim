@@ -11,6 +11,12 @@ const
   EMPTY_STRING = ""
   ERROR_DOWNLOAD_KEY = "Errored"
 
+proc resetView*(self: WelcomeScreenComponent) =
+  self.loading = false
+  self.welcomeScreen = false
+  self.newRecordScreen = false
+  self.openOnlineTrace = false
+
 proc uploadTrace(self: WelcomeScreenComponent, trace: Trace) {.async.} =
   var uploadedData = await self.data.asyncSend(
     "upload-trace-file",
