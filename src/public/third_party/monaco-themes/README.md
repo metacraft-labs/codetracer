@@ -1,3 +1,9 @@
+codetracer monaco-themes fork:
+-----------------------------------
+
+* added our custom codetracer themes in themes/customThemes : Victor Velitchkov's work
+* 6.10.2025: (alexander): removed yarn.lock, package.json, index.html, webpack.config.js and `scripts/`, because we don't use them and to prevent receiving dependabot alerts for them
+
 ## monaco-themes
 
 See extended demo at [https://editor.bitwiser.in](https://editor.bitwiser.in)
