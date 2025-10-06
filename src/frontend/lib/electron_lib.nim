@@ -130,7 +130,6 @@ let chomedriverExe* = linksPath & "/bin/chromedriver"
 
 import misc_lib
 
-var mmap*: MMap
 var helpers* {.exportc: "helpers".}: js
 if inElectron:
   helpers = require("./helpers")
