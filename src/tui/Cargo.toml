@@ -10,13 +10,13 @@ crossterm = { version = "0.27.0", features = ["event-stream"] }
 # ratatui = "0.26.1"
 home = "0.5.9"
 sqlite = "0.34.0"
-tokio = {version = "1.37.0", features=["full", "rt", "net", "signal"]}
+tokio = {version = "1.38.2", features=["full", "rt", "net", "signal"]}
 num-traits = "0.2"
 num-derive = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"
-notify = "6.1.1"
+notify = "8.2.0"
 futures = "0.3.30"
 futures-timer = "3.0.3"
 ratatui = "0.29.0"

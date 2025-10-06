@@ -16,7 +16,7 @@ proc findDiff(diffSpecification: string): string =
       except OsError:
         discard
 
-      if existsFile(path):
+      if fileExists(path):
         # assume it contains a diff
         # AND that we're in the actual repo as well
         readFile(path)

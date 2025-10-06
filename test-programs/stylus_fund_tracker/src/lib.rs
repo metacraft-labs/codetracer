@@ -30,9 +30,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use alloy_sol_types::sol;
-use stylus_sdk::storage::{StorageBool, StorageVec};
 /// Import items from the SDK. The prelude contains common traits and macros.
-use stylus_sdk::{alloy_primitives::U256, evm, msg, prelude::*};
+use stylus_sdk::{alloy_primitives::U256, prelude::*};
 
 // Define some persistent storage using the Solidity ABI.
 // `Counter` will be the entrypoint.
