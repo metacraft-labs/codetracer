@@ -267,3 +267,14 @@ pub extern "C" fn fputs(s: *const c_char, stream: *mut c_void) -> c_int {
     // C fputs returns a nonnegative value on success (commonly a non-portable value, so we return len)
     bytes.len() as c_int
 }
+
+#[no_mangle]
+pub extern "C" fn fdopen(fd: c_int, _mode: *const c_char) -> *mut c_void {
+    // Provide distinct, non-null sentinel handles for stdin/stdout/stderr (0/1/2).
+    // We never dereference these; other stubs ignore `stream` and treat any non-null as valid.
+    if (0..=2).contains(&fd) {
+        (fd as usize + 1) as *mut c_void
+    } else {
+        null_mut()
+    }
+}

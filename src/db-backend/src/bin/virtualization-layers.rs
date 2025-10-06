@@ -37,14 +37,8 @@ struct Args {
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Args::parse();
 
-    #[cfg(not(target_arch = "wasm32"))]
     let core = Core {
         socket: None,
-        caller_process_pid: cli.caller_process_pid,
-    };
-
-    #[cfg(target_arch = "wasm32")]
-    let core = Core {
         caller_process_pid: cli.caller_process_pid,
     };
 

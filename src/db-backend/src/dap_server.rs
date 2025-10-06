@@ -29,6 +29,7 @@ use std::io::BufRead;
 
 #[cfg(feature = "io-transport")]
 use std::io::BufReader;
+
 #[cfg(feature = "io-transport")]
 use std::os::unix::net::UnixStream;
 
@@ -511,6 +512,7 @@ pub fn handle_message<T: DapTransport>(
     Ok(())
 }
 
+#[cfg(feature = "io-transport")]
 fn handle_client<R: BufRead, T: DapTransport>(reader: &mut R, transport: &mut T) -> Result<(), Box<dyn Error>> {
     let seq = 1i64;
     let breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();

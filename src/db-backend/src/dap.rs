@@ -365,12 +365,7 @@ pub fn to_json(message: &DapMessage) -> DapResult<String> {
     Ok(serde_json::to_string(message)?)
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
-    todo!()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "io-transport")]
 pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
     info!("from_reader");
     let mut header = String::new();
@@ -402,22 +397,6 @@ pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<Dap
     info!("DAP raw <- {json_text}");
     from_json(json_text)
 }
-
-// #[cfg(not(target_arch = "wasm32"))]
-// pub fn write_message<W: std::io::Write>(writer: &mut W, message: &DapMessage) -> Result<(), DapError> {
-//     use serde_json::to_string as to_json;
-//     let json = to_json(message)?;
-//     let header = format!("Content-Length: {}\r\n\r\n", json.len());
-//     writer
-//         .write_all(header.as_bytes())
-//         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
-//     writer
-//         .write_all(json.as_bytes())
-//         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
-//     writer.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
-//     log::info!("DAP -> {:?}", message);
-//     Ok(())
-// }
 
 #[cfg(feature = "browser-transport")]
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
@@ -508,7 +487,7 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         t_clone.post_message(&payload).unwrap_throw();
 
         // TODO: Handle error
-        // handle_message(&dap_message, &mut transport, &mut ctx).unwrap_throw();
+        handle_message(&dap_message, &mut transport, &mut ctx).unwrap_throw();
     }) as Box<dyn FnMut(_)>)
     .into_js_value()
     .unchecked_into::<Function>();
