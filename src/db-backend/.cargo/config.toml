@@ -1,3 +1,9 @@
+[env]
+SYSROOT = { value = "wasm-sysroot", relative = true }
+
+CC_wasm32_unknown_unknown = "clang"
+AR_wasm32_unknown_unknown = "llvm-ar"
+
 [alias]
 native = "build --features io-transport"
 wasm = "build --target wasm32-unknown-unknown --no-default-features --features browser-transport"
