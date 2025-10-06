@@ -25,12 +25,15 @@ int fputc(int c, FILE *stream);
 
 int fputs(const char *restrict s, FILE *restrict stream);
 
-size_t fwrite(const void *restrict buffer, size_t size, size_t nmemb, FILE *restrict stream);
+size_t fwrite(const void *restrict buffer, size_t size, size_t nmemb,
+              FILE *restrict stream);
 
 int fprintf(FILE *restrict stream, const char *restrict format, ...);
 
-int snprintf(char *restrict buffer, size_t buffsz, const char *restrict format, ...);
+int snprintf(char *restrict buffer, size_t buffsz, const char *restrict format,
+             ...);
 
-int vsnprintf(char *restrict buffer, size_t buffsz, const char *restrict format, va_list vlist);
+int vsnprintf(char *restrict buffer, size_t buffsz, const char *restrict format,
+              va_list vlist);
 
 #endif // TREE_SITTER_WASM_STDIO_H_
