@@ -16,7 +16,7 @@ hex = { version = "0.4", default-features = false }
 [dev-dependencies]
 alloy-primitives = { version = "=0.8.20", features = ["sha3-keccak"] }
 tokio = { version = "1.12.0", features = ["full"] }
-ethers = "2.0"
+ethers = "2.0.14"
 eyre = "0.6.8"
 stylus-sdk = { version = "0.9.0", features = ["stylus-test"] }
 dotenv = "0.15.0"
