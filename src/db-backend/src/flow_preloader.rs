@@ -5,6 +5,7 @@ use crate::{
         BranchesTaken, CoreTrace, FlowEvent, FlowStep, FlowUpdate, FlowUpdateState, FlowUpdateStateKind,
         FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount,
     },
+    replay::Replay,
 };
 use log::{info, warn};
 use runtime_tracing::{CallKey, FullValueRecord, Line, StepId};
@@ -24,14 +25,14 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load(&mut self, location: Location, line: Line, mode: FlowMode, db: &Db) -> FlowUpdate {
+    pub fn load(&mut self, location: Location, mode: FlowMode, replay: &mut Replay) -> FlowUpdate {
         info!("flow: load: {:?}", location);
         let path_buf = PathBuf::from(&location.path);
         match self.expr_loader.load_file(&path_buf) {
             Ok(_) => {
                 info!("Expression loader complete!");
                 let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location, HashSet::new(), HashSet::new(), mode);
-                call_flow_preloader.load_flow(line, db)
+                call_flow_preloader.load_flow(location, replay)
             }
             Err(e) => {
                 warn!("can't process file {}: error {}", location.path, e);
@@ -123,19 +124,26 @@ impl<'a> CallFlowPreloader<'a> {
     //   last
     //
     #[allow(clippy::unwrap_used)]
-    pub fn load_flow(&mut self, line: Line, db: &Db) -> FlowUpdate {
+    pub fn load_flow(&mut self, location: Location, replay: &mut dyn Replay) -> FlowUpdate {
+        
         // Update location on flow load
         if self.mode == FlowMode::Call {
+            // let step_id = StepId(location.rr_ticks.0);
+            // let call_key = self.db.steps[step_id].call_key;
+            // let function_id = self.db.calls[call_key].function_id;
+            // let function_first = self.db.functions[function_id].line;
+            // info!("load {arg:?}");
+
             self.location = self
                 .flow_preloader
                 .expr_loader
-                .find_function_location(&self.location, &line);
+                .find_function_location(&location, &location.line);
         }
 
         // info!("location flow {:?}", self.location);
 
         let mut flow_update = FlowUpdate::new();
-        let flow_view_update = self.load_view_update(db);
+        let flow_view_update = self.load_view_update(replay);
 
         flow_update.location = self.location.clone();
         flow_update.view_updates.push(flow_view_update);
@@ -220,11 +228,12 @@ impl<'a> CallFlowPreloader<'a> {
         }
     }
 
-    fn load_view_update(&mut self, db: &Db) -> FlowViewUpdate {
-        let start_step_id = StepId(self.location.rr_ticks.0);
-        let call_key: CallKey = db.steps[start_step_id].call_key;
+    fn load_view_update(&mut self, replay: &mut dyn Replay) -> FlowViewUpdate {
+        // let start_step_id = StepId(self.location.rr_ticks.0);
+        let call_key: CallKey = self.location.call_key; // db.steps[start_step_id].call_key;
+        // db.calls[call_key].step_id;
         // let mut path_buf = &PathBuf::from(&self.location.path);
-        let mut iter_step_id = db.calls[call_key].step_id;
+        let mut iter_step_id = StepId(self.location.rrTicks.0);
         let mut flow_view_update = FlowViewUpdate::new(self.location.clone());
         let mut step_count = 0;
         let mut first = true;
