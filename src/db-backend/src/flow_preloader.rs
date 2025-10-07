@@ -3,7 +3,7 @@ use crate::{
     expr_loader::ExprLoader,
     task::{
         BranchesTaken, CoreTrace, FlowEvent, FlowStep, FlowUpdate, FlowUpdateState, FlowUpdateStateKind,
-        FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount,
+        FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount,
     },
 };
 use log::{info, warn};
@@ -82,12 +82,6 @@ impl FlowPreloader {
     // }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum FlowMode {
-    Call,
-    Diff,
-}
 
 pub struct CallFlowPreloader<'a> {
     flow_preloader: &'a FlowPreloader,
