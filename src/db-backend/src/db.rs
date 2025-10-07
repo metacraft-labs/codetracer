@@ -998,6 +998,12 @@ impl Replay for DbReplay {
 
         Ok(locals)
     }
+
+    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        self.step_id = step_id;
+        Ok(true)
+    }
+
     fn current_step_id(&mut self) -> StepId {
         self.step_id
     }

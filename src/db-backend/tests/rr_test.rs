@@ -3,12 +3,14 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde_json::json;
+use ntest::timeout;
 
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 // use db_backend::dap_types::StackTraceArguments;
 use db_backend::task;
 
 #[test]
+#[timeout(5_000)] // try to detect hanging, e.g. waiting for response that doesn't come
 #[ignore] // ignored by default, as they depend on closed source ct-rr-worker/also not finished setup
 fn test_rr() {
     let bin = env!("CARGO_BIN_EXE_db-backend");
@@ -117,11 +119,14 @@ fn test_rr() {
         let _ = dap::from_reader(&mut reader).unwrap();
     }
 
+    let last_location: task::Location; // = task::Location::default();
+
     let msg_complete_move_before_local_check = dap::from_reader(&mut reader).unwrap();
     match msg_complete_move_before_local_check {
         DapMessage::Event(e) => {
             assert_eq!(e.event, "ct/complete-move");
             let move_state = serde_json::from_value::<task::MoveState>(e.body).expect("valid move state");
+            last_location = move_state.location.clone();
             let path = PathBuf::from(move_state.clone().location.path);
             let filename = path.file_name().expect("filename");
             assert_eq!(filename.display().to_string(), "rr_gdb.rs");
@@ -131,25 +136,52 @@ fn test_rr() {
         _ => panic!("expected a complete move events, but got {:?}", msg_complete_move_before_local_check),
 
     }
+    let _next_response = dap::from_reader(&mut reader).unwrap();
 
     let load_locals_request = client.request("ct/load-locals", serde_json::to_value(&task::CtLoadLocalsArguments {
         count_budget: 3_000,
         min_count_limit: 50,
         rr_ticks: 0,
-    }).unwrap());
-    let _next_response = dap::from_reader(&mut reader).unwrap();
-
+    }).unwrap());    
     dap::write_message(&mut writer, &load_locals_request).unwrap();
+
     let load_locals_response = dap::from_reader(&mut reader).unwrap();
-    if let DapMessage::Response(response) = load_locals_response {
-        assert_eq!(response.command, "ct/load-locals");
-        println!("{:?}", response.body);
-        let variables = serde_json::from_value::<task::CtLoadLocalsResponseBody>(response.body)
-            .expect("valid local response")
-            .locals;
-        assert_eq!(variables[0].expression, "i");
-        assert_eq!(variables[0].value.typ.lang_type, "i64"); //?
-        assert_eq!(variables[0].value.i, "0");
+
+    match load_locals_response {
+        DapMessage::Response(response) => {
+            assert_eq!(response.command, "ct/load-locals");
+            // println!("{:?}", response.body);
+            let variables = serde_json::from_value::<task::CtLoadLocalsResponseBody>(response.body)
+                .expect("valid local response")
+                .locals;
+            assert_eq!(variables[0].expression, "i");
+            assert_eq!(variables[0].value.typ.lang_type, "i64"); //?
+            assert_eq!(variables[0].value.i, "0");
+        },
+        _ => {
+            panic!("expected a ct/load-locals response, received {:?}", load_locals_response);
+        }
+    }
+
+    let load_flow_request = client.request("ct/load-flow", serde_json::to_value(&task::CtLoadFlowArguments {
+        flow_mode: task::FlowMode::Call,
+        location: last_location.clone(),
+    }).unwrap());
+    dap::write_message(&mut writer, &load_flow_request).unwrap();
+
+    let flow_update_response = dap::from_reader(&mut reader).unwrap();
+    match flow_update_response {
+        DapMessage::Response(response) => {
+            assert_eq!(response.command, "ct/load-flow");
+            println!("{:?}", response.body);
+            let flow_update = serde_json::from_value::<task::FlowUpdate>(response.body)
+                .expect("valid flow update");
+            let flow_view_update = &flow_update.view_updates[0];
+            assert_eq!(flow_view_update.steps.len() > 0, true, "no steps found");
+        },
+        _ => {
+            panic!("expected a flow update response, received: {:?}", flow_update_response);
+        }
     }
 
     // let threads_request = client.request("threads", json!({}));
