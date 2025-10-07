@@ -1,7 +1,8 @@
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::dap_server;
 use db_backend::dap_types::StackTraceArguments;
-use serde_json::json;
+use db_backend::transport::DapTransport;
+use serde_json::{from_reader, json};
 use std::io::BufReader;
 
 #[cfg(target_arch = "x86_64")]
@@ -31,6 +32,7 @@ fn test_backend_dap_server() {
 
     let socket_path = dap_server::socket_path_for(std::process::id() as usize);
     let mut child = Command::new(bin).arg("dap-server").arg(&socket_path).spawn().unwrap();
+
     wait_for_socket(&socket_path);
 
     let stream = UnixStream::connect(&socket_path).unwrap();
@@ -39,7 +41,8 @@ fn test_backend_dap_server() {
 
     let mut client = DapClient::default();
     let init = client.request("initialize", json!({}));
-    dap::write_message(&mut writer, &init).unwrap();
+    // dap::write_message(&mut writer, &init).unwrap();
+    writer.send(&init);
     let launch_args = LaunchRequestArguments {
         program: Some("main".to_string()),
         trace_folder: Some(trace_dir),
@@ -55,9 +58,10 @@ fn test_backend_dap_server() {
         session_id: None,
     };
     let launch = client.launch(launch_args).unwrap();
-    dap::write_message(&mut writer, &launch).unwrap();
+    // dap::write_message(&mut writer, &launch).unwrap();
+    writer.send(&launch).unwrap();
 
-    let msg1 = dap::from_reader(&mut reader).unwrap();
+    let msg1 = from_reader(&mut reader).unwrap();
     match msg1 {
         DapMessage::Response(r) => {
             assert_eq!(r.command, "initialize");
@@ -71,25 +75,26 @@ fn test_backend_dap_server() {
         }
         _ => panic!(),
     }
-    let msg2 = dap::from_reader(&mut reader).unwrap();
+    let msg2 = from_reader(&mut reader).unwrap();
     match msg2 {
         DapMessage::Event(e) => assert_eq!(e.event, "initialized"),
         _ => panic!(),
     }
     let conf_done = client.request("configurationDone", json!({}));
-    dap::write_message(&mut writer, &conf_done).unwrap();
-    let msg3 = dap::from_reader(&mut reader).unwrap();
+    // dap::write_message(&mut writer, &conf_done).unwrap();
+    writer.send(&conf_done).unwrap();
+    let msg3 = from_reader(&mut reader).unwrap();
     match msg3 {
         DapMessage::Response(r) => assert_eq!(r.command, "launch"),
         _ => panic!(),
     }
-    let msg4 = dap::from_reader(&mut reader).unwrap();
+    let msg4 = from_reader(&mut reader).unwrap();
     match msg4 {
         DapMessage::Response(r) => assert_eq!(r.command, "configurationDone"),
         _ => panic!(),
     }
 
-    let msg5 = dap::from_reader(&mut reader).unwrap();
+    let msg5 = from_reader(&mut reader).unwrap();
     match msg5 {
         DapMessage::Event(e) => {
             assert_eq!(e.event, "stopped");
@@ -98,7 +103,7 @@ fn test_backend_dap_server() {
         _ => panic!("expected a stopped event, but got {:?}", msg5),
     }
 
-    let msg_complete_move = dap::from_reader(&mut reader).unwrap();
+    let msg_complete_move = from_reader(&mut reader).unwrap();
     match msg_complete_move {
         DapMessage::Event(e) => {
             assert_eq!(e.event, "ct/complete-move");
@@ -107,8 +112,9 @@ fn test_backend_dap_server() {
     }
 
     let threads_request = client.request("threads", json!({}));
-    dap::write_message(&mut writer, &threads_request).unwrap();
-    let msg_threads = dap::from_reader(&mut reader).unwrap();
+    // dap::write_message(&mut writer, &threads_request).unwrap();
+    writer.send(&threads_request).unwrap();
+    let msg_threads = from_reader(&mut reader).unwrap();
     match msg_threads {
         DapMessage::Response(r) => {
             assert_eq!(r.command, "threads");
@@ -130,8 +136,9 @@ fn test_backend_dap_server() {
         })
         .unwrap(),
     );
-    dap::write_message(&mut writer, &stack_trace_request).unwrap();
-    let msg_stack_trace = dap::from_reader(&mut reader).unwrap();
+    // dap::write_message(&mut writer, &stack_trace_request).unwrap();
+    writer.send(&stack_trace_request).unwrap();
+    let msg_stack_trace = from_reader(&mut reader).unwrap();
     match msg_stack_trace {
         DapMessage::Response(r) => assert_eq!(r.command, "stackTrace"), // TODO: test stackFrames / totalFrames ?
         _ => panic!(),
