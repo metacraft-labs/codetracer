@@ -1,4 +1,4 @@
-#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "io-transport")]
 use expanduser::expanduser;
 
 use std::collections::HashMap;

@@ -5,7 +5,6 @@ use db_backend::transport::DapTransport;
 use serde_json::{from_reader, json};
 use std::io::BufReader;
 
-#[cfg(target_arch = "x86_64")]
 use std::os::unix::net::UnixStream;
 
 use std::path::{Path, PathBuf};

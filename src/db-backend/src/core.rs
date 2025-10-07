@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::Write;
 
+#[cfg(feature = "io-transport")]
 use std::os::unix::net::UnixStream;
 
 use std::path::PathBuf;
