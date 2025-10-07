@@ -11,7 +11,6 @@ use runtime_tracing::{
     EventLogKind, Line, Tracer, TypeId, TypeKind, ValueRecord, NONE_TYPE_ID, NONE_VALUE,
 };
 
-mod lang;
 mod node;
 mod parser;
 mod position;
