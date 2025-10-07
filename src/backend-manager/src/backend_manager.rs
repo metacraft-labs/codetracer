@@ -71,16 +71,16 @@ impl BackendManager {
 
                 let mut res = res2.lock().await;
                 for rx in res.children_receivers.iter_mut().flatten() {
-                    if !rx.is_empty() {
-                        if let Some(message) = rx.recv().await {
-                            let write_res =
-                                socket_write.write_all(&DapParser::to_bytes(&message)).await;
+                    if !rx.is_empty()
+                        && let Some(message) = rx.recv().await
+                    {
+                        let write_res =
+                            socket_write.write_all(&DapParser::to_bytes(&message)).await;
 
-                            match write_res {
-                                Ok(()) => {}
-                                Err(err) => {
-                                    error!("Can't write to frontend socket! Error: {err}");
-                                }
+                        match write_res {
+                            Ok(()) => {}
+                            Err(err) => {
+                                error!("Can't write to frontend socket! Error: {err}");
                             }
                         }
                     }
@@ -305,52 +305,51 @@ impl BackendManager {
 
                 match req_type {
                     "ct/start-replay" => {
-                        if let Some(Value::Array(arr)) = args {
-                            if let Some(Value::String(command)) = arr.first() {
-                                let mut cmd_args: Vec<&str> = Vec::new();
-                                for arg in arr.iter().skip(1) {
-                                    if let Some(s) = arg.as_str() {
-                                        cmd_args.push(s);
-                                    } else {
-                                        // TODO: return error
-                                        return Ok(());
-                                    }
+                        if let Some(Value::Array(arr)) = args
+                            && let Some(Value::String(command)) = arr.first()
+                        {
+                            let mut cmd_args: Vec<&str> = Vec::new();
+                            for arg in arr.iter().skip(1) {
+                                if let Some(s) = arg.as_str() {
+                                    cmd_args.push(s);
+                                } else {
+                                    // TODO: return error
+                                    return Ok(());
                                 }
-                                self.start_replay(command, &cmd_args).await?;
-                                // TODO: send response
-                                return Ok(());
                             }
+                            self.start_replay(command, &cmd_args).await?;
+                            // TODO: send response
+                            return Ok(());
                         }
                         // TODO: return error
                         Ok(())
                     }
                     "ct/stop-replay" => {
-                        if let Some(Value::Number(num)) = args {
-                            if let Some(id) = num.as_u64() {
-                                self.stop_replay(id as usize).await?;
-                                return Ok(());
-                            }
+                        if let Some(Value::Number(num)) = args
+                            && let Some(id) = num.as_u64()
+                        {
+                            self.stop_replay(id as usize).await?;
+                            return Ok(());
                         }
                         // TODO: return error
                         Ok(())
                     }
                     "ct/select-replay" => {
-                        if let Some(Value::Number(num)) = args {
-                            if let Some(id) = num.as_u64() {
-                                self.select_replay(id as usize)?;
-                                return Ok(());
-                            }
+                        if let Some(Value::Number(num)) = args
+                            && let Some(id) = num.as_u64()
+                        {
+                            self.select_replay(id as usize)?;
+                            return Ok(());
                         }
                         // TODO: return error
                         Ok(())
                     }
                     _ => {
-                        if let Some(Value::Object(obj_args)) = args {
-                            if let Some(Value::Number(id)) = obj_args.get("replay-id") {
-                                if let Some(id) = id.as_u64() {
-                                    return self.message(id as usize, message).await;
-                                }
-                            }
+                        if let Some(Value::Object(obj_args)) = args
+                            && let Some(Value::Number(id)) = obj_args.get("replay-id")
+                            && let Some(id) = id.as_u64()
+                        {
+                            return self.message(id as usize, message).await;
                         }
                         self.message_selected(message).await
                     }

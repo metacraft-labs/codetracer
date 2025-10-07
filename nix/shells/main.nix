@@ -29,7 +29,13 @@ mkShell {
       # general dependencies
       git
 
-      rustup
+      binaryen
+      llvmPackages_21.clang-unwrapped
+      # clang
+      llvm
+      glibc_multi
+
+      wasm-pack
 
       gcc
       binutils
@@ -69,9 +75,10 @@ mkShell {
       # https://github.com/casey/just
       just
 
-      cargo
-      rustc
+      rustup
       rustfmt
+      emscripten
+      capnproto
       # ourPkgs.codetracer-rust-wrapped
 
       # For inspecting our deb packages
@@ -170,8 +177,15 @@ mkShell {
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
   shellHook = ''
-    rustup override set 1.88
+    rustup override set 1.89
     rustup target add wasm32-unknown-unknown
+    rustup target add wasm32-unknown-emscripten
+    rustup target add x86_64-unknown-linux-gnu
+
+
+    export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"
+    export CFLAGS_wasm32_unknown_unknown="-I$(pwd)/src/db-backend/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
+
 
     # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
     ROOT_PATH=$(git rev-parse --show-toplevel)

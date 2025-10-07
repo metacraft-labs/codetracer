@@ -10,6 +10,7 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
+use crate::paths::CODETRACER_PATHS;
 use chrono::Local;
 use clap::Parser;
 use log::LevelFilter;
@@ -17,13 +18,13 @@ use log::{error, info};
 use std::fs::File;
 use std::io::Write;
 use std::panic::PanicHookInfo;
-use std::{error::Error, panic};
 use std::path::PathBuf;
-use crate::paths::CODETRACER_PATHS;
+use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
 mod dap;
+mod dap_error;
 mod dap_server;
 mod dap_types;
 mod db;
@@ -39,6 +40,7 @@ mod step_lines_loader;
 mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
+mod transport;
 mod value;
 
 /// a custom backend for ruby (maybe others) support
@@ -60,6 +62,12 @@ fn panic_handler(info: &PanicHookInfo) {
     error!("PANIC!!! {}", info);
 }
 
+#[cfg(feature = "browser-transport")]
+fn main() {}
+
+// #[cfg(not(any(feature = "io-transport", feature = "browser-transport")))]
+
+#[cfg(feature = "io-transport")]
 fn main() -> Result<(), Box<dyn Error>> {
     panic::set_hook(Box::new(panic_handler));
 
@@ -73,9 +81,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let log_path = run_dir.join("db-backend_db-backend_0.log");
     // eprintln!("{}", log_path.display());
 
-    let tmp_path: PathBuf = {
-        CODETRACER_PATHS.lock()?.tmp_path.clone()
-    };
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
 
     let target = Box::new(File::create(tmp_path.join("db-backend.log"))?);
 
@@ -99,11 +105,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
-    // let handle =
     if cli.stdio {
-        // thread::spawn(move || {
         let _ = db_backend::dap_server::run_stdio();
-        // })
     } else {
         let socket_path = if let Some(p) = cli.socket_path {
             p
@@ -111,14 +114,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let pid = std::process::id() as usize;
             db_backend::dap_server::socket_path_for(pid)
         };
-        // thread::spawn(move || {
+
+        info!("dap_server::run {:?}", socket_path);
+
         let _ = db_backend::dap_server::run(&socket_path);
-        // })
     };
 
-    // match handle.join() {
-    //     Ok(_) => Ok(()),
-    //     Err(err) => Err(format!("dap server thread panicked {err:?}").into()),
-    // }
     Ok(())
 }

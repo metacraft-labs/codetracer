@@ -1,10 +1,14 @@
-use crate::dap_types;
-use crate::task::{self};
+use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
+use crate::task::{self, CtUpdatedTableResponseBody};
 use log::{error, info};
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::path::PathBuf;
+
+type DapResult<T> = std::result::Result<T, DapError>;
+
+use crate::dap_error::DapError;
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
@@ -90,7 +94,7 @@ pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> da
 pub struct DisconnectResponseBody {}
 
 impl Request {
-    pub fn load_args<T: DeserializeOwned>(&self) -> Result<T, Box<dyn std::error::Error>> {
+    pub fn load_args<T: DeserializeOwned>(&self) -> DapResult<T> {
         Ok(serde_json::from_value::<T>(self.arguments.clone())?)
     }
 }
@@ -148,18 +152,15 @@ impl DapClient {
         })
     }
 
-    pub fn launch(&mut self, args: LaunchRequestArguments) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn launch(&mut self, args: LaunchRequestArguments) -> DapResult<DapMessage> {
         Ok(self.request("launch", serde_json::to_value(args)?))
     }
 
-    pub fn set_breakpoints(
-        &mut self,
-        args: dap_types::SetBreakpointsArguments,
-    ) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn set_breakpoints(&mut self, args: SetBreakpointsArguments) -> DapResult<DapMessage> {
         Ok(self.request("setBreakpoints", serde_json::to_value(args)?))
     }
 
-    pub fn updated_trace_event(&mut self, args: task::TraceUpdate) -> Result<DapMessage, Box<dyn std::error::Error>> {
+    pub fn updated_trace_event(&mut self, args: task::TraceUpdate) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -170,8 +171,8 @@ impl DapClient {
         }))
     }
 
-    pub fn stopped_event(&mut self, reason: &str) -> Result<DapMessage, serde_json::Error> {
-        let body = dap_types::StoppedEventBody {
+    pub fn stopped_event(&mut self, reason: &str) -> DapResult<DapMessage> {
+        let body = StoppedEventBody {
             reason: reason.to_string(),
             thread_id: Some(1),
             all_threads_stopped: Some(true),
@@ -190,7 +191,7 @@ impl DapClient {
         }))
     }
 
-    pub fn updated_flow_event(&mut self, flow_update: task::FlowUpdate) -> Result<DapMessage, serde_json::Error> {
+    pub fn updated_flow_event(&mut self, flow_update: task::FlowUpdate) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -201,10 +202,7 @@ impl DapClient {
         }))
     }
 
-    pub fn updated_history_event(
-        &mut self,
-        history_update: task::HistoryUpdate,
-    ) -> Result<DapMessage, serde_json::Error> {
+    pub fn updated_history_event(&mut self, history_update: task::HistoryUpdate) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -215,7 +213,7 @@ impl DapClient {
         }))
     }
 
-    pub fn calltrace_search_event(&mut self, search_res: Vec<task::Call>) -> Result<DapMessage, serde_json::Error> {
+    pub fn calltrace_search_event(&mut self, search_res: Vec<task::Call>) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -226,7 +224,7 @@ impl DapClient {
         }))
     }
 
-    pub fn updated_events(&mut self, first_events: Vec<task::ProgramEvent>) -> Result<DapMessage, serde_json::Error> {
+    pub fn updated_events(&mut self, first_events: Vec<task::ProgramEvent>) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -237,7 +235,7 @@ impl DapClient {
         }))
     }
 
-    pub fn updated_events_content(&mut self, contents: String) -> Result<DapMessage, serde_json::Error> {
+    pub fn updated_events_content(&mut self, contents: String) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -248,10 +246,7 @@ impl DapClient {
         }))
     }
 
-    pub fn updated_calltrace_event(
-        &mut self,
-        update: &task::CallArgsUpdateResults,
-    ) -> Result<DapMessage, serde_json::Error> {
+    pub fn updated_calltrace_event(&mut self, update: &task::CallArgsUpdateResults) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -262,10 +257,7 @@ impl DapClient {
         }))
     }
 
-    pub fn updated_table_event(
-        &mut self,
-        update: &task::CtUpdatedTableResponseBody,
-    ) -> Result<DapMessage, serde_json::Error> {
+    pub fn updated_table_event(&mut self, update: &CtUpdatedTableResponseBody) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -276,7 +268,7 @@ impl DapClient {
         }))
     }
 
-    pub fn complete_move_event(&mut self, state: &task::MoveState) -> Result<DapMessage, serde_json::Error> {
+    pub fn complete_move_event(&mut self, state: &task::MoveState) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -287,7 +279,7 @@ impl DapClient {
         }))
     }
 
-    pub fn loaded_terminal_event(&mut self, events: Vec<task::ProgramEvent>) -> Result<DapMessage, serde_json::Error> {
+    pub fn loaded_terminal_event(&mut self, events: Vec<task::ProgramEvent>) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -298,7 +290,7 @@ impl DapClient {
         }))
     }
 
-    pub fn notification_event(&mut self, notification: task::Notification) -> Result<DapMessage, serde_json::Error> {
+    pub fn notification_event(&mut self, notification: task::Notification) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
@@ -309,14 +301,8 @@ impl DapClient {
         }))
     }
 
-    pub fn output_event(
-        &mut self,
-        category: &str,
-        path: &str,
-        line: usize,
-        output: &str,
-    ) -> Result<DapMessage, serde_json::Error> {
-        let body = dap_types::OutputEventBody {
+    pub fn output_event(&mut self, category: &str, path: &str, line: usize, output: &str) -> DapResult<DapMessage> {
+        let body = OutputEventBody {
             category: Some(category.to_string()),
             output: output.to_string(),
             group: None,
@@ -357,7 +343,7 @@ impl DapClient {
     }
 }
 
-pub fn from_json(s: &str) -> Result<DapMessage, serde_json::Error> {
+pub fn from_json(s: &str) -> DapResult<DapMessage> {
     let value: Value = serde_json::from_str(s)?;
     match value.get("type").and_then(|v| v.as_str()) {
         Some("request") => {
@@ -371,15 +357,16 @@ pub fn from_json(s: &str) -> Result<DapMessage, serde_json::Error> {
         }
         Some("response") => Ok(DapMessage::Response(serde_json::from_value(value)?)),
         Some("event") => Ok(DapMessage::Event(serde_json::from_value(value)?)),
-        _ => Err(serde_json::Error::custom("Unknown DAP message type")),
+        _ => Err(serde_json::Error::custom("Unknown DAP message type"))?,
     }
 }
 
-pub fn to_json(message: &DapMessage) -> Result<String, serde_json::Error> {
-    serde_json::to_string(message)
+pub fn to_json(message: &DapMessage) -> DapResult<String> {
+    Ok(serde_json::to_string(message)?)
 }
 
-pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json::Error> {
+#[cfg(feature = "io-transport")]
+pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
     info!("from_reader");
     let mut header = String::new();
     reader.read_line(&mut header).map_err(|e| {
@@ -388,7 +375,7 @@ pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json:
     })?;
     if !header.to_ascii_lowercase().starts_with("content-length:") {
         // println!("no content-length!");
-        return Err(serde_json::Error::custom("Missing Content-Length header"));
+        return Err(serde_json::Error::custom("Missing Content-Length header").into());
     }
     let len_part = header
         .split(':')
@@ -411,17 +398,101 @@ pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<DapMessage, serde_json:
     from_json(json_text)
 }
 
-pub fn write_message<W: Write>(writer: &mut W, message: &DapMessage) -> Result<(), serde_json::Error> {
-    let json = to_json(message)?;
-    let header = format!("Content-Length: {}\r\n\r\n", json.len());
-    writer
-        .write_all(header.as_bytes())
-        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
-    writer
-        .write_all(json.as_bytes())
-        .map_err(|e| serde_json::Error::custom(e.to_string()))?;
+#[cfg(feature = "browser-transport")]
+pub fn setup_onmessage_callback() -> Result<(), DapError> {
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, HashSet},
+        rc::Rc,
+    };
 
-    writer.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
-    info!("DAP -> {:?}", message);
+    use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
+    use web_sys::{
+        js_sys::{self, Function},
+        MessageEvent,
+    };
+
+    use crate::{
+        dap_server::{make_transport, Ctx},
+        handler::Handler,
+        transport::{DapTransport, WorkerTransport},
+    };
+
+    let global = js_sys::global();
+
+    let scope: web_sys::DedicatedWorkerGlobalScope = global
+        .dyn_into()
+        .map_err(|_| wasm_bindgen::JsValue::from_str("Not running inside a DedicatedWorkerGlobalScope"))?;
+
+    let seq = 1i64;
+    let breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
+    let handler: Option<Handler> = None;
+    let received_launch = false;
+    let launch_trace_folder = PathBuf::from("");
+    let launch_trace_file = PathBuf::from("");
+    let received_configuration_done = false;
+
+    // NOTE: This does not have to be wrapped in a lock
+    // This will run in the browser and JS callback code blocks are "critical sections".
+    let mut ctx = Ctx {
+        seq,
+        breakpoints,
+        handler,
+        received_launch,
+        launch_trace_folder,
+        launch_trace_file,
+        received_configuration_done,
+    };
+
+    // TODO: Handle error
+    let mut transport = make_transport().unwrap();
+
+    let t = Rc::new(scope);
+
+    let t_clone = t.clone();
+
+    let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
+        use serde_wasm_bindgen::to_value;
+        use wasm_bindgen::{JsValue, UnwrapThrowExt};
+        use web_sys::js_sys::JSON;
+
+        use crate::dap_server::handle_message;
+
+        let dap_message_raw = event.data();
+
+        web_sys::console::log_1(&"RAW DAP MESSAGE".into());
+        web_sys::console::log_1(&dap_message_raw);
+
+        t_clone
+            .post_message(&JsValue::from_str("This is a message from the worker!"))
+            .map_err(|_| "Could not convert message")
+            .unwrap_throw();
+
+        let dap_message_str = JSON::stringify(&dap_message_raw)
+            .unwrap_throw()
+            .as_string()
+            .unwrap_throw();
+
+        web_sys::console::log_1(&"DAP MESSAGE AS STR".into());
+        web_sys::console::log_1(&JsValue::from_str(&dap_message_str));
+
+        let dap_message = from_json(&dap_message_str)
+            .map_err(|_| "Could not convert message")
+            .unwrap_throw();
+
+        let payload = to_value(&dap_message)
+            .map_err(|_| "Could not convert message")
+            .unwrap_throw();
+
+        t_clone.post_message(&payload).unwrap_throw();
+
+        // TODO: Handle error
+        handle_message(&dap_message, &mut transport, &mut ctx).unwrap_throw();
+    }) as Box<dyn FnMut(_)>)
+    .into_js_value()
+    .unchecked_into::<Function>();
+
+    t.set_onmessage(Some(&callback));
+
     Ok(())
 }

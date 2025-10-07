@@ -1,47 +1,122 @@
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
-use crate::dap_types;
+use crate::dap_types::{self, Breakpoint, SetBreakpointsArguments, SetBreakpointsResponseBody, Source};
+
+#[cfg(feature = "browser-transport")]
+use crate::dap_error::DapError;
+
 use crate::db::Db;
 use crate::handler::Handler;
+use crate::paths::CODETRACER_PATHS;
 use crate::task::{
     gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, FunctionLocation,
     LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
     StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
 };
-use crate::paths::CODETRACER_PATHS;
+
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
-use log::{error, info, warn};
+
+use crate::transport::DapTransport;
+
+#[cfg(feature = "browser-transport")]
+use crate::transport::WorkerTransport;
+
+use log::{error, info};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
-use std::io::{BufRead, BufReader, Write};
+use std::io::BufRead;
+
+#[cfg(feature = "io-transport")]
+use std::io::BufReader;
+
+#[cfg(feature = "io-transport")]
 use std::os::unix::net::UnixStream;
+
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+// fn forward_raw_events<W: Write>(
+//     rx: &mpsc::Receiver<BackendResponse>,
+//     writer: &mut W,
+//     seq: &mut i64,
+// ) -> Result<(), Box<dyn Error>> {
+//     while let Ok(BackendResponse::EventResponse((kind, _id, payload, raw))) = rx.try_recv() {
+//         if raw && matches!(kind, EventKind::MissingEventKind) {
+//             if let Ok(DapMessage::Event(mut ev)) = dap::from_json(&payload) {
+//                 ev.base.seq = *seq;
+//                 *seq += 1;
+//                 dap::write_message(writer, &DapMessage::Event(ev))?;
+//             }
+//         }
+//     }
+//     Ok(())
+// }
+
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
-pub fn socket_path_for(pid: usize) -> PathBuf {
-    CODETRACER_PATHS.lock().unwrap().tmp_path.join(format!("{DAP_SOCKET_NAME}_{}", pid))
-}
+#[cfg(feature = "io-transport")]
+pub fn make_io_transport() -> Result<(BufReader<std::io::StdinLock<'static>>, std::io::Stdout), Box<dyn Error>> {
+    use std::io::BufReader;
 
-pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
-    info!("dap_server::run {:?}", socket_path);
-    let stream = UnixStream::connect(socket_path)?;
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut writer = stream;
-
-    handle_client(&mut reader, &mut writer)
-}
-
-pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    let mut reader = BufReader::new(stdin.lock());
-    let mut writer = stdout.lock();
+    let reader = BufReader::new(stdin.lock());
+    Ok((reader, stdout))
+}
+
+#[cfg(feature = "io-transport")]
+pub fn make_socket_transport(
+    socket_path: &PathBuf,
+) -> Result<(std::io::BufReader<UnixStream>, UnixStream), Box<dyn Error>> {
+    use std::io::BufReader;
+
+    let stream = UnixStream::connect(socket_path)?;
+    let reader = BufReader::new(stream.try_clone()?);
+    let writer = stream;
+    Ok((reader, writer))
+}
+
+#[cfg(feature = "browser-transport")]
+pub fn make_transport() -> Result<WorkerTransport, DapError> {
+    WorkerTransport::new()
+}
+
+pub fn socket_path_for(pid: usize) -> PathBuf {
+    CODETRACER_PATHS
+        .lock()
+        .unwrap()
+        .tmp_path
+        .join(format!("{DAP_SOCKET_NAME}_{}", pid))
+}
+
+#[cfg(feature = "io-transport")]
+pub fn run_stdio() -> Result<(), Box<dyn Error>> {
+    // let mut transport = make_io_transport().unwrap();
+
+    let (mut reader, mut writer) = make_io_transport().unwrap();
+
     handle_client(&mut reader, &mut writer)
 }
 
+#[cfg(feature = "io-transport")]
+pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    // let mut transport = make_io_transport().unwrap();
+
+    let (mut reader, mut writer) = make_socket_transport(socket_path).unwrap();
+
+    handle_client(&mut reader, &mut writer)
+}
+
+// pub fn run_stdio() -> Result<(), Box<dyn Error>> {
+//     let stdin = std::io::stdin();
+//     let stdout = std::io::stdout();
+//     let mut reader = BufReader::new(stdin.lock());
+//     let mut writer = stdout.lock();
+//     handle_client(&mut reader, &mut writer)
+// }
+
+#[cfg(feature = "io-transport")]
 fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -53,23 +128,16 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
     let trace_path = trace_folder.join(trace_file);
     // duration code copied from
     // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-    let start = Instant::now();
+    let _start = Instant::now();
     if let (Ok(meta), Ok(trace)) = (
         load_trace_metadata(&metadata_path),
         load_trace_data(&trace_path, trace_file_format),
     ) {
-        let duration = start.elapsed();
-        info!("loading trace: duration: {:?}", duration);
-
-        let start2 = Instant::now();
+        let _start2 = Instant::now();
         let mut db = Db::new(&meta.workdir);
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
 
-        let duration2 = start2.elapsed();
-        info!("postprocessing trace: duration: {:?}", duration2);
-
-        // eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
         handler.run_to_entry(dap::Request::default())?;
@@ -79,10 +147,20 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
     }
 }
 
-fn write_dap_messages<W: Write>(writer: &mut W, handler: &mut Handler, seq: &mut i64) -> Result<(), Box<dyn Error>> {
+#[cfg(feature = "browser-transport")]
+fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
+    todo!()
+}
+
+fn write_dap_messages<T: DapTransport>(
+    transport: &mut T,
+    handler: &mut Handler,
+    seq: &mut i64,
+) -> Result<(), Box<dyn Error>> {
     for message in &handler.resulting_dap_messages {
-        dap::write_message(writer, message)?;
+        transport.send(message)?;
     }
+
     handler.reset_dap();
     *seq = handler.dap_client.seq;
     Ok(())
@@ -124,11 +202,11 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
     }
 }
 
-fn handle_request<W: Write>(
+fn handle_request<T: DapTransport>(
     handler: &mut Handler,
     req: dap::Request,
     seq: &mut i64,
-    writer: &mut W,
+    transport: &mut T,
 ) -> Result<(), Box<dyn Error>> {
     handler.dap_client.seq = *seq;
     match req.command.as_str() {
@@ -175,124 +253,105 @@ fn handle_request<W: Write>(
                     // TODO: eventually support? or if this is the last  branch
                     // in the top `match`
                     // assume all request left here are unsupported
-                    error!("unsupported dap command: {}", req.command);
+                    // error!("unsupported dap command: {}", req.command);
                     return Err(format!("command {} not supported here", req.command).into());
                 }
             }
         }
     }
-    write_dap_messages(writer, handler, seq)
+    write_dap_messages(transport, handler, seq)
 }
 
-fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
-    let mut seq = 1i64;
-    let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
-    // let (tx, _rx) = mpsc::channel();
-    let mut handler: Option<Handler> = None;
-    let mut received_launch = false;
-    let mut launch_trace_folder = PathBuf::from("");
-    let mut launch_trace_file = PathBuf::from("");
-    let mut received_configuration_done = false;
-    while let Ok(msg) = dap::from_reader(reader) {
-        info!("DAP <- {:?}", msg);
+pub struct Ctx {
+    pub seq: i64,
+    pub breakpoints: HashMap<String, HashSet<i64>>,
+    pub handler: Option<Handler>,
+    pub received_launch: bool,
+    pub launch_trace_folder: PathBuf,
+    pub launch_trace_file: PathBuf,
+    pub received_configuration_done: bool,
+}
 
-        match msg {
-            DapMessage::Request(req) if req.command == "initialize" => {
-                // TODO: process client capabilities
-                let capabilities = Capabilities {
-                    supports_loaded_sources_request: Some(false),
-                    supports_step_back: Some(true),
-                    supports_configuration_done_request: Some(true),
-                    supports_disassemble_request: Some(true),
-                    supports_log_points: Some(true),
-                    supports_restart_request: Some(true),
-                };
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "initialize".to_string(),
-                    message: None,
-                    body: serde_json::to_value(capabilities)?,
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
+pub fn handle_message<T: DapTransport>(
+    msg: &DapMessage,
+    transport: &mut T,
+    ctx: &mut Ctx,
+) -> Result<(), Box<dyn Error>> {
+    info!("Handling message: {:?}", msg);
+    match msg {
+        DapMessage::Request(req) if req.command == "initialize" => {
+            let capabilities = Capabilities {
+                supports_loaded_sources_request: Some(false),
+                supports_step_back: Some(true),
+                supports_configuration_done_request: Some(true),
+                supports_disassemble_request: Some(true),
+                supports_log_points: Some(true),
+                supports_restart_request: Some(true),
+            };
+            let resp = DapMessage::Response(Response {
+                base: ProtocolMessage {
+                    seq: ctx.seq,
+                    type_: "response".to_string(),
+                },
+                request_seq: req.base.seq,
+                success: true,
+                command: "initialize".to_string(),
+                message: None,
+                body: serde_json::to_value(capabilities)?,
+            });
+            ctx.seq += 1;
 
-                let event = DapMessage::Event(Event {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "event".to_string(),
-                    },
-                    event: "initialized".to_string(),
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &event)?;
-            }
-            DapMessage::Request(req) if req.command == "setBreakpoints" => {
-                let mut results = Vec::new();
-                let args = req.load_args::<dap_types::SetBreakpointsArguments>()?;
-                if let Some(path) = args.source.path.clone() {
-                    let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
-                        bps.into_iter().map(|b| b.line).collect()
-                    } else {
-                        args.lines.unwrap_or_default()
-                    };
-                    let entry = breakpoints.entry(path.clone()).or_default();
-                    if let Some(h) = handler.as_mut() {
-                        h.clear_breakpoints();
-                        for line in lines {
-                            entry.insert(line);
-                            let _ = h.add_breakpoint(
-                                SourceLocation {
-                                    path: path.clone(),
-                                    line: line as usize,
-                                },
-                                Task {
-                                    kind: TaskKind::AddBreak,
-                                    id: gen_task_id(TaskKind::AddBreak),
-                                },
-                            );
-                            results.push(dap_types::Breakpoint {
-                                id: None,
-                                verified: true,
-                                message: None,
-                                source: Some(dap_types::Source {
-                                    name: args.source.name.clone(),
-                                    path: Some(path.clone()),
-                                    source_reference: args.source.source_reference,
-                                    adapter_data: None,
-                                    checksums: None,
-                                    origin: None,
-                                    presentation_hint: None,
-                                    sources: None,
-                                }),
-                                line: Some(line),
-                                column: None,
-                                end_line: None,
-                                end_column: None,
-                                instruction_reference: None,
-                                offset: None,
-                                reason: None,
-                            });
-                        }
-                    }
+            transport.send(&resp)?;
+
+            let event = DapMessage::Event(Event {
+                base: ProtocolMessage {
+                    seq: ctx.seq,
+                    type_: "event".to_string(),
+                },
+                event: "initialized".to_string(),
+                body: json!({}),
+            });
+            ctx.seq += 1;
+            transport.send(&event)?;
+        }
+        DapMessage::Request(req) if req.command == "setBreakpoints" => {
+            let mut results = Vec::new();
+            let args = req.load_args::<SetBreakpointsArguments>()?;
+            if let Some(path) = args.source.path.clone() {
+                let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
+                    bps.into_iter().map(|b| b.line).collect()
                 } else {
-                    let lines = args
-                        .breakpoints
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|b| b.line)
-                        .collect::<Vec<_>>();
+                    args.lines.unwrap_or_default()
+                };
+                let entry = ctx.breakpoints.entry(path.clone()).or_default();
+                if let Some(h) = ctx.handler.as_mut() {
+                    h.clear_breakpoints();
                     for line in lines {
-                        results.push(dap_types::Breakpoint {
+                        entry.insert(line);
+                        let _ = h.add_breakpoint(
+                            SourceLocation {
+                                path: path.clone(),
+                                line: line as usize,
+                            },
+                            Task {
+                                kind: TaskKind::AddBreak,
+                                id: gen_task_id(TaskKind::AddBreak),
+                            },
+                        );
+                        results.push(Breakpoint {
                             id: None,
-                            verified: false,
-                            message: Some("missing source path".to_string()),
-                            source: None,
+                            verified: true,
+                            message: None,
+                            source: Some(Source {
+                                name: args.source.name.clone(),
+                                path: Some(path.clone()),
+                                source_reference: args.source.source_reference,
+                                presentation_hint: None,
+                                origin: None,
+                                sources: None,
+                                adapter_data: None,
+                                checksums: None,
+                            }),
                             line: Some(line),
                             column: None,
                             end_line: None,
@@ -303,113 +362,176 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                         });
                     }
                 }
-                let body = dap_types::SetBreakpointsResponseBody { breakpoints: results };
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "setBreakpoints".to_string(),
-                    message: None,
-                    body: serde_json::to_value(body)?,
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-            }
-            DapMessage::Request(req) if req.command == "launch" => {
-                received_launch = true;
-                let args = req.load_args::<dap::LaunchRequestArguments>()?;
-                if let Some(folder) = &args.trace_folder {
-                    launch_trace_folder = folder.clone();
-                    if let Some(trace_file) = &args.trace_file {
-                        launch_trace_file = trace_file.clone();
-                    } else {
-                        launch_trace_file = "trace.json".into();
-                    }
-                    info!("stored launch trace folder: {launch_trace_folder:?}");
-                    if received_configuration_done {
-                        handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq)?);
-                        if let Some(h) = handler.as_mut() {
-                            write_dap_messages(writer, h, &mut seq)?;
-                        }
-                    }
-                    // if let Some(pid) = args.pid {
-                    // eprintln!("PID: {}", pid);
-                    // }
-                }
-                info!("received launch; configuration done? {received_configuration_done}; req: {req:?}");
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "launch".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-            }
-            DapMessage::Request(req) if req.command == "configurationDone" => {
-                // TODO: run to entry/continue here, after setting the `launch` field
-                received_configuration_done = true;
-                let resp = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq,
-                        type_: "response".to_string(),
-                    },
-                    request_seq: req.base.seq,
-                    success: true,
-                    command: "configurationDone".to_string(),
-                    message: None,
-                    body: json!({}),
-                });
-                seq += 1;
-                dap::write_message(writer, &resp)?;
-
-                info!("configuration done sent response; received_launch: {received_launch}");
-                if received_launch {
-                    handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq)?);
-                    if let Some(h) = handler.as_mut() {
-                        write_dap_messages(writer, h, &mut seq)?;
-                    }
+            } else {
+                let lines = args
+                    .breakpoints
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|b| b.line)
+                    .collect::<Vec<_>>();
+                for line in lines {
+                    results.push(Breakpoint {
+                        id: None,
+                        verified: false,
+                        message: Some("missing source path".to_string()),
+                        source: None,
+                        line: Some(line),
+                        column: None,
+                        end_line: None,
+                        end_column: None,
+                        instruction_reference: None,
+                        offset: None,
+                        reason: None,
+                    });
                 }
             }
-            DapMessage::Request(req) if req.command == "disconnect" => {
-                if let Some(h) = handler.as_mut() {
-                    let args = req.load_args::<dap_types::DisconnectArguments>()?;
-                    h.dap_client.seq = seq;
-                    h.respond_to_disconnect(req, args)?;
-                    write_dap_messages(writer, h, &mut seq)?;
-
-                    // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
-                    // > and then to shut down itself (the debug adapter).
-                    // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
-                    // we don't have a debuggee process, just a db, so we just stop db-backend for now
-                    // (and before that, we respond to the request, acknowledging it)
-                    //
-                    // we allow it for now here, but if additional cleanup is needed, maybe we'd need
-                    // to return to upper functions
-                    #[allow(clippy::exit)]
-                    std::process::exit(0);
-                }
-            }
-            DapMessage::Request(req) => {
-                if let Some(h) = handler.as_mut() {
-                    let res = handle_request(h, req, &mut seq, writer);
-                    if let Err(e) = res {
-                        warn!("handle_request error: {e:?}");
-                    }
-                }
-            }
-            _ => {}
+            let body = SetBreakpointsResponseBody { breakpoints: results };
+            let resp = DapMessage::Response(Response {
+                base: ProtocolMessage {
+                    seq: ctx.seq,
+                    type_: "response".to_string(),
+                },
+                request_seq: req.base.seq,
+                success: true,
+                command: "setBreakpoints".to_string(),
+                message: None,
+                body: serde_json::to_value(body)?,
+            });
+            ctx.seq += 1;
+            transport.send(&resp)?;
         }
-        // forward_raw_events(&rx, writer, &mut seq)?;
+        DapMessage::Request(req) if req.command == "launch" => {
+            ctx.received_launch = true;
+            let args = req.load_args::<dap::LaunchRequestArguments>()?;
+            if let Some(folder) = &args.trace_folder {
+                ctx.launch_trace_folder = folder.clone();
+                if let Some(trace_file) = &args.trace_file {
+                    ctx.launch_trace_file = trace_file.clone();
+                } else {
+                    ctx.launch_trace_file = "trace.json".into();
+                }
+
+                // info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder);
+
+                if ctx.received_configuration_done {
+                    ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
+                    if let Some(h) = ctx.handler.as_mut() {
+                        write_dap_messages(transport, h, &mut ctx.seq)?;
+                    }
+                }
+                // if let Some(pid) = args.pid {
+                // eprintln!("PID: {}", pid);
+                // }
+            }
+            // info!(
+            //     "received launch; configuration done? {0:?}; req: {1:?}",
+            //     ctx.received_configuration_done, req
+            // );
+
+            let resp = DapMessage::Response(Response {
+                base: ProtocolMessage {
+                    seq: ctx.seq,
+                    type_: "response".to_string(),
+                },
+                request_seq: req.base.seq,
+                success: true,
+                command: "launch".to_string(),
+                message: None,
+                body: json!({}),
+            });
+            ctx.seq += 1;
+            transport.send(&resp)?;
+        }
+        DapMessage::Request(req) if req.command == "configurationDone" => {
+            // TODO: run to entry/continue here, after setting the `launch` field
+            ctx.received_configuration_done = true;
+            let resp = DapMessage::Response(Response {
+                base: ProtocolMessage {
+                    seq: ctx.seq,
+                    type_: "response".to_string(),
+                },
+                request_seq: req.base.seq,
+                success: true,
+                command: "configurationDone".to_string(),
+                message: None,
+                body: json!({}),
+            });
+            ctx.seq += 1;
+            transport.send(&resp)?;
+
+            // info!(
+            //     "configuration done sent response; received_launch: {0:?}",
+            //     ctx.received_launch
+            // );
+            if ctx.received_launch {
+                ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
+                if let Some(h) = ctx.handler.as_mut() {
+                    write_dap_messages(transport, h, &mut ctx.seq)?;
+                }
+            }
+        }
+        DapMessage::Request(req) if req.command == "disconnect" => {
+            if let Some(h) = ctx.handler.as_mut() {
+                let args: dap_types::DisconnectArguments = req.load_args()?;
+                h.dap_client.seq = ctx.seq;
+                h.respond_to_disconnect(req.clone(), args)?;
+                write_dap_messages(transport, h, &mut ctx.seq)?;
+
+                // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
+                // > and then to shut down itself (the debug adapter).
+                // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
+                // we don't have a debuggee process, just a db, so we just stop db-backend for now
+                // (and before that, we respond to the request, acknowledging it)
+                //
+                // we allow it for now here, but if additional cleanup is needed, maybe we'd need
+                // to return to upper functions
+                #[allow(clippy::exit)]
+                ()
+
+                // NOTE: HANDLE THIS FOR WASM!
+                // std::process::exit(0);
+            }
+        }
+        DapMessage::Request(req) => {
+            if let Some(h) = ctx.handler.as_mut() {
+                let res = handle_request(h, req.clone(), &mut ctx.seq, transport);
+                if let Err(_e) = res {
+                    // warn!("handle_request error: {e:?}");
+                }
+            }
+        }
+        _ => {}
     }
+
+    Ok(())
+}
+
+#[cfg(feature = "io-transport")]
+fn handle_client<R: BufRead, T: DapTransport>(reader: &mut R, transport: &mut T) -> Result<(), Box<dyn Error>> {
+    let seq = 1i64;
+    let breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
+    // let (tx, _rx) = mpsc::channel();
+    let handler: Option<Handler> = None;
+    let received_launch = false;
+    let launch_trace_folder = PathBuf::from("");
+    let launch_trace_file = PathBuf::from("");
+    let received_configuration_done = false;
+
+    let mut ctx = Ctx {
+        seq,
+        breakpoints,
+        handler,
+        received_launch,
+        launch_trace_folder,
+        launch_trace_file,
+        received_configuration_done,
+    };
+
+    while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
+        info!("Handling msg: {:?}", msg);
+        let _ = handle_message(&msg, transport, &mut ctx);
+    }
+
     error!("maybe error from reader");
     Ok(())
 }

@@ -18,15 +18,20 @@ log = "0.4.21"
 env_logger = "0.11.3"
 # log2 = "0.1.11"
 regex = "1"
-tree-sitter = "0.24"
-tree-sitter-rust = "0.23"
-tree-sitter-ruby = "0.23"
-# tree-sitter-elisp = "1.5.0"
+tree-sitter = "*"
+tree-sitter-rust = "0.24"
+tree-sitter-ruby = "0.23.1"
 tree-sitter-traversal2 = "0.2.0"
 indexmap = "1.9.3"
 once_cell = "1.10.0"
 
-tokio = {version = "1.37.0", features=["full", "rt", "net", "signal"]}
+wee_alloc = "0.4"
+console_error_panic_hook = { version = "0.1", optional = true }
+wasm-logger = { version = "0.2", optional = true }
+
+schemars = "0.8.2"
+schemars-zod = "0.1.5"
+
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
@@ -34,9 +39,15 @@ runtime_tracing = "0.14.1"
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
-expanduser = "1.2.2"
-schemars = "0.8.2"
-schemars-zod = "0.1.5"
+
+serde-wasm-bindgen = { version = "0.6.5", optional = true}
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2.100", optional = true}
+web-sys = { version = "0.3", optional = true, features = [
+  "DedicatedWorkerGlobalScope", "WorkerGlobalScope", "console", "MessageEvent",
+  "Worker", "Window" ] }
+
+expanduser = { version = "1.2.2", optional = true}
 
 [lib]
 name = "db_backend"
@@ -46,11 +57,26 @@ crate-type   = ["rlib", "cdylib"]
 [[bin]]
 name = "db-backend"
 path = "src/main.rs"
+required-features = ["io-transport"]
 
 [[bin]]
 name = "virtualization-layers"
 path = "src/bin/virtualization-layers.rs"
+required-features = ["io-transport"]
 
 [[bin]]
 name = "schema-generator"
 path = "src/bin/schema_generator.rs"
+required-features = ["io-transport"]
+
+# CPPFLAGS_wasm32_unknown_unknown = "--target=wasm32 --sysroot={cwd}/wasm-sysroot -isystem {cwd}/wasm-sysroot/include"
+# CFLAGS_wasm32_unknown_unknown = "-I{cwd}/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
+
+[features]
+debugging = []
+
+default = ["io-transport"]
+
+io-transport = ["dep:expanduser"]
+browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",
+  "dep:web-sys", "dep:console_error_panic_hook", "dep:wasm-logger"]
