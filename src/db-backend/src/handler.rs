@@ -13,7 +13,7 @@ use crate::dap::{self, DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
-use crate::flow_preloader::{FlowPreloader, FlowMode};
+use crate::flow_preloader::FlowPreloader;
 use crate::program_search_tool::ProgramSearchTool;
 // use crate::response::{};
 use crate::dap_types;
@@ -22,8 +22,8 @@ use crate::step_lines_loader::StepLinesLoader;
 use crate::task;
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
-    CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, HistoryResult, HistoryUpdate, Instruction,
-    Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
+    CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, FlowMode, HistoryResult, HistoryUpdate, Instruction,
+    CtLoadFlowArguments, FlowUpdate, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
     Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
     SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
@@ -403,16 +403,21 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_flow(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
-        let step_id = StepId(location.rr_ticks.0);
-        let call_key = self.db.steps[step_id].call_key;
-        let function_id = self.db.calls[call_key].function_id;
-        let function_first = self.db.functions[function_id].line;
-        let flow_update = self.flow_preloader.load(location, function_first, FlowMode::Call, &self.db);
+    pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
+        let flow_update = if arg.flow_mode == FlowMode::Call {
+            let step_id = StepId(arg.location.rr_ticks.0);
+            let call_key = self.db.steps[step_id].call_key;
+            let function_id = self.db.calls[call_key].function_id;
+            let function_first = self.db.functions[function_id].line;
+            info!("load {arg:?}");
+            self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
+        } else {
+            let raw_flow = std::fs::read_to_string("/home/alexander92/codetracer/diff_index.json")?;
+            serde_json::from_str::<FlowUpdate>(&raw_flow)?
+        };
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
 
         self.send_dap(&raw_event)?;
-        warn!("flow not finished");
 
         Ok(())
     }

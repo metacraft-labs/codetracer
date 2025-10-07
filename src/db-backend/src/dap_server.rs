@@ -4,7 +4,7 @@ use crate::db::Db;
 use crate::handler::Handler;
 use crate::paths::CODETRACER_PATHS;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, FunctionLocation,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, CtLoadFlowArguments, FunctionLocation,
     LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
     StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
 };
@@ -160,7 +160,7 @@ fn handle_request<W: Write>(
         "ct/tracepoint-toggle" => handler.tracepoint_toggle(req.clone(), req.load_args::<TracepointId>()?)?,
         "ct/tracepoint-delete" => handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?)?,
         "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
-        "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<Location>()?)?,
+        "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?)?,
         "ct/run-to-entry" => handler.run_to_entry(req.clone())?,
         "ct/run-tracepoints" => handler.run_tracepoints(req.clone(), req.load_args::<RunTracepointsArg>()?)?,
         "ct/setup-trace-session" => handler.setup_trace_session(req.clone(), req.load_args::<RunTracepointsArg>()?)?,

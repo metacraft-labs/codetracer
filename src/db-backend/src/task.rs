@@ -33,6 +33,23 @@ pub struct CtLoadLocalsResponseBody {
     pub locals: Vec<Variable>,
 }
 
+/// flow mode for flow preloader
+#[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq, JsonSchema)]
+#[repr(u8)]
+pub enum FlowMode {
+    #[default]
+    Call,
+    Diff,
+}
+
+/// args for `ct/load-locals`
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadFlowArguments {
+    pub flow_mode: FlowMode,
+    pub location: Location,
+} 
+
 /// args for `ct/update-table`: actually Datatables.net produces those most of this: `TableArgs`
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -214,7 +231,7 @@ pub struct CodeSnippet {
     pub source: String,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Location {
     pub path: String,
@@ -357,7 +374,7 @@ impl Iteration {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, JsonSchema)]
 pub struct RRTicks(pub i64);
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]

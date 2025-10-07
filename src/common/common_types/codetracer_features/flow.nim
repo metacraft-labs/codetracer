@@ -114,6 +114,15 @@ type
     loops*: seq[LoopShape]
     expressions*: TableLike[int, seq[FlowExpression]]
 
+  FlowMode* {.pure.} = enum
+    Call,
+    Diff,
+
+  CtLoadFlowArguments* = ref object
+    flowMode*: FlowMode
+    location*: Location # empty/ignored for FlowMode.Diff
+  
+
 
 proc toLineFlowKind*(flow: FlowViewUpdate, position: int, finished: bool): LineFlowKind =
   ## Return the LineFlowKind for  FlowViewUpdate at position and if finished or not

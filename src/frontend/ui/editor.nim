@@ -1097,7 +1097,11 @@ proc sourceOrCallJump(self: EditorViewComponent, position: js) =
 
   self.lastScrollFireTime = currentTime
 
-proc loadFlow*(self: EditorViewComponent, location: types.Location) =
+proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Location) =
+  # # possible to test/debug diff flow TEMP HACK:
+  # if flowMode != FlowMode.Diff:
+  #  return
+
   self.flow = FlowComponent(
     api: self.api,
     id: self.id,
@@ -1145,7 +1149,7 @@ proc loadFlow*(self: EditorViewComponent, location: types.Location) =
   self.flow.valueMode = BeforeValueMode
 
   let taskId = genTaskId(LoadFlow)
-  self.api.emit(CtLoadFlow, self.location)
+  self.api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: flowMode, location: self.location))
   cdebug "start load-flow", taskId
 
 proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, lineNumber: int): Node =
@@ -1461,7 +1465,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           self.flow.clear()
 
       if self.shouldLoadFlow and not self.tabInfo.monacoEditor.isNil:
-        self.loadFlow(tabInfo.location)
+        self.loadFlow(FlowMode.Call, tabInfo.location)
         self.shouldLoadFlow = false
 
       if not self.data.startOptions.diff.isNil and
@@ -1469,6 +1473,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         self.diffAddedLines.len() == 0:
           self.clearDiffViewZones()
           self.makeDiffViewZones()
+          self.loadFlow(FlowMode.Diff, types.Location())
 
       self.applyEventualStylesLines()
 
@@ -1628,7 +1633,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       if self.tabInfo.monacoEditor.isNil:
         self.shouldLoadFlow = true
       else:
-        self.loadFlow(response.location)
+        self.loadFlow(FlowMode.Call, response.location)
         self.shouldLoadFlow = false
 
     elif self.supportsFlow() and not self.flow.isNil:

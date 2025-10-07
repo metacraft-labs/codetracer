@@ -83,7 +83,7 @@ pub struct FileInfo {
     file_lines: Vec<String>,
     branch: Vec<Branch>,
     position_branches: HashMap<Position, Branch>,
-    active_loops: Vec<Position>,
+    // active_loops: Vec<Position>,
     comment_lines: Vec<Position>,
 }
 
@@ -98,7 +98,7 @@ impl FileInfo {
             source_code: source_code.to_string(),
             branch: vec![],
             position_branches: HashMap::default(),
-            active_loops: vec![],
+            // active_loops: vec![],
             comment_lines: vec![],
         }
     }
@@ -443,13 +443,15 @@ impl ExprLoader {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn is_new_loop(&self, start: &Position, file_info: &FileInfo) -> bool {
-        file_info.position_loops.contains_key(start) && !file_info.active_loops.contains(start)
-    }
+    // #[allow(dead_code)]
+    // fn is_new_loop(&self, start: &Position, file_info: &FileInfo) -> bool {
+    //     file_info.position_loops.contains_key(start)
+    //     // && !file_info.active_loops.contains(start)
+    // }
 
     fn is_new_loop_shape(&self, start: &Position, file_info: &FileInfo) -> bool {
-        !file_info.position_loops.contains_key(start) && !file_info.active_loops.contains(start)
+        !file_info.position_loops.contains_key(start)
+        // && !file_info.active_loops.contains(start)
     }
 
     pub fn register_loop(&mut self, start: Position, end: Position, path: &PathBuf) {
@@ -460,15 +462,17 @@ impl ExprLoader {
             0
         };
         info!("current lang: {lang:?}");
-        if self.is_new_loop_shape(&start, &self.processed_files[path]) {
+        let start_with_offset = Position(start.0 + offset);
+        if self.is_new_loop_shape(&start_with_offset, &self.processed_files[path]) {
+            info!("new loop shape: {start_with_offset:?}");
             let loop_shape = LoopShape::new(
                 LoopShapeId(self.processed_files[path].loop_shapes.len() as i64),
                 LoopShapeId(self.loop_index),
-                Position(start.0 + offset),
+                start_with_offset,
                 end,
             );
             self.loop_index += 1;
-            info!("register loop {start:?} {end:?}");
+            info!("register loop {start_with_offset:?} {end:?}");
             self.processed_files
                 .get_mut(path)
                 .unwrap()
@@ -478,7 +482,7 @@ impl ExprLoader {
                 .get_mut(path)
                 .unwrap()
                 .position_loops
-                .insert(Position(start.0 + offset), loop_shape.base);
+                .insert(start_with_offset, loop_shape.base);
         }
     }
 
