@@ -35,4 +35,9 @@ tup generate --config build-debug/tup.config "$TUP_OUTPUT_SCRIPT"
 ./"$TUP_OUTPUT_SCRIPT"
 rm "$TUP_OUTPUT_SCRIPT"
 
+# TODO: this is not really working, problems with variants: generated script produce
+#   files directly in src/, instead of in src/build-debug, and so it can't run well
+#   we need to see if we can generate it in a better way, or to wrap/restructure the resulting folders
+#   to make possible to test the dev build in CI
+
 popd
