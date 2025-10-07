@@ -61,7 +61,7 @@ pub fn make_io_transport() -> Result<(BufReader<std::io::StdinLock<'static>>, st
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    let mut reader = BufReader::new(stdin.lock());
+    let reader = BufReader::new(stdin.lock());
     Ok((reader, stdout))
 }
 
@@ -128,21 +128,15 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
     let trace_path = trace_folder.join(trace_file);
     // duration code copied from
     // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-    let start = Instant::now();
+    let _start = Instant::now();
     if let (Ok(meta), Ok(trace)) = (
         load_trace_metadata(&metadata_path),
         load_trace_data(&trace_path, trace_file_format),
     ) {
-        let duration = start.elapsed();
-        // info!("loading trace: duration: {:?}", duration);
-
-        let start2 = Instant::now();
+        let _start2 = Instant::now();
         let mut db = Db::new(&meta.workdir);
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
-
-        let duration2 = start2.elapsed();
-        // info!("postprocessing trace: duration: {:?}", duration2);
 
         let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
@@ -501,7 +495,7 @@ pub fn handle_message<T: DapTransport>(
         DapMessage::Request(req) => {
             if let Some(h) = ctx.handler.as_mut() {
                 let res = handle_request(h, req.clone(), &mut ctx.seq, transport);
-                if let Err(e) = res {
+                if let Err(_e) = res {
                     // warn!("handle_request error: {e:?}");
                 }
             }
