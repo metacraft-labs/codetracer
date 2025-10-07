@@ -47,8 +47,7 @@ web-sys = { version = "0.3", optional = true, features = [
   "DedicatedWorkerGlobalScope", "WorkerGlobalScope", "console", "MessageEvent",
   "Worker", "Window" ] }
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-expanduser = "1.2.2"
+expanduser = { version = "1.2.2", optional = true}
 
 [lib]
 name = "db_backend"
@@ -78,6 +77,6 @@ debugging = []
 
 default = ["io-transport"]
 
-io-transport = []
+io-transport = ["dep:expanduser"]
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",
   "dep:web-sys", "dep:console_error_panic_hook", "dep:wasm-logger"]
