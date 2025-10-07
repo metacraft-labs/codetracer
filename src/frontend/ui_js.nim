@@ -691,10 +691,11 @@ proc onTraceLoaded(
     save=Save,
     diff=Diff,
     withDiff=bool,
+    rawDiffIndex=cstring,
     dontAskAgain=bool)) {.async.} =
 
   clog "trace loaded"
-  console.log response.withDiff, response.diff
+  # console.log response.withDiff, response.diff, response.rawDiffIndex
 
   data.trace = response.trace
   data.ui.readOnly = true

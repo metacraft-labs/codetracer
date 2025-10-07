@@ -55,6 +55,14 @@ proc parseArgs* =
         else:
           errorPrint "expected --diff <structuredDiffJson>"
           break
+      elif arg == cstring"--diff-index":
+        if i + 1 < args.len:
+          data.startOptions.rawDiffIndex = args[i + 1]
+          i += 2
+          continue
+        else:
+          errorPrint "expected --diff-index <indexDiffJson>"
+          break
       elif arg == cstring"--no-record":
         data.startOptions.record = false
       elif arg == cstring"edit":

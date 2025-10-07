@@ -14,7 +14,8 @@ when not defined(ctInExtension):
   proc dapInitializationHandler() =
     data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     data.dapApi.sendCtRequest(DapLaunch, js{
-      traceFolder: data.trace.outputFolder
+      traceFolder: data.trace.outputFolder,
+      rawDiffIndex: data.startOptions.rawDiffIndex,
     })
 
   proc newOperationHandler*(viewsApi: MediatorWithSubscribers, operation: NewOperation) =

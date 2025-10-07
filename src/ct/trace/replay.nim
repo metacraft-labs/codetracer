@@ -30,14 +30,23 @@ proc replayMultitrace*(archivePath: string, indexDiff: bool = false): bool =
     echo fmt"ERROR: couldn't import the trace with name {traceDir.extractFilename} from the multitrace"
     quit(1)
 
+  # TODO: improve this: use paths or temp folder or read from zip
+  # currently we pass them through as CLI args, but they're probably with limited memory/size
   var structuredDiffJson = ""
+  var indexDiffJson = ""
+
+  var structuredDiffPath = outputFolder / "diff.json"
   try:
-    structuredDiffJson = readFile(outputFolder / "diff.json")
-  except CatchableError as e:
-    # assume no diff.json recorded: that's ok
+    structuredDiffJson = readFile(structuredDiffPath)
+  except CatchableError: # assume file read error for now
+    # if no diff.json recorded: that's ok
     # we might have just a multitrace to replay multiple traces at once without a diff
     # in the future
+    structuredDiffPath = ""
     structuredDiffJson = ""
+
+  var diffIndexPath = ""
+  echo "index diff ", indexDiff
 
   if indexDiff:
     let backend = if trace.lang.isDbBased:
@@ -50,27 +59,42 @@ proc replayMultitrace*(archivePath: string, indexDiff: bool = false): bool =
           echo fmt"ERROR: rr backend not configured, but required for this trace lang: {trace.lang}"
           quit(1)
 
-    let structuredDiffJsonPath = outputFolder / "diff.json"
-    let process = startProcess(backend, args = @["index-diff", structuredDiffJsonPath, traceDir, outputFolder], options={poParentStreams})
-    let exitCode = waitForExit(process)
+    var eventualDiffIndexPath = outputFolder / "diff_index.json"
+    if not fileExists(eventualDiffIndexPath):
+      let process = startProcess(backend, args = @["index-diff", structuredDiffJson, traceDir, outputFolder], options={poParentStreams})
+      let exitCode = waitForExit(process)
 
-    if exitCode == 0:
-      # replace with an archive with the indexed data
-      removeFile(archivePath)
-      zipFolder(outputFolder, archivePath)
+      if exitCode == 0:
+        # replace with an archive with the indexed data
+        removeFile(archivePath)
+        zipFolder(outputFolder, archivePath)
+        diffIndexPath = eventualDiffIndexPath
+        indexDiffJson = readFile(diffIndexPath)
+      else:
+        echo "WARN: a problem with indexing diff: no diff index"
+        diffIndexPath = "" # some kind of a problem
+        indexDiffJson = ""
 
     # if ok: trace patched, diff indexed: archive still accessible
     # remove only the temp extracted folder
     removeDir(outputFolder)
     return false # this means it shouldn't restart: for now restart maybe supported in dev mode only for replays
   else:
-    # trace imported, diff copied: archive still accessible
+    var eventualDiffIndexPath = outputFolder / "diff_index.json"
+    if fileExists(eventualDiffIndexPath):
+      diffIndexPath = eventualDiffIndexPath
+      indexDiffJson = readFile(eventualDiffIndexPath)
+    else:
+      diffIndexPath = ""
+      indexDiffJson = ""
+
+    # trace imported, diff and eventually index copied: archive still accessible
     # remove only the temp extracted folder
     removeDir(outputFolder)
 
     let recordCore = envLoadRecordCore()
 
-    return runRecordedTrace(trace, test=false, structuredDiffJson=structuredDiffJson, recordCore=recordCore)
+    return runRecordedTrace(trace, test=false, structuredDiffJson=structuredDiffJson, indexDiffJson=indexDiffJson, recordCore=recordCore)
 
 proc indexDiff*(multitracePath: string) =
   discard replayMultitrace(multitracePath, indexDiff=true)

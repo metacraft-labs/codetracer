@@ -206,6 +206,7 @@ type
     rawTestStrategy*: langstring
     diff*: Diff
     withDiff*: bool
+    rawDiffIndex*: langstring
 
   # The contents of a window in the frontend
   Content* {.pure.} = enum

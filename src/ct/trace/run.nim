@@ -11,12 +11,16 @@ proc runRecordedTrace*(
   trace: Trace,
   test: bool,
   structuredDiffJson: string = "",
+  indexDiffJson: string = "",
   recordCore: bool = false
 ): bool =
   var args = if test: @[$trace.id, "--test"] else: @[$trace.id]
   if structuredDiffJson.len > 0:
     args.add("--diff")
     args.add(structuredDiffJson)
+    if indexDiffJson.len > 0:
+      args.add("--diff-index")
+      args.add(indexDiffJson)
   return launchElectron(args, trace, ElectronLaunchMode.Default, recordCore, test)
 
 
@@ -53,7 +57,7 @@ proc runWithRestart(
         if not afterRestart:
           # for now assume not a multitrace/no diff
           # .. returns true if it should restart
-          runRecordedTrace(recordedTrace, test, structuredDiffJson="", recordCore=recordCore)
+          runRecordedTrace(recordedTrace, test, structuredDiffJson="", indexDiffJson="", recordCore=recordCore)
         else:
           let process = startProcess(codetracerExe, args = @["replay", fmt"--id={recordedTrace.id}"], options = {poParentStreams})
           waitForExit(process) == RESTART_EXIT_CODE
