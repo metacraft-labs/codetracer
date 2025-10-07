@@ -41,6 +41,7 @@ fn test_backend_dap_server() {
         program: Some("main".to_string()),
         trace_folder: Some(trace_dir),
         trace_file: None,
+        raw_diff_index: None,
         pid: Some(pid as u64),
         cwd: None,
         no_debug: None,

@@ -97,6 +97,7 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
     save: save,
     diff: data.startOptions.diff,
     withDiff: data.startOptions.withDiff,
+    rawDiffIndex: data.startOptions.rawDiffIndex,
     dontAskAgain: dontAskAgain,
   }
 

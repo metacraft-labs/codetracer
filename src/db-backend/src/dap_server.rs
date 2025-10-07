@@ -48,7 +48,7 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
+fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>, seq: i64) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
@@ -78,6 +78,7 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
         // eprintln!("TRACE METADATA: {:?}", meta);
         let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
+        handler.raw_diff_index = raw_diff_index;
         handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
     } else {
@@ -198,6 +199,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
     let mut received_launch = false;
     let mut launch_trace_folder = PathBuf::from("");
     let mut launch_trace_file = PathBuf::from("");
+    let mut launch_raw_diff_index: Option<String> = None; 
     let mut received_configuration_done = false;
     while let Ok(msg) = dap::from_reader(reader) {
         info!("DAP <- {:?}", msg);
@@ -335,8 +337,9 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
                         launch_trace_file = "trace.json".into();
                     }
                     info!("stored launch trace folder: {launch_trace_folder:?}");
+                    launch_raw_diff_index = args.raw_diff_index.clone();
                     if received_configuration_done {
-                        handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq)?);
+                        handler = Some(launch(&launch_trace_folder, &launch_trace_file, launch_raw_diff_index.clone(), seq)?);
                         if let Some(h) = handler.as_mut() {
                             write_dap_messages(writer, h, &mut seq)?;
                         }
@@ -379,7 +382,7 @@ fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result
 
                 info!("configuration done sent response; received_launch: {received_launch}");
                 if received_launch {
-                    handler = Some(launch(&launch_trace_folder, &launch_trace_file, seq)?);
+                    handler = Some(launch(&launch_trace_folder, &launch_trace_file, launch_raw_diff_index.clone(), seq)?);
                     if let Some(h) = handler.as_mut() {
                         write_dap_messages(writer, h, &mut seq)?;
                     }

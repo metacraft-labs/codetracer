@@ -48,6 +48,7 @@ pub struct Handler {
     pub trace: CoreTrace,
     pub dap_client: DapClient,
     pub resulting_dap_messages: Vec<DapMessage>,
+    pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
 
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
@@ -107,6 +108,7 @@ impl Handler {
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
             resulting_dap_messages: vec![],
+            raw_diff_index: None,
         }
     }
     // TODO
@@ -412,8 +414,15 @@ impl Handler {
             info!("load {arg:?}");
             self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
         } else {
-            let raw_flow = std::fs::read_to_string("/home/alexander92/codetracer/diff_index.json")?;
-            serde_json::from_str::<FlowUpdate>(&raw_flow)?
+            if let Some(raw_flow) = &self.raw_diff_index {
+                serde_json::from_str::<FlowUpdate>(&raw_flow)?
+            } else {
+                // TODO: notification? or ignore
+                // eventually in the future: make a diff index now in the replay and send it
+                let message = "no raw diff index in handler, can't send flow for diff for now";
+                warn!("{}", message);
+                return Err(message.into());
+            }
         };
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
 
@@ -1760,7 +1769,12 @@ mod tests {
 
     fn test_load_flow(handler: &mut Handler, _path: &PathBuf) {
         handler
-            .load_flow(dap::Request::default(), handler.load_location(handler.step_id))
+            .load_flow(
+                dap::Request::default(),
+                CtLoadFlowArguments {
+                    flow_mode: FlowMode::Call,
+                    location: handler.load_location(handler.step_id)
+                })
             .unwrap();
     }
 
