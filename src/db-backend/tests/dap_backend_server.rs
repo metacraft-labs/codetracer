@@ -5,7 +5,6 @@ use db_backend::transport::DapTransport;
 use serde_json::{from_reader, json};
 use std::io::BufReader;
 
-#[cfg(target_arch = "x86_64")]
 use std::os::unix::net::UnixStream;
 
 use std::path::{Path, PathBuf};
@@ -31,8 +30,8 @@ fn test_backend_dap_server() {
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
 
     let socket_path = dap_server::socket_path_for(std::process::id() as usize);
-    wait_for_socket(&socket_path);
     let mut child = Command::new(bin).arg(&socket_path).spawn().unwrap();
+    wait_for_socket(&socket_path);
 
     let stream = UnixStream::connect(&socket_path).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());

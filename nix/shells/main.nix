@@ -29,7 +29,6 @@ mkShell {
       # general dependencies
       git
 
-      rustup
       binaryen
       llvmPackages_21.clang-unwrapped
       # clang
@@ -181,6 +180,7 @@ mkShell {
     rustup override set 1.89
     rustup target add wasm32-unknown-unknown
     rustup target add wasm32-unknown-emscripten
+    rustup target add x86_64-unknown-linux-gnu
 
 
     export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"

@@ -76,7 +76,7 @@ impl Db {
         }
     }
 
-    pub fn step_from(&self, step_id: StepId, forward: bool) -> StepIterator {
+    pub fn step_from(&'_ self, step_id: StepId, forward: bool) -> StepIterator<'_> {
         StepIterator {
             db: self,
             step_id,
