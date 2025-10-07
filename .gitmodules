@@ -5,10 +5,6 @@
 [submodule "libs/poly"]
 	path = libs/poly
 	url = https://github.com/alehander92/poly.git
-[submodule "libs/karax"]
-	path = libs/karax
-	url = ../karax.git
-	branch = new-karax
 [submodule "libs/NimYAML"]
 	path = libs/NimYAML
 	url = https://github.com/status-im/NimYAML.git
@@ -32,10 +28,6 @@
 	path = libs/nim-stew
 	url = https://github.com/status-im/nim-stew.git
 	branch = master
-[submodule "libs/nim-json-serialization"]
-	path = libs/nim-json-serialization
-	url = ../nim-json-serialization.git
-	branch = fix-track-field-name-errors
 [submodule "libs/asynctools"]
 	path = libs/asynctools
 	url = https://github.com/cheatfate/asynctools.git
@@ -80,3 +72,10 @@
 [submodule "libs/nim-confutils"]
 	path = libs/nim-confutils
 	url = https://github.com/metacraft-labs/nim-confutils
+[submodule "libs/karax"]
+	path = libs/karax
+	url = https://github.com/metacraft-labs/karax.git
+[submodule "libs/nim-json-serialization"]
+	path = libs/nim-json-serialization
+	url = https://github.com/metacraft-labs/nim-json-serialization.git
+	branch = fix-track-field-name-errors
