@@ -446,6 +446,7 @@ impl Handler {
     pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
             warn!("flow not implemented for rr");
+            self.send_notification(NotificationKind::Warning, "flow not implemented for rr!", false)?;
             return Ok(());
         }
         // TODO: something like this for db/rr:
@@ -454,15 +455,10 @@ impl Handler {
         // // or have a separate jump_to when it's not self.step_id?
         // self.replay.jump_to(step_id)?;
         // let location = self.replay.load_location(&mut self.expr_loader)?;
-        // let flow_update = self.flow_preloader.load(location, FlowMode::Call, &self.replay);
         // }
 
         let flow_update = if arg.flow_mode == FlowMode::Call {
-            let step_id = StepId(arg.location.rr_ticks.0);
-            let call_key = self.db.steps[step_id].call_key;
-            let function_id = self.db.calls[call_key].function_id;
-            let function_first = self.db.functions[function_id].line;
-            info!("load {arg:?}");
+            let flow_update = self.flow_preloader.load(arg.location, arg.flow_mode, &self.replay);
             self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
