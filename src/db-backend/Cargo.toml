@@ -51,6 +51,8 @@ vfs = "0.12"
 
 expanduser = { version = "1.2.2", optional = true}
 
+ntest = "0.9.3"
+
 [lib]
 name = "db_backend"
 path = "src/lib.rs"

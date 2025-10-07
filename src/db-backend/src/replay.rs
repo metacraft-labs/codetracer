@@ -17,5 +17,6 @@ pub trait Replay: std::fmt::Debug {
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>>;
+    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>>;
     fn current_step_id(&mut self) -> StepId;
 }
