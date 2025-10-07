@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde_json::json;
+use ntest::timeout;
 
 use db_backend::transport::DapTransport;
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
@@ -10,6 +11,7 @@ use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::task;
 
 #[test]
+#[timeout(5_000)] // try to detect hanging, e.g. waiting for response that doesn't come
 #[ignore] // ignored by default, as they depend on closed source ct-rr-worker/also not finished setup
 fn test_rr() {
     let bin = env!("CARGO_BIN_EXE_db-backend");
@@ -133,11 +135,14 @@ fn test_rr() {
         let _ = dap::read_dap_message_from_reader(&mut reader).unwrap();
     }
 
+    let last_location: task::Location; // = task::Location::default();
+
     let msg_complete_move_before_local_check = dap::read_dap_message_from_reader(&mut reader).unwrap();
     match msg_complete_move_before_local_check {
         DapMessage::Event(e) => {
             assert_eq!(e.event, "ct/complete-move");
             let move_state = serde_json::from_value::<task::MoveState>(e.body).expect("valid move state");
+            last_location = move_state.location.clone();
             let path = PathBuf::from(move_state.clone().location.path);
             let filename = path.file_name().expect("filename");
             assert_eq!(filename.display().to_string(), "rr_gdb.rs");
@@ -147,6 +152,7 @@ fn test_rr() {
         _ => panic!("expected a complete move events, but got {:?}", msg_complete_move_before_local_check),
 
     }
+    let _next_response = dap::from_reader(&mut reader).unwrap();
 
     let _next_response = dap::read_dap_message_from_reader(&mut reader).unwrap();
 
