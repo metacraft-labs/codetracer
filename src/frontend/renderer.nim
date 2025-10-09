@@ -1021,7 +1021,9 @@ proc isWindowMaximized(): bool {.importjs: "(window.outerWidth == screen.availWi
   false
 
 proc windowMenu*(data: Data, fromWelcomeScreen: bool = false): VNode =
-  if inElectron:
+  # Only run when not in macOS, since there we render the native traffic light buttons instead of our own
+  # window control buttons.
+  if inElectron and not defined(ctmacos):
     return buildHtml(tdiv(class = "window-menu")):
       tdiv(
         class = "menu-button-svg minimize",

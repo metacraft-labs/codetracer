@@ -227,11 +227,22 @@ method render*(self: DebugComponent): VNode =
   # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
   let finished = if self.finished: cstring"debug-finished-background" else: cstring""
 
+  # On macOS we display the native traffic light buttons, which means that we need to give them some space.
+  # They use about 20px per button and 25 for side margin for the whole widget
+  let style = when defined(ctmacos):
+    style(StyleAttr.paddingLeft, cstring("85px"))
+  else:
+    style()
+
   result = buildHtml(
     tdiv()
   ):
     messageView(self)
-    tdiv(id="debug", class=finished):
+    tdiv(
+      id="debug",
+      class=finished,
+      style=style
+    ):
 
       proc debugStepButton(id: string, action: DebuggerAction, reverse: bool): VNode {.closure.} =
         # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000:
@@ -303,7 +314,9 @@ method render*(self: DebugComponent): VNode =
               text tooltipText[id]
 
       if not self.finished:
-        separateBar()
+        # Looks ugly when rendering with the traffic light buttons
+        when not defined(ctmacos):
+          separateBar()
         debugButton("history-back")
         if self.listHistory:
           buildHistoryMenu(self)
