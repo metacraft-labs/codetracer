@@ -155,7 +155,8 @@ proc record(
     cmd: string, args: seq[string], compileCommand: string,
     langArg: Lang, backend: string, stylusTrace: string,
     test = false, basic = false,
-    traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = ""): Trace =
+    traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = "",
+    pythonInterpreter: string = ""): Trace =
   var traceID: int
   if traceIDRecord == -1:
     traceID = trace_index.newID(test)
@@ -241,6 +242,10 @@ proc record(
       return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
     elif lang == LangSmall:
       return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, stylusTrace, traceId)
+    elif lang == LangPythonDb:
+      discard pythonInterpreter
+      echo fmt"ERROR: unsupported lang {lang}"
+      quit(1)
     else:
       echo fmt"ERROR: unsupported lang {lang}"
       quit(1)
@@ -344,6 +349,7 @@ proc main*(): Trace =
   var address = ""
   var socketPath = ""
   var isExportedWithArg = false
+  var pythonInterpreter = ""
 
   # for i, arg in args:
   var i = 0
@@ -384,6 +390,12 @@ proc main*(): Trace =
         displayHelp()
         return
       stylusTrace = args[i + 1]
+      i += 2
+    elif arg == "--python-interpreter":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      pythonInterpreter = args[i + 1]
       i += 2
     elif arg == "--address" or arg == "-a":
       if args.len() < i + 2:
@@ -484,7 +496,8 @@ proc main*(): Trace =
   try:
     var trace = record(
       program, recordArgs, "", lang, backend, stylusTrace,
-      traceIDRecord=traceID, outputFolderArg=outputFolder)
+      traceIDRecord=traceID, outputFolderArg=outputFolder,
+      pythonInterpreter=pythonInterpreter)
     traceId = trace.id
     outputFolder = trace.outputFolder
 
