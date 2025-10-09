@@ -20,4 +20,5 @@
   and hook it to `app.on('before-quit')`, `app.on('window-all-closed')`, and
   Node process signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to ensure the process
   is always terminated when the app exits.
-- `ct record` now prefers `CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, or PATH resolution to locate the Python runtime before delegating to the db backend.
+- `ct record` now prefers `CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, or PATH resolution to locate the Python runtime before delegating to the db backend, and `db-backend-record` expects the resolved interpreter via `--python-interpreter` when launching the recorder.
+- `ct record` resolves Python via env vars (`CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, `PYTHON`) before checking PATH, so wrappers like `uv run` can force it to use the host interpreter if they populate `PYTHON_EXECUTABLE`.

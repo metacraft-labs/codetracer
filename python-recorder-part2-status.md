@@ -2,7 +2,8 @@
 
 ## Completed
 - Step 1: Language detection and enums now expose `LangPythonDb` for `.py` files and mark it as db-backed across shared language metadata.
-- Step 2: `ct record` resolves the active Python interpreter, and passes db-backend arguments for the Python recorder branch.
+- Step 2: `ct record` resolves the active Python interpreter, forwards activation/diff flags, and passes db-backend arguments for the Python recorder branch.
+- Step 3: `db-backend-record` invokes the recorder via the resolved interpreter, forwards activation/diff flags, and imports the generated traces.
 
 ## Next
-- Step 3: Implement the Python branch in `db-backend-record` to invoke the recorder and import generated traces.
+- Step 4: Integrate the recorder wheel into installer pipelines and expose launcher shims across distribution targets.
