@@ -42,22 +42,35 @@ proc createMainWindow*: js =
 
     let iconPath = linksPath & "/resources/Icon.iconset/icon_256x256.png"
 
-    let win = jsnew electron.BrowserWindow(
-      js{
-        "title": cstring"CodeTracer",
-        "icon": iconPath,
-        "width": 1900,
-        "height": 1400,
-        "minWidth": 1050,
-        "minHeight": 600,
-        "webPreferences": js{
-          "nodeIntegration": true,
-          "contextIsolation": false,
-          "spellcheck": false
-        },
-        "frame": false,
-        "transparent": true,
-        })
+    var initInfo = newJsObject()
+    initInfo = js{
+      "title": cstring"CodeTracer",
+      "icon": iconPath,
+      "width": 1900,
+      "height": 1400,
+      "minWidth": 1050,
+      "minHeight": 600,
+      "webPreferences": js{
+        "nodeIntegration": true,
+        "contextIsolation": false,
+        "spellcheck": false
+      },
+    }
+
+    when defined(ctmacos):
+      initInfo["titleBarStyle"] = cstring"hidden"
+      initInfo["trafficLightPosition"] = js{
+        "x": 10,
+        "y": 12
+      }
+      initInfo["titleBarOverlay"] = js{
+        "height": 70
+      }
+    else:
+      initInfo["frame"] = false
+      initInfo["transparent"] = true
+
+    let win = jsnew electron.BrowserWindow(initInfo)
     win.on("maximize", proc() =
       win.webContents.executeJavaScript("document.body.style.backgroundColor = 'black';"))
     win.on("unmaximize", proc() =
