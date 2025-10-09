@@ -385,6 +385,7 @@ let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
   emptyKeywords,
   emptyKeywords,
   emptyKeywords,
+  emptyKeywords,
   emptyKeywords
 ]
 

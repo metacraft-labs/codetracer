@@ -894,7 +894,7 @@ proc initDebugger*(main: js, trace: Trace, config: Config, helpers: Helpers) {.a
         paths: trace.sourceFolders,
         traceID: trace.id,
         calltrace: config.calltrace and trace.calltrace,
-        preloadEnabled: config.flow.enabled and trace.lang != LangPython,
+        preloadEnabled: config.flow.enabled and trace.lang notin {LangPython, LangPythonDb},
         callArgsEnabled: config.callArgs,
         traceEnabled: config.trace,
         historyEnabled: config.history,

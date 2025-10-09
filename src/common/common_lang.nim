@@ -12,16 +12,16 @@ type
     LangPascal, LangPython, LangRuby, LangRubyDb, LangJavascript,
     LangLua, LangAsm, LangNoir,
     LangRustWasm, LangCppWasm, # wasm
-    LangSmall, LangUnknown
+    LangSmall, LangPythonDb, LangUnknown
 
 var CURRENT_LANG*: Lang = LangUnknown ## The current lang in the codetraces session
 
 proc isVMLang*(lang: Lang): bool =
   ## return true if programming language implementation runs in a virtual machine
-  false # lang in {LangRuby, LangPython, LangLua, LangJavascript, LangUnknown}
+  false # lang in {LangRuby, LangPython, LangPythonDb, LangLua, LangJavascript, LangUnknown}
 
 var IS_DB_BASED*: array[Lang, bool] = [
-  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
+  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
 ]
 
 IS_DB_BASED[LangRubyDb] = true
@@ -29,6 +29,7 @@ IS_DB_BASED[LangNoir] = true
 IS_DB_BASED[LangSmall] = true
 IS_DB_BASED[LangRustWasm] = true
 IS_DB_BASED[LangCppWasm] = true
+IS_DB_BASED[LangPythonDb] = true
 
 proc isDbBased*(lang: Lang): bool =
   ## return true if `lang` uses the db backend
@@ -36,7 +37,7 @@ proc isDbBased*(lang: Lang): bool =
 
 proc toCLang*(lang: Lang): string =
   ## convert Lang_ to string
-  let langs: array[Lang, string] = ["c", "cpp", "rust", "nim", "go", "pascal", "python", "ruby", "ruby", "javascript", "lua", "assembly", "noir", "rust", "c++", "small", "uknown"]
+  let langs: array[Lang, string] = ["c", "cpp", "rust", "nim", "go", "pascal", "python", "ruby", "ruby", "javascript", "lua", "assembly", "noir", "rust", "c++", "small", "python", "uknown"]
   result = langs[lang]
 
 proc toName*(lang: Lang): string =
@@ -45,7 +46,7 @@ proc toName*(lang: Lang): string =
        "C", "C++", "Rust", "Nim", "Go",
        "Pascal", "Python", "Ruby", "Ruby(db)", "Javascript", "Lua", "assembly language", "Noir",
        "Rust(wasm)", "C++(wasm)",
-       "Small", "unknown"
+       "Small", "Python(db)", "unknown"
   ]
   result = langs[lang]
 
