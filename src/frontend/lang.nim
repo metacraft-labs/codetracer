@@ -13,8 +13,8 @@ proc toLang*(lang: cstring): Lang =
     nim: LangNim,
     go: LangGo,
     pas: LangPascal,
-    py: LangPython,
-    python: LangPython,
+    py: LangPythonDb,
+    python: LangPythonDb,
     rb: LangRubyDb, # default for ruby for now
     ruby: LangRuby,
     js: LangJavascript,
@@ -51,6 +51,7 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"javascript", cstring"lua", cstring"assembler", cstring"noir",
     cstring"rust", cstring"cpp",
     cstring"small",
+    cstring"python",
     cstring"unknown"
   ]
   result = langs[lang]
@@ -69,6 +70,7 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[cstring"for", cstring"if", cstring"while", cstring"proc"]),
   toSet(@[]),
   toSet(@[]), # LangGo: TODO
+  toSet(@[]),
   toSet(@[]),
   toSet(@[]),
   toSet(@[]),
@@ -100,6 +102,7 @@ proc getExtension*(lang: Lang): cstring =
     "rs",
     "cpp",
     "small",
+    "py",
     ""
   ]
   result = cstring(extensions[lang])
@@ -119,7 +122,7 @@ proc fromPath*(path: cstring): Lang =
     "pas": LangPascal,
     "rs": LangRust,
     "go": LangGo,
-    "py": LangPython,
+    "py": LangPythonDb,
     "rb": LangRubyDb,
     "js": LangJavascript,
     "lua": LangLua,
