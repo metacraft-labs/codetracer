@@ -4,6 +4,65 @@ import std/[os, osproc, strutils, sequtils, strtabs, strformat],
   ../utilities/[language_detection ],
   ../cli/build
 
+proc stripEnclosingQuotes(value: string): string =
+  ## Remove a single layer of matching quotes from ``value`` if present.
+  if value.len >= 2:
+    let first = value[0]
+    let last = value[^1]
+    if (first == '"' and last == '"') or (first == '\'' and last == '\''):
+      return value[1..^2]
+  value
+
+proc resolveInterpreterCandidate(candidate: string): string =
+  ## Best-effort resolution of an interpreter command or path to an absolute path.
+  var trimmed = candidate.strip()
+  if trimmed.len == 0:
+    return ""
+
+  trimmed = stripEnclosingQuotes(trimmed)
+
+  let direct = findExe(trimmed)
+  if direct.len > 0:
+    return direct
+
+  try:
+    if fileExists(trimmed):
+      return expandFilename(trimmed)
+  except CatchableError:
+    discard
+
+  let wsIdx = trimmed.find({' ', '\t'})
+  if wsIdx != -1:
+    let head = trimmed[0 ..< wsIdx]
+    let headResolved = findExe(head)
+    if headResolved.len > 0:
+      return headResolved
+
+  ""
+
+proc resolvePythonInterpreter(): string =
+  ## Resolve the Python interpreter by inspecting common environment variables and PATH.
+  let envCandidates = @[
+    "CODETRACER_PYTHON_INTERPRETER",
+    "PYTHON_EXECUTABLE",
+    "PYTHONEXECUTABLE",
+    "PYTHON"
+  ]
+
+  for envName in envCandidates:
+    let value = getEnv(envName, "")
+    if value.len > 0:
+      let resolved = resolveInterpreterCandidate(value)
+      if resolved.len > 0:
+        return resolved
+
+  for binary in ["python3", "python", "py"]:
+    let resolved = resolveInterpreterCandidate(binary)
+    if resolved.len > 0:
+      return resolved
+
+  ""
+
 proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath: string): Trace =
   let env = if configPath.len > 0:
       setupEnv(configPath)
@@ -63,6 +122,15 @@ proc record*(lang: string,
     pargs.add("--socket")
     pargs.add(socketPath)
 
+  if detectedLang == LangPythonDb:
+    let pythonInterpreter = resolvePythonInterpreter()
+    if pythonInterpreter.len == 0:
+      echo "error: Python interpreter not found. Set CODETRACER_PYTHON_INTERPRETER or ensure `python` is on PATH."
+      quit(1)
+
+    pargs.add("--python-interpreter")
+    pargs.add(pythonInterpreter)
+
   pargs.add(program)
   if args.len != 0:
     pargs = concat(pargs, args)
@@ -81,7 +149,7 @@ proc record*(lang: string,
   if getEnv("CODETRACER_WRAPPER_PID", "").len == 0:
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
-  if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]:
+  if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall, LangPythonDb]:
     return recordInternal(dbBackendRecordExe, pargs, withDiff, "")
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)

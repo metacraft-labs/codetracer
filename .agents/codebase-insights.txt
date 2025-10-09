@@ -20,3 +20,4 @@
   and hook it to `app.on('before-quit')`, `app.on('window-all-closed')`, and
   Node process signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to ensure the process
   is always terminated when the app exits.
+- `ct record` now prefers `CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, or PATH resolution to locate the Python runtime before delegating to the db backend.
