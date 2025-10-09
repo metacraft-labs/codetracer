@@ -1,5 +1,6 @@
 #[cfg(feature = "io-transport")]
 use expanduser::expanduser;
+use vfs::VfsPath;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -14,6 +15,7 @@ use runtime_tracing::{
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
 // use crate::task::{Comp}
+//
 
 #[derive(Debug, Clone, Copy)]
 struct CompoundValueInfo {
@@ -418,7 +420,7 @@ impl<'a> TraceProcessor<'a> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "io-transport")]
 #[allow(clippy::panic)]
 pub fn load_trace_data(
     trace_file: &Path,
@@ -431,16 +433,20 @@ pub fn load_trace_data(
     Ok(trace_events)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "browser-transport")]
 #[allow(clippy::panic)]
 pub fn load_trace_data(
     trace_file: &Path,
     file_format: runtime_tracing::TraceEventsFileFormat,
 ) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    todo!()
+    use crate::vfs::{load_trace_data_vfs, trace_vfs_root};
+
+    let path_str = trace_file.to_str().unwrap();
+
+    load_trace_data_vfs(trace_vfs_root(), path_str, file_format)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "io-transport")]
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
@@ -453,8 +459,12 @@ pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, 
     Ok(trace_metadata)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "browser-transport")]
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
-    todo!()
+    use crate::vfs::{load_trace_metadata_vfs, trace_vfs_root};
+
+    let path_str = trace_metadata_file.to_str().unwrap();
+
+    load_trace_metadata_vfs(trace_vfs_root(), path_str)
 }
