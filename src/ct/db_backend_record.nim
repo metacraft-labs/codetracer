@@ -59,7 +59,7 @@ proc recordDb(
     lang: Lang, vmExe: string,
     program: string, args: seq[string],
     backend: string, traceFolder: string, stylusTrace: string,
-    traceId: int): Trace =
+    traceId: int, pythonActivationPath: string = ""): Trace =
 
   createDir(traceFolder)
   let tracePath = traceFolder / "trace.json"
@@ -70,21 +70,19 @@ proc recordDb(
   putEnv("CODETRACER_DB_TRACE_PATH", tracePath)
   # echo "record db ", getEnv("CODETRACER_DB_TRACE_PATH")
 
-  let startArgs = case lang:
+  var startArgs: seq[string]
+  case lang:
     of LangRubyDb:
-      @[rubyRecorderPath, "--out-dir", fmt"{traceFolder}", program]
+      startArgs = @[rubyRecorderPath, "--out-dir", fmt"{traceFolder}", program]
     of LangSmall:
-      @[program, "--tracing"]
+      startArgs = @[program, "--tracing"]
     of LangRustWasm, LangCppWasm:
-      # TODO: add Lang..Wasm
-      #if program.endsWith(".wasm"):
-      #  # wazero
       var vmArgs = @["run"]
       if stylusTrace.len > 0:
         vmArgs.add("-stylus")
         vmArgs.add(stylusTrace)
       vmArgs = vmArgs.concat(@["--trace-dir", traceFolder, program])
-      vmArgs
+      startArgs = vmArgs
     of LangNoir:
       let backendArgs = if backend == "plonky2":
           @["--trace-plonky2"]
@@ -94,7 +92,19 @@ proc recordDb(
         else:
           @[]
 
-      @["trace", "--trace-dir", traceFolder].concat(backendArgs)
+      startArgs = @["trace", "--trace-dir", traceFolder].concat(backendArgs)
+    of LangPythonDb:
+      if vmExe.len == 0:
+        echo "error: python interpreter not provided while trying to start recorder"
+        quit(1)
+      var recorderArgs = @["-m", "codetracer_python_recorder", "--trace-dir", traceFolder, "--format", "json"]
+      if pythonActivationPath.len > 0:
+        recorderArgs.add("--activation-path")
+        recorderArgs.add(pythonActivationPath)
+      recorderArgs.add(program)
+      startArgs = recorderArgs
+      # Debug call
+      startArgs = @["-m", "sysconfig"]
     else:
       echo fmt"error: lang {lang} not supported for recordDb"
       quit(1)
@@ -144,7 +154,7 @@ proc recordDb(
   let recordPid = process.processId
   let exitCode = waitForExit(process)
   if exitCode != 0:
-    echo "error: problem with ruby trace: exit code = ", exitCode
+    echo fmt"error: recorder exited with {exitCode} for {lang}"
     quit(1)
 
   result = importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT)
@@ -156,7 +166,7 @@ proc record(
     langArg: Lang, backend: string, stylusTrace: string,
     test = false, basic = false,
     traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = "",
-    pythonInterpreter: string = ""): Trace =
+    pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false): Trace =
   var traceID: int
   if traceIDRecord == -1:
     traceID = trace_index.newID(test)
@@ -234,18 +244,44 @@ proc record(
         # for noir for now "executable" is the noir folder
         recordSymbols(executable, outputFolder, lang)
       var vmPath = ""
-      if lang in {LangRustWasm, LangCppWasm}: # executable.endsWith(".wasm"):
+      if lang in {LangRustWasm, LangCppWasm}:
         vmPath = wazeroExe
-        # echo "wasm vm path ", vmPath
       else:
         vmPath = noirExe
       return recordDb(lang, vmPath, executable, args, backend, outputFolder, stylusTrace, traceId)
     elif lang == LangSmall:
       return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, stylusTrace, traceId)
     elif lang == LangPythonDb:
-      discard pythonInterpreter
-      echo fmt"ERROR: unsupported lang {lang}"
-      quit(1)
+      var interpreterPath = pythonInterpreter
+      if interpreterPath.len == 0:
+        errorMessage "error: expected a python interpreter path but received an empty value"
+        quit(1)
+      try:
+        interpreterPath = expandFilename(interpreterPath)
+      except OsError:
+        let foundInterpreter = findExe(interpreterPath)
+        if foundInterpreter.len == 0:
+          errorMessage fmt"error: can't locate python interpreter at '{pythonInterpreter}'"
+          quit(1)
+        interpreterPath = foundInterpreter
+
+      var activationPathResolved = pythonActivationPath
+      if activationPathResolved.len > 0:
+        try:
+          activationPathResolved = expandFilename(activationPathResolved)
+        except OsError:
+          discard
+
+      return recordDb(
+        LangPythonDb,
+        interpreterPath,
+        executable,
+        args,
+        backend,
+        outputFolder,
+        stylusTrace,
+        traceId,
+        pythonActivationPath = activationPathResolved)
     else:
       echo fmt"ERROR: unsupported lang {lang}"
       quit(1)
