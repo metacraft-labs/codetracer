@@ -26,7 +26,7 @@ const LANGS = {
   "rs": LangRust,
   "nim": LangNim,
   "go": LangGo,
-  "py": LangPython,
+  "py": LangPythonDb,
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
   "small": LangSmall,

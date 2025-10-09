@@ -11,8 +11,8 @@ proc toLang*(lang: string): Lang =
     "nim": LangNim,
     "go": LangGo,
     "pascal": LangPascal,
-    "py": LangPython,
-    "python": LangPython,
+    "py": LangPythonDb,
+    "python": LangPythonDb,
     "rb": LangRubyDb, # default for ruby for now
     "ruby": LangRuby,
     "ruby(db)": LangRubyDb,
@@ -51,6 +51,7 @@ proc getExtension*(lang: Lang): string =
     "rs",
     "cpp",
     "small",
+    "py",
     ""
   ]
   result = extensions[lang]
