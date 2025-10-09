@@ -116,7 +116,6 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
 //     handle_client(&mut reader, &mut writer)
 // }
 
-#[cfg(feature = "io-transport")]
 fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -145,11 +144,6 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
     } else {
         Err("problem with reading metadata or path trace files".into())
     }
-}
-
-#[cfg(feature = "browser-transport")]
-fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
-    todo!()
 }
 
 fn write_dap_messages<T: DapTransport>(

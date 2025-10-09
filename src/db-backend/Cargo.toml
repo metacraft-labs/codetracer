@@ -47,6 +47,8 @@ web-sys = { version = "0.3", optional = true, features = [
   "DedicatedWorkerGlobalScope", "WorkerGlobalScope", "console", "MessageEvent",
   "Worker", "Window" ] }
 
+vfs = "0.12"
+
 expanduser = { version = "1.2.2", optional = true}
 
 [lib]
@@ -69,13 +71,10 @@ name = "schema-generator"
 path = "src/bin/schema_generator.rs"
 required-features = ["io-transport"]
 
-# CPPFLAGS_wasm32_unknown_unknown = "--target=wasm32 --sysroot={cwd}/wasm-sysroot -isystem {cwd}/wasm-sysroot/include"
-# CFLAGS_wasm32_unknown_unknown = "-I{cwd}/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
-
 [features]
 debugging = []
 
-default = ["io-transport"]
+default = ["browser-transport"]
 
 io-transport = ["dep:expanduser"]
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",

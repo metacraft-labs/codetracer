@@ -14,4 +14,4 @@ cargo clean
 # build (just your crate, or the specific package)
 cargo build --target wasm32-unknown-unknown --release --no-default-features --features browser-transport
 
-wasm-pack build --target web --release -- --no-default-features --features browser-transport
+wasm-pack build --target web --release -d ./wasm-testing/pkg -- --no-default-features --features browser-transport

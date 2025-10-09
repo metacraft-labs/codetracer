@@ -16,6 +16,9 @@ use crate::dap::setup_onmessage_callback;
 #[cfg(feature = "browser-transport")]
 pub mod c_compat;
 
+#[cfg(feature = "browser-transport")]
+pub mod vfs;
+
 pub mod calltrace;
 
 #[cfg(feature = "io-transport")]
