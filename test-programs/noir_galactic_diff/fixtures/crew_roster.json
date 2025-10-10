@@ -1,0 +1,5 @@
+[
+  { "name": "Astra", "role": "pilot", "certs": ["NAV", "COM"], "seniority": 5 },
+  { "name": "Nova", "role": "engineer", "certs": ["SYS"], "seniority": 4 },
+  { "name": "Quill", "role": "analyst", "certs": ["DATA", "RISK"], "seniority": 3 }
+]
