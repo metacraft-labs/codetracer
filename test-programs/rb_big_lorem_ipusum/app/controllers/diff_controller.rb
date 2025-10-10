@@ -10,6 +10,8 @@ module RbBigLoremIpusum
 
         def drill_down(path, content)
           first_line = content.lines.first || ''
+          return empty_diff(path) if first_line.empty?
+
           {
             path: path,
             header: @renderer.decorate(path: path, first_line: first_line.strip.start_with?('//'), payload: first_line.strip),
@@ -23,6 +25,12 @@ module RbBigLoremIpusum
               { line: index + 1, marker: marker, text: line.chomp }
             end
           }
+        end
+
+        private
+
+        def empty_diff(path)
+          { path: path, header: @renderer.decorate(path: path, first_line: false, payload: ''), body: [] }
         end
       end
     end

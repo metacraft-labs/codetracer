@@ -23,10 +23,10 @@ module RbBigLoremIpusum
           ships = manifest.fetch(:ships)
           ships.map do |ship|
             context = {
-              diffs: diffs.fetch(:file_diff_summary, {})
-                              .select { |path, _| path.include?(ship.identifier) },
               telemetry: telemetry.fetch(:diff_rendering, [])
-                                   .find { |entry| entry[:ship] == ship.identifier }
+                                   .find { |entry| entry[:ship] == ship.identifier },
+              diffs: diffs.fetch(:file_diff_summary, {})
+                              .select { |path, _| path.include?(ship.identifier) }
             }
             Domain::Logging::LogEntry.new(
               ship: ship.identifier,

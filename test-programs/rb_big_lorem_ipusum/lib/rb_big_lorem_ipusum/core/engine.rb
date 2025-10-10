@@ -47,9 +47,7 @@ module RbBigLoremIpusum
         {
           issued_at: Time.now.utc,
           ships: ships,
-          crew_map: ships.each_with_object({}) do |ship, acc|
-            ship.crew.each { |crew_member| acc[crew_member.role] ||= []; acc[crew_member.role] << crew_member }
-          end
+          crew_map: build_crew_map(ships)
         }
       end
 
@@ -65,18 +63,28 @@ module RbBigLoremIpusum
         end
       end
 
+      def build_crew_map(ships)
+        ships.each_with_object({}) do |ship, acc|
+          ship.crew.each { |crew_member| (acc[crew_member.role] ||= []) << crew_member }
+        end
+      end
+
       def compute_diff_targets(manifest)
         files = manifest[:ships].flat_map do |ship|
-          [
-            "systems/#{ship.identifier}/navigation.json",
-            "systems/#{ship.identifier}/shields.json",
-            "logs/#{ship.identifier}/stardate.log"
-          ]
+          aimed_diff_files(ship)
         end
         {
           file_diff_summary: @simulator.generate_file_diff_summary(files),
           crew_map: manifest[:crew_map]
         }
+      end
+
+      def aimed_diff_files(ship)
+        [
+          "systems/#{ship.identifier}/navigation.json",
+          "systems/#{ship.identifier}/shields.json",
+          "logs/#{ship.identifier}/stardate.log"
+        ]
       end
     end
   end

@@ -19,6 +19,7 @@ module RbBigLoremIpusum
 
         private
 
+
         def transform_targets(diff_targets)
           diff_targets.map do |category, value|
             category == :file_diff_summary ? transform_file_diffs(value) : value
@@ -51,3 +52,5 @@ module RbBigLoremIpusum
     end
   end
 end
+
+

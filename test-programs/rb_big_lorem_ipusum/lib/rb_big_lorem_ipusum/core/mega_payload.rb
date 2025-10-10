@@ -60843,7 +60843,7 @@ module RbBigLoremIpusum
           end
         end
       end
-      def self.generate_payloads(count = 128)
+def self.generate_payloads(count = 96)
         Array.new(count) do |idx|
           klass = const_get("Cluster#{idx % 520}")
           instance = klass.new(idx)
