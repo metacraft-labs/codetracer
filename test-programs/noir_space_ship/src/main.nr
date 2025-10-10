@@ -9,7 +9,7 @@ mod shield;
 // We can not reveal how much shields we have will have in the end so that the space pirates won't know if it is safe to atack us
 // The space pirates can track our course but our shield technology remains a well guarded secret
 
-fn main(initial_shield: Field, shield_regen_percentage: Field, asteroid_masses_positive: pub [Field; 8], asteroid_masses_negative: pub [Field; 8]) -> pub bool {
+fn main(initial_shield: Field, shield_regen_percentage: Field, asteroid_masses_positive: pub [Field; 9], asteroid_masses_negative: pub [Field; 9]) -> pub bool {
     println("Positive Test Case");
 
     let did_survive_positive = shield::iterate_asteroids(initial_shield, shield_regen_percentage , asteroid_masses_positive);
@@ -29,7 +29,7 @@ fn main(initial_shield: Field, shield_regen_percentage: Field, asteroid_masses_p
     println("shields will hold, but where expected to fail")
     }
     else{
-        println("shields will not hold as expected")
+        println("shields will not hold as expected pumpkin")
     }
 
     assert(did_survive_positive == true);

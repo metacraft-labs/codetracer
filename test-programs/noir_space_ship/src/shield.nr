@@ -1,7 +1,7 @@
-pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field, masses: [Field; 8]) -> bool {
+pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field, masses: [Field; 9]) -> bool {
     let mut remaining_shield = initial_shield;
 
-    for i in 0..8 {
+    for i in 0..9 {
         let mass = masses[i];
         let damage = calculate_damage(initial_shield, remaining_shield, mass);
         remaining_shield -= damage;
