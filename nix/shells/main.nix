@@ -186,7 +186,6 @@ mkShell {
     export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"
     export CFLAGS_wasm32_unknown_unknown="-I$(pwd)/src/db-backend/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
 
-
     # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
     ROOT_PATH=$(git rev-parse --show-toplevel)
 
