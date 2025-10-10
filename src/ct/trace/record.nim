@@ -20,21 +20,27 @@ proc resolveInterpreterCandidate(candidate: string): string =
     return ""
 
   trimmed = stripEnclosingQuotes(trimmed)
+  trimmed = expandTilde(trimmed)
 
-  let direct = findExe(trimmed)
+  let hasPathSeparator = trimmed.contains({'/', '\\'})
+  if hasPathSeparator or trimmed.startsWith("."):
+    try:
+      if fileExists(trimmed):
+        if trimmed.isAbsolute():
+          return trimmed
+        else:
+          return absolutePath(trimmed)
+    except CatchableError:
+      discard
+
+  let direct = findExe(trimmed, followSymlinks=false)
   if direct.len > 0:
     return direct
-
-  try:
-    if fileExists(trimmed):
-      return expandFilename(trimmed)
-  except CatchableError:
-    discard
 
   let wsIdx = trimmed.find({' ', '\t'})
   if wsIdx != -1:
     let head = trimmed[0 ..< wsIdx]
-    let headResolved = findExe(head)
+    let headResolved = findExe(head, followSymlinks=false)
     if headResolved.len > 0:
       return headResolved
 
