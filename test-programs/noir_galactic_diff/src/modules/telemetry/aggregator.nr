@@ -1,3 +1,4 @@
+use crate::modules::telemetry::aggregator_core;
 use crate::utils::collections::{fold_sum, slice_max};
 
 pub fn collect_streams(
@@ -6,18 +7,11 @@ pub fn collect_streams(
     routes: [Field; 8],
     path_score: Field
 ) -> Field {
-    let mut total = shield_state + stability + path_score;
-    for i in 0..routes.len() {
-        total += routes[i] + (i as Field);
-    }
-
+    let mut total = aggregator_core::base_total(shield_state, stability, path_score);
+    total += aggregator_core::route_enrichment(routes);
     total + slice_max([shield_state, stability, fold_sum(routes), path_score])
 }
 
 pub fn summarize_payload(payload: [Field; 4]) -> Field {
-    let mut summary = 0;
-    for item in 0..payload.len() {
-        summary += payload[item] * (item + 2) as Field;
-    }
-    summary
+    aggregator_core::payload_score(payload)
 }

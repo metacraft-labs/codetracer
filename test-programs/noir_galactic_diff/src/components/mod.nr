@@ -1,2 +1,2 @@
-pub mod crew_manifest;
+pub mod crew_registry;
 pub mod mission_profile;
