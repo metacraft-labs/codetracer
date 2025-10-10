@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative 'rb_big_lorem_ipusum/version'
-require_relative 'rb_big_lorem_ipusum/support/loader'
 require_relative 'rb_big_lorem_ipusum/features/diff_diagnostics/analyzer'
+require_relative 'rb_big_lorem_ipusum/support/loader'
+require_relative 'rb_big_lorem_ipusum/version'
 
 # Core components
 require_relative 'rb_big_lorem_ipusum/core/engine'
@@ -25,6 +25,7 @@ require_relative 'rb_big_lorem_ipusum/infrastructure/scheduling/orchestrator'
 require_relative 'rb_big_lorem_ipusum/ui/dashboard_toolkit'
 
 # Algorithms
+require_relative 'rb_big_lorem_ipusum/algorithms/algorithm_registry'
 require_relative 'rb_big_lorem_ipusum/algorithms/graph/dijkstra'
 require_relative 'rb_big_lorem_ipusum/algorithms/dynamic/longest_common_subsequence'
 require_relative 'rb_big_lorem_ipusum/algorithms/dp/knapsack'
@@ -36,5 +37,4 @@ require_relative '../app/domain/entities/ship'
 require_relative '../app/domain/entities/crew_member'
 require_relative '../app/domain/logging/log_entry'
 require_relative '../app/service_layer/reporting_service'
-require_relative 'rb_big_lorem_ipusum/algorithms/algorithm_registry'
 require_relative '../app/views/templates/dashboard_view'

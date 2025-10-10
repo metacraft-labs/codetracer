@@ -5,7 +5,7 @@ module RbBigLoremIpusum
     module Domain
       module Entities
         class Ship
-          attr_reader :identifier, :model, :crew, :cargo
+          attr_reader :cargo, :crew, :identifier, :model
 
           def initialize(identifier:, model:, crew:, cargo: [])
             @identifier = identifier

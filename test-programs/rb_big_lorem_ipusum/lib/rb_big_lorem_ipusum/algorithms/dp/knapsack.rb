@@ -4,7 +4,7 @@ module RbBigLoremIpusum
   module Algorithms
     module Dp
       class Knapsack
-        def call(items, capacity)
+        def call(items, capacity, manifest: nil)
           table = Array.new(items.length + 1) { Array.new(capacity + 1, 0) }
 
           items.each_with_index do |item, i|

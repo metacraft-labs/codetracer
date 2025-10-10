@@ -4,11 +4,11 @@ module RbBigLoremIpusum
   module App
     module Controllers
       class NavigationController
-        def initialize(algorithm_registry: Services::AlgorithmRegistry.new)
+        def initialize(algorithm_registry: Algorithms::AlgorithmRegistry.new)
           @algorithm_registry = algorithm_registry
         end
 
-        def routes_for(ship)
+        def routes_for(ship, manifest: nil)
           knapsack = @algorithm_registry.run(:knapsack, sample_items(ship.identifier), 300)
           waypoints = Array.new(8) { |index| "waypoint-#{ship.identifier}-#{index}" }
           { ship: ship.identifier, cargo_plan: knapsack, waypoints: waypoints }

@@ -30,7 +30,7 @@ mega_payload.each do |entry|
   puts "Payload #{entry[:index]} signature=#{entry[:summary][:signature]} depth=#{entry[:trace].length}"
 end
 
-algo_registry = RbBigLoremIpusum::App::Services::AlgorithmRegistry.new
+algo_registry = RbBigLoremIpusum::Algorithms::AlgorithmRegistry.new
 puts "\n== Algorithm runs =="
 graph = { 0 => { 1 => 2, 2 => 5 }, 1 => { 2 => 1 }, 2 => { 3 => 2 }, 3 => {} }
 puts "Dijkstra: #{algo_registry.run(:dijkstra, graph, 0)}"

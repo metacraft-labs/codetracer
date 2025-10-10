@@ -5,7 +5,7 @@ module RbBigLoremIpusum
     # Coordinates the synthetic fleet simulation and ensures each component exposes
     # consistent data for diff tooling.
     class Engine
-      CREW_ROLES = %w[captain pilot analyst botanist mechanic scientist].freeze
+      CREW_ROLES = %w[analyst botanist captain mechanic pilot scientist].freeze
 
       def initialize(simulator: Simulations::FleetSimulator.new,
                      analyzer: Analysis::Analyzer.new,

@@ -11,21 +11,19 @@ module RbBigLoremIpusum
         end
 
         def harvest(manifest, diff_targets)
-          summaries = diff_targets.map do |category, value|
-            case category
-            when :file_diff_summary
-              transform_file_diffs(value)
-            else
-              value
-            end
-          end
           {
             crew_map: manifest.fetch(:crew_map),
-            file_diff_summary: summaries.first
+            file_diff_summary: transform_targets(diff_targets)
           }
         end
 
         private
+
+        def transform_targets(diff_targets)
+          diff_targets.map do |category, value|
+            category == :file_diff_summary ? transform_file_diffs(value) : value
+          end.first
+        end
 
         def transform_file_diffs(file_list)
           file_list.each_with_object({}) do |path, acc|
@@ -35,12 +33,12 @@ module RbBigLoremIpusum
 
         def sample_diff_for(path)
           {
-            added: Array.new(rand(1..3)) { |idx| line_change(path, idx, :added) },
-            removed: Array.new(rand(1..3)) { |idx| line_change(path, idx, :removed) }
+            added: Array.new(rand(1..3)) { |idx| sample_diff_element(path, idx, :added) },
+            removed: Array.new(rand(1..3)) { |idx| sample_diff_element(path, idx, :removed) }
           }
         end
 
-        def line_change(path, idx, change_type)
+        def sample_diff_element(path, idx, change_type)
           first_line = idx.zero?
           snippet = if first_line
                       "// #{change_type} - first line edge case for #{path}"

@@ -12,7 +12,7 @@ module RbBigLoremIpusum
       @diff_harvester = Core::Pipelines::DiffHarvester.new
       @dashboard = UI::ConsoleDashboard.new
       @reporting_service = App::ServiceLayer::ReportingService.new
-      @algorithm_registry = App::Services::AlgorithmRegistry.new
+      @algorithm_registry = Algorithms::AlgorithmRegistry.new
       @call_storm = Core::Simulations::CallStorm.new(output: $stdout)
     end
 

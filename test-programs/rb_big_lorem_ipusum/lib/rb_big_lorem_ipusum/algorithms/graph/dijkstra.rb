@@ -3,10 +3,11 @@
 module RbBigLoremIpusum
   module Algorithms
     module Graph
+      class DijkstraHelper
+      end
       class Dijkstra
         def call(graph, source)
-          distances = Hash.new(Float::INFINITY)
-          distances[source] = 0
+          distances = initialize_distances(source)
           visited = {}
 
           until visited.length == graph.length
@@ -21,6 +22,10 @@ module RbBigLoremIpusum
         end
 
         private
+
+        def initialize_distances(source)
+          Hash.new(Float::INFINITY).merge(source => 0)
+        end
 
         def select_next(distances, visited)
           distances.reject { |node, _| visited[node] }.min_by { |_, cost| cost }&.first
