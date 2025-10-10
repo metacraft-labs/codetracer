@@ -50,6 +50,7 @@ fn test_backend_dap_server() {
         request: None,
         typ: None,
         session_id: None,
+        ct_rr_worker_exe: None,
     };
     let launch = client.launch(launch_args).unwrap();
     dap::write_message(&mut writer, &launch).unwrap();

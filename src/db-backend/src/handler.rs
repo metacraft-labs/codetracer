@@ -4,17 +4,19 @@ use std::error::Error;
 
 use log::{error, info, warn};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
+use crate::db::{BreakpointRecord, Db, DbCall, DbRecordEvent, DbReplay, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::program_search_tool::ProgramSearchTool;
+use crate::replay::Replay;
+use crate::rr_dispatcher::{CtRRArgs, RRDispatcher};
 // use crate::response::{};
 use crate::dap_types;
 // use crate::dap_types::Source;
@@ -51,15 +53,18 @@ pub struct Handler {
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
 
+    pub trace_kind: TraceKind,
+    // pub rr: RRDispatcher,
+    pub replay: Box<dyn Replay>,
+
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BreakpointRecord {
-    pub is_active: bool,
+#[derive(Debug, Clone, PartialEq)]
+pub enum TraceKind {
+    DB,
+    RR,
 }
-
-type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 
 // two choices:
 //   return results and potentially
@@ -80,20 +85,26 @@ type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 //   sender.
 
 impl Handler {
-    pub fn new(db: Box<Db>) -> Handler {
-        Self::construct(db, false)
+    pub fn new(trace_kind: TraceKind, ct_rr_args: CtRRArgs, db: Box<Db>) -> Handler {
+        Self::construct(trace_kind, ct_rr_args, db, false)
     }
 
-    pub fn construct(db: Box<Db>, indirect_send: bool) -> Handler {
+    pub fn construct(trace_kind: TraceKind, ct_rr_args: CtRRArgs, db: Box<Db>, indirect_send: bool) -> Handler {
         let calltrace = Calltrace::new(&db);
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
         let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
         let step_lines_loader = StepLinesLoader::new(&db, &mut expr_loader);
+        let replay: Box<dyn Replay> = if trace_kind == TraceKind::DB {
+            Box::new(DbReplay::new(db.clone()))
+        } else {
+            Box::new(RRDispatcher::new(ct_rr_args))
+        };
         // let sender = sender::Sender::new();
         Handler {
-            db,
+            trace_kind,
+            db: db.clone(),
             step_id: StepId(0),
             last_call_key: CallKey(0),
             indirect_send,
@@ -107,6 +118,8 @@ impl Handler {
             step_lines_loader,
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
+            // rr: RRDispatcher::new(ct_rr_args),
+            replay,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
         }
@@ -204,29 +217,28 @@ impl Handler {
         self.send_dap(&response)
     }
 
-    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
-        let call_key = self.db.call_key_for_step(self.step_id);
-        let reset_flow = is_main || call_key != self.last_call_key;
-        self.last_call_key = call_key;
-        info!("complete move: step_id: {:?}", self.step_id);
-        let move_state = MoveState {
-            status: "".to_string(),
-            location: self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
-            c_location: Location::default(),
-            main: is_main,
-            reset_flow,
-            stop_signal: RRGDBStopSignal::OtherStopSignal,
-            frame_info: FrameInfo::default(),
-        };
-
-        // info!("move_state {:?}", move_state);
+    // will be sent after completion of query
+    fn prepare_stopped_event(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         let reason = if is_main { "entry" } else { "step" };
         info!("generate stopped event");
         let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
         self.send_dap(&raw_event)?;
-        let raw_complete_move_event = self.dap_client.complete_move_event(&move_state)?;
+        Ok(())
+    }
+
+    fn prepare_complete_move_event(&mut self, move_state: &MoveState) -> Result<(), Box<dyn Error>> {
+        let raw_complete_move_event = self.dap_client.complete_move_event(move_state)?;
         self.send_dap(&raw_complete_move_event)?;
+        Ok(())
+    }
+
+    fn prepare_output_events(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("prepare_output_events not implemented for rr");
+            return Ok(()); // TODO
+        }
+
         if self.step_id.0 > self.previous_step_id.0 {
             let mut raw_output_events: Vec<dap::DapMessage> = vec![];
             for event in self.db.events.iter() {
@@ -253,9 +265,14 @@ impl Handler {
                 self.send_dap(raw_output_event)?;
             }
         }
-        self.previous_step_id = self.step_id;
+        Ok(())
+    }
 
-        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+    fn prepare_eventual_error_event(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("prepare_eventual_error_event not implemented for rr");
+            return Ok(()); // TODO
+        }
 
         let exact = false; // or for now try as flow // true just for this exact step
         let step_events = self.db.load_step_events(self.step_id, exact);
@@ -272,43 +289,59 @@ impl Handler {
         Ok(())
     }
 
+    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
+        info!("complete_move");
+
+        // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        // let call_key = location.call_key; // self.db.call_key_for_step(self.step_id);
+        // TODO: change if we need to support non-int keys
+        let call_key = CallKey(location.key.parse::<i64>()?);
+        let reset_flow = is_main || call_key != self.last_call_key;
+        self.last_call_key = call_key;
+        info!("  location: {location:?}");
+
+        let move_state = MoveState {
+            status: "".to_string(),
+            location,
+            c_location: Location::default(),
+            main: is_main,
+            reset_flow,
+            stop_signal: RRGDBStopSignal::OtherStopSignal,
+            frame_info: FrameInfo::default(),
+        };
+
+        self.prepare_stopped_event(is_main)?;
+        self.prepare_complete_move_event(&move_state)?;
+        self.prepare_output_events()?;
+
+        self.previous_step_id = self.step_id;
+
+        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+
+        self.prepare_eventual_error_event()?;
+
+        Ok(())
+    }
+
     pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(0));
+        self.replay.run_to_entry()?;
+        self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
         self.complete_move(true)?;
         Ok(())
     }
 
-    pub fn load_locals(&mut self, req: dap::Request, _args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
-        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
-            .iter()
-            .map(|v| Variable {
-                expression: self.db.variable_name(v.variable_id).to_string(),
-                value: self.db.to_ct_value(&v.value),
-            })
-            .collect();
+    pub fn load_locals(&mut self, req: dap::Request, args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
+        // if self.trace_kind == TraceKind::RR {
+            // let locals: Vec<Variable> = vec![];
+            // warn!("load_locals not implemented for rr yet");
+            let locals = self.replay.load_locals(args)?;
+            self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+            Ok(())
+        // }
 
-        // TODO: fix random order here as well: ensure order(or in final locals?)
-        let value_tracking_locals: Vec<Variable> = self.db.variable_cells[self.step_id]
-            .iter()
-            .map(|(variable_id, place)| {
-                let name = self.db.variable_name(*variable_id);
-                info!("log local {variable_id:?} {name} place: {place:?}");
-                let value = self.db.load_value_for_place(*place, self.step_id);
-                Variable {
-                    expression: self.db.variable_name(*variable_id).to_string(),
-                    value: self.db.to_ct_value(&value),
-                }
-            })
-            .collect();
-        // based on https://stackoverflow.com/a/56490417/438099
-        let mut locals: Vec<Variable> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
-
-        locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
-        // for now just removing duplicated variables/expressions: even if storing different values
-        locals.dedup_by(|a, b| a.expression == b.expression);
-
-        self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
-        Ok(())
+        // self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+        // Ok(())
     }
 
     // pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
@@ -388,6 +421,11 @@ impl Handler {
         _req: dap::Request,
         args: CalltraceLoadArgs,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("load_calltrace_section not implemented for rr");
+            return Ok(());
+        }
+
         let start_call_line_index = args.start_call_line_index;
         let call_lines = self.load_local_calltrace(args)?;
         let total_count = self.calc_total_calls();
@@ -406,12 +444,21 @@ impl Handler {
     }
 
     pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("flow not implemented for rr");
+            self.send_notification(NotificationKind::Warning, "flow not implemented for rr!", false)?;
+            return Ok(());
+        }
+        // TODO: something like this for db/rr:
+        // {
+        // // TODO: pass step_id to load_location and let it jump for RR if needed?
+        // // or have a separate jump_to when it's not self.step_id?
+        // self.replay.jump_to(step_id)?;
+        // let location = self.replay.load_location(&mut self.expr_loader)?;
+        // }
+
         let flow_update = if arg.flow_mode == FlowMode::Call {
-            let step_id = StepId(arg.location.rr_ticks.0);
-            let call_key = self.db.steps[step_id].call_key;
-            let function_id = self.db.calls[call_key].function_id;
-            let function_first = self.db.functions[function_id].line;
-            info!("load {arg:?}");
+            let flow_update = self.flow_preloader.load(arg.location, arg.flow_mode, &self.replay);
             self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
@@ -478,7 +525,9 @@ impl Handler {
     }
 
     pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
+        self.replay.step(Action::StepIn, forward)?;
+        self.step_id = self.replay.current_step_id();
+
         Ok(())
     }
 
@@ -509,57 +558,23 @@ impl Handler {
     }
 
     pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        let step_to_different_line = true; // which is better/should be let the user configure it?
-        (self.step_id, _) = self
-            .db
-            .next_step_id_relative_to(self.step_id, forward, step_to_different_line);
+        self.replay.step(Action::Next, forward)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
     pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        (self.step_id, _) = self.db.step_out_step_id_relative_to(self.step_id, forward);
+        self.replay.step(Action::StepOut, forward)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
     #[allow(clippy::expect_used)]
     pub fn step_continue(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        for step in self.db.step_from(self.step_id, forward) {
-            if !self.breakpoint_list.is_empty() {
-                if let Some(is_active) = self.breakpoint_list[step.path_id.0]
-                    .get(&step.line.into())
-                    .map(|bp| bp.is_active)
-                {
-                    if is_active {
-                        self.step_id_jump(step.step_id);
-                        self.complete_move(false)?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                break;
-            }
+        if !self.replay.step(Action::Continue, forward)? {
+            self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
         }
-
-        // If the continue step doesn't find a valid breakpoint.
-        if forward {
-            self.step_id_jump(
-                self.db
-                    .steps
-                    .last()
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            );
-        } else {
-            self.step_id_jump(
-                self.db
-                    .steps
-                    .first()
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            )
-        }
-        self.complete_move(false)?;
-        self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
@@ -576,21 +591,23 @@ impl Handler {
             Action::Continue => self.step_continue(!arg.reverse)?,
             _ => error!("action {:?} not implemented", arg.action),
         }
-        if arg.complete && arg.action != Action::Continue {
+        if arg.complete { // && arg.action != Action::Continue {
             self.complete_move(false)?;
         }
 
-        if original_step_id == self.step_id {
-            let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
-            self.send_notification(
-                NotificationKind::Warning,
-                &format!("Limit of record at the {location} already reached!"),
-                false,
-            )?;
-        } else if self.step_id == StepId(0) {
-            self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
-        } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
-            self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+        if self.trace_kind == TraceKind::DB {
+            if original_step_id == self.step_id {
+                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                )?;
+            } else if self.step_id == StepId(0) {
+                self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
+            } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
+                self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+            }
         }
         // } else if arg.action == Action::Next {
         //     let new_step = self.db.steps[self.step_id];
@@ -610,19 +627,11 @@ impl Handler {
     }
 
     pub fn event_load(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        let mut events: Vec<ProgramEvent> = vec![];
-        let mut first_events: Vec<ProgramEvent> = vec![];
-        let mut contents: String = "".to_string();
+        let events_data = self.replay.load_events()?;
 
-        for (i, event_record) in self.db.events.iter().enumerate() {
-            let mut event = self.to_program_event(event_record, i);
-            event.content = event_record.content.to_string();
-            events.push(event.clone());
-            if i < 20 {
-                first_events.push(event);
-                contents.push_str(&format!("{}\\n\n", event_record.content));
-            }
-        }
+        let events = events_data.events;
+        let first_events = events_data.first_events;
+        let contents = events_data.contents;
 
         self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
         self.event_db.refresh_global();
@@ -1550,7 +1559,7 @@ mod tests {
     #[test]
     fn test_struct_handling() {
         let db = setup_db();
-        let handler: Handler = Handler::new(Box::new(db));
+        let handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let value = handler.db.to_ct_value(&ValueRecord::Struct {
             field_values: vec![],
             type_id: TypeId(1),
@@ -1563,7 +1572,7 @@ mod tests {
         let db = setup_db();
 
         // Act: Create a new Handler instance
-        let handler: Handler = Handler::new(Box::new(db));
+        let handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
@@ -1574,7 +1583,7 @@ mod tests {
     #[test]
     fn test_run_single_tracepoint() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0))?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
@@ -1585,7 +1594,7 @@ mod tests {
     #[test]
     fn test_multiple_tracepoints() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         // TODO
         // this way we are resetting them after reforms
@@ -1620,7 +1629,7 @@ mod tests {
     fn test_multile_tracepoints_with_multiline_logs() -> Result<(), Box<dyn Error>> {
         let size: usize = 10000;
         let db: Db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             dap::Request::default(),
@@ -1647,7 +1656,7 @@ mod tests {
     fn test_tracepoint_in_loop() -> Result<(), Box<dyn Error>> {
         let size = 10000;
         let db: Db = setup_db_loop(size);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0))?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
@@ -1661,7 +1670,7 @@ mod tests {
         // Number of tracepoints and steps
         let count: usize = 10000;
         let db: Db = setup_db_with_step_count(count);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count))?;
 
@@ -1674,7 +1683,7 @@ mod tests {
         let db = setup_db();
 
         // Act: Create a new Handler instance
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let request = dap::Request::default();
         handler.step(request, make_step_in())?;
         assert_eq!(handler.step_id, StepId(1_i64));
@@ -1684,7 +1693,7 @@ mod tests {
     #[test]
     fn test_source_jumps() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let path = "/test/workdir";
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
@@ -1715,7 +1724,7 @@ mod tests {
     #[test]
     fn test_local_calltrace() -> Result<(), Box<dyn Error>> {
         let db = setup_db_with_calls();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         let calltrace_load_args = CalltraceLoadArgs {
             location: handler
@@ -1757,7 +1766,7 @@ mod tests {
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/alexander92/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // step-in from 1 to end(maybe also a parameter?)
         // on each step check validity, load locals, load callstack
@@ -1814,6 +1823,7 @@ mod tests {
         }
         let trace_metadata_file = path.join("trace_metadata.json");
         let trace = load_trace_data(&trace_file, trace_file_format).expect("expected that it can load the trace file");
+        info!("trace {:?}", trace);
         let trace_metadata =
             load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
         let mut db = Db::new(&trace_metadata.workdir);
