@@ -19,7 +19,7 @@ To ship a single CLI/UI (`ct record`, `ct upload`) regardless of installation me
 We will treat Python as a db-backend language inside Codetracer by adding a Python-specific launcher that invokes the PyO3 module, streams traces into the standard `trace.json`/`trace_metadata.json` format, and imports the results via `importDbTrace`.
 
 1. **Introduce `LangPythonDb`:** Extend `Lang` to include a db-backed variant for Python (`LangPythonDb`), mark it as db-based, and update language detection so `.py` scripts resolve to this enum when the bundled recorder is available.
-2. **Bundle the Recorder Wheel:** During desktop builds (AppImage, DMG, future Windows installer) compile the `codetracer_python_recorder` wheel via maturin and ship it inside the distribution alongside its Python shims. Provide a small launcher script (`ct-python-recorder`) that lives next to the CLI binaries.
+2. **Bundle the Recorder Wheel:** During desktop builds (AppImage, DMG, future Windows installer) compile the `codetracer_python_recorder` wheel via maturin and ship it inside the distribution alongside its Python shims.
 3. **CLI Invocation & Environment Parity:** Update `recordDb` so when `lang == LangPythonDb` it launches the *same* Python that the user’s shell would resolve for `python`/`python3` (or whatever interpreter is on `$PATH` inside wrappers such as `uv run`). The command will execute `-m codetracer_python_recorder` (or an equivalent entry point) inside the caller’s environment so that site-packages, virtualenvs, and tool-managed setups behave identically. If no interpreter is available, we surface the same error the user would see when running `python`, rather than falling back to a bundled runtime.
 4. **Configuration Parity:** Respect the same flags (`--with-diff`, activation scopes, environment auto-start) by translating CLI options into recorder arguments/env vars, and inherit all user environment variables untouched. The db backend will continue to populate sqlite indices and cached metadata as it does for Ruby.
 5. **Installer Hooks:** Ensure the bundled CLI exposes the recorder module without overriding interpreter discovery. Wrapper scripts should add our wheel to `PYTHONPATH` (or `CODERTRACER_RECORDER_PATH`) while deferring to the interpreter already active in the user’s shell (`uv`, `pipx`, virtualenv). On macOS/Linux this happens via scripts created by `installCodetracerOnPath`; the Windows installer will register similar shims. We will not ship a backup interpreter for unmatched environments.
@@ -52,10 +52,9 @@ This decision establishes the db-backend as the single ingestion interface for C
 ## Implementation Notes
 
 1. Create a maturin build step in installer pipelines that outputs wheels for the target platform and stage them under `resources/python/`.
-2. Add a tiny launcher script (e.g., `bin/ct-python-recorder`) that amends `PYTHONPATH` to include the bundled wheel but defers to the interpreter in `$PATH` so wrappers like `uv run` or virtualenv activation continue to work—no backup interpreter is provided.
-3. Extend `recordDb` with a Python branch that discovers the interpreter (`env["PYTHON"]`, `which python`, activated `sys.executable` within wrappers) and invokes the launcher with activation paths, output directories, and user arguments. If discovery fails, return an error mirroring `python`’s behaviour (e.g., “command not found”).
-4. Update trace import tests to cover Python recordings end-to-end, ensuring sqlite metadata matches expectations.
-5. Modify CLI help (`ct record --help`) and docs to note that Python recordings are now first-class within the desktop app.
+2. Extend `recordDb` with a Python branch that discovers the interpreter (`env["PYTHON"]`, `which python`, activated `sys.executable` within wrappers) and invokes the launcher with activation paths, output directories, and user arguments. If discovery fails, return an error mirroring `python`’s behaviour (e.g., “command not found”).
+3. Update trace import tests to cover Python recordings end-to-end, ensuring sqlite metadata matches expectations.
+4. Modify CLI help (`ct record --help`) and docs to note that Python recordings are now first-class within the desktop app.
 
 ## Status & Next Steps
 
