@@ -3,9 +3,9 @@
 module RbBigLoremIpusum
   module Config
     TELEMETRY_STREAMS = {
-      latency_traces: { retention: 72, sampling: :adaptive },
-      diff_rendering: { retention: 48, sampling: :burst },
-      accessibility_events: { retention: 168, sampling: :all }
+      diff_rendering: { sampling: :burst, retention: 96 },
+      latency_traces: { sampling: :adaptive, retention: 144 },
+      accessibility_events: { sampling: :all, retention: 192 }
     }.freeze
   end
 end

@@ -13,7 +13,7 @@ module RbBigLoremIpusum
         output = StringIO.new
         $stdout = output
         dashboard.render(
-          crew: { pilot: [App::Domain::Entities::CrewMember.new(name: 'Pilot 1', role: 'pilot', certifications: [], on_call: true)] },
+          crew: { pilot: [App::Domain::Entities::CrewMember.new(name: 'Pilot 1', role: 'pilot', certifications: [], on_call: false)] },
           diffs: { 'file.rb' => { added: [{ payload: 'line', path: 'file.rb', first_line: false }], removed: [] } },
           telemetry: { diff_rendering: [{ ship: 'RB-000', metrics: [] }] }
         )

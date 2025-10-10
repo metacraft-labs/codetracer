@@ -44,7 +44,7 @@ module RbBigLoremIpusum
           snippet = if first_line
                       "// #{change_type} - first line edge case for #{path}"
                     else
-                      "// #{change_type} change ##{idx} for #{path}"
+                      "// #{change_type} :diff change ##{idx} for #{path}"
                     end
           @renderer.decorate(path: path, first_line: first_line, payload: snippet)
         end
@@ -52,5 +52,4 @@ module RbBigLoremIpusum
     end
   end
 end
-
 
