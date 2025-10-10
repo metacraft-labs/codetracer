@@ -3,12 +3,12 @@ mod components;
 mod modules;
 mod utils;
 
-use crate::components::crew_manifest;
+use crate::components::crew_registry;
 use crate::components::mission_profile::MissionOutcome;
-use crate::entrypoints::record;
+use crate::entrypoints::mission_ops;
 use crate::modules::algorithms::{pathfinding, statistics};
-use crate::modules::systems::{life_support, navigation, shield_matrix};
-use crate::modules::telemetry::{aggregator, log_dispatcher, mega_trace};
+use crate::modules::systems::{legacy, navigation, shield_matrix};
+use crate::modules::telemetry::{aggregator, archives::historical::mega_trace, features::signal_probe, log_dispatcher};
 use crate::utils::math_helpers;
 
 fn main(
@@ -21,12 +21,12 @@ fn main(
 ) -> pub Field {
     println("== noir_galactic_diff run ==");
 
-    let (manifest, manifest_summary) = components::crew_manifest::build_manifest(initial_power, crew_morale, logistic_payload);
+    let (manifest, manifest_summary) = components::crew_registry::build_manifest(initial_power, crew_morale, logistic_payload);
     let mission = components::mission_profile::build_profile(route_weights, hazard_intensity);
 
     let mut stability = shield_matrix::evaluate_matrix(manifest.shield_state, regen_rate, hazard_intensity);
     let navigation_weight = navigation::weighted_course(route_weights, hazard_intensity);
-    let life_support_margin = life_support::estimate_margin(manifest.life_support_grid, crew_morale);
+    let life_support_margin = legacy::life_support::estimate_margin(manifest.life_support_grid, crew_morale);
 
     let path_score = pathfinding::compute_galactic_path(route_weights, hazard_intensity);
     let morale_delta = statistics::normalize_morale(crew_morale);
@@ -34,7 +34,7 @@ fn main(
     let mission_checksum = mission.checksum;
     let route_sequence = mission.route_sequence;
     let hazard_profile = mission.hazard_profile;
-    let recorded = record::record_snapshot(manifest_summary, mission_checksum, route_sequence, hazard_profile, path_score, morale_delta);
+    let recorded = mission_ops::record_snapshot(manifest_summary, mission_checksum, route_sequence, hazard_profile, path_score, morale_delta);
     let stability_flag = (stability as i32) > 0;
     log_dispatcher::print_log_summary(recorded.log_entries, stability_flag);
 
@@ -45,7 +45,10 @@ fn main(
         path_score
     );
 
-    let mega = mega_trace::emit_trace_summary(telemetry_total + navigation_weight);
+    let probe_window = [stability, path_score, navigation_weight, life_support_margin];
+    let probe_signal = signal_probe::probe_signal(probe_window);
+
+    let mega = mega_trace::emit_trace_summary(telemetry_total + navigation_weight + probe_signal);
     stability = stability + mega;
 
     if (stability as i32) <= 0 {

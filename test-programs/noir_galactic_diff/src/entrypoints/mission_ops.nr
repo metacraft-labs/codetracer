@@ -1,3 +1,4 @@
+use crate::modules::systems::navigation;
 use crate::utils::collections::fold_sum;
 
 pub struct SnapshotRecord {
@@ -23,4 +24,9 @@ pub fn record_snapshot(
     logs[3] = fold_sum(hazard_profile);
 
     SnapshotRecord { manifest_checksum, mission_checksum, log_entries: logs }
+}
+
+pub fn project_route(weights: [Field; 8], hazards: [Field; 8]) -> Field {
+    let nav = navigation::weighted_course(weights, hazards);
+    nav + fold_sum(weights)
 }
