@@ -1,0 +1,26 @@
+{
+  "issued_at": "2025-10-10 14:07:58 UTC",
+  "ships": [
+    "#<RbBigLoremIpusum::App::Models::Ship:0x00007fffd25ca3d0>",
+    "#<RbBigLoremIpusum::App::Models::Ship:0x00007fffd25c43e0>",
+    "#<RbBigLoremIpusum::App::Models::Ship:0x00007fffd9e5d310>"
+  ],
+  "crew_map": {
+    "captain": [
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25cdb20>",
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25c74f0>",
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25c18c0>"
+    ],
+    "pilot": [
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25cc8b0>",
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25c65a0>",
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25c0970>"
+    ],
+    "analyst": [
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25cb6e0>",
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd25c56a0>",
+      "#<RbBigLoremIpusum::App::Models::CrewMember:0x00007fffd9e5eee0>"
+    ]
+  },
+  "serialized_at": "2025-10-10 14:07:58 UTC"
+}

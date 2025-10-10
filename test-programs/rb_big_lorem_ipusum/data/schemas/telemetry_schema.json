@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TelemetryEntry",
+  "type": "object",
+  "properties": {
+    "ship": { "type": "string" },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "destination": { "type": "string" },
+          "latency": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["destination", "latency"]
+      }
+    }
+  },
+  "required": ["ship", "metrics"]
+}

@@ -20,3 +20,6 @@
   and hook it to `app.on('before-quit')`, `app.on('window-all-closed')`, and
   Node process signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to ensure the process
   is always terminated when the app exits.
+- Synthetic diff stressor: `test-programs/rb_big_lorem_ipusum` mirrors the repo's breadth with a 60k+ line payload generator to expose multi-file diff edge cases.
+- `Core::Simulations::CallStorm` inside `rb_big_lorem_ipusum` drives a deep recursive call graph with heavy logging to exercise call-trace visualizations.
+- Iteration-heavy code paths in `rb_big_lorem_ipusum` are now capped (e.g. 3 ships, top-3 samples in the dashboard) so `run_all.rb` completes quickly during manual UI tests.
