@@ -3,7 +3,7 @@
 module RbBigLoremIpusum
   module Infrastructure
     module Storage
-      class MemoryAdapter
+      class MemoryBuffer
         attr_reader :store
 
         def initialize

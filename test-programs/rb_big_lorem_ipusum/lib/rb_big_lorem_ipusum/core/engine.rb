@@ -37,7 +37,7 @@ module RbBigLoremIpusum
 
       def build_manifest
         ships = Array.new(3) do |index|
-          App::Models::Ship.new(
+          App::Domain::Entities::Ship.new(
             identifier: "RB-#{index.to_s.rjust(3, '0')}",
             model: index.even? ? 'Explorer' : 'Courier',
             crew: build_crew(index),
@@ -56,7 +56,7 @@ module RbBigLoremIpusum
       def build_crew(seed)
         Array.new(3).map.with_index do |_, idx|
           role = CREW_ROLES[idx % CREW_ROLES.length]
-          App::Models::CrewMember.new(
+          App::Domain::Entities::CrewMember.new(
             name: "#{role.capitalize} #{seed}-#{idx}",
             role: role,
             certifications: Array.new((seed + idx) % 5 + 1) { |cert| "cert-#{role}-#{cert}" },

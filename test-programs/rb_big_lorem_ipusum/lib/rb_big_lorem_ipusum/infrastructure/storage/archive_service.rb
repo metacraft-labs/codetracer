@@ -6,7 +6,7 @@ module RbBigLoremIpusum
       # Stores manifest snapshots to both memory and file adapters to simulate
       # multi-target persistence in the diff scenarios.
       class ArchiveService
-        def initialize(memory: MemoryAdapter.new, file: FileSystemAdapter.new)
+        def initialize(memory: MemoryBuffer.new, file: FileSystemAdapter.new)
           @memory = memory
           @file = file
         end

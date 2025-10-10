@@ -14,6 +14,9 @@ diff_harvester = RbBigLoremIpusum::Core::Pipelines::DiffHarvester.new
 diffs = diff_harvester.harvest(payload[:manifest], payload[:diff_targets])
 puts "Harvested #{diffs[:file_diff_summary].keys.length} diff targets"
 
+diagnostics = RbBigLoremIpusum::Features::DiffDiagnostics::Analyzer.new
+diagnostics.emit_summary(diffs[:file_diff_summary].to_a)
+
 aggregator = RbBigLoremIpusum::Infrastructure::Telemetry::Aggregator.new
 telemetry = aggregator.capture(payload[:fleet_metrics])
 puts "Captured telemetry streams: #{telemetry.keys.join(', ')}"
@@ -52,7 +55,7 @@ drill_down = diff_controller.drill_down(sample_path, diff_body)
 puts "\nDrill down for #{sample_path}:"
 puts drill_down.inspect
 
-reporting = RbBigLoremIpusum::App::Services::ReportingService.new
+reporting = RbBigLoremIpusum::App::ServiceLayer::ReportingService.new
 reports = reporting.persist(payload[:manifest], diffs, telemetry)
 puts "\nPersisted #{reports.length} report entries"
 

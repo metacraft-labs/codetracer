@@ -5,6 +5,8 @@ module RbBigLoremIpusum
     module Telemetry
       # Collects telemetry entries and enforces retention policies defined in config.
       class Aggregator
+        include AggregatorSupport
+
         def initialize(streams: Config::TELEMETRY_STREAMS)
           @streams = streams
           @buffer = Hash.new { |hash, key| hash[key] = [] }
@@ -32,19 +34,8 @@ module RbBigLoremIpusum
           @buffer[stream] = @buffer[stream].last(limit)
         end
 
-        def build_latency_trace(entry)
-          {
-            ship: entry[:ship],
-            metrics: entry[:cycles].each_slice(2).map do |cycle, destination|
-              next unless destination
-
-              { destination: destination, latency: (cycle.hash % 200) + 20 }
-            end.compact
-          }
-        end
-
         def flush
-          serializer = StreamSerializer.new
+          serializer = serializer_for
           @buffer.transform_values { |entries| serializer.serialize(entries) }
         end
       end

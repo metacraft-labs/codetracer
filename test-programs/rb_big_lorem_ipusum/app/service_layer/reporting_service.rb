@@ -2,7 +2,7 @@
 
 module RbBigLoremIpusum
   module App
-    module Services
+    module ServiceLayer
       class ReportingService
         def initialize(storage: Infrastructure::Storage::ArchiveService.new)
           @storage = storage
@@ -28,7 +28,7 @@ module RbBigLoremIpusum
               telemetry: telemetry.fetch(:diff_rendering, [])
                                    .find { |entry| entry[:ship] == ship.identifier }
             }
-            Models::LogEntry.new(
+            Domain::Logging::LogEntry.new(
               ship: ship.identifier,
               level: :info,
               message: "Generated report for #{ship.identifier}",

@@ -7,14 +7,14 @@ module RbBigLoremIpusum
 
       def ship(identifier: 'RB-000')
         crew = Array.new(3) do |index|
-          App::Models::CrewMember.new(
+          App::Domain::Entities::CrewMember.new(
             name: "Crew #{index}",
             role: %w[pilot engineer analyst][index % 3],
             certifications: %W[c#{index} d#{index}],
             on_call: index.even?
           )
         end
-        App::Models::Ship.new(
+        App::Domain::Entities::Ship.new(
           identifier: identifier,
           model: 'Explorer',
           crew: crew,
