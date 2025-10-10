@@ -1,0 +1,7 @@
+{
+  "streams": [
+    { "name": "diff_rendering", "sampling": "burst", "retention": 48 },
+    { "name": "latency_traces", "sampling": "adaptive", "retention": 72 },
+    { "name": "accessibility_events", "sampling": "all", "retention": 168 }
+  ]
+}

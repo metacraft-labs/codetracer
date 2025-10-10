@@ -1,0 +1,20 @@
+initial_power = "1337"
+regen_rate = "17"
+
+route_weights = [
+  "1", "2", "3", "4",
+  "5", "6", "7", "8"
+]
+
+hazard_intensity = [
+  "8", "7", "6", "5",
+  "4", "3", "2", "1"
+]
+
+crew_morale = [
+  "10", "12", "9", "11"
+]
+
+logistic_payload = [
+  "21", "34", "55", "89"
+]
