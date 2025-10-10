@@ -1,6 +1,5 @@
 #[cfg(feature = "io-transport")]
 use expanduser::expanduser;
-use vfs::VfsPath;
 
 use std::collections::HashMap;
 use std::error::Error;
