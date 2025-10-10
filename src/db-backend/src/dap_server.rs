@@ -1,9 +1,6 @@
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
 use crate::dap_types::{self, Breakpoint, SetBreakpointsArguments, SetBreakpointsResponseBody, Source};
 
-#[cfg(feature = "browser-transport")]
-use crate::dap_error::DapError;
-
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::paths::CODETRACER_PATHS;
@@ -18,14 +15,13 @@ use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcesso
 use crate::transport::DapTransport;
 
 #[cfg(feature = "browser-transport")]
-use crate::transport::WorkerTransport;
+use crate::transport::{DapResult, WorkerTransport};
 
-use log::{error, info};
+use log::info;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
-use std::io::BufRead;
 
 #[cfg(feature = "io-transport")]
 use std::io::BufReader;
@@ -34,24 +30,6 @@ use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
-
-// fn forward_raw_events<W: Write>(
-//     rx: &mpsc::Receiver<BackendResponse>,
-//     writer: &mut W,
-//     seq: &mut i64,
-// ) -> Result<(), Box<dyn Error>> {
-//     while let Ok(BackendResponse::EventResponse((kind, _id, payload, raw))) = rx.try_recv() {
-//         if raw && matches!(kind, EventKind::MissingEventKind) {
-//             if let Ok(DapMessage::Event(mut ev)) = dap::from_json(&payload) {
-//                 ev.base.seq = *seq;
-//                 *seq += 1;
-//                 dap::write_message(writer, &DapMessage::Event(ev))?;
-//             }
-//         }
-//     }
-//     Ok(())
-// }
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
@@ -78,7 +56,7 @@ pub fn make_socket_transport(
 }
 
 #[cfg(feature = "browser-transport")]
-pub fn make_transport() -> Result<WorkerTransport, DapError> {
+pub fn make_transport() -> DapResult<WorkerTransport> {
     WorkerTransport::new()
 }
 
@@ -87,7 +65,7 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
         .lock()
         .unwrap()
         .tmp_path
-        .join(format!("{DAP_SOCKET_NAME}_{}", pid))
+        .join(format!("{DAP_SOCKET_NAME}_{}.sock", pid))
 }
 
 #[cfg(feature = "io-transport")]
@@ -103,20 +81,13 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
 pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     // let mut transport = make_io_transport().unwrap();
 
-    let (mut reader, mut writer) = make_socket_transport(socket_path).unwrap();
+    let (mut reader, mut writer) = make_socket_transport(socket_path)?;
 
     handle_client(&mut reader, &mut writer)
 }
 
-// pub fn run_stdio() -> Result<(), Box<dyn Error>> {
-//     let stdin = std::io::stdin();
-//     let stdout = std::io::stdout();
-//     let mut reader = BufReader::new(stdin.lock());
-//     let mut writer = stdout.lock();
-//     handle_client(&mut reader, &mut writer)
-// }
-
 fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
+    // TODO: log this when logging logic is properly abstracted
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
@@ -127,12 +98,10 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
     let trace_path = trace_folder.join(trace_file);
     // duration code copied from
     // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-    let _start = Instant::now();
     if let (Ok(meta), Ok(trace)) = (
         load_trace_metadata(&metadata_path),
         load_trace_data(&trace_path, trace_file_format),
     ) {
-        let _start2 = Instant::now();
         let mut db = Db::new(&meta.workdir);
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
@@ -231,7 +200,8 @@ fn handle_request<T: DapTransport>(
         "ct/run-tracepoints" => handler.run_tracepoints(req.clone(), req.load_args::<RunTracepointsArg>()?)?,
         "ct/setup-trace-session" => handler.setup_trace_session(req.clone(), req.load_args::<RunTracepointsArg>()?)?,
         "ct/load-calltrace-section" => {
-            info!("load_calltrace_section");
+            // TODO: log this when logging logic is properly abstracted
+            // info!("load_calltrace_section");
             handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
         }
         "ct/load-asm-function" => handler.load_asm_function(req.clone(), req.load_args::<FunctionLocation>()?)?,
@@ -264,6 +234,20 @@ pub struct Ctx {
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
     pub received_configuration_done: bool,
+}
+
+impl Default for Ctx {
+    fn default() -> Self {
+        Self {
+            seq: 1i64,
+            breakpoints: HashMap::new(),
+            handler: None,
+            received_launch: false,
+            launch_trace_folder: PathBuf::from(""),
+            launch_trace_file: PathBuf::from(""),
+            received_configuration_done: false,
+        }
+    }
 }
 
 pub fn handle_message<T: DapTransport>(
@@ -405,7 +389,8 @@ pub fn handle_message<T: DapTransport>(
                     ctx.launch_trace_file = "trace.json".into();
                 }
 
-                // info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder);
+                // TODO: log this when logging logic is properly abstracted
+                //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
 
                 if ctx.received_configuration_done {
                     ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
@@ -413,10 +398,8 @@ pub fn handle_message<T: DapTransport>(
                         write_dap_messages(transport, h, &mut ctx.seq)?;
                     }
                 }
-                // if let Some(pid) = args.pid {
-                // eprintln!("PID: {}", pid);
-                // }
             }
+            // TODO: log this when logging logic is properly abstracted
             // info!(
             //     "received launch; configuration done? {0:?}; req: {1:?}",
             //     ctx.received_configuration_done, req
@@ -453,6 +436,7 @@ pub fn handle_message<T: DapTransport>(
             ctx.seq += 1;
             transport.send(&resp)?;
 
+            // TODO: log this when logging logic is properly abstracted
             // info!(
             //     "configuration done sent response; received_launch: {0:?}",
             //     ctx.received_launch
@@ -480,10 +464,7 @@ pub fn handle_message<T: DapTransport>(
                 // we allow it for now here, but if additional cleanup is needed, maybe we'd need
                 // to return to upper functions
                 #[allow(clippy::exit)]
-                ()
-
-                // NOTE: HANDLE THIS FOR WASM!
-                // std::process::exit(0);
+                std::process::exit(0);
             }
         }
         DapMessage::Request(req) => {
@@ -501,28 +482,15 @@ pub fn handle_message<T: DapTransport>(
 }
 
 #[cfg(feature = "io-transport")]
-fn handle_client<R: BufRead, T: DapTransport>(reader: &mut R, transport: &mut T) -> Result<(), Box<dyn Error>> {
-    let seq = 1i64;
-    let breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
-    // let (tx, _rx) = mpsc::channel();
-    let handler: Option<Handler> = None;
-    let received_launch = false;
-    let launch_trace_folder = PathBuf::from("");
-    let launch_trace_file = PathBuf::from("");
-    let received_configuration_done = false;
+fn handle_client<R: std::io::BufRead, T: DapTransport>(
+    reader: &mut R,
+    transport: &mut T,
+) -> Result<(), Box<dyn Error>> {
+    use log::error;
 
-    let mut ctx = Ctx {
-        seq,
-        breakpoints,
-        handler,
-        received_launch,
-        launch_trace_folder,
-        launch_trace_file,
-        received_configuration_done,
-    };
+    let mut ctx = Ctx::default();
 
     while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
-        info!("Handling msg: {:?}", msg);
         let _ = handle_message(&msg, transport, &mut ctx);
     }
 

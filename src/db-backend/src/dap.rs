@@ -1,14 +1,9 @@
 use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
 use crate::task::{self, CtUpdatedTableResponseBody};
-use log::{error, info};
+use crate::transport::DapResult;
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
-use std::io::BufRead;
 use std::path::PathBuf;
-
-type DapResult<T> = std::result::Result<T, DapError>;
-
-use crate::dap_error::DapError;
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
@@ -366,10 +361,14 @@ pub fn to_json(message: &DapMessage) -> DapResult<String> {
 }
 
 #[cfg(feature = "io-transport")]
-pub fn read_dap_message_from_reader<R: BufRead>(reader: &mut R) -> DapResult<DapMessage> {
+pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapResult<DapMessage> {
+    use log::info;
+
     info!("from_reader");
     let mut header = String::new();
     reader.read_line(&mut header).map_err(|e| {
+        use log::error;
+
         error!("Read Line: {:?}", e);
         serde_json::Error::custom(e.to_string())
     })?;

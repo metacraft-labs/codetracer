@@ -1,8 +1,10 @@
 use crate::{dap::DapMessage, dap_error::DapError};
 
+pub type DapResult<T> = std::result::Result<T, DapError>;
+
 /// Unified abstraction used by your code regardless of target.
 pub trait DapTransport {
-    fn send(&mut self, message: &DapMessage) -> Result<(), DapError>;
+    fn send(&mut self, message: &DapMessage) -> DapResult<()>;
 }
 
 //
@@ -19,7 +21,7 @@ mod io_transport {
 
     // Blanket impl: any `Write` is a DapTransport
     impl<T: Write> DapTransport for T {
-        fn send(&mut self, msg: &DapMessage) -> Result<(), DapError> {
+        fn send(&mut self, msg: &DapMessage) -> DapResult<()> {
             let json = to_json(msg)?;
             let header = format!("Content-Length: {}\r\n\r\n", json.len());
             self.write_all(header.as_bytes())
@@ -52,7 +54,7 @@ mod browser_transport {
 
     impl BrowserTransport {
         /// Create from `globalThis` assuming we are inside a DedicatedWorkerGlobalScope.
-        pub fn new() -> Result<Self, DapError> {
+        pub fn new() -> DapResult<Self> {
             let global = js_sys::global();
             let scope: DedicatedWorkerGlobalScope = global
                 .dyn_into()
@@ -62,9 +64,7 @@ mod browser_transport {
     }
 
     impl DapTransport for BrowserTransport {
-        fn send(&mut self, msg: &DapMessage) -> Result<(), DapError> {
-            // 2) OR send as string (simpler, but pick one path)
-
+        fn send(&mut self, msg: &DapMessage) -> DapResult<()> {
             let js_val = to_value(msg).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
             self.scope
                 .post_message(&js_val)
