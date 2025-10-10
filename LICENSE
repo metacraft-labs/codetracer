@@ -660,5 +660,4 @@ if any, to sign a "copyright disclaimer" for the program, if necessary.
 For more information on this, and how to apply and follow the GNU AGPL, see
 <https://www.gnu.org/licenses/>.
 
-The wasm-sysroot is copied from the tree-sitter repo.
-<https://github.com/tree-sitter/tree-sitter>.
+The wasm-sysroot is copied from the tree-sitter repo: (https://github.com/tree-sitter/tree-sitter) : specifically https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include. The C headers there are a modified version of glibc headers, which are originally under LGPL license.
