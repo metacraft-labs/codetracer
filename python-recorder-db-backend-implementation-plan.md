@@ -43,9 +43,17 @@ Deliverable: a new release of the `codetracer_python_recorder` wheel that the de
    - Reuse the existing import pipeline (`importDbTrace`) to ingest the generated trace artifacts.
 
 4. **Installer & packaging updates**
-   - Hook maturin wheel builds into AppImage / DMG / (future) Windows pipelines, staging the wheel and launcher under `resources/python/`.
+   - Hook maturin wheel builds into AppImage / DMG / (future) Windows pipelines, staging the wheel and launcher under `resources/python/`. 
+     
+	 __Status__: Deprecated: We will build this package separately. In
+     the codetracer repo we will just run the proper `python -m ...`
+     command to start the recorder, expecting that the user has
+     installed it in their venv. 
+
    - Update PATH-install scripts (`install_utils.nim`, installer shell scripts) to expose the launcher while deferring interpreter selection to the user’s environment.
-   - Add CI smoke tests that run `ct record examples/python_script.py` on each platform build artifact.
+   
+   - Add CI smoke tests that run `ct record examples/python_script.py` on each platform build artifact.   
+     Details: this will work by creating a small venv and installing the special Python package we need to record in it. For example one can do this using `just venv 2.13 dev` in `lib/codetracer-python-recorder`
 
 5. **CLI UX & documentation**
    - Update `ct record --help`, docs (`docs/book/src/installation.md`, CLI guides) and release notes to communicate Python parity expectations (“matches `python script.py` in the caller’s environment”).

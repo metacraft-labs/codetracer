@@ -103,8 +103,6 @@ proc recordDb(
         recorderArgs.add(pythonActivationPath)
       recorderArgs.add(program)
       startArgs = recorderArgs
-      # Debug call
-      startArgs = @["-m", "sysconfig"]
     else:
       echo fmt"error: lang {lang} not supported for recordDb"
       quit(1)
@@ -256,10 +254,11 @@ proc record(
       if interpreterPath.len == 0:
         errorMessage "error: expected a python interpreter path but received an empty value"
         quit(1)
-      try:
-        interpreterPath = expandFilename(interpreterPath)
-      except OsError:
-        let foundInterpreter = findExe(interpreterPath)
+      if fileExists(interpreterPath):
+        if not interpreterPath.isAbsolute():
+          interpreterPath = absolutePath(interpreterPath)
+      else:
+        let foundInterpreter = findExe(interpreterPath, followSymlinks=false)
         if foundInterpreter.len == 0:
           errorMessage fmt"error: can't locate python interpreter at '{pythonInterpreter}'"
           quit(1)
