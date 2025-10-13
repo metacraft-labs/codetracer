@@ -9,6 +9,7 @@
   - [Stylus](./getting_started/stylus.md)
   - [WASM](./getting_started/wasm.md)
   - [Ruby](./getting_started/ruby.md)
+  - [Python](./getting_started/python.md)
 
 ## Usage guide
 

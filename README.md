@@ -151,7 +151,7 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
 `<application>` can be a source file or a project folder (depending on the language):
 
 1. `ct run <application>` - Creates a recording and load it in CodeTracer with a single command.
-1. `ct record <application>` - Creates a trace file that can be loaded later or shared.
+1. `ct record <application>` - Creates a trace file that can be loaded later or shared. For Python scripts this reuses the interpreter you would get by running `python` in the same shell (honoring the `CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, and `PYTHON` environment variables before falling back to `PATH`) and that interpreter must have `codetracer_python_recorder` installed.
 1. `ct replay` - Launches the CodeTracer GUI with a previously recorded trace file. Common usages are:
    - `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
    - `ct replay <program-name>` - Opens the last trace of an application.
