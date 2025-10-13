@@ -6,6 +6,7 @@
 - Step 3: `db-backend-record` invokes the recorder via the resolved interpreter, forwards activation/diff flags, and imports the generated traces.
 - Step 4: `ct record` performs a preflight check that `codetracer_python_recorder` can be imported, surfaces actionable guidance when it is missing or broken, and the docs/CLI help now point users to install the wheel themselves.
 - Step 5: CLI help text, README, and docs share the Python db-backend parity story, including interpreter resolution, the `codetracer_python_recorder` requirement, and a dedicated getting-started guide.
+- Step 6: CI smoke test now records a Python trace inside a virtualenv, validates metadata fields, and exercises failure modes for missing recorder modules and missing interpreters.
 
 ## Next
-- Step 6: Add validation coverage (Python end-to-end trace plus failure-mode messaging) for the db-backend integration.
+- Milestone: remove the feature flag once cross-platform packaging and CI smoke tests are green.

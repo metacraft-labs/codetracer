@@ -51,8 +51,8 @@ Deliverable: a new release of the `codetracer_python_recorder` wheel that users 
    - Update `ct record --help`, docs (`docs/book/src/installation.md`, CLI guides) and release notes to communicate Python parity expectations (“matches `python script.py` in the caller’s environment”).
 
 6. **Validation**
-   - Add end-to-end tests: record + upload a Python trace via the CLI inside a virtual environment and confirm trace metadata matches expectations.
-   - Ensure failure modes (missing interpreter, import errors) surface actionable messages.
+   - Add end-to-end tests: record a Python trace via the CLI inside a virtual environment, verify metadata fields, and ensure the trace is accepted by the importer.
+   - Exercise failure paths (missing interpreter, missing recorder module) and assert the CLI emits actionable guidance.
 
 Deliverable: desktop Codetracer builds where `ct record` for Python scripts behaves identically to invoking `python` directly, using the user’s interpreter, while storing traces through the db-backend workflow.
 
