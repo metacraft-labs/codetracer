@@ -348,6 +348,10 @@
             {
               "type": "STRING",
               "value": "покажи"
+            },
+            {
+              "type": "STRING",
+              "value": "print"
             }
           ]
         },
@@ -1646,5 +1650,6 @@
   "precedences": [],
   "externals": [],
   "inline": [],
-  "supertypes": []
+  "supertypes": [],
+  "reserved": {}
 }

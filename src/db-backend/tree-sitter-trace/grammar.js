@@ -84,7 +84,7 @@ module.exports = grammar({
       ))
     ),
     logExpression: $ => seq(
-      choice("log", "покажи"),
+      choice("log", "покажи", "print"),
       "(",
       // based on https://stackoverflow.com/a/62803449/438099
       optional(seq($._expression, repeat(seq(",", $._expression)))),
