@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - Documented that Python recordings now run through the db backend using the active interpreter, including CLI help and installation guidance for the `codetracer_python_recorder` package.
 - Added a Python getting-started guide covering recorder installation, `ct record`, and replay workflows.
+- `ct record` now verifies that `codetracer_python_recorder` is importable before launching the db backend and prints remediation hints when the module is missing or broken.
 
 ## 25.09.2 - 2025-09-25(hotfix)
 
