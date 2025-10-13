@@ -16,15 +16,15 @@ This plan tracks the work required to implement ADR 0005 (“Wire the Rust/PyO3 
    - Introduce fixtures or golden files if additional metadata (e.g., tool identifiers) must be appended.
 
 3. **Wheel packaging & layout**
-   - Update `pyproject.toml` / `Cargo.toml` to tag the wheel for the platforms we ship and to include the new CLI module in the distribution.
-   - Provide a tiny shim script (e.g., `bin/codetracer-python-recorder`) that simply invokes `python -m codetracer_python_recorder`.
+   - Update `pyproject.toml` / `Cargo.toml` to tag the wheel for the platforms we support and to include the CLI module in the distribution published to PyPI (or our internal index).
+   - Ensure the wheel exposes an entry point that `python -m codetracer_python_recorder` can invoke without requiring additional shims.
    - Extend the `Justfile`/CI workflow to build release wheels and run smoke tests against the CLI entry point.
 
 4. **Documentation & tooling**
    - Add recorder CLI usage examples to `README` / design docs.
-   - Document expected environment variables (PYTHONPATH additions, activation behaviour) for installer integration.
+   - Document interpreter expectations and environment variables so downstream tools (e.g., Codetracer CLI) can integrate without bundling the wheel.
 
-Deliverable: a new release of the `codetracer_python_recorder` wheel that the desktop bundle can consume without additional patches.
+Deliverable: a new release of the `codetracer_python_recorder` wheel that users can install directly in their development environments without additional patches.
 
 ---
 
@@ -38,22 +38,14 @@ Deliverable: a new release of the `codetracer_python_recorder` wheel that the de
    - Capture interpreter discovery (respect `$PYTHON`, current shell PATH, `sys.executable` inside wrappers) and surface clear errors when the executable is missing.
 
 3. **db-backend invocation**
-   - In `src/ct/db_backend_record.nim`, add a Python branch that launches the user’s interpreter with the packaged launcher (e.g., `python -m codetracer_python_recorder --trace-dir ...`).
+   - In `src/ct/db_backend_record.nim`, add a Python branch that launches the user’s interpreter against the installed module (e.g., `python -m codetracer_python_recorder --trace-dir ...`).
    - Ensure the subprocess inherits the current environment, including virtualenv variables, without modification.
    - Reuse the existing import pipeline (`importDbTrace`) to ingest the generated trace artifacts.
 
-4. **Installer & packaging updates**
-   - Hook maturin wheel builds into AppImage / DMG / (future) Windows pipelines, staging the wheel and launcher under `resources/python/`. 
-     
-	 __Status__: Deprecated: We will build this package separately. In
-     the codetracer repo we will just run the proper `python -m ...`
-     command to start the recorder, expecting that the user has
-     installed it in their venv. 
-
-   - Update PATH-install scripts (`install_utils.nim`, installer shell scripts) to expose the launcher while deferring interpreter selection to the user’s environment.
-   
-   - Add CI smoke tests that run `ct record examples/python_script.py` on each platform build artifact.   
-     Details: this will work by creating a small venv and installing the special Python package we need to record in it. For example one can do this using `just venv 2.13 dev` in `lib/codetracer-python-recorder`
+4. **User guidance & preflight checks**
+   - Add CLI validation that surfaces a descriptive error when `codetracer_python_recorder` cannot be imported, including remediation hints.
+   - Expand documentation (installation guide, getting started, CLI help) to explain how users install and update the recorder wheel.
+   - Record CI smoke tests that create a disposable virtual environment, `pip install codetracer_python_recorder`, and run `ct record examples/python_script.py` to guard against regressions.
 
 5. **CLI UX & documentation**
    - Update `ct record --help`, docs (`docs/book/src/installation.md`, CLI guides) and release notes to communicate Python parity expectations (“matches `python script.py` in the caller’s environment”).
