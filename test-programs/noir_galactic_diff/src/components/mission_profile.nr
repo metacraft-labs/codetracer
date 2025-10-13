@@ -7,15 +7,19 @@ pub struct MissionProfile {
 }
 
 pub struct MissionOutcome {
-    pub route_score: Field,
-    pub survivability: Field,
     pub morale_delta: Field,
+    pub survivability: Field,
+    pub route_score: Field,
 }
 
 impl MissionOutcome {
-    pub fn status_code(self) -> Field {
+    pub fn success_flag(self) -> Field {
         let surv = self.survivability as i32;
         if surv > 0 { 1 } else { 0 }
+    }
+
+    pub fn status_code(self) -> Field {
+        self.success_flag()
     }
 }
 
@@ -41,8 +45,8 @@ pub fn assess_outcome(
         survivability = (survivability * -1) + penalty;
     }
     MissionOutcome {
-        route_score: navigation_weight,
-        survivability,
         morale_delta,
+        survivability,
+        route_score: navigation_weight,
     }
 }

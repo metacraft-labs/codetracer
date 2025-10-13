@@ -1,9 +1,9 @@
 use crate::utils::collections::fold_sum_small;
 
 pub struct CrewMemberSummary {
+    pub rank: Field,
     pub morale: Field,
     pub load: Field,
-    pub rank: Field,
 }
 
 pub struct CrewManifest {
@@ -29,7 +29,7 @@ pub fn build_manifest(initial_power: Field, crew_morale: [Field; 4], payload: [F
         total_summary += summaries[i].morale + summaries[i].load;
     }
 
-    let grid = fold_sum_small(payload) + initial_power;
+    let grid = fold_sum_small(payload) + initial_power + 1;
     let manifest = CrewManifest {
         shield_state: initial_power + fold_sum_small(crew_morale),
         life_support_grid: grid,

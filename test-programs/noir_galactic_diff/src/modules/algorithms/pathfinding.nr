@@ -1,18 +1,12 @@
-use crate::utils::collections::{fold_sum, slice_max};
+use crate::modules::algorithms::pathfinding_helpers;
+use crate::utils::collections::fold_sum;
 
 pub fn compute_galactic_path(weights: [Field; 8], hazards: [Field; 8]) -> Field {
     let mut adjacency: [[Field; 8]; 8] = [[0; 8]; 8];
     for i in 0..8 {
         for j in 0..8 {
-            let raw = (weights[i] + hazards[j]) * (i + j + 1) as Field;
-            let raw_i32 = raw as i32;
-            let normalized = if i == j {
-                0
-            } else if raw_i32 % 2 == 0 {
-                (raw_i32 / 2) as Field
-            } else {
-                raw
-            };
+            let raw = weights[j] + hazards[i] + (i + j + 1) as Field;
+            let normalized = raw + (i as Field);
             adjacency[i][j] = normalized;
         }
     }
@@ -27,7 +21,7 @@ pub fn compute_galactic_path(weights: [Field; 8], hazards: [Field; 8]) -> Field 
         }
     }
 
-    accumulator + recursive_probe(0, weights, hazards, 0)
+    accumulator + pathfinding_helpers::recursive_probe(0, weights, hazards, 0)
 }
 
 fn dijkstra_step(adjacency: [[Field; 8]; 8], source: u32) -> Field {
@@ -75,14 +69,4 @@ fn iterative_relaxation(seed: Field, hazards: [Field; 8]) -> Field {
         cursor = cursor + hazards[i] * (i + 1) as Field;
     }
     cursor
-}
-
-fn recursive_probe(depth: u32, weights: [Field; 8], hazards: [Field; 8], acc: Field) -> Field {
-    if depth == 3 {
-        let base = acc + slice_max([weights[depth], hazards[depth], acc, 0]);
-        base
-    } else {
-        let combined = weights[depth] + hazards[depth] + acc;
-        recursive_probe(depth + 1, weights, hazards, combined) + combined
-    }
 }

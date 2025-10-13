@@ -13,7 +13,8 @@ pub fn record_snapshot(
     route_sequence: [Field; 8],
     hazard_profile: [Field; 8],
     path_score: Field,
-    morale_delta: Field
+    morale_delta: Field,
+    stability_marker: Field
 ) -> SnapshotRecord {
     let mission_checksum = mission_checksum + path_score + morale_delta;
 
@@ -21,7 +22,7 @@ pub fn record_snapshot(
     logs[0] = manifest_checksum;
     logs[1] = mission_checksum;
     logs[2] = fold_sum(route_sequence);
-    logs[3] = fold_sum(hazard_profile);
+    logs[3] = fold_sum(hazard_profile) + stability_marker;
 
     SnapshotRecord { manifest_checksum, mission_checksum, log_entries: logs }
 }
