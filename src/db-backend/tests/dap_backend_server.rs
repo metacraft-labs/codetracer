@@ -41,8 +41,6 @@ fn test_backend_dap_server() {
     let socket_path = dap_server::socket_path_for(std::process::id() as usize);
     let mut child = Command::new(bin).arg("dap-server").arg(&socket_path).spawn().unwrap();
 
-    wait_for_socket(&socket_path);
-
     if let Some(dir) = socket_path.parent() {
         fs::create_dir_all(dir).unwrap_or_else(|err| panic!("failed to create socket directory {dir:?}: {err}"));
     }

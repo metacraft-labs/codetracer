@@ -1500,6 +1500,10 @@
     "named": false
   },
   {
+    "type": "print",
+    "named": false
+  },
+  {
     "type": "rawStringPart",
     "named": true
   },

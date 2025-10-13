@@ -1,3 +1,6 @@
+#[cfg(feature = "browser-transport")]
+use crate::dap_error::DapError;
+
 use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
 use crate::task::{self, CtUpdatedTableResponseBody};
 use crate::transport::DapResult;

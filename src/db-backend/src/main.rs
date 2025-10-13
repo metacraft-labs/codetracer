@@ -120,20 +120,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
-    if cli.stdio {
-        let _ = db_backend::dap_server::run_stdio();
-    } else {
-        let socket_path = if let Some(p) = cli.socket_path {
-            p
-        } else {
-            let pid = std::process::id() as usize;
-            db_backend::dap_server::socket_path_for(pid)
-        };
 
-        info!("dap_server::run {:?}", socket_path);
+    match cli.cmd {
+        Commands::DapServer { socket_path, stdio } => {
+            if stdio {
+                let _ = db_backend::dap_server::run_stdio();
+            } else {
+                let socket_path = if let Some(p) = socket_path {
+                    p
+                } else {
+                    let pid = std::process::id() as usize;
+                    db_backend::dap_server::socket_path_for(pid)
+                };
 
-        let _ = db_backend::dap_server::run(&socket_path);
-    };
+                info!("dap_server::run {:?}", socket_path);
+
+                let _ = db_backend::dap_server::run(&socket_path);
+            };
+        }
+        Commands::IndexDiff {
+            structured_diff_path,
+            trace_folder,
+            multitrace_folder,
+        } => {
+            let raw = std::fs::read_to_string(structured_diff_path)?;
+            info!("raw {raw:?}");
+            let structured_diff = serde_json::from_str::<diff::Diff>(&raw)?;
+            diff::index_diff(structured_diff, &trace_folder, &multitrace_folder)?;
+        }
+    }
 
     Ok(())
 }

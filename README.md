@@ -20,10 +20,10 @@ Key signatures:
 
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/bin` on Linux).
-> 
+>
 > When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
 
-> [!CAUTION]  
+> [!CAUTION]
 > Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `user $ xattr -c <path/to/CodeTracer.app>`.
 >
 > We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program which will ensure CodeTracer is properly signed and whitelisted by Apple.
@@ -31,7 +31,7 @@ Key signatures:
 
 > [!CAUTION]
 > Recording ruby on macOS requires you to install ruby through [homebrew](https://brew.sh), otherwise trying to record ruby programs will fail due to the built-in ruby binary on macOS being more than 7 years old.
-> 
+>
 > Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
 
 # Introduction
@@ -228,3 +228,5 @@ Check out our [Contributors Guide](./CONTRIBUTING.md) for more details.
 ## License
 
 CodeTracer is distributed under the GNU Affero General Public License (AGPLv3).
+
+The wasm-sysroot is copied from the tree-sitter repo: (https://github.com/tree-sitter/tree-sitter) : specifically https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include. The C headers there are a modified version of glibc headers, which are originally under LGPL license.
