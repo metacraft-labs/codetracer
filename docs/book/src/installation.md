@@ -38,6 +38,9 @@ You can download a `.dmg` app bundle from our website:
 > 
 > Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
 
+> [!NOTE]
+> Python recordings reuse whichever interpreter resolves when you run `python` (or `python3`) in your shell. Install the `codetracer_python_recorder` package in that environment (for example `pip install codetracer_python_recorder`) before running `ct record my_script.py`. You can point CodeTracer at a specific interpreter by setting `CODETRACER_PYTHON_INTERPRETER`. See the [Python getting-started guide](../getting_started/python.md) for a full walkthrough covering installation, recording, and replay.
+
 ## Installation from source
 
 ### Linux (and other Nix-based systems)

@@ -235,7 +235,10 @@ type
       recordLang* {.
         name: "lang"
         defaultValue: ""
-        desc: "Language of the recording. Supported languages: c, cpp, rust, ruby, python, lua, nim ???"
+        desc: "Language of the recording (auto-detected from the program path)."
+        longDesc: "Leave blank to auto-detect. Python scripts use the db backend and run with the same interpreter " &
+          "you would get from `python`, honoring CODETRACER_PYTHON_INTERPRETER, PYTHON_EXECUTABLE, PYTHONEXECUTABLE, PYTHON, or PATH. " &
+          "Ensure that interpreter has the codetracer_python_recorder package installed."
       .} : string
 
       recordOutputFolder* {.
