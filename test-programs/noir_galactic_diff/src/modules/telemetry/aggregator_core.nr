@@ -9,11 +9,3 @@ pub fn route_enrichment(routes: [Field; 8]) -> Field {
     }
     enrichment
 }
-
-pub fn payload_score(payload: [Field; 4]) -> Field {
-    let mut summary = 0;
-    for idx in 0..payload.len() {
-        summary += payload[idx] * (idx + 2) as Field;
-    }
-    summary
-}

@@ -6,9 +6,9 @@ mod utils;
 use crate::components::crew_registry;
 use crate::components::mission_profile::MissionOutcome;
 use crate::entrypoints::mission_ops;
-use crate::modules::algorithms::{pathfinding, statistics};
-use crate::modules::systems::{legacy, navigation, shield_matrix};
 use crate::modules::telemetry::{aggregator, archives::historical::mega_trace, features::signal_probe, log_dispatcher};
+use crate::modules::algorithms::{statistics, pathfinding};
+use crate::modules::systems::{navigation, shield_matrix, legacy};
 use crate::utils::math_helpers;
 
 fn main(
@@ -34,7 +34,7 @@ fn main(
     let mission_checksum = mission.checksum;
     let route_sequence = mission.route_sequence;
     let hazard_profile = mission.hazard_profile;
-    let recorded = mission_ops::record_snapshot(manifest_summary, mission_checksum, route_sequence, hazard_profile, path_score, morale_delta);
+    let recorded = mission_ops::record_snapshot(manifest_summary, mission_checksum, route_sequence, hazard_profile, path_score, morale_delta, stability);
     let stability_flag = (stability as i32) > 0;
     log_dispatcher::print_log_summary(recorded.log_entries, stability_flag);
 

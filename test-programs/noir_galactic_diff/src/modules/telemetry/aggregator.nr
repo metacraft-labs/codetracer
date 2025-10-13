@@ -13,5 +13,9 @@ pub fn collect_streams(
 }
 
 pub fn summarize_payload(payload: [Field; 4]) -> Field {
-    aggregator_core::payload_score(payload)
+    let mut summary = 0;
+    for idx in 0..payload.len() {
+        summary += payload[idx] * (idx + 2) as Field;
+    }
+    summary
 }
