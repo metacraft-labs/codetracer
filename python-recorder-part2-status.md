@@ -4,7 +4,7 @@
 - Step 1: Language detection and enums now expose `LangPythonDb` for `.py` files and mark it as db-backed across shared language metadata.
 - Step 2: `ct record` resolves the active Python interpreter, forwards activation/diff flags, and passes db-backend arguments for the Python recorder branch.
 - Step 3: `db-backend-record` invokes the recorder via the resolved interpreter, forwards activation/diff flags, and imports the generated traces.
-- Step 4: CI runs a Python recorder smoke test that records `examples/python_script.py` through the db backend.
+- Step 4: `ct record` performs a preflight check that `codetracer_python_recorder` can be imported, surfaces actionable guidance when it is missing or broken, and the docs/CLI help now point users to install the wheel themselves.
 - Step 5: CLI help text, README, and docs share the Python db-backend parity story, including interpreter resolution, the `codetracer_python_recorder` requirement, and a dedicated getting-started guide.
 
 ## Next

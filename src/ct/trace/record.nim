@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, sequtils, strtabs, strformat],
+import std/[os, osproc, strutils, sequtils, strtabs, strformat, json],
   multitrace,
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
@@ -69,6 +69,104 @@ proc resolvePythonInterpreter(): string =
 
   ""
 
+type PythonRecorderCheckStatus = enum
+  recorderPresent,
+  recorderMissing,
+  recorderError
+
+proc checkPythonRecorder(interpreter: string): tuple
+    [status: PythonRecorderCheckStatus, version: string, diagnostics: string] =
+  ## Run a short Python snippet to ensure codetracer_python_recorder is importable.
+  const checkPrefix = "CODETRACER_PYTHON_RECORDER_CHECK::"
+  let script = """
+import importlib, importlib.util, json, sys, traceback
+
+result = {"status": "ok", "version": ""}
+try:
+    spec = importlib.util.find_spec("codetracer_python_recorder")
+    if spec is None:
+        result["status"] = "missing"
+    else:
+        module = importlib.import_module("codetracer_python_recorder")
+        version = getattr(module, "__version__", "")
+        if isinstance(version, str):
+            result["version"] = version
+        else:
+            result["version"] = repr(version)
+except Exception as exc:
+    result["status"] = "error"
+    result["error"] = repr(exc)
+    result["traceback"] = traceback.format_exc()
+
+print("CODETRACER_PYTHON_RECORDER_CHECK::" + json.dumps(result))
+if result["status"] == "ok":
+    sys.exit(0)
+elif result["status"] == "missing":
+    sys.exit(3)
+else:
+    sys.exit(4)
+"""
+  let process = startProcess(
+    interpreter,
+    args = @["-c", script],
+    options = {poStdErrToStdOut})
+  let (lines, exitCode) = process.readLines
+
+  var payload = ""
+  for line in lines:
+    if line.startsWith(checkPrefix):
+      if line.len > checkPrefix.len:
+        payload = line[checkPrefix.len .. ^1]
+      else:
+        payload = ""
+
+  var status = recorderError
+  var version = ""
+  var diagnostics = ""
+
+  if payload.len > 0:
+    try:
+      let node = parseJson(payload)
+      if node.kind == JObject:
+        let statusStr = if node.hasKey("status") and node["status"].kind == JString:
+            node["status"].getStr()
+          else:
+            ""
+        case statusStr
+        of "ok":
+          status = recorderPresent
+        of "missing":
+          status = recorderMissing
+        else:
+          status = recorderError
+
+        if node.hasKey("version") and node["version"].kind == JString:
+          version = node["version"].getStr()
+
+        if node.hasKey("error") and node["error"].kind == JString:
+          diagnostics = node["error"].getStr()
+        if node.hasKey("traceback") and node["traceback"].kind == JString:
+          let tb = node["traceback"].getStr()
+          if diagnostics.len > 0:
+            diagnostics.add("\n")
+          diagnostics.add(tb)
+    except CatchableError as parseError:
+      diagnostics = "Failed to parse recorder check output: " & parseError.msg & "\nPayload: " & payload
+  else:
+    diagnostics = lines.join("\n")
+
+  if status == recorderPresent and exitCode == 0:
+    return (recorderPresent, version, diagnostics)
+  elif status == recorderMissing and exitCode == 3:
+    return (recorderMissing, version, diagnostics)
+  elif status == recorderError:
+    if diagnostics.len == 0:
+      diagnostics = lines.join("\n")
+    return (recorderError, version, diagnostics)
+  else:
+    let combined = if diagnostics.len > 0: diagnostics else: lines.join("\n")
+    return (recorderError, version, combined)
+
 proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath: string): Trace =
   let env = if configPath.len > 0:
       setupEnv(configPath)
@@ -132,6 +230,26 @@ proc record*(lang: string,
     let pythonInterpreter = resolvePythonInterpreter()
     if pythonInterpreter.len == 0:
       echo "error: Python interpreter not found. Set CODETRACER_PYTHON_INTERPRETER or ensure `python` is on PATH."
+      quit(1)
+
+    let checkResult = checkPythonRecorder(pythonInterpreter)
+    case checkResult.status
+    of recorderPresent:
+      discard
+    of recorderMissing:
+      echo "error: Python module `codetracer_python_recorder` is not installed for interpreter: " & pythonInterpreter
+      if checkResult.diagnostics.len > 0:
+        echo checkResult.diagnostics
+      echo "help: Install it in that environment with `python -m pip install codetracer_python_recorder`"
+      echo "help: Or point CodeTracer at a different interpreter via CODETRACER_PYTHON_INTERPRETER=/path/to/python"
+      quit(1)
+    of recorderError:
+      echo "error: Failed to import `codetracer_python_recorder` using interpreter: " & pythonInterpreter
+      if checkResult.diagnostics.len > 0:
+        echo checkResult.diagnostics
+      else:
+        echo "help: Inspect the interpreter output above for details."
+      echo "help: Ensure the package is installed and the environment activates correctly before running `ct record`."
       quit(1)
 
     pargs.add("--python-interpreter")
