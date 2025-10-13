@@ -17,5 +17,6 @@ This guide is structured to help you get started quickly and then dive deeper in
 *   **Instructions on how to launch CodeTracer using each of the languages listed below**
     *   [**Noir**](./noir.md): Examples and steps how to trace a Noir program.
     *   [**Stylus**](./stylus.md): Examples and steps how to trace a Stylus.
+    *   [**Python**](./python.md): Steps for installing the recorder, creating a trace, and replaying it with your interpreter.
     *   [**Ruby**](./ruby.md): Examples and steps how to trace a Ruby program.    
     *   [**WASM**](./wasm.md): Examples and steps how to trace a WASM program.

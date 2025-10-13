@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Documented that Python recordings now run through the db backend using the active interpreter, including CLI help and installation guidance for the `codetracer_python_recorder` package.
+- Added a Python getting-started guide covering recorder installation, `ct record`, and replay workflows.
+
 ## 25.09.2 - 2025-09-25(hotfix)
 
 Introduced a number of hotfixes for critical bugs:
@@ -127,4 +132,3 @@ and the lite display mode of OmniScience.
 
 (Initial version 25.02.1 open sourced on 17 February, 
 after a repo/history cleanup, superseded by current initial 25.03.1 version from 4 March)
-
