@@ -41,6 +41,7 @@ impl FlowPreloader {
     }
 
     pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db) -> FlowUpdate {
+        info!("load_diff_flow");
         for diff_line in &diff_lines {
             match self.expr_loader.load_file(&diff_line.0) {
                 Ok(_) => {

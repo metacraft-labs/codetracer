@@ -86,7 +86,7 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, Box<dyn Error>> {
+fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>, seq: i64) -> Result<Handler, Box<dyn Error>> {
     // TODO: log this when logging logic is properly abstracted
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -108,6 +108,7 @@ fn launch(trace_folder: &Path, trace_file: &Path, seq: i64) -> Result<Handler, B
 
         let mut handler = Handler::new(Box::new(db));
         handler.dap_client.seq = seq;
+        handler.raw_diff_index = raw_diff_index;
         handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
     } else {
@@ -233,6 +234,7 @@ pub struct Ctx {
     pub received_launch: bool,
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
+    pub launch_raw_diff_index: Option<String>,
     pub received_configuration_done: bool,
 }
 
@@ -245,6 +247,7 @@ impl Default for Ctx {
             received_launch: false,
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
+            launch_raw_diff_index: None,
             received_configuration_done: false,
         }
     }
@@ -392,8 +395,10 @@ pub fn handle_message<T: DapTransport>(
                 // TODO: log this when logging logic is properly abstracted
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
 
+                ctx.launch_raw_diff_index = args.raw_diff_index.clone();
+
                 if ctx.received_configuration_done {
-                    ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
+                    ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.launch_raw_diff_index.clone(), ctx.seq)?);
                     if let Some(h) = ctx.handler.as_mut() {
                         write_dap_messages(transport, h, &mut ctx.seq)?;
                     }
@@ -442,7 +447,7 @@ pub fn handle_message<T: DapTransport>(
             //     ctx.received_launch
             // );
             if ctx.received_launch {
-                ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.seq)?);
+                ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.launch_raw_diff_index.clone(), ctx.seq)?);
                 if let Some(h) = ctx.handler.as_mut() {
                     write_dap_messages(transport, h, &mut ctx.seq)?;
                 }

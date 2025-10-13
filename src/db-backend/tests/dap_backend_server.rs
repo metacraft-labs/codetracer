@@ -39,7 +39,6 @@ fn test_backend_dap_server() {
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
 
     let socket_path = dap_server::socket_path_for(std::process::id() as usize);
-    let mut child = Command::new(bin).arg("dap-server").arg(&socket_path).spawn().unwrap();
 
     if let Some(dir) = socket_path.parent() {
         fs::create_dir_all(dir).unwrap_or_else(|err| panic!("failed to create socket directory {dir:?}: {err}"));
@@ -63,7 +62,7 @@ fn test_backend_dap_server() {
     // use std::os::unix::fs::PermissionsExt;
     // fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
 
-    let mut child = Command::new(bin).arg(&socket_path).spawn().unwrap();
+    let mut child = Command::new(bin).arg("dap-server").arg(&socket_path).spawn().unwrap();
     println!("Bin: {}", bin);
 
     println!("Socket path: {}", socket_path.to_str().unwrap());
