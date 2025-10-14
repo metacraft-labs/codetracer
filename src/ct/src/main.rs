@@ -1,6 +1,6 @@
 mod subcommands;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -15,12 +15,37 @@ pub struct Args {
     pub command: Command,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+pub enum Lang {
+    Python,
+    Ruby,
+    Noir,
+    Wasm,
+    Small
+}
+
+#[derive(Debug, clap::Args)]
+pub struct RecordOptions {
+    /// Override the language of the project. Used to determine which recorder is used.
+    #[arg(short, long)]
+    pub lang: Option<Lang>,
+
+    /// Where to save the trace.
+    #[arg(short, long)]
+    pub output_folder: Option<String>,
+
+    /// Path to the program to record.
+    pub program: String,
+
+    /// Arguments to pass to the program.
+    pub args: Vec<String>,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Output a pre-defined secret message.
-    Record,
+    /// Record the execution of a program
+    Record(RecordOptions),
 
-    // TODO: list all subcommands
     /// Lists all available external subcommands.
     List,
 
@@ -34,6 +59,6 @@ fn main() {
     match args.command {
         Command::List => subcommands::run_list::<Args>(),
         Command::External(args) => subcommands::run_external(&args),
-        _ => unimplemented!(),
+        Command::Record(options) => subcommands::run_record(options),
     }
 }
