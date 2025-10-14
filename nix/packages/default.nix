@@ -623,7 +623,7 @@
             mkdir -p $out/frontend/styles
 
 
-            cp ./ct $out/bin/
+            cp ./ct-legacy $out/bin/
 
             # Codetracer web
             cp -L ${codetracer-electron}/views/server_index.ejs $out/views
@@ -660,7 +660,7 @@
             cp -L ${codetracer-electron}/src/helpers.js $out/src/helpers.js
             # ln -sf ${codetracer-electron}/src/public/ $out/public
 
-            cp ./ct $out/bin
+            cp ./ct-legacy $out/bin
             cp ./db-backend-record $out/bin
 
             cp -r src/frontend/index.html $out/
@@ -668,10 +668,10 @@
 
           '';
 
-          meta.mainProgram = "ct";
+          meta.mainProgram = "ct-legacy";
 
           postFixup = ''
-            wrapProgram $out/bin/ct \
+            wrapProgram $out/bin/ct-legacy \
               --prefix PATH : ${pkgs.lib.makeBinPath [ cargo-stylus ]}
           '';
 

@@ -56,19 +56,19 @@ cp -r "$ROOT_DIR"/src/config "$DIST_DIR"/config
 cp -r "$ROOT_DIR"/src/public "$DIST_DIR"/public
 cp -r "$BIN_DIR"/* "$DIST_DIR"/bin/
 
-mv "$DIST_DIR"/bin/ct "$DIST_DIR"/bin/ct_unwrapped
+mv "$DIST_DIR"/bin/ct-legacy "$DIST_DIR"/bin/ct-legacy_unwrapped
 
-cat << 'EOF' > "${DIST_DIR}"/bin/ct
+cat << 'EOF' > "${DIST_DIR}"/bin/ct-legacy
 #!/usr/bin/env bash
 
 export HERE=$(dirname $(dirname "$0"))
 
 export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
 
-exec ${HERE}/bin/ct_unwrapped "$@"
+exec ${HERE}/bin/ct-legacy_unwrapped "$@"
 EOF
 
-chmod +x "${DIST_DIR}"/bin/ct
+chmod +x "${DIST_DIR}"/bin/ct-legacy
 
 # Enable the installation prompt. Extra argument to be compatible with FreeBSD coreutils
 sed -i "" "s/skipInstall.*/skipInstall: false/g" "$DIST_DIR/config/default_config.yaml"

@@ -59,7 +59,7 @@ Direnv should be set up in your shell, as shown [here](https://direnv.net/docs/h
    ```
 4. Run `nix develop`
 5. Run `direnv allow`
-6. To build codetracer simply run `just build`. The location of the resulting binary will be `./src/build-debug/bin/ct`
+6. To build codetracer simply run `just build`. The location of the resulting binary will be `./src/build-debug/bin/ct-legacy`
 7. Now every time you enter the `codetracer` directory your environment should be updated
 
 > [!TIP]
@@ -78,7 +78,7 @@ The only dependencies for the macOS build are `git`, `bash` and `homebrew`.
 1. Clone the repository with submodules: `git clone https://github.com/metacraft-labs/codetracer.git --recursive`
 2. Enter the created directory
 3. Run `./non-nix-build/build.sh` from the root of the cloned repository. This will install all prerequisites like Rust, Nim and others using homebrew
-4. The resulting binary can be found at `./non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct`, and a DMG installer is created at `./non-nix-build/CodeTracer.dmg`.
+4. The resulting binary can be found at `./non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct-legacy`, and a DMG installer is created at `./non-nix-build/CodeTracer.dmg`.
 
 
 ### Building and running the tests

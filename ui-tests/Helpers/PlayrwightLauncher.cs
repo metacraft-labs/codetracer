@@ -35,7 +35,7 @@ public static class PlaywrightLauncher
     public static async Task<IBrowser> LaunchAsync(string programRelativePath)
     {
         if (!IsCtAvailable)
-            throw new FileNotFoundException($"ct executable not found at {CtPath}");
+            throw new FileNotFoundException($"ct-legacy executable not found at {CtPath}");
 
         int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
         int port = await GetFreeTcpPortAsync();

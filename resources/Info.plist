@@ -6,7 +6,7 @@
     <string>CodeTracer</string>
 
     <key>CFBundleExecutable</key>
-    <string>bin/ct</string>
+    <string>bin/ct-legacy</string>
 
     <key>CFBundleIconFile</key>
     <string>CodeTracer.icns</string>
@@ -83,4 +83,3 @@
     <string>Copyright (c) 2025 Metacraft Labs Ltd.</string>
   </dict>
 </plist>
-

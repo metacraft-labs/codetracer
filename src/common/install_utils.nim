@@ -103,16 +103,16 @@ proc installCodetracerOnPath*(codetracerExe: string): Result[void, string] {.rai
       execPath = getEnv("APPIMAGE")
 
     try:
-      if not fileExists(binDir / "ct"):
+      if not fileExists(binDir / "ct-legacy"):
         echo fmt2"Creating symlink to {execPath} in {binDir}"
-        createSymlink(execPath, binDir / "ct")
+        createSymlink(execPath, binDir / "ct-legacy")
 
-      elif isSymlinkDangling(binDir / "ct"):
+      elif isSymlinkDangling(binDir / "ct-legacy"):
         # Try and clean up the installation
-        removeFile(binDir / "ct")
-        createSymlink(execPath, binDir / "ct")
+        removeFile(binDir / "ct-legacy")
+        createSymlink(execPath, binDir / "ct-legacy")
       else:
-        echo fmt2"{binDir}/ct already exists and is not dangling"
+        echo fmt2"{binDir}/ct-legacy already exists and is not dangling"
     except OSError as e:
       return err "Failed to put CodeTracer on the PATH: " & e.msg
 
@@ -126,13 +126,13 @@ proc installCodetracerOnPath*(codetracerExe: string): Result[void, string] {.rai
 
     try:
       createDir(shellLaunchersDir)
-      let ctLauncherPath = shellLaunchersDir / "ct"
-      writeFile(ctLauncherPath, slurpShellIntegrationFile "shell-launchers/ct")
+      let ctLauncherPath = shellLaunchersDir / "ct-legacy"
+      writeFile(ctLauncherPath, slurpShellIntegrationFile "shell-launchers/ct-legacy")
       setFilePermissions(ctLauncherPath, {fpUserExec, fpGroupExec, fpOthersExec,
                                           fpUserRead, fpGroupRead, fpOthersRead,
                                           fpUserWrite})
     except CatchableError as err:
-      return err "Failed to create the ct shell launcher: " & err.msg
+      return err "Failed to create the ct-legacy shell launcher: " & err.msg
 
     let shellPath = getEnv("SHELL", "/bin/bash")
 
@@ -253,7 +253,7 @@ when defined(linux):
       # ran the `install` command
 
       echo fmt"Replacing exec field with {execPath}"
-      contents = contents.replace("Exec=ct", fmt"Exec={execPath}")
+      contents = contents.replace("Exec=ct-legacy", fmt"Exec={execPath}")
 
       let desktopFile = desktopFileDir / "codetracer.desktop"
 

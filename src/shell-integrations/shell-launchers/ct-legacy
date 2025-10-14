@@ -10,7 +10,7 @@ if [[ -s ~/.local/share/codetracer/app-install-fs-location ]]; then
       if [[ $1 == "" || $1 == "run" ]]; then
         open "$app_location" --args "$@"
       else
-        "$app_location/Contents/MacOS/bin/ct" "$@"
+        "$app_location/Contents/MacOS/bin/ct-legacy" "$@"
       fi
     elif [ -f "$app_location" ]; then
       # The app binary has been linked directry. This is used sometimes during development.

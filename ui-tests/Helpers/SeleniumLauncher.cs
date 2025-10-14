@@ -8,7 +8,7 @@ public static class SeleniumLauncher
     public static IWebDriver Launch(string programRelativePath)
     {
         if (!CodetracerLauncher.IsCtAvailable)
-            throw new FileNotFoundException($"ct executable not found at {CodetracerLauncher.CtPath}");
+            throw new FileNotFoundException($"ct-legacy executable not found at {CodetracerLauncher.CtPath}");
 
         int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
         // CodetracerLauncher.StartCore(traceId, 1);
