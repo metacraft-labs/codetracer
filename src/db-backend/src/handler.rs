@@ -459,7 +459,7 @@ impl Handler {
 
         let flow_update = if arg.flow_mode == FlowMode::Call {
             let flow_update = self.flow_preloader.load(arg.location, arg.flow_mode, &self.replay);
-            self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
+            // self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
                 serde_json::from_str::<FlowUpdate>(&raw_flow)?
