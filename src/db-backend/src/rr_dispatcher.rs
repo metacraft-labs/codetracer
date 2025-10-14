@@ -8,8 +8,9 @@ use std::thread;
 use std::time::Duration;
 
 use log::{info, warn};
-use runtime_tracing::StepId;
+use runtime_tracing::{StepId, ValueRecord};
 
+use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
@@ -184,6 +185,29 @@ impl Replay for RRDispatcher {
         self.ensure_active_stable()?;
         let res = serde_json::from_str::<Vec<Variable>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
         Ok(res)
+    }
+
+    fn load_value(&mut self, expression: &str) -> Result<ValueRecord, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let res = serde_json::from_str::<ValueRecord>(&self.stable.run_query(CtRRQuery::LoadValue { expression })?)?;
+        Ok(res)
+    }
+
+    fn load_return_value(&mut self) -> Result<ValueRecord, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let res = serde_json::from_str::<ValueRecord>(&self.stable.run_query(CtRRQuery::LoadReturnValue)?)?;
+        Ok(res)
+    }
+
+    fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent> {
+        // TODO: maybe cache events directly in replay for now, and use the same logic for them as in Db?
+        // or directly embed Db? or separate events in a separate EventList?
+        vec![]
+    }
+
+    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        // TODO
+        todo!()
     }
 
     fn current_step_id(&mut self) -> StepId {
