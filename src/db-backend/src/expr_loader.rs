@@ -401,8 +401,7 @@ impl ExprLoader {
         Ok(())
     }
 
-    pub fn load_branch_for_step(&self, step: &DbStep, path: &PathBuf) -> HashMap<usize, BranchState> {
-        let position = Position(step.line.0);
+    pub fn load_branch_for_position(&self, position: Position, path: &PathBuf) -> HashMap<usize, BranchState> {
         let mut results: HashMap<usize, BranchState> = HashMap::default();
         if self.processed_files[path].position_branches.contains_key(&position) {
             let mut branch = self.processed_files[path].position_branches[&position].clone();
@@ -434,13 +433,13 @@ impl ExprLoader {
         results
     }
 
-    pub fn get_loop_shape(&self, step: &DbStep, path: &PathBuf) -> Option<LoopShape> {
+    pub fn get_loop_shape(&self, line: Position, path: &PathBuf) -> Option<LoopShape> {
         info!("path {}", path.display());
         info!(
             "get_loop_shape {} {:?}",
-            step.line.0, self.processed_files[path].position_loops
+            line.0, self.processed_files[path].position_loops
         );
-        if let Some(loop_shape_id) = self.processed_files[path].position_loops.get(&Position(step.line.0)) {
+        if let Some(loop_shape_id) = self.processed_files[path].position_loops.get(&line) {
             return Some(self.processed_files[path].loop_shapes[loop_shape_id.0 as usize].clone());
         }
         None
