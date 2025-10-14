@@ -9,7 +9,9 @@ echo '##########################################################################
 echo "Building Codetracer CLI for smoke test"
 echo '###############################################################################'
 
-./ci/build/dev.sh
+just build-once
+
+# ./ci/build/dev.sh
 
 CT_BIN="${ROOT_DIR}/src/build-debug/bin/ct"
 if [[ ! -x "${CT_BIN}" ]]; then
