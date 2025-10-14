@@ -784,6 +784,7 @@ pub struct BreakpointRecord {
 pub struct DbReplay {
     pub db: Box<Db>,
     pub step_id: StepId,
+    pub call_key: CallKey,
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
 
@@ -791,7 +792,7 @@ impl DbReplay {
     pub fn new(db: Box<Db>) -> DbReplay {
         let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
-        DbReplay { db, step_id: StepId(0), breakpoint_list }
+        DbReplay { db, step_id: StepId(0), call_key: CallKey(0), breakpoint_list }
     }
 
     pub fn step_id_jump(&mut self, step_id: StepId) {
@@ -925,6 +926,7 @@ impl Replay for DbReplay {
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         info!("load_location: db replay");
         let call_key = self.db.call_key_for_step(self.step_id);
+        self.call_key = call_key;
         Ok(self.db.load_location(self.step_id, call_key, expr_loader))
     }
 
@@ -999,6 +1001,27 @@ impl Replay for DbReplay {
         Ok(locals)
     }
 
+    fn load_value(&mut self, expression: &str) -> Result<ValueRecord, Box<dyn Error>> {
+        // TODO: a more optimal way: cache a hashmap? or change structure?
+        // or again start directly loading available values matching all expressions in the same time?:
+        //   taking a set of expressions: probably best(maybe add an additional load_values)
+        for variable in &self.db.variables[self.step_id] {
+            if self.db.variable_names[variable.variable_id] == expression {
+                return Ok(variable.value.clone())
+            }
+        }
+        return Err(format!("variable {expression} not found on this step").into())
+    }
+
+    fn load_return_value(&mut self) -> Result<ValueRecord, Box<dyn Error>> {
+        // assumes self.load_location() has been ran, and that we have the current call key
+        Ok(self.db.calls[self.call_key].return_value.clone())
+    }
+
+    fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent> {
+        self.db.load_step_events(step_id, exact)
+    }
+    
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
         self.step_id = step_id;
         Ok(true)

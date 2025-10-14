@@ -9,4 +9,6 @@ pub enum CtRRQuery {
     LoadLocation,
     Step { action: Action, forward: bool },
     LoadLocals { arg: CtLoadLocalsArguments },
+    LoadReturnValue,
+    LoadValue { expression: String },
 }
