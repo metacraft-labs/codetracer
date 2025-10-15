@@ -35,13 +35,13 @@ pub fn run_dir_for(tmp_path: &Path, run_id: usize) -> Result<PathBuf, Box<dyn Er
     Ok(run_dir)
 }
 
-pub fn ct_rr_worker_socket_path(from: &str, worker_name: &str, run_id: usize) -> Result<PathBuf, Box<dyn Error>> {
+pub fn ct_rr_worker_socket_path(from: &str, worker_name: &str, worker_index_for_kind: usize, run_id: usize) -> Result<PathBuf, Box<dyn Error>> {
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
     let run_dir = run_dir_for(&tmp_path, run_id)?;
     // eventually: TODO: unique index or better cleanup
     //  if worker with the same name started/restarted multiple times
     //  by the same backend instance
-    Ok(run_dir.join(format!("ct_rr_worker_{worker_name}_from_{from}.sock")))
+    Ok(run_dir.join(format!("ct_rr_worker_{worker_name}_{worker_index_for_kind}_from_{from}.sock")))
 
     // TODO: decide if we need to check/eventually remove or the unique run folder/paths are enough:
     //
