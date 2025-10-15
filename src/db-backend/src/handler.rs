@@ -54,8 +54,9 @@ pub struct Handler {
     pub previous_step_id: StepId,
 
     pub trace_kind: TraceKind,
-    // pub rr: RRDispatcher,
     pub replay: Box<dyn Replay>,
+    pub ct_rr_args: CtRRArgs,
+    pub load_flow_index: usize,
 
     pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
@@ -99,7 +100,7 @@ impl Handler {
         let replay: Box<dyn Replay> = if trace_kind == TraceKind::DB {
             Box::new(DbReplay::new(db.clone()))
         } else {
-            Box::new(RRDispatcher::new(ct_rr_args))
+            Box::new(RRDispatcher::new("stable", 0, ct_rr_args.clone()))
         };
         // let sender = sender::Sender::new();
         Handler {
@@ -118,8 +119,9 @@ impl Handler {
             step_lines_loader,
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
-            // rr: RRDispatcher::new(ct_rr_args),
             replay,
+            ct_rr_args,
+            load_flow_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
         }
@@ -444,11 +446,11 @@ impl Handler {
     }
 
     pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
-        if self.trace_kind == TraceKind::RR {
-            warn!("flow not implemented for rr");
-            self.send_notification(NotificationKind::Warning, "flow not implemented for rr!", false)?;
-            return Ok(());
-        }
+        // if self.trace_kind == TraceKind::RR {
+            // warn!("flow not implemented for rr");
+            // self.send_notification(NotificationKind::Warning, "flow not implemented for rr!", false)?;
+            // return Ok(());
+        // }
         // TODO: something like this for db/rr:
         // {
         // // TODO: pass step_id to load_location and let it jump for RR if needed?
@@ -457,9 +459,18 @@ impl Handler {
         // let location = self.replay.load_location(&mut self.expr_loader)?;
         // }
 
+        let mut flow_replay: Box<dyn Replay> = if self.trace_kind == TraceKind::DB {
+            Box::new(DbReplay::new(self.db.clone()))
+        } else {
+            Box::new(RRDispatcher::new("flow", self.load_flow_index, self.ct_rr_args.clone()))
+        };
+        self.load_flow_index += 1;
+
+        // TODO: eventually cleanup or manage in a more optimal way flow replays: caching
+        // if possible for example
+
         let flow_update = if arg.flow_mode == FlowMode::Call {
-            let flow_update = self.flow_preloader.load(arg.location, arg.flow_mode, &self.replay);
-            // self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
+            self.flow_preloader.load(arg.location, arg.flow_mode, &mut *flow_replay)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
                 serde_json::from_str::<FlowUpdate>(&raw_flow)?
