@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use log::{info, warn};
+use log::{info, warn, error};
 use runtime_tracing::{StepId, ValueRecord};
 
 use crate::db::DbRecordEvent;
@@ -22,11 +22,14 @@ pub struct RRDispatcher {
     pub stable: CtRRWorker,
     pub ct_rr_worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
+    pub name: String,
+    pub index: usize,
 }
 
 #[derive(Debug)]
 pub struct CtRRWorker {
     pub name: String,
+    pub index: usize,
     pub active: bool,
     pub ct_rr_worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
@@ -34,16 +37,17 @@ pub struct CtRRWorker {
     stream: Option<UnixStream>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct CtRRArgs {
     pub worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
 }
 
 impl CtRRWorker {
-    pub fn new(name: &str, ct_rr_worker_exe: &Path, rr_trace_folder: &Path) -> CtRRWorker {
+    pub fn new(name: &str, index: usize, ct_rr_worker_exe: &Path, rr_trace_folder: &Path) -> CtRRWorker {
         CtRRWorker {
             name: name.to_string(),
+            index,
             active: false,
             ct_rr_worker_exe: PathBuf::from(ct_rr_worker_exe),
             rr_trace_folder: PathBuf::from(rr_trace_folder),
@@ -54,15 +58,18 @@ impl CtRRWorker {
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
         info!(
-            "start: {} --name {} replay {}",
+            "start: {} --name {} --index {} replay {}",
             self.ct_rr_worker_exe.display(),
             self.name,
+            self.index,
             self.rr_trace_folder.display()
         );
         let ct_worker = Command::new(&self.ct_rr_worker_exe)
             .arg("replay")
             .arg("--name")
             .arg(&self.name)
+            .arg("--index")
+            .arg(self.index.to_string())
             .arg(&self.rr_trace_folder)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -81,7 +88,7 @@ impl CtRRWorker {
 
         let run_id = std::process::id() as usize;
 
-        let socket_path = ct_rr_worker_socket_path("", &self.name, run_id)?;
+        let socket_path = ct_rr_worker_socket_path("", &self.name, self.index, run_id)?;
         info!("try to connect to worker with socket in {}", socket_path.display());
         loop {
             if let Ok(stream) = UnixStream::connect(&socket_path) {
@@ -90,6 +97,8 @@ impl CtRRWorker {
             }
             thread::sleep(Duration::from_millis(1));
             // TODO: handle different kinds of errors
+
+            // TODO: after some retries, assume a problem and return an error?
         }
 
         Ok(())
@@ -125,9 +134,11 @@ impl CtRRWorker {
 }
 
 impl RRDispatcher {
-    pub fn new(ct_rr_args: CtRRArgs) -> RRDispatcher {
+    pub fn new(name: &str, index: usize, ct_rr_args: CtRRArgs) -> RRDispatcher {
         RRDispatcher {
-            stable: CtRRWorker::new("stable", &ct_rr_args.worker_exe, &ct_rr_args.rr_trace_folder),
+            name: name.to_string(),
+            index,
+            stable: CtRRWorker::new(name, index, &ct_rr_args.worker_exe, &ct_rr_args.rr_trace_folder),
             ct_rr_worker_exe: ct_rr_args.worker_exe.clone(),
             rr_trace_folder: ct_rr_args.rr_trace_folder.clone(),
         }
@@ -189,7 +200,7 @@ impl Replay for RRDispatcher {
 
     fn load_value(&mut self, expression: &str) -> Result<ValueRecord, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<ValueRecord>(&self.stable.run_query(CtRRQuery::LoadValue { expression })?)?;
+        let res = serde_json::from_str::<ValueRecord>(&self.stable.run_query(CtRRQuery::LoadValue { expression: expression.to_string() })?)?;
         Ok(res)
     }
 
@@ -199,15 +210,18 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
-    fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent> {
+    fn load_step_events(&mut self, _step_id: StepId, _exact: bool) -> Vec<DbRecordEvent> {
         // TODO: maybe cache events directly in replay for now, and use the same logic for them as in Db?
         // or directly embed Db? or separate events in a separate EventList?
         vec![]
     }
 
-    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+    fn jump_to(&mut self, _step_id: StepId) -> Result<bool, Box<dyn Error>> {
         // TODO
-        todo!()
+        error!("TODO rr jump_to: for now run to entry");
+        self.run_to_entry()?;
+        Ok(true)
+        // todo!()
     }
 
     fn current_step_id(&mut self) -> StepId {

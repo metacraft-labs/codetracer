@@ -261,6 +261,10 @@ impl Db {
     }
 
     fn to_ct_type(&self, type_id: &TypeId) -> Type {
+        if self.types.len() == 0 { // probably rr trace case
+            warn!("to_ct_type: for now returning just a placeholder type: assuming rr trace!");
+            return Type::new(TypeKind::None, "<None>");
+        }
         let type_record = &self.types[*type_id];
         match self.types[*type_id].kind {
             TypeKind::Struct => {
