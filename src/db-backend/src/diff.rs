@@ -146,7 +146,7 @@ pub fn index_diff(diff: Diff, trace_folder: &Path) -> Result<(), Box<dyn Error>>
     
     info!("diff_lines {diff_lines:?}");
     let mut flow_preloader = FlowPreloader::new();
-    let mut replay = Box::new(DbReplay::new(db.clone()));
+    let mut replay = DbReplay::new(Box::new(db.clone()));
     let flow_update = flow_preloader.load_diff_flow(diff_lines, &db, &mut replay);
 
     let raw = serde_json::to_string(&flow_update)?;
