@@ -371,7 +371,7 @@ pub fn to_json(message: &DapMessage) -> DapResult<String> {
 pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapResult<DapMessage> {
     use log::info;
 
-    info!("from_reader");
+    info!("read_dap_message_from_reader");
     let mut header = String::new();
     reader.read_line(&mut header).map_err(|e| {
         use log::error;
