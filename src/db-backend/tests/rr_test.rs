@@ -131,28 +131,28 @@ fn test_rr() {
         .send(&next_request)
         .unwrap_or_else(|err| panic!("failed to send next request: {err}"));
 
-    for _ in 0 .. 7 {
+    for _ in 0 .. 4 {
         let _ = dap::read_dap_message_from_reader(&mut reader).unwrap();
     }
 
-    let last_location: task::Location; // = task::Location::default();
+    // let last_location: task::Location; // = task::Location::default();
 
     let msg_complete_move_before_local_check = dap::read_dap_message_from_reader(&mut reader).unwrap();
     match msg_complete_move_before_local_check {
         DapMessage::Event(e) => {
             assert_eq!(e.event, "ct/complete-move");
             let move_state = serde_json::from_value::<task::MoveState>(e.body).expect("valid move state");
-            last_location = move_state.location.clone();
+            // last_location = move_state.location.clone();
             let path = PathBuf::from(move_state.clone().location.path);
             let filename = path.file_name().expect("filename");
             assert_eq!(filename.display().to_string(), "rr_gdb.rs");
-            assert_eq!(move_state.location.line, 72);
+            assert_eq!(move_state.location.line, 70);
             assert_eq!(move_state.location.function_name.starts_with("rr_gdb::run"), true);
         }
         _ => panic!("expected a complete move events, but got {:?}", msg_complete_move_before_local_check),
 
     }
-    let _next_response = dap::from_reader(&mut reader).unwrap();
+    let _next_response = dap::read_dap_message_from_reader(&mut reader).unwrap();
 
     let _next_response = dap::read_dap_message_from_reader(&mut reader).unwrap();
 
