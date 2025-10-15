@@ -446,19 +446,6 @@ impl Handler {
     }
 
     pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
-        // if self.trace_kind == TraceKind::RR {
-            // warn!("flow not implemented for rr");
-            // self.send_notification(NotificationKind::Warning, "flow not implemented for rr!", false)?;
-            // return Ok(());
-        // }
-        // TODO: something like this for db/rr:
-        // {
-        // // TODO: pass step_id to load_location and let it jump for RR if needed?
-        // // or have a separate jump_to when it's not self.step_id?
-        // self.replay.jump_to(step_id)?;
-        // let location = self.replay.load_location(&mut self.expr_loader)?;
-        // }
-
         let mut flow_replay: Box<dyn Replay> = if self.trace_kind == TraceKind::DB {
             Box::new(DbReplay::new(self.db.clone()))
         } else {
@@ -659,7 +646,8 @@ impl Handler {
     pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
                                                               // for compat with rr/gdb core support
-        self.step_id_jump(step_id);
+        self.replay.jump_to(step_id)?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
 
         Ok(())
@@ -668,7 +656,8 @@ impl Handler {
     pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(location.rr_ticks.0); // using this field
                                                    // for compat with rr/gdb core support
-        self.step_id_jump(step_id);
+        self.replay.jump_to(step_id)?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
 
         Ok(())
@@ -765,7 +754,8 @@ impl Handler {
     }
 
     pub fn history_jump(&mut self, _req: dap::Request, loc: Location) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(loc.rr_ticks.0));
+        self.replay.jump_to(StepId(loc.rr_ticks.0))?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
         Ok(())
     }
@@ -820,7 +810,8 @@ impl Handler {
         source_location: SourceLocation,
     ) -> Result<(), Box<dyn Error>> {
         if let Some(step_id) = self.get_closest_step_id(&source_location) {
-            self.step_id_jump(step_id);
+            self.replay.jump_to(step_id)?;
+            self.step_id = self.replay.current_step_id();
             self.complete_move(false)?;
             Ok(())
         } else {
@@ -829,11 +820,11 @@ impl Handler {
         }
     }
 
-    fn step_id_jump(&mut self, step_id: StepId) {
-        if step_id.0 != NO_INDEX {
-            self.step_id = step_id;
-        }
-    }
+    // fn step_id_jump(&mut self, step_id: StepId) {
+    //     if step_id.0 != NO_INDEX {
+    //         self.step_id = step_id;
+    //     }
+    // }
 
     fn get_call_target(&self, loc: &SourceCallJumpTarget) -> Option<StepId> {
         let mut line: Line = Line(loc.line as i64);
@@ -869,11 +860,13 @@ impl Handler {
             line: call_target.line,
             path: call_target.path.clone(),
         }) {
-            self.step_id_jump(line_step_id);
+            self.replay.jump_to(line_step_id)?;
+            self.step_id = self.replay.current_step_id();
         }
 
         if let Some(call_step_id) = self.get_call_target(&call_target) {
-            self.step_id_jump(call_step_id);
+            self.replay.jump_to(call_step_id)?;
+            self.step_id = self.replay.current_step_id();
             self.complete_move(false)?;
             Ok(())
         } else {
@@ -1097,7 +1090,8 @@ impl Handler {
     }
 
     pub fn trace_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(event.direct_location_rr_ticks));
+        self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
         Ok(())
     }
@@ -1167,7 +1161,8 @@ impl Handler {
     }
 
     pub fn local_step_jump(&mut self, _req: dap::Request, arg: LocalStepJump) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(arg.rr_ticks));
+        self.replay.jump_to(StepId(arg.rr_ticks))?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
         Ok(())
     }
