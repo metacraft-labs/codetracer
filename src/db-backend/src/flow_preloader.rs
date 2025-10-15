@@ -1,8 +1,7 @@
 use crate::{
-    db::{Db, DbRecordEvent, DbStep},
+    db::{Db, DbRecordEvent},
     expr_loader::ExprLoader,
     task::{
-        self,
         Action, BranchesTaken, CoreTrace, FlowEvent, FlowStep, FlowUpdate, FlowUpdateState, FlowUpdateStateKind,
         FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount
     },
@@ -10,7 +9,7 @@ use crate::{
     value::Value,
 };
 use log::{info, warn, error};
-use runtime_tracing::{CallKey, FullValueRecord, Line, StepId};
+use runtime_tracing::{CallKey, Line, StepId, ValueRecord, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::error::Error;
@@ -34,7 +33,7 @@ impl FlowPreloader {
         match self.expr_loader.load_file(&path_buf) {
             Ok(_) => {
                 info!("Expression loader complete!");
-                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location, HashSet::new(), HashSet::new(), mode);
+                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location.clone(), HashSet::new(), HashSet::new(), mode);
                 call_flow_preloader.load_flow(location, replay)
             }
             Err(e) => {
@@ -71,7 +70,7 @@ impl FlowPreloader {
         }
        
         let mut call_flow_preloader = CallFlowPreloader::new(self, Location::default(), diff_lines, diff_call_keys, FlowMode::Diff);
-        let location = Location { line: Line(1), ..Location::default() };
+        let location = Location { line: 1, ..Location::default() };
         call_flow_preloader.load_flow(location, replay)
     }
 
@@ -79,7 +78,7 @@ impl FlowPreloader {
     // self.expr_loader.load_file(&PathBuf::from(path.to_string())).unwrap();
     // }
 
-    pub fn get_var_list(&self, line: Line, location: &Location) -> Option<Vec<String>> {
+    pub fn get_var_list(&self, line: Position, location: &Location) -> Option<Vec<String>> {
         self.expr_loader.get_expr_list(line, location)
     }
 
@@ -163,18 +162,21 @@ impl<'a> CallFlowPreloader<'a> {
         }
     }
 
-    fn add_return_value(&mut self, mut flow_view_update: FlowViewUpdate, replay: &mut dyn Replay, call_key: CallKey) -> FlowViewUpdate {
+    fn add_return_value(&mut self, mut flow_view_update: FlowViewUpdate, replay: &mut dyn Replay) -> FlowViewUpdate {
+        // assumes that replay is stopped on the place where return value is available
+
+        let return_string = "return".to_string();
+
         // The if condition ensures, that the Options on which .unwrap() is called
         // are never None, so it is safe to unwrap them.
-        let return_string = "return".to_string();
         if !flow_view_update.steps.is_empty() {
 
-            let db = Db::new(PathBuf::from("")); // we don't need its state for to_ct_value
+            let db = Db::new(&PathBuf::from("")); // we don't need its state for to_ct_value
             let return_value_record = replay.load_return_value().unwrap_or(ValueRecord::Error { 
                 msg: "<return value error>".to_string(),
                 type_id: TypeId(0),
             });
-            let return_value = db.to_ct_value(return_value_record);
+            let return_value = db.to_ct_value(&return_value_record);
 
             #[allow(clippy::unwrap_used)]
             flow_view_update.steps.last_mut().unwrap().before_values.insert(
@@ -207,7 +209,7 @@ impl<'a> CallFlowPreloader<'a> {
         flow_view_update
     }
 
-    fn next_diff_flow_step(&self, from_step_id: StepId, including_from: bool, replay: &mut dyn Replay) -> (StepId, bool) {
+    fn next_diff_flow_step(&self, _from_step_id: StepId, _including_from: bool, _replay: &mut dyn Replay) -> (StepId, bool) {
         // TODO: maybe combination of replay.next, diff_call_keys check, different for cases?s
         //
         // if from_step_id.0 >= db.steps.len() as i64 {
@@ -233,12 +235,12 @@ impl<'a> CallFlowPreloader<'a> {
         todo!()
     }
 
-    fn move_to_first_step(&self, from_step_id: StepId, replay: &mut dyn Replay) -> (StepId, bool) {
+    fn move_to_first_step(&self, from_step_id: StepId, replay: &mut dyn Replay) -> Result<(StepId, bool), Box<dyn Error>> {
         let (step_id, progressing) = match self.mode {
             FlowMode::Call => (from_step_id, true),
             FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
         };
-        replay.jump_to(step_id);
+        replay.jump_to(step_id)?;
         Ok((step_id, progressing))
     }
 
@@ -248,7 +250,8 @@ impl<'a> CallFlowPreloader<'a> {
                 // let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
                 // db.next_step_id_relative_to(from_step_id, true, step_to_different_line),
                 replay.step(Action::Next, true).unwrap(); // TODO: handle error
-                let location = replay.load_location(&mut self.flow_preloader.expr_loader).unwrap(); // TODO: handle error
+                let mut expr_loader = ExprLoader::new(CoreTrace::default());
+                let location = replay.load_location(&mut expr_loader).unwrap(); // TODO: handle error
                 let new_step_id = StepId(location.rr_ticks.0);
                 let progressing = new_step_id != from_step_id;
                 (new_step_id, progressing)
@@ -257,7 +260,7 @@ impl<'a> CallFlowPreloader<'a> {
         }
     }
 
-    fn call_key_from(&self, location: Location) -> Result<CallKey, Box<dyn Error>> {
+    fn call_key_from(&self, location: &Location) -> Result<CallKey, Box<dyn Error>> {
         Ok(CallKey(location.key.parse::<i64>()?)) // for now still assume it's an integer
     }
 
@@ -265,15 +268,15 @@ impl<'a> CallFlowPreloader<'a> {
         // let start_step_id = StepId(self.location.rr_ticks.0);
         // db.calls[call_key].step_id;
         // let mut path_buf = &PathBuf::from(&self.location.path);
-        let mut iter_step_id = StepId(self.location.rrTicks.0);
+        let mut iter_step_id = StepId(self.location.rr_ticks.0);
         let mut flow_view_update = FlowViewUpdate::new(self.location.clone());
         let mut step_count = 0;
         let mut first = true;
-        let last_call_key_result = self.call_key_from(self.location);
-        let mut last_call_key = CallKey(0);
-        match last_call_key_result {
+        let tracked_call_key_result = self.call_key_from(&self.location);
+        let tracked_call_key; // = CallKey(0);
+        match tracked_call_key_result {
             Ok(call_key) => {
-                last_call_key = call_key;
+                tracked_call_key = call_key;
             },
             Err(e) => {
                 error!("call key parse error: {e:?}");
@@ -291,15 +294,15 @@ impl<'a> CallFlowPreloader<'a> {
             // };
             let (step_id, progressing) = if first {
                 first = false;
-                self.move_to_first_step(iter_step_id, replay);
+                self.move_to_first_step(iter_step_id, replay)?
             } else {
-                self.move_to_next_step(iter_step_id, replay);
+                self.move_to_next_step(iter_step_id, replay)
             };
 
             iter_step_id = step_id;
             let mut expr_loader = ExprLoader::new(CoreTrace::default());
-            self.location = replay.load_location(&mut expr_loader);
-            let new_call_key = match self.call_key_from(self.location) {
+            self.location = replay.load_location(&mut expr_loader)?;
+            let new_call_key = match self.call_key_from(&self.location) {
                 Ok(call_key) => {
                     call_key
                 }
@@ -309,8 +312,20 @@ impl<'a> CallFlowPreloader<'a> {
                 }
             };
 
-            if self.mode == FlowMode::Call && last_call_key != new_call_key || !progressing {
-                flow_view_update = self.add_return_value(flow_view_update, replay, call_key);
+            if self.mode == FlowMode::Call && tracked_call_key != new_call_key || !progressing {
+                replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
+                let return_location = replay.load_location(&mut expr_loader)?;
+                let mut load_return_value = false;
+                // maybe this can be improved with a limited loop/jump to return/exit of call in the future
+                if let Ok(return_call_key) = self.call_key_from(&return_location) {
+                    if return_call_key == tracked_call_key {
+                        flow_view_update = self.add_return_value(flow_view_update, replay);
+                        load_return_value = true;
+                    }
+                }
+                if !load_return_value {
+                    warn!("we can't load return value");
+                }
                 info!("break flow");
                 break;
             }
@@ -333,8 +348,8 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update.add_step_count(line, step_count);
             info!("process loops");
             let path_buf = &PathBuf::from(&self.location.path);
-            flow_view_update = self.process_loops(flow_view_update.clone(), Position(self.location.line.0), replay.current_step_id(), path_buf, step_count);
-            flow_view_update = self.log_expressions(flow_view_update.clone(), Position(self.location.0), replay, step_id);
+            flow_view_update = self.process_loops(flow_view_update.clone(), Position(self.location.line), replay.current_step_id(), path_buf, step_count);
+            flow_view_update = self.log_expressions(flow_view_update.clone(), Position(self.location.line), replay, step_id);
             step_count += 1;
         }
         let path_buf = &PathBuf::from(&self.location.path);
@@ -346,7 +361,7 @@ impl<'a> CallFlowPreloader<'a> {
                 .expr_loader
                 .final_branch_load(path_buf, &flow_view_update.branches_taken[0][0].table),
         );
-        flow_view_update
+        Ok(flow_view_update)
     }
 
     #[allow(clippy::unwrap_used)]
@@ -358,7 +373,7 @@ impl<'a> CallFlowPreloader<'a> {
         path_buf: &PathBuf,
         step_count: i64,
     ) -> FlowViewUpdate {
-        if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(&line, path_buf) {
+        if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(line, path_buf) {
             if loop_shape.first.0 == line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
@@ -418,14 +433,14 @@ impl<'a> CallFlowPreloader<'a> {
                     .insert(line.0 as usize, step_count as usize);
                 flow_view_update.add_branches(
                     flow_view_update.loops.clone().last_mut().unwrap().base.0,
-                    self.flow_preloader.expr_loader.load_branch_for_position(&line, path_buf),
+                    self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
                 );
             }
         } else {
             flow_view_update.loop_iteration_steps[0][0]
                 .table
                 .insert(line.0 as usize, step_count as usize);
-            flow_view_update.add_branches(0, self.flow_preloader.expr_loader.load_branch_for_position(&line, path_buf));
+            flow_view_update.add_branches(0, self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf));
         }
         flow_view_update
     }
@@ -479,12 +494,12 @@ impl<'a> CallFlowPreloader<'a> {
         //     variable_map.insert(name.clone(), full_value_record);
         // }
 
-        if let Some(var_list) = self.flow_preloader.get_var_list(line.0, &self.location) {
+        if let Some(var_list) = self.flow_preloader.get_var_list(line, &self.location) {
             info!("var_list {:?}", var_list.clone());
             for value_name in &var_list {
                 if let Ok(value) = replay.load_value(value_name) {
                 // if variable_map.contains_key(value_name) {
-                    let db = Db::new(PathBuf::from("")); // no state needed for to_ct_value 
+                    let db = Db::new(&PathBuf::from("")); // no state needed for to_ct_value 
                     let ct_value = db.to_ct_value(&value);
                     flow_view_update
                         .steps
@@ -507,7 +522,7 @@ impl<'a> CallFlowPreloader<'a> {
                 if variable_map.contains_key(variable) {
                     flow_view_update.steps[index]
                         .after_values
-                        .insert(variable.clone(), variable_map[variable]);
+                        .insert(variable.clone(), variable_map[variable].clone());
                 }
             }
         }
