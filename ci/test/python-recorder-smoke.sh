@@ -9,11 +9,9 @@ echo '##########################################################################
 echo "Building Codetracer CLI for smoke test"
 echo '###############################################################################'
 
-just build-once
+nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
 
-# ./ci/build/dev.sh
-
-CT_BIN="${ROOT_DIR}/src/build-debug/bin/ct"
+CT_BIN="${ROOT_DIR}/src/bin/ct"
 if [[ ! -x "${CT_BIN}" ]]; then
   echo "error: ${CT_BIN} not found after build"
   exit 1
@@ -59,6 +57,9 @@ echo '##########################################################################
 TRACE_PROGRAM="${ROOT_DIR}/examples/python_script.py"
 export TRACE_DIR
 
+CODETRACER_CT_PATHS=$(pwd)/ct_paths.json
+export CODETRACER_CT_PATHS
+
 "${CT_BIN}" record -o="${TRACE_DIR}" "${TRACE_PROGRAM}"
 
 if [[ ! -f "${TRACE_DIR}/trace.json" ]]; then
@@ -82,7 +83,6 @@ metadata = json.loads((trace_dir / "trace_metadata.json").read_text(encoding="ut
 recorder = metadata.get("recorder", {})
 assert recorder.get("name") == "codetracer_python_recorder", recorder
 assert recorder.get("target_script"), "missing target_script in recorder metadata"
-# assert recorder.get("with_diff") is False, "expected with_diff False by default"
 PY
 
 echo '###############################################################################'
@@ -136,7 +136,7 @@ if [[ ${INTERP_STATUS} -eq 0 ]]; then
   exit 1
 fi
 
-if ! grep -q "Python interpreter not found" <<<"${MISSING_INTERP_OUTPUT}"; then
+if ! grep -q "Python module \`codetracer_python_recorder\` is not installed for interpreter" <<<"${MISSING_INTERP_OUTPUT}"; then
   echo "error: missing interpreter output did not mention missing interpreter"
   echo "${MISSING_INTERP_OUTPUT}"
   exit 1
