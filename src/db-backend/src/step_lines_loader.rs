@@ -9,7 +9,7 @@ use crate::db::{Db, DbStep, DbReplay};
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
-use crate::task::{FlowMode, LineStep, LineStepKind, LineStepValue, Location};
+use crate::task::{FlowMode, LineStep, LineStepKind, LineStepValue, Location, TraceKind};
 
 #[derive(Debug, Clone)]
 pub struct StepLinesLoader {
@@ -87,7 +87,7 @@ impl StepLinesLoader {
                 // let function_id = db.calls[call_key].function_id;
                 // let function_first = db.functions[function_id].line;
                 let mut replay = DbReplay::new(Box::new(db.clone()));
-                let flow_update = flow_preloader.load(location, FlowMode::Call, &mut replay);
+                let flow_update = flow_preloader.load(location, FlowMode::Call, TraceKind::DB, &mut replay);
                 if !flow_update.error && !flow_update.view_updates.is_empty() {
                     let flow_view_update = &flow_update.view_updates[0];
                     for flow_step in flow_view_update.steps.iter() {
