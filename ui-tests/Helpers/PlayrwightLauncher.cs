@@ -4,13 +4,13 @@ using UiTests.Helpers;
 
 public static class PlaywrightLauncher
 {
-    private static async Task<int> GetFreeTcpPortAsync()
+    private static Task<int> GetFreeTcpPortAsync()
     {
         var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
         l.Start();
         int port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
         l.Stop();
-        return port;
+        return Task.FromResult(port);
     }
 
     private static async Task WaitForCdpAsync(int port, TimeSpan timeout)
@@ -32,7 +32,7 @@ public static class PlaywrightLauncher
     public static string CtPath => CodetracerLauncher.CtPath;
     public static bool IsCtAvailable => CodetracerLauncher.IsCtAvailable;
 
-    public static async Task<IBrowser> LaunchAsync(string programRelativePath)
+    public static async Task<CodeTracerSession> LaunchAsync(string programRelativePath)
     {
         if (!IsCtAvailable)
             throw new FileNotFoundException($"ct executable not found at {CtPath}");
@@ -48,6 +48,8 @@ public static class PlaywrightLauncher
             UseShellExecute = false,
             // ArgumentList = { "--remote-debugging-port=9222" },
         };
+        info.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
+        info.EnvironmentVariables.Remove("ELECTRON_NO_ATTACH_CONSOLE");
         info.ArgumentList.Add($"--remote-debugging-port={port}");
         info.EnvironmentVariables.Add("CODETRACER_CALLER_PID", "1");
         info.EnvironmentVariables.Add("CODETRACER_TRACE_ID", traceId.ToString());
@@ -72,7 +74,7 @@ public static class PlaywrightLauncher
             Timeout = 20000
         });
 
-        return browser;
+        return new CodeTracerSession(process, browser, pw);
         // var firstWindow = await app.FirstWindowAsync();
         // return (await firstWindow.TitleAsync()) == "DevTools"
         //     ? (await app.WindowsAsync())[1]
