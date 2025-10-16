@@ -1640,10 +1640,13 @@ pub struct TracepointResults {
     pub first_update: bool,
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Breakpoint {
     pub id: i64,
     pub enabled: bool,
 }
+
 pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
 pub static mut EVENT_ID_MAP: &mut [usize] = &mut [0; 100];
 
