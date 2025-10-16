@@ -3,4 +3,5 @@ obj/
 TestResults/
 playwright-report/
 test-results/
+.direnv/
 *.patch

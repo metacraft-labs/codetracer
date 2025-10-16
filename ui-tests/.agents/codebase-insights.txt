@@ -1,0 +1,5 @@
+- 2024-12-09: Added `docs/` directory with starter guides (`coding-guidelines.md`, `extending-the-suite.md`, `debugging.md`) to centralize project documentation for human and AI contributors.
+- 2024-12-09: UI tests require entering `nix develop` inside `ui-tests` (or trusting direnv) before running `./dotnet_build.sh` and `dotnet run`; the env provides compatible Playwright tooling.
+- 2024-12-09: Added `.envrc` with `use flake`; direnv will auto-load the Nix toolchain when entering `ui-tests` if trusted via `direnv allow`.
+- 2024-12-09: Debug launcher now strips `ELECTRON_RUN_AS_NODE`/`ELECTRON_NO_ATTACH_CONSOLE` before starting `ct`; otherwise Electron treats requests as Node and rejects `--remote-debugging-port`.
+- 2024-12-09: `PlaywrightLauncher.LaunchAsync` returns `CodeTracerSession`, ensuring the Playwright browser and `ct` process are disposed so VS Code debug runs shut down cleanly.
