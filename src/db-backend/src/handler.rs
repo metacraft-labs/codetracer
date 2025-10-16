@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
 use log::{error, info, warn};
@@ -52,6 +52,7 @@ pub struct Handler {
     pub resulting_dap_messages: Vec<DapMessage>,
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
+    pub breakpoints: HashMap<String, HashSet<i64>>,
 
     pub trace_kind: TraceKind,
     pub replay: Box<dyn Replay>,
@@ -114,6 +115,7 @@ impl Handler {
             step_lines_loader,
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
+            breakpoints: HashMap::new(),
             replay,
             ct_rr_args,
             load_flow_index: 0,
@@ -893,34 +895,95 @@ impl Handler {
         }
     }
 
-    pub fn add_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-       self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
-       Ok(())
-    }
-
-    pub fn delete_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        let path_id = path_id_res?;
-        let inner_map = &mut self.breakpoint_list[path_id.0];
-        inner_map.remove(&loc.line);
+    pub fn set_breakpoints(&mut self, request: dap::Request, args: dap_types::SetBreakpointsArguments) -> Result<(), Box<dyn Error>> {
+        let mut results = Vec::new();
+        self.clear_breakpoints()?;
+        if let Some(path) = args.source.path.clone() {
+            let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
+                bps.into_iter().map(|b| b.line).collect()
+            } else {
+                args.lines.unwrap_or_default()
+            };
+        
+            for line in lines {
+                { 
+                    let entry = self.breakpoints.entry(path.clone()).or_default();
+                    entry.insert(line);
+                }
+                let _ = self.add_breakpoint(
+                    SourceLocation {
+                        path: path.clone(),
+                        line: line as usize,
+                    },
+                );
+                results.push(dap_types::Breakpoint {
+                    id: None,
+                    verified: true,
+                    message: None,
+                    source: Some(dap_types::Source {
+                        name: args.source.name.clone(),
+                        path: Some(path.clone()),
+                        source_reference: args.source.source_reference,
+                        presentation_hint: None,
+                        origin: None,
+                        sources: None,
+                        adapter_data: None,
+                        checksums: None,
+                    }),
+                    line: Some(line),
+                    column: None,
+                    end_line: None,
+                    end_column: None,
+                    instruction_reference: None,
+                    offset: None,
+                    reason: None,
+                });
+            }
+        } else {
+            let lines = args
+                .breakpoints
+                .unwrap_or_default()
+                .into_iter()
+                .map(|b| b.line)
+                .collect::<Vec<_>>();
+            for line in lines {
+                results.push(dap_types::Breakpoint {
+                    id: None,
+                    verified: false,
+                    message: Some("missing source path".to_string()),
+                    source: None,
+                    line: Some(line),
+                    column: None,
+                    end_line: None,
+                    end_column: None,
+                    instruction_reference: None,
+                    offset: None,
+                    reason: None,
+                });
+            }
+        }
+        self.respond_dap(request, dap_types::SetBreakpointsResponseBody { breakpoints: results })?;
         Ok(())
     }
 
-    pub fn clear_breakpoints(&mut self) {
-        self.breakpoint_list.clear();
-        self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
+    pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<(), Box<dyn Error>> {
+       let _breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
+       // TODO: map them to id-s in handler so we can do the reverse on delete and let replay work with breakpoints?
+       Ok(())
     }
 
-    pub fn toggle_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        let path_id = path_id_res?;
-        if let Some(breakpoint) = self.breakpoint_list[path_id.0].get_mut(&loc.line) {
-            breakpoint.is_active = !breakpoint.is_active;
-        }
+    pub fn delete_breakpoint(&mut self, _loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
+        // TODO: load themfrom handler id map: self.replay.delete_breakpoint(loc)
+        Ok(())
+    }
+
+    pub fn clear_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        let _ = self.replay.delete_breakpoints()?;
+        Ok(())
+    }
+
+    pub fn toggle_breakpoint(&mut self, _loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
+        // TODO: use path,line to id map: self.replay.toggle_breakpoint()?;
         Ok(())
     }
 

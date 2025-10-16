@@ -785,13 +785,14 @@ pub struct DbReplay {
     pub step_id: StepId,
     pub call_key: CallKey,
     pub breakpoint_list: Vec<HashMap<usize, Breakpoint>>,
+    breakpoint_next_id: usize,
 }
 
 impl DbReplay {
     pub fn new(db: Box<Db>) -> DbReplay {
         let mut breakpoint_list: Vec<HashMap<usize, Breakpoint>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
-        DbReplay { db, step_id: StepId(0), call_key: CallKey(0), breakpoint_list }
+        DbReplay { db, step_id: StepId(0), call_key: CallKey(0), breakpoint_list, breakpoint_next_id: 0 }
     }
 
     pub fn step_id_jump(&mut self, step_id: StepId) {
@@ -883,11 +884,11 @@ impl DbReplay {
     fn step_continue(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
         for step in self.db.step_from(self.step_id, forward) {
             if !self.breakpoint_list.is_empty() {
-                if let Some(is_active) = self.breakpoint_list[step.path_id.0]
+                if let Some(enabled) = self.breakpoint_list[step.path_id.0]
                     .get(&step.line.into())
-                    .map(|bp| bp.is_active)
+                    .map(|bp| bp.enabled)
                 {
-                    if is_active {
+                    if enabled {
                         self.step_id_jump(step.step_id);
                         // true: has hit a breakpoint
                         return Ok(true);
@@ -1032,14 +1033,43 @@ impl Replay for DbReplay {
 
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
+            .load_path_id(path)
+            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", path).into());
         let path_id = path_id_res?;
         let inner_map = &mut self.breakpoint_list[path_id.0];
-        let breakpoint = Breakpoint { enabled: true, id: self.breakpoint_next_id };
-        self.breakpoint_next_i
-        inner_map.insert(loc.line, Breakpoint { is_active: true });
+        let breakpoint = Breakpoint { enabled: true, id: self.breakpoint_next_id as i64 };
+        self.breakpoint_next_id += 1;
+        inner_map.insert(line as usize, breakpoint.clone());
+        Ok(breakpoint)
     }
+
+    fn delete_breakpoint(&mut self, _breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
+        // let path_id_res: Result<PathId, Box<dyn Error>> = self
+        //     .load_path_id(&loc.path)
+        //     .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
+        // let path_id = path_id_res?;
+        // let inner_map = &mut self.breakpoint_list[path_id.0];
+        // inner_map.remove(&loc.line);
+        todo!()        
+    }
+
+    fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>> {
+        self.breakpoint_list.clear();
+        self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
+        Ok(true)
+    } 
+
+    fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>> {
+        // let path_id_res: Result<PathId, Box<dyn Error>> = self
+        //     .load_path_id(&loc.path)
+        //     .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
+        // let path_id = path_id_res?;
+        // if let Some(breakpoint) = self.breakpoint_list[path_id.0].get_mut(&loc.line) {
+        let mut toggled_breakpoint = breakpoint.clone();
+        toggled_breakpoint.enabled = !toggled_breakpoint.enabled;
+        Ok(toggled_breakpoint)
+    }
+
     fn current_step_id(&mut self) -> StepId {
         self.step_id
     }
