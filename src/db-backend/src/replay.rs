@@ -27,5 +27,6 @@ pub trait Replay: std::fmt::Debug {
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>>;
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>>;
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>>;
+    fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>>;
     fn current_step_id(&mut self) -> StepId;
 }

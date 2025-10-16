@@ -1647,6 +1647,12 @@ pub struct Breakpoint {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TraceKind {
+    DB,
+    RR,
+}
+
 pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
 pub static mut EVENT_ID_MAP: &mut [usize] = &mut [0; 100];
 
