@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 
 use log::{error, info, warn};
@@ -23,7 +23,7 @@ use crate::dap_types;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task;
 use crate::task::{
-    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
+    Action, Breakpoint, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
     CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, FlowMode, HistoryResult, HistoryUpdate, Instruction,
     CtLoadFlowArguments, FlowUpdate, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
     Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
@@ -52,7 +52,7 @@ pub struct Handler {
     pub resulting_dap_messages: Vec<DapMessage>,
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
-    pub breakpoints: HashMap<String, HashSet<i64>>,
+    pub breakpoints: HashMap<(String, i64), Vec<Breakpoint>>,
 
     pub trace_kind: TraceKind,
     pub replay: Box<dyn Replay>,
@@ -897,6 +897,7 @@ impl Handler {
 
     pub fn set_breakpoints(&mut self, request: dap::Request, args: dap_types::SetBreakpointsArguments) -> Result<(), Box<dyn Error>> {
         let mut results = Vec::new();
+        // for now simples to redo them every time: TODO possible optimizations
         self.clear_breakpoints()?;
         if let Some(path) = args.source.path.clone() {
             let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
@@ -906,10 +907,6 @@ impl Handler {
             };
         
             for line in lines {
-                { 
-                    let entry = self.breakpoints.entry(path.clone()).or_default();
-                    entry.insert(line);
-                }
                 let _ = self.add_breakpoint(
                     SourceLocation {
                         path: path.clone(),
@@ -967,18 +964,24 @@ impl Handler {
     }
 
     pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<(), Box<dyn Error>> {
-       let _breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
-       // TODO: map them to id-s in handler so we can do the reverse on delete and let replay work with breakpoints?
+       let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
+       let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
+       entry.push(breakpoint);
        Ok(())
     }
 
-    pub fn delete_breakpoint(&mut self, _loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        // TODO: load themfrom handler id map: self.replay.delete_breakpoint(loc)
+    pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
+        if self.breakpoints.contains_key(&(loc.path.clone(), loc.line as i64)) {
+            for breakpoint in &self.breakpoints[&(loc.path.clone(), loc.line as i64)] {
+                self.replay.delete_breakpoint(breakpoint)?;
+            }
+        }
         Ok(())
     }
 
     pub fn clear_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
         let _ = self.replay.delete_breakpoints()?;
+        self.breakpoints.clear();
         Ok(())
     }
 
