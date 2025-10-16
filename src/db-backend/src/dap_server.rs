@@ -1,14 +1,14 @@
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
-use crate::dap_types::{self, Breakpoint, SetBreakpointsArguments, SetBreakpointsResponseBody, Source};
+use crate::dap_types;
 
 use crate::db::Db;
 use crate::handler::{Handler, TraceKind};
 use crate::paths::CODETRACER_PATHS;
 use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments,
+    Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments,
     CtLoadLocalsArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
+    SourceCallJumpTarget, SourceLocation, StepArg, TracepointId, UpdateTableArgs,
 };
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
@@ -20,7 +20,7 @@ use crate::transport::{DapResult, WorkerTransport};
 
 use log::{info, warn};
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+// use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 
@@ -200,6 +200,7 @@ fn handle_request<T: DapTransport>(
         "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap_types::StackTraceArguments>()?)?,
         "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?)?,
         "restart" => handler.run_to_entry(req.clone())?,
+        "setBreakpoints" => handler.set_breakpoints(req.clone(), req.load_args::<dap_types::SetBreakpointsArguments>()?)?,
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
@@ -250,7 +251,6 @@ fn handle_request<T: DapTransport>(
 
 pub struct Ctx {
     pub seq: i64,
-    pub breakpoints: HashMap<String, HashSet<i64>>,
     pub handler: Option<Handler>,
     pub received_launch: bool,
     pub launch_trace_folder: PathBuf,
@@ -264,7 +264,6 @@ impl Default for Ctx {
     fn default() -> Self {
         Self {
             seq: 1i64,
-            breakpoints: HashMap::new(),
             handler: None,
             received_launch: false,
             launch_trace_folder: PathBuf::from(""),
@@ -321,92 +320,6 @@ pub fn handle_message<T: DapTransport>(
             });
             ctx.seq += 1;
             transport.send(&event)?;
-        }
-        DapMessage::Request(req) if req.command == "setBreakpoints" => {
-            let mut results = Vec::new();
-            let args = req.load_args::<SetBreakpointsArguments>()?;
-            if let Some(path) = args.source.path.clone() {
-                let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
-                    bps.into_iter().map(|b| b.line).collect()
-                } else {
-                    args.lines.unwrap_or_default()
-                };
-                let entry = ctx.breakpoints.entry(path.clone()).or_default();
-                if let Some(h) = ctx.handler.as_mut() {
-                    h.clear_breakpoints();
-                    for line in lines {
-                        entry.insert(line);
-                        let _ = h.add_breakpoint(
-                            SourceLocation {
-                                path: path.clone(),
-                                line: line as usize,
-                            },
-                            Task {
-                                kind: TaskKind::AddBreak,
-                                id: gen_task_id(TaskKind::AddBreak),
-                            },
-                        );
-                        results.push(Breakpoint {
-                            id: None,
-                            verified: true,
-                            message: None,
-                            source: Some(Source {
-                                name: args.source.name.clone(),
-                                path: Some(path.clone()),
-                                source_reference: args.source.source_reference,
-                                presentation_hint: None,
-                                origin: None,
-                                sources: None,
-                                adapter_data: None,
-                                checksums: None,
-                            }),
-                            line: Some(line),
-                            column: None,
-                            end_line: None,
-                            end_column: None,
-                            instruction_reference: None,
-                            offset: None,
-                            reason: None,
-                        });
-                    }
-                }
-            } else {
-                let lines = args
-                    .breakpoints
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|b| b.line)
-                    .collect::<Vec<_>>();
-                for line in lines {
-                    results.push(Breakpoint {
-                        id: None,
-                        verified: false,
-                        message: Some("missing source path".to_string()),
-                        source: None,
-                        line: Some(line),
-                        column: None,
-                        end_line: None,
-                        end_column: None,
-                        instruction_reference: None,
-                        offset: None,
-                        reason: None,
-                    });
-                }
-            }
-            let body = SetBreakpointsResponseBody { breakpoints: results };
-            let resp = DapMessage::Response(Response {
-                base: ProtocolMessage {
-                    seq: ctx.seq,
-                    type_: "response".to_string(),
-                },
-                request_seq: req.base.seq,
-                success: true,
-                command: "setBreakpoints".to_string(),
-                message: None,
-                body: serde_json::to_value(body)?,
-            });
-            ctx.seq += 1;
-            transport.send(&resp)?;
         }
         DapMessage::Request(req) if req.command == "launch" => {
             ctx.received_launch = true;
