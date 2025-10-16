@@ -15,7 +15,7 @@ use crate::expr_loader::ExprLoader;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::{Events, Replay};
-use crate::task::{Action, Location, CtLoadLocalsArguments, Variable};
+use crate::task::{Action, Breakpoint, Location, CtLoadLocalsArguments, Variable};
 
 #[derive(Debug)]
 pub struct RRDispatcher {
@@ -222,6 +222,47 @@ impl Replay for RRDispatcher {
         self.run_to_entry()?;
         Ok(true)
         // todo!()
+    }
+
+    fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let breakpoint = serde_json::from_str::<Breakpoint>(
+            &self.stable.run_query(
+                CtRRQuery::AddBreakpoint {
+                    path: path.to_string(),
+                    line,
+                })?
+        )?;
+        Ok(breakpoint)
+    }
+
+    fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<bool>(
+            &self.stable.run_query(
+                CtRRQuery::DeleteBreakpoint {
+                    breakpoint: breakpoint.clone(),
+                }
+            )?
+        )?) 
+    }
+
+    fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<bool>(
+            &self.stable.run_query(
+                CtRRQuery::DeleteBreakpoints
+            )?
+        )?)
+    } 
+
+    fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<Breakpoint>(
+            &self.stable.run_query(
+                CtRRQuery::ToggleBreakpoint { breakpoint: breakpoint.clone() },
+            )?
+        )?)
     }
 
     fn current_step_id(&mut self) -> StepId {
