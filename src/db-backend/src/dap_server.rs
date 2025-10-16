@@ -282,6 +282,10 @@ pub fn handle_message<T: DapTransport>(
     ctx: &mut Ctx,
 ) -> Result<(), Box<dyn Error>> {
     info!("Handling message: {:?}", msg);
+    if let DapMessage::Request(req) = msg {
+        info!("  request {}", req.command);
+    }
+
     match msg {
         DapMessage::Request(req) if req.command == "initialize" => {
             let capabilities = Capabilities {

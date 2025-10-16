@@ -10,7 +10,7 @@ use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, N
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{BreakpointRecord, Db, DbCall, DbRecordEvent, DbReplay, DbStep};
+use crate::db::{Db, DbCall, DbRecordEvent, DbReplay, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
@@ -57,8 +57,6 @@ pub struct Handler {
     pub replay: Box<dyn Replay>,
     pub ct_rr_args: CtRRArgs,
     pub load_flow_index: usize,
-
-    pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,8 +92,6 @@ impl Handler {
         let calltrace = Calltrace::new(&db);
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
-        let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
-        breakpoint_list.resize_with(db.paths.len(), HashMap::new);
         let step_lines_loader = StepLinesLoader::new(&db, &mut expr_loader);
         let replay: Box<dyn Replay> = if trace_kind == TraceKind::DB {
             Box::new(DbReplay::new(db.clone()))
@@ -110,7 +106,6 @@ impl Handler {
             last_call_key: CallKey(0),
             indirect_send,
             // sender,
-            breakpoint_list,
             event_db: EventDb::new(),
             flow_preloader: FlowPreloader::new(),
             expr_loader,
@@ -809,14 +804,31 @@ impl Handler {
         _req: dap::Request,
         source_location: SourceLocation,
     ) -> Result<(), Box<dyn Error>> {
-        if let Some(step_id) = self.get_closest_step_id(&source_location) {
-            self.replay.jump_to(step_id)?;
-            self.step_id = self.replay.current_step_id();
-            self.complete_move(false)?;
-            Ok(())
+        if self.trace_kind == TraceKind::DB {
+            if let Some(step_id) = self.get_closest_step_id(&source_location) {
+                self.replay.jump_to(step_id)?;
+                self.step_id = self.replay.current_step_id();
+                self.complete_move(false)?;
+                Ok(())
+            } else {
+                let err: String = format!("unknown location: {}", &source_location);
+                Err(err.into())
+            }
         } else {
-            let err: String = format!("unknown location: {}", &source_location);
-            Err(err.into())
+            let b = self.replay.add_breakpoint(&source_location.path, source_location.line as i64)?;
+            match self.replay.step(Action::Continue, true) {
+                Ok(_) => {
+                    self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
+                    let _location = self.replay.load_location(&mut self.expr_loader)?;
+                    self.step_id = self.replay.current_step_id();
+                    self.complete_move(false)?;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.replay.delete_breakpoint(&b)?;
+                    Err(e)
+                }
+            }
         }
     }
 
@@ -882,13 +894,8 @@ impl Handler {
     }
 
     pub fn add_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        let path_id = path_id_res?;
-        let inner_map = &mut self.breakpoint_list[path_id.0];
-        inner_map.insert(loc.line, BreakpointRecord { is_active: true });
-        Ok(())
+       self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
+       Ok(())
     }
 
     pub fn delete_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
