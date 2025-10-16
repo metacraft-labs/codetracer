@@ -27,7 +27,7 @@ use crate::task::{
     CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, FlowMode, HistoryResult, HistoryUpdate, Instruction,
     CtLoadFlowArguments, FlowUpdate, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
     Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
+    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceKind, TraceUpdate, TracepointId, TracepointResults,
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
@@ -58,12 +58,6 @@ pub struct Handler {
     pub replay: Box<dyn Replay>,
     pub ct_rr_args: CtRRArgs,
     pub load_flow_index: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TraceKind {
-    DB,
-    RR,
 }
 
 // two choices:
@@ -454,7 +448,7 @@ impl Handler {
         // if possible for example
 
         let flow_update = if arg.flow_mode == FlowMode::Call {
-            self.flow_preloader.load(arg.location, arg.flow_mode, &mut *flow_replay)
+            self.flow_preloader.load(arg.location, arg.flow_mode, self.trace_kind, &mut *flow_replay)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
                 serde_json::from_str::<FlowUpdate>(&raw_flow)?
