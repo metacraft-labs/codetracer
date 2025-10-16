@@ -20,8 +20,9 @@ use std::path::PathBuf;
 extern crate db_backend;
 use db_backend::core::Core;
 use db_backend::db::Db;
-use db_backend::handler::{Handler, TraceKind};
+use db_backend::handler::Handler;
 use db_backend::rr_dispatcher::CtRRArgs;
+use db_backend::task::TraceKind;
 // use db_backend::receiver::Receiver;
 // use db_backend::response::Response;
 
