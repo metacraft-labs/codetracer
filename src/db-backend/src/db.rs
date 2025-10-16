@@ -15,7 +15,7 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::{Events, Replay};
-use crate::task::{Action, Call, CallArg, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, Variable};
+use crate::task::{Action, Breakpoint, Call, CallArg, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, Variable};
 use crate::value::{Type, Value};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -777,11 +777,6 @@ pub enum EndOfProgram {
 //     pub place: Place,
 // }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BreakpointRecord {
-    pub is_active: bool,
-}
-
 // type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 
 #[derive(Debug)]
@@ -789,12 +784,12 @@ pub struct DbReplay {
     pub db: Box<Db>,
     pub step_id: StepId,
     pub call_key: CallKey,
-    pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
+    pub breakpoint_list: Vec<HashMap<usize, Breakpoint>>,
 }
 
 impl DbReplay {
     pub fn new(db: Box<Db>) -> DbReplay {
-        let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
+        let mut breakpoint_list: Vec<HashMap<usize, Breakpoint>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
         DbReplay { db, step_id: StepId(0), call_key: CallKey(0), breakpoint_list }
     }
@@ -924,6 +919,10 @@ impl DbReplay {
         // false: hasn't hit a breakpoint
         Ok(false)
     }
+
+    fn load_path_id(&self, path: &str) -> Option<PathId> {
+        self.db.path_map.get(path).copied()
+    }
 }
 
 impl Replay for DbReplay {
@@ -1031,6 +1030,16 @@ impl Replay for DbReplay {
         Ok(true)
     }
 
+    fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
+        let path_id_res: Result<PathId, Box<dyn Error>> = self
+            .load_path_id(&loc.path)
+            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
+        let path_id = path_id_res?;
+        let inner_map = &mut self.breakpoint_list[path_id.0];
+        let breakpoint = Breakpoint { enabled: true, id: self.breakpoint_next_id };
+        self.breakpoint_next_i
+        inner_map.insert(loc.line, Breakpoint { is_active: true });
+    }
     fn current_step_id(&mut self) -> StepId {
         self.step_id
     }
