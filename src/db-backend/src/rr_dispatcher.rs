@@ -265,6 +265,15 @@ impl Replay for RRDispatcher {
         )?)
     }
 
+    fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<Location>(
+            &self.stable.run_query(
+                CtRRQuery::JumpToCall { location: location.clone() }
+            )?
+        )?)
+    }
+
     fn current_step_id(&mut self) -> StepId {
         // cache location or step_id and return
         // OR always load from worker

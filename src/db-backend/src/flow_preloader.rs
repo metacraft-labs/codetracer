@@ -3,7 +3,7 @@ use crate::{
     expr_loader::ExprLoader,
     task::{
         Action, BranchesTaken, CoreTrace, FlowEvent, FlowStep, FlowUpdate, FlowUpdateState, FlowUpdateStateKind,
-        FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount
+        FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount, TraceKind,
     },
     replay::Replay,
     value::Value,
@@ -27,13 +27,13 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load(&mut self, location: Location, mode: FlowMode, replay: &mut dyn Replay) -> FlowUpdate {
+    pub fn load(&mut self, location: Location, mode: FlowMode, kind: TraceKind, replay: &mut dyn Replay) -> FlowUpdate {
         info!("flow: load: {:?}", location);
         let path_buf = PathBuf::from(&location.path);
         match self.expr_loader.load_file(&path_buf) {
             Ok(_) => {
                 info!("Expression loader complete!");
-                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location.clone(), HashSet::new(), HashSet::new(), mode);
+                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location.clone(), HashSet::new(), HashSet::new(), mode, kind);
                 call_flow_preloader.load_flow(location, replay)
             }
             Err(e) => {
@@ -43,7 +43,7 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db, replay: &mut dyn Replay) -> FlowUpdate {
+    pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db, trace_kind: TraceKind, replay: &mut dyn Replay) -> FlowUpdate {
         info!("load_diff_flow");
         for diff_line in &diff_lines {
             match self.expr_loader.load_file(&diff_line.0) {
@@ -69,7 +69,7 @@ impl FlowPreloader {
             }
         }
        
-        let mut call_flow_preloader = CallFlowPreloader::new(self, Location::default(), diff_lines, diff_call_keys, FlowMode::Diff);
+        let mut call_flow_preloader = CallFlowPreloader::new(self, Location::default(), diff_lines, diff_call_keys, FlowMode::Diff, trace_kind);
         let location = Location { line: 1, ..Location::default() };
         call_flow_preloader.load_flow(location, replay)
     }
@@ -97,10 +97,17 @@ pub struct CallFlowPreloader<'a> {
     diff_lines: HashSet<(PathBuf, i64)>,
     diff_call_keys: HashSet<i64>, //  TODO: if we add Eq, Hash it seems we can do CallKey
     mode: FlowMode,
+    trace_kind: TraceKind,
 }
 
 impl<'a> CallFlowPreloader<'a> {
-    pub fn new(flow_preloader: &'a FlowPreloader, location: Location, diff_lines: HashSet<(PathBuf, i64)>, diff_call_keys: HashSet<i64>, mode: FlowMode) -> Self {
+    pub fn new(
+            flow_preloader: &'a FlowPreloader,
+            location: Location,
+            diff_lines: HashSet<(PathBuf, i64)>,
+            diff_call_keys: HashSet<i64>,
+            mode: FlowMode,
+            trace_kind: TraceKind) -> Self {
         CallFlowPreloader {
             flow_preloader,
             location,
@@ -110,6 +117,7 @@ impl<'a> CallFlowPreloader<'a> {
             diff_lines,
             diff_call_keys,
             mode,
+            trace_kind,
         }
     }
 
@@ -236,11 +244,17 @@ impl<'a> CallFlowPreloader<'a> {
     }
 
     fn move_to_first_step(&self, from_step_id: StepId, replay: &mut dyn Replay) -> Result<(StepId, bool), Box<dyn Error>> {
-        let (step_id, progressing) = match self.mode {
+        let (mut step_id, mut progressing) = match self.mode {
             FlowMode::Call => (from_step_id, true),
             FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
         };
-        replay.jump_to(step_id)?;
+        if self.trace_kind == TraceKind::DB {
+            replay.jump_to(step_id)?;
+        } else {
+            let location = replay.jump_to_call(&self.location)?;
+            step_id = StepId(location.rr_ticks.0);
+            progressing = true;
+        }
         Ok((step_id, progressing))
     }
 

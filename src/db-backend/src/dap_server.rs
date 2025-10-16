@@ -2,13 +2,13 @@ use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Respons
 use crate::dap_types;
 
 use crate::db::Db;
-use crate::handler::{Handler, TraceKind};
+use crate::handler::Handler;
 use crate::paths::CODETRACER_PATHS;
 use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments,
     CtLoadLocalsArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, TracepointId, UpdateTableArgs,
+    SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
