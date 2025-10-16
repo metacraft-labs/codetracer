@@ -15,7 +15,7 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::{Events, Replay};
-use crate::task::{Action, Breakpoint, Call, CallArg, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, Variable};
+use crate::task::{Action, Breakpoint, Call, CallArg, CoreTrace, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, Variable};
 use crate::value::{Type, Value};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -1050,7 +1050,7 @@ impl Replay for DbReplay {
         // let path_id = path_id_res?;
         // let inner_map = &mut self.breakpoint_list[path_id.0];
         // inner_map.remove(&loc.line);
-        todo!()        
+        todo!()       
     }
 
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>> {
@@ -1068,6 +1068,15 @@ impl Replay for DbReplay {
         let mut toggled_breakpoint = breakpoint.clone();
         toggled_breakpoint.enabled = !toggled_breakpoint.enabled;
         Ok(toggled_breakpoint)
+    }
+
+    fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
+        let step = self.db.steps[StepId(location.rr_ticks.0)];
+        let call_key = step.call_key;
+        let first_call_step_id = self.db.calls[call_key].step_id;
+        self.jump_to(first_call_step_id)?;
+        let mut expr_loader = ExprLoader::new(CoreTrace::default());
+        self.load_location(&mut expr_loader)
     }
 
     fn current_step_id(&mut self) -> StepId {
