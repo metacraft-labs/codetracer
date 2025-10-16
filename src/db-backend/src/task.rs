@@ -1640,6 +1640,10 @@ pub struct TracepointResults {
     pub first_update: bool,
 }
 
+pub struct Breakpoint {
+    pub id: i64,
+    pub enabled: bool,
+}
 pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
 pub static mut EVENT_ID_MAP: &mut [usize] = &mut [0; 100];
 
