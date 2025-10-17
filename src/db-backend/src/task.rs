@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::*;
 
 use crate::lang::*;
-use crate::value::{Type, Value};
+use crate::value::{Type, Value, ValueRecordWithType};
 use schemars::JsonSchema;
 
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
@@ -123,6 +123,20 @@ pub struct Variable {
     pub expression: String,
     pub value: Value,
 }
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct VariableWithRecord {
+    pub expression: String,
+    pub value: ValueRecordWithType,
+}
+
+// pub struct ValueRecordAndType {
+//     value: ValueRecord,
+//     typ: Type,
+// }
+
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
