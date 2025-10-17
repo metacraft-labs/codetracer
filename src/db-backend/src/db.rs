@@ -15,8 +15,8 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::{Events, Replay};
-use crate::task::{Action, Breakpoint, Call, CallArg, CoreTrace, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, Variable};
-use crate::value::{Type, Value};
+use crate::task::{Action, Breakpoint, Call, CallArg, CoreTrace, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, VariableWithRecord};
+use crate::value::{Type, Value, ValueRecordWithType};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
 
@@ -795,6 +795,52 @@ impl DbReplay {
         DbReplay { db, step_id: StepId(0), call_key: CallKey(0), breakpoint_list, breakpoint_next_id: 0 }
     }
 
+    pub fn register_type(&mut self, typ: TypeRecord) -> TypeId {
+        // for no checking for typ.name logic: eventually in ensure_type?
+        self.db.types.push(typ);
+        TypeId(self.db.types.len() - 1)
+    }
+
+    pub fn to_value_record(&mut self, v: ValueRecordWithType) -> ValueRecord {
+        match v {
+            ValueRecordWithType::Int { i, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::Int { i, type_id }
+            },
+            ValueRecordWithType::Float { f, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::Float { f, type_id }
+            }
+            ValueRecordWithType::Bool { b, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::Bool { b, type_id }
+            }
+            ValueRecordWithType::String { text, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::String { text, type_id }
+            }
+            _ => todo!()
+        }
+    }
+
+    pub fn to_value_record_with_type(&mut self, v: &ValueRecord) -> ValueRecordWithType {
+        match v {
+            ValueRecord::Int { i, type_id } => {
+                ValueRecordWithType::Int { i: *i, typ: self.db.types[*type_id].clone() }
+            },
+            ValueRecord::Float { f, type_id } => {
+                ValueRecordWithType::Float { f: *f, typ: self.db.types[*type_id].clone() }
+            }
+            ValueRecord::Bool { b, type_id } => {
+                ValueRecordWithType::Bool { b: *b, typ: self.db.types[*type_id].clone() }
+            }
+            ValueRecord::String { text, type_id } => {
+                ValueRecordWithType::String { text: text.to_string(), typ: self.db.types[*type_id].clone() }
+            }
+            _ => todo!()
+        }
+    }
+
     pub fn step_id_jump(&mut self, step_id: StepId) {
         if step_id.0 != NO_INDEX {
             self.step_id = step_id;
@@ -973,30 +1019,33 @@ impl Replay for DbReplay {
         }
     }
 
-    fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>> {
-        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
+    fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
+        let variables_for_step = self.db.variables[self.step_id].clone();
+        let full_value_locals: Vec<VariableWithRecord> = variables_for_step
             .iter()
-            .map(|v| Variable {
+            .map(|v| VariableWithRecord {
                 expression: self.db.variable_name(v.variable_id).to_string(),
-                value: self.db.to_ct_value(&v.value),
+                value: self.to_value_record_with_type(&v.value),
+                // &self.db.to_ct_value(&v.value),
             })
             .collect();
 
         // TODO: fix random order here as well: ensure order(or in final locals?)
-        let value_tracking_locals: Vec<Variable> = self.db.variable_cells[self.step_id]
+        let variable_cells_for_step = self.db.variable_cells[self.step_id].clone();
+        let value_tracking_locals: Vec<VariableWithRecord> = variable_cells_for_step
             .iter()
             .map(|(variable_id, place)| {
                 let name = self.db.variable_name(*variable_id);
                 info!("log local {variable_id:?} {name} place: {place:?}");
                 let value = self.db.load_value_for_place(*place, self.step_id);
-                Variable {
+                VariableWithRecord {
                     expression: self.db.variable_name(*variable_id).to_string(),
-                    value: self.db.to_ct_value(&value),
+                    value: self.to_value_record_with_type(&value),
                 }
             })
             .collect();
         // based on https://stackoverflow.com/a/56490417/438099
-        let mut locals: Vec<Variable> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
+        let mut locals: Vec<VariableWithRecord> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
 
         locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
         // for now just removing duplicated variables/expressions: even if storing different values
@@ -1005,21 +1054,21 @@ impl Replay for DbReplay {
         Ok(locals)
     }
 
-    fn load_value(&mut self, expression: &str) -> Result<ValueRecord, Box<dyn Error>> {
+    fn load_value(&mut self, expression: &str) -> Result<ValueRecordWithType, Box<dyn Error>> {
         // TODO: a more optimal way: cache a hashmap? or change structure?
         // or again start directly loading available values matching all expressions in the same time?:
         //   taking a set of expressions: probably best(maybe add an additional load_values)
         for variable in &self.db.variables[self.step_id] {
             if self.db.variable_names[variable.variable_id] == expression {
-                return Ok(variable.value.clone())
+                return Ok(self.to_value_record_with_type(&variable.value.clone()))
             }
         }
         return Err(format!("variable {expression} not found on this step").into())
     }
 
-    fn load_return_value(&mut self) -> Result<ValueRecord, Box<dyn Error>> {
+    fn load_return_value(&mut self) -> Result<ValueRecordWithType, Box<dyn Error>> {
         // assumes self.load_location() has been ran, and that we have the current call key
-        Ok(self.db.calls[self.call_key].return_value.clone())
+        Ok(self.to_value_record_with_type(&self.db.calls[self.call_key].return_value.clone()))
     }
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent> {

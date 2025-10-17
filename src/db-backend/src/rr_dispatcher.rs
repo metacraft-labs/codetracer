@@ -8,14 +8,15 @@ use std::thread;
 use std::time::Duration;
 
 use log::{info, warn, error};
-use runtime_tracing::{StepId, ValueRecord};
+use runtime_tracing::StepId;
 
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::{Events, Replay};
-use crate::task::{Action, Breakpoint, Location, CtLoadLocalsArguments, Variable};
+use crate::task::{Action, Breakpoint, Location, CtLoadLocalsArguments, VariableWithRecord};
+use crate::value::ValueRecordWithType;
 
 #[derive(Debug)]
 pub struct RRDispatcher {
@@ -123,7 +124,7 @@ impl CtRRWorker {
 
         res = String::from(res.trim()); // trim newlines/whitespace!
 
-        info!("res {res}");
+        info!("res: `{res}`");
 
         if !res.starts_with("error:") {
             Ok(res)
@@ -192,21 +193,21 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
-    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>> {
+    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<Vec<Variable>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
+        let res = serde_json::from_str::<Vec<VariableWithRecord>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
         Ok(res)
     }
 
-    fn load_value(&mut self, expression: &str) -> Result<ValueRecord, Box<dyn Error>> {
+    fn load_value(&mut self, expression: &str) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<ValueRecord>(&self.stable.run_query(CtRRQuery::LoadValue { expression: expression.to_string() })?)?;
+        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadValue { expression: expression.to_string() })?)?;
         Ok(res)
     }
 
-    fn load_return_value(&mut self) -> Result<ValueRecord, Box<dyn Error>> {
+    fn load_return_value(&mut self) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<ValueRecord>(&self.stable.run_query(CtRRQuery::LoadReturnValue)?)?;
+        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadReturnValue)?)?;
         Ok(res)
     }
 
