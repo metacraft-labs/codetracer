@@ -20,7 +20,7 @@ internal static class CodetracerLauncher
         Path.Combine(
             Environment.GetEnvironmentVariable("NIX_CODETRACER_EXE_DIR") ??
             Path.Combine(RepoRoot, "src", "build-debug"),
-            "bin", "ct");
+            "bin", "ct-legacy");
 
     public static string CtInstallDir { get; } = Path.GetDirectoryName(CtPath)!;
 
@@ -60,4 +60,3 @@ internal static class CodetracerLauncher
         Thread.Sleep(5000);
     }
 }
-

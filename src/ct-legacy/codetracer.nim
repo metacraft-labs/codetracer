@@ -3,7 +3,7 @@
 import
   launch/[ launch ],
   codetracerconf, confutils,
-  version
+  ../common/version
 
 try:
   if not eventuallyWrapElectron():

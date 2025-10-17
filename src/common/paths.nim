@@ -73,7 +73,7 @@ let
   cTraceSourcePath* = linksPath / "src" / "trace.c"
   consoleExe* = linksPath / "bin" / "console"
   # (additional note: it is a workaround for dev/some cases: TODO think more)
-  codetracerExe* = codetracerExeDir / "bin" / "ct"
+  codetracerExe* = codetracerExeDir / "bin" / "ct-legacy"
   bashExe* = linksPath / "bin" / "bash"
   taskProcessExe* = linksPath / "bin" / "task_process"
   python3Path* = linksPath / "bin" / "python3"
@@ -139,7 +139,7 @@ let
   nodeModulesPath* = linksPath / "node_modules"
 
   codetracerTestDir* = codetracerInstallDir / "src" / "tests"
-  codetracerNixResultExe* = codetracerInstallDir / "result" / "bin" / "ct"
+  codetracerNixResultExe* = codetracerInstallDir / "result" / "bin" / "ct-legacy"
   codetracerTestBuildDir* = codetracerExeDir / "tests"
   programDir* = codetracerTestDir / "programs"
   recordDir* = codetracerTestDir / "records"

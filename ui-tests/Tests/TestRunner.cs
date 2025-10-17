@@ -15,7 +15,7 @@ public static class TestRunner
     {
         if (!PlaywrightLauncher.IsCtAvailable)
         {
-            Console.WriteLine($"ct executable not found at {PlaywrightLauncher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
+            Console.WriteLine($"ct-legacy executable not found at {PlaywrightLauncher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
             return;
         }
 

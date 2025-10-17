@@ -102,7 +102,7 @@ proc isCtInstalled*(config: Config): bool =
   else:
     if not config.skipInstall:
       if process.platform == "darwin".toJs:
-        let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct")
+        let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct-legacy")
         return fs.existsSync(ctLaunchersPath)
       else:
         let dataHome = getEnv("XDG_DATA_HOME", getEnv("HOME") / ".local/share")

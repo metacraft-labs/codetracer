@@ -11,7 +11,6 @@
   `get_message()`, so callers need to drain messages until `None` after feeding
   new bytes.
 
-
 - The db-backend DAP server now responds to the `configurationDone` request.
 
 - Electron lifecycle: the backend-manager process is spawned in
@@ -20,3 +19,5 @@
   and hook it to `app.on('before-quit')`, `app.on('window-all-closed')`, and
   Node process signals (`SIGINT`, `SIGTERM`, `SIGHUP`) to ensure the process
   is always terminated when the app exits.
+- The CodeTracer frontend and tooling now invoke the legacy CLI via the
+  `ct-legacy` binary; avoid calling the `ct` binary because it is a different tool.

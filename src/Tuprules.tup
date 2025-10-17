@@ -155,6 +155,10 @@ export RUSTUP_HOME
   CARGO_TARGET_DIR=/tmp/codetracer/backend_manager_target \
     cargo build --release && \
     cp /tmp/codetracer/backend_manager_target/release/backend-manager %o |> %o
+!rust_cargo_ct = |> \
+  CARGO_TARGET_DIR=/tmp/codetracer/ct_target \
+    cargo build --release && \
+    cp /tmp/codetracer/ct_target/release/ct %o |> %o
 !debug_rust_cargo_db_backend = |> \
   CARGO_TARGET_DIR=/tmp/codetracer/db_backend_target \
     cargo build && \

@@ -27,6 +27,6 @@ cp "$DIST_DIR"/../Resources/CodeTracer.icns "$(realpath MacOS/node_modules)"/ele
 # macOS uses core utils from FreeBSD so the additional "" is needed to execute this sed call.
 #
 # This sed call is needed because even though we replaced the entire plist file, the CodeTracer icon will not be displayed correctly
-# in the auto-generated about menu, if the correct executable isn't listed here. If it was left as "bin/ct" a big disabled icon would
+# in the auto-generated about menu, if the correct executable isn't listed here. If it was left as "bin/ct-legacy" a big disabled icon would
 # be overlayed on top of the app icon
-sed -i "" "s/\<string\>bin\/ct/\<string\>Electron/g" "$(realpath MacOS/node_modules)"/electron/dist/Electron.app/Contents/Info.plist
+sed -i "" "s/\<string\>bin\/ct-legacy/\<string\>Electron/g" "$(realpath MacOS/node_modules)"/electron/dist/Electron.app/Contents/Info.plist

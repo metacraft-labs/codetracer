@@ -35,7 +35,7 @@ export const codetracerPath =
   // eslint-disable-next-line @typescript-eslint/no-magic-numbers
   envCodetracerPath.length > 0
     ? envCodetracerPath
-    : path.join(linksPath, "bin", "ct");
+    : path.join(linksPath, "bin", "ct-legacy");
 
 const OK_EXIT_CODE = 0;
 const ERROR_EXIT_CODE = 1;
@@ -113,7 +113,7 @@ export function wait(ms: number): Promise<void> {
 function setupLdLibraryPath(): void {
   // originally in src/tester/tester.nim
   // required so <path to>/codetracer can be called internally
-  // (it is called from ct itself)
+  // (it is called from ct-legacy itself)
   // we need the correct ld library paths
   // for more info, please read the comment for `setupLdLibraryPath`
   // in src/tester/tester.nim;
@@ -293,7 +293,7 @@ function recordTestProgram(recordArg: string): number {
   const lines = ctProcess.stdout.trim().split("\n");
   const lastLine = lines[lines.length - 1]; // eslint-disable-line @typescript-eslint/no-magic-numbers
   if (!lastLine.startsWith("traceId:")) {
-    console.log("ERROR: unexpected last line of ct record:");
+    console.log("ERROR: unexpected last line of ct-legacy record:");
     console.log(lastLine);
     process.exit(ERROR_EXIT_CODE);
   }
@@ -334,7 +334,7 @@ async function recordAndReplayTestProgram(
   const outputBinary = `${name}_${langExtension}`;
   const outputBinaryPath = path.join(testBinariesPath, outputBinary);
 
-  // uses ct record <path>;
+  // uses ct-legacy record <path>;
   //   stores it in the shared central local db as all the normal records
   //   maybe by an user, not in a separate test one!
   const traceId = buildAndRecordTestProgram(sourcePath, outputBinaryPath);

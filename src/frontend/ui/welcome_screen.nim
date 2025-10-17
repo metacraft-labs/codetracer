@@ -2,7 +2,7 @@ import
   std/[ options, jsffi, enumerate ],
   ui_imports,
   ../[ types ],
-  ../../ct/version
+  ../../common/version
 import std/times except now
 
 const
@@ -682,7 +682,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     WelcomeScreenOption(
       name: "Open online trace",
       inactive: false,
-      command: proc = 
+      command: proc =
         self.openOnlineTrace = true
         self.welcomeScreen = false
         self.newDownload = NewDownloadRecord(

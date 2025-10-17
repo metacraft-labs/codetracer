@@ -104,14 +104,14 @@ bash "${ROOT_PATH}"/appimage-scripts/build_css.sh
 # Build/setup nim-based files
 bash "${ROOT_PATH}"/appimage-scripts/build_with_nim.sh
 
-cat << 'EOF' > "${APP_DIR}/bin/ct"
+cat << 'EOF' > "${APP_DIR}/bin/ct-legacy"
 #!/usr/bin/env bash
 
 HERE=${HERE:-$(dirname "$(readlink -f "${0}")")}
 
 # TODO: This includes references to x86_64. What about aarch64?
 
-exec "${HERE}"/bin/ct_unwrapped "$@"
+exec "${HERE}"/bin/ct-legacy_unwrapped "$@"
 
 EOF
 
@@ -204,7 +204,7 @@ export LINKS_PATH_DIR=$HERE
 export PATH="${HERE}/bin:${PATH}"
 export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
 
-exec ${HERE}/bin/ct "$@"
+exec ${HERE}/bin/ct-legacy "$@"
 EOF
 
 chmod +x "${APP_DIR}/AppRun"
@@ -252,7 +252,7 @@ else
 fi
 
 # Patchelf the executable's interpreter
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct_unwrapped
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct-legacy_unwrapped
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-record
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/backend-manager
@@ -265,7 +265,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/node
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
 
 # Clear up the executable's rpath
-patchelf --remove-rpath "${APP_DIR}"/bin/ct_unwrapped
+patchelf --remove-rpath "${APP_DIR}"/bin/ct-legacy_unwrapped
 patchelf --remove-rpath "${APP_DIR}"/bin/db-backend
 patchelf --remove-rpath "${APP_DIR}"/bin/db-backend-record
 patchelf --remove-rpath "${APP_DIR}"/bin/backend-manager
@@ -277,7 +277,7 @@ patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
 
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct_unwrapped
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct-legacy_unwrapped
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/db-backend
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/db-backend-record
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/backend-manager

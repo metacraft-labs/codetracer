@@ -35,15 +35,15 @@ nim -d:release \
     -d:ctEntrypoint \
     --nimcache:nimcache \
     -d:ctmacos \
-    --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
+    --out:"$DIST_DIR/bin/ct-legacy" c ./src/ct-legacy/codetracer.nim
 
 install_name_tool \
   -add_rpath "@executable_path/../../Frameworks" \
-  "${DIST_DIR}/bin/ct"
+  "${DIST_DIR}/bin/ct-legacy"
 
-install_name_tool -add_rpath "@loader_path" "${DIST_DIR}/bin/ct"
+install_name_tool -add_rpath "@loader_path" "${DIST_DIR}/bin/ct-legacy"
 
-codesign -s - --force --deep "${DIST_DIR}/bin/ct"
+codesign -s - --force --deep "${DIST_DIR}/bin/ct-legacy"
 
 nim -d:release \
     -d:asyncBackend=asyncdispatch \
@@ -60,7 +60,7 @@ nim -d:release \
     -d:ctEntrypoint \
     --nimcache:nimcache \
     -d:ctmacos \
-    --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct/db_backend_record.nim
+    --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct-legacy/db_backend_record.nim
 
 install_name_tool \
   -add_rpath "@executable_path/../../Frameworks" \

@@ -46,7 +46,7 @@ nim -d:release \
     -d:libcPath=libc \
     -d:pathToNodeModules=../node_modules \
     --nimcache:nimcache \
-    --out:"${APP_DIR}/bin/ct_unwrapped" c ./src/ct/codetracer.nim
+    --out:"${APP_DIR}/bin/ct-legacy_unwrapped" c ./src/ct-legacy/codetracer.nim
 
 
 nim \
@@ -70,7 +70,7 @@ nim \
     --passL:"${APP_DIR}/lib/libpcre.so.1" \
     --passL:"${APP_DIR}/lib/libzip.so.5" \
     --nimcache:nimcache \
-    --out:"${APP_DIR}/bin/db-backend-record" c ./src/ct/db_backend_record.nim
+    --out:"${APP_DIR}/bin/db-backend-record" c ./src/ct-legacy/db_backend_record.nim
 
     # --passL:"-lsqlite3" \
     #--passL:"${APPDIR}/lib/libcrypto.so.3" \
@@ -81,7 +81,7 @@ nim \
 
     # TODO conditional for nixos?--passL:$LIBSQLITE3_PATH
     #
-# patchelf --set-rpath ${APP_DIR}/lib ${APP_DIR}/bin/ct
+# patchelf --set-rpath ${APP_DIR}/lib ${APP_DIR}/bin/ct-legacy
 
 
 # index.js
