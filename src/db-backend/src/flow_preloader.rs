@@ -6,10 +6,10 @@ use crate::{
         FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount, TraceKind,
     },
     replay::Replay,
-    value::Value,
+    value::{to_ct_value, Value, ValueRecordWithType},
 };
 use log::{info, warn, error};
-use runtime_tracing::{CallKey, Line, StepId, ValueRecord, TypeId};
+use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::error::Error;
@@ -179,12 +179,11 @@ impl<'a> CallFlowPreloader<'a> {
         // are never None, so it is safe to unwrap them.
         if !flow_view_update.steps.is_empty() {
 
-            let db = Db::new(&PathBuf::from("")); // we don't need its state for to_ct_value
-            let return_value_record = replay.load_return_value().unwrap_or(ValueRecord::Error { 
+            let return_value_record = replay.load_return_value().unwrap_or(ValueRecordWithType::Error { 
                 msg: "<return value error>".to_string(),
-                type_id: TypeId(0),
+                typ: TypeRecord { kind: TypeKind::Error, lang_type: "<error>".to_string(), specific_info: TypeSpecificInfo::None },
             });
-            let return_value = db.to_ct_value(&return_value_record);
+            let return_value = to_ct_value(&return_value_record);
 
             #[allow(clippy::unwrap_used)]
             flow_view_update.steps.last_mut().unwrap().before_values.insert(
@@ -513,8 +512,7 @@ impl<'a> CallFlowPreloader<'a> {
             for value_name in &var_list {
                 if let Ok(value) = replay.load_value(value_name) {
                 // if variable_map.contains_key(value_name) {
-                    let db = Db::new(&PathBuf::from("")); // no state needed for to_ct_value 
-                    let ct_value = db.to_ct_value(&value);
+                    let ct_value = to_ct_value(&value);
                     flow_view_update
                         .steps
                         .last_mut()
