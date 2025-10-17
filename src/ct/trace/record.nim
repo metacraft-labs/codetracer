@@ -46,8 +46,9 @@ proc resolveInterpreterCandidate(candidate: string): string =
 
   ""
 
-proc resolvePythonInterpreter(): string =
+proc resolvePythonInterpreter(): tuple[path: string, error: string] =
   ## Resolve the Python interpreter by inspecting common environment variables and PATH.
+  ## Authoritative overrides (env vars) must point to a valid interpreter; otherwise we surface the failure.
   let envCandidates = @[
     "CODETRACER_PYTHON_INTERPRETER",
     "PYTHON_EXECUTABLE",
@@ -60,14 +61,18 @@ proc resolvePythonInterpreter(): string =
     if value.len > 0:
       let resolved = resolveInterpreterCandidate(value)
       if resolved.len > 0:
-        return resolved
+        return (resolved, "")
+      else:
+        let trimmedValue = value.strip()
+        let presentedValue = if trimmedValue.len > 0: trimmedValue else: value
+        return ("", fmt"{envName} is set to '{presentedValue}' but it does not resolve to a Python interpreter. Update the variable or unset it to fall back to PATH detection.")
 
   for binary in ["python3", "python", "py"]:
     let resolved = resolveInterpreterCandidate(binary)
     if resolved.len > 0:
-      return resolved
+      return (resolved, "")
 
-  ""
+  ("", "")
 
 type PythonRecorderCheckStatus = enum
   recorderPresent,
@@ -227,7 +232,10 @@ proc record*(lang: string,
     pargs.add(socketPath)
 
   if detectedLang == LangPythonDb:
-    let pythonInterpreter = resolvePythonInterpreter()
+    let (pythonInterpreter, resolverError) = resolvePythonInterpreter()
+    if resolverError.len > 0:
+      echo "error: " & resolverError
+      quit(1)
     if pythonInterpreter.len == 0:
       echo "error: Python interpreter not found. Set CODETRACER_PYTHON_INTERPRETER or ensure `python` is on PATH."
       quit(1)
