@@ -31,6 +31,7 @@ use crate::task::{
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
+use crate::value::to_ct_value;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -328,7 +329,11 @@ impl Handler {
         // if self.trace_kind == TraceKind::RR {
             // let locals: Vec<Variable> = vec![];
             // warn!("load_locals not implemented for rr yet");
-            let locals = self.replay.load_locals(args)?;
+            let locals_with_records = self.replay.load_locals(args)?;
+            let locals = locals_with_records.iter().map(|l| Variable {
+                expression: l.expression.clone(),
+                value: to_ct_value(&l.value)
+            }).collect();
             self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
             Ok(())
         // }
