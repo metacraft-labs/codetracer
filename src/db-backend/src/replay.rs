@@ -1,9 +1,10 @@
-use runtime_tracing::{StepId, ValueRecord};
+use runtime_tracing::StepId;
 use std::error::Error;
 
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
-use crate::task::{Action, Breakpoint, Location, ProgramEvent, CtLoadLocalsArguments, Variable};
+use crate::task::{Action, Breakpoint, Location, ProgramEvent, CtLoadLocalsArguments, VariableWithRecord};
+use crate::value::ValueRecordWithType;
 
 #[derive(Debug, Clone)]
 pub struct Events {
@@ -17,10 +18,10 @@ pub trait Replay: std::fmt::Debug {
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>>;
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
-    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<Variable>, Box<dyn Error>>;
-    fn load_value(&mut self, expression: &str) -> Result<ValueRecord, Box<dyn Error>>;
+    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>>;
+    fn load_value(&mut self, expression: &str) -> Result<ValueRecordWithType, Box<dyn Error>>;
     // assuming currently in the right call for both trace kinds; and if rr: possibly near the return value
-    fn load_return_value(&mut self) -> Result<ValueRecord, Box<dyn Error>>;
+    fn load_return_value(&mut self) -> Result<ValueRecordWithType, Box<dyn Error>>;
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>>;
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>>;
