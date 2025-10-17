@@ -136,14 +136,14 @@ if [[ ${INTERP_STATUS} -eq 0 ]]; then
   exit 1
 fi
 
-if ! grep -q "Python module \`codetracer_python_recorder\` is not installed for interpreter" <<<"${MISSING_INTERP_OUTPUT}"; then
-  echo "error: missing interpreter output did not mention missing interpreter"
+if ! grep -q "CODETRACER_PYTHON_INTERPRETER is set" <<<"${MISSING_INTERP_OUTPUT}"; then
+  echo "error: missing interpreter output did not explain which override failed"
   echo "${MISSING_INTERP_OUTPUT}"
   exit 1
 fi
 
-if ! grep -q "CODETRACER_PYTHON_INTERPRETER" <<<"${MISSING_INTERP_OUTPUT}"; then
-  echo "error: missing interpreter output did not reference CODETRACER_PYTHON_INTERPRETER hint"
+if ! grep -q "does not resolve to a Python interpreter" <<<"${MISSING_INTERP_OUTPUT}"; then
+  echo "error: missing interpreter output did not describe the resolution failure"
   echo "${MISSING_INTERP_OUTPUT}"
   exit 1
 fi
