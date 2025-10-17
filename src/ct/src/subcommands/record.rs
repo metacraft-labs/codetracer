@@ -1,10 +1,21 @@
 use std::{path::PathBuf, str::FromStr};
 
-use crate::{Lang, RecordOptions};
+use crate::{db, subcommands::run_external, Lang, RecordOptions};
 
 pub fn run_record(options: RecordOptions) {
+    println!("{:#?}", options);
+
     let lang = options.lang.or_else(|| detect_language(&options.program));
-    println!("{:#?}", lang);
+    if lang.is_none() {
+        panic!("Can't determine language"); // TODO: better error and what to do?
+    }
+
+    let lang = lang.unwrap();
+    let recorder_program = format!("codetracer-{}-recorder", lang.to_string());
+
+    run_external(&vec![recorder_program, options.program]);
+
+    let db = db::CONNECTION_MUTEX.lock();
 }
 
 fn detect_language(program: &str) -> Option<Lang> {

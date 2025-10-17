@@ -1,6 +1,11 @@
+mod db;
+mod lang;
+mod paths;
 mod subcommands;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
+
+use crate::lang::Lang;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -13,15 +18,6 @@ pub struct Args {
     /// Selects which operation to perform.
     #[command(subcommand)]
     pub command: Command,
-}
-
-#[derive(ValueEnum, Clone, Debug)]
-pub enum Lang {
-    Python,
-    Ruby,
-    Noir,
-    Wasm,
-    Small
 }
 
 #[derive(Debug, clap::Args)]
@@ -56,6 +52,7 @@ pub enum Command {
 
 fn main() {
     let args = Args::parse();
+
     match args.command {
         Command::List => subcommands::run_list::<Args>(),
         Command::External(args) => subcommands::run_external(&args),
