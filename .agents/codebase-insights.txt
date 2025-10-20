@@ -27,3 +27,6 @@
 - Sudoku test-program datasets include intentionally invalid boards (e.g., examples #3 and #6) with duplicate digits inside a sub-grid; solvers should detect and report these gracefully.
 - `ct remote` shells out to `ct-remote`, first checking alongside the `ct` binary and then falling back to the user's PATH if needed; errors are surfaced with actionable messaging when the binary is missing.
 - Nix packaging now fetches the prebuilt DesktopClient.App binary, patches its glibc interpreter/RPATH via `patchelf`, and installs it alongside the main `ct`; the devshell, AppImage build (with safe cleanup for `squashfs-root`), non-nix build, and Python wheel build all reuse the same binary so `ct-remote` ships with every distribution path.
+- UI tests rely on `CODETRACER_WRAP_ELECTRON=1`, so `wrapElectron()` must populate `LINKS_PATH_DIR` and `NIX_CODETRACER_EXE_DIR` before `execv`; otherwise the Electron renderer cannot locate `backend-manager`.
+- The `ct host` CLI expects options in the `--flag=value` form; passing space-delimited values (e.g. `--frontend-socket 1234`) leaves the value empty and the command falls back to default ports, so parallel hosts collide.
+- `ct host` exposes a single socket.io listener; keep `--frontend-socket` equal to `--backend-socket-port` when launching multiple hosts so the browser connects to the active socket server.
