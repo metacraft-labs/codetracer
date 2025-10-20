@@ -379,6 +379,7 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
         error!("Read Line: {:?}", e);
         serde_json::Error::custom(e.to_string())
     })?;
+    info!("line read");
     if !header.to_ascii_lowercase().starts_with("content-length:") {
         // println!("no content-length!");
         return Err(serde_json::Error::custom("Missing Content-Length header").into());
