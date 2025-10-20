@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
+use std::ffi::OsStr;
 
 use log::{info, warn, error};
 use runtime_tracing::StepId;
@@ -58,23 +59,41 @@ impl CtRRWorker {
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
+        let is_appimage = self.ct_rr_worker_exe.extension() == Some(OsStr::new("AppImage"));
         info!(
-            "start: {} --name {} --index {} replay {}",
+            "start: {}{} replay --name {} --index {} {}",
+            if !is_appimage { "" } else { "appimage-run " },
             self.ct_rr_worker_exe.display(),
             self.name,
             self.index,
             self.rr_trace_folder.display()
         );
-        let ct_worker = Command::new(&self.ct_rr_worker_exe)
-            .arg("replay")
-            .arg("--name")
-            .arg(&self.name)
-            .arg("--index")
-            .arg(self.index.to_string())
-            .arg(&self.rr_trace_folder)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()?;
+
+        let ct_worker = if !is_appimage {
+            Command::new(&self.ct_rr_worker_exe)
+                .arg("replay")
+                .arg("--name")
+                .arg(&self.name)
+                .arg("--index")
+                .arg(self.index.to_string())
+                .arg(&self.rr_trace_folder)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()?
+                
+        } else {
+            Command::new("appimage-run")
+                .arg(&self.ct_rr_worker_exe)
+                .arg("replay")
+                .arg("--name")
+                .arg(&self.name)
+                .arg("--index")
+                .arg(self.index.to_string())
+                .arg(&self.rr_trace_folder)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()?
+        };
 
         self.process = Some(ct_worker);
         self.setup_worker_sockets()?;
