@@ -69,11 +69,19 @@ else:
 #   echo "linksPathConst ", linksPathConst
 #   echo "codetracerExeDir ", codetracerExeDir
 
+when not defined(pythonPackage):
+  let
+    codetracerExe* = codetracerExeDir / "bin" / "ct"
+    dbBackendRecordExe* = codetracerExeDir / "bin" / "db-backend-record"
+else:
+  let
+    codetracerExe* = "ct"
+    dbBackendRecordExe* = "db-backend-record"
+
 let
   cTraceSourcePath* = linksPath / "src" / "trace.c"
   consoleExe* = linksPath / "bin" / "console"
   # (additional note: it is a workaround for dev/some cases: TODO think more)
-  codetracerExe* = codetracerExeDir / "bin" / "ct"
   bashExe* = linksPath / "bin" / "bash"
   taskProcessExe* = linksPath / "bin" / "task_process"
   python3Path* = linksPath / "bin" / "python3"
@@ -87,7 +95,6 @@ let
   wazeroExe* = env.get("CODETRACER_WASM_VM_PATH", linksPath / "bin" / "wazero")
   dbBackendExe* = linksPath / "bin" / "db-backend"
   backendManagerExe* = linksPath / "bin" / "backend-manager"
-  dbBackendRecordExe* = codetracerExeDir / "bin" / "db-backend-record"
   virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
   ctagsExe* = linksPath / "bin" / "ctags"
 
