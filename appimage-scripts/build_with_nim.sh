@@ -19,98 +19,69 @@ echo "${APP_DIR}"
     # --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
 
 # codetracer
-nim -d:release \
-    --d:asyncBackend=asyncdispatch \
-    --dynlibOverride:std -d:staticStd \
-    --gc:refc --hints:on --warnings:off \
-    --dynlibOverride:"sqlite3" \
-    --dynlibOverride:"pcre" \
-    --dynlibOverride:"libzip" \
-    --dynlibOverride:"libcrypto" \
-    --dynlibOverride:"libssl" \
-    --passL:"-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
-    --passL:"${APP_DIR}/lib/libpcre.so.1" \
-    --passL:"${APP_DIR}/lib/libzip.so.5" \
-    --passL:"${APP_DIR}/lib/libcrypto.so" \
-    --passL:"${APP_DIR}/lib/libcrypto.so.3" \
-    --passL:"${APP_DIR}/lib/libssl.so" \
-    --boundChecks:on \
-    -d:useOpenssl3 \
-    -d:ssl \
-    -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-    -d:chronicles_timestamps=UnixTime \
-    -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-    -d:builtWithNix \
-    -d:ctEntrypoint \
-    -d:linksPathConst=.. \
-    -d:libcPath=libc \
-    -d:pathToNodeModules=../node_modules \
-    --nimcache:nimcache \
-    --out:"${APP_DIR}/bin/ct_unwrapped" c ./src/ct/codetracer.nim
+tools/build/build_codetracer.sh \
+    --target ct \
+    --profile release \
+    --output "${APP_DIR}/bin/ct_unwrapped" \
+    --extra-define builtWithNix \
+    --extra-define linksPathConst=.. \
+    --extra-define libcPath=libc \
+    --extra-define pathToNodeModules=../node_modules \
+    --extra-flag "--dynlibOverride:std" \
+    --extra-flag "-d:staticStd" \
+    --extra-flag "--dynlibOverride:sqlite3" \
+    --extra-flag "--dynlibOverride:pcre" \
+    --extra-flag "--dynlibOverride:libzip" \
+    --extra-flag "--dynlibOverride:libcrypto" \
+    --extra-flag "--dynlibOverride:libssl" \
+    --extra-flag "--passL:-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
+    --extra-flag "--passL:${APP_DIR}/lib/libpcre.so.1" \
+    --extra-flag "--passL:${APP_DIR}/lib/libzip.so.5" \
+    --extra-flag "--passL:${APP_DIR}/lib/libcrypto.so" \
+    --extra-flag "--passL:${APP_DIR}/lib/libcrypto.so.3" \
+    --extra-flag "--passL:${APP_DIR}/lib/libssl.so"
 
+tools/build/build_codetracer.sh \
+    --target db-backend-record \
+    --profile release \
+    --output "${APP_DIR}/bin/db-backend-record" \
+    --extra-define builtWithNix \
+    --extra-define linksPathConst=.. \
+    --extra-define libcPath=libc \
+    --extra-flag "--dynlibOverride:libsqlite3" \
+    --extra-flag "--dynlibOverride:sqlite3" \
+    --extra-flag "--dynlibOverride:pcre" \
+    --extra-flag "--dynlibOverride:libzip" \
+    --extra-flag "--passL:-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
+    --extra-flag "--passL:${APP_DIR}/lib/libpcre.so.1" \
+    --extra-flag "--passL:${APP_DIR}/lib/libzip.so.5"
 
-nim \
-    -d:release -d:asyncBackend=asyncdispatch \
-    --gc:refc --hints:off --warnings:off \
-    --debugInfo --lineDir:on \
-    --boundChecks:on --stacktrace:on --linetrace:on \
-    -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-    -d:chronicles_timestamps=UnixTime \
-    -d:ssl \
-    -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-    -d:linksPathConst=.. \
-    -d:libcPath=libc \
-    -d:builtWithNix \
-    -d:ctEntrypoint \
-    --dynlibOverride:"libsqlite3" \
-    --dynlibOverride:"sqlite3" \
-    --dynlibOverride:"pcre" \
-    --dynlibOverride:"libzip" \
-    --passL:"-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
-    --passL:"${APP_DIR}/lib/libpcre.so.1" \
-    --passL:"${APP_DIR}/lib/libzip.so.5" \
-    --nimcache:nimcache \
-    --out:"${APP_DIR}/bin/db-backend-record" c ./src/ct/db_backend_record.nim
-
-    # --passL:"-lsqlite3" \
-    #--passL:"${APPDIR}/lib/libcrypto.so.3" \
-    #--passL:"${APPDIR}/lib/libssl.so.3" \
-    # --passL:"${APP_DIR}/lib/libz.so.1" \
-
-# this works    --passL:/nix/store/f6afb4jw9g5f94ixw0jn6cl0ah4liy35-sqlite-3.45.3/lib/libsqlite3.so.0 \
-
-    # TODO conditional for nixos?--passL:$LIBSQLITE3_PATH
-    #
-# patchelf --set-rpath ${APP_DIR}/lib ${APP_DIR}/bin/ct
-
-
-# index.js
-nim \
-    --hints:on --warnings:off --sourcemap:on \
-    -d:ctIndex -d:chronicles_sinks=json \
-    -d:nodejs --out:"${APP_DIR}/index.js" js src/frontend/index.nim
+# index.js bundles
+tools/build/build_codetracer.sh \
+    --target js:index \
+    --profile release \
+    --output "${APP_DIR}/index.js" \
+    --extra-define pathToNodeModules=../node_modules
 cp "${APP_DIR}/index.js" "${APP_DIR}/src/index.js"
 
-nim \
-    --hints:on --warnings:off --sourcemap:on \
-    -d:ctIndex -d:server -d:chronicles_sinks=json \
-    -d:nodejs --out:"${APP_DIR}/server_index.js" js src/frontend/index.nim
+tools/build/build_codetracer.sh \
+    --target js:server-index \
+    --profile release \
+    --output "${APP_DIR}/server_index.js" \
+    --extra-define pathToNodeModules=../node_modules
 cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
 
-# ui.js
-nim \
-    --hints:off --warnings:off \
-    -d:chronicles_enabled=off  \
-    -d:ctRenderer \
-    --out:"${APP_DIR}/ui.js" js src/frontend/ui_js.nim
+# renderer bundles
+tools/build/build_codetracer.sh \
+    --target js:ui \
+    --profile release \
+    --output "${APP_DIR}/ui.js"
 cp "${APP_DIR}/ui.js" "${APP_DIR}/src/ui.js"
 
-# subwindow.js
-nim \
-    --hints:off --warnings:off \
-    -d:chronicles_enabled=off  \
-    -d:ctRenderer \
-    --out:"${APP_DIR}/subwindow.js" js src/frontend/subwindow.nim
+tools/build/build_codetracer.sh \
+    --target js:subwindow \
+    --profile release \
+    --output "${APP_DIR}/subwindow.js"
 cp "${APP_DIR}/subwindow.js" "${APP_DIR}/src/subwindow.js"
 
 popd

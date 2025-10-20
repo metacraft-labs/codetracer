@@ -567,47 +567,30 @@
           ];
 
           buildPhase = ''
-            ls -al ${pkgs.sqlite.out}/lib/
-            ls -al ${staticDeps.outPath}/bin
-            echo ${runtimeDeps.outPath}/bin
-            ls -al ${runtimeDeps.outPath}/bin
+            export PATH=${upstream-nim-codetracer.out}/bin:$PATH
 
-            ${upstream-nim-codetracer.out}/bin/nim \
-              -d:debug -d:asyncBackend=asyncdispatch \
-              --gc:refc --hints:off --warnings:off \
-              --debugInfo --lineDir:on \
-              --boundChecks:on --stacktrace:on --linetrace:on \
-              -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-              -d:chronicles_timestamps=UnixTime \
-              -d:ssl \
-              -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
-              -d:linksPathConst=${runtimeDeps.outPath}/ \
-              -d:libcPath=${pkgs.glibc.out} \
-              -d:builtWithNix \
-              -d:ctEntrypoint \
-              -d:pathToNodeModules=${node-modules-derivation.outPath}/bin/node_modules \
-              --passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0 \
-              --nimcache:nimcache \
-              --out:ct c ./src/ct/codetracer.nim
+            patchShebangs tools/build
 
-            ${upstream-nim-codetracer.out}/bin/nim \
-              -d:debug -d:asyncBackend=asyncdispatch \
-              --gc:refc --hints:off --warnings:off \
-              --debugInfo --lineDir:on \
-              --boundChecks:on --stacktrace:on --linetrace:on \
-              -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-              -d:chronicles_timestamps=UnixTime \
-              -d:ssl \
-              -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
-              -d:linksPathConst=${runtimeDeps.outPath}/ \
-              -d:libcPath=${pkgs.glibc.out} \
-              -d:builtWithNix \
-              -d:ctEntrypoint \
-              --passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0 \
-              --passL:${pkgs.openssl.out}/lib/libssl.so \
-              --passL:${pkgs.openssl.out}/lib/libcrypto.so \
-              --nimcache:nimcache \
-              --out:db-backend-record c ./src/ct/db_backend_record.nim
+            tools/build/build_codetracer.sh \
+              --target ct \
+              --profile debug \
+              --output ct \
+              --extra-define builtWithNix \
+              --extra-define linksPathConst=${runtimeDeps.outPath}/ \
+              --extra-define libcPath=${pkgs.glibc.out} \
+              --extra-define pathToNodeModules=${node-modules-derivation.outPath}/bin/node_modules \
+              --extra-flag "--passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0"
+
+            tools/build/build_codetracer.sh \
+              --target db-backend-record \
+              --profile debug \
+              --output db-backend-record \
+              --extra-define builtWithNix \
+              --extra-define linksPathConst=${runtimeDeps.outPath}/ \
+              --extra-define libcPath=${pkgs.glibc.out} \
+              --extra-flag "--passL:${pkgs.sqlite.out}/lib/libsqlite3.so.0" \
+              --extra-flag "--passL:${pkgs.openssl.out}/lib/libssl.so" \
+              --extra-flag "--passL:${pkgs.openssl.out}/lib/libcrypto.so"
           '';
 
           installPhase = ''

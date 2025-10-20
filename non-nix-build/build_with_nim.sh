@@ -19,23 +19,16 @@ echo "==========="
 #       compile-time. The paths should not be used for making any
 #       run-time decisions.
 
-# codetracer
-nim -d:release \
-    -d:asyncBackend=asyncdispatch \
-    --passL:"-headerpad_max_install_names" \
-    --gc:refc --hints:on --warnings:off \
-    --debugInfo --lineDir:on \
-    --boundChecks:on --stacktrace:on --linetrace:on \
-    -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-    -d:chronicles_timestamps=UnixTime \
-    -d:ctTest -d:ssl -d:testing "--hint[XDeclaredButNotUsed]:off" \
-    -d:libcPath=libc \
-    -d:useLibzipSrc \
-    -d:builtWithNix \
-    -d:ctEntrypoint \
-    --nimcache:nimcache \
-    -d:ctmacos \
-    --out:"$DIST_DIR/bin/ct" c ./src/ct/codetracer.nim
+tools/build/build_codetracer.sh \
+    --target ct \
+    --profile release \
+    --output "$DIST_DIR/bin/ct" \
+    --extra-flag "--passL:-headerpad_max_install_names" \
+    --extra-define libcPath=libc \
+    --extra-define useLibzipSrc \
+    --extra-define builtWithNix \
+    --extra-define ctmacos \
+    --extra-define ssl
 
 install_name_tool \
   -add_rpath "@executable_path/../../Frameworks" \
@@ -45,22 +38,16 @@ install_name_tool -add_rpath "@loader_path" "${DIST_DIR}/bin/ct"
 
 codesign -s - --force --deep "${DIST_DIR}/bin/ct"
 
-nim -d:release \
-    -d:asyncBackend=asyncdispatch \
-    --passL:"-headerpad_max_install_names" \
-    --gc:refc --hints:on --warnings:off \
-    --debugInfo --lineDir:on \
-    --boundChecks:on --stacktrace:on --linetrace:on \
-    -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
-    -d:chronicles_timestamps=UnixTime \
-    -d:ctTest -d:ssl -d:testing "--hint[XDeclaredButNotUsed]:off" \
-    -d:libcPath=libc \
-    -d:useLibzipSrc \
-    -d:builtWithNix \
-    -d:ctEntrypoint \
-    --nimcache:nimcache \
-    -d:ctmacos \
-    --out:"$DIST_DIR/bin/db-backend-record" c ./src/ct/db_backend_record.nim
+tools/build/build_codetracer.sh \
+    --target db-backend-record \
+    --profile release \
+    --output "$DIST_DIR/bin/db-backend-record" \
+    --extra-flag "--passL:-headerpad_max_install_names" \
+    --extra-define libcPath=libc \
+    --extra-define useLibzipSrc \
+    --extra-define builtWithNix \
+    --extra-define ctmacos \
+    --extra-define ssl
 
 install_name_tool \
   -add_rpath "@executable_path/../../Frameworks" \
@@ -74,29 +61,28 @@ codesign -s - --force --deep "${DIST_DIR}/bin/db-backend-record"
 
 
 # index.js
-nim \
-    --hints:on --warnings:off --sourcemap:on \
-    -d:ctIndex -d:chronicles_sinks=json \
-    -d:ctmacos \
-    -d:nodejs --out:"$DIST_DIR/index.js" js src/frontend/index.nim
+tools/build/build_codetracer.sh \
+    --target js:index \
+    --profile release \
+    --output "$DIST_DIR/index.js" \
+    --extra-define ctmacos \
+    --extra-define pathToNodeModules=../node_modules
 cp "$DIST_DIR/index.js" "$DIST_DIR/src/index.js"
 
 # ui.js
-nim \
-    --hints:off --warnings:off \
-    -d:chronicles_enabled=off  \
-    -d:ctRenderer \
-    -d:ctmacos \
-    --out:"$DIST_DIR/ui.js" js src/frontend/ui_js.nim
+tools/build/build_codetracer.sh \
+    --target js:ui \
+    --profile release \
+    --output "$DIST_DIR/ui.js" \
+    --extra-define ctmacos
 cp "$DIST_DIR/ui.js" "$DIST_DIR/src/ui.js"
 
 # subwindow.js
-nim \
-    --hints:off --warnings:off \
-    -d:chronicles_enabled=off  \
-    -d:ctRenderer \
-    -d:ctmacos \
-    --out:"$DIST_DIR/subwindow.js" js src/frontend/subwindow.nim
+tools/build/build_codetracer.sh \
+    --target js:subwindow \
+    --profile release \
+    --output "$DIST_DIR/subwindow.js" \
+    --extra-define ctmacos
 cp "$DIST_DIR/subwindow.js" "$DIST_DIR/src/subwindow.js"
 
 echo "==========="

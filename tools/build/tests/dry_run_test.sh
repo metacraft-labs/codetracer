@@ -58,4 +58,9 @@ run_and_assert \
   "${PROJECT_ROOT}/src/frontend/middleware.nim" \
   --target js:middleware
 
+run_and_assert \
+  "ui extension dry-run" \
+  "-d:ctInExtension" \
+  --target js:ui-extension
+
 echo "All dry-run checks passed."

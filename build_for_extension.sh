@@ -4,9 +4,8 @@
 set -e
 
 tools/build/build_codetracer.sh \
-  --target js:ui \
-  --output "$1" \
-  --extra-define ctInExtension
+  --target js:ui-extension \
+  --output "$1"
 
 tools/build/build_codetracer.sh \
   --target js:middleware \

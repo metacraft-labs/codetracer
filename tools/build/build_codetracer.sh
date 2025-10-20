@@ -18,6 +18,7 @@ SUPPORTED_TARGETS=(
   "js:subwindow"
   "js:ui"
   "js:middleware"
+  "js:ui-extension"
 )
 
 usage() {
@@ -148,22 +149,24 @@ resolve_target() {
         "-d:ctInExtension"
       )
       ;;
+    js:ui-extension)
+      target_kind="nim-js"
+      target_source="${SRC_DIR}/frontend/ui_js.nim"
+      target_output_name="ui_extension.js"
+      target_specific_flags=(
+        "${CODERACER_NIM_JS_SHARED_FLAGS[@]}"
+        "-d:chronicles_enabled=off"
+        "-d:ctRenderer"
+        "-d:ctInExtension"
+        "--debugInfo:on"
+        "--lineDir:on"
+        "--hotCodeReloading:on"
+      )
+      ;;
     *)
       echo "Error: unsupported target '${target}'" >&2
       echo >&2
       usage >&2
-      exit 1
-      ;;
-  esac
-}
-
-profile_flags() {
-  local profile="$1"
-  case "$profile" in
-    debug) printf '%s\n' "${CODERACER_NIM_PROFILE_DEBUG_FLAGS[@]}";;
-    release) printf '%s\n' "${CODERACER_NIM_PROFILE_RELEASE_FLAGS[@]}";;
-    *)
-      echo "Error: unsupported profile '${profile}'" >&2
       exit 1
       ;;
   esac
@@ -283,9 +286,14 @@ main() {
 
   local -a cmd=("nim")
   cmd+=("${CODERACER_NIM_COMMON_FLAGS[@]}")
-  local -a profile_specific=()
-  mapfile -t profile_specific < <(profile_flags "$profile")
-  cmd+=("${profile_specific[@]}")
+  case "$profile" in
+    debug) cmd+=("${CODERACER_NIM_PROFILE_DEBUG_FLAGS[@]}");;
+    release) cmd+=("${CODERACER_NIM_PROFILE_RELEASE_FLAGS[@]}");;
+    *)
+      echo "Error: unsupported profile '${profile}'" >&2
+      exit 1
+      ;;
+  esac
 
   case "$target_kind" in
     nim-c) cmd+=("${target_specific_flags[@]}") ;;
