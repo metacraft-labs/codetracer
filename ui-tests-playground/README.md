@@ -1,6 +1,6 @@
-# UI Tests Playground
+# UI Tests Startup Example
 
-This directory is a sandbox for prototyping ideas before they graduate into the `ui-tests-v3/` rebuild. Expect the code here to be volatile—use it to spike concepts, evaluate tooling, and document findings before hardening them for the next-generation framework.
+This directory is a **stable reference implementation** for launching multiple CodeTracer instances in parallel (Electron and web/`ct host`). Unlike `ui-tests-playground/`, the code here should remain relatively unchanged so other projects—particularly `ui-tests-v3/`—can copy known-good patterns for startup, orchestration, and troubleshooting.
 
 ## Getting Started
 
@@ -16,10 +16,10 @@ This directory is a sandbox for prototyping ideas before they graduate into the 
    ```
    Use `just build-once` instead of `just build`; the latter keeps `tup monitor` running and never exits.
 
-3. **Run the playground harness**
+3. **Run the startup harness**
    ```
    LD_LIBRARY_PATH=$(jq -r '.LD_LIBRARY_PATH' ct_paths.json) \
-   dotnet run --project ui-tests-playground/Playground.csproj
+   dotnet run --project ui-tests-startup-example/Playground.csproj
    ```
    - The harness records a Noir sample trace, launches three Electron scenarios, and spins up three `ct host` instances in parallel (each reuses a single socket port for both frontend and backend).
    - Fullscreen behaviour is handled automatically: the Playwright context uses the detected monitor dimensions and emits a `resize` event after loading the page, so the CodeTracer UI fills the window.
@@ -29,17 +29,24 @@ This directory is a sandbox for prototyping ideas before they graduate into the 
 
 ## Documentation
 
-- `docs/debugging.md` – tooling tips for diagnosing playground scenarios.
-- `docs/extending-the-suite.md` – conventions for adding or organising spikes.
-- `docs/coding-guidelines.md` – lightweight standards to keep prototypes readable.
+- `docs/debugging.md` – tooling tips for diagnosing multi-instance startup scenarios.
+- `docs/extending-the-suite.md` – conventions for adding or organising additional experiments inside this reference.
+- `docs/coding-guidelines.md` – lightweight standards to keep examples readable.
 - `docs/specifications.md` – quick notes capturing hypotheses and desired outcomes.
-- `docs/development-plan.md` – short-lived task lists for active experiments.
-- `docs/progress.md` – running log of insights worth upstreaming.
+- `docs/development-plan.md` – short-lived task lists for any incremental improvements.
+- `docs/progress.md` – running log of insights worth upstreaming to `ui-tests-v3/`.
+
+### Key Helpers
+
+- `Helpers/CtHostLauncher.cs` – wraps `ct host` startup, ensuring `--backend-socket-port` and `--frontend-socket` share the same value.
+- `Helpers/ProcessUtilities.cs` – handles pre/post-run cleanup so parallel launches don’t leak processes.
+- `Helpers/NetworkUtilities.cs` – reserves free TCP ports defensively.
+- `Helpers/MonitorUtilities.cs` – normalises window size/position for Playwright.
 
 ## References
 
 - `ui-tests/` – the stable Playwright-based suite currently powering CodeTracer UI tests.
-- `ui-tests-v3/` – structured rebuild that will eventually replace the legacy suite.
+- `ui-tests-v3/` – structured rebuild that will eventually replace the legacy suite (references this project for startup guidance).
 - `/home/franz/code/repos/Puppeteer` – legacy Selenium/Puppeteer project providing APIs and helpers to port.
 
-When a playground spike proves useful, migrate the polished pieces into `ui-tests-v3/` and record the outcome in both progress logs.
+Use this project as the canonical example for orchestrating stable startup flows. When new scenarios are proven here, port them into `ui-tests-v3/` and record the outcome in both progress logs.

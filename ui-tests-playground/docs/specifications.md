@@ -1,6 +1,6 @@
-# Playground Specifications & Hypotheses
+# Startup Example Specifications & Hypotheses
 
-Capture high-level ideas you intend to prototype in this sandbox before formalising them for `ui-tests-v3/`.
+Capture high-level ideas you intend to validate in this reference before formalising them for `ui-tests-v3/`.
 
 ## Active Hypotheses
 
