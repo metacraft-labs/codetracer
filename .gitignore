@@ -1,5 +1,9 @@
 .env
 
+# .NET / build outputs
+**/bin/
+**/obj/
+
 node_modules
 node_modules/
 nimcache/
