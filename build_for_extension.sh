@@ -3,21 +3,16 @@
 # build_for_extension.sh <ui_js_output_path> <ct_vscode_js_output_path> <db_backend_path>
 set -e
 
-nim \
-    -d:chronicles_enabled=off \
-    -d:ctRenderer \
-    -d:ctInExtension \
-    --debugInfo:on \
-    --lineDir:on \
-    --hotCodeReloading:on \
-    --out:"$1" \
-    js src/frontend/ui_js.nim
+tools/build/build_codetracer.sh \
+  --target js:ui \
+  --output "$1" \
+  --extra-define ctInExtension
 
-nim \
-  -d:ctInExtension \
-  -d:ctInCentralExtensionContext \
-  --out:"$2" \
-  js src/frontend/middleware.nim
+tools/build/build_codetracer.sh \
+  --target js:middleware \
+  --output "$2" \
+  --extra-define ctInExtension \
+  --extra-define ctInCentralExtensionContext
 
 just build-once
 

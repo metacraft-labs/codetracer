@@ -17,6 +17,7 @@ SUPPORTED_TARGETS=(
   "js:server-index"
   "js:subwindow"
   "js:ui"
+  "js:middleware"
 )
 
 usage() {
@@ -136,6 +137,15 @@ resolve_target() {
         "--debugInfo:on"
         "--lineDir:on"
         "--hotCodeReloading:on"
+      )
+      ;;
+    js:middleware)
+      target_kind="nim-js"
+      target_source="${SRC_DIR}/frontend/middleware.nim"
+      target_output_name="middleware.js"
+      target_specific_flags=(
+        "${CODERACER_NIM_JS_SHARED_FLAGS[@]}"
+        "-d:ctInExtension"
       )
       ;;
     *)

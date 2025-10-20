@@ -53,4 +53,9 @@ run_and_assert \
   "js ${PROJECT_ROOT}/src/frontend/index.nim" \
   --target js:index
 
+run_and_assert \
+  "middleware dry-run" \
+  "${PROJECT_ROOT}/src/frontend/middleware.nim" \
+  --target js:middleware
+
 echo "All dry-run checks passed."

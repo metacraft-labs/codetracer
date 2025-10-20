@@ -11,13 +11,15 @@ logic instead of re-declaring command lines.
 tools/build/build_codetracer.sh --target ct --profile debug --output-dir ./out/bin
 tools/build/build_codetracer.sh --target db-backend-record --profile release --extra-define builtWithNix --output-dir ./dist/bin
 tools/build/build_codetracer.sh --target js:index --output ./out/js/index.js --dry-run
+tools/build/build_codetracer.sh --target js:middleware --output ./out/js/middleware.js --extra-define ctInCentralExtensionContext
 tools/build/build_codetracer.sh --target ct-wrapper --output ./out/bin/ct
 ```
 
 ### Key flags
 
 - `--target` – identifies the artefact to build (`ct`, `ct-wrapper`,
-  `db-backend-record`, `js:index`, `js:server-index`, `js:subwindow`, `js:ui`).
+  `db-backend-record`, `js:index`, `js:server-index`, `js:subwindow`,
+  `js:ui`, `js:middleware`).
 - `--profile` – switches between `debug` and `release` flag bundles
   (default: `debug`).
 - `--output-dir` – location for the generated binary or JS file. Defaults to
