@@ -39,24 +39,6 @@ when not defined(ctRenderer):
 
 const linksPathConst {.strdefine.} = ""
 
-# binary/lib/artifact paths
-# should be same in folder structure
-# in tup dev env, nix and packages
-let
-  linksPath* = env.get("LINKS_PATH_DIR",
-    if linksPathConst.len > 0:
-      linksPathConst
-    else:
-      when not defined(js) and defined(ctEntrypoint):
-        getAppDir().parentDir
-      else:
-        ""
-  )
-
-# we might call this from a different process, e.g. index, so
-# getting this path is not always easy
-# (additional note: it is a workaround for dev/some cases: TODO think more)
-# also, we mean the more top level folder `<folder1>` where `ct` is in `<folder1>/bin/`
 when not defined(js) and defined(ctEntrypoint):
   # echo "ct entrypoint"
   let codetracerExeDir* = getAppDir().parentDir
@@ -64,6 +46,31 @@ else:
   # echo "not ct entrypoint: env : ", env.get("NIX_CODETRACER_EXE_DIR")
   let codetracerExeDir* = env.get("NIX_CODETRACER_EXE_DIR", "<unknown>")
 
+# binary/lib/artifact paths
+# should be same in folder structure
+# in tup dev env, nix and packages
+var linksPathValue = env.get("LINKS_PATH_DIR",
+  if linksPathConst.len > 0:
+    linksPathConst
+  else:
+    when not defined(js) and defined(ctEntrypoint):
+      codetracerExeDir
+    else:
+      ""
+)
+
+when defined(js):
+  if linksPathValue.len == 0 or linksPathValue == "<unknown>":
+    # In renderer processes triggered from tests the launcher may omit LINKS_PATH_DIR,
+    # so fall back to the Electron bundle directory if it is available.
+    if codetracerExeDir.len > 0 and codetracerExeDir != "<unknown>":
+      linksPathValue = codetracerExeDir
+
+let linksPath* = linksPathValue
+
+# binary/lib/artifact paths
+# should be same in folder structure
+# in tup dev env, nix and packages
 # when defined(js):
 #   echo "linksPath ", linksPath
 #   echo "linksPathConst ", linksPathConst

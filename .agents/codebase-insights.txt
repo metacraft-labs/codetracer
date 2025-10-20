@@ -25,3 +25,6 @@
 - Interpreter overrides (e.g. `CODETRACER_PYTHON_INTERPRETER`) are now treated as authoritative; if the configured path cannot be resolved we error instead of silently falling back to PATH.
 - `ct record` verifies that `codetracer_python_recorder` is importable before launching the db backend and prints actionable guidance if the module is missing or broken.
 - Sudoku test-program datasets include intentionally invalid boards (e.g., examples #3 and #6) with duplicate digits inside a sub-grid; solvers should detect and report these gracefully.
+- UI tests rely on `CODETRACER_WRAP_ELECTRON=1`, so `wrapElectron()` must populate `LINKS_PATH_DIR` and `NIX_CODETRACER_EXE_DIR` before `execv`; otherwise the Electron renderer cannot locate `backend-manager`.
+- The `ct host` CLI expects options in the `--flag=value` form; passing space-delimited values (e.g. `--frontend-socket 1234`) leaves the value empty and the command falls back to default ports, so parallel hosts collide.
+- `ct host` exposes a single socket.io listener; keep `--frontend-socket` equal to `--backend-socket-port` when launching multiple hosts so the browser connects to the active socket server.

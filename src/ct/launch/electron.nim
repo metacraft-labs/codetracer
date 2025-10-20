@@ -94,6 +94,17 @@ when defined(posix):
     putEnv("CODETRACER_WRAP_ELECTRON", "")
     putEnv("CODETRACER_START_INDEX", "")
 
+    # Ensure Electron receives the same path hints that launchElectron() provides.
+    # The UI tests set CODETRACER_WRAP_ELECTRON=1 so we execv() directly here,
+    # bypassing the code that would normally populate these env vars.
+    if getEnv("LINKS_PATH_DIR", "") == "" and linksPath.len > 0:
+      putEnv("LINKS_PATH_DIR", linksPath)
+    if getEnv("NIX_CODETRACER_EXE_DIR", "") == "" and
+        codetracerExeDir.len > 0 and codetracerExeDir != "<unknown>":
+      putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir)
+    if getEnv("ELECTRON_ENABLE_LOGGING", "") == "":
+      putEnv("ELECTRON_ENABLE_LOGGING", "1")
+
     let execvArgsCount = if startIndex: args.len + 2 else: args.len + 1
 
     # copied and adapted from nim forum: nucky9 and Araq:
