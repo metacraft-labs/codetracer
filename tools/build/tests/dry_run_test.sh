@@ -36,6 +36,19 @@ run_and_assert \
   --output-dir "${tmp_dir}/bin"
 
 run_and_assert \
+  "ct dry-run includes -d:withTup" \
+  "-d:withTup" \
+  --target ct \
+  --profile debug \
+  --output-dir "${tmp_dir}/bin"
+
+run_and_assert \
+  "explicit output path respected" \
+  "--out:${tmp_dir}/custom/bin/codetracer" \
+  --target ct \
+  --output "${tmp_dir}/custom/bin/codetracer"
+
+run_and_assert \
   "index.js dry-run" \
   "js ${PROJECT_ROOT}/src/frontend/index.nim" \
   --target js:index

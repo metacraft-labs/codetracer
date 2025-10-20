@@ -1,10 +1,10 @@
 include_rules
 
 # JS build
-: frontend/index.nim |> !nim_node_index |> index.js | index.js.map
-: frontend/subwindow.nim |> !nim_node_subwindow |> subwindow.js | subwindow.js.map
-: frontend/index.nim |> !nim_node_index_server |> server_index.js | server_index.js.map
-: frontend/ui_js.nim |> !nim_js |> ui.js
+: frontend/index.nim |> ../tools/build/build_codetracer.sh --target js:index --output index.js |> index.js | index.js.map
+: frontend/subwindow.nim |> ../tools/build/build_codetracer.sh --target js:subwindow --output subwindow.js |> subwindow.js | subwindow.js.map
+: frontend/index.nim |> ../tools/build/build_codetracer.sh --target js:server-index --output server_index.js |> server_index.js | server_index.js.map
+: frontend/ui_js.nim |> ../tools/build/build_codetracer.sh --target js:ui --output ui.js |> ui.js
 # : frontend/browsersync_serv.nim |> !nim_node |> browsersync_serv.js
 # : frontend/codetracer_shell.nim |> !codetracer_shell |> bin/codetracer_shell.js
 

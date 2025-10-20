@@ -11,6 +11,7 @@ source "${SCRIPT_DIR}/codetracer_flags.env"
 
 SUPPORTED_TARGETS=(
   "ct"
+  "ct-wrapper"
   "db-backend-record"
   "js:index"
   "js:server-index"
@@ -24,6 +25,7 @@ Usage: build_codetracer.sh --target <name> [options]
 
 Targets:
   ct                Nim C build for the Codetracer CLI binary.
+  ct-wrapper        Nim C build for the wrapper binary exposed as `ct`.
   db-backend-record Nim C build for the db-backend recording helper.
   js:index          Nim JS build for frontend/index.nim (renderer entrypoint).
   js:server-index   Nim JS build for frontend/index.nim (server bundle).
@@ -33,6 +35,7 @@ Targets:
 Options:
   --profile <debug|release>     Build profile (default: debug).
   --output-dir <path>           Directory for the final artefact (defaults depend on target/profile).
+  --output <path>               Explicit output file path (overrides --output-dir and default name).
   --nimcache <path>             Override Nim cache directory (default: <output-dir>/.nimcache/<target>).
   --extra-define <define>       Additional -d:<define> to pass to Nim (may be repeated).
   --extra-flag <flag>           Additional flag appended to the Nim command (may be repeated).
@@ -42,7 +45,7 @@ Options:
 
 Examples:
   build_codetracer.sh --target ct --profile debug --output-dir ./out/bin
-  build_codetracer.sh --target js:index --output-dir ./out/js --dry-run
+  build_codetracer.sh --target js:index --output ./out/js/index.js --dry-run
 EOF
 }
 
@@ -67,6 +70,14 @@ resolve_target() {
       target_specific_flags=(
         "${CODERACER_NIM_BINARY_SHARED_FLAGS[@]}"
         "-d:ctEntrypoint"
+      )
+      ;;
+    ct-wrapper)
+      target_kind="nim-c"
+      target_source="${SRC_DIR}/ct/ct_wrapper.nim"
+      target_output_name="ct"
+      target_specific_flags=(
+        "${CODERACER_NIM_BINARY_SHARED_FLAGS[@]}"
       )
       ;;
     db-backend-record)
@@ -162,6 +173,7 @@ main() {
   local target=""
   local output_dir=""
   local nimcache=""
+  local explicit_output=""
   local dry_run=0
   local list_only=0
   local -a extra_defines=()
@@ -182,6 +194,11 @@ main() {
       --output-dir)
         output_dir="${2:-}"
         [[ -n "$output_dir" ]] || { echo "Error: --output-dir expects a value" >&2; exit 1; }
+        shift 2
+        ;;
+      --output)
+        explicit_output="${2:-}"
+        [[ -n "$explicit_output" ]] || { echo "Error: --output expects a value" >&2; exit 1; }
         shift 2
         ;;
       --nimcache)
@@ -232,16 +249,26 @@ main() {
 
   resolve_target "$target"
 
-  if [[ -z "$output_dir" ]]; then
-    case "$target_kind" in
-      nim-c) output_dir="${REPO_ROOT}/build/${profile}/bin" ;;
-      nim-js) output_dir="${REPO_ROOT}/build/${profile}/js" ;;
-      *) output_dir="${REPO_ROOT}/build/${profile}/out" ;;
-    esac
+  local output_path=""
+  if [[ -n "$explicit_output" ]]; then
+    output_path="${explicit_output}"
+    if [[ -z "$output_dir" ]]; then
+      output_dir="$(dirname "${output_path}")"
+    fi
+  else
+    if [[ -z "$output_dir" ]]; then
+      case "$target_kind" in
+        nim-c) output_dir="${REPO_ROOT}/build/${profile}/bin" ;;
+        nim-js) output_dir="${REPO_ROOT}/build/${profile}/js" ;;
+        *) output_dir="${REPO_ROOT}/build/${profile}/out" ;;
+      esac
+    fi
+    output_path="${output_dir}/${target_output_name}"
   fi
 
   if [[ -z "$nimcache" ]]; then
-    nimcache="${output_dir}/.nimcache/${target}"
+    local sanitized_target="${target//[:\/]/_}"
+    nimcache="${output_dir}/.nimcache/${sanitized_target}"
   fi
 
   local -a cmd=("nim")
@@ -260,13 +287,16 @@ main() {
   done
   cmd+=("${extra_flags[@]}")
 
+  local output_dirname
+  output_dirname="$(dirname "${output_path}")"
+
   if (( ! dry_run )); then
-    mkdir -p "$output_dir"
+    mkdir -p "$output_dirname"
     mkdir -p "$nimcache"
   fi
 
   cmd+=("--nimcache:${nimcache}")
-  cmd+=("--out:${output_dir}/${target_output_name}")
+  cmd+=("--out:${output_path}")
 
   if [[ "$target_kind" == "nim-js" ]]; then
     cmd+=("js")

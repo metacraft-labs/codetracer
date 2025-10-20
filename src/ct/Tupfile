@@ -1,8 +1,8 @@
 include_rules
 
 # Build locally; top-level Tupfile is responsible for distributing into the shared bin dir.
-: codetracer.nim |> !codetracer |> codetracer_depending_on_env_vars_in_tup
-: ct_wrapper.nim |> !nim_c |> ct
+: codetracer.nim |> ../../tools/build/build_codetracer.sh --target ct --output %o |> codetracer_depending_on_env_vars_in_tup
+: ct_wrapper.nim |> ../../tools/build/build_codetracer.sh --target ct-wrapper --output %o |> ct
 # TODO think if we want explicitly both
-# : ct_wrapper.nim |> !nim_c |> codetracer
-: db_backend_record.nim |> !codetracer |> db-backend-record
+# : ct_wrapper.nim |> ../../tools/build/build_codetracer.sh --target ct-wrapper --output %o |> codetracer
+: db_backend_record.nim |> ../../tools/build/build_codetracer.sh --target db-backend-record --output %o |> db-backend-record
