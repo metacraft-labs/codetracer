@@ -16,6 +16,7 @@ This document captures the target capabilities and architectural constraints for
   - [Spec-LAUNCH-01] Start CodeTracer with Playwright over CDP using the same environment variables as the legacy suite.
   - [Spec-LAUNCH-02] Allow custom startup scripts (e.g., Puppeteer/Selenium workflows) via dependency injection.
   - [Spec-LAUNCH-03] Provide lifecycle hooks (BeforeLaunch, AfterLaunch, OnShutdown).
+  - Implementation reference: see `docs/launching-multi-instance.md` for the latest multi-instance startup flow derived from `ui-tests-startup-example/`.
 - **Page Objects**
   - [Spec-PO-01] Support lazy locator resolution and automatic waiting semantics.
   - [Spec-PO-02] Enable composition (panes/pages/components) with shared interfaces.
@@ -42,6 +43,7 @@ This document captures the target capabilities and architectural constraints for
 
 - **Legacy Playwright Suite** (`ui-tests/`): Source of truth for Electron launch mechanics, retry patterns, and environment management.
 - **Puppeteer/Selenium Project** (`/home/franz/code/repos/Puppeteer`): Source for advanced fixture management, reusable action patterns, and reporting ideas.
+- **Multi-Instance Launch Guide** (`docs/launching-multi-instance.md`): Step-by-step startup and troubleshooting notes extracted from `ui-tests-startup-example/`.
 
 ## Open Questions
 
