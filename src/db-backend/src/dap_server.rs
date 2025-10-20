@@ -446,10 +446,21 @@ fn handle_client<R: std::io::BufRead, T: DapTransport>(
 
     let mut ctx = Ctx::default();
 
-    while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
-        let _ = handle_message(&msg, transport, &mut ctx);
+    loop {
+        match dap::read_dap_message_from_reader(reader) {
+            Ok(msg) => {
+                let res = handle_message(&msg, transport, &mut ctx);
+                if let Err(e) = res {
+                    error!("handle_message error: {e:?}");
+                }
+            },
+            Err(e) => {
+                error!("error from read_dap_message_from_reader: {e:?}");
+                break;
+            }
+        }
     }
 
-    error!("maybe error from reader");
+
     Ok(())
 }

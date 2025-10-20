@@ -1654,7 +1654,7 @@ mod tests {
 
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
-        assert!(!handler.breakpoint_list.is_empty());
+        assert!(!handler.breakpoints.is_empty());
     }
 
     // Test single tracepoint
