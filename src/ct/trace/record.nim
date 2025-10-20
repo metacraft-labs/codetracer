@@ -184,7 +184,7 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath
     exe,
     args = args,
     env = env,
-    options = {poStdErrToStdOut})
+    options = {poStdErrToStdOut, poUsePath})
 
   let (lines, exCode) = p.readLines
   # echo args
@@ -277,7 +277,7 @@ proc record*(lang: string,
   # we already pass it from ct_wrapper)
   #
   # eventually Dimo/Petar want to simplify this to maybe
-  # directly read the traceId from the record process output 
+  # directly read the traceId from the record process output
   if getEnv("CODETRACER_WRAPPER_PID", "").len == 0:
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
