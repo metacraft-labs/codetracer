@@ -7,6 +7,9 @@
 - Part 2 Step 1: Tup rules (`src/ct/Tupfile`, `src/Tupfile`) now invoke `tools/build/build_codetracer.sh` for all Nim/JS artefacts, eliminating direct `nim` command lines.
 - Part 2 Step 2: Developer helpers (e.g., `just build-ui-js`, `build_for_extension.sh`) now delegate to the shared driver with `--extra-define` hooks instead of embedding Nim invocations.
 - Part 2 Step 3: Packaging flows (non-Nix `build_with_nim.sh`, AppImage scripts, and `nix/packages/default.nix`) call the shared driver with environment-specific overrides, removing duplicated Nim flag sets from release tooling.
+- Part 3 Step 1: Removed unused Nim macros/rules from `src/Tuprules.tup`, leaving only the shared driver integrations.
+- Part 3 Step 1: Updated documentation (`docs/build.md`, `CONTRIBUTING.md`) to point contributors at the shared driver instead of raw `nim` commands.
+- Part 3 Step 3: Dry-run test suite covers all driver targets, and CI builds (Nix, macOS dmg, AppImage) complete using the centralized tooling.
 
 ## Next
-- Validate end-to-end packaging outputs (macOS app, AppImage, Nix build) and update contributor docs once CI passes with the centralized driver.
+- Monitor future build tooling for regressions and extend the driver/tests when new artefacts are added.

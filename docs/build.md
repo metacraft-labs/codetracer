@@ -1,16 +1,31 @@
 
-notes about build and dependencies
+# Build & Packaging Notes
 
-### monaco-editor notes
+Codetracer now routes every Nim compilation through the shared driver located at
+`tools/build/build_codetracer.sh`. The script understands each artefact (CLI
+binary, db backend helper, tester, JS bundles, etc.), applies the canonical flag
+sets, and accepts environment-specific overrides via `--extra-define` and
+`--extra-flag`.
 
-* TODO: list
-* Temporary : copy all to `editor.main.js` 
-IMPORTANT: change that to normal build or a simpler auto operation ?
+Typical examples:
 
-### golden-layout notes
+```bash
+# Debug CLI build to the default staging directory
+tools/build/build_codetracer.sh --target ct
 
-* For now build in a copied repo of it
-* Copy its `dist/umd/golden-layout.js` file to `src/public/third_party/goldenlayout.js`
-* Comment out the `// else if(typeof define === 'function' && define.amd) .. // define(["jquery"], factory);`
-TODO: license
+# Release tester binary with a custom nimcache path
+tools/build/build_codetracer.sh \
+  --target tester \
+  --profile release \
+  --output ./dist/bin/tester \
+  --nimcache /tmp/ct-nim-cache/tester
 
+# UI bundle consumed by the VS Code extension
+tools/build/build_codetracer.sh \
+  --target js:ui-extension \
+  --output ./dist/ui.js
+```
+
+All developer scripts (`just build-ui-js`, `build_for_extension.sh`), Tupfiles,
+and packaging flows (non-Nix, AppImage, Nix) delegate to this driver, so manual
+commands should do the same to avoid configuration drift.

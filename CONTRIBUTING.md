@@ -16,6 +16,11 @@ The guide is written as a set of markdown documents and built using [mdbook](htt
 
 You can contribute to the documentation itself, by editing it in `docs/book` and making a pull request. You can iterate on it locally , by cloning the repo, activating it's nix devshell and running `just serve-docs [hostname port]`: it will serve it locally(by default on http://localhost:3000).
 
+When building or updating tooling, always invoke the shared build driver
+`tools/build/build_codetracer.sh` instead of hard-coding `nim` command lines.
+All existing workflows (Tup, packaging, scripts) delegate to it, and new ones
+should do the same to avoid flag drift.
+
 ### Style guide
 
 For Rust, we are using `cargo fmt` to autoformat our code, and `cargo clippy` with some custom allow/deny rules inside the code.
@@ -32,4 +37,3 @@ We use or are ok with using more "types", not only those included by default in 
 
 We use `git rebase`, not merge and currently use the github pull requests as the main way to add code. Any pull request would need at least one review
 from someone from the CodeTracer team.
-
