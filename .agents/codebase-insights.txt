@@ -25,3 +25,6 @@
 - Interpreter overrides (e.g. `CODETRACER_PYTHON_INTERPRETER`) are now treated as authoritative; if the configured path cannot be resolved we error instead of silently falling back to PATH.
 - `ct record` verifies that `codetracer_python_recorder` is importable before launching the db backend and prints actionable guidance if the module is missing or broken.
 - Sudoku test-program datasets include intentionally invalid boards (e.g., examples #3 and #6) with duplicate digits inside a sub-grid; solvers should detect and report these gracefully.
+- `.gitignore` now unignores `src/**` while explicitly re-ignoring `src/build-debug/` and `src/.tup/` and re-exposing `src/public/**` so stray build products in `src/` surface during reviews without disturbing known build dirs.
+- Each sub-crate Tupfile now keeps its outputs inside its own tree (e.g., `bin/` under the crate), and `src/Tupfile` lifts the built artefacts into the shared `src/bin`/`src` paths, so no rule needs to emit `../` outputs and the generated `tup.sh` no longer creates a literal `[` directory.
+- ADR 0006 proposes introducing `tools/build/build_codetracer.sh` plus shared flag config so all environments (Tup, Nix, AppImage, non-Nix) compile Codetracer through one driver; see `0006-build-system-consolidation.md` and `build-system-consolidation-plan.md`.

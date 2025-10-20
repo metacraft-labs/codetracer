@@ -7,6 +7,12 @@ nimcache/
 .venv/
 build-*/
 
+# Ensure stray build artifacts inside src/ show up while keeping the intended build dir ignored
+!src/**
+src/build-debug/
+src/.tup/
+src/public/dist
+
 # wasm binaries
 *.wasm
 # object files
@@ -124,7 +130,7 @@ read.c
 write.c
 src/tests/gdb/*_gdb
 src/tests/run/gdb/
-dist/
+# dist/
 ctail
 #dispatcher
 gmon.out

@@ -1,0 +1,20 @@
+# Collect binaries built in subdirectories into the shared bin directory so nothing has to reach up a level.
+: ../backend-manager/backend-manager |> cp %f %o |> backend-manager
+: ../db-backend/db-backend |> cp %f %o |> db-backend
+: ../small-lang/small-lang |> cp %f %o |> small-lang
+: ../tester/tester |> cp %f %o |> tester
+: ../ct/codetracer_depending_on_env_vars_in_tup |> cp %f %o |> codetracer_depending_on_env_vars_in_tup
+: ../ct/db-backend-record |> cp %f %o |> db-backend-record
+: ../ct/ct |> cp %f %o |> ct
+
+: ../links/codetracer-pure-ruby-recorder |> !tup_preserve |> codetracer-pure-ruby-recorder
+: ../links/bash |> !tup_preserve |> bash
+: ../links/node |> !tup_preserve |> node
+: ../links/ruby |> !tup_preserve |> ruby
+: ../links/nargo |> !tup_preserve |> nargo
+: ../links/wazero |> !tup_preserve |> wazero
+: ../links/ctags |> !tup_preserve |> ctags
+: ../links/electron |> !tup_preserve |> electron
+# : ../links/unzip |> !tup_preserve |> unzip
+# : ../links/zip |> !tup_preserve |> zip
+: ../links/curl |> !tup_preserve |> curl

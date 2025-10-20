@@ -11,28 +11,14 @@ include_rules
 # TODO : helpers.ts |> !ts |> helpers.js
 : helpers.js |> !tup_preserve |> helpers.js
 
-: index.js |> cp %f %o |> src/index.js
-: subwindow.js |> cp %f %o |> src/subwindow.js
 : ui.js |> cp %f %o |> public/ui.js
-: helpers.js |> cp %f %o |> src/helpers.js
 
 # preserve
 # : links/trace.rb |> !tup_preserve |> src/trace.rb
 
-: links/codetracer-pure-ruby-recorder |> !tup_preserve |> bin/codetracer-pure-ruby-recorder
 
-: links/recorder.rb |> !tup_preserve |> src/recorder.rb
-: links/trace.py |> !tup_preserve |> src/trace.py
-: links/bash |> !tup_preserve |> bin/bash
-: links/node |> !tup_preserve |> bin/node
-: links/ruby |> !tup_preserve |> bin/ruby
-: links/nargo |> !tup_preserve |> bin/nargo
-: links/wazero |> !tup_preserve |> bin/wazero
-: links/ctags |> !tup_preserve |> bin/ctags
-: links/electron |> !tup_preserve |> bin/electron
-# : links/unzip |> !tup_preserve |> bin/unzip
-# : links/zip |> !tup_preserve |> bin/zip
-: links/curl |> !tup_preserve |> bin/curl
+
+
 : foreach *.json *.yaml   |> !tup_preserve |>
 : frontend/index.html |> !tup_preserve |> index.html
 : frontend/subwindow.html |> !tup_preserve |> subwindow.html

@@ -1,0 +1,5 @@
+: ../index.js |> cp %f %o |> index.js
+: ../subwindow.js |> cp %f %o |> subwindow.js
+: ../helpers.js |> cp %f %o |> helpers.js
+: ../links/recorder.rb |> !tup_preserve |> recorder.rb
+: ../links/trace.py |> !tup_preserve |> trace.py
