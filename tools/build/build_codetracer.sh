@@ -13,6 +13,7 @@ SUPPORTED_TARGETS=(
   "ct"
   "ct-wrapper"
   "db-backend-record"
+  "tester"
   "js:index"
   "js:server-index"
   "js:subwindow"
@@ -29,6 +30,7 @@ Targets:
   ct                Nim C build for the Codetracer CLI binary.
   ct-wrapper        Nim C build for the wrapper binary exposed as `ct`.
   db-backend-record Nim C build for the db-backend recording helper.
+  tester            Nim C build for the integration test runner.
   js:index          Nim JS build for frontend/index.nim (renderer entrypoint).
   js:server-index   Nim JS build for frontend/index.nim (server bundle).
   js:subwindow      Nim JS build for frontend/subwindow.nim.
@@ -88,6 +90,15 @@ resolve_target() {
       target_output_name="db-backend-record"
       target_specific_flags=(
         "${CODERACER_NIM_BINARY_SHARED_FLAGS[@]}"
+      )
+      ;;
+    tester)
+      target_kind="nim-c"
+      target_source="${SRC_DIR}/tester/tester.nim"
+      target_output_name="tester"
+      target_specific_flags=(
+        "--warnings:on"
+        "--hints:on"
       )
       ;;
     js:index)

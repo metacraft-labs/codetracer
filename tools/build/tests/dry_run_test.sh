@@ -63,4 +63,12 @@ run_and_assert \
   "-d:ctInExtension" \
   --target js:ui-extension
 
+run_and_assert \
+  "tester dry-run" \
+  "${PROJECT_ROOT}/src/tester/tester.nim" \
+  --target tester \
+  --profile release \
+  --nimcache "${tmp_dir}/tester-cache" \
+  --output "${tmp_dir}/tester"
+
 echo "All dry-run checks passed."

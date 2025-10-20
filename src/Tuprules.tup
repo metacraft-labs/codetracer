@@ -37,107 +37,13 @@ NIM_DANGER_FLAGS=\
 ROOT = $(TUP_CWD)/../../
 NIM_BIN = nim
 
-NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
-NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)
-NIM_DANGER  = $(NIM_BIN) $(NIM_DANGER_FLAGS)
-
 TSC = tsc
 STYLUS = stylus
 
 # misc rules
-!cp = |> ^ %f^ cp %f %o |>
 !stylus = |> ^ %f^ $(STYLUS) %f -o %o |>
 # workaround for errors, file seems to be still generated
 !ts = |> ^ %f^ $(TSC) %f |> %o
-
-# JS Rules:
-!nim_js = |> ^ %f^ $(NIM_DEBUG)\
--d:chronicles_enabled=off\
--d:ctRenderer\
---debugInfo:on\
---lineDir:on\
---hints:off \
---warnings:off \
---hotCodeReloading:on\
---out:%o\
-js %f |> %B.js
-
-!nim_node = |> ^ %f^ $(NIM_DEBUG)\
--d:nodejs\
---out:%o\
-js %f |> %B.js
-
-!nim_node_index = |> ^ %f^ $(NIM_DEBUG)\
--d:ctIndex\
--d:nodejs\
---sourcemap:on\
---out:%o\
-js %f |> %B.js %B.js.map
-
-!nim_node_subwindow = |> ^ %f^ $(NIM_DEBUG)\
--d:chronicles_enabled=off\
--d:ctRenderer\
---debugInfo:on\
---lineDir:on\
---hotCodeReloading:on\
---sourcemap:on\
---out:%o\
-js %f |> %B.js %B.js.map
-
-!nim_node_index_server = |> ^ %f^ $(NIM_DEBUG)\
--d:ctIndex\
--d:server\
--d:nodejs\
---sourcemap:on\
---out:%o \
-js %f |> %B.js %B.js.map
-
-!codetracer_shell = |> $(NIM_DEBUG)\
--d:nodejs\
---out:%o\
-js %f |> %o
-
-!nim_test_js = |> ^ %f^ $(NIM_DEBUG) \
--d:ctTest\
--d:chronicles_log_level=DEBUG\
---verbosity:1\
---hint:Processing:on\
---stacktrace:on\
---linetrace:on \
---lineDir:on\
---debugInfo\
---nimcache:/tmp/ct-nim-cache/%B_test_nimcache2\
---out:%o\
-js %f |> %B.js
-
-# C rules:
-!nim_c = |> ^ %f^ $(NIM_DEBUG)\
--d:ssl \
--d:useOpenssl3 \
---out:%o\
-c %f |> %o
-
-!codetracer = |> $(NIM_DEBUG)\
--d:testing\
---boundChecks:on\
---stacktrace:on\
---linetrace:on\
---warnings:on\
---hints:on\
--d:ctEntrypoint \
--d:withTup \
--d:useOpenssl3 \
--d:ssl \
---nimcache:/tmp/ct-nim-cache/codetracer_binary\
---out:%o\
-c %f |> %o
-
-!nim_tester = |> ^ %f^ $(NIM_DEBUG) \
---nimcache:/tmp/ct-nim-cache/tester \
---warnings:on \
---hints:on \
---out:%o\
-c %f |> %B macro_sourcemap_%B.json
 
 # mypy
 !mypy = |> ^ %f^ mypy --implicit-optional --cache-dir /tmp/.mypy-cache %f; |>
