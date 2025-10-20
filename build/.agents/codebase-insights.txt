@@ -1,0 +1,2 @@
+- Wheel builds only retain the matching target directory under `src/ct/bin/<os>-<arch>`; the GitHub workflow prunes other binaries before packaging.
+- `ct.runtime.get_executable_path` accepts a `binary_name` argument to pick which packaged CLI (``ct`` or ``db-backend-record``) to execute.
