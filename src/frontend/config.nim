@@ -2,13 +2,15 @@ import
   std / [json, strutils, sequtils, jsffi],
   types,
   lib/jslib,
-  .. / common / ct_logging
+  .. / common / ct_logging,
+  .. / config / defaults
 
 let
   configPath* = ".config.yaml"
   testConfigPath* = ".config.yaml"
   defaultConfigPath* = "default_config.yaml"
   defaultLayoutPath* = "default_layout.json"
+  defaultConfigContent* = defaults.defaultConfigContent
 
 when not defined(ctRenderer):
   import 
@@ -55,5 +57,4 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
   for key, value in conflicts:
     result.conflictList.add((key, value))
   return result
-
 

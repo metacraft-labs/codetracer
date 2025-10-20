@@ -193,15 +193,16 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
       errorPrint "mkdir for config folder error: exiting: ", errMkdir
       quit(1)
 
-    let errCopy = await fsCopyFileWithErr(
-      cstring(fmt"{configDir / defaultConfigPath}"),
-      cstring(fmt"{userConfigDir / configPath}")
+    # Persist the embedded default config when the user has no local file yet.
+    let errWrite = await fsWriteFileWithErr(
+      cstring(fmt"{userConfigDir / configPath}"),
+      cstring(defaultConfigContent)
     )
 
-    if not errCopy.isNil:
-      errorPrint "can't copy .config.yaml to user config dir:"
-      errorPrint "  tried to copy from: ", cstring(fmt"{configDir / defaultConfigPath}")
-      errorPrint "  to: ", fmt"{userConfigDir / configPath}"
+    if not errWrite.isNil:
+      errorPrint "can't write default .config.yaml to user config dir:"
+      errorPrint "  target: ", fmt"{userConfigDir / configPath}"
+      errorPrint "  error: ", errWrite
       quit(1)
 
   infoPrint "index: load config ", file
