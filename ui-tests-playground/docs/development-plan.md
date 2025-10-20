@@ -1,18 +1,18 @@
-# Playground Development Plan
+# Startup Example Maintenance Plan
 
-Unlike the structured V3 roadmap, this plan lists lightweight tasks for ongoing experiments. Update frequently as spikes evolve.
+Unlike the structured V3 roadmap, this plan lists lightweight tasks for keeping the reference implementation sharp without introducing churn.
 
 ## Current Focus Areas
 
-1. **Launcher Middleware Spike**
-   - Prototype environment mutators (Electron flags, telemetry hooks).
-   - Compare startup times vs. the legacy `PlaywrightLauncher`.
-2. **Reporting Enhancements**
-   - Capture Playwright traces plus custom JSON metadata.
+1. **Launcher Validation**
+   - Periodically verify `PlaywrightLauncher` and `CtHostLauncher` against the latest CodeTracer builds.
+   - Compare startup times vs. the legacy `ui-tests/` harness to catch regressions early.
+2. **Diagnostics Enhancements**
+   - Capture Playwright traces plus custom JSON metadata for both Electron and web runs.
    - Evaluate bundling strategies for CI uploads.
-3. **Selenium Helper Port**
-   - Isolate key utilities from `/home/franz/code/repos/Puppeteer`.
-   - Wrap them with async Playwright calls and log incompatibilities.
+3. **Helper Sync**
+   - Isolate key utilities from `/home/franz/code/repos/Puppeteer` or `ui-tests/` when parity is required.
+   - Wrap them with async Playwright calls and log incompatibilities before copying into `ui-tests-v3/`.
 
 ## Workflow Tips
 
