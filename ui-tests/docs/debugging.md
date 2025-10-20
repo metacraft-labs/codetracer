@@ -8,6 +8,12 @@ Follow these steps to diagnose failures and keep the suite reliable.
 - Confirm the `CODETRACER_REPO_ROOT_PATH` environment variable if you use a non-standard checkout layout.
 - Verify Playwright dependencies by running `npx playwright install`. The `Microsoft.Playwright` NuGet package will bootstrap browsers on first run, but explicit installation avoids surprises.
 
+## Preparing CodeTracer Builds
+
+- Build CodeTracer with `just build-once`. The `just build` recipe keeps `tup monitor` running indefinitely and never exits, which leaves the UI suite without fresh binaries.
+- If a previous run left `tup` running (look for it with `pgrep -fl tup`), terminate the process before invoking `just build-once` again; otherwise the incremental graph may refuse to rebuild and the Electron bundle will stay stale.
+- For web-hosted scenarios, remember that `ct host` exposes a single socket: pass `--backend-socket-port=<n>` and `--frontend-socket=<n>` (identical value) when launching. Using separate ports or space-delimited arguments (e.g., `--frontend-socket 1234`) leaves the flag unset and the browser will fail to connect.
+
 ## Running Tests Locally
 
 1. From the repository root, enter the `ui-tests` directory:
