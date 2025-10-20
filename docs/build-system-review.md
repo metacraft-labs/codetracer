@@ -102,3 +102,10 @@ and output directory `src/public/dist` using `webpack.config.js`.【F:webpack.co
    commands overlap. Establishing one authoritative entry point (e.g., Just recipes that
    internally call Nix or Tup) and deprecating redundant scripts will make the build
    story clearer for contributors and automation.【F:justfile†L1-L200】【F:build_for_extension.sh†L6-L27】【F:non-nix-build/build.sh†L1-L34】【F:appimage-scripts/build_appimage.sh†L1-L305】
+
+## Proof of Concept: Justfile Driver
+
+A Justfile-oriented build driver is available as a proof of concept. Invoke it with
+`just poc <recipe>` to exercise centralized build, test, and packaging workflows while
+maintaining the existing commands. See `docs/build-system-just-poc.md` for the
+overview and `just/poc.just` for the implementation.【F:docs/build-system-just-poc.md†L1-L56】【F:just/poc.just†L1-L136】

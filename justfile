@@ -1,3 +1,6 @@
+poc target="help":
+  just --justfile just/poc.just {{target}}
+
 build:
   #!/usr/bin/env bash
 
