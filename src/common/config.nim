@@ -4,6 +4,7 @@
 import std / [ strutils, sequtils, streams, strformat, os ]
 import json_serialization/std/tables, yaml
 import .. / common / [paths, types]
+import .. / config / defaults
 
 type
   RRBackendConfig* = object
@@ -89,6 +90,10 @@ let configDir* = linksPath / "config"
 let userConfigDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
 let userLayoutDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
 
+proc writeDefaultConfigFile(destPath: string) {.raises: [IOError, OSError].} =
+  ## Persist the embedded default configuration to `destPath`.
+  writeFile(destPath, defaults.defaultConfigContent)
+
 func normalize(shortcut: string): string =
   # for now we expect to write editor-style monaco shortcuts
   shortcut
@@ -140,7 +145,7 @@ proc loadConfig*(folder: string, inTest: bool): Config =
   if file.len == 0:
     file = userConfigDir / configPath
     createDir(userConfigDir)
-    copyFile(configDir / defaultConfigPath, file)
+    writeDefaultConfigFile(file)
   # if inTest:
   #   file = codetracerTestDir / testConfigPath
   var raw = ""
@@ -170,6 +175,9 @@ proc loadConfig*(folder: string, inTest: bool): Config =
       echo fmt"   for now we now have directly copied your existing config file to {backupFilePath}"
     except Exception as copyError:
       echo "ERROR: couldn't backup your existing config file; error: ", copyError.msg
-    copyFile(configDir / defaultConfigPath, file)
+    try:
+      writeDefaultConfigFile(file)
+    except CatchableError as defaultWriteError:
+      echo "ERROR: failed to write default config: ", defaultWriteError.msg
+      quit(1)
     echo "  REPLACED with new up to date default config file"
-

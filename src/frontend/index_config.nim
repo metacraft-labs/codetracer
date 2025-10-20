@@ -1219,17 +1219,14 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = j"", send
     if not errMkdir.isNil:
       errorPrint "mkdir for config folder error: exiting: ", errMkdir
       quit(1)
-    # thanks to Peter for the good advice to use copyFile instead of `cp`
-    # works around an issue i had with wrong libc version and nix
-    # and more clean
-    let errCopy = await fsCopyFileWithErr(
-      cstring(fmt"{configDir / defaultConfigPath}"),
-      cstring(fmt"{userConfigDir / configPath}"));
-     # cstring(&"cp {configDir}{defaultLayoutPath} {filename}"))
-    if not errCopy.isNil:
-      errorPrint "can't copy .config.yaml to user config dir:"
-      errorPrint "  tried to copy from: ", cstring(fmt"{configDir / defaultConfigPath}")
-      errorPrint "  to: ", fmt"{userConfigDir / configPath}"
+    # Persist the embedded default config when the user has no local file yet.
+    let errWrite = await fsWriteFileWithErr(
+      cstring(fmt"{userConfigDir / configPath}"),
+      cstring(defaultConfigContent))
+    if not errWrite.isNil:
+      errorPrint "can't write default .config.yaml to user config dir:"
+      errorPrint "  target: ", fmt"{userConfigDir / configPath}"
+      errorPrint "  error: ", errWrite
       quit(1)
 
   # TODO: maybe remove config test logic?
