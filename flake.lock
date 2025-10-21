@@ -833,6 +833,18 @@
         "type": "github"
       }
     },
+    "libs": {
+      "flake": false,
+      "locked": {
+        "path": "./libs",
+        "type": "path"
+      },
+      "original": {
+        "path": "./libs",
+        "type": "path"
+      },
+      "parent": []
+    },
     "microvm": {
       "inputs": {
         "flake-utils": [

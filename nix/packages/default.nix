@@ -213,6 +213,189 @@
           done
         '';
 
+        nimBuildInputs = [
+          pkgs.gcc
+          pkgs.sqlite
+          pkgs.pcre
+          pkgs.libzip
+          pkgs.openssl
+          pkgs.libuv
+        ];
+
+        nimBuildSetup = ''
+          export HOME=$TMPDIR/home
+          mkdir -p "$HOME"
+          mkdir -p nimcache
+        '';
+
+        mkNimBinary =
+          {
+            name,
+            outName,
+            cmd,
+          }:
+          stdenv.mkDerivation {
+            inherit src name;
+
+            nativeBuildInputs = [
+              upstream-nim-codetracer
+            ];
+
+            buildInputs = nimBuildInputs;
+
+            buildPhase = ''
+              ${nimBuildSetup}
+              ${cmd}
+            '';
+
+            installPhase = ''
+              mkdir -p $out/bin
+              install -m 0755 ${outName} $out/bin/${outName}
+            '';
+          };
+
+        mkNimJs =
+          {
+            name,
+            outName,
+            cmd,
+          }:
+          stdenv.mkDerivation {
+            inherit src name;
+
+            nativeBuildInputs = [
+              upstream-nim-codetracer
+            ];
+
+            buildInputs = nimBuildInputs;
+
+            buildPhase = ''
+              ${nimBuildSetup}
+              ${cmd}
+            '';
+
+            installPhase = ''
+              mkdir -p $out
+              install -m 0644 ${outName} $out/${outName}
+            '';
+          };
+
+        appimageCtUnwrapped =
+          mkNimBinary {
+            name = "codetracer-appimage-ct-unwrapped";
+            outName = "ct_unwrapped";
+            cmd = ''
+              ${upstream-nim-codetracer.out}/bin/nim -d:release \
+                --d:asyncBackend=asyncdispatch \
+                --dynlibOverride:std -d:staticStd \
+                --gc:refc --hints:on --warnings:off \
+                --dynlibOverride:"sqlite3" \
+                --dynlibOverride:"pcre" \
+                --dynlibOverride:"libzip" \
+                --dynlibOverride:"libcrypto" \
+                --dynlibOverride:"libssl" \
+                --passL:"-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
+                --passL:"${appimageDeps}/lib/libpcre.so.1" \
+                --passL:"${appimageDeps}/lib/libzip.so.5" \
+                --passL:"${appimageDeps}/lib/libcrypto.so" \
+                --passL:"${appimageDeps}/lib/libcrypto.so.3" \
+                --passL:"${appimageDeps}/lib/libssl.so" \
+                --boundChecks:on \
+                -d:useOpenssl3 \
+                -d:ssl \
+                -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+                -d:chronicles_timestamps=UnixTime \
+                -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+                -d:builtWithNix \
+                -d:ctEntrypoint \
+                -d:linksPathConst=.. \
+                -d:libcPath=libc \
+                -d:pathToNodeModules=../node_modules \
+                --nimcache:nimcache \
+                --out:ct_unwrapped c ./src/ct/codetracer.nim
+            '';
+          };
+
+        appimageDbBackendRecord =
+          mkNimBinary {
+            name = "codetracer-appimage-db-backend-record";
+            outName = "db-backend-record";
+            cmd = ''
+              ${upstream-nim-codetracer.out}/bin/nim \
+                -d:release -d:asyncBackend=asyncdispatch \
+                --gc:refc --hints:off --warnings:off \
+                --debugInfo --lineDir:on \
+                --boundChecks:on --stacktrace:on --linetrace:on \
+                -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+                -d:chronicles_timestamps=UnixTime \
+                -d:ssl \
+                -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+                -d:linksPathConst=.. \
+                -d:libcPath=libc \
+                -d:builtWithNix \
+                -d:ctEntrypoint \
+                --dynlibOverride:"libsqlite3" \
+                --dynlibOverride:"sqlite3" \
+                --dynlibOverride:"pcre" \
+                --dynlibOverride:"libzip" \
+                --passL:"-Wl,-Bstatic -lsqlite3 -Wl,-Bdynamic" \
+                --passL:"${appimageDeps}/lib/libpcre.so.1" \
+                --passL:"${appimageDeps}/lib/libzip.so.5" \
+                --nimcache:nimcache \
+                --out:db-backend-record c ./src/ct/db_backend_record.nim
+            '';
+          };
+
+        appimageIndexJs =
+          mkNimJs {
+            name = "codetracer-appimage-index-js";
+            outName = "index.js";
+            cmd = ''
+              ${upstream-nim-codetracer.out}/bin/nim \
+                --hints:on --warnings:off --sourcemap:on \
+                -d:ctIndex -d:chronicles_sinks=json \
+                -d:nodejs --out:index.js js src/frontend/index.nim
+            '';
+          };
+
+        appimageServerIndexJs =
+          mkNimJs {
+            name = "codetracer-appimage-server-index-js";
+            outName = "server_index.js";
+            cmd = ''
+              ${upstream-nim-codetracer.out}/bin/nim \
+                --hints:on --warnings:off --sourcemap:on \
+                -d:ctIndex -d:server -d:chronicles_sinks=json \
+                -d:nodejs --out:server_index.js js src/frontend/index.nim
+            '';
+          };
+
+        appimageUiJs =
+          mkNimJs {
+            name = "codetracer-appimage-ui-js";
+            outName = "ui.js";
+            cmd = ''
+              ${upstream-nim-codetracer.out}/bin/nim \
+                --hints:off --warnings:off \
+                -d:chronicles_enabled=off  \
+                -d:ctRenderer \
+                --out:ui.js js src/frontend/ui_js.nim
+            '';
+          };
+
+        appimageSubwindowJs =
+          mkNimJs {
+            name = "codetracer-appimage-subwindow-js";
+            outName = "subwindow.js";
+            cmd = ''
+              ${upstream-nim-codetracer.out}/bin/nim \
+                --hints:off --warnings:off \
+                -d:chronicles_enabled=off  \
+                -d:ctRenderer \
+                --out:subwindow.js js src/frontend/subwindow.nim
+            '';
+          };
+
         appimagePayload = pkgs.runCommand "codetracer-appimage-payload" {
           nativeBuildInputs = [
             pkgs.bashInteractive
@@ -227,6 +410,7 @@
           cp -R ${appimageDeps}/. "$out/"
           chmod -R u+w "$out"
           mkdir -p "$out/bin"
+          mkdir -p "$out/src"
 
           INTERPRETER_PATH="${
             if pkgs.stdenv.hostPlatform.system == "aarch64-linux"
@@ -253,6 +437,23 @@
 
           install_bin ${db-backend}/bin/db-backend db-backend
           install_bin ${backend-manager}/bin/backend-manager backend-manager
+          install_bin ${appimageCtUnwrapped}/bin/ct_unwrapped ct_unwrapped
+          install_bin ${appimageDbBackendRecord}/bin/db-backend-record db-backend-record
+
+          cp -L ${appimageIndexJs}/index.js "$out/index.js"
+          cp -L ${appimageIndexJs}/index.js "$out/src/index.js"
+
+          cp -L ${appimageServerIndexJs}/server_index.js "$out/server_index.js"
+          cp -L ${appimageServerIndexJs}/server_index.js "$out/src/server_index.js"
+
+          cp -L ${appimageUiJs}/ui.js "$out/ui.js"
+          cp -L ${appimageUiJs}/ui.js "$out/src/ui.js"
+
+          cp -L ${appimageSubwindowJs}/subwindow.js "$out/subwindow.js"
+          cp -L ${appimageSubwindowJs}/subwindow.js "$out/src/subwindow.js"
+
+          patch_binary "$out/bin/ct_unwrapped" || true
+          patch_binary "$out/bin/db-backend-record" || true
         '';
 
         indexJavascript = stdenv.mkDerivation {
