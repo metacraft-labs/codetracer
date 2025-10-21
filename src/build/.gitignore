@@ -1,0 +1,14 @@
+#
+# Ignore everything in this directory and its subdirectories except for
+# files that are part of the Tup build configuration. The double-asterisk
+# patterns allow Tup metadata to be tracked no matter where the files live.
+#
+*
+!*/
+!.gitignore
+!**/Tupfile
+!**/Tupfile.lua
+!**/Tupconfig
+!**/Tuprules.tup
+!**/tup.config
+.tup/

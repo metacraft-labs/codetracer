@@ -1,3 +1,0 @@
-include_rules
-
-: |> !rust_cargo_backend_manager |> ../bin/backend-manager

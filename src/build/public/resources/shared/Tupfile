@@ -1,0 +1,6 @@
+include_rules
+
+SRC_DIR = ../../../../public/resources/shared
+
+: foreach $(SRC_DIR)/*.* |> !cp_preserve |> %b
+: foreach $(SRC_DIR)/filesystem/*.svg |> !cp_preserve |> filesystem/%b

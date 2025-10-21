@@ -1,0 +1,15 @@
+SRC_DIR = ../../../frontend/styles
+
+include_rules
+
+# workaround if css does not build:
+# css
+# comment uncomment the line below and comment out everything else
+# save the file, let tup work its magic and after that return the file to previous state
+#: foreach *.styl |> !stylus |>
+
+: $(SRC_DIR)/default_white_theme.styl |> !stylus |> default_white_theme.css
+: $(SRC_DIR)/default_dark_theme_electron.styl |> !stylus |> default_dark_theme_electron.css
+: $(SRC_DIR)/default_dark_theme_extension.styl |> !stylus |> default_dark_theme_extension.css
+: $(SRC_DIR)/loader.styl |> !stylus |> loader.css
+: $(SRC_DIR)/subwindow.styl |> !stylus |> subwindow.css

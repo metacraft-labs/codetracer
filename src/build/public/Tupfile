@@ -1,0 +1,16 @@
+include_rules
+SRC_DIR = ../../public
+
+: foreach $(SRC_DIR)/*.* |> !cp_preserve |> %b
+: foreach $(SRC_DIR)/third_party/wnumb-1.2.0/*.js |> !cp_preserve |> third_party/wnumb-1.2.0/%b
+: foreach $(SRC_DIR)/resources/window/*.svg |> !cp_preserve |> resources/window/%b
+: foreach $(SRC_DIR)/resources/notifications/*.svg |> !cp_preserve |> resources/notifications/%b
+: foreach $(SRC_DIR)/third_party/bootstrap-4.3.1-dist/css/*.css |> !cp_preserve |> third_party/bootstrap-4.3.1-dist/css/%b
+: $(SRC_DIR)/third_party/tippy.js/tippy.css |> !cp_preserve |> third_party/tippy.js/tippy.css
+: $(SRC_DIR)/third_party/monaco-editor/min |> !cp_preserve |> third_party/monaco-editor/min
+: $(SRC_DIR)/third_party/@exuanbo |> !cp_preserve |> third_party/@exuanbo
+: $(SRC_DIR)/third_party/golden-layout/dist |> !cp_preserve |> third_party/golden-layout/dist
+: $(SRC_DIR)/third_party/mousetrap |> !cp_preserve |> third_party/mousetrap
+: $(SRC_DIR)/third_party/vex-js |> !cp_preserve |> third_party/vex-js
+: $(SRC_DIR)/third_party/xterm |> !cp_preserve |> third_party/xterm
+: foreach $(SRC_DIR)/dist/* |> !cp_preserve |> dist/%b

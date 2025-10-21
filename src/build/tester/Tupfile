@@ -1,0 +1,5 @@
+SRC_DIR = ../../tester
+
+include_rules
+
+: $(SRC_DIR)/tester.nim |> !nim_tester |> ../bin/tester

@@ -1,0 +1,5 @@
+SRC_DIR = &(src_root)/tui
+
+include_rules
+
+#: $(SRC_DIR)/src/main.rs |> !rust_cargo_tui |> ../bin/tui
