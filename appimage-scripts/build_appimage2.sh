@@ -67,12 +67,6 @@ bash "${ROOT_PATH}/appimage-scripts/install_electron.sh"
 # Setup node deps
 bash "${ROOT_PATH}/appimage-scripts/setup_node_deps.sh"
 
-# Build our css files
-bash "${ROOT_PATH}/appimage-scripts/build_css.sh"
-
-# Build/setup nim-based files
-bash "${ROOT_PATH}/appimage-scripts/build_with_nim2.sh"
-
 cat <<'EOF' >"${APP_DIR}/bin/ct"
 #!/usr/bin/env bash
 

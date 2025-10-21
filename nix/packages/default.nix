@@ -396,6 +396,34 @@
             '';
           };
 
+        appimageCss = pkgs.runCommand "codetracer-appimage-css" {
+          nativeBuildInputs = [
+            pkgs.coreutils
+            pkgs.nodejs_20
+            node-modules-derivation
+          ];
+        } ''
+          set -eu
+
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+
+          mkdir -p "$out/frontend/styles"
+
+          cd ${src}/src/frontend/styles
+
+          stylus="${node-modules-derivation.out}/bin/node_modules/.bin/stylus"
+
+          for style in \
+            default_white_theme.styl \
+            default_dark_theme_electron.styl \
+            loader.styl \
+            subwindow.styl
+          do
+            ${pkgs.nodejs_20}/bin/node "$stylus" -o "$out/frontend/styles" "$style"
+          done
+        '';
+
         appimagePayload = pkgs.runCommand "codetracer-appimage-payload" {
           nativeBuildInputs = [
             pkgs.bashInteractive
@@ -411,6 +439,8 @@
           chmod -R u+w "$out"
           mkdir -p "$out/bin"
           mkdir -p "$out/src"
+
+          cp -Lr ${appimageCss}/frontend "$out/"
 
           INTERPRETER_PATH="${
             if pkgs.stdenv.hostPlatform.system == "aarch64-linux"
