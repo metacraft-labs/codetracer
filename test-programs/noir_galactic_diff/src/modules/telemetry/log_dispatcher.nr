@@ -4,9 +4,9 @@ pub fn print_log_summary(log_entries: [Field; 4], stable: bool) {
         let value = log_entries[idx] as i32;
         println(f"entry[{idx}] = {value}");
     }
-    if stable {
-        println("system stable");
-    } else {
+    if !stable {
         println("system unstable");
+    } else {
+        println("system stable");
     }
 }

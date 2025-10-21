@@ -19,7 +19,14 @@ pub fn record_snapshot(
     let mission_checksum = mission_checksum + path_score + morale_delta;
 
     let mut logs: [Field; 4] = [0, 0, 0, 0];
-    logs[0] = manifest_checksum;
+    let mut pairing_sum = 0;
+    for primary in 0..2 {
+        for secondary in 0..2 {
+            let route_idx = primary + secondary;
+            pairing_sum += route_sequence[route_idx] + hazard_profile[primary];
+        }
+    }
+    logs[0] = manifest_checksum + pairing_sum;
     logs[1] = mission_checksum;
     logs[2] = fold_sum(route_sequence);
     logs[3] = fold_sum(hazard_profile) + stability_marker;

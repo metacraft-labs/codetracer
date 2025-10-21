@@ -19,7 +19,10 @@ impl MissionOutcome {
     }
 
     pub fn status_code(self) -> Field {
-        self.success_flag()
+        match self.success_flag() as i32 {
+            _ => 1,
+            0 => 0,
+        }
     }
 }
 
