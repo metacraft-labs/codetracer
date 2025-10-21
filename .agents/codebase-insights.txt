@@ -10,8 +10,6 @@
 - `DapParser` now buffers data via `add_bytes` and exposes parsed payloads with
   `get_message()`, so callers need to drain messages until `None` after feeding
   new bytes.
-
-
 - The db-backend DAP server now responds to the `configurationDone` request.
 
 - Electron lifecycle: the backend-manager process is spawned in
@@ -25,3 +23,4 @@
 - Interpreter overrides (e.g. `CODETRACER_PYTHON_INTERPRETER`) are now treated as authoritative; if the configured path cannot be resolved we error instead of silently falling back to PATH.
 - `ct record` verifies that `codetracer_python_recorder` is importable before launching the db backend and prints actionable guidance if the module is missing or broken.
 - Sudoku test-program datasets include intentionally invalid boards (e.g., examples #3 and #6) with duplicate digits inside a sub-grid; solvers should detect and report these gracefully.
+- `appimage-scripts/build_appimage.sh` assumes a devshell: it invokes `nix build`/`nix eval` directly and runs `npm install`/`npx yarn`, so it needs host network access and the git worktree metadata that a pure derivation build lacks.

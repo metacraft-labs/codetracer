@@ -127,6 +127,23 @@
           '';
         };
 
+        appimageDeps = pkgs.symlinkJoin {
+          name = "codetracer-appimage-deps";
+          paths = [
+            sqlite
+            pcre
+            libzip
+            openssl
+            libuv
+            cargo-stylus
+            wazero
+            noir
+            pkgs.universal-ctags
+            pkgs.curl
+            pkgs.nodejs_20
+          ];
+        };
+
         indexJavascript = stdenv.mkDerivation {
           name = "index.js";
           pname = "index.js";
