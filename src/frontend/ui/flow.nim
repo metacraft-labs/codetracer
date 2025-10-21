@@ -135,7 +135,7 @@ iterator loopPositionsChildren(self: FlowComponent, loopIndex: int): tuple[itera
           yield (iteration: iteration, child: childNodes[i])
           iteration += 1
 
-proc makeLoopState(): LoopState = 
+proc makeLoopState(): LoopState =
   LoopState(
     positions: JsAssoc[int, LoopPosition]{},
     iterationsWidth: JsAssoc[int, float]{},
@@ -223,7 +223,7 @@ proc loopStepContainerStyle(self: FlowComponent, step: FlowStep): VStyle =
   )
 
 proc complexValueStyle(self: FlowComponent, step: FlowStep, expression: cstring): VStyle =
-  let valueWidth = 
+  let valueWidth =
     self.loopStates[step.loop]
       .positions[step.position]
       .positionColumns[step.iteration]
@@ -1231,7 +1231,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       .toLowerAscii()
   var before = &"flow-{flowMode}-value-before-only"
 
-  let (klass, name) = 
+  let (klass, name) =
     case event.kind:
     of EventLogKind.Error:
       ("flow-error", "error")
@@ -1247,7 +1247,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       ("flow-std-default", $event.metadata)
     else:
       ("", "")
-  # let klass = 
+  # let klass =
   #   case event.kind:
   #   of EventLogKind.Error:
   #     "flow-error"
@@ -3748,7 +3748,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
 
     for (loopID, loop) in loops:
       var index = 0
-      
+
       if not self.flow.positionStepCounts.hasKey(position):
         index += 1
 
@@ -3777,7 +3777,7 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
               continue
 
             hasLoop = true
-            let width = 
+            let width =
               if self.valueMode == BeforeAndAfterValueMode:
                 group.loopWidths[loopID][i] * group.baseWidth * 2 + 21
               else:
