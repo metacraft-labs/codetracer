@@ -31,3 +31,5 @@
 - Third-party frontend assets that were previously symlinks into `node_modules` (`@exuanbo`, `golden-layout/dist`, `monaco-editor/min`, `mousetrap`, `vex-js`, `xterm`) are now materialized from `node-modules-derivation` inside `appimagePayload`, preventing broken symlinks when the payload is copied out of the Nix store.
 - Ruby 3.3 comes from `appimageDeps` (via `pkgs.ruby_3_3`) and is patched inside the derivation, so the AppDir no longer copies Ruby from the devshell during the AppImage build.
 - `nix/packages/default.nix` now hides helper bindings like `mkNimBinary` via `builtins.removeAttrs` so `perSystem.packages` exposes only real derivations; flake checks will reject non-package values there.
+- The generated `appimagePayload` launcher (`bin/ct`) now executes `ct_unwrapped` from the same directory instead of `bin/ct_unwrapped`, fixing AppImage runs where `HERE` already points at `bin/`.
+- `ci/build/dev.sh` temporarily moves `src/links` out of the tree before `tup generate` because the generated script writes artifacts directly into `src/`, forcing a full `git clean -xfd src/` afterward.

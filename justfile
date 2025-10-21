@@ -197,7 +197,7 @@ tail pid_or_current_or_last kind process="default" instance_index="0":
   tail -f ${log_file_path}
 
 build-nix:
-  nix build --print-build-logs '.?submodules=1#codetracer' --show-trace --keep-failed
+  nix build --print-build-logs '.#codetracer' --show-trace --keep-failed
 
 cachix-push-nix-package:
   cachix push metacraft-labs-codetracer $(nix build --print-out-paths ".?submodules=1#codetracer")
