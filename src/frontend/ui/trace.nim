@@ -23,7 +23,7 @@ proc calcTraceWidth(self: TraceComponent) =
   let minimapWidth = editorLayout.minimapWidth
 
   self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
-  
+
 # proc traceMainStyle(self: TraceComponent): VStyle =
 #   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
 #   self.calcTraceWidth()
@@ -378,8 +378,8 @@ proc renderTableResults(
         discard setTimeout(proc() = self.dataTable.updateTableRows(), 100)
         discard setTimeout(proc() = self.dataTable.updateTableFooter(), 100)
       )
-      
-      proc toProgramEvent(self: TraceComponent, datatableRow: js): ProgramEvent = 
+
+      proc toProgramEvent(self: TraceComponent, datatableRow: js): ProgramEvent =
         ProgramEvent(
           kind: TraceLogEvent,
           highLevelPath: self.name,
@@ -420,7 +420,7 @@ proc renderTableResults(
     let denseWrapper = cstring(fmt"#trace-table-{self.id}_wrapper")
 
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
-        .addEventListener(cstring"wheel", proc(ev: Event) = 
+        .addEventListener(cstring"wheel", proc(ev: Event) =
           ev.stopPropagation()
           self.dataTable.updateTableRows()
           self.dataTable.updateTableFooter())
@@ -620,7 +620,8 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
       tracepointHtml = cstring"<div class='gutter-disabled-trace' onmousedown='event.stopPropagation()'></div>"
 
   if line == self.location.line and
-      path == self.location.path:
+      path == self.location.path and
+      not isDeleteChunk:
     highlightHtml = cstring"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
 
   if self.data.services.debugger.hasBreakpoint(path, realLine):
@@ -693,7 +694,7 @@ proc traceMenuView(self: TraceComponent): VNode =
         oninput = search,
         placeholder = "Search"
       )
-    
+
     tdiv(class = "trace-buttons-container"):
       tdiv(class = "run-trace-button", onclick = proc() = runTracepoints(self.data)):
         img(
@@ -836,7 +837,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
 
     # add trace monaco editor to the register
     self.data.ui.traceMonacoEditors.add(self.monacoEditor)
-    self.monacoEditor.onMouseWheel(proc(e: js) = 
+    self.monacoEditor.onMouseWheel(proc(e: js) =
       e.preventDefault()
     )
     # subscribe to trace monaco editor change event
@@ -862,7 +863,7 @@ proc setEditorResizeObserver(self: TraceComponent) =
   let editorDom = jq(cstring(fmt"[data-label={activeEditor}]"))
   let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
     for entry in entries:
-      # let timeout = 
+      # let timeout =
       discard setTimeout(proc = resizeEditorHandler(self), 100)
   )
 
@@ -903,7 +904,7 @@ method render*(self: TraceComponent): VNode =
   result = buildHtml(tdiv):
     tdiv(
       class = "trace-main",
-      onclick = proc(ev: Event, v:VNode) = 
+      onclick = proc(ev: Event, v:VNode) =
         ev.stopPropagation()
         if self.data.ui.activeFocus != self:
           self.data.ui.activeFocus = self,

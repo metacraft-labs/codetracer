@@ -1214,7 +1214,7 @@ proc addDiffView(self: EditorViewComponent, source: cstring, removedLinesNumber:
   var offset = 1 # Offset for proper line placement and number
   var newZoneDom = self.drawDiffViewZones(source, startLineNumber, firstDeletedLineNumber)
   let viewZone = js{
-    afterLineNumber: startLineNumber,
+    afterLineNumber: if startLineNumber == 1: 0 else: startLineNumber,
     heightInLines: removedLinesNumber + offset,
     domNode: newZoneDom
   }
