@@ -1160,7 +1160,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
   zoneDom.style.fontSize = cstring($self.data.ui.fontSize) & cstring"px"
 
   var editorDom = document.createElement("div")
-  var selector = fmt"editorComponent-{id}"
+  var selector = fmt"diffEditorComponent-{id}"
   editorDom.id = selector
 
   let editorContentLeft = self.monacoEditor
@@ -1172,36 +1172,37 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
 
   var lang = fromPath(self.data.services.debugger.location.path)
   let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
-  discard setTimeout(proc () =
-    self.diffEditors[lineNumber] = monaco.editor.create(
-      jq("#" & editorDom.id),
-      MonacoEditorOptions(
-        value: source,
-        language: lang.toCLang(),
-        readOnly: true,
-        theme: theme,
-        automaticLayout: true,
-        folding: true,
-        fontSize: self.data.ui.fontSize,
-        minimap: js{ enabled: false },
-        find: js{ addExtraSpaceOnTop: false },
-        renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
-        lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
-        lineDecorationsWidth: 20,
-        contextmenu: false,
-        mouseWheelScrollSensitivity: 0,
-        fastScrollSensitivity: 0,
-        scrollBeyondLastLine: false,
-        smoothScrolling: false,
-        scrollbar: js{
-          "vertical": "hidden",
-          "horizontal": "hidden",
-          "useShadows": false
-        }
-      )
-    ),
-    0
-  )
+  if not self.diffEditors.hasKey(lineNumber):
+    discard setTimeout(proc () =
+      self.diffEditors[lineNumber] = monaco.editor.create(
+        jq("#" & editorDom.id),
+        MonacoEditorOptions(
+          value: source,
+          language: lang.toCLang(),
+          readOnly: true,
+          theme: theme,
+          automaticLayout: true,
+          folding: true,
+          fontSize: self.data.ui.fontSize,
+          minimap: js{ enabled: false },
+          find: js{ addExtraSpaceOnTop: false },
+          renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
+          lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
+          lineDecorationsWidth: 20,
+          contextmenu: false,
+          mouseWheelScrollSensitivity: 0,
+          fastScrollSensitivity: 0,
+          scrollBeyondLastLine: false,
+          smoothScrolling: false,
+          scrollbar: js{
+            "vertical": "hidden",
+            "horizontal": "hidden",
+            "useShadows": false
+          }
+        )
+      ),
+      0
+    )
 
   return zoneDom
 
