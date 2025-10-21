@@ -70,6 +70,26 @@ and output directory `src/public/dist` using `webpack.config.js`.【F:webpack.co
 | `appimage-scripts/build_appimage.sh` | Produces `CodeTracer.AppImage` after assembling an AppDir. | Installs runtime deps, builds Nim/Rust binaries, copies assets, patches binaries, runs `appimagetool`. | `appimage-scripts/build_appimage.sh` L1-L305【F:appimage-scripts/build_appimage.sh†L1-L305】 |
 | `non-nix-build/build_dmg.sh` | Packages the macOS `.app` bundle into `CodeTracer.dmg`. | Installs `create-dmg` via Homebrew and invokes it with custom window/icon metadata. | `non-nix-build/build_dmg.sh` L1-L13【F:non-nix-build/build_dmg.sh†L1-L13】 |
 
+### AppImage vs. macOS DMG Packaging
+
+**AppImage pipeline**
+
+1. Prepares a fresh `squashfs-root` AppDir, exports environment variables, and seeds the directory structure that will host binaries and resources.【F:appimage-scripts/build_appimage.sh†L11-L40】
+2. Stages the runtime stack by invoking helper scripts and Nix builds to install Ruby, Electron, Node dependencies, Nim and Rust binaries, and shared libraries into the AppDir before copying application assets and configuration.【F:appimage-scripts/build_appimage.sh†L41-L195】
+3. Patches ELF interpreters and RPATHs for every bundled executable and finally calls `appimagetool` to emit `CodeTracer.AppImage`, ensuring the artifact is self-contained on Linux.【F:appimage-scripts/build_appimage.sh†L248-L305】
+
+**macOS DMG pipeline**
+
+1. Uses the non-Nix builder to populate `dist/` with binaries, assets, and wrappers by rerunning the same helper scripts used on Linux, tailoring the staging area for macOS paths.【F:non-nix-build/build_in_simple_env.sh†L7-L73】
+2. Converts the staged files into a `.app` bundle by generating icons, updating `Info.plist`, and wiring symlinks so Electron presents as CodeTracer within the macOS application structure.【F:non-nix-build/build_mac_app.sh†L6-L32】
+3. Installs the `create-dmg` tool via Homebrew and packages the prepared `CodeTracer.app` into `CodeTracer.dmg`, applying Finder layout metadata for distribution.【F:non-nix-build/build_dmg.sh†L3-L14】
+
+**Key differences**
+
+- The AppImage build assembles a Linux AppDir from scratch and repackages every executable with `patchelf`, whereas the macOS flow reuses the platform’s `.app` convention without rewriting binary loaders.【F:appimage-scripts/build_appimage.sh†L11-L305】【F:non-nix-build/build_mac_app.sh†L6-L32】
+- Dependency bundling for AppImage leverages Nix derivations to copy shared libraries alongside helper tools, while the DMG build leans on Homebrew-installed components and the existing macOS runtime (e.g., symlinking system Ruby).【F:appimage-scripts/build_appimage.sh†L65-L165】【F:non-nix-build/build_in_simple_env.sh†L45-L57】【F:non-nix-build/build_dmg.sh†L3-L14】
+- Final packaging uses `appimagetool` to create a self-mounting binary for Linux, contrasted with `create-dmg` producing a disk image that embeds macOS-specific window layout metadata.【F:appimage-scripts/build_appimage.sh†L297-L304】【F:non-nix-build/build_dmg.sh†L5-L14】
+
 ## Artifact Inventory
 - **Desktop executables**: `ct`, `codetracer_depending_on_env_vars_in_tup`, `db-backend`,
   `db-backend-record`, `backend-manager`, `small-lang`, `tester`, `console` (Nim), each
