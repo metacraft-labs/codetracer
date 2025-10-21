@@ -287,7 +287,9 @@ type
     hasSaveHistoryTimeout*: bool
     switchTabHistoryLimit*: int
     cachedFiles*: JsAssoc[cstring, TabInfo]
-    diffId*: seq[cstring]
+    addedDiffId*: seq[cstring]
+    changedDiffId*: seq[cstring]
+    deletedDiffId*: seq[cstring]
     index*: int
     # commandData*: CommandData
 
@@ -1534,7 +1536,7 @@ type
     # sys*: SysConfig
 
 when defined(ctRenderer):
-  import 
+  import
     std / jsconsole,
     .. / common / ct_event
 
@@ -1590,7 +1592,9 @@ when defined(ctRenderer):
         # lowLevel: LowLevel(),
         expandedOpen: JsAssoc[cstring, TabInfo]{},
         cachedFiles: JsAssoc[cstring, TabInfo]{},
-        diffId: @[],
+        addedDiffId: @[],
+        changedDiffId: @[],
+        deletedDiffId: @[],
         index: 1),
       calltrace: CalltraceService(
         callstackCollapse: (name: cstring"", level: -1),
@@ -1630,7 +1634,7 @@ when defined(ctRenderer):
     # TODO max for program, maybe min as well?
 
   console.log "data.dapApi"
-  console.log data.dapApi 
+  console.log data.dapApi
 
   console.log "data.viewsApi"
   console.log data.viewsApi
@@ -1678,7 +1682,7 @@ when defined(ctRenderer):
 
   proc newLocalViewToMiddlewareTransport(middlewareToViewsTransport: Transport): LocalViewToMiddlewareTransport =
     LocalViewToMiddlewareTransport(middlewareToViewsTransport: middlewareToViewsTransport)
-  
+
   # === end
 
   proc setupLocalViewToMiddlewareApi*(name: cstring, middlewareToViewsApi: MediatorWithSubscribers): MediatorWithSubscribers =
@@ -1866,7 +1870,7 @@ method onOutputJumpFromShellUi*(self: Component, response: int) {.base, async.} 
 
 method onDapStopped*(self: Component, response: DapStoppedEvent) {.base, async.} =
   discard
- 
+
 method increaseWhitespaceWidth*(self: EditorViewComponent) {.base.} =
   if self.whitespace.width < MAX_WHITESPACE_WIDTH:
     self.whitespace.width += 1
