@@ -119,17 +119,30 @@ proc changeIcons*(file: CodetracerFile) =
 
 
 proc reapplyDiffClasses(self: FilesystemComponent) =
-  for id in self.service.diffId:
-    let sel = "#j" & id
-    let el  = jqFind(sel)
-    if not el.isNil: el.addClass("diff-file")
+  proc applyClass(diffIdList: seq[cstring], class: cstring) =
+    for id in diffIdList:
+      let sel = "#j" & id
+      let el  = jqFind(sel)
+      if not el.isNil: el.addClass(class)
+
+  self.service.addedDiffId.applyClass("diff-file-added")
+  self.service.changedDiffId.applyClass("diff-file-changed")
+  self.service.deletedDiffId.applyClass("diff-file-deleted")
 
 proc mapDiff(service: EditorService, node: CodetracerFile) =
   for child in node.children:
     service.index += 1
     for fileDiff in data.startOptions.diff.files:
       if child.original.path == fileDiff.currentPath:
-        service.diffId.add(&"1_{service.index}_anchor")
+        case fileDiff.change:
+        of FileAdded:
+          service.addedDiffId.add(&"1_{service.index}_anchor")
+        of FileDeleted:
+          service.deletedDiffId.add(&"1_{service.index}_anchor")
+        of FileRenamed:
+          discard
+        of FileChanged:
+          service.changedDiffId.add(&"1_{service.index}_anchor")
     mapDiff(service, child)
 
 proc openTab(currentPath: cstring) =
@@ -165,8 +178,7 @@ method render*(self: FilesystemComponent): VNode =
               jqFind(".filesystem").toJs.on(
                 "ready.jstree",
                 proc(e: js, node: jsobject(node=CodetracerFile)) =
-                  for id in self.service.diffId:
-                    jqFind("#j" & id).addClass("diff-file")
+                  self.reapplyDiffClasses()
               )
 
               jqFind(".filesystem").toJs.on(cstring"refresh.jstree",
