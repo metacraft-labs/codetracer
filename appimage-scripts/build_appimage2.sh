@@ -93,19 +93,6 @@ bash "${ROOT_PATH}/appimage-scripts/build_backend_manager.sh"
 # Ensure copied binaries are executable.
 chmod +x "${APP_DIR}/bin/"{cargo-stylus,ctags,curl,nargo,node,wazero}
 
-# Collect transitive shared library dependencies from Nix store.
-# shellcheck disable=SC2046
-cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}/lib"
-
-# shellcheck disable=SC2046
-cp -n $(lddtree -l "${APP_DIR}/bin/curl" | grep -v glibc | grep /nix) "${APP_DIR}/lib"
-
-# shellcheck disable=SC2046
-cp -n $(lddtree -l "${APP_DIR}/bin/node" | grep -v glibc | grep /nix) "${APP_DIR}/lib"
-
-# shellcheck disable=SC2046
-cp -n $(lddtree -l "${APP_DIR}/bin/cargo-stylus" | grep -v glibc | grep /nix) "${APP_DIR}/lib"
-
 chmod -R +x "${APP_DIR}/bin"
 chmod -R +x "${APP_DIR}/electron"
 

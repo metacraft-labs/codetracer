@@ -131,6 +131,9 @@
           nativeBuildInputs = [
             pkgs.bashInteractive
             pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+            pkgs.pax-utils
           ];
         } ''
           set -euo pipefail
@@ -139,10 +142,8 @@
           mkdir -p "$out/bin" "$out/lib"
 
           copy_libs() {
-            for pattern in "$@"; do
-              for lib in $pattern; do
-                cp -L "$lib" "$out/lib/"
-              done
+            for lib in "$@"; do
+              cp -n -L "$lib" "$out/lib/" || true
             done
           }
 
@@ -162,6 +163,24 @@
             ${libuv.out}/lib/libuv.so*
 
           copy_bins \
+            ${cargo-stylus}/bin/cargo-stylus \
+            ${wazero}/bin/wazero \
+            ${noir}/bin/nargo \
+            ${pkgs.universal-ctags}/bin/ctags \
+            ${pkgs.curl}/bin/curl \
+            ${pkgs.nodejs_20}/bin/node
+
+          collect_transitive_libs() {
+            local binary
+            for binary in "$@"; do
+              lddtree -l "$binary" | grep /nix | grep -v glibc | while read -r dep; do
+                [ -f "$dep" ] || continue
+                cp -n -L "$dep" "$out/lib/" || true
+              done
+            done
+          }
+
+          collect_transitive_libs \
             ${cargo-stylus}/bin/cargo-stylus \
             ${wazero}/bin/wazero \
             ${noir}/bin/nargo \
