@@ -43,7 +43,7 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db, trace_kind: TraceKind, replay: &mut dyn Replay) -> FlowUpdate {
+    pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db, trace_kind: TraceKind, replay: &mut dyn Replay) -> Result<FlowUpdate, Box<dyn Error>> {
         info!("load_diff_flow");
         for diff_line in &diff_lines {
             match self.expr_loader.load_file(&diff_line.0) {
@@ -52,12 +52,23 @@ impl FlowPreloader {
                 }
                 Err(e) => {
                     warn!("can't process file {}: error {}", diff_line.0.display(), e);
-                    return FlowUpdate::error(&format!("can't process file {}", diff_line.0.display()));
+                    return Err(format!("can't process file {}", diff_line.0.display()).into()); // FlowUpdate::error(&format!("can't process file {}", diff_line.0.display()));
                 }
             }
         }
 
         let mut diff_call_keys = HashSet::new();
+        // put breakpoints on all of them
+        for diff_line in &diff_lines {
+            let _ = replay.add_breakpoint(&diff_line.0.display().to_string(),  diff_line.1)?;
+        }
+        // TODO: breakpoints on function entries or function names as well
+        //   so => we can count how many stops?
+        // 
+        // just continue for now in next diff flow step; and if we go through the function/function entry line or
+        // breakpoint; count a next call for it;
+        // maybe this will just work because they're registered as loop first line
+
         for step in db.step_from(runtime_tracing::StepId(0), true) {
             if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
                 diff_call_keys.insert(step.call_key.0);
@@ -71,7 +82,7 @@ impl FlowPreloader {
        
         let mut call_flow_preloader = CallFlowPreloader::new(self, Location::default(), diff_lines, diff_call_keys, FlowMode::Diff, trace_kind);
         let location = Location { line: 1, ..Location::default() };
-        call_flow_preloader.load_flow(location, replay)
+        Ok(call_flow_preloader.load_flow(location, replay))
     }
 
     // fn load_file(&mut self, path: &str) {
