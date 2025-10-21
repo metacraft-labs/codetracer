@@ -191,6 +191,30 @@
           chmod +x "$out/bin"/*
         '';
 
+        appimagePayload = pkgs.runCommand "codetracer-appimage-payload" {
+          nativeBuildInputs = [
+            pkgs.bashInteractive
+            pkgs.coreutils
+          ];
+        } ''
+          set -euo pipefail
+
+          mkdir -p "$out"
+          cp -R ${appimageDeps}/. "$out/"
+          chmod -R u+w "$out"
+          mkdir -p "$out/bin"
+
+          install_bin() {
+            local src=$1
+            local dest=$2
+            cp -L "$src" "$out/bin/$(basename "$dest")"
+            chmod +x "$out/bin/$(basename "$dest")"
+          }
+
+          install_bin ${db-backend}/bin/db-backend db-backend
+          install_bin ${backend-manager}/bin/backend-manager backend-manager
+        '';
+
         indexJavascript = stdenv.mkDerivation {
           name = "index.js";
           pname = "index.js";

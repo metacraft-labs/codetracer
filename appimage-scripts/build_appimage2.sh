@@ -34,9 +34,9 @@ mkdir -p "${APP_DIR}"
 export NIX_CODETRACER_EXE_DIR="${APP_DIR}"
 
 CURRENT_NIX_SYSTEM=$(nix eval --impure --raw --expr 'builtins.currentSystem')
-APPIMAGE_DEPS=$(nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.appimageDeps" --no-link --print-out-paths | tail -n1)
+APPIMAGE_PAYLOAD=$(nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.appimagePayload" --no-link --print-out-paths | tail -n1)
 
-cp -Lr "${APPIMAGE_DEPS}/." "${APP_DIR}/"
+cp -Lr "${APPIMAGE_PAYLOAD}/." "${APP_DIR}/"
 
 chmod -R u+rwX "${APP_DIR}"
 
@@ -84,14 +84,8 @@ exec "${HERE}/bin/ct_unwrapped" "$@"
 
 EOF
 
-# Build/setup db-backend
-bash "${ROOT_PATH}/appimage-scripts/build_db_backend.sh"
-
-# Build/setup backend-manager
-bash "${ROOT_PATH}/appimage-scripts/build_backend_manager.sh"
-
 # Ensure copied binaries are executable.
-chmod +x "${APP_DIR}/bin/"{cargo-stylus,ctags,curl,nargo,node,wazero}
+chmod +x "${APP_DIR}/bin/"{cargo-stylus,ctags,curl,nargo,node,wazero,db-backend,backend-manager}
 
 chmod -R +x "${APP_DIR}/bin"
 chmod -R +x "${APP_DIR}/electron"
