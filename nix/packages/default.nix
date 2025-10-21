@@ -127,22 +127,50 @@
           '';
         };
 
-        appimageDeps = pkgs.symlinkJoin {
-          name = "codetracer-appimage-deps";
-          paths = [
-            sqlite
-            pcre
-            libzip
-            openssl
-            libuv
-            cargo-stylus
-            wazero
-            noir
-            pkgs.universal-ctags
-            pkgs.curl
-            pkgs.nodejs_20
+        appimageDeps = pkgs.runCommand "codetracer-appimage-deps" {
+          nativeBuildInputs = [
+            pkgs.bashInteractive
+            pkgs.coreutils
           ];
-        };
+        } ''
+          set -euo pipefail
+          shopt -s nullglob
+
+          mkdir -p "$out/bin" "$out/lib"
+
+          copy_libs() {
+            for pattern in "$@"; do
+              for lib in $pattern; do
+                cp -L "$lib" "$out/lib/"
+              done
+            done
+          }
+
+          copy_bins() {
+            while [ "$#" -gt 0 ]; do
+              cp -L "$1" "$out/bin/"
+              shift
+            done
+          }
+
+          copy_libs \
+            ${sqlite.out}/lib/libsqlite3.so* \
+            ${pcre.out}/lib/libpcre.so* \
+            ${libzip.out}/lib/libzip.so* \
+            ${openssl.out}/lib/libssl.so* \
+            ${openssl.out}/lib/libcrypto.so* \
+            ${libuv.out}/lib/libuv.so*
+
+          copy_bins \
+            ${cargo-stylus}/bin/cargo-stylus \
+            ${wazero}/bin/wazero \
+            ${noir}/bin/nargo \
+            ${pkgs.universal-ctags}/bin/ctags \
+            ${pkgs.curl}/bin/curl \
+            ${pkgs.nodejs_20}/bin/node
+
+          chmod +x "$out/bin"/*
+        '';
 
         indexJavascript = stdenv.mkDerivation {
           name = "index.js";

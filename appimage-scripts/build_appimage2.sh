@@ -28,7 +28,7 @@ if [ -e "${ROOT_PATH}/CodeTracer.AppImage" ]; then
 fi
 
 rm -rf "${APP_DIR}"
-mkdir -p "${APP_DIR}/"{bin,src,lib,views}
+mkdir -p "${APP_DIR}"
 
 # This environment variable controls where build artifacts and static resources end up.
 export NIX_CODETRACER_EXE_DIR="${APP_DIR}"
@@ -36,72 +36,11 @@ export NIX_CODETRACER_EXE_DIR="${APP_DIR}"
 CURRENT_NIX_SYSTEM=$(nix eval --impure --raw --expr 'builtins.currentSystem')
 APPIMAGE_DEPS=$(nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.appimageDeps" --no-link --print-out-paths | tail -n1)
 
-copy_lib_from_derivation() {
-  local lib_name=$1
-  local copied=false
+cp -Lr "${APPIMAGE_DEPS}/." "${APP_DIR}/"
 
-  if [ -f "${APPIMAGE_DEPS}/lib/${lib_name}" ]; then
-    cp -L "${APPIMAGE_DEPS}/lib/${lib_name}" "${APP_DIR}/lib/"
-    copied=true
-  fi
+chmod -R u+rwX "${APP_DIR}"
 
-  if [ -f "${APPIMAGE_DEPS}/lib64/${lib_name}" ]; then
-    cp -L "${APPIMAGE_DEPS}/lib64/${lib_name}" "${APP_DIR}/lib/"
-    copied=true
-  fi
-
-  if [ "${copied}" = false ]; then
-    return 1
-  fi
-
-  return 0
-}
-
-copy_required_lib() {
-  local lib_name=$1
-  if ! copy_lib_from_derivation "${lib_name}"; then
-    echo "Required library ${lib_name} is missing from ${APPIMAGE_DEPS}" >&2
-    exit 1
-  fi
-}
-
-copy_optional_lib() {
-  local lib_name=$1
-  if ! copy_lib_from_derivation "${lib_name}"; then
-    echo "Optional library ${lib_name} not found; continuing." >&2
-  fi
-}
-
-copy_binary_from_derivation() {
-  local binary_name=$1
-  local destination="${APP_DIR}/bin/${binary_name}"
-
-  if [ ! -f "${APPIMAGE_DEPS}/bin/${binary_name}" ]; then
-    echo "Required binary ${binary_name} is missing from ${APPIMAGE_DEPS}" >&2
-    exit 1
-  fi
-
-  cp -L "${APPIMAGE_DEPS}/bin/${binary_name}" "${destination}"
-}
-
-# Copy shared libraries that were previously fetched via individual nix build/eval calls.
-copy_required_lib "libsqlite3.so.0"
-copy_optional_lib "libsqlite3.so"
-copy_required_lib "libpcre.so.1"
-copy_required_lib "libzip.so.5"
-copy_required_lib "libssl.so.3"
-copy_optional_lib "libssl.so"
-copy_required_lib "libcrypto.so.3"
-copy_optional_lib "libcrypto.so"
-copy_required_lib "libuv.so.1"
-
-# Copy binaries sourced from Nix packages.
-copy_binary_from_derivation "wazero"
-copy_binary_from_derivation "cargo-stylus"
-copy_binary_from_derivation "nargo"
-copy_binary_from_derivation "ctags"
-copy_binary_from_derivation "curl"
-copy_binary_from_derivation "node"
+mkdir -p "${APP_DIR}/bin" "${APP_DIR}/src" "${APP_DIR}/views"
 
 # Install Ruby
 bash "${ROOT_PATH}/appimage-scripts/install_ruby.sh"
