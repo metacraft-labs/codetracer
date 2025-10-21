@@ -158,42 +158,18 @@ else
   INTERPRETER_PATH=/lib64/ld-linux-x86-64.so.2
 fi
 
-# Patchelf the executable's interpreter
+# Patchelf the executable's interpreter for locally built components
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/ct_unwrapped"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/db-backend"
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/db-backend-record"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/backend-manager"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/nargo"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/wazero"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/ctags"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/curl"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/cargo-stylus"
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/bin/node"
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/ruby/bin/ruby"
 
 # Clear up the executable's rpath
 patchelf --remove-rpath "${APP_DIR}/bin/ct_unwrapped"
-patchelf --remove-rpath "${APP_DIR}/bin/db-backend"
 patchelf --remove-rpath "${APP_DIR}/bin/db-backend-record"
-patchelf --remove-rpath "${APP_DIR}/bin/backend-manager"
-patchelf --remove-rpath "${APP_DIR}/bin/nargo"
-patchelf --remove-rpath "${APP_DIR}/bin/wazero"
-patchelf --remove-rpath "${APP_DIR}/bin/ctags"
-patchelf --remove-rpath "${APP_DIR}/bin/curl"
-patchelf --remove-rpath "${APP_DIR}/bin/cargo-stylus"
-patchelf --remove-rpath "${APP_DIR}/bin/node"
 patchelf --remove-rpath "${APP_DIR}/ruby/bin/ruby"
 
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/node"
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/ct_unwrapped"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/db-backend"
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/db-backend-record"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/backend-manager"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/nargo"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/wazero"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/ctags"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/curl"
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/bin/node"
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/ruby/bin/ruby"
 
 APPIMAGE_ARCH=${CURRENT_ARCH}

@@ -134,6 +134,8 @@
             pkgs.findutils
             pkgs.gnugrep
             pkgs.pax-utils
+            pkgs.file
+            pkgs.patchelf
           ];
         } ''
           set -euo pipefail
@@ -189,12 +191,34 @@
             ${pkgs.nodejs_20}/bin/node
 
           chmod +x "$out/bin"/*
+
+          INTERPRETER_PATH="${
+            if pkgs.stdenv.hostPlatform.system == "aarch64-linux"
+            then "/lib/ld-linux-aarch64.so.1"
+            else "/lib64/ld-linux-x86-64.so.2"
+          }"
+
+          patch_binary() {
+            local bin=$1
+            if file "$bin" | grep -q 'ELF'; then
+              patchelf --remove-rpath "$bin" || true
+              patchelf --set-interpreter "''${INTERPRETER_PATH}" "$bin"
+              patchelf --set-rpath '$ORIGIN/../lib' "$bin"
+            fi
+          }
+
+          for bin in "$out/bin"/*; do
+            [ -f "$bin" ] || continue
+            patch_binary "$bin" || true
+          done
         '';
 
         appimagePayload = pkgs.runCommand "codetracer-appimage-payload" {
           nativeBuildInputs = [
             pkgs.bashInteractive
             pkgs.coreutils
+            pkgs.file
+            pkgs.patchelf
           ];
         } ''
           set -euo pipefail
@@ -204,11 +228,27 @@
           chmod -R u+w "$out"
           mkdir -p "$out/bin"
 
+          INTERPRETER_PATH="${
+            if pkgs.stdenv.hostPlatform.system == "aarch64-linux"
+            then "/lib/ld-linux-aarch64.so.1"
+            else "/lib64/ld-linux-x86-64.so.2"
+          }"
+
+          patch_binary() {
+            local bin=$1
+            if file "$bin" | grep -q 'ELF'; then
+              patchelf --remove-rpath "$bin" || true
+              patchelf --set-interpreter "''${INTERPRETER_PATH}" "$bin"
+              patchelf --set-rpath '$ORIGIN/../lib' "$bin"
+            fi
+          }
+
           install_bin() {
             local src=$1
             local dest=$2
             cp -L "$src" "$out/bin/$(basename "$dest")"
             chmod +x "$out/bin/$(basename "$dest")"
+            patch_binary "$out/bin/$(basename "$dest")" || true
           }
 
           install_bin ${db-backend}/bin/db-backend db-backend
