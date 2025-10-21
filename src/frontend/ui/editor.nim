@@ -1154,13 +1154,13 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
 
 proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, lineNumber: int): Node =
   var zoneDom = document.createElement("div")
-  zoneDom.id = fmt"diff-view-zone-{id}"
+  zoneDom.id = fmt"diff-view-zone-{self.id}-{id}"
   zoneDom.class = "diff-view-zone"
   zoneDom.style.display = "flex"
   zoneDom.style.fontSize = cstring($self.data.ui.fontSize) & cstring"px"
 
   var editorDom = document.createElement("div")
-  var selector = fmt"diffEditorComponent-{id}"
+  var selector = fmt"diffEditorComponent-{self.id}-{id}"
   editorDom.id = selector
 
   let editorContentLeft = self.monacoEditor
