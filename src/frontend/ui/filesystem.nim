@@ -63,7 +63,7 @@ const ICON_MAP = {
   "gitignore": "devicon-git-plain",
   "gitattributes": "devicon-git-plain",
   "gitmodules": "devicon-git-plain",
-  
+
   # Editors and Config Files
   "editorconfig": "devicon-readthedocs-original",
   "vscode": "devicon-visualstudio-plain",
@@ -126,6 +126,17 @@ proc mapDiff(service: EditorService, node: CodetracerFile) =
         service.diffId.add(&"1_{service.index}_anchor")
     mapDiff(service, child)
 
+proc openTab(currentPath: cstring) =
+  data.openTab(data.trace.outputFolder & "files".cstring & currentPath, ViewSource)
+
+proc diffItem(path: string, klass: string): VNode =
+  buildHtml(tdiv(
+    class = fmt"diff-file-path {klass}",
+    onclick = proc(ev: Event, tg: VNode) {.closure.} =
+      data.openTab(path, ViewSource)
+  )):
+    text path.split("/")[^1]
+
 method render*(self: FilesystemComponent): VNode =
   if not self.initFilesystem:
     kxiMap["filesystemComponent"].afterRedraws.add(proc =
@@ -147,7 +158,7 @@ method render*(self: FilesystemComponent): VNode =
 
               jqFind(".filesystem").toJs.on(
                 "ready.jstree",
-                proc(e: js, node: jsobject(node=CodetracerFile)) = 
+                proc(e: js, node: jsobject(node=CodetracerFile)) =
                   for id in self.service.diffId:
                     jqFind("#j" & id).addClass("diff-file")
               )
@@ -196,10 +207,6 @@ method render*(self: FilesystemComponent): VNode =
     )
     if not self.data.startOptions.diff.isNil:
       tdiv(class = "diff-files-list"):
-        for fileDiff in self.data.startOptions.diff.files:
-          tdiv(
-            class = "diff-file-path",
-            onclick = proc(ev: Event, tg: VNode) =
-              data.openTab(fileDiff.currentPath, ViewSource)
-          ):
-            text fileDiff.currentPath.split("/")[^1]
+        for i, fd in self.data.startOptions.diff.files:
+          let klass = if i mod 2 == 0: "path-even" else: "path-odd"
+          diffItem($fd.currentPath, klass)
