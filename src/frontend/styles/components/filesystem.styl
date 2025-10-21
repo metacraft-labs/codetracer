@@ -32,8 +32,21 @@
   height: 20%
   display: flex
   flex-direction: column
-  border-top: 4px solid black
-  overflow: scroll
+  border-top: 4px solid PRIMARY_BASE
+  overflow-y: scroll
+  overflow-x: hidden
+  margin-left: 2px
+  background-color: PRIMARY_BASE
+
+  &::-webkit-scrollbar-thumb
+    border-color: PRIMARY_BASE
+    margin-right: 2px
 
 .diff-file-path
   cursor: pointer
+  padding-left: 8px
+
+.path-odd
+  background: INACTIVE_BASE
+.path-even
+  background: ACTIVE_ROW

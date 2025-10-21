@@ -1320,7 +1320,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           lang = LangRust
 
         cdebug lang
-  
+
         tabInfo.monacoEditor = monaco.editor.create(
           jq(selector),
           MonacoEditorOptions(
