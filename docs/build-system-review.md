@@ -108,4 +108,7 @@ and output directory `src/public/dist` using `webpack.config.js`.【F:webpack.co
 A Justfile-oriented build driver is available as a proof of concept. Invoke it with
 `just poc <recipe>` to exercise centralized build, test, and packaging workflows while
 maintaining the existing commands. See `docs/build-system-just-poc.md` for the
-overview and `just/poc.just` for the implementation.【F:docs/build-system-just-poc.md†L1-L56】【F:just/poc.just†L1-L136】
+overview and `just/poc.just` for the implementation.【F:docs/build-system-just-poc.md†L1-L63】【F:just/poc.just†L1-L152】 The
+driver now wraps the bespoke AppImage pipeline via `build:appimage`, ensuring the
+AppDir assembly scripts and tooling checks are accessible through the centralized
+interface.【F:just/poc.just†L1-L152】

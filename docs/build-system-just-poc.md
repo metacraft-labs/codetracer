@@ -29,6 +29,8 @@ The proof-of-concept driver groups related commands under namespaces:
   created).
 - `build:*` recipes build each component (Tup application, frontend bundle,
   Rust backend, MdBook documentation) and aggregate into `build:all`.
+- `build:appimage` prepares the bespoke AppDir and emits `CodeTracer.AppImage`
+  using the existing shell scripts while checking required tooling.
 - `dev:watch` coordinates Tup and Webpack watchers to mirror the current
   development workflow in a single command.
 - `test:*`, `lint:rust`, and `format:rust` wrap existing verification steps so

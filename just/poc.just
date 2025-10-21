@@ -6,6 +6,7 @@ repo_root := justfile_directory() + "/.."
 src_dir := repo_root + "/src"
 node_bin := repo_root + "/node_modules/.bin"
 docs_dir := repo_root + "/docs"
+appimage_scripts_dir := repo_root + "/appimage-scripts"
 
 # Aggregate entry point -----------------------------------------------------
 
@@ -51,7 +52,26 @@ workspace:ensure-nix:
     exit 1; \
   fi
 
+workspace:ensure-appimagetool:
+  if ! command -v appimagetool >/dev/null 2>&1; then \
+    printf '\nappimagetool is required for AppImage builds.\n' >&2; \
+    exit 1; \
+  fi
+
+workspace:ensure-patchelf:
+  if ! command -v patchelf >/dev/null 2>&1; then \
+    printf '\npatchelf is required for AppImage builds.\n' >&2; \
+    exit 1; \
+  fi
+
+workspace:ensure-lddtree:
+  if ! command -v lddtree >/dev/null 2>&1; then \
+    printf '\nlddtree is required for AppImage builds.\n' >&2; \
+    exit 1; \
+  fi
+
 workspace:check := workspace:prepare workspace:ensure-node workspace:ensure-mdbook workspace:ensure-tup workspace:ensure-cargo
+workspace:check-appimage := workspace:check workspace:ensure-nix workspace:ensure-appimagetool workspace:ensure-patchelf workspace:ensure-lddtree
 
 # Build recipes -------------------------------------------------------------
 
@@ -79,6 +99,11 @@ build:packages := workspace:ensure-node workspace:ensure-tup workspace:ensure-ni
 build:packages:
   cd {{repo_root}}
   nix bundle --bundler github:NixOS/bundlers#toDEB --print-build-logs ".?submodules=1#codetracer"
+
+build:appimage := workspace:check-appimage
+build:appimage:
+  cd {{repo_root}}
+  bash {{appimage_scripts_dir}}/build_appimage.sh
 
 build:all := build:app build:frontend build:db-backend build:docs
 build:all:
