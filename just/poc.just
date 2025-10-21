@@ -7,6 +7,7 @@ src_dir := repo_root + "/src"
 node_bin := repo_root + "/node_modules/.bin"
 docs_dir := repo_root + "/docs"
 appimage_scripts_dir := repo_root + "/appimage-scripts"
+non_nix_build_dir := repo_root + "/non-nix-build"
 
 # Aggregate entry point -----------------------------------------------------
 
@@ -52,6 +53,12 @@ workspace:ensure-nix:
     exit 1; \
   fi
 
+workspace:ensure-brew:
+  if ! command -v brew >/dev/null 2>&1; then \
+    printf '\nbrew is required for macOS packaging builds.\n' >&2; \
+    exit 1; \
+  fi
+
 workspace:ensure-appimagetool:
   if ! command -v appimagetool >/dev/null 2>&1; then \
     printf '\nappimagetool is required for AppImage builds.\n' >&2; \
@@ -72,6 +79,7 @@ workspace:ensure-lddtree:
 
 workspace:check := workspace:prepare workspace:ensure-node workspace:ensure-mdbook workspace:ensure-tup workspace:ensure-cargo
 workspace:check-appimage := workspace:check workspace:ensure-nix workspace:ensure-appimagetool workspace:ensure-patchelf workspace:ensure-lddtree
+workspace:check-dmg := workspace:ensure-brew
 
 # Build recipes -------------------------------------------------------------
 
@@ -104,6 +112,19 @@ build:appimage := workspace:check-appimage
 build:appimage:
   cd {{repo_root}}
   bash {{appimage_scripts_dir}}/build_appimage.sh
+
+build:mac-app := workspace:check workspace:check-dmg
+build:mac-app:
+  cd {{non_nix_build_dir}}
+  source env.sh
+  ./build_in_simple_env.sh "$platform" "$os"
+  ./build_mac_app.sh
+
+build:dmg := build:mac-app
+build:dmg:
+  cd {{non_nix_build_dir}}
+  source env.sh
+  ./build_dmg.sh
 
 build:all := build:app build:frontend build:db-backend build:docs
 build:all:

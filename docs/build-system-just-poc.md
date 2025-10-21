@@ -31,6 +31,9 @@ The proof-of-concept driver groups related commands under namespaces:
   Rust backend, MdBook documentation) and aggregate into `build:all`.
 - `build:appimage` prepares the bespoke AppDir and emits `CodeTracer.AppImage`
   using the existing shell scripts while checking required tooling.
+- `build:mac-app` and `build:dmg` wrap the non-Nix macOS packaging scripts to
+  create the `.app` bundle and `.dmg` image from the same centralized entry
+  point.
 - `dev:watch` coordinates Tup and Webpack watchers to mirror the current
   development workflow in a single command.
 - `test:*`, `lint:rust`, and `format:rust` wrap existing verification steps so

@@ -68,6 +68,7 @@ and output directory `src/public/dist` using `webpack.config.js`.【F:webpack.co
 | `non-nix-build/build.sh` | Platform-specific desktop bundle (`dist` directory, macOS app/dmg). | Dispatches to `build_in_simple_env.sh`, optional macOS packaging pipeline. | `non-nix-build/build.sh` L1-L34【F:non-nix-build/build.sh†L1-L34】 |
 | `non-nix-build/build_in_simple_env.sh` | Populates `$DIST_DIR` with binaries, assets, and wrappers. | Installs node deps, builds Nim assets, compiles Rust backends, copies runtime assets, wraps `ct`. | `non-nix-build/build_in_simple_env.sh` L1-L74【F:non-nix-build/build_in_simple_env.sh†L1-L74】 |
 | `appimage-scripts/build_appimage.sh` | Produces `CodeTracer.AppImage` after assembling an AppDir. | Installs runtime deps, builds Nim/Rust binaries, copies assets, patches binaries, runs `appimagetool`. | `appimage-scripts/build_appimage.sh` L1-L305【F:appimage-scripts/build_appimage.sh†L1-L305】 |
+| `non-nix-build/build_dmg.sh` | Packages the macOS `.app` bundle into `CodeTracer.dmg`. | Installs `create-dmg` via Homebrew and invokes it with custom window/icon metadata. | `non-nix-build/build_dmg.sh` L1-L13【F:non-nix-build/build_dmg.sh†L1-L13】 |
 
 ## Artifact Inventory
 - **Desktop executables**: `ct`, `codetracer_depending_on_env_vars_in_tup`, `db-backend`,
@@ -108,7 +109,8 @@ and output directory `src/public/dist` using `webpack.config.js`.【F:webpack.co
 A Justfile-oriented build driver is available as a proof of concept. Invoke it with
 `just poc <recipe>` to exercise centralized build, test, and packaging workflows while
 maintaining the existing commands. See `docs/build-system-just-poc.md` for the
-overview and `just/poc.just` for the implementation.【F:docs/build-system-just-poc.md†L1-L63】【F:just/poc.just†L1-L152】 The
-driver now wraps the bespoke AppImage pipeline via `build:appimage`, ensuring the
-AppDir assembly scripts and tooling checks are accessible through the centralized
-interface.【F:just/poc.just†L1-L152】
+overview and `just/poc.just` for the implementation.【F:docs/build-system-just-poc.md†L1-L63】【F:just/poc.just†L1-L181】 The
+driver now wraps the bespoke AppImage pipeline via `build:appimage` and the macOS
+packaging flow via `build:mac-app` / `build:dmg`, ensuring the AppDir assembly
+scripts and disk image tooling are accessible through the centralized
+interface.【F:just/poc.just†L111-L127】
