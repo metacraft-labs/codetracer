@@ -14,7 +14,9 @@
       rubyPkg = pkgs.ruby_3_3;
     in
     {
-      packages = rec {
+      packages =
+        let
+          rawPackages = rec {
         upstream-nim-codetracer = pkgs.buildPackages.nim1.overrideAttrs (_: {
           postInstallPhase = ''
             mv $out/nim $out/upstream-nim
@@ -150,7 +152,7 @@
 
           copy_libs() {
             for lib in "$@"; do
-              cp -n -L "$lib" "$out/lib/" || true
+              cp -n -L "$lib" "$out/lib/"
             done
           }
 
@@ -182,7 +184,7 @@
             for binary in "$@"; do
               lddtree -l "$binary" | grep /nix | grep -v glibc | while read -r dep; do
                 [ -f "$dep" ] || continue
-                cp -n -L "$dep" "$out/lib/" || true
+                cp -n -L "$dep" "$out/lib/"
               done
             done
           }
@@ -207,7 +209,8 @@
           patch_binary() {
             local bin=$1
             if file "$bin" | grep -q 'ELF'; then
-              patchelf --remove-rpath "$bin" || true
+              chmod u+w "$bin"
+              patchelf --remove-rpath "$bin"
               patchelf --set-interpreter "''${INTERPRETER_PATH}" "$bin"
               patchelf --set-rpath '$ORIGIN/../lib' "$bin"
             fi
@@ -215,10 +218,10 @@
 
           for bin in "$out/bin"/*; do
             [ -f "$bin" ] || continue
-            patch_binary "$bin" || true
+            patch_binary "$bin"
           done
 
-          patch_binary "$out/ruby/bin/ruby" || true
+          patch_binary "$out/ruby/bin/ruby"
         '';
 
         nimBuildInputs = [
@@ -480,7 +483,8 @@
           patch_binary() {
             local bin=$1
             if file "$bin" | grep -q 'ELF'; then
-              patchelf --remove-rpath "$bin" || true
+              chmod u+w "$bin"
+              patchelf --remove-rpath "$bin"
               patchelf --set-interpreter "''${INTERPRETER_PATH}" "$bin"
               patchelf --set-rpath '$ORIGIN/../lib' "$bin"
             fi
@@ -491,7 +495,7 @@
             local dest=$2
             cp -L "$src" "$out/bin/$(basename "$dest")"
             chmod +x "$out/bin/$(basename "$dest")"
-            patch_binary "$out/bin/$(basename "$dest")" || true
+            patch_binary "$out/bin/$(basename "$dest")"
           }
 
           install_bin ${db-backend}/bin/db-backend db-backend
@@ -514,7 +518,7 @@
           cat <<'EOF' > "$out/bin/ct"
 #!/usr/bin/env bash
 
-HERE=''${HERE:-$(dirname "$(readlink -f "$0")")}
+HERE=''${HERE:-$(dirname "$(readlink -f "$0")")/..}
 
 # TODO: This includes references to x86_64. What about aarch64?
 
@@ -561,9 +565,9 @@ EOF
 
           cp "''${SRC_ICONSET_DIR}/icon_256x256.png" "$out/codetracer.png"
 
-          patch_binary "$out/bin/ct_unwrapped" || true
-          patch_binary "$out/bin/db-backend-record" || true
-          patch_binary "$out/ruby/bin/ruby" || true
+          patch_binary "$out/bin/ct_unwrapped"
+          patch_binary "$out/bin/db-backend-record"
+          patch_binary "$out/ruby/bin/ruby"
         '';
 
         indexJavascript = stdenv.mkDerivation {
@@ -1123,5 +1127,12 @@ EOF
 
         default = codetracer;
       };
+        in
+        builtins.removeAttrs rawPackages [
+          "nimBuildInputs"
+          "nimBuildSetup"
+          "mkNimBinary"
+          "mkNimJs"
+        ];
     };
 }
