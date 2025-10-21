@@ -118,6 +118,12 @@ proc changeIcons*(file: CodetracerFile) =
     child.changeIcons()
 
 
+proc reapplyDiffClasses(self: FilesystemComponent) =
+  for id in self.service.diffId:
+    let sel = "#j" & id
+    let el  = jqFind(sel)
+    if not el.isNil: el.addClass("diff-file")
+
 proc mapDiff(service: EditorService, node: CodetracerFile) =
   for child in node.children:
     service.index += 1
@@ -161,6 +167,21 @@ method render*(self: FilesystemComponent): VNode =
                 proc(e: js, node: jsobject(node=CodetracerFile)) =
                   for id in self.service.diffId:
                     jqFind("#j" & id).addClass("diff-file")
+              )
+
+              jqFind(".filesystem").toJs.on(cstring"refresh.jstree",
+                proc(e: js, node: jsobject(node=CodetracerFile)) =
+                  self.reapplyDiffClasses()
+              )
+
+              jqFind(".filesystem").toJs.on(cstring"load_node.jstree",
+                proc(e: js, node: jsobject(node=CodetracerFile)) =
+                  self.reapplyDiffClasses()
+              )
+
+              jqFind(".filesystem").toJs.on(cstring"open_node.jstree",
+                proc(e: js, node: jsobject(node=CodetracerFile)) =
+                  self.reapplyDiffClasses()
               )
 
               jqFind(".filesystem").toJs.on(cstring"changed.jstree",
