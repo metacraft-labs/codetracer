@@ -429,6 +429,7 @@
             pkgs.bashInteractive
             pkgs.coreutils
             pkgs.file
+            pkgs.gnused
             pkgs.patchelf
           ];
         } ''
@@ -439,8 +440,28 @@
           chmod -R u+w "$out"
           mkdir -p "$out/bin"
           mkdir -p "$out/src"
+          mkdir -p "$out/views"
 
           cp -Lr ${appimageCss}/frontend "$out/"
+          cp -Lr ${src}/libs/codetracer-ruby-recorder "$out/codetracer-ruby-recorder"
+
+          cp -L ${src}/src/helpers.js "$out/helpers.js"
+          cp -L ${src}/src/helpers.js "$out/src/helpers.js"
+
+          cp -L ${src}/src/frontend/index.html "$out/index.html"
+          cp -L ${src}/src/frontend/index.html "$out/src/index.html"
+
+          cp -L ${src}/src/frontend/subwindow.html "$out/subwindow.html"
+          cp -L ${src}/src/frontend/subwindow.html "$out/src/subwindow.html"
+
+          cp -L ${src}/views/server_index.ejs "$out/views/server_index.ejs"
+
+          cp -R ${src}/src/config "$out/config"
+          chmod -R u+w "$out/config"
+          sed -i 's/skipInstall.*/skipInstall: false/' "$out/config/default_config.yaml"
+
+          cp -R ${src}/resources "$out/resources"
+          cp -L ${src}/resources/codetracer.desktop "$out/codetracer.desktop"
 
           INTERPRETER_PATH="${
             if pkgs.stdenv.hostPlatform.system == "aarch64-linux"
@@ -481,6 +502,56 @@
 
           cp -L ${appimageSubwindowJs}/subwindow.js "$out/subwindow.js"
           cp -L ${appimageSubwindowJs}/subwindow.js "$out/src/subwindow.js"
+
+          cat <<'EOF' > "$out/bin/ct"
+#!/usr/bin/env bash
+
+HERE=''${HERE:-$(dirname "$(readlink -f "$0")")}
+
+# TODO: This includes references to x86_64. What about aarch64?
+
+exec "''${HERE}/bin/ct_unwrapped" "$@"
+EOF
+          chmod +x "$out/bin/ct"
+
+          cat <<'EOF' > "$out/bin/ruby"
+#!/usr/bin/env bash
+
+HERE="''${HERE:-..}"
+
+# TODO: This includes references to x86_64. What about aarch64?
+export RUBYLIB="''${HERE}/ruby/lib/ruby/3.3.0:''${HERE}/ruby/lib/ruby/3.3.0/x86_64-linux:''${RUBYLIB}"
+
+"''${HERE}/ruby/bin/ruby" "$@"
+
+EOF
+          chmod +x "$out/bin/ruby"
+
+          cat <<'EOF' > "$out/AppRun"
+#!/usr/bin/env bash
+
+export HERE=$(dirname "$(readlink -f "$0")")
+
+# TODO: This includes references to x86_64. What about aarch64?
+export LINKS_PATH_DIR=''${HERE}
+export PATH="''${HERE}/bin:''${PATH}"
+export CODETRACER_RUBY_RECORDER_PATH="''${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
+
+exec ''${HERE}/bin/ct "$@"
+EOF
+          chmod +x "$out/AppRun"
+
+          SRC_ICONSET_DIR="${src}/resources/Icon.iconset"
+          for SIZE in 16 32 128 256 512; do
+            XSIZE="''${SIZE}x''${SIZE}"
+            DST_PATH="$out/usr/share/icons/hicolor/''${XSIZE}/apps/"
+            DOUBLE_SIZE_DST_PATH="$out/usr/share/icons/hicolor/''${XSIZE}@2/apps/"
+            mkdir -p "$DST_PATH" "$DOUBLE_SIZE_DST_PATH"
+            cp "''${SRC_ICONSET_DIR}/icon_''${XSIZE}.png" "''${DST_PATH}/codetracer.png"
+            cp "''${SRC_ICONSET_DIR}/icon_''${XSIZE}@2x.png" "''${DOUBLE_SIZE_DST_PATH}/codetracer.png"
+          done
+
+          cp "''${SRC_ICONSET_DIR}/icon_256x256.png" "$out/codetracer.png"
 
           patch_binary "$out/bin/ct_unwrapped" || true
           patch_binary "$out/bin/db-backend-record" || true

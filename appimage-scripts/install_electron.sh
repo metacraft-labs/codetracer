@@ -20,3 +20,5 @@ export LD_LIBRARY_PATH="${HERE}/ruby/lib:${HERE}/lib:/usr/lib/:/usr/lib64/:/usr/
 
 "${ELECTRON_DIR}"/electron --no-sandbox "$@"
 EOF
+
+chmod +x "${APP_DIR}/bin/electron"
