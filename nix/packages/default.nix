@@ -10,6 +10,8 @@
       inherit (pkgs) stdenv;
 
       src = ../../.;
+
+      rubyPkg = pkgs.ruby_3_3;
     in
     {
       packages = rec {
@@ -141,7 +143,10 @@
           set -euo pipefail
           shopt -s nullglob
 
-          mkdir -p "$out/bin" "$out/lib"
+          mkdir -p "$out/bin" "$out/lib" "$out/ruby"
+
+          cp -R ${rubyPkg}/. "$out/ruby"
+          chmod -R u+w "$out/ruby"
 
           copy_libs() {
             for lib in "$@"; do
@@ -188,7 +193,8 @@
             ${noir}/bin/nargo \
             ${pkgs.universal-ctags}/bin/ctags \
             ${pkgs.curl}/bin/curl \
-            ${pkgs.nodejs_20}/bin/node
+            ${pkgs.nodejs_20}/bin/node \
+            ${rubyPkg}/bin/ruby
 
           chmod +x "$out/bin"/*
 
@@ -211,6 +217,8 @@
             [ -f "$bin" ] || continue
             patch_binary "$bin" || true
           done
+
+          patch_binary "$out/ruby/bin/ruby" || true
         '';
 
         nimBuildInputs = [
@@ -555,6 +563,7 @@ EOF
 
           patch_binary "$out/bin/ct_unwrapped" || true
           patch_binary "$out/bin/db-backend-record" || true
+          patch_binary "$out/ruby/bin/ruby" || true
         '';
 
         indexJavascript = stdenv.mkDerivation {

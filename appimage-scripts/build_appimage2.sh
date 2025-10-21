@@ -49,9 +49,6 @@ cp -Lr "${APPIMAGE_PAYLOAD}/." "${APP_DIR}/"
 
 chmod -R u+rwX "${APP_DIR}"
 
-# Install Ruby
-bash "${ROOT_PATH}/appimage-scripts/install_ruby.sh"
-
 # Copy over electron
 # bash "${ROOT_PATH}/appimage-scripts/install_electron_nix.sh"
 bash "${ROOT_PATH}/appimage-scripts/install_electron.sh"
@@ -67,10 +64,6 @@ cp -Lr "${ROOT_PATH}/src/public/dist/frontend_bundle.js" "${APP_DIR}/frontend_bu
 
 chmod -R +x "${APP_DIR}/electron"
 
-echo "============================"
-echo "AppImage patchelf"
-echo "============================"
-
 CURRENT_ARCH=$(uname -m)
 if [[ "${CURRENT_ARCH}" == "aarch64" ]]; then
   INTERPRETER_PATH=/lib/ld-linux-aarch64.so.1
@@ -78,27 +71,11 @@ else
   INTERPRETER_PATH=/lib64/ld-linux-x86-64.so.2
 fi
 
-
-chmod -R u+w ${APP_DIR}
-# Patchelf the executable's interpreter for locally built components
-# Nim binaries have already been patched in appimagePayload; only patch the
-# Ruby interpreter that we copy in impurely here.
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}/ruby/bin/ruby"
-
-# Clear up the executable's rpath
-patchelf --remove-rpath "${APP_DIR}/ruby/bin/ruby"
-
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}/ruby/bin/ruby"
-
 APPIMAGE_ARCH=${CURRENT_ARCH}
 if [[ "${APPIMAGE_ARCH}" == "aarch64" ]]; then
   # The appimagetool has its own convention for specifying the ARM64 arch.
   APPIMAGE_ARCH=arm_aarch64
 fi
-
-echo "============================"
-echo "AppImagetool"
-echo "============================"
 
 # Use AppImage tool to create AppImage itself
 ARCH=${APPIMAGE_ARCH} appimagetool "${APP_DIR}" CodeTracer.AppImage
