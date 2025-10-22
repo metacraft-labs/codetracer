@@ -6,9 +6,7 @@ echo '##########################################################################
 echo 'Running ui e2e playwright tests'
 echo '###############################################################################'
 
-# TODO: maybe pass the result from the build stage as artifact to this job?
-# TODO: tup generate seems problematic with variants: we need to fix/change the resulting dirs to work correctly
-# ./ci/build/dev.sh
+./ci/build/dev.sh
 
 # trying to make it work with the nix build, instead of the tup build:
 
@@ -25,10 +23,20 @@ echo '##########################################################################
 
 # ./ci/build/nix.sh
 
-# CODETRACER_E2E_CT_PATH="$(pwd)/result/bin/ct"
-# export CODETRACER_E2E_CT_PATH
+CODETRACER_E2E_CT_PATH="$(pwd)/src/build/bin/ct"
+LINKS_PATH_DIR="$(pwd)/src/build"
+NIX_CODETRACER_EXE_DIR="$(pwd)/src/build"
+CODETRACER_LINKS_PATH="$(pwd)/src/build"
 
-# pushd ui-tests
-# nix develop --command ./ci.sh
+export CODETRACER_E2E_CT_PATH
+export LINKS_PATH_DIR
+export NIX_CODETRACER_EXE_DIR
+export CODETRACER_LINKS_PATH
 
-# popd
+pushd ui-tests
+nix develop --command ./ci.sh
+
+popd
+
+git clean -fx ./src/build
+git clean -fx ./src/build-debug

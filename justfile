@@ -14,10 +14,10 @@ build:
   # build-debug/codetracer user-setup
 
   # Start building continuously
-  cd src/build
+  cd src
   tup build-debug
   tup monitor -a
-  cd ../..
+  cd ..
 
   # start webpack
   node_modules/.bin/webpack --watch --progress & # building frontend_bundle.js
@@ -32,20 +32,20 @@ build-once:
   # We have to make the dist directory here, because it's missing on a fresh check out
   # It will be created by the webpack command below, but we have an a chicken and egg
   # problem because the Tupfiles refer to it.
-  mkdir public/dist
+  mkdir -p src/public/dist
 
-  cd src/build
+  cd src
   tup build-debug
-  cd ../..
+  cd ..
 
   # Build frontend_bundle.js in the dist folder
   node_modules/.bin/webpack --progress
 
   # We need to execute another tup run because webpack may have created some new files
   # that tup will discover
-  cd src/build
+  cd src
   tup build-debug
-  cd ../..
+  cd ..
 
 build-docs:
   #!/usr/bin/env bash

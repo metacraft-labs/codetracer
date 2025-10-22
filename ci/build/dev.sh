@@ -31,13 +31,3 @@ TUP_OUTPUT_SCRIPT=tup-generated-build-once.sh
 tup generate --config build-debug/tup.config "$TUP_OUTPUT_SCRIPT"
 ./"$TUP_OUTPUT_SCRIPT"
 rm "$TUP_OUTPUT_SCRIPT"
-
-# Running the generated script populates the staging tree; clean it so that
-# subsequent `tup` invocations (locally or in CI) can start from a fresh slate.
-git clean -fx .
-
-popd
-
-pushd src/build-debug
-git clean -fx .
-popd
