@@ -27,6 +27,10 @@ proc launchElectron*(
   for name, value in envPairs():
     env[name] = value
 
+  # Ensure we never inherit Electron's Node-only mode, which breaks the `require("electron")` module.
+  if env.hasKey("ELECTRON_RUN_AS_NODE"):
+    env.del("ELECTRON_RUN_AS_NODE")
+
   if mode != ElectronLaunchMode.Default:
     env["CODETRACER_LAUNCH_MODE"] = $mode
 

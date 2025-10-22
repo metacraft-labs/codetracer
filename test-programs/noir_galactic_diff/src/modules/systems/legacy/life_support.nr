@@ -7,14 +7,16 @@ pub fn estimate_margin(grid: Field, morale: [Field; 4]) -> Field {
 }
 
 pub fn recycle_capacity(cycles: [Field; 4], efficiency: Field) -> Field {
-    if efficiency as i32 == 0 {
-        return 0;
+    let efficiency_i32 = efficiency as i32;
+    if efficiency_i32 == 0 {
+        0
+    } else {
+        let mut capacity = 0;
+        for i in 0..cycles.len() {
+            let mut cycle = cycles[i] * efficiency;
+            let cycle_i32 = cycle as i32;
+            capacity += (cycle_i32 / 7 + cycle_i32) as Field;
+        }
+        capacity
     }
-    let mut capacity = 0;
-    for i in 0..cycles.len() {
-        let mut cycle = cycles[i] * efficiency;
-        let cycle_i32 = cycle as i32;
-        capacity += (cycle_i32 / 7 + cycle_i32) as Field;
-    }
-    capacity
 }

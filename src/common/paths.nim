@@ -107,15 +107,28 @@ when defined(ctmacos):
   let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/"
   let codetracerCache* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/cache"
 else:
-  let tmpFolder = env.get("TMPDIR",
-                            env.get("TEMPDIR",
-                                    env.get("TEMP",
-                                            env.get("TMP",
-                                                    "/tmp"
-                                            )
-                                    )
-                            )
-  )
+  const
+    # Unix domain sockets are limited to 108 bytes; reserve headroom for suffixes.
+    maxTmpDirLen* = 64
+
+  proc resolveTmpFolder*(): string =
+    ## Pick a temporary directory that keeps derived socket paths short enough
+    ## for Unix domain sockets. Some shells (e.g. Nix) expose long `$TMPDIR`
+    ## values which easily exceed the 108 byte `sun_path` limit once we append
+    ## `codetracer/backend-manager/<pid>.sock`. Fall back to `/tmp` whenever the
+    ## environment-provided candidate is too long.
+    let candidates = @[
+      env.get("TMPDIR", ""),
+      env.get("TEMPDIR", ""),
+      env.get("TEMP", ""),
+      env.get("TMP", "")
+    ]
+    for candidate in candidates:
+      if candidate.len > 0 and candidate.len <= maxTmpDirLen:
+        return candidate
+    "/tmp"
+
+  let tmpFolder = resolveTmpFolder()
   let
     codetracerCache* = tmpFolder / "codetracer/cache"
     codetracerTmpPath* = tmpFolder / "codetracer"

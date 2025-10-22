@@ -194,6 +194,10 @@ tup-generate.vardict
 # playwright ui-tests
 playwright-report
 test-results
+ui-tests-playground/bin/
+ui-tests-playground/obj/
+ui-tests-startup-example/bin/
+ui-tests-startup-example/obj/
 
 # lisp
 *.fasl
