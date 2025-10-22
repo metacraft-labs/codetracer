@@ -1,11 +1,15 @@
 # Tup Build Staging Refactor – Status
 
 ## Completed
-- Step 1: Created the `src/build/` staging layout, moved the root Tupfile/Tuprules plus crate-specific Tupfiles, added the `src/Tupfile` shim, and kept `Tupfile.ini` rooted in `src/`.
+- Relocated the entire Tup graph to `src/build/`, with `Tupfile.ini` still rooted in `src/`; `tup` now runs directly from the staging tree and no `src/Tupfile` shim is needed.
+- Standardized on per-file `SRC_DIR` handling for relocated Tupfiles, added `!cp_preserve` plus `src/build/.gitignore`, and refreshed `.agents/codebase-insights.txt`; no further Tupfile edits are planned.
+- Validated the build: both `tup` and `tup generate` succeed, `just build` / `just build-once` work end-to-end, and their outputs land under `src/build/` or `src/build-debug/build/` as intended.
 
 ## In Progress
-- Step 2: Updating relocated Tupfiles to pull inputs from the original source tree and emit outputs inside `src/build/`. Added `include_rules` to every staged Tupfile, introduced a `!cp_preserve` helper, and rewrote asset copies to use explicit relative paths instead of `!tup_preserve`. Need to validate with `tup` runs (current environment blocks user namespaces) and adjust paths based on the results.
+- Update tooling, scripts, and documentation (CI jobs, `justfile`, Nix shells, onboarding guides) to reference `src/build-debug/build/**` and reflect the new staging entry point.
+- Capture the operational caveat that a generated script populates `src/build/`; developers must run `cd src/build && git clean -fx .` followed by `cd ../build-debug && git clean -fx .` before returning to live `tup` runs.
 
 ## Next
-- Step 2: Validate the updated rules by running `tup` (default + `build-debug`) once user-namespace restrictions are lifted, and fix any remaining path issues that show up.
-- Step 3: Refresh tooling, documentation, and CI scripts to rely on the staging tree and ensure `tup generate` produces artifacts only under `src/build/` and the existing variant directories.
+- Sweep remaining references to `src/build-debug/bin` (arm shell, docs, helper scripts) and switch them to `src/build-debug/build/**`.
+- Document the post-`tup.sh` clean-up sequence across contributor docs and CI scripts, adding automation where possible to enforce a clean staging area.
+- Verify CI and developer tooling run successfully with the updated paths and documented clean-up, then mark ADR 0006 as accepted.

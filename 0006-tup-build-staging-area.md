@@ -16,11 +16,11 @@ We tried `tup generate --builddir …` to sandbox the outputs, but the option is
 
 We will move the entire Tup configuration into a dedicated staging area at `src/build/`, so that both `tup` FUSE runs and generated scripts create or modify files only inside that subtree while still producing the expected variant outputs (`build-debug/`, etc.).
 
-1. **Establish `src/build/` as the staging tree:** Relocate the root `Tupfile` (providing a thin wrapper in `src/Tupfile` if needed) and every subordinate `Tupfile` under a mirrored directory structure rooted at `src/build/`, while keeping `Tupfile.ini` anchored in `src/` so the Tup root remains the project root. Each rule will reference sources in `../` (or higher) as needed, but outputs and intermediate files stay under `src/build/` by default.
-2. **Centralize path conventions:** Introduce helper variables in `Tuprules.tup` (e.g., `SRC_ROOT`, `BUILD_ROOT`, `VARIANT_ROOT`) so recipes can target `src/build/` during generated executions while still honoring variant directories such as `src/build-debug/` when `CONFIG_DEBUG=1` or when explicit output directories are required.
+1. **Establish `src/build/` as the staging tree:** Relocate the root `Tupfile` and every subordinate `Tupfile` under a mirrored directory structure rooted at `src/build/`, while keeping `Tupfile.ini` anchored in `src/` so the Tup root remains the project root. The staged layout becomes the canonical entry point—invocations now run from `src/build/` without requiring a compatibility shim in `src/Tupfile`. Each rule references sources in `../` (or higher) as needed, but outputs and intermediate files stay under `src/build/` by default.
+2. **Stable path conventions via `SRC_DIR`:** Each staged `Tupfile` declares its own source root with a local `SRC_DIR` variable. This per-file approach is sufficient for the refactor and avoids introducing additional global macros.
 3. **Git hygiene:** Add a scoped `.gitignore` inside `src/build/` that admits `tup.sh`, generated metadata (`*.tup` state, temporary outputs), and any new staging directories while keeping declarative build files tracked.
-4. **Tooling alignment:** Update `ci/build/dev.sh`, `justfile`, and shell/Nix helpers to invoke `tup` from `src/build/`. The CI clean step will narrow to `git clean -xfd src/build/` instead of the whole source tree, and hacks that relocate `src/links` become unnecessary.
-5. **Documentation & onboarding:** Refresh contributor docs to explain the new layout, clarifying that FUSE-based workflows (`tup monitor`) and generated scripts both operate inside `src/build/`, while `tup build-debug` continues to populate `src/build-debug/`.
+4. **Tooling alignment:** Update `ci/build/dev.sh`, `justfile`, and shell/Nix helpers to invoke `tup` from `src/build/`. The CI clean step focuses on `src/build/` and `src/build-debug/build/`, and hacks that relocate `src/links` become unnecessary.
+5. **Documentation & onboarding:** Refresh contributor docs to explain the new layout, clarifying that FUSE-based workflows (`tup monitor`) operate inside `src/build/`, while `tup build-debug` and generated scripts populate `src/build-debug/build/`. Highlight that `tup generate` writes into the staging tree and document the clean-up sequence required before running the live `tup` monitor again (`cd src/build && git clean -fx .`, followed by `cd ../build-debug && git clean -fx .`).
 
 ## Alternatives Considered
 
@@ -30,10 +30,10 @@ We will move the entire Tup configuration into a dedicated staging area at `src/
 
 ## Consequences
 
-- **Positive:** Generated scripts run cleanly without mangling tracked files; CI simplifications; consistent developer experience across environments lacking FUSE; easier to inspect or purge build artifacts via `git clean src/build`.
+- **Positive:** Generated scripts run cleanly without polluting tracked files; CI simplifications; consistent developer experience across environments lacking FUSE; easier to inspect or purge build artifacts via `git clean src/build` and `git clean src/build-debug/build`.
 - **Neutral/Enabling:** Establishes clearer separation between declarative build metadata and source assets, paving the way for additional variants or build caching under `src/build/`.
-- **Negative:** Requires refactoring every `Tupfile` path to account for the new root; risk of path mistakes during migration; temporary churn for developers with pending Tup changes.
-- **Risks & Mitigations:** Misconfigured outputs could still escape the sandbox—mitigate by adding integration tests that run `tup generate` + `tup.sh` and assert the set of touched paths. Variant parity must be verified by running `tup build-debug` before and after the move within CI.
+- **Negative:** Requires refactoring every `Tupfile` path to account for the new root; risk of path mistakes during migration; temporary churn for developers with pending Tup changes. Running a generated script will populate `src/build/`; developers must clean both `src/build/` and `src/build-debug/` before resuming normal `tup` usage.
+- **Risks & Mitigations:** Misconfigured outputs could still escape the sandbox—mitigate by adding integration tests that run `tup generate` + `tup.sh` and assert the set of touched paths. Variant parity must be verified by running `tup build-debug` before and after the move within CI. Document the clean-up sequence after generated runs to avoid confusing residual artifacts.
 
 ## Key Locations
 
@@ -44,14 +44,14 @@ We will move the entire Tup configuration into a dedicated staging area at `src/
 
 ## Implementation Notes
 
-1. Mirror the existing Tup hierarchy under `src/build/`, keeping directory-by-directory `Tupfile`s collocated with their rules while adjusting relative paths for inputs and outputs; retain `src/Tupfile.ini` at the root and add a lightweight `src/Tupfile` shim that delegates into `src/build/Tupfile`.
-2. Define shared path macros (e.g., `SRC_ROOT = $(TUP_CWD)/../../..`) so recipes can reference the actual sources without brittle `../../..` sequences, and expose a `BUILD_ROOT` for staging outputs.
+1. Mirror the existing Tup hierarchy under `src/build/`, keeping directory-by-directory `Tupfile`s collocated with their rules while adjusting relative paths for inputs and outputs; retain `src/Tupfile.ini` at the root and run `tup` directly from `src/build/`.
+2. Keep per-directory `SRC_DIR` variables to reference the original sources without introducing additional macros.
 3. Create a `.gitignore` within `src/build/` that ignores generated scripts, logs, and `tup` state directories but keeps the committed `Tupfile`s tracked.
-4. Update tooling (`ci`, `just`, Nix shells) to execute `tup` from `src/build/`, ensuring variant commands still find `build-debug/tup.config`.
-5. Add CI coverage that runs both `tup generate` + generated script and `tup build-debug` to confirm artifacts remain confined to `src/build/` and `src/build-debug/`.
+4. Update tooling (`ci`, `just`, Nix shells) to execute `tup` from `src/build/`, ensuring variant commands still find `build-debug/tup.config` and write outputs to `src/build-debug/build/`.
+5. Add CI coverage that runs both `tup generate` + generated script and `tup build-debug` to confirm artifacts remain confined to `src/build/` and `src/build-debug/build/`, and document the clean-up requirement after generated runs.
 
 ## Status & Next Steps
 
 - Draft ADR for review (this document).
-- Prototype the directory move on a feature branch to validate path macros and variant compatibility.
-- Once validated, mark this ADR **Accepted** and execute the implementation plan alongside automated regression coverage.
+- Prototype the directory move on a feature branch to validate the staged layout, confirm both `tup` and `tup generate` succeed, and measure the clean-up workflow required after generated runs.
+- Once validated, mark this ADR **Accepted**, land the staging refactor, update the documentation (including the post-`tup.sh` cleaning steps), and complete the implementation plan alongside automated regression coverage.

@@ -33,6 +33,8 @@
 - `nix/packages/default.nix` now hides helper bindings like `mkNimBinary` via `builtins.removeAttrs` so `perSystem.packages` exposes only real derivations; flake checks will reject non-package values there.
 - The generated `appimagePayload` launcher (`bin/ct`) now executes `ct_unwrapped` from the same directory instead of `bin/ct_unwrapped`, fixing AppImage runs where `HERE` already points at `bin/`.
 - `ci/build/dev.sh` temporarily moves `src/links` out of the tree before `tup generate` because the generated script writes artifacts directly into `src/`, forcing a full `git clean -xfd src/` afterward.
+- The staged Tup layout now lives under `src/build/`; live `tup` runs and `just build` execute from there, and variant artifacts are produced in `src/build-debug/build/`.
+- Running a script produced by `tup generate` populates `src/build/`; clean the staging trees with `cd src/build && git clean -fx .` and `cd ../build-debug && git clean -fx .` before resuming live `tup`.
 - `!tup_preserve` only mirrors files relative to the directory containing the Tupfile; after moving Tupfiles into `src/build` we copy assets with the new `!cp_preserve` helper so files can originate from the original `src/` tree without confusing tup.
 - `!cp_preserve` replaces symlink sources with fresh links pointing at the original target (using `readlink -f`) so mirrored assets stay valid when their relative paths shift.
 - `ct_wrapper` resolves `ct_paths.json` by honouring `CODETRACER_CT_PATHS` and otherwise searching upward from both the binary location and the current working directory, so it no longer assumes the wrapper lives at a specific depth in the checkout.
