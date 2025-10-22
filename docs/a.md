@@ -8,7 +8,7 @@
 ### Local
 
 I sometimes do 
-`set -gx PATH /home/al/codetracer/src/build-debug $PATH`
+`set -gx PATH /home/al/codetracer/src/build-debug/build $PATH`
 to get many codetracer-related binaries in my path: `codetracer`, `tester` and maybe others
 
 # Fix preloading
@@ -77,7 +77,6 @@ to get many codetracer-related binaries in my path: `codetracer`, `tester` and m
 
 # events prestarting:
   We just get to those
-
 
 
 

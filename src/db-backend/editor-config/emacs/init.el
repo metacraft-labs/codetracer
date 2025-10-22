@@ -30,7 +30,7 @@
 (dap-register-debug-provider
  "rust"
  (lambda (conf)
-   (plist-put conf :dap-server-path "/home/alexander92/codetracer/src/build-debug/bin/db-backend")
+   (plist-put conf :dap-server-path "/home/alexander92/codetracer/src/build-debug/build/bin/db-backend")
    conf))
 
 (dap-register-debug-template "CodeTracer db-backend rust"

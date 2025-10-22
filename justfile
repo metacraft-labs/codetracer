@@ -14,10 +14,10 @@ build:
   # build-debug/codetracer user-setup
 
   # Start building continuously
-  cd src
+  cd src/build
   tup build-debug
   tup monitor -a
-  cd ../
+  cd ../..
 
   # start webpack
   node_modules/.bin/webpack --watch --progress & # building frontend_bundle.js
@@ -34,17 +34,18 @@ build-once:
   # problem because the Tupfiles refer to it.
   mkdir public/dist
 
-  cd src
+  cd src/build
   tup build-debug
-  cd ..
+  cd ../..
 
   # Build frontend_bundle.js in the dist folder
   node_modules/.bin/webpack --progress
 
   # We need to execute another tup run because webpack may have created some new files
   # that tup will discover
-  cd src
+  cd src/build
   tup build-debug
+  cd ../..
 
 build-docs:
   #!/usr/bin/env bash
@@ -103,7 +104,7 @@ build-macos-app:
 build-app-image:
   ./appimage-scripts/build_appimage.sh
 
-tester := "src/build-debug/bin/tester"
+tester := "src/build-debug/build/bin/tester"
 
 test-ui headless="0":
   #!/usr/bin/env bash
@@ -215,7 +216,7 @@ pid pid_or_current_or_last:
   #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   if [[ "{{pid_or_current_or_last}}" == "current" ]]; then \
-    echo $(ps aux | grep src/build-debug/codetracer | head -n 1 | awk '{print $2}') ; \
+    echo $(ps aux | grep src/build-debug/build | head -n 1 | awk '{print $2}') ; \
   elif [[ "{{pid_or_current_or_last}}" == "last" ]]; then \
     TTMP=$(just findtmp) ; \
     echo $(cat $TTMP/last-start-pid) ; \

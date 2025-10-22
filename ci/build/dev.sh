@@ -15,11 +15,8 @@ echo '##########################################################################
 # stop processes: make sure none of those processes left from last build
 stop_processes
 
-git clean -xfd src/build-debug
-
-mv src/links links
-git clean -xfd src/
-mv links src/links
+git clean -fdx src/build
+git clean -fdx src/build-debug/build
 
 echo '###############################################################################'
 echo "Build:"
@@ -35,9 +32,12 @@ tup generate --config build-debug/tup.config "$TUP_OUTPUT_SCRIPT"
 ./"$TUP_OUTPUT_SCRIPT"
 rm "$TUP_OUTPUT_SCRIPT"
 
-# TODO: this is not really working, problems with variants: generated script produce
-#   files directly in src/, instead of in src/build-debug, and so it can't run well
-#   we need to see if we can generate it in a better way, or to wrap/restructure the resulting folders
-#   to make possible to test the dev build in CI
+# Running the generated script populates the staging tree; clean it so that
+# subsequent `tup` invocations (locally or in CI) can start from a fresh slate.
+git clean -fx .
 
+popd
+
+pushd src/build-debug
+git clean -fx .
 popd

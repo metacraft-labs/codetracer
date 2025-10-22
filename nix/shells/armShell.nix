@@ -197,7 +197,7 @@ mkShell {
 
     # ====
 
-    export CODETRACER_LINKS_PATH=$PWD/src/build-debug/
+    export CODETRACER_LINKS_PATH=$PWD/src/build-debug/build
 
     echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
 
@@ -244,10 +244,10 @@ mkShell {
     rm -rf $ROOT_PATH/node_modules
     ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
 
-    export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
-    export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
+    export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/build
+    export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/build
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-    export PATH=$PATH:$PWD/src/build-debug/bin
+    export PATH=$PWD/src/build/bin:$PWD/src/build-debug/build/bin:$PATH
     export PATH=$PATH:$ROOT_PATH/node_modules/.bin/
     export CODETRACER_DEV_TOOLS=1
     export CODETRACER_LOG_LEVEL=INFO

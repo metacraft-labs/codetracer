@@ -14,10 +14,10 @@ const config = {
     [
       'electron',
       {
-        // appPath: 'node_modules/.bin/', // join(__dirname, 'src/build-debug/dist'),
+        // appPath: 'node_modules/.bin/', // join(__dirname, 'src/build-debug/build/dist'),
         // appName: 'electron',
         binaryPath: join(__dirname, 'node_modules', '.bin', 'electron'),
-        appArgs: ['app=src/build-debug'],
+        appArgs: ['app=src/build-debug/build'],
         chromedriver: {
           port: 9519,
           logFileName: 'wdio-chromedriver.log',
@@ -36,7 +36,7 @@ const config = {
   logLevel: 'debug',
   runner: 'local',
   outputDir: 'wdio-logs',
-  specs: ['./src/build-debug/tests/dom_test.js'],
+  specs: ['./src/build-debug/build/tests/dom_test.js'],
 
   // framework: 'mocha',
   // mochaOpts: {
