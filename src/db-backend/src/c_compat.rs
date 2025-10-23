@@ -5,8 +5,6 @@ use core::ffi::{c_char, c_int, c_void};
 use core::mem::{align_of, size_of};
 use core::ptr::null_mut;
 
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 // Layout: [ usize: size ][ payload... ]
 const HEADER_ALIGN: usize = align_of::<usize>();
