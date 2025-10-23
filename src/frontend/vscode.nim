@@ -189,6 +189,9 @@ when defined(ctInExtension):
           return parseInt(traceNumber.strip())
       return NO_INDEX
 
+    proc getFlowList*() {.async, exportc.}=
+      discard
+
     proc getCurrentTrace*(codetracerExe: cstring, workDir: cstring, isNixOS: bool): Future[JsObject] {.async, exportc.} =
       let outputResult = await readCTOutput(
         codetracerExe,

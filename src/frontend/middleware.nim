@@ -11,7 +11,7 @@ import
 var tracepointMap: JsAssoc[cstring, JsAssoc[int, Tracepoint]] = Jsassoc[cstring, JsAssoc[int, Tracepoint]]{}
 var sessionCounter = 0
 
-proc getTraceSession(name: cstring = "/home/nedy/calls.rb"): TraceSession =
+proc getTraceSession(name: cstring): TraceSession =
   var results = JsAssoc[int, seq[Stop]]{}
   var tracepoints: seq[Tracepoint] = @[]
 
@@ -247,3 +247,4 @@ when defined(ctInExtension):
     {.emit: "module.exports.getRecentTransactions = getRecentTransactions".}
     {.emit: "module.exports.getTransactionTrace = getTransactionTrace".}
     {.emit: "module.exports.getCurrentTrace = getCurrentTrace".}
+    {.emit: "module.exports.getFlowList = getFlowList".}
