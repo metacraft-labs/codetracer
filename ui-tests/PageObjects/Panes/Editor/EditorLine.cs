@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
+using UiTests.PageObjects.Components;
 
 namespace UiTests.PageObjects.Panes.Editor;
 
@@ -144,6 +145,23 @@ public class EditorLine
     /// </summary>
     public ILocator FlowMultilineValuePointers()
         => Root.Locator(".flow-multiline-value-pointer");
+
+    /// <summary>
+    /// Returns all flow values currently attached to this line.
+    /// </summary>
+    public async Task<IReadOnlyList<FlowValue>> FlowValuesAsync()
+    {
+        var selector = ".flow-inline-value-box, .flow-loop-value-box, .flow-multiline-value-box";
+        var locators = await Root.Locator(selector).AllAsync();
+        var menu = new ContextMenu(ParentPane.Root.Page);
+        var values = new List<FlowValue>();
+        foreach (var locator in locators)
+        {
+            values.Add(new FlowValue(locator, menu));
+        }
+
+        return values;
+    }
 
     /// <summary>
     /// Determines whether this line currently displays any breakpoint glyph.

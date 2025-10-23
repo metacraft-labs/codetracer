@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
@@ -49,5 +50,13 @@ public class EventRow
             return await _root.Locator(selector).TextContentAsync() ?? string.Empty;
         }
         return await _root.Locator(selector).TextContentAsync() ?? string.Empty;
+    }
+
+    public async Task<bool> IsHighlightedAsync()
+    {
+        var classes = await _root.GetAttributeAsync("class") ?? string.Empty;
+        return classes.Contains("eventLog-selected", StringComparison.OrdinalIgnoreCase)
+            || classes.Contains("active", StringComparison.OrdinalIgnoreCase)
+            || classes.Contains("selected", StringComparison.OrdinalIgnoreCase);
     }
 }
