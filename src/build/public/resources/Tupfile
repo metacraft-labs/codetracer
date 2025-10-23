@@ -1,0 +1,8 @@
+include_rules
+
+SRC_DIR = ../../../public/resources
+
+: foreach $(SRC_DIR)/*.* |> !cp_preserve |> %b
+: foreach $(SRC_DIR)/welcome/*.svg |> !cp_preserve |> welcome/%b
+: foreach $(SRC_DIR)/jstree/*.png |> !cp_preserve |> jstree/%b
+: foreach $(SRC_DIR)/jstree/*.gif |> !cp_preserve |> jstree/%b

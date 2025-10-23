@@ -21,6 +21,6 @@ we can save the steps in a file by passing `--file`, instead of running those au
 Running:
 
 ```bash
-src/build-debug/tests/run/a_test <traceID>
-src/build-debug/tests/run/a_test examples/sum.nim
+src/build-debug/build/tests/run/a_test <traceID>
+src/build-debug/build/tests/run/a_test examples/sum.nim
 ```

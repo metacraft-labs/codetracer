@@ -1,3 +1,0 @@
-include_rules
-
-#: src/main.rs |> !rust_cargo_tui |> ../bin/tui

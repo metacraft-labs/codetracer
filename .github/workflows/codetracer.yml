@@ -118,12 +118,6 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.pub.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc
   dev-build:
     runs-on: [self-hosted, nixos]
-    needs:
-      - lint-bash
-      - lint-nim
-      - lint-nix
-      - lint-rust
-      - lint-ui-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -142,12 +136,6 @@ jobs:
 
   nix-build:
     runs-on: [self-hosted, nixos]
-    needs:
-      - lint-bash
-      - lint-nim
-      - lint-nix
-      - lint-rust
-      - lint-ui-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -172,6 +160,11 @@ jobs:
       - lint-nix
       - lint-rust
       - lint-ui-tests
+      - test-rust
+      - test-python-recorder
+      - test-ui-tests
+      - dev-build
+      - nix-build
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -216,6 +209,11 @@ jobs:
       - lint-nix
       - lint-rust
       - lint-ui-tests
+      - test-rust
+      - test-python-recorder
+      - test-ui-tests
+      - dev-build
+      - nix-build
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -310,11 +308,6 @@ jobs:
 
   test-rust:
     runs-on: [self-hosted, nixos]
-    needs:
-      - dev-build
-      - nix-build
-      - appimage-build
-      - dmg-build
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -333,11 +326,6 @@ jobs:
 
   test-python-recorder:
     runs-on: [self-hosted, nixos]
-    needs:
-      - dev-build
-      - nix-build
-      - appimage-build
-      - dmg-build
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -356,11 +344,6 @@ jobs:
 
   test-ui-tests:
     runs-on: [self-hosted, nixos]
-    needs:
-      - dev-build
-      - nix-build
-      - appimage-build
-      - dmg-build
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -380,9 +363,6 @@ jobs:
   push-to-cachix:
     runs-on: [self-hosted, nixos]
     needs:
-      - test-rust
-      - test-python-recorder
-      - test-ui-tests
       - appimage-lib-check
       - dmg-lib-check
     if: "github.ref == 'refs/heads/main' && ${{ !github.event.codetracer-ci }}"

@@ -1,0 +1,4 @@
+include_rules
+SRC_DIR = ../../../public/third_party
+
+: foreach $(SRC_DIR)/*.* |> !cp_preserve |> %b

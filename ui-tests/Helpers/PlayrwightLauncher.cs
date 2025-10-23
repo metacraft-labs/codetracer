@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using Microsoft.Playwright;
 using UiTests.Helpers;
@@ -55,6 +56,14 @@ public static class PlaywrightLauncher
         info.EnvironmentVariables.Add("CODETRACER_TEST", "1");
         info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
         info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
+        const string electronArgsKey = "CODETRACER_ELECTRON_ARGS";
+        var existingElectronArgs = info.EnvironmentVariables[electronArgsKey];
+        var sanitizedElectronArgs = string.IsNullOrWhiteSpace(existingElectronArgs)
+            ? "--no-sandbox"
+            : existingElectronArgs.Contains("--no-sandbox", StringComparison.Ordinal)
+                ? existingElectronArgs
+                : $"{existingElectronArgs} --no-sandbox";
+        info.EnvironmentVariables[electronArgsKey] = sanitizedElectronArgs;
         // info.EnvironmentVariables.Add("CODETRACER_DEV_TOOLS", "");
 
         var process = Process.Start(info)!;

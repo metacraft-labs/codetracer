@@ -62,8 +62,11 @@ Direnv should be set up in your shell, as shown [here](https://direnv.net/docs/h
    ```
 4. Run `nix develop`
 5. Run `direnv allow`
-6. To build codetracer simply run `just build`. The location of the resulting binary will be `./src/build-debug/bin/ct`
+6. To build codetracer simply run `just build`. The location of the resulting binary will be `./src/build-debug/build/bin/ct`
 7. Now every time you enter the `codetracer` directory your environment should be updated
+
+> [!NOTE]
+> When you need to use `tup generate`, remember that the generated script writes into the staging tree. After it finishes, run `cd src/build && git clean -fx .` followed by `cd ../build-debug && git clean -fx .` before invoking `tup` again.
 
 > [!TIP]
 > Users of Visual Studio Code might encounter issues when using `code .`. To fix them do the following:

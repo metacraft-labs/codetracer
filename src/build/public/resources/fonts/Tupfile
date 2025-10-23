@@ -1,0 +1,5 @@
+include_rules
+
+SRC_DIR = ../../../../public/resources/fonts
+
+: foreach $(SRC_DIR)/*.* |> !cp_preserve |> %b

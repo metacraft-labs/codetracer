@@ -1,0 +1,8 @@
+SRC_DIR = ../../db-backend
+
+include_rules
+
+: $(SRC_DIR)/Cargo.toml |> !debug_rust_cargo_db_backend |> ../bin/db-backend
+# required for now only for system lang backend
+# for now not needed for db-backend
+# : src/bin/virtualization-layers.rs |> !rust_cargo_virtualization_layers |> ../bin/virtualization-layers

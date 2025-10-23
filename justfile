@@ -17,7 +17,7 @@ build:
   cd src
   tup build-debug
   tup monitor -a
-  cd ../
+  cd ..
 
   # start webpack
   node_modules/.bin/webpack --watch --progress & # building frontend_bundle.js
@@ -32,7 +32,7 @@ build-once:
   # We have to make the dist directory here, because it's missing on a fresh check out
   # It will be created by the webpack command below, but we have an a chicken and egg
   # problem because the Tupfiles refer to it.
-  mkdir public/dist
+  mkdir -p src/public/dist
 
   cd src
   tup build-debug
@@ -45,6 +45,7 @@ build-once:
   # that tup will discover
   cd src
   tup build-debug
+  cd ..
 
 build-docs:
   #!/usr/bin/env bash
@@ -103,7 +104,7 @@ build-macos-app:
 build-app-image:
   ./appimage-scripts/build_appimage.sh
 
-tester := "src/build-debug/bin/tester"
+tester := "src/build-debug/build/bin/tester"
 
 test-ui headless="0":
   #!/usr/bin/env bash
@@ -197,7 +198,7 @@ tail pid_or_current_or_last kind process="default" instance_index="0":
   tail -f ${log_file_path}
 
 build-nix:
-  nix build --print-build-logs '.?submodules=1#codetracer' --show-trace --keep-failed
+  nix build --print-build-logs '.#codetracer' --show-trace --keep-failed
 
 cachix-push-nix-package:
   cachix push metacraft-labs-codetracer $(nix build --print-out-paths ".?submodules=1#codetracer")
@@ -215,7 +216,7 @@ pid pid_or_current_or_last:
   #!/usr/bin/env bash
   # argument can be either `current`, `last` or a pid number
   if [[ "{{pid_or_current_or_last}}" == "current" ]]; then \
-    echo $(ps aux | grep src/build-debug/codetracer | head -n 1 | awk '{print $2}') ; \
+    echo $(ps aux | grep src/build-debug/build | head -n 1 | awk '{print $2}') ; \
   elif [[ "{{pid_or_current_or_last}}" == "last" ]]; then \
     TTMP=$(just findtmp) ; \
     echo $(cat $TTMP/last-start-pid) ; \

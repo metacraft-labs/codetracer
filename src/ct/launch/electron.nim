@@ -89,24 +89,33 @@ when defined(posix):
 
   proc wrapElectron*(args: seq[string]) =
     let startIndex = getEnv("CODETRACER_START_INDEX", "") == "1"
+    # Preserve custom Electron CLI overrides (e.g. --no-sandbox for CI environments).
+    let optionalElectronArgs = getEnv("CODETRACER_ELECTRON_ARGS", "").splitWhitespace()
 
     # internal ct runs should be normal, not wrapping electron again
     putEnv("CODETRACER_WRAP_ELECTRON", "")
     putEnv("CODETRACER_START_INDEX", "")
 
-    let execvArgsCount = if startIndex: args.len + 2 else: args.len + 1
+    let totalArgs = args.len + optionalElectronArgs.len
+    let execvArgsCount = if startIndex: totalArgs + 2 else: totalArgs + 1
 
     # copied and adapted from nim forum: nucky9 and Araq:
     #   https://forum.nim-lang.org/t/7415#47044
     var execvArgs = cast[cstringArray](alloc0((execvArgsCount + 1) * sizeof(cstring)))
     execvArgs[0] = electronExe.cstring
-    for i, arg in args:
-      execvArgs[i + 1] = arg.cstring
+    var argIndex = 1
+    for arg in args:
+      execvArgs[argIndex] = arg.cstring
+      inc argIndex
+    for arg in optionalElectronArgs:
+      execvArgs[argIndex] = arg.cstring
+      inc argIndex
 
     if startIndex:
-      execvArgs[execvArgsCount - 1] = electronIndexPath.cstring
+      execvArgs[argIndex] = electronIndexPath.cstring
+      inc argIndex
 
-    execvArgs[execvArgsCount] = nil
+    execvArgs[argIndex] = nil
 
     discard execv(
       electronExe.cstring,

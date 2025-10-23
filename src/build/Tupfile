@@ -1,0 +1,42 @@
+include_rules
+
+SRC_DIR = ..
+
+# JS build
+: $(SRC_DIR)/frontend/index.nim |> !nim_node_index |> index.js | index.js.map
+: $(SRC_DIR)/frontend/subwindow.nim |> !nim_node_subwindow |> subwindow.js | subwindow.js.map
+: $(SRC_DIR)/frontend/index.nim |> !nim_node_index_server |> server_index.js | server_index.js.map
+: $(SRC_DIR)/frontend/ui_js.nim |> !nim_js |> ui.js
+# : frontend/browsersync_serv.nim |> !nim_node |> browsersync_serv.js
+# : frontend/codetracer_shell.nim |> !codetracer_shell |> bin/codetracer_shell.js
+
+# TODO : helpers.ts |> !ts |> helpers.js
+: $(SRC_DIR)/helpers.js |> !cp_preserve |> helpers.js
+
+: index.js |> cp %f %o |> src/index.js
+: subwindow.js |> cp %f %o |> src/subwindow.js
+: ui.js |> cp %f %o |> public/ui.js
+: helpers.js |> cp %f %o |> src/helpers.js
+
+# preserve
+# : links/trace.rb |> !tup_preserve |> src/trace.rb
+
+: $(SRC_DIR)/links/codetracer-pure-ruby-recorder |> !cp_preserve |> bin/codetracer-pure-ruby-recorder
+
+: $(SRC_DIR)/links/recorder.rb |> !cp_preserve |> src/recorder.rb
+: $(SRC_DIR)/links/trace.py |> !cp_preserve |> src/trace.py
+: $(SRC_DIR)/links/bash |> !cp_preserve |> bin/bash
+: $(SRC_DIR)/links/node |> !cp_preserve |> bin/node
+: $(SRC_DIR)/links/ruby |> !cp_preserve |> bin/ruby
+: $(SRC_DIR)/links/nargo |> !cp_preserve |> bin/nargo
+: $(SRC_DIR)/links/wazero |> !cp_preserve |> bin/wazero
+: $(SRC_DIR)/links/ctags |> !cp_preserve |> bin/ctags
+: $(SRC_DIR)/links/electron |> !cp_preserve |> bin/electron
+# : links/unzip |> !tup_preserve |> bin/unzip
+# : links/zip |> !tup_preserve |> bin/zip
+: $(SRC_DIR)/links/curl |> !cp_preserve |> bin/curl
+: foreach $(SRC_DIR)/*.json $(SRC_DIR)/*.yaml   |> !cp_preserve |> %b
+: $(SRC_DIR)/frontend/index.html |> !cp_preserve |> index.html
+: $(SRC_DIR)/frontend/subwindow.html |> !cp_preserve |> subwindow.html
+: $(SRC_DIR)/config/default_layout.json |> !cp_preserve |> config/default_layout.json
+: $(SRC_DIR)/config/default_config.yaml |> !cp_preserve |> config/default_config.yaml

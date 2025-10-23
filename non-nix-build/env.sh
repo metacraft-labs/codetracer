@@ -49,7 +49,7 @@ if [ ! -f "$ROOT_DIR"/ct_paths.json ]; then
   echo "{\"PYTHONPATH\": \"\",\"LD_LIBRARY_PATH\":\"\"}" > "$ROOT_DIR"/ct_paths.json
 fi
 
-export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build-debug/bin:$PATH
+export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build/bin:$ROOT_DIR/src/build-debug/build/bin:$PATH
 
 if [ "$os" == "mac" ]; then
   brew install sqlite3 ruby node universal-ctags go capnp

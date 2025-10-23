@@ -1,0 +1,5 @@
+SRC_DIR = ../../small-lang
+
+include_rules
+
+: $(SRC_DIR)/Cargo.toml |> !rust_cargo_small_lang |> ../bin/small-lang

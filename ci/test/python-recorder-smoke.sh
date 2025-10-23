@@ -11,7 +11,7 @@ echo '##########################################################################
 
 nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
 
-CT_BIN="${ROOT_DIR}/src/bin/ct"
+CT_BIN="${ROOT_DIR}/src/build/bin/ct"
 if [[ ! -x "${CT_BIN}" ]]; then
   echo "error: ${CT_BIN} not found after build"
   exit 1

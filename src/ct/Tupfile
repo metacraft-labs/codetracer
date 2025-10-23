@@ -1,7 +1,0 @@
-include_rules
-
-: codetracer.nim |> !codetracer |> ../bin/codetracer_depending_on_env_vars_in_tup
-: ct_wrapper.nim |> !nim_c |> ../bin/ct
-# TODO think if we want explicitly both
-# : ct_wrapper.nim |> !nim_c |> ../bin/codetracer
-: db_backend_record.nim |> !codetracer |> ../bin/db-backend-record
