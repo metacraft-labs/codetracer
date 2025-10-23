@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
+using UiTests.PageObjects.Components;
 using UiTests.PageObjects.Panes.EventLog;
 
 namespace UiTests.PageObjects.Panes.Editor;
@@ -42,9 +43,25 @@ public class TraceLogPanel
     /// <summary>
     /// Rows rendered in the trace log panel.
     /// </summary>
-    public async Task<IReadOnlyList<EventRow>> EventRowsAsync()
+    public async Task<IReadOnlyList<TraceLogRow>> TraceRowsAsync()
     {
         var locators = await Root.Locator(".trace-view tbody tr").AllAsync();
-        return locators.Select(l => new EventRow(l, EventElementType.TracePointEditor)).ToList();
+        var menu = new ContextMenu(ParentPane.Root.Page);
+        return locators.Select(l => new TraceLogRow(l, menu)).ToList();
     }
+
+    /// <summary>
+    /// Backwards-compatible accessor returning the legacy event row wrapper.
+    /// </summary>
+    public async Task<IReadOnlyList<EventRow>> EventRowsAsync()
+    {
+        var traceRows = await TraceRowsAsync();
+        return traceRows
+            .Select(row => new EventRow(row.Root, EventElementType.TracePointEditor))
+            .ToList();
+    }
+
+    public ILocator ToggleButton() => Root.Locator(".trace-disable");
+    public ILocator DisabledOverlay() => Root.Locator(".trace-disabled-overlay");
+    public ILocator RunButton() => Root.Locator(".trace-run-button-svg").Nth(0);
 }

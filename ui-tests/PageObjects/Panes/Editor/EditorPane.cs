@@ -291,6 +291,21 @@ public class EditorPane : TabObject
     }
 
     /// <summary>
+    /// Gathers all flow values currently rendered across visible lines.
+    /// </summary>
+    public async Task<IReadOnlyList<FlowValue>> FlowValuesAsync()
+    {
+        var lines = await LinesAsync();
+        var values = new List<FlowValue>();
+        foreach (var line in lines)
+        {
+            values.AddRange(await line.FlowValuesAsync());
+        }
+
+        return values;
+    }
+
+    /// <summary>
     /// Opens the trace log panel for the provided line.
     /// </summary>
     public async Task<TraceLogPanel> OpenTracePointAsync(EditorLine line)
