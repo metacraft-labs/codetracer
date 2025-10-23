@@ -39,12 +39,26 @@ Follow these steps to diagnose failures and keep the suite reliable.
     dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint
     ```
 
+Before running UI tests after code changes, rebuild Codetracer once:
+
+```bash
+nix develop . -c just build-once
+```
+
+Avoid `just build`; it never releases the terminal and leaves `tup` running.
+
 `./dotnet_build.sh` configures the environment consistently with CI (including Nix wrappers) before `dotnet run` executes the hosted test runner. Provide additional arguments after `--` to tweak behaviour:
 
 - `--max-parallel=1` limits execution to a single scenario at a time (useful while debugging).
 - `--mode=Web` or `--mode=Electron` restricts runs to the specified runtime. By default both Electron and Web suites execute for every scenario.
 - `--include=<TestId>` / `--exclude=<TestId>` filter by test identifiers (e.g. `NoirSpaceShip.CreateSimpleTracePoint`). Scenario identifiers from `appsettings.json` also work.
 - `--config=/tmp/run.json` merges an additional JSON configuration file at the highest precedence. Use this to maintain experiment-specific overrides outside source control.
+- Reproduce the parallel recording stress test with:
+
+  ```bash
+  nix shell nixpkgs#dotnet-sdk_8 --command bash -lc 'cd ui-tests && dotnet run -- --max-parallel=1'
+  nix shell nixpkgs#dotnet-sdk_8 --command bash -lc 'cd ui-tests && dotnet run -- --max-parallel=32'
+  ```
 
 `UiTestApplication` performs pre/post-run sanitation via `ProcessLifecycleManager`: stray `ct`, `electron`, or `backend-manager` processes are logged and terminated before new sessions start. The Electron executor (`Execution/ElectronTestSessionExecutor.cs`) and the web executor (`Execution/WebTestSessionExecutor.cs`) both dispose their `CodeTracerSession`/`WebTestSession` instances with `await using`, ensuring Playwright and the spawned processes shut down even during debugger stops.
 
