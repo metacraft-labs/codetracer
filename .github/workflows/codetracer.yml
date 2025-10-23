@@ -164,6 +164,238 @@ jobs:
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh"
 
+  build-python-packages:
+    needs:
+      - lint-bash
+      - lint-nim
+      - lint-nix
+      - lint-rust
+      - lint-ui-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runner: ubuntu-latest
+            target_os: linux
+            arch: amd64
+            plat_name: manylinux_2_17_x86_64
+          # - name: linux-arm64
+          #   runner: ubuntu-22.04-arm64
+          #   target_os: linux
+          #   arch: arm64
+          #   plat_name: manylinux_2_17_aarch64
+
+          - name: macos-amd64
+            runner: macos-13
+            target_os: macos
+            arch: amd64
+            plat_name: macosx_10_9_x86_64
+          - name: macos-arm64
+            runner: macos-14
+            target_os: macos
+            arch: arm64
+            plat_name: macosx_11_0_arm64
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build backend
+        run: python -m pip install --upgrade build
+
+      - name: Install nim
+        run: |
+          set -euo pipefail
+
+          wget https://nim-lang.org/download/nim-1.6.20.tar.xz
+          tar xf nim-1.6.20.tar.xz
+          pushd nim-1.6.20
+          sh build.sh
+          bin/nim c koch
+          ./koch boot -d:release
+          export PATH="$(pwd)/bin:${PATH}"
+          popd
+
+      - name: Get sqlite
+        run: |
+          set -euo pipefail
+
+          wget https://sqlite.org/2025/sqlite-amalgamation-3500400.zip
+          unzip sqlite-amalgamation-3500400.zip
+          cp sqlite-amalgamation-3500400/sqlite3.c .
+
+      - name: Install libssl (Linux)
+        if: ${{ matrix.target_os == 'linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+
+      - name: Install libssl (MacOS)
+        if: ${{ matrix.target_os == 'macos' }}
+        run: |
+          git clone https://github.com/openssl/openssl
+          pushd openssl
+          git checkout openssl-3.5.4
+
+          ./Configure --prefix=$(pwd)/../openssl-res
+          make -j$(sysctl -n hw.ncpu)
+          make install_sw
+
+          popd
+
+      - name: Install zlib (Linux)
+        if: ${{ matrix.target_os == 'linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zlib1g-dev
+
+      - name: Install zlib (MacOS)
+        if: ${{ matrix.target_os == 'macos' }}
+        run: |
+          wget https://zlib.net/zlib-1.3.1.tar.gz
+          tar xf zlib-1.3.1.tar.gz
+          pushd zlib-1.3.1
+
+          ./configure --static --prefix=$(pwd)/../zlib-res
+          make -j$(sysctl -n hw.ncpu)
+          make install
+
+          popd
+
+      - name: Build codetracer binaries (Linux)
+        if: ${{ matrix.target_os == 'linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
+          mkdir -p "${TARGET_DIR}"
+
+          ./nim-1.6.20/bin/nim -d:release \
+            --d:asyncBackend=asyncdispatch \
+            --dynlibOverride:std -d:staticStd \
+            --gc:refc --hints:on --warnings:off \
+            --boundChecks:on \
+            -d:useOpenssl3 \
+            -d:ssl \
+            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+            -d:chronicles_timestamps=UnixTime \
+            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+            -d:builtWithNix \
+            -d:ctEntrypoint \
+            -d:pythonPackage \
+            -d:linksPathConst=.. \
+            -d:libcPath=libc \
+            -d:pathToNodeModules=../node_modules \
+            --nimcache:nimcache \
+            -d:staticSqlite \
+            -d:useLibzipSrc \
+            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libz.a -Wl,-Bdynamic" \
+            --dynlibOverride:ssl --dynlibOverride:crypto \
+            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
+            --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
+
+          ./nim-1.6.20/bin/nim \
+            -d:release -d:asyncBackend=asyncdispatch \
+            --gc:refc --hints:off --warnings:off \
+            --debugInfo --lineDir:on \
+            --boundChecks:on --stacktrace:on --linetrace:on \
+            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+            -d:chronicles_timestamps=UnixTime \
+            -d:ssl \
+            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+            -d:linksPathConst=.. \
+            -d:libcPath=libc \
+            -d:builtWithNix \
+            -d:ctEntrypoint \
+            -d:pythonPackage \
+            --nimcache:nimcache \
+            -d:staticSqlite \
+            -d:useLibzipSrc \
+            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libz.a -Wl,-Bdynamic" \
+            --dynlibOverride:ssl --dynlibOverride:crypto \
+            --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
+            --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
+
+      - name: Build codetracer binaries (MacOS)
+        if: ${{ matrix.target_os == 'macos' }}
+        run: |
+          set -euo pipefail
+
+          TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
+          mkdir -p "${TARGET_DIR}"
+
+          ./nim-1.6.20/bin/nim -d:release \
+            --d:asyncBackend=asyncdispatch \
+            --dynlibOverride:std -d:staticStd \
+            --gc:refc --hints:on --warnings:off \
+            --boundChecks:on \
+            -d:useOpenssl3 \
+            -d:ssl \
+            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+            -d:chronicles_timestamps=UnixTime \
+            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+            -d:builtWithNix \
+            -d:ctEntrypoint \
+            -d:pythonPackage \
+            -d:linksPathConst=.. \
+            -d:libcPath=libc \
+            -d:pathToNodeModules=../node_modules \
+            --nimcache:nimcache \
+            -d:staticSqlite \
+            -d:useLibzipSrc \
+            --passL:"$(pwd)/zlib-res/lib/libz.a" \
+            --dynlibOverride:ssl --dynlibOverride:crypto \
+            --passL:"$(pwd)/openssl-res/lib/libssl.a $(pwd)/openssl-res/lib/libcrypto.a" \
+            --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
+
+          ./nim-1.6.20/bin/nim \
+            -d:release -d:asyncBackend=asyncdispatch \
+            --gc:refc --hints:off --warnings:off \
+            --debugInfo --lineDir:on \
+            --boundChecks:on --stacktrace:on --linetrace:on \
+            -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
+            -d:chronicles_timestamps=UnixTime \
+            -d:ssl \
+            -d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
+            -d:linksPathConst=.. \
+            -d:libcPath=libc \
+            -d:builtWithNix \
+            -d:ctEntrypoint \
+            -d:pythonPackage \
+            --nimcache:nimcache \
+            -d:staticSqlite \
+            -d:useLibzipSrc \
+            --passL:"$(pwd)/zlib-res/lib/libz.a" \
+            --dynlibOverride:ssl --dynlibOverride:crypto \
+            --passL:"$(pwd)/openssl-res/lib/libssl.a $(pwd)/openssl-res/lib/libcrypto.a" \
+            --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
+
+      - name: Build wheel
+        run: |
+          set -euo pipefail
+
+          pushd build-python
+          python -m build --wheel -C--build-option=--plat-name=${{ matrix.plat_name }}
+          popd
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist-${{ matrix.name }}
+          path: build-python/dist/*.whl
+          if-no-files-found: error
+
   appimage-build:
     runs-on: [self-hosted, nixos]
     needs:
@@ -315,6 +547,7 @@ jobs:
       - nix-build
       - appimage-build
       - dmg-build
+      - build-python-packages
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -338,6 +571,7 @@ jobs:
       - nix-build
       - appimage-build
       - dmg-build
+      - build-python-packages
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -361,6 +595,7 @@ jobs:
       - nix-build
       - appimage-build
       - dmg-build
+      - build-python-packages
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -376,6 +611,33 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
+
+  publish-pypi:
+    needs:
+      - build-python-packages
+      - test-rust
+      - test-python-recorder
+      - test-ui-tests
+      # - create-release
+    # if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages_dir: dist
+          repository-url: https://test.pypi.org/legacy/
+
+      # - name: Publish to PyPI
+      #   uses: pypa/gh-action-pypi-publish@release/v1
+      #   with:
+      #     packages_dir: dist
 
   push-to-cachix:
     runs-on: [self-hosted, nixos]
@@ -450,7 +712,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global init.defaultBranch main
-          
+
           git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
 
           git tag -a "$YEAR.$MONTH.$BUILD" -m "Release $YEAR.$MONTH.$BUILD" || echo "Tag already exists"
