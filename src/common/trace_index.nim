@@ -19,9 +19,20 @@ type
 
 let defaultPath = app
 
+const
+  dbBusyTimeoutMs = 60_000
+
+let busyTimeoutPragma = SqlQuery("PRAGMA busy_timeout = " & $dbBusyTimeoutMs & ";")
+let walModePragma = sql"PRAGMA journal_mode=WAL;"
+let synchronousNormalPragma = sql"PRAGMA synchronous = NORMAL;"
 
 var globalDbMap: array[2, DBConn]
 
+proc configureDatabaseConnection(db: DBConn) =
+  ## Configure the SQLite handle so concurrent writers back off instead of failing.
+  db.exec(busyTimeoutPragma)
+  db.exec(walModePragma)
+  db.exec(synchronousNormalPragma)
 
 proc ensureDB(test: bool): DBConn =
   # useful when debugging where it is called from: writeStackTrace()
@@ -31,6 +42,7 @@ proc ensureDB(test: bool): DBConn =
   if not globalDbMap[test.int].isNil:
     # echo "db ", DB_PATHS[test.int]
     globalDbMap[test.int] = open(DB_PATHS[test.int], "", "", "")
+    configureDatabaseConnection(globalDbMap[test.int])
     return globalDbMap[test.int]
 
   createDir(DB_FOLDERS[test.int]) # execCMD(&"mkdir -p {DB_FOLDERS[test.int]}")
@@ -42,6 +54,7 @@ proc ensureDB(test: bool): DBConn =
     # so we don't depend on /bin/sh here
 
   var db = open(DB_PATHS[test.int], "", "", "")
+  configureDatabaseConnection(db)
 
   for statement in SQL_CREATE_TABLE_STATEMENTS:
     db.exec(sql(statement))

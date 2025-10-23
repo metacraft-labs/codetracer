@@ -34,3 +34,4 @@
 - `ui-tests-playground` will adopt a Microsoft.Extensions.Hosting bootstrap with Options-based `AppSettings` (see ui-tests-playground/docs/settings-infrastructure.md) so per-run configuration overrides are DI-friendly for CI and agent workflows.
 - `ui-tests` now mirrors that host bootstrap: `Program.cs` wires `AppSettings` into `Execution/TestExecutionPipeline`, fanning out each scenario across both Electron and Web executors while `Runner.MaxParallelInstances` (and the `--max-parallel` CLI flag) throttle concurrency.
 - `Infrastructure/CodetracerLauncher.RecordProgramAsync` accepts Noir directories as well as Ruby/Python files, matching `ct record` semantics; when `Web.DefaultTraceDirectory` is unset it falls back to `~/.local/share/codetracer`.
+- `trace_index.ensureDB` enables SQLite WAL mode and a 60s busy timeout so parallel `ct record` processes wait on locks instead of failing with “database is locked”.
