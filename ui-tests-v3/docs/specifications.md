@@ -4,7 +4,7 @@ This document captures the target capabilities and architectural constraints for
 
 ## High-Level Objectives
 
-1. **Unified Launcher**: Provide a reusable service that starts CodeTracer (Electron) and alternative runtimes with configurable environment variables, drawing on the current `ui-tests/Helpers/PlayrwightLauncher.cs`.
+1. **Unified Launcher**: Provide a reusable service that starts CodeTracer (Electron) and alternative runtimes with configurable environment variables, drawing on the new `ui-tests/Execution/ElectronTestSessionExecutor.cs` and `ui-tests/Execution/WebTestSessionExecutor.cs` implementations.
 2. **Extensible Page Objects**: Build a modular page object model that covers the primary CodeTracer UI surfaces and can be extended without duplicating locators. Leverage the abstraction patterns found in `/home/franz/code/repos/Puppeteer`.
 3. **Scenario Orchestration**: Support declarative scenario definitions with built-in retries, error capture, and telemetry.
 4. **Multi-Channel Reporting**: Generate structured run outputs consumable by CI pipelines and AI agents (JSON summaries, screenshots, traces).
