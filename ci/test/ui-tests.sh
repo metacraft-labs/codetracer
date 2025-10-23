@@ -27,11 +27,13 @@ CODETRACER_E2E_CT_PATH="$(pwd)/src/build/bin/ct"
 LINKS_PATH_DIR="$(pwd)/src/build"
 NIX_CODETRACER_EXE_DIR="$(pwd)/src/build"
 CODETRACER_LINKS_PATH="$(pwd)/src/build"
+CODETRACER_ELECTRON_ARGS="--no-sandbox"
 
 export CODETRACER_E2E_CT_PATH
 export LINKS_PATH_DIR
 export NIX_CODETRACER_EXE_DIR
 export CODETRACER_LINKS_PATH
+export CODETRACER_ELECTRON_ARGS
 
 pushd ui-tests
 nix develop --command ./ci.sh
