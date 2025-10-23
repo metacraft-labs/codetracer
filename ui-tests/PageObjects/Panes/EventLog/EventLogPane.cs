@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -55,5 +56,34 @@ public class EventLogPane : TabObject
             _events = roots.Select(r => new EventRow(r, EventElementType.EventLog)).ToList();
         }
         return _events;
+    }
+
+    public Task<int> RowCountAsync(bool forceReload = false)
+        => Root.Locator(".eventLog-dense-table tbody tr").CountAsync();
+
+    private ILocator FilterButton()
+        => Root.GetByText("Filter", new() { Exact = true }).First;
+
+    private ILocator DropdownRoot()
+        => Page.Locator("#dropdown-container-id");
+
+    public async Task ActivateTraceEventsFilterAsync()
+    {
+        await FilterButton().ClickAsync();
+        var traceButton = DropdownRoot().GetByText("Trace events", new() { Exact = true });
+        await traceButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await traceButton.ClickAsync();
+        await Page.Keyboard.PressAsync("Escape");
+        await Page.WaitForTimeoutAsync(100);
+    }
+
+    public async Task ActivateRecordedEventsFilterAsync()
+    {
+        await FilterButton().ClickAsync();
+        var recordedButton = DropdownRoot().GetByText("Recorded events", new() { Exact = true });
+        await recordedButton.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        await recordedButton.ClickAsync();
+        await Page.Keyboard.PressAsync("Escape");
+        await Page.WaitForTimeoutAsync(100);
     }
 }

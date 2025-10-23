@@ -7,6 +7,9 @@ using UiTests.PageObjects.Panes.EventLog;
 using UiTests.PageObjects.Panes.VariableState;
 using UiTests.PageObjects.Panes.CallTrace;
 using UiTests.PageObjects.Panes.Editor;
+using UiTests.PageObjects.Panes.Scratchpad;
+using UiTests.PageObjects.Panes.Filesystem;
+using UiTests.PageObjects.Panes.Terminal;
 using UiTests.Utils;
 
 namespace UiTests.PageObjects;
@@ -19,6 +22,10 @@ public class LayoutPage : BasePage
     private List<EventLogPane> _eventLogTabs = new();
     private List<VariableStatePane> _programStateTabs = new();
     private List<EditorPane> _editorTabs = new();
+    private List<ScratchpadPane> _scratchpadTabs = new();
+    private List<FilesystemPane> _filesystemTabs = new();
+    private List<TerminalOutputPane> _terminalTabs = new();
+    private List<CallTracePane> _callTraceTabs = new();
 
     public LayoutPage(IPage page) : base(page) { }
 
@@ -42,15 +49,25 @@ public class LayoutPage : BasePage
         RetryHelpers.RetryAsync(async () =>
             await Page.Locator("div[id^='editorComponent-']").CountAsync() > 0);
 
+    public Task WaitForScratchpadLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='scratchpadComponent-']").CountAsync() > 0);
+
+    public Task WaitForTerminalLoadedAsync() =>
+        RetryHelpers.RetryAsync(async () =>
+            await Page.Locator("div[id^='terminalComponent-']").CountAsync() > 0);
+
     public Task WaitForAllComponentsLoadedAsync()
     {
         var waits = new[]
         {
-            // WaitForFilesystemLoadedAsync(),
-            // WaitForStateLoadedAsync(),
-            // WaitForCallTraceLoadedAsync(),
-            // WaitForEventLogLoadedAsync(),
-            WaitForEditorLoadedAsync()
+            WaitForFilesystemLoadedAsync(),
+            WaitForStateLoadedAsync(),
+            WaitForCallTraceLoadedAsync(),
+            WaitForEventLogLoadedAsync(),
+            WaitForEditorLoadedAsync(),
+            WaitForTerminalLoadedAsync(),
+            WaitForScratchpadLoadedAsync()
         };
         return Task.WhenAll(waits);
     }
@@ -65,6 +82,9 @@ public class LayoutPage : BasePage
     public ILocator ReverseStepInButton() => Page.Locator("#reverse-step-in-debug");
     public ILocator NextButton() => Page.Locator("#next-debug");
     public ILocator ReverseNextButton() => Page.Locator("#reverse-next-debug");
+
+    public ILocator OperationStatus() => Page.Locator("#operation-status");
+    public ILocator StatusBusyIndicator() => Page.Locator(".status-notification.is-active");
     #endregion
 
     public async Task<IReadOnlyList<EventLogPane>> EventLogTabsAsync(bool forceReload = false)
@@ -109,6 +129,58 @@ public class LayoutPage : BasePage
             _editorTabs = tabs;
         }
         return _editorTabs;
+    }
+
+    public async Task<IReadOnlyList<ScratchpadPane>> ScratchpadTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _scratchpadTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='scratchpadComponent-']").AllAsync();
+            _scratchpadTabs = roots
+                .Select(r => new ScratchpadPane(Page, r, "SCRATCHPAD"))
+                .ToList();
+        }
+
+        return _scratchpadTabs;
+    }
+
+    public async Task<IReadOnlyList<FilesystemPane>> FilesystemTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _filesystemTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='filesystemComponent-']").AllAsync();
+            _filesystemTabs = roots
+                .Select(r => new FilesystemPane(Page, r, "FILES"))
+                .ToList();
+        }
+
+        return _filesystemTabs;
+    }
+
+    public async Task<IReadOnlyList<TerminalOutputPane>> TerminalTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _terminalTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='terminalComponent-']").AllAsync();
+            _terminalTabs = roots
+                .Select(r => new TerminalOutputPane(Page, r, "TERMINAL"))
+                .ToList();
+        }
+
+        return _terminalTabs;
+    }
+
+    public async Task<IReadOnlyList<CallTracePane>> CallTraceTabsAsync(bool forceReload = false)
+    {
+        if (forceReload || _callTraceTabs.Count == 0)
+        {
+            var roots = await Page.Locator("div[id^='calltraceComponent-']").AllAsync();
+            _callTraceTabs = roots
+                .Select(r => new CallTracePane(Page, r, "CALLTRACE"))
+                .ToList();
+        }
+
+        return _callTraceTabs;
     }
 
     public ILocator MenuRootButton() => Page.Locator("#menu-root-name");

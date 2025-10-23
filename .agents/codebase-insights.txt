@@ -35,3 +35,5 @@
 - `ui-tests` now mirrors that host bootstrap: `Program.cs` wires `AppSettings` into `Execution/TestExecutionPipeline`, fanning out each scenario across both Electron and Web executors while `Runner.MaxParallelInstances` (and the `--max-parallel` CLI flag) throttle concurrency.
 - `Infrastructure/CodetracerLauncher.RecordProgramAsync` accepts Noir directories as well as Ruby/Python files, matching `ct record` semantics; when `Web.DefaultTraceDirectory` is unset it falls back to `~/.local/share/codetracer`.
 - `trace_index.ensureDB` enables SQLite WAL mode and a 60s busy timeout so parallel `ct record` processes wait on locks instead of failing with “database is locked”.
+- Scratchpad entries are sourced from multiple panes via `InternalAddToScratchpad`: calltrace arguments, flow before/after values, trace table rows, editor trace results, and value tooltips/context menus all emit that event, so UI tests should cover each surface explicitly.
+- Most panes use the global `#context-menu-container` element for menu actions, but the filesystem tree relies on jstree's `#vakata-contextmenu`, so page objects/tests need to open the correct container.
