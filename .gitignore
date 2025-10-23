@@ -7,6 +7,9 @@ nimcache/
 .venv/
 build-*/
 
+!build-python
+build-python/src/ct/bin
+
 # wasm binaries
 *.wasm
 # object files
