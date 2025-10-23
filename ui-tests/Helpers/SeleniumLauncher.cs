@@ -1,21 +1,30 @@
 using System.Diagnostics;
+using System.IO;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
-using UiTests.Helpers;
+using System.Threading;
+using UiTests.Configuration;
+using UiTests.Infrastructure;
 
 public static class SeleniumLauncher
 {
     public static IWebDriver Launch(string programRelativePath)
     {
-        if (!CodetracerLauncher.IsCtAvailable)
-            throw new FileNotFoundException($"ct executable not found at {CodetracerLauncher.CtPath}");
+        var launcher = new CodetracerLauncher(
+            Options.Create(new AppSettings()),
+            NullLogger<CodetracerLauncher>.Instance);
 
-        int traceId = CodetracerLauncher.RecordProgram(programRelativePath);
+        if (!launcher.IsCtAvailable)
+            throw new FileNotFoundException($"ct executable not found at {launcher.CtPath}");
+
+        int traceId = launcher.RecordProgramAsync(programRelativePath, CancellationToken.None).GetAwaiter().GetResult();
         // CodetracerLauncher.StartCore(traceId, 1);
 
-        var psi = new ProcessStartInfo(CodetracerLauncher.CtPath, "--remote-debugging-port=9222")
+        var psi = new ProcessStartInfo(launcher.CtPath, "--remote-debugging-port=9222")
         {
-            WorkingDirectory = CodetracerLauncher.CtInstallDir,
+            WorkingDirectory = launcher.CtInstallDirectory,
             UseShellExecute = false
         };
         psi.Environment["CODETRACER_CALLER_PID"] = "1";

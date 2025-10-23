@@ -20,7 +20,7 @@ Although the V3 code has not yet been implemented, the target layout will mirror
 ## How to Add New Capabilities
 
 1. Review the relevant patterns in the legacy projects:
-   - For Electron launch mechanics, inspect `ui-tests/Helpers/PlayrwightLauncher.cs`.
+  - For Electron launch mechanics, inspect `ui-tests/Execution/ElectronTestSessionExecutor.cs` and `ui-tests/Infrastructure/CodetracerLauncher.cs`.
    - For reusable test utilities, look at `/home/franz/code/repos/Puppeteer`.
 2. Update `docs/specifications.md` with any new requirements or architectural considerations.
 3. Break the work into actionable tasks in `docs/development-plan.md`.

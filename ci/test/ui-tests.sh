@@ -14,11 +14,8 @@ echo '##########################################################################
 
 # TODO: fix again: problem on CI in ui-tests/ci.sh with dotnet run:
 # System.Threading.Tasks.TaskCanceledException: A task was canceled.
-#    at PlaywrightLauncher.WaitForCdpAsync(Int32 port, TimeSpan timeout) in /var/lib/github-runner-work/github-runner-mcl-003/codetracer/codetracer/ui-tests/Helpers/PlayrwightLauncher.cs:line 28
-#    at PlaywrightLauncher.LaunchAsync(String programRelativePath) in /var/lib/github-runner-work/github-runner-mcl-003/codetracer/codetracer/ui-tests/Helpers/PlayrwightLauncher.cs:line 62
-#    at UiTests.Tests.TestRunner.RunAsync() in /var/lib/github-runner-work/github-runner-mcl-003/codetracer/codetracer/ui-tests/Tests/TestRunner.cs:line 22
-#    at UiTests.Program.Main() in /var/lib/github-runner-work/github-runner-mcl-003/codetracer/codetracer/ui-tests/Program.cs:line 13
-#    at UiTests.Program.<Main>()
+#    at UiTests.Execution.ElectronTestSessionExecutor.WaitForCdpAsync(Int32 port, TimeSpan timeout)
+#    at UiTests.Execution.TestExecutionPipeline.ExecuteEntryAsync(...)
 # backend-manager: no process found
 #
 # it *should* work with the nix build, but I am not sure if the problem is related

@@ -4,9 +4,11 @@ Follow these steps to diagnose failures and keep the suite reliable.
 
 ## Environment Checklist
 
-- Ensure the `ct` executable is available. `Helpers/CodetracerLauncher.cs` resolves it via `CODETRACER_E2E_CT_PATH` or the default build output (`src/build-debug/bin/ct`).
-- Confirm the `CODETRACER_REPO_ROOT_PATH` environment variable if you use a non-standard checkout layout.
-- Verify Playwright dependencies by running `npx playwright install`. The `Microsoft.Playwright` NuGet package will bootstrap browsers on first run, but explicit installation avoids surprises.
+- Ensure the `ct` executable is available. `Infrastructure/CodetracerLauncher.cs` resolves it via `CODETRACER_E2E_CT_PATH` or the default build output (`src/build-debug/bin/ct`).
+- Pass the correct program path to `ct record`: Noir scenarios require the directory that contains `program.json`, while Ruby/Python scenarios expect the `.rb` / `.py` file. The launcher now mirrors this behaviour so existing traces continue to build correctly.
+- Confirm `CODETRACER_REPO_ROOT_PATH` if you use a non-standard checkout layout. The launcher uses it to locate `test-programs/` when recording traces.
+- Verify Playwright dependencies with `npx playwright install`. The `Microsoft.Playwright` NuGet package boots browsers on first run, but explicit installation avoids surprises.
+- Override configuration through `appsettings.json`, environment variables prefixed with `UITESTS_`, command-line switches (e.g. `--max-parallel=1`), or a per-run JSON file passed via `--config=/path/to/settings.json`.
 
 ## Preparing CodeTracer Builds
 
@@ -34,24 +36,29 @@ Follow these steps to diagnose failures and keep the suite reliable.
 
     ```bash
     ./dotnet_build.sh
-    dotnet run
+    dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint
     ```
 
-`./dotnet_build.sh` configures the environment consistently with CI (including Nix wrappers) before `dotnet run` executes the UI scenarios. Ensure the direnv/Nix shell stays active while running the commands above. For targeted runs, invoke individual methods through the `TestRunner` or attach a debugger to the `UiTests` executable.
+`./dotnet_build.sh` configures the environment consistently with CI (including Nix wrappers) before `dotnet run` executes the hosted test runner. Provide additional arguments after `--` to tweak behaviour:
 
-`PlaywrightLauncher.LaunchAsync` now returns a `CodeTracerSession`; always dispose it (`await using`) so the Electron process shuts down even when debugging from VS Code.
+- `--max-parallel=1` limits execution to a single scenario at a time (useful while debugging).
+- `--mode=Web` or `--mode=Electron` restricts runs to the specified runtime. By default both Electron and Web suites execute for every scenario.
+- `--include=<TestId>` / `--exclude=<TestId>` filter by test identifiers (e.g. `NoirSpaceShip.CreateSimpleTracePoint`). Scenario identifiers from `appsettings.json` also work.
+- `--config=/tmp/run.json` merges an additional JSON configuration file at the highest precedence. Use this to maintain experiment-specific overrides outside source control.
+
+`UiTestApplication` performs pre/post-run sanitation via `ProcessLifecycleManager`: stray `ct`, `electron`, or `backend-manager` processes are logged and terminated before new sessions start. The Electron executor (`Execution/ElectronTestSessionExecutor.cs`) and the web executor (`Execution/WebTestSessionExecutor.cs`) both dispose their `CodeTracerSession`/`WebTestSession` instances with `await using`, ensuring Playwright and the spawned processes shut down even during debugger stops.
 
 ## Capturing Additional Diagnostics
 
 - Wrap flaky assertions with `RetryHelpers.RetryAsync` and log contextual data (like locator text) before rethrowing.
 - Enable Playwright tracing by setting `PWDEBUG=1` before launching the test runner. This allows stepping through actions in a headed browser.
-- Use `PlaywrightLauncher.GetAppPageAsync` to wait for the correct window. If it times out, inspect the CodeTracer process logs under the directory reported by `CodetracerLauncher.CtInstallDir`.
+- If Electron pages fail to appear, inspect the logs emitted by `Execution/ElectronTestSessionExecutor`. The service polls `http://localhost:<port>/json/version`; network proxies or stale Electron builds usually explain a missing CDP endpoint. Web-browser failures typically surface in the `ct host` logs streamed by `Infrastructure/CtHostLauncher`.
 
 ## Common Failure Modes
 
-- **Process startup**: If `PlaywrightLauncher.IsCtAvailable` returns false, rebuild CodeTracer or set `CODETRACER_E2E_CT_PATH` to a valid binary.
+- **Process startup**: If `Infrastructure/CodetracerLauncher.IsCtAvailable` resolves to false, rebuild CodeTracer or set `CODETRACER_E2E_CT_PATH` to a valid binary before running `dotnet run`.
 - **CDP negotiation**: Electron builds that reject `--remote-debugging-port=<port>` (error: `bad option: --remote-debugging-port=####`) prevent Playwright from attaching. Ensure your `ct` bundle ships an Electron binary with remote debugging enabled or update to a compatible build.
-- **Electron environment leaks**: Global variables like `ELECTRON_RUN_AS_NODE=1` cause Electron to behave like the Node runtime and reject debug flags. The UI launcher removes these, but confirm your shell configuration does not reintroduce them when running `ct` directly.
+- **Electron environment leaks**: Global variables like `ELECTRON_RUN_AS_NODE=1` cause Electron to behave like the Node runtime and reject debug flags. The Electron executor strips these, but confirm your shell configuration does not reintroduce them when running `ct` directly.
 - **Element not found**: Double-check selectors in the corresponding page object. Prefer waiting for the component with `WaitForAsync` before interacting.
 - **Flaky timing**: Replace raw `Task.Delay` calls with retries that assert the final state (see `Tests/ProgramSpecific/NoirSpaceShipTests.cs` for patterns).
 
