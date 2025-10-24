@@ -5,6 +5,10 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   lint-bash:
     runs-on: [self-hosted, nixos]
