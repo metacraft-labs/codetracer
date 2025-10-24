@@ -8,3 +8,5 @@ updates:
       github-actions:
         patterns:
           - "*"
+    exclude-paths:
+      - "tsc-ui-tests" # not used right now: legacy; not ui tests are in dotnet, in `ui-tests`
