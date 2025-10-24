@@ -1045,4 +1045,3 @@ proc refreshEditorLine*(self: EditorViewComponent, line: int) =
   editor.changeViewZones do (view: js):
     view.removeZone(zone)
   # refresh editor
-

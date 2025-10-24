@@ -126,6 +126,11 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
     if not data.functions.toggleMode.isNil:
       data.functions.toggleMode(data),
 
+  cstring"CTRL+KeyE":   proc(editor: MonacoEditor, e: EditorViewComponent) =
+    ## Mirror the Mousetrap shortcut so toggling works while Monaco has focus.
+    if not data.functions.toggleMode.isNil:
+      data.functions.toggleMode(data),
+
   # TODO: support concurrent when add later on
   # cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
   #   let taskId = genTaskId(Step)
