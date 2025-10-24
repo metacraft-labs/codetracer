@@ -1,3 +1,10 @@
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::error::Error;
+
+use log::{info, warn, error};
+use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
+
 use crate::{
     db::{Db, DbRecordEvent},
     expr_loader::ExprLoader,
@@ -5,14 +12,10 @@ use crate::{
         Action, BranchesTaken, CoreTrace, FlowEvent, FlowStep, FlowUpdate, FlowUpdateState, FlowUpdateStateKind,
         FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount, TraceKind,
     },
+    lang::{lang_from_context, Lang},
     replay::Replay,
     value::{to_ct_value, Value, ValueRecordWithType},
 };
-use log::{info, warn, error};
-use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::error::Error;
 
 #[derive(Debug)]
 pub struct FlowPreloader {
@@ -109,6 +112,7 @@ pub struct CallFlowPreloader<'a> {
     diff_call_keys: HashSet<i64>, //  TODO: if we add Eq, Hash it seems we can do CallKey
     mode: FlowMode,
     trace_kind: TraceKind,
+    lang: Lang,
 }
 
 impl<'a> CallFlowPreloader<'a> {
@@ -121,7 +125,7 @@ impl<'a> CallFlowPreloader<'a> {
             trace_kind: TraceKind) -> Self {
         CallFlowPreloader {
             flow_preloader,
-            location,
+            location: location.clone(),
             active_loops: vec![],
             last_step_id: StepId(-1),
             last_expr_order: vec![],
@@ -129,6 +133,7 @@ impl<'a> CallFlowPreloader<'a> {
             diff_call_keys,
             mode,
             trace_kind,
+            lang: lang_from_context(&Path::new(&location.path), trace_kind),
         }
     }
 
@@ -190,7 +195,7 @@ impl<'a> CallFlowPreloader<'a> {
         // are never None, so it is safe to unwrap them.
         if !flow_view_update.steps.is_empty() {
 
-            let return_value_record = replay.load_return_value().unwrap_or(ValueRecordWithType::Error { 
+            let return_value_record = replay.load_return_value(self.lang).unwrap_or(ValueRecordWithType::Error { 
                 msg: "<return value error>".to_string(),
                 typ: TypeRecord { kind: TypeKind::Error, lang_type: "<error>".to_string(), specific_info: TypeSpecificInfo::None },
             });
@@ -521,7 +526,7 @@ impl<'a> CallFlowPreloader<'a> {
         if let Some(var_list) = self.flow_preloader.get_var_list(line, &self.location) {
             info!("var_list {:?}", var_list.clone());
             for value_name in &var_list {
-                if let Ok(value) = replay.load_value(value_name) {
+                if let Ok(value) = replay.load_value(value_name, self.lang) {
                 // if variable_map.contains_key(value_name) {
                     let ct_value = to_ct_value(&value);
                     flow_view_update

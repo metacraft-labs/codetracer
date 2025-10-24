@@ -13,6 +13,7 @@ use runtime_tracing::StepId;
 
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
+use crate::lang::Lang;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::{Events, Replay};
@@ -218,15 +219,17 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
-    fn load_value(&mut self, expression: &str) -> Result<ValueRecordWithType, Box<dyn Error>> {
+    fn load_value(&mut self, expression: &str, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadValue { expression: expression.to_string() })?)?;
+        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadValue {
+            expression: expression.to_string(),
+            lang, })?)?;
         Ok(res)
     }
 
-    fn load_return_value(&mut self) -> Result<ValueRecordWithType, Box<dyn Error>> {
+    fn load_return_value(&mut self, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadReturnValue)?)?;
+        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadReturnValue { lang })?)?;
         Ok(res)
     }
 
