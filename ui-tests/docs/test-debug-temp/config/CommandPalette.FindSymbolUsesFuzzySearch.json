@@ -1,0 +1,20 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "CommandPalette.FindSymbolUsesFuzzySearch"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "command-palette-fuzzy-search",
+      "Description": "Focused run for CommandPalette.FindSymbolUsesFuzzySearch while debugging.",
+      "Test": "CommandPalette.FindSymbolUsesFuzzySearch",
+      "Enabled": true
+    }
+  ]
+}

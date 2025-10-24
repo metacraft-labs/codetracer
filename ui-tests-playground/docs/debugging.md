@@ -25,6 +25,7 @@ Use this guide when troubleshooting the stable multi-instance harness in `ui-tes
   ```
   or the page never reaches `#eventLog-0-dense-table-0`, ensure the launcher passes `--backend-socket-port=<n>` and `--frontend-socket=<n>` (identical values). The startup example exposes this via `Helpers/NetworkUtilities.GetFreeTcpPort()` and `Helpers/CtHostLauncher.StartHostProcess`.
 - **Argument format**: `ct host` uses `--flag=value` syntax. Passing space-delimited arguments (e.g., `--frontend-socket 1234`) leaves the flag unset, and hosts collide on the default port `5000`.
+- **Iterative troubleshooting**: When a failure happens before the main scenario runs (e.g., waiting for the page to load), everything afterward will seem broken. Instrument the suspicious portion with temporary logs, note the last message that prints and the first that does not, fix only that segment, then remove the extra logs once the root cause is resolved.
 
 ## When to Update This Document
 
@@ -33,3 +34,7 @@ Add notes for:
 - Recurrent issues hit during spikes.
 - Tricks that accelerate debugging (custom scripts, helper functions).
 - Differences uncovered between Puppeteer-based logic and Playwright equivalents.
+
+### Example: Waits vs. Clicks
+
+See the `ui-tests` case study: a stalled component wait made the downstream call-trace clicks appear broken. Once logging confirmed the last successful message, fixing the wait allowed the later steps to run. Use the same playbook here—log around suspicious blocks, resolve the earliest failure, then move on.

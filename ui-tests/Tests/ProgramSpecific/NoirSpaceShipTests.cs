@@ -34,29 +34,51 @@ public static class NoirSpaceShipTests
 
     public static async Task CalculateDamageCalltraceNavigation(IPage page)
     {
+        DebugLogger.Reset();
+        DebugLogger.Log("Starting CalculateDamageCalltraceNavigation");
+
         var layout = new LayoutPage(page);
+        DebugLogger.Log("Waiting for all components to load");
         await layout.WaitForAllComponentsLoadedAsync();
+        DebugLogger.Log("All components loaded");
 
         var callTrace = (await layout.CallTraceTabsAsync()).First();
+        DebugLogger.Log("Call trace tab acquired; focusing call trace");
         await callTrace.TabButton().ClickAsync();
         callTrace.InvalidateEntries();
 
+        var eventLog = (await layout.EventLogTabsAsync()).First();
+        DebugLogger.Log("Opening event log tab");
+        await eventLog.TabButton().ClickAsync();
+        var firstRow = await eventLog.RowByIndexAsync(1, forceReload: true);
+        DebugLogger.Log("Clicking first event log row");
+        await firstRow.ClickAsync();
+
         var statusReportEntry = await callTrace.FindEntryAsync("status_report", forceReload: true)
             ?? throw new Exception("Unable to locate status_report entry in call trace.");
+        DebugLogger.Log("Activating status_report entry");
         await statusReportEntry.ActivateAsync();
+        DebugLogger.Log("Expanding status_report children");
+        await statusReportEntry.ExpandChildrenAsync();
+        callTrace.InvalidateEntries();
 
         var calculateDamageEntry = await callTrace.FindEntryAsync("calculate_damage", forceReload: true)
             ?? throw new Exception("Unable to locate calculate_damage entry in call trace.");
+        var debugHtml = await calculateDamageEntry.Root.InnerHTMLAsync();
+        Console.WriteLine($"CalculateDamageCalltraceNavigation: calculate_damage entry HTML -> {debugHtml}");
+        DebugLogger.Log("Activating calculate_damage entry");
         await calculateDamageEntry.ActivateAsync();
 
         var shieldEditor = (await layout.EditorTabsAsync(true))
             .FirstOrDefault(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase))
             ?? throw new Exception("shield.nr editor tab was not available.");
+        DebugLogger.Log("Focusing shield.nr editor tab");
         await shieldEditor.TabButton().ClickAsync();
 
         await RetryHelpers.RetryAsync(async () =>
         {
             var lineNumber = await shieldEditor.ActiveLineNumberAsync();
+            Console.WriteLine($"CalculateDamageCalltraceNavigation: shield.nr active line -> {lineNumber?.ToString() ?? "<null>"}");
             return lineNumber == 22;
         }, maxAttempts: 30, delayMs: 200);
 
@@ -691,15 +713,24 @@ public static class NoirSpaceShipTests
     }
     public static async Task JumpToAllEvents(IPage page)
     {
+        DebugLogger.Log("Starting JumpToAllEvents");
         var layout = new LayoutPage(page);
+        DebugLogger.Log("JumpToAllEvents: waiting for components");
         await layout.WaitForAllComponentsLoadedAsync();
+        DebugLogger.Log("JumpToAllEvents: components loaded");
 
         var eventLogs = await layout.EventLogTabsAsync();
+        DebugLogger.Log($"JumpToAllEvents: located {eventLogs.Count} event log tabs");
         foreach (var tab in eventLogs)
         {
-            if (!await tab.IsVisibleAsync()) { continue; }
+            if (!await tab.IsVisibleAsync())
+            {
+                DebugLogger.Log("JumpToAllEvents: skipping hidden event log tab");
+                continue;
+            }
 
             var events = (await tab.EventElementsAsync()).ToList();
+            DebugLogger.Log($"JumpToAllEvents: tab has {events.Count} events");
             if (!await EventsInExpectedState(events, -1))
             {
                 throw new FailedTestException("Events were expected to be greyed out initially.");
@@ -707,9 +738,14 @@ public static class NoirSpaceShipTests
 
             for (int i = 0; i < events.Count; i++)
             {
-                await events[i]._root.ClickAsync();
+                DebugLogger.Log($"JumpToAllEvents: clicking event index {i}");
+                await events[i].ClickAsync();
                 await RetryHelpers.RetryAsync(async () =>
-                    (await events[i]._root.GetAttributeAsync("class"))?.Contains("active") == true);
+                {
+                    var attr = await events[i]._root.GetAttributeAsync("class");
+                    DebugLogger.Log($"JumpToAllEvents: retry checking active class for index {i} -> {attr}");
+                    return attr?.Contains("active") == true;
+                });
 
                 if (!await EventsInExpectedState(events, i))
                 {

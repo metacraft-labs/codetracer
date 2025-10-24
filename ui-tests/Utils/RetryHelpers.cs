@@ -18,14 +18,19 @@ public static class RetryHelpers
     /// <exception cref="TimeoutException">Thrown when the condition never evaluates to <c>true</c>.</exception>
     public static async Task RetryAsync(Func<Task<bool>> condition, int maxAttempts = 10, int delayMs = 1000)
     {
+        DebugLogger.Log($"RetryAsync<bool>: start (maxAttempts={maxAttempts}, delayMs={delayMs})");
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
+            DebugLogger.Log($"RetryAsync<bool>: attempt {attempt + 1} evaluating condition");
             if (await condition())
             {
+                DebugLogger.Log($"RetryAsync<bool>: attempt {attempt + 1} succeeded");
                 return;
             }
+            DebugLogger.Log($"RetryAsync<bool>: attempt {attempt + 1} failed; sleeping {delayMs}ms");
             await Task.Delay(delayMs);
         }
+        DebugLogger.Log($"RetryAsync<bool>: exhausted {maxAttempts} attempts without success");
         throw new TimeoutException($"Condition was not satisfied after {maxAttempts} attempts.");
     }
 
@@ -40,19 +45,25 @@ public static class RetryHelpers
     public static async Task RetryAsync(Func<Task> action, int maxAttempts = 50, int delayMs = 100)
     {
         Exception? lastError = null;
+        DebugLogger.Log($"RetryAsync<void>: start (maxAttempts={maxAttempts}, delayMs={delayMs})");
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
             {
+                DebugLogger.Log($"RetryAsync<void>: attempt {attempt + 1} executing action");
                 await action();
+                DebugLogger.Log($"RetryAsync<void>: attempt {attempt + 1} completed");
                 return;
             }
             catch (Exception ex)
             {
+                DebugLogger.Log($"RetryAsync<void>: attempt {attempt + 1} threw {ex.GetType().Name}: {ex.Message}");
                 lastError = ex;
             }
+            DebugLogger.Log($"RetryAsync<void>: sleeping {delayMs}ms before next attempt");
             await Task.Delay(delayMs);
         }
+        DebugLogger.Log($"RetryAsync<void>: exhausted {maxAttempts} attempts; throwing TimeoutException");
         throw new TimeoutException($"Action failed after {maxAttempts} attempts", lastError);
     }
 }

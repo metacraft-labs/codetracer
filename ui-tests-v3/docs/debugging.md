@@ -38,6 +38,7 @@ Follow the sequence documented in `docs/launching-multi-instance.md`. Highlights
 - **ct host exits immediately**: check `[ct host:<label>]` logs for `Error while processing the port=` or `EADDRINUSE`. Re-run the port allocation routines described above.
 - **Timeout waiting for `#eventLog-0-dense-table-0`**: ensure `CtHostLauncher.WaitForServerAsync` succeeded—HTTP 200 responses confirm the host is alive before Playwright navigates.
 - **UI loads at incorrect size**: confirm the monitor detection (`MonitorUtilities.DetectMonitors`) returned sane coordinates and that the resize event executes after navigation.
+- **Iterative troubleshooting**: Failures that occur during the initial load (for example, a component wait) make every later step appear broken because those steps never run. Add focused `DebugLogger` calls to bracket the suspect region, note the last message that prints and the first that does not, fix only the code between those log markers, then remove the temporary instrumentation before continuing.
 - **Selenium-specific APIs**: when porting utilities from the Puppeteer repository, ensure they are adapted to Playwright idioms (async/await, locator usage) before integration.
 - **Toolchain drift**: if `dotnet` or `node` versions differ between the legacy and experimental projects, realign the flake inputs to avoid subtle runtime differences.
 
@@ -48,3 +49,7 @@ Add troubleshooting steps whenever you encounter:
 - New environment variables required by the V3 harness.
 - Failures specific to the migrated Selenium/Puppeteer functionality.
 - Lessons learned while stabilising the rebuild that future contributors—or automation agents—should know.
+
+### Example: Waits vs. Clicks
+
+While debugging `ui-tests/NoirSpaceShip.CalculateDamageCalltraceNavigation`, the suite appeared to fail inside the call-trace click logic, but logging showed the real issue was earlier: `layout.WaitForAllComponentsLoadedAsync()` never completed, so the click code never ran. After instrumenting the wait with `DebugLogger` and fixing the selector, the test advanced and the click behaviour became the next true problem. Use the same playbook here—log around the suspect path, fix the earliest failing stage, remove the temporary logging, then iterate on the next issue.

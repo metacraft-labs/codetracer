@@ -74,7 +74,22 @@ Avoid `just build`; it never releases the terminal and leaves `tup` running.
 - **CDP negotiation**: Electron builds that reject `--remote-debugging-port=<port>` (error: `bad option: --remote-debugging-port=####`) prevent Playwright from attaching. Ensure your `ct` bundle ships an Electron binary with remote debugging enabled or update to a compatible build.
 - **Electron environment leaks**: Global variables like `ELECTRON_RUN_AS_NODE=1` cause Electron to behave like the Node runtime and reject debug flags. The Electron executor strips these, but confirm your shell configuration does not reintroduce them when running `ct` directly.
 - **Element not found**: Double-check selectors in the corresponding page object. Prefer waiting for the component with `WaitForAsync` before interacting.
+- **Component wait stalls**: If the run appears to hang inside `layout.WaitForAllComponentsLoadedAsync`, check `ui-tests/bin/Debug/net8.0/ui-tests-debug.log` (or the path in `UITESTS_DEBUG_LOG`). Each component wait logs the selector and final count, making it clear which pane never loaded.
+- **Iterative troubleshooting**: Treat debugging as a staged process. When a run fails early (e.g., during page load), later steps appear broken simply because they never executed. Use targeted `DebugLogger` calls (or temporary console output) to bracket the flow: identify the last message that prints and the first one that does not, then fix only the code between those markers. After the root cause is resolved, remove the temporary logging and move to the next failing stage.
 - **Flaky timing**: Replace raw `Task.Delay` calls with retries that assert the final state (see `Tests/ProgramSpecific/NoirSpaceShipTests.cs` for patterns).
+
+## Case Study: Page Load vs. Click Failures
+
+During the work on `NoirSpaceShip.CalculateDamageCalltraceNavigation`, the suite appeared to hang during the call-trace click steps even though the real culprit was an earlier wait: `layout.WaitForAllComponentsLoadedAsync()` never returned, so none of the click logic executed. By adding temporary `DebugLogger.Log(...)` statements before each stage, we saw the last message that printed (“Waiting for all components to load”) and realised the call-trace code had not yet run. Fixing the component selector resolved the wait; only then did it make sense to revisit the Monaco navigation.
+
+When you encounter similar symptoms:
+
+1. Add short-lived logging before and after the suspect code path.
+2. Re-run the test and inspect `ui-tests-debug.log` to find the last message that prints and the first that does not.
+3. Focus your fix on the small region between those two messages.
+4. Remove the temporary logging once the stage passes, then move on to the next failing block.
+
+This disciplined, incremental approach prevents chasing downstream issues before the upstream blockers are resolved.
 
 ## When to Update This Document
 
