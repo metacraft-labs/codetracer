@@ -1203,4 +1203,3 @@ proc closeTrace*(self: TraceComponent) =
     )
 
   self.data.redraw()
-
