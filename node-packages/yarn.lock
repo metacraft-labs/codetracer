@@ -2873,11 +2873,11 @@ __metadata:
     js-yaml: "npm:^4.1.0"
     jstree: "npm:3.3.17"
     livereload: "npm:^0.10.3"
-    monaco-editor: "npm:0.47.0"
+    monaco-editor: "npm:0.48.0"
     monaco-editor-webpack-plugin: "npm:7.1.1"
     mousetrap: "npm:^1.6.5"
     napi-build-utils: "npm:^2.0.0"
-    node-abi: "npm:^4.14.0"
+    node-abi: "npm:^4.15.0"
     node-gyp: "npm:^11.5.0"
     node-ipc: "npm:^12.0.0"
     nouislider: "npm:^15.8.1"
@@ -7210,10 +7210,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"monaco-editor@npm:0.47.0":
-  version: 0.47.0
-  resolution: "monaco-editor@npm:0.47.0"
-  checksum: 10c0/bbe4fc284a7803e4ed0fa69b6e31c41ef6f5d259722e8a876ce2850b7139e68eff3a6435306e11eff848db8662b818e40f9cafc6f7a53d4a4551fed362d5dc02
+"monaco-editor@npm:0.48.0":
+  version: 0.48.0
+  resolution: "monaco-editor@npm:0.48.0"
+  checksum: 10c0/f4f8fbf372ab4a038d35f72b2195f0fef7403188e83cfe41f8ed01bf8e276eec25263b9aa5aed32a87a5e42796344c236b694e4fb1049c46d5f0ed9635ebf970
   languageName: node
   linkType: hard
 
@@ -7312,12 +7312,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-abi@npm:^4.14.0":
-  version: 4.14.0
-  resolution: "node-abi@npm:4.14.0"
+"node-abi@npm:^4.15.0":
+  version: 4.15.0
+  resolution: "node-abi@npm:4.15.0"
   dependencies:
     semver: "npm:^7.6.3"
-  checksum: 10c0/928bcd5f02d85aa7b6b87bc295e1cb991984ffb29dce97ac9bddedd7338a439236ea3dc9d6f9aff61fc3968f869b9bde0914bd71a3437ddd99832587d561c7e4
+  checksum: 10c0/ac519cbdce531cd68db1e395a0ae249130188a5df68db9bc911f12054e5dc6daab43fb94f99029713c5a5a10583bab7c2ff92180491be7271d9f5129c922909e
   languageName: node
   linkType: hard
 
