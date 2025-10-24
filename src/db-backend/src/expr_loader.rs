@@ -70,6 +70,21 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
             comments: vec!["".to_string()],
         },
     );
+
+    m.insert(
+        Lang::PythonDb,
+        NodeNames {
+            if_conditions: vec!["if_statement".to_string(), "match_statement".to_string(),],
+            else_conditions: vec!["else_clause".to_string()], // TODO: "case_clause".to_string(),?
+            loops: vec!["for_statement".to_string(), "while_statement".to_string()],
+            branches_body: vec!["block".to_string()],
+            branches: vec!["block".to_string()],
+            functions: vec!["function_definition".to_string()],
+            values: vec!["identifier".to_string()],
+            comments: vec!["comment".to_string()],
+        }
+    );
+
     m
 });
 
@@ -146,6 +161,8 @@ impl ExprLoader {
                 Lang::Small
             } else if extension == "rs" {
                 Lang::RustWasm // TODO RustWasm?
+            } else if extension == "py" {
+                Lang::PythonDb   
             } else {
                 Lang::Unknown
             }
@@ -163,6 +180,8 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
         } else if lang == Lang::Ruby {
             parser.set_language(&tree_sitter_ruby::LANGUAGE.into())?;
+        } else if lang == Lang::PythonDb {
+            parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
         } else {
             // else if lang == Lang::Small {
             //     parser.set_language(&tree_sitter_elisp::LANGUAGE.into())?;

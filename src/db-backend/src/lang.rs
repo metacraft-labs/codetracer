@@ -33,5 +33,6 @@ pub enum Lang {
     RustWasm,
     CppWasm,
     Small,
+    PythonDb,
     Unknown,
 }
