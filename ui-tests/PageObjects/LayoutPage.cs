@@ -29,36 +29,57 @@ public class LayoutPage : BasePage
 
     public LayoutPage(IPage page) : base(page) { }
 
+    private async Task WaitForComponentAsync(string componentName, string selector)
+    {
+        var locator = Page.Locator(selector);
+        try
+        {
+            await RetryHelpers.RetryAsync(async () =>
+            {
+                var count = await locator.CountAsync();
+                if (count == 0)
+                {
+                    DebugLogger.Log($"LayoutPage: component '{componentName}' pending (selector='{selector}', count=0)");
+                    return false;
+                }
+
+                var visible = await locator.First.IsVisibleAsync();
+                DebugLogger.Log($"LayoutPage: component '{componentName}' ready (count={count}, firstVisible={visible})");
+                return true;
+            });
+        }
+        catch (TimeoutException ex)
+        {
+            var count = await locator.CountAsync();
+            DebugLogger.Log($"LayoutPage: component '{componentName}' FAILED to load (selector='{selector}', final count={count})");
+            throw new TimeoutException($"Component '{componentName}' (selector '{selector}') did not load; final count={count}.", ex);
+        }
+    }
+
     public Task WaitForFilesystemLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='filesystemComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("filesystem", "div[id^='filesystemComponent']");
 
     public Task WaitForStateLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='stateComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("state", "div[id^='stateComponent']");
 
     public Task WaitForCallTraceLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='calltraceComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("calltrace", "div[id^='calltraceComponent']");
 
     public Task WaitForEventLogLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='eventLogComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("event-log", "div[id^='eventLogComponent']");
 
     public Task WaitForEditorLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='editorComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("editor", "div[id^='editorComponent']");
 
     public Task WaitForScratchpadLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='scratchpadComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("scratchpad", "div[id^='scratchpadComponent']");
 
     public Task WaitForTerminalLoadedAsync() =>
-        RetryHelpers.RetryAsync(async () =>
-            await Page.Locator("div[id^='terminalComponent-']").CountAsync() > 0);
+        WaitForComponentAsync("terminal", "div[id^='terminalComponent']");
 
     public Task WaitForAllComponentsLoadedAsync()
     {
+        DebugLogger.Log("LayoutPage: waiting for all components");
         var waits = new[]
         {
             WaitForFilesystemLoadedAsync(),
@@ -101,7 +122,7 @@ public class LayoutPage : BasePage
     {
         if (forceReload || _programStateTabs.Count == 0)
         {
-            var roots = await Page.Locator("div[id^='stateComponent-']").AllAsync();
+            var roots = await Page.Locator("div[id^='stateComponent']").AllAsync();
             _programStateTabs = roots.Select(r => new VariableStatePane(Page, r, "STATE")).ToList();
         }
         return _programStateTabs;
@@ -111,7 +132,7 @@ public class LayoutPage : BasePage
     {
         if (forceReload || _editorTabs.Count == 0)
         {
-            var roots = await Page.Locator("div[id^='editorComponent-']").AllAsync();
+            var roots = await Page.Locator("div[id^='editorComponent']").AllAsync();
             var tabs = new List<EditorPane>();
             foreach (var r in roots)
             {
@@ -135,7 +156,7 @@ public class LayoutPage : BasePage
     {
         if (forceReload || _scratchpadTabs.Count == 0)
         {
-            var roots = await Page.Locator("div[id^='scratchpadComponent-']").AllAsync();
+            var roots = await Page.Locator("div[id^='scratchpadComponent']").AllAsync();
             _scratchpadTabs = roots
                 .Select(r => new ScratchpadPane(Page, r, "SCRATCHPAD"))
                 .ToList();
@@ -148,7 +169,7 @@ public class LayoutPage : BasePage
     {
         if (forceReload || _filesystemTabs.Count == 0)
         {
-            var roots = await Page.Locator("div[id^='filesystemComponent-']").AllAsync();
+            var roots = await Page.Locator("div[id^='filesystemComponent']").AllAsync();
             _filesystemTabs = roots
                 .Select(r => new FilesystemPane(Page, r, "FILES"))
                 .ToList();
@@ -161,7 +182,7 @@ public class LayoutPage : BasePage
     {
         if (forceReload || _terminalTabs.Count == 0)
         {
-            var roots = await Page.Locator("div[id^='terminalComponent-']").AllAsync();
+            var roots = await Page.Locator("div[id^='terminalComponent']").AllAsync();
             _terminalTabs = roots
                 .Select(r => new TerminalOutputPane(Page, r, "TERMINAL"))
                 .ToList();
@@ -174,7 +195,7 @@ public class LayoutPage : BasePage
     {
         if (forceReload || _callTraceTabs.Count == 0)
         {
-            var roots = await Page.Locator("div[id^='calltraceComponent-']").AllAsync();
+            var roots = await Page.Locator("div[id^='calltraceComponent']").AllAsync();
             _callTraceTabs = roots
                 .Select(r => new CallTracePane(Page, r, "CALLTRACE"))
                 .ToList();

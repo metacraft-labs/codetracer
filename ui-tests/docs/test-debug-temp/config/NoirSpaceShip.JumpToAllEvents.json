@@ -1,0 +1,20 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 2,
+    "IncludeTests": [
+      "NoirSpaceShip.JumpToAllEvents"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noir-jump-to-all-events",
+      "Description": "Focused run for NoirSpaceShip.JumpToAllEvents during debugging.",
+      "Test": "NoirSpaceShip.JumpToAllEvents",
+      "Enabled": true
+    }
+  ]
+}

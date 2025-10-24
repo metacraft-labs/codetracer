@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 using UiTests.PageObjects;
+using UiTests.Utils;
 
 namespace UiTests.PageObjects.Panes.EventLog;
 
@@ -60,6 +61,23 @@ public class EventLogPane : TabObject
 
     public Task<int> RowCountAsync(bool forceReload = false)
         => Root.Locator(".eventLog-dense-table tbody tr").CountAsync();
+
+    public async Task<EventRow> RowByIndexAsync(int index, bool forceReload = false)
+    {
+        DebugLogger.Log($"EventLogPane: locating row {index} (forceReload={forceReload})");
+        var rows = await EventElementsAsync(forceReload);
+        foreach (var row in rows)
+        {
+            if (await row.IndexAsync() == index)
+            {
+                DebugLogger.Log($"EventLogPane: found row {index}");
+                return row;
+            }
+        }
+
+        DebugLogger.Log($"EventLogPane: row {index} not found");
+        throw new InvalidOperationException($"Event log row with index {index} was not found.");
+    }
 
     private ILocator FilterButton()
         => Root.GetByText("Filter", new() { Exact = true }).First;

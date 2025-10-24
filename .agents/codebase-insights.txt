@@ -37,3 +37,8 @@
 - `trace_index.ensureDB` enables SQLite WAL mode and a 60s busy timeout so parallel `ct record` processes wait on locks instead of failing with “database is locked”.
 - Scratchpad entries are sourced from multiple panes via `InternalAddToScratchpad`: calltrace arguments, flow before/after values, trace table rows, editor trace results, and value tooltips/context menus all emit that event, so UI tests should cover each surface explicitly.
 - Most panes use the global `#context-menu-container` element for menu actions, but the filesystem tree relies on jstree's `#vakata-contextmenu`, so page objects/tests need to open the correct container.
+- launch ui-tests commands through `direnv exec .` (or an equivalent `nix shell`) so the flake-provided dotnet toolchain and Playwright node runtime land on PATH; invoking `dotnet` directly from `bash -lc` skips direnv hooks.
+- The default `appsettings.json` only wires Noir scenarios; to exercise ProgramAgnostic tests, supply a custom config overriding `Scenarios` and pass it via `--config=/abs/path`.
+- Electron and Web builds use different keyboard shortcuts for command palette and Monaco actions; until we emit platform-aware chords, keep those program-agnostic tests commented out in `Execution/TestRegistry`.
+- Call trace navigation currently requires expanding the parent entry; even with expanded children the UI may ignore single clicks, so tests now fall back to double-clicks/forced clicks and still rely on Monaco updates—further instrumentation of the renderer may be needed.
+- Use `UiTests.Utils.DebugLogger` (default `ui-tests/bin/Debug/net8.0/ui-tests-debug.log`, override with `UITESTS_DEBUG_LOG`) to trace retry loops and click attempts—`RetryHelpers` and key page objects now emit detailed timestamps.

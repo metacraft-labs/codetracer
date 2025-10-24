@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
+using UiTests.Utils;
 
 namespace UiTests.PageObjects.Panes.EventLog;
 
@@ -58,5 +59,13 @@ public class EventRow
         return classes.Contains("eventLog-selected", StringComparison.OrdinalIgnoreCase)
             || classes.Contains("active", StringComparison.OrdinalIgnoreCase)
             || classes.Contains("selected", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task ClickAsync()
+    {
+        var index = await IndexAsync();
+        DebugLogger.Log($"EventRow: clicking row index {index}");
+        await _root.ClickAsync();
+        DebugLogger.Log($"EventRow: click completed for row index {index}");
     }
 }

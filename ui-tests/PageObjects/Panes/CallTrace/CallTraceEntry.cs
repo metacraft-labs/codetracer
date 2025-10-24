@@ -181,8 +181,67 @@ public class CallTraceEntry
 
     /// <summary>
     /// Clicks the call entry to trigger jump navigation.
+    /// Tries multiple hit targets (call text, child container, root) to accommodate
+    /// renderer differences between Electron and Web.
     /// </summary>
-    public Task ActivateAsync() => CallTextLocator().ClickAsync();
+    public async Task ActivateAsync()
+    {
+        var functionName = await FunctionNameAsync();
+        DebugLogger.Log($"CallTraceEntry[{functionName}]: Begin ActivateAsync");
+
+        var targets = new (string Label, ILocator Locator)[]
+        {
+            ("call-text", CallTextLocator()),
+            ("child-box", ChildBoxLocator()),
+            ("root", _root)
+        };
+
+        var clickAttempts = new (string Label, LocatorClickOptions Options)[]
+        {
+            ("single-click", new LocatorClickOptions { ClickCount = 1 }),
+            ("double-click", new LocatorClickOptions { ClickCount = 2, Delay = 50 }),
+            ("forced-click", new LocatorClickOptions { ClickCount = 1, Force = true })
+        };
+
+        foreach (var (targetLabel, target) in targets)
+        {
+            try
+            {
+                DebugLogger.Log($"CallTraceEntry[{functionName}]: scrolling into view {targetLabel}");
+                await target.ScrollIntoViewIfNeededAsync();
+            }
+            catch (PlaywrightException ex)
+            {
+                DebugLogger.Log($"CallTraceEntry[{functionName}]: scroll failed for {targetLabel}: {ex.Message}");
+            }
+
+            foreach (var (clickLabel, options) in clickAttempts)
+            {
+                try
+                {
+                    DebugLogger.Log($"CallTraceEntry[{functionName}]: clicking {targetLabel} with {clickLabel}");
+                    await target.ClickAsync(options);
+                    try
+                    {
+                        await RetryHelpers.RetryAsync(async () => await IsSelectedAsync(), maxAttempts: 5, delayMs: 50);
+                        DebugLogger.Log($"CallTraceEntry[{functionName}]: activation succeeded via {targetLabel}/{clickLabel}");
+                        return;
+                    }
+                    catch (TimeoutException)
+                    {
+                        DebugLogger.Log($"CallTraceEntry[{functionName}]: selection timeout after {targetLabel}/{clickLabel}");
+                    }
+                }
+                catch (PlaywrightException ex)
+                {
+                    DebugLogger.Log($"CallTraceEntry[{functionName}]: PlaywrightException on {targetLabel}/{clickLabel}: {ex.Message}");
+                }
+            }
+        }
+
+        DebugLogger.Log($"CallTraceEntry[{functionName}]: failed to activate via all targets");
+        throw new InvalidOperationException("Failed to activate call trace entry via any known target.");
+    }
 
     /// <summary>
     /// Retrieves all argument descriptors rendered for the call.
