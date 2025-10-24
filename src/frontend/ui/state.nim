@@ -71,6 +71,7 @@ method onMove(self: StateComponent) {.async.} =
     rrTicks: self.rrTicks,
     countBudget: countBudget,
     minCountLimit: minCountLimit,
+    lang: toLangFromFilename(self.location.path),
   )
   self.api.emit(CtLoadLocals, arguments)
   self.redraw()
