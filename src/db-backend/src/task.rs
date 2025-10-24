@@ -24,6 +24,7 @@ pub struct CtLoadLocalsArguments {
     pub rr_ticks: i64,
     pub count_budget: i64,
     pub min_count_limit: i64,
+    pub lang: Lang,
 }
 
 /// response for `ct/load-locals`
