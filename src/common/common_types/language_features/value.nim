@@ -72,6 +72,7 @@ type
     rrTicks*: int
     countBudget*: int
     minCountLimit*: int
+    lang*: Lang
     
   CtLoadLocalsResponseBody* = ref object
     locals*: seq[Variable]

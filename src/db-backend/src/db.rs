@@ -1054,7 +1054,7 @@ impl Replay for DbReplay {
         Ok(locals)
     }
 
-    fn load_value(&mut self, expression: &str) -> Result<ValueRecordWithType, Box<dyn Error>> {
+    fn load_value(&mut self, expression: &str, _lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
         // TODO: a more optimal way: cache a hashmap? or change structure?
         // or again start directly loading available values matching all expressions in the same time?:
         //   taking a set of expressions: probably best(maybe add an additional load_values)
@@ -1066,7 +1066,7 @@ impl Replay for DbReplay {
         return Err(format!("variable {expression} not found on this step").into())
     }
 
-    fn load_return_value(&mut self) -> Result<ValueRecordWithType, Box<dyn Error>> {
+    fn load_return_value(&mut self, _lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
         // assumes self.load_location() has been ran, and that we have the current call key
         Ok(self.to_value_record_with_type(&self.db.calls[self.call_key].return_value.clone()))
     }
