@@ -1,5 +1,5 @@
 import
-  std/[strutils, strformat, os, re],
+  std/[strutils, strformat, os],
   results,
   strings, filepaths
 
@@ -9,12 +9,12 @@ proc isSymlinkDangling(symlinkPath: string): bool =
 
 proc extractExecCommand(desktopFile: string): string =
   let content = readFile(desktopFile)
-  let pattern = re"^Exec=(.*)$"
+  const execPrefix = "Exec="
 
   for line in content.splitLines():
-      var matches: array[1, string]
-      if line.find(pattern, matches) >= 0:
-        return matches[0]
+      let normalized = strip(line, leading = true, trailing = false)
+      if normalized.startsWith(execPrefix):
+        return normalized[execPrefix.len ..< normalized.len]
 
   return ""
 
