@@ -637,6 +637,7 @@ jobs:
         with:
           packages_dir: dist
           repository-url: https://test.pypi.org/legacy/
+          verbose: true
 
       # - name: Publish to PyPI
       #   uses: pypa/gh-action-pypi-publish@release/v1
