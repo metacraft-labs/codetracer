@@ -26,13 +26,13 @@ use crate::dap_types;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task;
 use crate::task::{
-    Action, Breakpoint, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
-    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
-    FrameInfo, FunctionLocation, GlobalCallLineIndex, HistoryResult, HistoryUpdate, Instruction, Instructions,
-    LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification,
-    NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, StringAndValueTuple, Task, TraceKind, TraceUpdate,
-    TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
+    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
+    CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation,
+    HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate,
+    LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks,
+    RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task,
+    TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION,
+    NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
@@ -497,6 +497,13 @@ impl Handler {
         let flow_update = if arg.flow_mode == FlowMode::Call {
             self.flow_preloader
                 .load(arg.location, arg.flow_mode, self.trace_kind, &mut *flow_replay)
+            // let step_id = StepId(arg.location.rr_ticks.0);
+            // let call_key = self.db.steps[step_id].call_key;
+            // let function_id = self.db.calls[call_key].function_id;
+            // let function_first = self.db.functions[function_id].line;
+            // info!("load {arg:?}");
+            // self.flow_preloader
+            //     .load(arg.location, function_first, arg.flow_mode, &self.db)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
                 serde_json::from_str::<FlowUpdate>(&raw_flow)?

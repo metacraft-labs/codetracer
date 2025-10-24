@@ -484,6 +484,21 @@ proc update*(self: Data, build: bool = false) =
 # alt+c => low level cfg view
 # they all share the same window, but they are displayed in the order in which they are toggled
 
+proc setEditorsEditable*(data: Data, editable: bool) =
+  ## Update Monaco editors to match requested editability.
+  for label, editor in data.ui.editors:
+    if editor.monacoEditor.isNil:
+      continue
+    let readOnlyOptions = MonacoEditorOptions(readOnly: not editable)
+    editor.monacoEditor.updateOptions(readOnlyOptions)
+    let minimapEnabled =
+      if editable: data.config.showMinimap
+      else: false
+    editor.monacoEditor.updateOptions(MonacoEditorOptions(
+      minimap: js{ enabled: minimapEnabled }
+    ))
+    editor.updateLineNumbersOnly()
+
 # proc toggle
 proc switchToEdit*(data: Data) =
   if data.ui.mode != EditMode:
@@ -505,12 +520,7 @@ proc switchToEdit*(data: Data) =
           cerror "layout: component clear: " & getCurrentExceptionMsg()
     for label, editor in data.ui.editors:
       editor.disableDebugShortcuts()
-      if not editor.monacoEditor.isNil:
-        var options = MonacoEditorOptions(
-          scrollbar: js{},
-          minimap: js{ enabled: data.config.showMinimap },
-          readOnly: false)
-        editor.monacoEditor.updateOptions(options)
+    data.setEditorsEditable(true)
   redrawAll()
 
 proc switchToDebug*(data: Data) =
@@ -524,9 +534,7 @@ proc switchToDebug*(data: Data) =
     data.ui.layout.root.contentItems[0].contentItems[1].element.show()
     for label, editor in data.ui.editors:
       editor.enableDebugShortcuts()
-      if not editor.monacoEditor.isNil:
-        var options = MonacoEditorOptions(readOnly: true)
-        editor.monacoEditor.updateOptions(options)
+    data.setEditorsEditable(false)
   redrawAll()
 
 proc toggleMode*(data: Data) =
@@ -547,6 +555,9 @@ data.functions.focusEditorView = focusEditorView
 
 proc configure(data: Data) =
   Mousetrap.`bind`("ctrl+f5") do ():
+    data.toggleMode()
+
+  Mousetrap.`bind`("ctrl+e") do ():
     data.toggleMode()
 
   Mousetrap.`bind`("ctrl+s") do ():

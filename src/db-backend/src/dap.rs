@@ -438,6 +438,7 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
     let launch_trace_folder = PathBuf::from("");
     let launch_trace_file = PathBuf::from("");
     let received_configuration_done = false;
+    let launch_raw_diff_index = None;
 
     // NOTE: This does not have to be wrapped in a lock
     // This will run in the browser and JS callback code blocks are "critical sections".
@@ -449,6 +450,7 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         launch_trace_folder,
         launch_trace_file,
         received_configuration_done,
+        launch_raw_diff_index,
     };
 
     // TODO: Handle error
