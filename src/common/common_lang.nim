@@ -30,6 +30,7 @@ IS_DB_BASED[LangSmall] = true
 IS_DB_BASED[LangRustWasm] = true
 IS_DB_BASED[LangCppWasm] = true
 IS_DB_BASED[LangPythonDb] = true
+IS_DB_BASED[LangPascal] = false
 
 proc isDbBased*(lang: Lang): bool =
   ## return true if `lang` uses the db backend
