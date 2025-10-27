@@ -25,3 +25,4 @@
 - Interpreter overrides (e.g. `CODETRACER_PYTHON_INTERPRETER`) are now treated as authoritative; if the configured path cannot be resolved we error instead of silently falling back to PATH.
 - `ct record` verifies that `codetracer_python_recorder` is importable before launching the db backend and prints actionable guidance if the module is missing or broken.
 - Sudoku test-program datasets include intentionally invalid boards (e.g., examples #3 and #6) with duplicate digits inside a sub-grid; solvers should detect and report these gracefully.
+- `ct remote` shells out to `ct-remote`, first checking alongside the `ct` binary and then falling back to the user's PATH if needed; errors are surfaced with actionable messaging when the binary is missing.

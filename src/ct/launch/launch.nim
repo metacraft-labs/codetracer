@@ -1,5 +1,5 @@
 import
-  std/[ json, os, strutils ],
+  std/[ json, os, osproc, strutils ],
   ../../common/[ paths, types, intel_fix, install_utils ],
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],
@@ -12,6 +12,22 @@ import
   electron,
   results,
   json_serialization
+
+proc runCtRemote(args: seq[string]): int =
+  var execPath = ctRemoteExe
+  if not fileExists(execPath):
+    execPath = findExe("ct-remote")
+
+  if execPath.len == 0 or not fileExists(execPath):
+    echo "Failed to locate ct-remote. Ensure it is installed alongside ct or available on PATH."
+    return 1
+
+  try:
+    let process = startProcess(execPath, args = args, options = {poParentStreams})
+    result = waitForExit(process)
+  except CatchableError as err:
+    echo "Failed to launch ct-remote (" & execPath & "): " & err.msg
+    result = 1
 
 proc eventuallyWrapElectron*: bool =
   if getEnv("CODETRACER_WRAP_ELECTRON", "") == "1":
@@ -148,6 +164,8 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
+    of StartupCommand.remote:
+      quit(runCtRemote(conf.remoteArgs))
     of StartupCommand.arb:
       case conf.arbCommand:
       of ArbCommand.noCommand:
