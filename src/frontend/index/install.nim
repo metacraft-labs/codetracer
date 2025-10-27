@@ -6,6 +6,8 @@ import
   ../[ types ],
   ../../common/[ paths, ct_logging ]
 
+from window import setupSecureContext
+
 type
   InstallResponseKind* {.pure.} = enum Ok, Problem, Dismissed
 
@@ -22,31 +24,33 @@ var
   process {.importc.}: js
 
 proc createInstallSubwindow*(): js =
-    let win = jsnew electron.BrowserWindow(
-      js{
-        "width": 700,
-        "height": 422,
-        "resizable": false,
-        "parent": mainWindow,
-        "modal": true,
-        "webPreferences": js{
-          "nodeIntegration": true,
-          "contextIsolation": false,
-          "spellcheck": false
-        },
-        "frame": false,
-        "transparent": false,
-        })
+  let win = jsnew electron.BrowserWindow(
+    js{
+      "width": 700,
+      "height": 422,
+      "resizable": false,
+      "parent": mainWindow,
+      "modal": true,
+      "webPreferences": js{
+        "nodeIntegration": true,
+        "contextIsolation": false,
+        "spellcheck": false
+      },
+      "frame": false,
+      "transparent": false,
+    }
+  )
+  setupSecureContext(win)
 
-    let url = "file://" & $codetracerExeDir & "/subwindow.html"
-    debugPrint "Attempting to load: ", url
-    win.loadURL(cstring(url))
+  let url = $codetracerExeDir & "/subwindow.html"
+  debugPrint "Attempting to load: ", url
+  win.loadFile(url)
 
-    let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
-    if inDevEnv:
-      electronDebug.devTools(win)
+  let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
+  if inDevEnv:
+    electronDebug.devTools(win)
 
-    win.toJs
+  win.toJs
 
 
 proc onInstallCt*(sender: js, response: js) {.async.} =
