@@ -82,6 +82,7 @@ let
   cTraceSourcePath* = linksPath / "src" / "trace.c"
   consoleExe* = linksPath / "bin" / "console"
   # (additional note: it is a workaround for dev/some cases: TODO think more)
+  ctRemoteExe* = codetracerExeDir / "bin" / "ct-remote"
   bashExe* = linksPath / "bin" / "bash"
   taskProcessExe* = linksPath / "bin" / "task_process"
   python3Path* = linksPath / "bin" / "python3"

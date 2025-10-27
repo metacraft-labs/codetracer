@@ -19,6 +19,7 @@ type
     noCommand,
     replay,
     run,
+    remote,
     install,
     upload,
     download,
@@ -287,7 +288,7 @@ type
         desc: "Record a diff related to this trace and produce a multitrace. " &
           "Arg can be `last-commit`, path to a diff file (must be from the current repo!) or a valid `git diff <arg>` arg"
       .}: string
-      
+
       recordProgram* {.
         argument
         desc: "Program to record"
@@ -329,6 +330,12 @@ type
         defaultValue: @[]
         desc: "Arguments to forward to trace run command"
       .} : seq[string]
+    of remote:
+      remoteArgs* {.
+        restOfArgs
+        defaultValue: @[]
+        desc: "Trace sharing utilities"
+      .}: seq[string]
     of upload:
       # same args as replay
       uploadTraceId* {.
