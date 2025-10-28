@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Location};
+use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Location, ProgramEvent};
 use crate::lang::Lang;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,4 +17,6 @@ pub enum CtRRQuery {
     DeleteBreakpoints,
     ToggleBreakpoint { breakpoint: Breakpoint },
     JumpToCall { location: Location },
+    LoadAllEvents,
+    EventJump { program_event: ProgramEvent },
 }
