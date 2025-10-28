@@ -34,6 +34,16 @@ We will make `ct record` treat the user program arguments as an opaque tail that
 - **Neutral:** Slightly more care is required when adding new Codetracer options to avoid conflicts with commonly-used script flags. Providing `--` as an opt-in delimiter and updating help mitigates this risk.
 - **Negative:** None identified; the change relaxes parsing rather than tightening it. We must, however, add regression tests to ensure future refactors do not reintroduce eager option parsing.
 
+## Test Coverage Examples
+
+The following user flows must be captured as regression tests (with supporting harnesses that assert the backend receives the exact argument vector):
+
+- `ct record tests/test_helper.py --lf -x` – pytest-style long and short flags without a delimiter.
+- `ct record tests/test_helper.py -- --lf -x` – identical flags guarded by the optional `--` separator.
+- `ct record tests/test_helper.py -k=test_case --maxfail=1` – mixed short/long flags, including `=` assignments.
+- `ct record tests/test_helper.py -- -weird --fake` – arguments that start with dashes *after* a delimiter to ensure pass-through works even when the first payload token is `--`.
+- `ct record tests/test_helper.py` – no additional arguments to confirm baseline behaviour is unchanged.
+
 ## Key Locations
 
 - `src/ct/codetracerconf.nim` – redefine the `record` command schema to use `restOfArgs` for program arguments.

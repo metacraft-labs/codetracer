@@ -13,8 +13,14 @@ This plan tracks the work required to implement ADR 0006 (“Preserve Script Arg
    - Refresh the generated `ct record --help` output to document the new signature (`[--]` separator, examples with script flags).
    - Verify other help surfaces (docs when running `ct help record`, desktop UI tooltips) render the updated wording.
 3. **Regression tests for parsing**
-   - Introduce CLI-level tests that invoke `ct record` with leading-dash script arguments (e.g., `--lf`, `-k=test`) and confirm the subprocess receives them unchanged.
-   - Include coverage for edge cases: `ct record script.py` (no args), `ct record script.py --` (empty tail), and `ct record script.py -- -weird` (arguments that begin with `--` after the delimiter).
+   - Build a lightweight test harness (e.g., Nim test invoking `ct record` against a fixture script that records argv) so we can assert the backend receives the exact argument vector Codetracer forwards.
+   - Add regression cases for the key scenarios called out in ADR 0006:
+     - `ct record tests/test_helper.py --lf -x`
+     - `ct record tests/test_helper.py -- --lf -x`
+     - `ct record tests/test_helper.py -k=test_case --maxfail=1`
+     - `ct record tests/test_helper.py -- -weird --fake`
+     - `ct record tests/test_helper.py`
+   - Ensure the harness supports both CLI execution and library-style invocation so future languages can reuse it.
 
 ## Phase 2 – Backend propagation & compatibility
 
