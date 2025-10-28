@@ -4,16 +4,8 @@ use std::error::Error;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
-use crate::task::{Action, Breakpoint, Location, ProgramEvent, CtLoadLocalsArguments, VariableWithRecord};
+use crate::task::{Action, Breakpoint, Events, Location, CtLoadLocalsArguments, ProgramEvent, VariableWithRecord};
 use crate::value::ValueRecordWithType;
-
-
-#[derive(Debug, Clone)]
-pub struct Events {
-    pub events: Vec<ProgramEvent>,
-    pub first_events: Vec<ProgramEvent>,
-    pub contents: String,
-}
 
 pub trait Replay: std::fmt::Debug {
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>>;
@@ -34,5 +26,6 @@ pub trait Replay: std::fmt::Debug {
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>>;
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>>;
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>>;
+    fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>>;
     fn current_step_id(&mut self) -> StepId;
 }
