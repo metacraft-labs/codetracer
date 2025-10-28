@@ -79,6 +79,8 @@ proc createMainWindow*: js =
       "webPreferences": js{
         "nodeIntegration": true,
         "contextIsolation": false,
+        "webSecurity": true,
+        "allowRunningInsecureContent": false,
         "spellcheck": false
       },
     }
