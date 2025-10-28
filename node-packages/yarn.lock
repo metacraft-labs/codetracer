@@ -1123,12 +1123,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^24.9.1":
-  version: 24.9.1
-  resolution: "@types/node@npm:24.9.1"
+"@types/node@npm:^24.9.2":
+  version: 24.9.2
+  resolution: "@types/node@npm:24.9.2"
   dependencies:
     undici-types: "npm:~7.16.0"
-  checksum: 10c0/c52f8168080ef9a7c3dc23d8ac6061fab5371aad89231a0f6f4c075869bc3de7e89b075b1f3e3171d9e5143d0dda1807c3dab8e32eac6d68f02e7480e7e78576
+  checksum: 10c0/7905d43f65cee72ef475fe76316e10bbf6ac5d08a7f0f6c38f2b6285d7ca3009e8fcafc8f8a1d2bf3f55889c9c278dbb203a9081fd0cf2d6d62161703924c6fa
   languageName: node
   linkType: hard
 
@@ -1326,14 +1326,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@wdio/cdp-bridge@npm:9.2.0":
-  version: 9.2.0
-  resolution: "@wdio/cdp-bridge@npm:9.2.0"
+"@wdio/cdp-bridge@npm:9.2.1":
+  version: 9.2.1
+  resolution: "@wdio/cdp-bridge@npm:9.2.1"
   dependencies:
-    "@wdio/electron-utils": "npm:9.2.0"
+    "@wdio/electron-utils": "npm:9.2.1"
     wait-port: "npm:^1.1.0"
     ws: "npm:^8.18.3"
-  checksum: 10c0/8cc17e47f71e424a60373ccd9fa87be2c4ab6ea23d74c927da56b7b3f1858c7e27f448cace129021ae6ef14aee4b21a9f270865a5788a0b8f35158f5a3df0692
+  checksum: 10c0/754e1b2b39dd16637617721b96487353dc5d2380b63270a12eb436628e5c8b516e82b563f07b9f452bcec6f6710bc3f7f753b6666863885cf7b8af6f666b043d
   languageName: node
   linkType: hard
 
@@ -1352,18 +1352,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@wdio/electron-types@npm:9.2.0":
-  version: 9.2.0
-  resolution: "@wdio/electron-types@npm:9.2.0"
+"@wdio/electron-types@npm:9.2.1":
+  version: 9.2.1
+  resolution: "@wdio/electron-types@npm:9.2.1"
   dependencies:
     "@vitest/spy": "npm:^3.2.4"
-  checksum: 10c0/7d9ce753139bc4211d8901a5fff5d498333785ed4ce70faa124ac6a26df125614a26f1f0a06cc9c8737a103c5165db494c5ac480a1b78b45c09060703d4a24a7
+  checksum: 10c0/99b90687e0651ce0ac07117bb2ea3c4690b94a79ae427069d2ffe02fa70786fec640ebcc6d52bf51ef009b1c7db3ec58af3320f41bddb12c98febc0971018479
   languageName: node
   linkType: hard
 
-"@wdio/electron-utils@npm:9.2.0":
-  version: 9.2.0
-  resolution: "@wdio/electron-utils@npm:9.2.0"
+"@wdio/electron-utils@npm:9.2.1":
+  version: 9.2.1
+  resolution: "@wdio/electron-utils@npm:9.2.1"
   dependencies:
     "@electron/packager": "npm:^18.4.4"
     "@wdio/logger": "npm:^9.18.0"
@@ -1375,7 +1375,7 @@ __metadata:
     smol-toml: "npm:^1.4.2"
     tsx: "npm:^4.20.6"
     yaml: "npm:^2.8.1"
-  checksum: 10c0/fa8f46df0f39729ac7bd520264ca52876a06b7e1fc95ef0352592c1e95a37ffed1fc9e3b7fc87a425a0ee1f639e087509914274e38a48f952e52225f2f78b804
+  checksum: 10c0/b5b63c884d3fceae0fd7bfd07bd8c352f25649d5f8a00e3926a812f3dd703dab793e6af25f30bbedac628af52c120ce684e47d1901d33e7ddeb7e0e9219d9371
   languageName: node
   linkType: hard
 
@@ -2843,7 +2843,7 @@ __metadata:
     "@testing-library/dom": "npm:^10.4.1"
     "@testing-library/webdriverio": "npm:^3.2.1"
     "@types/mocha": "npm:^10.0.10"
-    "@types/node": "npm:^24.9.1"
+    "@types/node": "npm:^24.9.2"
     "@typescript-eslint/eslint-plugin": "npm:^8.46.2"
     "@typescript-eslint/parser": "npm:^8.46.2"
     ansi-parser: "npm:^3.2.11"
@@ -2877,7 +2877,7 @@ __metadata:
     monaco-editor-webpack-plugin: "npm:7.1.1"
     mousetrap: "npm:^1.6.5"
     napi-build-utils: "npm:^2.0.0"
-    node-abi: "npm:^4.14.0"
+    node-abi: "npm:^4.16.0"
     node-gyp: "npm:^11.5.0"
     node-ipc: "npm:^12.0.0"
     nouislider: "npm:^15.8.1"
@@ -2886,7 +2886,7 @@ __metadata:
     prettier: "npm:3.6.2"
     random-js: "npm:^2.1.0"
     remove: "npm:^0.1.5"
-    selenium-webdriver: "npm:^4.37.0"
+    selenium-webdriver: "npm:^4.38.0"
     socket.io: "npm:^4.8.1"
     style-loader: "npm:4.0.0"
     stylus: "npm:^0.64.0"
@@ -2897,7 +2897,7 @@ __metadata:
     vex-dialog: "npm:^1.1.0"
     vex-js: "npm:^4.1.0"
     vite: "npm:7.1.12"
-    wdio-electron-service: "npm:^9.2.0"
+    wdio-electron-service: "npm:^9.2.1"
     wdio-spec-reporter: "npm:^0.1.5"
     webpack: "npm:5.102.1"
     webpack-cli: "npm:6.0.1"
@@ -7312,12 +7312,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-abi@npm:^4.14.0":
-  version: 4.14.0
-  resolution: "node-abi@npm:4.14.0"
+"node-abi@npm:^4.16.0":
+  version: 4.16.0
+  resolution: "node-abi@npm:4.16.0"
   dependencies:
     semver: "npm:^7.6.3"
-  checksum: 10c0/928bcd5f02d85aa7b6b87bc295e1cb991984ffb29dce97ac9bddedd7338a439236ea3dc9d6f9aff61fc3968f869b9bde0914bd71a3437ddd99832587d561c7e4
+  checksum: 10c0/86755daa52b07eebd3c0db57cef7f573febb1d70fd11ddc907260fedb5b7a5dd63386e2d7c1c0d3b3e6923d4cc629e8a570768a6597ef0ae6cd4567cda4ea7b6
   languageName: node
   linkType: hard
 
@@ -9085,15 +9085,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"selenium-webdriver@npm:^4.37.0":
-  version: 4.37.0
-  resolution: "selenium-webdriver@npm:4.37.0"
+"selenium-webdriver@npm:^4.38.0":
+  version: 4.38.0
+  resolution: "selenium-webdriver@npm:4.38.0"
   dependencies:
     "@bazel/runfiles": "npm:^6.3.1"
     jszip: "npm:^3.10.1"
     tmp: "npm:^0.2.5"
     ws: "npm:^8.18.3"
-  checksum: 10c0/32b9115afca257476b91395ce88a61489359f1b125668e3a0113008b6b315b803208e16a8e99934613c5f488054aedbf62c1409c51cff4556ae546b327341860
+  checksum: 10c0/de7dffb60c8ad1fcacda0dda57d8b9cc17d965e74e8af67001f2585c2ac091d8b7d305cd93ddb1c6d3000a913a1959aaea6053e9e587762a8eaac598927fb68a
   languageName: node
   linkType: hard
 
@@ -10774,16 +10774,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"wdio-electron-service@npm:^9.2.0":
-  version: 9.2.0
-  resolution: "wdio-electron-service@npm:9.2.0"
+"wdio-electron-service@npm:^9.2.1":
+  version: 9.2.1
+  resolution: "wdio-electron-service@npm:9.2.1"
   dependencies:
     "@babel/parser": "npm:^7.28.4"
     "@electron/fuses": "npm:^2.0.0"
     "@vitest/spy": "npm:^3.2.4"
-    "@wdio/cdp-bridge": "npm:9.2.0"
-    "@wdio/electron-types": "npm:9.2.0"
-    "@wdio/electron-utils": "npm:9.2.0"
+    "@wdio/cdp-bridge": "npm:9.2.1"
+    "@wdio/electron-types": "npm:9.2.1"
+    "@wdio/electron-utils": "npm:9.2.1"
     "@wdio/globals": "npm:^9.17.0"
     "@wdio/logger": "npm:^9.18.0"
     compare-versions: "npm:^6.1.1"
@@ -10804,7 +10804,7 @@ __metadata:
       optional: true
     webdriverio:
       optional: false
-  checksum: 10c0/0e00b78b35a17161bd8a0d0a5e1cb7717815b310bcf1ccc93dca77f199ef3977610444632faa470bd3b499fd5b24e0948f2130c02c66311075778eefea58a063
+  checksum: 10c0/53b3d9b93a196c21a1e1d9ac839e0e848d72f15d9effcdcd2a6d39a21ff85ef9e4d01785f0e4fc129174aa7f4bc4873baf084ce28631eea05c0bed1abf5f540a
   languageName: node
   linkType: hard
 
