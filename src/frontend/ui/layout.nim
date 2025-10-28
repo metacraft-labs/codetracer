@@ -153,7 +153,7 @@ proc makeNestedButton(layout: js, ev: Event): VNode =
     ):
       text "Maximise container"
 
-proc closeLayoutTab(data: Data, content: Content, id: int) =
+proc closeLayoutTab*(data: Data, content: Content, id: int) =
   if not data.ui.componentMapping[content].hasKey(id):
     raise newException(Exception, "There is not any component with the given id.")
 

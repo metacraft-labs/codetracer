@@ -1387,6 +1387,7 @@ type
     pageLoaded*: bool
     initEventReceived*: bool
     focusHistory*: seq[JsObject]
+    editModeHiddenPanels*: seq[tuple[content: Content, id: int]]
 
 
   ClientActionHandler* = proc: void {.nimcall.}
@@ -1440,6 +1441,7 @@ type
   # services and components, but we need to call them sometimes in components/services
   Functions* = object
     toggleMode*:     proc(data: Data): void
+    toggleReadOnly*: proc(data: Data): void
     update*:         proc(data: Data, build: bool): void
     switchToDebug*:    proc(data: Data): void
     switchToEdit*:     proc(data: Data): void
@@ -1623,7 +1625,8 @@ when defined(ctRenderer):
     pointList: PointListData(
       tracepoints: JsAssoc[int, Tracepoint]{}),
     ui: Components(
-      focusHistory: @[]
+      focusHistory: @[],
+      editModeHiddenPanels: @[]
     ),
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
     maxRRTicks: 100_000) # TODO, not based on events which don't update? somehow record/send from record

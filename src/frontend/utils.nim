@@ -541,7 +541,8 @@ data.ui = Components(
   layoutSizes: LayoutSizes(startSize: true),
   monacoEditors: @[],
   traceMonacoEditors: @[],
-  fontSize: 15)
+  fontSize: 15,
+  editModeHiddenPanels: @[])
   # mode: CalltraceMode)
 
 for content in Content:

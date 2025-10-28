@@ -44,7 +44,9 @@ proc createInstallSubwindow*(): js =
 
     let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
     if inDevEnv:
-      electronDebug.devTools(win)
+      win.once("ready-to-show", proc() =
+        win.webContents.openDevTools(js{"mode": cstring"detach"})
+      )
 
     win.toJs
 
