@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 use std::ffi::OsStr;
 
-use log::{info, warn, error};
+use log::{info, error};
 use runtime_tracing::StepId;
 
 use crate::db::DbRecordEvent;
@@ -16,8 +16,8 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
-use crate::replay::{Events, Replay};
-use crate::task::{Action, Breakpoint, Location, CtLoadLocalsArguments, VariableWithRecord};
+use crate::replay::Replay;
+use crate::task::{Action, Breakpoint, Events, Location, CtLoadLocalsArguments, ProgramEvent, VariableWithRecord};
 use crate::value::ValueRecordWithType;
 
 #[derive(Debug)]
@@ -199,12 +199,13 @@ impl Replay for RRDispatcher {
 
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        warn!("TODO load_events rr");
-        Ok(Events {
-            events: vec![],
-            first_events: vec![],
-            contents: "".to_string(),
-        })
+        let events = serde_json::from_str::<Events>(&self.stable.run_query(CtRRQuery::LoadAllEvents)?)?;
+        Ok(events)
+        // Ok(Events {
+        //     events: vec![],
+        //     first_events: vec![],
+        //     contents: "".to_string(),
+        // })
     }
 
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>> {
@@ -293,6 +294,15 @@ impl Replay for RRDispatcher {
         Ok(serde_json::from_str::<Location>(
             &self.stable.run_query(
                 CtRRQuery::JumpToCall { location: location.clone() }
+            )?
+        )?)
+    }
+
+    fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        Ok(serde_json::from_str::<bool>(
+            &self.stable.run_query(
+                CtRRQuery::EventJump { program_event: event.clone() }
             )?
         )?)
     }

@@ -673,7 +673,7 @@ impl FlowUpdate {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct ProgramEvent {
     pub kind: EventLogKind,
@@ -1667,6 +1667,15 @@ pub enum TraceKind {
     DB,
     RR,
 }
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct Events {
+    pub events: Vec<ProgramEvent>,
+    pub first_events: Vec<ProgramEvent>,
+    pub contents: String,
+}
+
 
 pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
 pub static mut EVENT_ID_MAP: &mut [usize] = &mut [0; 100];

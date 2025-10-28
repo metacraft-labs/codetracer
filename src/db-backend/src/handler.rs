@@ -640,9 +640,7 @@ impl Handler {
     }
 
     pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
-        let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
-                                                              // for compat with rr/gdb core support
-        self.replay.jump_to(step_id)?;
+        let _ = self.replay.event_jump(&event)?;
         self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
 
