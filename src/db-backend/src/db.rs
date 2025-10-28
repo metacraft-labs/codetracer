@@ -14,8 +14,8 @@ use runtime_tracing::{
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
-use crate::replay::{Events, Replay};
-use crate::task::{Action, Breakpoint, Call, CallArg, CoreTrace, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, VariableWithRecord};
+use crate::replay::Replay;
+use crate::task::{Action, Breakpoint, Call, CallArg, CoreTrace, Events, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, VariableWithRecord};
 use crate::value::{Type, Value, ValueRecordWithType};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -1126,6 +1126,13 @@ impl Replay for DbReplay {
         self.jump_to(first_call_step_id)?;
         let mut expr_loader = ExprLoader::new(CoreTrace::default());
         self.load_location(&mut expr_loader)
+    }
+
+    fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
+        let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
+                                                            // for compat with rr/gdb core support    
+        self.jump_to(step_id)?;
+        Ok(true)
     }
 
     fn current_step_id(&mut self) -> StepId {
