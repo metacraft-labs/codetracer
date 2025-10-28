@@ -128,6 +128,9 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
 
   cstring"CTRL+KeyE":   proc(editor: MonacoEditor, e: EditorViewComponent) =
     ## Mirror the Mousetrap shortcut so toggling works while Monaco has focus.
+    if not data.functions.toggleReadOnly.isNil:
+      data.functions.toggleReadOnly(data)
+      return
     if not data.functions.toggleMode.isNil:
       data.functions.toggleMode(data),
 
@@ -1683,6 +1686,8 @@ method render*(self: EditorViewComponent): VNode =
     result = editorView(self)
 
 method onEnter*(self: EditorViewComponent) {.async.} =
+
+  console.log("This gonn get nasty")
   var editor = self.monacoEditor
 
   if self.data.ui.readOnly and editor.hasTextFocus():
@@ -1693,7 +1698,11 @@ method onEnter*(self: EditorViewComponent) {.async.} =
       flow.openValue(flow.selectedStepCount, cstring"", before=true)
       discard
     else:
-      self.toggleTrace(self.name, line)
+      if data.services.editor.activeTabInfo().changed:
+        cwarn("TAB IS EDITED, DOING NOTHING")
+      else:
+        self.toggleTrace(self.name, line)
+
 
   else:
     let line = editor.getLine()

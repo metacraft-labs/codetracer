@@ -85,7 +85,10 @@ proc createMainWindow*: js =
     # open the dev tools directly from the interface, as in browsers
     let inDevEnv = nodeProcess.env[cstring"CODETRACER_DEV_TOOLS"] == cstring"1"
     if inDevEnv:
-      electronDebug.devTools(win)
+      ## Wait for the window to finish initial painting before attaching DevTools
+      win.once("ready-to-show", proc() =
+        win.webContents.openDevTools(js{"mode": cstring"detach"})
+      )
     duration("opening the browser window from index")
     return win
   else:

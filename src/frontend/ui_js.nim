@@ -489,21 +489,80 @@ proc setEditorsEditable*(data: Data, editable: bool) =
   for label, editor in data.ui.editors:
     if editor.monacoEditor.isNil:
       continue
-    let readOnlyOptions = MonacoEditorOptions(readOnly: not editable)
-    editor.monacoEditor.updateOptions(readOnlyOptions)
     let minimapEnabled =
       if editable: data.config.showMinimap
       else: false
-    editor.monacoEditor.updateOptions(MonacoEditorOptions(
+    let options = MonacoEditorOptions(
+      readOnly: not editable,
       minimap: js{ enabled: minimapEnabled }
-    ))
+    )
+    editor.monacoEditor.updateOptions(options)
     editor.updateLineNumbersOnly()
 
-# proc toggle
+const editModeAuxiliaryContents = [
+  Content.State,
+  Content.Scratchpad,
+  Content.Repl,
+  Content.EventLog,
+  Content.TerminalOutput,
+  Content.StepList,
+  Content.Calltrace
+]
+
+proc closeAuxiliaryPanels(data: Data) =
+  ## Close side panels that should disappear while edit mode is active.
+  if data.ui.editModeHiddenPanels.len > 0:
+    return
+  for content in editModeAuxiliaryContents:
+    var idsToClose: seq[int] = @[]
+    for id, component in data.ui.componentMapping[content]:
+      if component.isNil or component.layoutItem.isNil:
+        continue
+      idsToClose.add(id)
+    for id in idsToClose:
+      if not data.ui.componentMapping[content].hasKey(id):
+        continue
+      let component = data.ui.componentMapping[content][id]
+      if component.isNil or component.layoutItem.isNil:
+        continue
+      data.ui.editModeHiddenPanels.add((content: content, id: id))
+      try:
+        component.layoutItem.remove()
+      except:
+        cwarn fmt"edit-mode: failed to close {$content} layout tab {id}: {getCurrentExceptionMsg()}"
+
+proc reopenAuxiliaryPanels(data: Data) =
+  ## Re-open panels closed while edit mode was active.
+  if data.ui.editModeHiddenPanels.len == 0:
+    return
+  for panel in data.ui.editModeHiddenPanels:
+    try:
+      data.openLayoutTab(panel.content, id = panel.id)
+    except:
+      cwarn fmt"edit-mode: failed to reopen {$panel.content} layout tab with id {panel.id}: {getCurrentExceptionMsg()}"
+  data.ui.editModeHiddenPanels.setLen(0)
+
+proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
+  ## Keep Monaco editor options and context keys aligned with the requested read-only flag.
+  if data.ui.readOnly == readOnly:
+    return
+  data.ui.readOnly = readOnly
+  if readOnly:
+    data.reopenAuxiliaryPanels()
+  else:
+    data.closeAuxiliaryPanels()
+  for _, editor in data.ui.editors:
+    if editor.isNil:
+      continue
+    if readOnly:
+      editor.enableDebugShortcuts()
+    else:
+      editor.disableDebugShortcuts()
+  data.setEditorsEditable(not readOnly)
+
 proc switchToEdit*(data: Data) =
   if data.ui.mode != EditMode:
     data.ui.mode = EditMode
-    data.ui.readOnly = false
     # TODO separate action for those?
     # data.ui.layout.root.contentItems[0].contentItems[1].config.width = 0
     # data.ui.layout.root.contentItems[0].contentItems[0].config.width = 100
@@ -518,23 +577,18 @@ proc switchToEdit*(data: Data) =
           component.clear()
         except:
           cerror "layout: component clear: " & getCurrentExceptionMsg()
-    for label, editor in data.ui.editors:
-      editor.disableDebugShortcuts()
-    data.setEditorsEditable(true)
+  data.setEditorsReadOnlyState(false)
   redrawAll()
 
 proc switchToDebug*(data: Data) =
   if data.ui.mode != DebugMode:
     data.ui.mode = DebugMode
-    data.ui.readOnly = true
     # TODO separate action?
     data.ui.layout.root.contentItems[0].contentItems[0].config.width = 50
     data.ui.layout.root.contentItems[0].contentItems[1].config.width = 50
     data.ui.layout.updateSize()
     data.ui.layout.root.contentItems[0].contentItems[1].element.show()
-    for label, editor in data.ui.editors:
-      editor.enableDebugShortcuts()
-    data.setEditorsEditable(false)
+  data.setEditorsReadOnlyState(true)
   redrawAll()
 
 proc toggleMode*(data: Data) =
@@ -543,8 +597,19 @@ proc toggleMode*(data: Data) =
   else:
     data.switchToDebug()
 
+proc toggleReadOnly*(data: Data) =
+  ## Toggle Monaco read-only state and accompanying panels without forcing a full layout toggle.
+  let goingReadOnly = not data.ui.readOnly
+  data.setEditorsReadOnlyState(goingReadOnly)
+  if goingReadOnly:
+    data.ui.mode = DebugMode
+  else:
+    data.ui.mode = EditMode
+  redrawAll()
+
 
 data.functions.toggleMode = toggleMode
+data.functions.toggleReadOnly = toggleReadOnly
 data.functions.update = update
 data.functions.switchToEdit = switchToEdit
 data.functions.switchToDebug = switchToDebug
@@ -558,7 +623,7 @@ proc configure(data: Data) =
     data.toggleMode()
 
   Mousetrap.`bind`("ctrl+e") do ():
-    data.toggleMode()
+    data.toggleReadOnly()
 
   Mousetrap.`bind`("ctrl+s") do ():
     data.update()
