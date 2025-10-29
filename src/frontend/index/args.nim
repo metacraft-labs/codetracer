@@ -48,7 +48,7 @@ proc parseArgs* =
         data.startOptions.inTest = true
       elif arg == cstring"--diff":
         if i + 1 < args.len:
-          data.startOptions.diff = cast[Diff](JSON.parse(args[i + 1]))
+          data.startOptions.diff = cast[Diff](JSON.parse(fs.readFileSync(args[i + 1], cstring"utf8")))
           data.startOptions.withDiff = true
           i += 2
           continue
@@ -57,7 +57,7 @@ proc parseArgs* =
           break
       elif arg == cstring"--diff-index":
         if i + 1 < args.len:
-          data.startOptions.rawDiffIndex = args[i + 1]
+          data.startOptions.rawDiffIndex = fs.readFileSync(args[i + 1], cstring"utf-8")
           i += 2
           continue
         else:
