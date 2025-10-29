@@ -511,8 +511,14 @@ const editModeAuxiliaryContents = [
 
 proc closeAuxiliaryPanels(data: Data) =
   ## Close side panels that should disappear while edit mode is active.
+
   if data.ui.editModeHiddenPanels.len > 0:
     return
+  if not data.ui.layout.isNil and data.ui.savedLayoutBeforeEdit.isNil:
+    let snapshot = data.ui.layout.saveLayout()
+    # Clone the resolved config so later layout mutations don't modify our snapshot.
+    let snapshotCopy = cast[GoldenLayoutResolvedConfig](JSON.parse(JSON.stringify(snapshot)))
+    data.ui.savedLayoutBeforeEdit = snapshotCopy
   for content in editModeAuxiliaryContents:
     var idsToClose: seq[int] = @[]
     for id, component in data.ui.componentMapping[content]:
@@ -523,24 +529,61 @@ proc closeAuxiliaryPanels(data: Data) =
       if not data.ui.componentMapping[content].hasKey(id):
         continue
       let component = data.ui.componentMapping[content][id]
-      if component.isNil or component.layoutItem.isNil:
+      let layoutItem = component.layoutItem
+      if component.isNil or layoutItem.isNil:
         continue
-      data.ui.editModeHiddenPanels.add((content: content, id: id))
+      let parent = layoutItem.parent
+      if parent.isNil:
+        continue
+      var insertIdx = parent.contentItems.len
+      for index, item in parent.contentItems:
+        if item == layoutItem:
+          insertIdx = index
+          break
+      let config = cast[GoldenLayoutResolvedConfig](JSON.parse(JSON.stringify(layoutItem.toConfig())))
+      data.ui.editModeHiddenPanels.add(EditModeHiddenPanel(
+        content: content,
+        id: id,
+        parent: parent,
+        index: insertIdx,
+        config: config
+      ))
       try:
-        component.layoutItem.remove()
+        layoutItem.remove()
       except:
         cwarn fmt"edit-mode: failed to close {$content} layout tab {id}: {getCurrentExceptionMsg()}"
+      component.layoutItem = nil
 
 proc reopenAuxiliaryPanels(data: Data) =
   ## Re-open panels closed while edit mode was active.
+
   if data.ui.editModeHiddenPanels.len == 0:
+    data.ui.savedLayoutBeforeEdit = nil
     return
+
+  if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
+    for panel in data.ui.editModeHiddenPanels:
+      if not data.ui.componentMapping[panel.content].hasKey(panel.id):
+        console.log("Key missing!")
+        discard data.makeComponent(panel.content, panel.id)
+    try:
+      data.ui.layout.loadLayout(data.ui.savedLayoutBeforeEdit)
+      data.ui.resolvedConfig = data.ui.savedLayoutBeforeEdit
+      data.ui.editModeHiddenPanels.setLen(0)
+      data.ui.savedLayoutBeforeEdit = nil
+      return
+    except:
+      cerror fmt"edit-mode: failed to reload saved layout: {getCurrentExceptionMsg()}"
+
   for panel in data.ui.editModeHiddenPanels:
+    if not data.ui.componentMapping[panel.content].hasKey(panel.id):
+      discard data.makeComponent(panel.content, panel.id)
     try:
       data.openLayoutTab(panel.content, id = panel.id)
     except:
       cwarn fmt"edit-mode: failed to reopen {$panel.content} layout tab with id {panel.id}: {getCurrentExceptionMsg()}"
   data.ui.editModeHiddenPanels.setLen(0)
+  data.ui.savedLayoutBeforeEdit = nil
 
 proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
   ## Keep Monaco editor options and context keys aligned with the requested read-only flag.
