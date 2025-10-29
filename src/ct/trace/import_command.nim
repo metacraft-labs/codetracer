@@ -28,5 +28,5 @@ proc importCommand*(traceZipPath: string, importedTraceFolder: string) =
   removeDir(outputFolder)
 
   createDir(outputFolder)
-  let outputFolderFullPath = expandFilename(outputFolder)
+  let outputFolderFullPath = expandFilename(expandTilde(outputFolder))
   importTraceInPreparedFolder(traceZipPath, outputFolderFullPath)

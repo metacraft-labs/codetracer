@@ -10,8 +10,9 @@ import std / [options, os, osproc, strutils, strformat ],
 
 proc replayMultitrace*(archivePath: string, indexDiff: bool = false): bool =
   # TODO: a more unique path? or is this enough
-  let outputFolder = getTempDir() / "codetracer" / archivePath.extractFilename.changeFileExt("")
-  unzipIntoFolder(archivePath, outputFolder)
+  let fullArchivePath = expandFilename(expandTilde(archivePath))
+  let outputFolder = getTempDir() / "codetracer" / fullArchivePath.extractFilename.changeFileExt("")
+  unzipIntoFolder(fullArchivePath, outputFolder)
 
   var traceDir = ""
   for kind, file in walkDir(outputFolder, relative=true):
