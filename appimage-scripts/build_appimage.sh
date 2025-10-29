@@ -151,6 +151,12 @@ cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/curl"
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/curl" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+
+# ct-remote
+cp -Lr "${ROOT_PATH}/src/links/ct-remote" "${APP_DIR}/bin/"
+chmod +x "${APP_DIR}/bin/ct-remote"
+# shellcheck disable=SC2046
+cp -n $(lddtree -l "${APP_DIR}/bin/ct-remote" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 ls -al "${APP_DIR}"/lib
 
 
@@ -264,6 +270,7 @@ patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/curl
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/node
 patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
+patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct-remote
 
 # Clear up the executable's rpath
 patchelf --remove-rpath "${APP_DIR}"/bin/ct_unwrapped
@@ -276,6 +283,7 @@ patchelf --remove-rpath "${APP_DIR}"/bin/ctags
 patchelf --remove-rpath "${APP_DIR}"/bin/curl
 patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
+patchelf --remove-rpath "${APP_DIR}"/bin/ct-remote
 
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct_unwrapped
@@ -288,6 +296,7 @@ patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ctags
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/curl
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/ruby/bin/ruby
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct-remote
 
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
