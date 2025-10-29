@@ -30,7 +30,7 @@ proc zipFolder*(source, output: string, onProgress: proc(progressPercent: int) =
 proc unzipIntoFolder*(zipPath, targetDir: string) {.raises: [IOError, OSError, Exception].} =
   var zip: ZipArchive
   if not zip.open(zipPath, fmRead):
-    raise newException(IOError, "Failed to open decrypted ZIP: " & zipPath)
+    raise newException(IOError, "Failed to open ZIP: " & zipPath)
 
   createDir(targetDir)
   zip.extractAll(targetDir)

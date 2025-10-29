@@ -189,7 +189,7 @@ proc record(
   let shellArgs = @[cmd].concat(args)
   var executable = cmd.split(" ", 1)[0]
   try:
-    executable = expandFilename(executable)
+    executable = expandFilename(expandTilde(executable))
   except OsError:
     let foundExe = findExe(executable)
     if foundExe == "":
@@ -267,7 +267,7 @@ proc record(
       var activationPathResolved = pythonActivationPath
       if activationPathResolved.len > 0:
         try:
-          activationPathResolved = expandFilename(activationPathResolved)
+          activationPathResolved = expandFilename(expandTilde(activationPathResolved))
         except OsError:
           discard
 
@@ -336,7 +336,7 @@ proc exportRecord(
   #   trying to find full path
   #   a hack: writing first there, otherwise i think expandFilename fails in some cases, when no such file yets
   writeFile(exportZipPath, "")
-  let exportZipFullPath = expandFilename(exportZipPath)
+  let exportZipFullPath = expandFilename(expandTilde(exportZipPath))
   # otherwise zip seems to try to add to it and because it's not a valid archive, it leads to an error
   removeFile(exportZipPath)
 
@@ -395,7 +395,7 @@ proc main*(): Trace =
         displayHelp()
         return
       createDir args[i + 1]
-      outputFolder = expandFilename(args[i + 1])
+      outputFolder = expandFilename(expandTilde(args[i + 1]))
       i += 2
     elif arg == "-e" or arg == "--export":
       isExportedWithArg = true
@@ -545,7 +545,7 @@ proc main*(): Trace =
         createDir(exportFolder)
       exportRecord(program, recordArgs, traceId, exportZipPath, outputFolder, cleanupOutputFolder)
 
-      traceZipFullPath = expandFilename(exportZipPath)
+      traceZipFullPath = expandFilename(expandTilde(exportZipPath))
 
     if shouldSendEvents:
       let lastLine = loadLine(sessionId, sessionLogPath)

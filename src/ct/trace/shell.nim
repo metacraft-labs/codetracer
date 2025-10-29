@@ -43,9 +43,9 @@ proc findTraceForArgs*(
       return nil
   elif traceFolderArg.isSome:
     let folder = traceFolderArg.get
-    var trace = trace_index.findByPath(expandFilename(folder), test=false)
+    var trace = trace_index.findByPath(expandFilename(expandTilde(folder)), test=false)
     if trace.isNil:
-      trace = trace_index.findByPath(expandFilename(folder) & "/", test=false)
+      trace = trace_index.findByPath(expandFilename(expandTilde(folder)) & "/", test=false)
     if not trace.isNil:
       return trace
     else:

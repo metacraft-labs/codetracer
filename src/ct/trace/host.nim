@@ -53,7 +53,7 @@ proc hostCommand*(
     let traceFolder = traceArg
     var traceFolderFullPath = ""
     try:
-      traceFolderFullPath = expandFilename(traceFolder)
+      traceFolderFullPath = expandFilename(expandTilde(traceFolder))
     except OsError as e:
       echo "ct host error: folder os error: ", e.msg
       quit(1)

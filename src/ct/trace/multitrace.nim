@@ -13,7 +13,7 @@ proc findDiff(diffSpecification: string): string =
       var path = diffSpecification
       try:
         # try to support arguments like `~/<path>`
-        path = expandFileName(diffSpecification)
+        path = expandFileName(expandTilde(diffSpecification))
       except OsError:
         discard
 
