@@ -16,7 +16,7 @@ cleanup() {
   rm -rf ./squashfs-root
 }
 
-trap cleanup EXIT
+trap cleanup EXIT ERR INT TERM HUP QUIT
 
 ROOT_PATH=$(git rev-parse --show-toplevel)
 export ROOT_PATH
@@ -26,6 +26,11 @@ export APP_DIR
 
 if [ -e "${ROOT_PATH}"/CodeTracer.AppImage ]; then
   rm -rf "${ROOT_PATH}"/CodeTracer.AppImage
+fi
+
+if [ -d "${APP_DIR}" ]; then
+  chmod -R u+w "${APP_DIR}" || true
+  rm -rf "${APP_DIR}"
 fi
 
 mkdir "${APP_DIR}"
@@ -156,7 +161,11 @@ cp -n $(lddtree -l "${APP_DIR}/bin/curl" | grep -v glibc | grep /nix) "${APP_DIR
 cp -Lr "${ROOT_PATH}/src/links/ct-remote" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/ct-remote"
 # shellcheck disable=SC2046
-cp -n $(lddtree -l "${APP_DIR}/bin/ct-remote" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
+ct_remote_libs=$(lddtree -l "${APP_DIR}/bin/ct-remote" | grep -v glibc | grep /nix || true)
+if [ -n "${ct_remote_libs}" ]; then
+  # shellcheck disable=SC2086
+  cp -n ${ct_remote_libs} "${APP_DIR}"/lib
+fi
 ls -al "${APP_DIR}"/lib
 
 
