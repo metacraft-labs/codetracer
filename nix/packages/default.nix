@@ -244,6 +244,40 @@
           };
         };
 
+        ctRemote = stdenv.mkDerivation rec {
+          pname = "ct-remote";
+          version = "03c01ce";
+
+          src = pkgs.fetchurl {
+            url =
+              "https://downloads.codetracer.com/DesktopClient.App/DesktopClient.App-linux-x64-${version}.tar.gz";
+            sha256 = "1apc3pxdn4jdhpqj3qjf4a96pqh1r5zzf2b1zy9k7chxqa1yl22a";
+          };
+
+          dontUnpack = true;
+          nativeBuildInputs = [
+            pkgs.gnutar
+            pkgs.patchelf
+          ];
+
+          installPhase = ''
+            mkdir -p $out/bin
+            tar -xzf $src
+            mv DesktopClient.App $out/bin/ct-remote
+            chmod +x $out/bin/ct-remote
+            patchelf \
+              --set-interpreter ${pkgs.glibc}/lib/ld-linux-x86-64.so.2 \
+              --set-rpath ${pkgs.lib.makeLibraryPath [ pkgs.glibc ]} \
+              $out/bin/ct-remote
+          '';
+
+          meta = {
+            description = "Prebuilt ct-remote client binary distributed with Codetracer";
+            platforms = [ "x86_64-linux" ];
+            mainProgram = "ct-remote";
+          };
+        };
+
         console = stdenv.mkDerivation {
           name = "console";
 
@@ -324,6 +358,7 @@
             resources-derivation
             db-backend
             backend-manager
+            ctRemote
             codetracer-electron
             node-modules-derivation
             stdenv.cc
@@ -662,6 +697,7 @@
 
             cp ./ct $out/bin
             cp ./db-backend-record $out/bin
+            cp -L ${ctRemote}/bin/ct-remote $out/bin/
 
             cp -r src/frontend/index.html $out/
             cp -r src/frontend/subwindow.html $out/
