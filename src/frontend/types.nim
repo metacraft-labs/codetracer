@@ -1353,6 +1353,13 @@ type
     search*:        SearchService
     shell*:         ShellService
 
+  EditModeHiddenPanel* = object
+    content*: Content
+    id*: int
+    parent*: GoldenContentItem
+    index*: int
+    config*: GoldenLayoutResolvedConfig
+
   Components* = ref object
     welcomeScreen*:  WelcomeScreenComponent
     editors*:        JsAssoc[cstring, EditorViewComponent] # ast! ir kind etc
@@ -1366,6 +1373,7 @@ type
     layoutConfig*:   GoldenLayoutConfigClass
     contentItemConfig*: GoldenLayoutItemConfigClass
     resolvedConfig*: GoldenLayoutResolvedConfig
+    savedLayoutBeforeEdit*: GoldenLayoutResolvedConfig
     layout*:         GoldenLayout
     mode*:           LayoutMode
     readOnly*:       bool
@@ -1387,7 +1395,7 @@ type
     pageLoaded*: bool
     initEventReceived*: bool
     focusHistory*: seq[JsObject]
-    editModeHiddenPanels*: seq[tuple[content: Content, id: int]]
+    editModeHiddenPanels*: seq[EditModeHiddenPanel]
 
 
   ClientActionHandler* = proc: void {.nimcall.}
@@ -1626,7 +1634,8 @@ when defined(ctRenderer):
       tracepoints: JsAssoc[int, Tracepoint]{}),
     ui: Components(
       focusHistory: @[],
-      editModeHiddenPanels: @[]
+      editModeHiddenPanels: @[],
+      savedLayoutBeforeEdit: nil
     ),
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
     maxRRTicks: 100_000) # TODO, not based on events which don't update? somehow record/send from record

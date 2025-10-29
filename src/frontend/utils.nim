@@ -542,7 +542,8 @@ data.ui = Components(
   monacoEditors: @[],
   traceMonacoEditors: @[],
   fontSize: 15,
-  editModeHiddenPanels: @[])
+  editModeHiddenPanels: @[],
+  savedLayoutBeforeEdit: nil)
   # mode: CalltraceMode)
 
 for content in Content:
