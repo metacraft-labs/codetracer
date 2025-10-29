@@ -50,6 +50,7 @@ mkShell {
       # ourPkgs.chromedriver-102
 
       ourPkgs.noir
+      ourPkgs.ctRemote
 
       capnproto
 
@@ -248,6 +249,7 @@ mkShell {
     [ ! -f links/electron ] && ln -s ${electron.outPath}/bin/electron links/electron
     [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
     [ ! -f links/curl ] && ln -s ${curl.outPath}/bin/curl links/curl
+    [ ! -f links/ct-remote ] && ln -s ${ourPkgs.ctRemote.outPath}/bin/ct-remote links/ct-remote
 
     # TODO: try to add an option to link to libs/upstream-nim, libs/rr
     #   for faster iteration when patching them as Zahary suggested?
