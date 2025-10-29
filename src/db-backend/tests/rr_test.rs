@@ -9,6 +9,7 @@ use db_backend::transport::DapTransport;
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 // use db_backend::dap_types::StackTraceArguments;
 use db_backend::task;
+use db_backend::lang::Lang;
 
 #[test]
 #[timeout(5_000)] // try to detect hanging, e.g. waiting for response that doesn't come
@@ -161,6 +162,7 @@ fn test_rr() {
         count_budget: 3_000,
         min_count_limit: 50,
         rr_ticks: 0,
+        lang: Lang::Rust,
     }).unwrap());    
     writer
         .send(&load_locals_request)
