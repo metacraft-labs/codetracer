@@ -331,6 +331,11 @@ jobs:
             --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
             --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
 
+          ./build-python/scripts/download_ct_remote.sh \
+            "${{ matrix.target_os }}" \
+            "${{ matrix.arch }}" \
+            "${TARGET_DIR}"
+
       - name: Build codetracer binaries (MacOS)
         if: ${{ matrix.target_os == 'macos' }}
         run: |
@@ -384,6 +389,11 @@ jobs:
             --dynlibOverride:ssl --dynlibOverride:crypto \
             --passL:"$(pwd)/openssl-res/lib/libssl.a $(pwd)/openssl-res/lib/libcrypto.a" \
             --out:"${TARGET_DIR}/db-backend-record" c ./src/ct/db_backend_record.nim
+
+          ./build-python/scripts/download_ct_remote.sh \
+            "${{ matrix.target_os }}" \
+            "${{ matrix.arch }}" \
+            "${TARGET_DIR}"
 
       - name: Build wheel
         run: |

@@ -25,6 +25,15 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsInstance(path, Path)
         self.assertTrue(path.name == runtime.DB_BACKEND_RECORD_BINARY_NAME)
 
+    def test_get_executable_path_for_ct_remote(self) -> None:
+        path = runtime.get_executable_path(
+            target_os="linux",
+            target_arch="amd64",
+            binary_name=runtime.CT_REMOTE_BINARY_NAME,
+        )
+        self.assertIsInstance(path, Path)
+        self.assertTrue(path.name == runtime.CT_REMOTE_BINARY_NAME)
+
     def test_get_executable_path_raises_for_unsupported_os(self) -> None:
         with self.assertRaises(runtime.BinaryNotFoundError):
             runtime.get_executable_path(target_os="plan9", target_arch="amd64")

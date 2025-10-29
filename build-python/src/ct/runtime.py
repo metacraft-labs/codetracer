@@ -13,6 +13,7 @@ DEFAULT_BINARY_NAME = "ct"
 # ``BINARY_NAME`` is kept for backward compatibility with the public API.
 BINARY_NAME = DEFAULT_BINARY_NAME
 DB_BACKEND_RECORD_BINARY_NAME = "db-backend-record"
+CT_REMOTE_BINARY_NAME = "ct-remote"
 
 
 class BinaryNotFoundError(FileNotFoundError):
