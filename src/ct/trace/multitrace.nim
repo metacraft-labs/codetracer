@@ -163,7 +163,7 @@ proc makeMultitraceArchive(traceFolders: seq[string], rawDiff: string, structure
 
   zipFolder(folder, outputPath)
 
-  removeDir(folder)
+  # TODO: decide here: only when flag archive? or always? removeDir(folder)
 
 proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPath: string) =
   # make a folder , copy those traces , find this diff, eventually parse it and store it

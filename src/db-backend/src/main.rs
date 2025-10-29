@@ -65,7 +65,7 @@ enum Commands {
         stdio: bool,
     },
     IndexDiff {
-        structured_diff_raw: String, // _path: std::path::PathBuf,
+        structured_diff_path: std::path::PathBuf,
         trace_folder: std::path::PathBuf,
         multitrace_folder: std::path::PathBuf,
     },
@@ -139,13 +139,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
         }
         Commands::IndexDiff {
-            structured_diff_raw,
+            structured_diff_path,
             trace_folder,
             multitrace_folder,
         } => {
-            // TODO: eventually structured diff path? big diff-s might not fit into CLI args
-            // let raw = std::fs::read_to_string(structured_diff_path)?;
-            let structured_diff = serde_json::from_str::<diff::Diff>(&structured_diff_raw)?;
+            let raw = std::fs::read_to_string(structured_diff_path)?;
+            let structured_diff = serde_json::from_str::<diff::Diff>(&raw)?;
             diff::index_diff(structured_diff, &trace_folder, &multitrace_folder)?;
         }
     }
