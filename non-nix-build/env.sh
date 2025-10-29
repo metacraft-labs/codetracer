@@ -59,6 +59,7 @@ fi
 ./install_nargo.sh
 ./install_wazero.sh
 ./install_nim_osx.sh
+./install_ct_remote.sh
 
 if [[ "$platform" == "mac" ]]; then
   DEFAULT_DIST_DIR=$NON_NIX_BUILD_DIR/CodeTracer.app/Contents/MacOS
@@ -83,4 +84,5 @@ pushd ../src/links
   [ ! -f ruby ]         && ln -sf "$(brew --prefix ruby)"/bin/ruby ruby
   [ ! -f nargo ]        && ln -sf "$(readlink -f "$(which nargo)")" nargo
   [ ! -f electron ]     && ln -sf "$(readlink -f "$(which electron)")" electron
+  [ ! -f ct-remote ]    && ln -sf "$BIN_DIR/ct-remote" ct-remote
 popd
