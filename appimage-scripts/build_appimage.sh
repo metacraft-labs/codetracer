@@ -12,6 +12,7 @@ set -e
 
 cleanup() {
   echo "Performing cleanup..."
+  chmod -R 777 "${APP_DIR}"
   rm -rf ./squashfs-root
 }
 
