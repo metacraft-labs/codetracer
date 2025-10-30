@@ -179,7 +179,7 @@ func filename*(event: ProgramEvent): cstring =
   event.highLevelPath.split("/")[^1]
 
 func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
-  let (name, lang) = 
+  let (name, lang) =
     case eventElement.kind:
     of WriteFile:
       (
@@ -211,7 +211,7 @@ func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
 
     of Read:
       ("event: read from stdin #{index}", LangUnknown)
-      
+
     else:
       (fmt"event: {eventElement.kind} #{index}", LangUnknown)
 
@@ -471,7 +471,7 @@ proc events(self: EventLogComponent) =
       var renderColumns: array[
           EventOptionalColumn,
           proc(content: cstring, t: js, event: ProgramEvent): cstring
-        ] = 
+        ] =
         [
           proc(content: cstring, t: js, event: ProgramEvent): cstring {.closure.} =
             if event.kind != TraceLogEvent:
@@ -523,6 +523,19 @@ proc events(self: EventLogComponent) =
           scrollY:        2000,
           scroller:       true,
           fixedColumns:   true,
+          info: false,
+          lengthChange: false,
+          search: false,
+          label: false,
+          layout: js{
+            top:        nil,
+            topStart:   nil,
+            topEnd:     nil,
+            bottom:     nil,
+            bottomStart:nil,
+            bottomEnd:  nil
+          },
+          pageLength: -1,
           order:          @[[0.toJs, (cstring"asc").toJs]],
           colResize:      js{
             isEnabled: true,
@@ -551,7 +564,7 @@ proc events(self: EventLogComponent) =
                 tableArgs: mutData,
                 selectedKinds: self.selectedKinds,
                 isTrace: false,
-                traceId: 0,  
+                traceId: 0,
               )
             self.api.emit(CtUpdateTable, updateTableArgs),
         }
@@ -597,7 +610,7 @@ proc events(self: EventLogComponent) =
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
     jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
-    let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"  
+    let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
     cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
       .addEventListener(
         cstring"scroll",
@@ -918,7 +931,7 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
 
   proc showDropdown(e: Event, et: VNode) =
     var dropdownElem = document.getElementById(dropDownContainerId)
-    
+
     if dropdownElem == nil:
       document.body.appendChild(vnodeToDom(dropdownVNode(), KaraxInstance()))
       dropdownElem = document.getElementById(dropDownContainerId)
@@ -1110,7 +1123,7 @@ method render*(self: EventLogComponent): VNode =
     tdiv(
       class = componentContainerClass("eventLog"),
       tabIndex = "2",
-      onclick = proc(ev: Event, v:VNode) = 
+      onclick = proc(ev: Event, v:VNode) =
         ev.stopPropagation()
         if self.data.ui.activeFocus != self:
           self.data.ui.activeFocus = self
