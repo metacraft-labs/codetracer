@@ -2,12 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 25.10.1 - 2025-10-30
 
-- Documented that Python recordings now run through the db backend using the active interpreter, including CLI help and installation guidance for the `codetracer_python_recorder` package.
-- Added a Python getting-started guide covering recorder installation, `ct record`, and replay workflows.
-- `ct record` now verifies that `codetracer_python_recorder` is importable before launching the db backend and prints remediation hints when the module is missing or broken.
-- CI smoke test for the Python recorder validates metadata fields and exercises failure paths for missing interpreters or recorder modules.
+We are releasing our new version enabling support for Python recordings!
+
+They are based on our [codetracer-python-recorder](https://github.com/metacraft-labs/codetracer-python-recorder)
+and one needs to install it (e.g. with `pip install codetracer-python-recorder`) to be able to use `ct record <script.py>`
+
+One can read more in the [docbook section for Python](https://docs.codetracer.com/getting_started/python.html)
+
+There are also some bugfixes, and a lot of work on various other features which are still in development.
+
+Bugfixes:
+  - bugfix(ruby): Fix ruby output being on a single line (fix for one of the newer ruby recorders this time)
+  - bugfix(frontend): add uniform disabled style for future in both event log and terminal
+  - security fixes, cleanups and upgrades of packages
+Refactorings:
+  - refactor additional parts of our frontend/index code
 
 ## 25.09.2 - 2025-09-25(hotfix)
 
