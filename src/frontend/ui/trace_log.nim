@@ -156,7 +156,7 @@ method render*(self: TraceLogComponent): VNode =
         self.resizeObserver = resizeObserver
 
       # add scroll event listeners to both tables
-      jq(&"#traceLogComponent-{self.id} .dataTables_scrollBody").toJs
+      jq(&"#traceLogComponent-{self.id} .dt-scroll-body").toJs
         .addEventListener(cstring"scroll", proc = self.table.updateTableRows())
 
       self.table.updateTableRows(redraw = false))

@@ -382,7 +382,7 @@ proc renderTableResults(
       self.dataTable.resizeTable()
 
       # add event listener for scrolling to update table footer
-      let scrollBodyDom = jq(cstring(fmt"#chart-table-{self.id} .dataTables_scrollBody"))
+      let scrollBodyDom = jq(cstring(fmt"#chart-table-{self.id} .dt-scroll-body"))
 
       # add wheel event handler for nested scrollable element (table content)
       scrollBodyDom.toJs.addEventListener(cstring"wheel", proc(ev: Event, tg: VNode) =
@@ -432,7 +432,7 @@ proc renderTableResults(
 
     let denseWrapper = cstring(fmt"#trace-table-{self.id}_wrapper")
 
-    cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
+    cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
         .addEventListener(cstring"wheel", proc(ev: Event) =
           ev.stopPropagation()
           self.dataTable.updateTableRows()

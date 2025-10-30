@@ -47,8 +47,8 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
 
   if not container.isNil:
     let containerHeight = container.toJs.clientHeight.to(int)
-    let scrollArea = cast[Node](container.findNodeInElement(".dataTables_scroll"))
-    let scrollBody = cast[Node](scrollArea.findNodeInElement(".dataTables_scrollBody"))
+    let scrollArea = cast[Node](container.findNodeInElement(".dt-scroll"))
+    let scrollBody = cast[Node](scrollArea.findNodeInElement(".dt-scroll-body"))
 
     scrollArea.style.height = cstring(fmt"{containerHeight}px")
     scrollArea.style.maxHeight = cstring(fmt"{containerHeight}px")
@@ -74,7 +74,7 @@ proc updateTableRows*(self: DataTableComponent, redraw: bool = true) =
   let scroller = context.scroller
   let page = scroller.page()
 
-  self.startRow = cast[int](page.start) + 1  
+  self.startRow = cast[int](page.start) + 1
   self.endRow = cast[int](page["end"]) + 1
 
   if redraw:
