@@ -30,6 +30,19 @@ proc refreshTraces(self: TraceLogComponent) =
           deferRender: true,
           scrollY: 200,
           scroller: true,
+          info: false,
+          lengthChange: false,
+          search: false,
+          label: false,
+          layout: js{
+            top:        nil,
+            topStart:   nil,
+            topEnd:     nil,
+            bottom:     nil,
+            bottomStart:nil,
+            bottomEnd:  nil
+          },
+          pageLength: -1,
           order: @[[0.toJs, (cstring"asc").toJs]],
           colResize: js{
             isEnabled: true,
