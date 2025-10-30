@@ -672,6 +672,8 @@ jobs:
     runs-on: [self-hosted, nixos]
     needs: [push-to-cachix]
     if: ${{ github.ref == 'refs/heads/main' && !github.event['codetracer-ci'] }}
+    permissions:
+      contents: "write"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -686,11 +688,20 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh"
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config init.defaultBranch main
+
+          git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
+          
+          nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
 
   push-tag:
     runs-on: [ self-hosted, nixos ]
     needs: [ dev-build, nix-build, appimage-build, dmg-build ]
+    permissions:
+      contents: "write"
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -713,9 +724,9 @@ jobs:
           MONTH=$(bash -c "printf '%02d' \$(grep \"CodeTracerMonth\*\" src/ct/version.nim | sed \"s/.*CodeTracerMonth\* = //g\")")
           BUILD=$(bash -c 'grep "CodeTracerBuild\*" src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g"')
 
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global init.defaultBranch main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config init.defaultBranch main
 
           git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
 
