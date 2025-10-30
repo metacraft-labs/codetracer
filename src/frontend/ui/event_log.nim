@@ -92,7 +92,7 @@ proc recalculateKinds(self: EventLogComponent)
 
 proc resizeEventLogHandler(self: EventLogComponent) =
   self.denseTable.resizeTable()
-  self.detailedTable.resizeTable()
+  # self.detailedTable.resizeTable()
 
 proc filterEvents(self: EventLogComponent): seq[ProgramEvent] =
   var events: seq[ProgramEvent] = @[]
@@ -611,7 +611,7 @@ proc events(self: EventLogComponent) =
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
     jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
     let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
-    cast[Node](jq(denseWrapper)).findNodeInElement(".dataTables_scrollBody")
+    cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
       .addEventListener(
         cstring"scroll",
         proc () =
