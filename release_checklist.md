@@ -5,7 +5,7 @@
 * Update version.nim with the new version, following [calendar versioning](https://calver.org/): `YY.OM.<build>`:
   e.g. the first build for a month can be `25.03.1`, the next one `25.03.2` etc
 * Update Info.plist with the new version following the same format.
-* Update build-python/setup.cfg with the new version following the same format.
+* Update `build-python/setup.cfg` with the new version following the same format.
 * Open a pull request with the changes
 * Check if CI builds and upload the artifacts correctly. Test the artifacts: if needed, one can
   fix/change things and push again
