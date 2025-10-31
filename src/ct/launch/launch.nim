@@ -133,7 +133,7 @@ proc runInitial*(conf: CodetracerConf) =
         replayInteractive,
         conf.uploadOrg)
     of StartupCommand.download:
-      downloadTraceCommand(conf.traceDownloadKey)
+      downloadTraceCommand(conf.traceDownloadUrl)
     of StartupCommand.login:
       loginCommand(conf.loginDefaultOrg)
     of StartupCommand.`update-default-org`:
