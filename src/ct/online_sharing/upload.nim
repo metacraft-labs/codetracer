@@ -87,6 +87,10 @@ proc uploadCommand*(
   interactive: bool,
   uploadOrg: Option[string],
 ) =
+  # TODO: re-enable when ready
+  echo "command not functional yet"
+  quit(1)
+
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
   if not config.traceSharing.enabled:

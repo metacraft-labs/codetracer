@@ -42,7 +42,6 @@ proc downloadTrace*(url: string): int =
   return traceId
 
 proc downloadTraceCommand*(traceDownloadUrl: string) =
-  let config = loadConfig(folder=getCurrentDir(), inTest=false)
   try:
     let traceId = downloadTrace(traceDownloadUrl)
     if isatty(stdout):

@@ -80,3 +80,4 @@
 [submodule "libs/nim-confutils"]
 	path = libs/nim-confutils
 	url = https://github.com/metacraft-labs/nim-confutils
+	branch = codetracer
