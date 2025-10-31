@@ -702,6 +702,7 @@
             cp -r src/frontend/index.html $out/
             cp -r src/frontend/subwindow.html $out/
 
+            cp -r src/frontend/init.js $out/
           '';
 
           meta.mainProgram = "ct";

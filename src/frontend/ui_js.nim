@@ -1212,6 +1212,11 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
     result.add(messageCode)
   # echo result.repr
 
+proc onMaximize(data: Data) =
+  jq("body").style.backgroundColor = cstring"black"
+proc onUnmaximize(data: Data) =
+  jq("body").style.backgroundColor = cstring"transparent"
+
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
     # "new-record-window"
@@ -1304,6 +1309,9 @@ proc configureIPC(data: Data) =
     # "dap-raw-response-or-event"
     "dap-receive-response"
     "dap-receive-event"
+
+    "maximize"
+    "unmaximize"
 
   duration("configureIPCRun")
 

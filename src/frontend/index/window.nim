@@ -36,6 +36,32 @@ proc onClose*(e: js) =
     mainWindow.webContents.send "CODETRACER::close", js{}
     close = true
 
+proc setupSecureContext*(win: JsObject) =
+  # Prevent opening new windows or popups
+  win.webContents.setWindowOpenHandler(proc: js =
+    return js{
+      "action": "deny"
+    }
+  )
+
+  # Disable webview tags
+  electron_vars.app.on(
+    "web-contents-created",
+    proc(evt: js, contents: js) =
+      contents.on("will-attach-webview", proc(event: js) =
+        event.preventDefault()
+      )
+  )
+
+  # Disable window navigation
+  win.on(
+    "will-navigate",
+    proc(e: js, url: js) =
+      let current = win.getURL()
+      if url != current:
+        e.preventDefault()
+  )
+
 proc createMainWindow*: js =
   when not defined(server):
     # TODO load from config
@@ -53,6 +79,8 @@ proc createMainWindow*: js =
       "webPreferences": js{
         "nodeIntegration": true,
         "contextIsolation": false,
+        "webSecurity": true,
+        "allowRunningInsecureContent": false,
         "spellcheck": false
       },
     }
@@ -72,13 +100,16 @@ proc createMainWindow*: js =
 
     let win = jsnew electron.BrowserWindow(initInfo)
     win.on("maximize", proc() =
-      win.webContents.executeJavaScript("document.body.style.backgroundColor = 'black';"))
+      win.webContents.send "CODETRACER::maximize", js{}
+    )
     win.on("unmaximize", proc() =
-      win.webContents.executeJavaScript("document.body.style.backgroundColor = 'transparent';"))
+      win.webContents.send "CODETRACER::unmaximize", js{}
+    )
     win.maximize()
-    let url = "file://" & $codetracerExeDir & "/index.html"
 
-    win.loadURL(cstring(url))
+    let url = $codetracerExeDir & "/index.html"
+    win.loadFile(url)
+    setupSecureContext(win)
 
     win.on("close", onClose)
     # TODO: eventually add a shortcut and ipc message that lets us
