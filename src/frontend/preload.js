@@ -1,0 +1,1 @@
+window.inElectron = true
