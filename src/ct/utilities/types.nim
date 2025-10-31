@@ -14,3 +14,4 @@ type UploadedInfo* = ref object
   downloadKey*: string
   controlId*: string
   storedUntilEpochSeconds*: int
+  exitCode*: int

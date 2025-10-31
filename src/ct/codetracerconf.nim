@@ -356,6 +356,10 @@ type
         abbr: "i",
         desc: "explicit flag for interactively choosing a trace"
       .}: Option[bool]
+      uploadOrg* {.
+        name: "org",
+        desc: "organization to upload to"
+      .}: Option[string]
     of download:
       traceDownloadKey* {.
         argument,
