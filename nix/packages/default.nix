@@ -246,12 +246,12 @@
 
         ctRemote = stdenv.mkDerivation rec {
           pname = "ct-remote";
-          version = "87f277f";
+          version = "102d2c8";
 
           src = pkgs.fetchurl {
             url =
               "https://downloads.codetracer.com/DesktopClient.App/DesktopClient.App-linux-x64-${version}.tar.gz";
-              sha256 = "sha256-e9l21kbXn0O52I1E6Ii4M2KLSlZwzDXs9cK3pUq5vzU=";
+              sha256 = "sha256-8eJubZI677ZeIHum9jK4wouFt14Ocez+w5uZLHMo4Bw=";
           };
 
           dontUnpack = true;

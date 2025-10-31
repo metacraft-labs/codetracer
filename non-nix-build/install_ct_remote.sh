@@ -8,7 +8,7 @@ set -euo pipefail
 mkdir -p "$DEPS_DIR"
 mkdir -p "$BIN_DIR"
 
-CT_REMOTE_VERSION=${CT_REMOTE_VERSION:-03c01ce}
+CT_REMOTE_VERSION=${CT_REMOTE_VERSION:-102d2c8}
 DEST_BINARY="$BIN_DIR/ct-remote"
 VERSION_FILE="$DEPS_DIR/ct-remote.version"
 
