@@ -132,16 +132,16 @@ proc runInitial*(conf: CodetracerConf) =
         conf.uploadTraceFolder,
         replayInteractive,
         conf.uploadOrg)
-    of StartupCommand.download:
-      downloadTraceCommand(conf.traceDownloadUrl)
-    of StartupCommand.login:
-      loginCommand(conf.loginDefaultOrg)
-    of StartupCommand.`update-default-org`:
-      updateDefaultOrg(conf.updateDefaultOrgName)
-    of StartupCommand.cmdDelete:
-      deleteTraceCommand(conf.traceId, conf.controlId)
-      # eventually enable?
-      # downloadCommand(conf.traceRegistryId)
+    # of StartupCommand.download:
+    #   downloadTraceCommand(conf.traceDownloadUrl)
+    # of StartupCommand.login:
+    #   loginCommand(conf.loginDefaultOrg)
+    # of StartupCommand.`update-default-org`:
+    #   updateDefaultOrg(conf.updateDefaultOrgName)
+    # of StartupCommand.cmdDelete:
+    #   deleteTraceCommand(conf.traceId, conf.controlId)
+    #   # eventually enable?
+    #   # downloadCommand(conf.traceRegistryId)
     of StartupCommand.build:
       build(conf.buildProgramPath, conf.buildOutputPath)
     of StartupCommand.record:
@@ -153,8 +153,8 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
-    of StartupCommand.remote:
-      quit(runCtRemote(conf.remoteArgs))
+    # of StartupCommand.remote:
+    #   quit(runCtRemote(conf.remoteArgs))
     of StartupCommand.arb:
       case conf.arbCommand:
       of ArbCommand.noCommand:
