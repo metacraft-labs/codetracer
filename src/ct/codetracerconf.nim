@@ -291,6 +291,11 @@ type
           "Arg can be `last-commit`, path to a diff file (must be from the current repo!) or a valid `git diff <arg>` arg"
       .}: string
 
+      recordUpload* {.
+        name: "upload",
+        desc: "upload the trace directly after recording and processing it"
+      .}: bool
+
       recordProgram* {.
         argument
         desc: "Program to record"
@@ -302,6 +307,7 @@ type
         desc: "Arguments for record",
         longDesc: "longer description for record"
       .} : seq[string]
+
     of StartupCommand.replay:
      replayTraceId* {.
         name: "id",

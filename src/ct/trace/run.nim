@@ -53,6 +53,7 @@ proc runWithRestart(
                              address="",
                              socketPath="",
                              withDiff="",
+                             upload=false,
                              program=recordArgs[0],
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:

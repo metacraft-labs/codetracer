@@ -1,8 +1,9 @@
-import std/[os, osproc, strutils, sequtils, strtabs, strformat, json],
+import std/[os, osproc, strutils, sequtils, strtabs, strformat, json, options],
   multitrace,
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
-  ../cli/build
+  ../cli/build,
+  ../online_sharing/upload
 
 proc stripEnclosingQuotes(value: string): string =
   ## Remove a single layer of matching quotes from ``value`` if present.
@@ -172,7 +173,7 @@ else:
     let combined = if diagnostics.len > 0: diagnostics else: lines.join("\n")
     return (recorderError, version, combined)
 
-proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath: string): Trace =
+proc recordInternal(exe: string, args: seq[string], withDiff: string, upload: bool, configPath: string): Trace =
   let env = if configPath.len > 0:
       setupEnv(configPath)
     else:
@@ -202,6 +203,19 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath
         # makeMultitrace(@[traceId], withDiff, fmt"multitrace-with-diff-for-trace-{traceId}.zip")
         addDiffToTrace(result, withDiff)
 
+      if upload:
+        # ct-remote must add its default organization if it exists
+        # if not, for now there is not an org arg for ct record yet
+        let org = none(string)
+        # IMPORTANT: currently this calls ct-remote and leaves the output mostly to it
+        # and after this directly exists the program
+        # we assume this is ok, as ct record --upload .. is a bit like
+        # ct record + ct upload
+        discard uploadTrace(result, org)
+    else:
+      echo "ERROR: maybe something wrong with record; couldn't read trace id after recording"
+      quit(1)
+
 proc record*(lang: string,
              outputFolder: string,
              exportFile: string,
@@ -209,6 +223,7 @@ proc record*(lang: string,
              address: string,
              socketPath: string,
              withDiff: string,
+             upload: bool,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
@@ -283,11 +298,11 @@ proc record*(lang: string,
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall, LangPythonDb]:
-    return recordInternal(dbBackendRecordExe, pargs, withDiff, "")
+    return recordInternal(dbBackendRecordExe, pargs, withDiff, upload, "")
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
       let configPath = ctConfig.rrBackend.ctPaths
-      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), withDiff, configPath)
+      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), withDiff, upload, configPath)
     else:
       echo "This functionality requires a codetracer-rr-backend installation"
