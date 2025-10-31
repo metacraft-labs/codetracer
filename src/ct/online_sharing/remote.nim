@@ -1,5 +1,5 @@
 import
-  std/[ json, os, osproc, strutils ],
+  std/[ json, os, osproc, strutils, options ],
   ../../common/[ paths ],
   ../cli/[ logging, list, help, build]
 
@@ -18,3 +18,13 @@ proc runCtRemote*(args: seq[string]): int =
   except CatchableError as err:
     echo "Failed to launch ct-remote (" & execPath & "): " & err.msg
     result = 1
+
+proc loginCommand*(defaultOrg: Option[string]) =
+  var args = @["login"]
+  if defaultOrg.isSome:
+    args.add("--default-org")
+    args.add(defaultOrg.get)
+  quit(runCtRemote(args))
+
+proc updateDefaultOrg*(newOrg: string) =
+  quit(runCtRemote(@["update-default-org", newOrg]))

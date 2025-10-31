@@ -134,6 +134,10 @@ proc runInitial*(conf: CodetracerConf) =
         conf.uploadOrg)
     of StartupCommand.download:
       downloadTraceCommand(conf.traceDownloadKey)
+    of StartupCommand.login:
+      loginCommand(conf.loginDefaultOrg)
+    of StartupCommand.`update-default-org`:
+      updateDefaultOrg(conf.updateDefaultOrgName)
     of StartupCommand.cmdDelete:
       deleteTraceCommand(conf.traceId, conf.controlId)
       # eventually enable?
