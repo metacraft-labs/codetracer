@@ -2,8 +2,8 @@ const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 const path = require('path');
 
 module.exports = {
-  mode: 'development',
-  // devtool: "source-map",
+  mode: "production",
+  devtool: false,
   entry: "./src/frontend/frontend_imports.js",
   output: {
     globalObject: 'window',
@@ -11,16 +11,16 @@ module.exports = {
     filename: "frontend_bundle.js"
   },
   module: {
-      rules: [
-        {
-          test: /\.css$/,
-          use: ['style-loader', 'css-loader']
-        },
-        // {
-        //   test: /\.ttf$/,
-        //   type: 'asset/resource'
-        // }
-      ]
+    rules: [
+    {
+      test: /\.css$/,
+      use: ['style-loader', 'css-loader']
     },
-    plugins: [new MonacoWebpackPlugin()]
+    // {
+    //   test: /\.ttf$/,
+    //   type: 'asset/resource'
+    // }
+    ]
+  },
+  plugins: [new MonacoWebpackPlugin()]
 };
