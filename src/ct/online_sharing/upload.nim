@@ -1,83 +1,42 @@
-import std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json, sequtils ]
+import std/[ 
+  terminal, options, strutils, strformat,
+  os, httpclient, uri, net, json,
+  sequtils, streams, oids
+]
 import ../../common/[ trace_index, types ]
 import ../utilities/[ encryption, zip, types, progress_update ]
-import ../../common/[ config ]
+import ../../common/[ config, paths ]
 import ../cli/interactive_replay
 import ../codetracerconf
 import ../trace/shell
-import streams
+import remote
 
 proc uploadFile(
-  file: string,
-  config: Config,
-  onProgress: proc(progressPercent: int) = nil
+  traceZipPath: string,
+  org: Option[string],
+  config: Config
 ): UploadedInfo {.raises: [KeyError, Exception].} =
 
-  var client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
-  let totalSize = getFileSize(file)
-
+  result = UploadedInfo(exitCode: 0)
   try:
-    let getUrlResponse = client.getContent(fmt"{parseUri(config.traceSharing.baseUrl) / config.traceSharing.getUploadUrlApi}")
-    let getUrlJson = parseJson(getUrlResponse)
-
-    let uploadUrl = getUrlJson[UPLOAD_URL_FIELD].getStr("").strip()
-    let fileId = getUrlJson[FILE_ID_FIELD].getStr("").strip()
-    let controlId = getUrlJson[CONTROL_ID_FIELD].getStr("")
-    let storedUntilEpochSeconds = getUrlJson[FILE_STORED_UNTIL_FIELD].getInt()
-    if fileId == "" or uploadUrl == "" or controlId == "" or storedUntilEpochSeconds == 0:
-      raise newException(KeyError, "error: Can't parse response")
-
-    let boundary = "----NimUploadBoundary"
-    let filename = extractFilename(file)
-
-    var uploadStream = newStringStream()
-    proc writeLine(s: string) = uploadStream.write(s & "\r\n")
-
-    # Write multipart headers
-    writeLine("--" & boundary)
-    writeLine("Content-Disposition: form-data; name=\"file\"; filename=\"" & filename & "\"")
-    writeLine("Content-Type: application/octet-stream")
-    writeLine("")
-
-    let fileSize = getFileSize(file)
-
-    # Read file and simulate streaming while calling onProgress
-    var sent = 0
-    var fileStream = open(file, fmRead)
-    var buf: array[4096, byte]
-    var readBytes: int
-    var lastPercentSent = 0
-    var currentProgress = 0
-
-    while true:
-      readBytes = fileStream.readBuffer(addr buf[0], buf.len)
-      if readBytes == 0: break
-      uploadStream.writeData(addr buf[0], readBytes)
-      if not onProgress.isNil:
-        sent += readBytes
-        currentProgress = int((sent * 100) div totalSize)
-        if currentProgress > lastPercentSent:
-          onProgress(currentProgress)
-          lastPercentSent = currentProgress
-
-    fileStream.close()
-
-    # End of multipart form
-    writeLine("")
-    writeLine("--" & boundary & "--")
-
-    # Actually send the request
-    client.headers["Content-Type"] = "multipart/form-data; boundary=" & boundary
-    discard client.putContent(uploadUrl, uploadStream.data)
-
-    return UploadedInfo(
-      fileId: fileId,
-      controlId: controlId,
-      storedUntilEpochSeconds: storedUntilEpochSeconds
-    )
-
+    var args = @["upload", traceZipPath]
+    if org.isSome:
+      args.add("--org")
+      args.add(org.get)
+    result.exitCode = runCtRemote(args)
   except CatchableError as e:
-    raise newException(Exception, &"error: can't upload to API: {e.msg}")
+    echo "error: uploadFile exception: ", e.msg
+
+  # TODO: for now ct-remote outputs the info
+  #   for integration with welcome-screen we might eventually
+  #   get json and process it here again in the future
+
+  # return UploadedInfo(
+  #   fileId: fileId,
+  #   controlId: controlId,
+  #   storedUntilEpochSeconds: storedUntilEpochSeconds
+  # )
+
 
 proc onProgress(ratio, start: int, message: string, lastPercentSent: ref int): proc(progressPercent: int) =
   proc(progressPercent: int) =
@@ -86,31 +45,47 @@ proc onProgress(ratio, start: int, message: string, lastPercentSent: ref int): p
       lastPercentSent[] = scaled
       logUpdate(scaled, message)
 
-proc uploadTrace*(trace: Trace, config: Config): UploadedInfo =
-  let outputZip = trace.outputFolder / "tmp.zip"
-  let outputEncr = trace.outputFolder / "tmp.enc"
-  let (key, iv) = generateEncryptionKey()
 
+proc uploadTrace*(trace: Trace, org: Option[string], config: Config): UploadedInfo =
+  # try to generate a unique path, so even if we don't remove it/clean it up
+  #   it's not easy to clash with it on a next upload
+  # https://nim-lang.org/docs/oids.html
+  let id = $genOid()
+  let traceTempUploadZipFolder = codetracerTmpPath / fmt"trace-upload-zips-{id}"
+  createDir(traceTempUploadZipFolder)
+  # alexander: import to be tmp.zip for the codetracer-ci service iirc
+  let outputZip = traceTempUploadZipFolder / fmt"tmp.zip"
+
+  let lastPercentSent = new int
+  zipFolder(trace.outputFolder, outputZip, onProgress = onProgress(ratio = 33, start = 0, "Zipping files..", lastPercentSent))
+  var uploadInfo = UploadedInfo()
   try:
-    let lastPercentSent = new int
-    zipFolder(trace.outputFolder, outputZip, onProgress = onProgress(ratio = 33, start = 0, "Zipping files..", lastPercentSent))
-    encryptFile(outputZip, outputEncr, key, iv, onProgress = onProgress(ratio = 33, start = 34, "Encrypting zip file...", lastPercentSent))
-    let uploadInfo: UploadedInfo = uploadFile(outputEncr, config, onProgress = onProgress(ratio = 33, start = 67, "Uploading file to server...", lastPercentSent))
-    uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt((it.uint64).toHex(2)).join("")
-
-    updateField(trace.id, "remoteShareDownloadKey", uploadInfo.downloadKey, false)
-    updateField(trace.id, "remoteShareControlId", uploadInfo.controlId, false)
-    updateField(trace.id, "remoteShareExpireTime", uploadInfo.storedUntilEpochSeconds, false)
-    return uploadInfo
+    uploadInfo = uploadFile(outputZip, org, config)
+  
+    # TODO: after we have link and welcome screen integration again
+    #   for now just leave the output to ct-remote: we quit directly in uploadFile for now
+    # uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt((it.uint64).toHex(2)).join("")
+    # updateField(trace.id, "remoteShareDownloadKey", uploadInfo.downloadKey, false)
+  except CatchableError as e:
+    echo "uploadTrace error: ", e.msg
+    uploadInfo.exitCode = 1
   finally:
     removeFile(outputZip)
-    removeFile(outputEncr)
+    # TODO: if we start to support directly passed zips: as an argument or because
+    #   of multitraces, don't remove such a folder for those cases
+    # this one is just a temp one:
+    removeDir(traceTempUploadZipFolder)
+
+  quit(uploadInfo.exitCode)
+
+  # TODO: result = uploadInfo?
 
 proc uploadCommand*(
   patternArg: Option[string],
   traceIdArg: Option[int],
   traceFolderArg: Option[string],
-  interactive: bool
+  interactive: bool,
+  uploadOrg: Option[string],
 ) =
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
@@ -131,7 +106,7 @@ proc uploadCommand*(
     quit(1)
 
   try:
-    uploadInfo = uploadTrace(trace, config)
+    uploadInfo = uploadTrace(trace, uploadOrg, config)
   except CatchableError as e:
     echo e.msg
     quit(1)
