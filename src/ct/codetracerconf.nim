@@ -420,9 +420,9 @@ type
       of listRecentTx:
         discard
     of `index-diff`:
-      indexDiffMultitracePath* {.
+      indexDiffTracePath* {.
         argument
-        desc: "Path to a multitrace: for now indexing only a single(the first) trace"
+        desc: "Path to a trace with diffs: for now indexing only a single trace"
       .}: string
 
     # of `import`:

@@ -424,9 +424,11 @@ impl ExprLoader {
         check_list: &HashMap<usize, BranchState>,
     ) -> HashMap<usize, BranchState> {
         let mut results: HashMap<usize, BranchState> = HashMap::default();
-        for branch in &self.processed_files[path].branch {
-            if !check_list.contains_key(&(branch.header_line.0 as usize)) && branch.status == BranchState::Unknown {
-                results.insert(branch.header_line.0 as usize, BranchState::NotTaken);
+        if self.processed_files.contains_key(path) {
+            for branch in &self.processed_files[path].branch {
+                if !check_list.contains_key(&(branch.header_line.0 as usize)) && branch.status == BranchState::Unknown {
+                    results.insert(branch.header_line.0 as usize, BranchState::NotTaken);
+                }
             }
         }
         results
@@ -545,7 +547,7 @@ impl ExprLoader {
     // pub fn load_loops(&mut self, )
 
     pub fn get_comment_positions(&self, path: &PathBuf) -> Vec<Position> {
-        self.processed_files.get(path).unwrap().comment_lines.clone()
+        self.processed_files.get(path).unwrap_or(&FileInfo::new("")).comment_lines.clone()
     }
 }
 

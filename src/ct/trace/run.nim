@@ -1,4 +1,4 @@
-import std/[osproc, strformat, sequtils],
+import std/[os, osproc, strformat, sequtils],
   ../../common/[ paths, lang, types ],
   ../launch/electron,
   ../utilities/[ env, language_detection ],
@@ -10,17 +10,20 @@ import std/[osproc, strformat, sequtils],
 proc runRecordedTrace*(
   trace: Trace,
   test: bool,
+  # TODO: we use those if we restore multitraces
   structuredDiffPath: string = "",
   indexDiffPath: string = "",
   recordCore: bool = false
 ): bool =
   var args = if test: @[$trace.id, "--test"] else: @[$trace.id]
-  if structuredDiffPath.len > 0:
+  let traceStructuredDiffPath = trace.outputFolder / "diff.json"
+  let traceIndexDiffPath = trace.outputFolder / "diff_index.json"
+  if existsFile(traceStructuredDiffPath):
     args.add("--diff")
-    args.add(structuredDiffPath)
-    if indexDiffPath.len > 0:
+    args.add(traceStructuredDiffPath)
+    if existsFile(traceIndexDiffPath):
       args.add("--diff-index")
-      args.add(indexDiffPath)
+      args.add(traceIndexDiffPath)
   return launchElectron(args, trace, ElectronLaunchMode.Default, recordCore, test)
 
 
