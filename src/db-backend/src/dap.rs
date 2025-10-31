@@ -37,6 +37,8 @@ pub struct LaunchRequestArguments {
     pub trace_file: Option<PathBuf>,
     #[serde(rename = "rawDiffIndex", skip_serializing_if = "Option::is_none")]
     pub raw_diff_index: Option<String>,
+    #[serde(rename = "ctRRWorkerExe", skip_serializing_if = "Option::is_none")]
+    pub ct_rr_worker_exe: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -369,7 +371,7 @@ pub fn to_json(message: &DapMessage) -> DapResult<String> {
 pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapResult<DapMessage> {
     use log::info;
 
-    info!("from_reader");
+    info!("read_dap_message_from_reader");
     let mut header = String::new();
     reader.read_line(&mut header).map_err(|e| {
         use log::error;
@@ -377,6 +379,7 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
         error!("Read Line: {:?}", e);
         serde_json::Error::custom(e.to_string())
     })?;
+    info!("line read");
     if !header.to_ascii_lowercase().starts_with("content-length:") {
         // println!("no content-length!");
         return Err(serde_json::Error::custom("Missing Content-Length header").into());
@@ -398,7 +401,7 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
         .read_exact(&mut buf)
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     let json_text = std::str::from_utf8(&buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
-    info!("DAP raw <- {json_text}");
+    // info!("DAP raw <- {json_text}");
     from_json(json_text)
 }
 
