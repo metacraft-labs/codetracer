@@ -3,7 +3,7 @@ import json_serialization, result
 import .. / .. / common / trace_index
 import .. / .. / common / types
 import .. / utilities / [git, zip]
-import replay
+# import replay
 
 proc findDiff(diffSpecification: string): string =
   if diffSpecification.len > 0:
@@ -149,32 +149,38 @@ proc parseDiff(rawDiff: string): Diff =
         if chunk.previousFrom != 0:
           fileDiff.chunks.add(chunk)
 
-proc makeMultitraceArchive(traceFolders: seq[string], rawDiff: string, structuredDiff: Diff, outputPath: string) =
-  let folder = getTempDir() / "codetracer" / "multitrace-" & outputPath.extractFilename # TODO a more unique name?
-  removeDir(folder)
-  createDir(folder)
+# proc makeMultitraceArchive(traceFolders: seq[string], rawDiff: string, structuredDiff: Diff, outputPath: string) =
+#   let folder = getTempDir() / "codetracer" / "multitrace-" & outputPath.extractFilename # TODO a more unique name?
+#   removeDir(folder)
+#   createDir(folder)
 
-  for traceFolder in traceFolders:
-    copyDir(traceFolder, folder / traceFolder.extractFilename)
+#   for traceFolder in traceFolders:
+#     copyDir(traceFolder, folder / traceFolder.extractFilename)
 
-  writeFile(folder / "original_diff.patch", rawDiff)
-  writeFile(folder / "diff.json", Json.encode(structuredDiff, pretty=true))
-  # for now no diff_data.json or other format: eventually from diff-index
+#   writeFile(folder / "original_diff.patch", rawDiff)
+#   writeFile(folder / "diff.json", Json.encode(structuredDiff, pretty=true))
+#   # for now no diff_data.json or other format: eventually from diff-index
 
-  zipFolder(folder, outputPath)
+#   zipFolder(folder, outputPath)
 
   # TODO: decide here: only when flag archive? or always? removeDir(folder)
 
-proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPath: string) =
-  # make a folder , copy those traces , find this diff, eventually parse it and store it
-  # TODO: eventually diff-index in the future
-  # in the future store as a new trace-id?
-  # for now in a custom place
+# proc makeMultitrace*(traceIdList: seq[int], diffSpecification: string, outputPath: string) =
+#   # make a folder , copy those traces , find this diff, eventually parse it and store it
+#   # TODO: eventually diff-index in the future
+#   # in the future store as a new trace-id?
+#   # for now in a custom place
   
-  # find the diff, parse
+#   # find the diff, parse
+#   let rawDiff = findDiff(diffSpecification)
+#   # echo rawDiff
+#   let structuredDiff = parseDiff(rawDiff)
+#   let traceFolders = traceIdList.mapIt(trace_index.find(it, test=false).outputFolder)
+#   makeMultitraceArchive(traceFolders, rawDiff, structuredDiff, outputPath)
+#   echo fmt"OK: created multitrace in {outputPath}"
+
+proc addDiffToTrace*(trace: Trace, diffSpecification: string) =
   let rawDiff = findDiff(diffSpecification)
-  # echo rawDiff
   let structuredDiff = parseDiff(rawDiff)
-  let traceFolders = traceIdList.mapIt(trace_index.find(it, test=false).outputFolder)
-  makeMultitraceArchive(traceFolders, rawDiff, structuredDiff, outputPath)
-  echo fmt"OK: created multitrace in {outputPath}"
+  writeFile(trace.outputFolder / "original_diff.patch", rawDiff)
+  writeFile(trace.outputFolder / "diff.json", Json.encode(structuredDiff, pretty=true))

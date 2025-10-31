@@ -107,7 +107,7 @@ fn index_function_flow(_db: &Db, function_id: FunctionId) -> Result<(), Box<dyn 
 }
 
 
-pub fn index_diff(diff: Diff, trace_folder: &Path, multitrace_folder: &Path) -> Result<(), Box<dyn Error>> {
+pub fn index_diff(diff: Diff, trace_folder: &Path) -> Result<(), Box<dyn Error>> {
     info!("index_diff");
     let db = load_and_postprocess_trace(trace_folder)?;
 
@@ -149,6 +149,6 @@ pub fn index_diff(diff: Diff, trace_folder: &Path, multitrace_folder: &Path) -> 
     let flow_update = flow_preloader.load_diff_flow(diff_lines, &db);
 
     let raw = serde_json::to_string(&flow_update)?;
-    std::fs::write(multitrace_folder.join("diff_index.json"), raw)?;
+    std::fs::write(trace_folder.join("diff_index.json"), raw)?;
     Ok(())
 }

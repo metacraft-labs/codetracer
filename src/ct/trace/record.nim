@@ -199,7 +199,8 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, configPath
       result = trace_index.find(traceId, test=false)
 
       if withDiff.len > 0:
-        makeMultitrace(@[traceId], withDiff, fmt"multitrace-with-diff-for-trace-{traceId}.zip")
+        # makeMultitrace(@[traceId], withDiff, fmt"multitrace-with-diff-for-trace-{traceId}.zip")
+        addDiffToTrace(result, withDiff)
 
 proc record*(lang: string,
              outputFolder: string,
