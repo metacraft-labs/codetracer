@@ -48,7 +48,7 @@ proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError,
 
   echo "WASM with debug info: ", wasm, " EVM trace: ", evmTrace
 
-  result = record("", ".", "", evmTrace, "", "", "", wasm, @[])
+  result = record("", ".", "", evmTrace, "", "", withDiff="", upload=false, program = wasm, args = @[])
   updateField(result.id, "program", hash, false)
   result.program = hash
 

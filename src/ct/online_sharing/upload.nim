@@ -14,8 +14,11 @@ import remote
 proc uploadFile(
   traceZipPath: string,
   org: Option[string],
-  config: Config
 ): UploadedInfo {.raises: [KeyError, Exception].} =
+
+  # TODO: remove when ready
+  echo "\nERROR: uploading files not functional yet"
+  quit(1)
 
   result = UploadedInfo(exitCode: 0)
   try:
@@ -46,7 +49,7 @@ proc onProgress(ratio, start: int, message: string, lastPercentSent: ref int): p
       logUpdate(scaled, message)
 
 
-proc uploadTrace*(trace: Trace, org: Option[string], config: Config): UploadedInfo =
+proc uploadTrace*(trace: Trace, org: Option[string]): UploadedInfo =
   # try to generate a unique path, so even if we don't remove it/clean it up
   #   it's not easy to clash with it on a next upload
   # https://nim-lang.org/docs/oids.html
@@ -60,7 +63,7 @@ proc uploadTrace*(trace: Trace, org: Option[string], config: Config): UploadedIn
   zipFolder(trace.outputFolder, outputZip, onProgress = onProgress(ratio = 33, start = 0, "Zipping files..", lastPercentSent))
   var uploadInfo = UploadedInfo()
   try:
-    uploadInfo = uploadFile(outputZip, org, config)
+    uploadInfo = uploadFile(outputZip, org)
   
     # TODO: after we have link and welcome screen integration again
     #   for now just leave the output to ct-remote: we quit directly in uploadFile for now
@@ -110,7 +113,7 @@ proc uploadCommand*(
     quit(1)
 
   try:
-    uploadInfo = uploadTrace(trace, uploadOrg, config)
+    uploadInfo = uploadTrace(trace, uploadOrg)
   except CatchableError as e:
     echo e.msg
     quit(1)
