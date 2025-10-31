@@ -4,7 +4,7 @@ import std/[
   sequtils, streams, oids
 ]
 import ../../common/[ trace_index, types ]
-import ../utilities/[ encryption, zip, types, progress_update ]
+import ../utilities/[ zip, types, progress_update ]
 import ../../common/[ config, paths ]
 import ../cli/interactive_replay
 import ../codetracerconf

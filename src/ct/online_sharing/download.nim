@@ -1,28 +1,26 @@
 import streams, nimcrypto, std/[ terminal, options, strutils, strformat, os, httpclient, uri, net, json ]
 import ../../common/[ config, trace_index, paths, lang, types ]
-import ../utilities/[ types, encryption, zip, language_detection ]
+import ../utilities/[ types, zip, language_detection ]
 import ../trace/storage_and_import, ../globals
+import remote
 
-proc downloadFile(fileId, localPath: string, config: Config) =
-  let client = newHttpClient()
-  client.downloadFile(fmt"{parseUri(config.traceSharing.baseUrl) / config.traceSharing.downloadApi}?FileId={fileId}", localPath)
+proc downloadFile(url: string, outputPath: string): int =
+  runCtRemote(@["download", url, "--output", outputPath])
 
-proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], config: Config): int =
-  var iv: array[16, byte]
-  copyMem(addr iv, unsafeAddr key, 16)
-
+proc downloadTrace*(url: string): int =
   let traceId = trace_index.newID(false)
 
-  let downloadTarget = codetracerTmpPath / &"{fileId}.enc"
-  let decryptedTarget = codetracerTmpPath / &"{fileId}.zip"
+  let downloadTarget = codetracerTmpPath / fmt"downloaded-trace-{traceId}.zip"
+
   let unzippedLocation = codetracerTraceDir / "trace-" & $traceId
 
-  downloadFile(fileId, downloadTarget, config)
-  decryptFile(downloadTarget, decryptedTarget, key, iv)
-  removeFile(downloadTarget)
+  let downloadExitCode = downloadFile(url, downloadTarget)
+  if downloadExitCode != 0:
+    echo "error: problem: `ct-remote download` failed"
+    quit(downloadExitCode)
 
-  unzipIntoFolder(decryptedTarget, unzippedLocation)
-  removeFile(decryptedTarget)
+  unzipIntoFolder(downloadTarget, unzippedLocation)
+  removeFile(downloadTarget)
 
   let tracePath = unzippedLocation / "trace.json"
   let traceJson = parseJson(readFile(tracePath))
@@ -40,32 +38,13 @@ proc downloadTrace*(fileId, traceDownloadKey: string, key: array[32, byte], conf
   let lang = detectLang(pathValue.extractFilename, LangUnknown, isWasm)
   let recordPid = NO_PID # for now not processing the pid , but it can be 
   # accessed from trace metadata file if we need it in the future
-  discard importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceDownloadKey)
+  discard importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, url)
   return traceId
 
-proc extractInfoFromKey*(downloadKey: string, config: Config): (string, array[32, byte]) =
-  # We expect a traceDownloadKey to have <name>//<fileId>//<passwordKey>
-  let stringSplit = downloadKey.split("//")
-  if not config.traceSharing.enabled:
-    echo TRACE_SHARING_DISABLED_ERROR_MESSAGE
-    quit(1)
-  if stringSplit.len() != 3:
-    echo "error: Invalid download key! Should be <program_name>//<file_id>//<encryption_password>"
-    quit(1)
-
-  let fileId = stringSplit[1]
-  let passwordHex = stringSplit[2]
-
-  var password: array[32, byte]
-  hexToBytes(passwordHex, password)
-  (fileId, password)
-
-
-proc downloadTraceCommand*(traceDownloadKey: string) =
+proc downloadTraceCommand*(traceDownloadUrl: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
-  let (fileId, password) = extractInfoFromKey(traceDownloadKey, config)
   try:
-    let traceId = downloadTrace(fileId, traceDownloadKey, password, config)
+    let traceId = downloadTrace(traceDownloadUrl)
     if isatty(stdout):
       echo fmt"OK: downloaded with trace id {traceId}"
     else:

@@ -89,7 +89,7 @@ proc importDbTrace*(
   recordPid: int,
   langArg: Lang = LangNoir,
   selfContained: bool = true,
-  downloadKey: string = ""
+  downloadUrl: string = ""
 ): Trace =
   
   echo traceMetadataPath
@@ -159,7 +159,7 @@ proc importDbTrace*(
 
   if dirExists(traceFolder / "files"):
     copyDir(traceFolder / "files", outputFolder / "files")
-  elif selfContained and downloadKey == "":
+  elif selfContained and downloadUrl == "":
     # for now assuming if no `files/` dir already,
     # it happens on the original machine
     # when the source files are still available and unchanged
@@ -194,7 +194,7 @@ proc importDbTrace*(
     # for now always use FullRecord for db-backend
     # and ignore possible env var override
     calltraceMode = CalltraceMode.FullRecord,
-    fileId = downloadKey)
+    fileId = downloadUrl)
 
 proc getFolderSize(folderPath: string): int64 =
   var totalSize: int64 = 0
