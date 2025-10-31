@@ -23,6 +23,8 @@ type
     install,
     upload,
     download,
+    login,
+    `update-default-org`,
     cmdDelete,
     build,
     record,
@@ -364,6 +366,16 @@ type
       traceDownloadKey* {.
         argument,
         desc: "the trace registry unique id: <program-name>//<downloadId>//<password> e.g. noir//1234//asd"
+      .}: string
+    of login:
+      loginDefaultOrg* {.
+        name: "default-org",
+        desc: "set a default organization for uploads",
+      .}: Option[string]
+    of `update-default-org`:
+      updateDefaultOrgName* {.
+        argument,
+        desc: "the name of an organization to be updated as default"
       .}: string
     of cmdDelete:
       traceId* {.
