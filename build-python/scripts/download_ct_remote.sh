@@ -11,7 +11,7 @@ TARGET_OS="$1"
 TARGET_ARCH="$2"
 OUTPUT_DIR="$3"
 
-CT_REMOTE_VERSION="${CT_REMOTE_VERSION:-03c01ce}"
+CT_REMOTE_VERSION="${CT_REMOTE_VERSION:-102d2c8}"
 BASE_URL="https://downloads.codetracer.com/DesktopClient.App"
 
 case "${TARGET_OS}" in
