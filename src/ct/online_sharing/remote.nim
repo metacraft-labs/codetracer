@@ -30,5 +30,5 @@ proc loginCommand*(defaultOrg: Option[string]) =
     args.add(defaultOrg.get)
   quit(runCtRemote(args))
 
-proc updateDefaultOrg*(newOrg: string) =
+proc setDefaultOrg*(newOrg: string) =
   quit(runCtRemote(@["set-default-org", "-org", newOrg]))

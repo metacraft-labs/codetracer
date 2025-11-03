@@ -136,8 +136,8 @@ proc runInitial*(conf: CodetracerConf) =
       downloadTraceCommand(conf.traceDownloadUrl)
     of StartupCommand.login:
       loginCommand(conf.loginDefaultOrg)
-    of StartupCommand.`update-default-org`:
-      updateDefaultOrg(conf.updateDefaultOrgName)
+    of StartupCommand.`set-default-org`:
+      setDefaultOrg(conf.setDefaultOrgName)
     # of StartupCommand.cmdDelete:
     #   deleteTraceCommand(conf.traceId, conf.controlId)
     #   # eventually enable?
