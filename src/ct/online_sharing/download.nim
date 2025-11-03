@@ -5,7 +5,7 @@ import ../trace/storage_and_import, ../globals
 import remote
 
 proc downloadFile(url: string, outputPath: string): int =
-  runCtRemote(@["download", url, "--output", outputPath])
+  runCtRemote(@["download", "--url", url, "--output", outputPath])
 
 proc downloadTrace*(url: string): int =
   let traceId = trace_index.newID(false)

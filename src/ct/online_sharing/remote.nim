@@ -22,9 +22,9 @@ proc runCtRemote*(args: seq[string]): int =
 proc loginCommand*(defaultOrg: Option[string]) =
   var args = @["login"]
   if defaultOrg.isSome:
-    args.add("--default-org")
+    args.add("-org")
     args.add(defaultOrg.get)
   quit(runCtRemote(args))
 
 proc updateDefaultOrg*(newOrg: string) =
-  quit(runCtRemote(@["update-default-org", newOrg]))
+  quit(runCtRemote(@["set-default-org", "-org", newOrg]))
