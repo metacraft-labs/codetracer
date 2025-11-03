@@ -1178,6 +1178,7 @@ type
     infoMessageActive*: JsAssoc[int, bool]
     errorMessageActive*: JsAssoc[int, MessageKind]
     isUploading*: JsAssoc[int, bool]
+    showTraceSharing*: bool
 
   ReplComponent* = ref object of Component
     history*: seq[DebugInteraction]

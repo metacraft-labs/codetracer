@@ -98,8 +98,8 @@ proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, 
           self.data.ipc.send "CODETRACER::load-recent-transaction", js{ txHash: tx.txHash }
       )
 
+
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
-  let featureFlag = data.config.traceSharing.enabled
   let tooltipTopPosition = (position + 1) * 36 - self.recentTracesScroll
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
   let infoActive = if self.infoMessageActive.hasKey(trace.id) and self.infoMessageActive[trace.id]: "welcome-path-active" else: ""
@@ -151,7 +151,7 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
         separateBar()
         span(class = "recent-trace-title-content"):
           text limitedProgramName # TODO: tippy
-    if featureFlag:
+    if self.showTraceSharing:
       tdiv(class = "online-functionality-buttons"):
         if self.isUploading[trace.id]:
           tdiv(class = "recent-trace-buttons", id = "progress-bar"):
@@ -681,7 +681,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     ),
     WelcomeScreenOption(
       name: "Open online trace",
-      inactive: false,
+      inactive: not self.showTraceSharing,
       command: proc = 
         self.openOnlineTrace = true
         self.welcomeScreen = false
@@ -729,9 +729,19 @@ proc loadingOverlay(self: WelcomeScreenComponent): VNode =
     tdiv(class = "welcome-screen-loading-overlay-text"):
       tdiv(): text "Loading trace..."
 
+# TODO: adapt or change for newer uploading api; for now hiddden
+#   available only from CLI:
+const TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN = true
+
 method render*(self: WelcomeScreenComponent): VNode =
   if self.data.ui.welcomeScreen.isNil:
     return
+  
+  self.showTraceSharing = when TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN:
+      false
+    else:
+      self.data.config.traceSharing.enabled
+
   if self.options.len == 0:
     self.loadInitialOptions()
 
