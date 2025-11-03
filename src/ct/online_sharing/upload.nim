@@ -16,15 +16,11 @@ proc uploadFile(
   org: Option[string],
 ): UploadedInfo {.raises: [KeyError, Exception].} =
 
-  # TODO: remove when ready
-  echo "\nERROR: uploading files not functional yet"
-  quit(1)
-
   result = UploadedInfo(exitCode: 0)
   try:
     var args = @["upload", traceZipPath]
     if org.isSome:
-      args.add("--org")
+      args.add("-org")
       args.add(org.get)
     result.exitCode = runCtRemote(args)
   except CatchableError as e:
@@ -90,10 +86,6 @@ proc uploadCommand*(
   interactive: bool,
   uploadOrg: Option[string],
 ) =
-  # TODO: re-enable when ready
-  echo "command not functional yet"
-  quit(1)
-
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
   if not config.traceSharing.enabled:
