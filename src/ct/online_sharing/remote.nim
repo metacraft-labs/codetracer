@@ -1,5 +1,5 @@
 import
-  std/[ json, os, osproc, strutils, options ],
+  std/[ json, os, osproc, strutils, options, sequtils ],
   ../../common/[ paths ],
   ../cli/[ logging, list, help, build]
 
@@ -13,7 +13,11 @@ proc runCtRemote*(args: seq[string]): int =
     return 1
 
   try:
-    let process = startProcess(execPath, args = args, options = {poEchoCmd, poParentStreams})
+    let fullArgs = args.concat(@["--binary-name", "ct remote"])
+    var options = {poParentStreams}
+    if getEnv("CODETRACER_DEBUG_CT_REMOTE", "0") == "1":
+      options.incl(poEchoCmd)
+    let process = startProcess(execPath, args = fullArgs, options = options)
     result = waitForExit(process)
   except CatchableError as err:
     echo "Failed to launch ct-remote (" & execPath & "): " & err.msg
