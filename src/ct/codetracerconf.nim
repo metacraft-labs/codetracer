@@ -24,7 +24,7 @@ type
     upload,
     download,
     login,
-    `update-default-org`,
+    `set-default-org`,
     # cmdDelete,
     build,
     record,
@@ -383,8 +383,8 @@ type
         name: "default-org",
         desc: "set a default organization for uploads",
       .}: Option[string]
-    of `update-default-org`:
-      updateDefaultOrgName* {.
+    of `set-default-org`:
+      setDefaultOrgName* {.
         argument,
         desc: "the name of an organization to be updated as default"
       .}: string
