@@ -12,7 +12,7 @@ set -e
 
 cleanup() {
   echo "Performing cleanup..."
-  chmod -R 777 "${APP_DIR}"
+  chmod -R 777 "${APP_DIR}" || true
   rm -rf ./squashfs-root
 }
 
@@ -293,6 +293,7 @@ patchelf --remove-rpath "${APP_DIR}"/bin/curl
 patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
 patchelf --remove-rpath "${APP_DIR}"/bin/ct-remote
+patchelf --remove-rpath "${APP_DIR}"/lib/libicui18n.so.76
 
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct_unwrapped
@@ -306,6 +307,7 @@ patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/curl
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/ruby/bin/ruby
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct-remote
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/lib/libicui18n.so.76
 
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
