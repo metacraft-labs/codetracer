@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, json, strutils, strformat ],
-  electron_vars, server_config, base_handlers, config,
+  electron_vars, server_config, base_handlers, config, lsp_bridge,
   ../lib/[ jslib, electron_lib ],
   ../[ types ],
   ../../common/[ paths, ct_logging ]
@@ -21,6 +21,7 @@ proc stopBackendManager* =
   if not backendManagerProcess.isNil:
     backendManagerProcess.stopProcess()
     backendManagerProcess = nil
+  stopLspBridge()
 
 proc duration*(name: string) =
   infoPrint fmt"index: TIME for {name}: {now() - data.start}ms"
