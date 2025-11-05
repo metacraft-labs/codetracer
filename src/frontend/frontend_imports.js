@@ -1,6 +1,10 @@
 import * as monaco from 'monaco-editor';
 window.monaco = monaco;
 
+
+import { MonacoLanguageClient } from 'monaco-languageclient';
+window.MonacoLanguageClient = MonacoLanguageClient;
+
 import { GoldenLayout, VirtualLayout, LayoutManager, LayoutConfig, ItemConfig } from 'golden-layout';
 window.GoldenLayout = GoldenLayout;
 window.VirtualLayout = VirtualLayout;

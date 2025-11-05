@@ -86,7 +86,7 @@ required-features = ["io-transport"]
 [features]
 debugging = []
 
-default = ["browser-transport"]
+default = ["io-transport"]
 
 io-transport = ["dep:expanduser"]
 browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",
