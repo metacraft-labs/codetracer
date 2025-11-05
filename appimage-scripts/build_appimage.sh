@@ -294,6 +294,7 @@ patchelf --remove-rpath "${APP_DIR}"/bin/node
 patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
 patchelf --remove-rpath "${APP_DIR}"/bin/ct-remote
 patchelf --remove-rpath "${APP_DIR}"/lib/libicui18n.so.76
+patchelf --remove-rpath "${APP_DIR}"/lib/libgssapi_krb5.so.2
 
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct_unwrapped
@@ -308,6 +309,7 @@ patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/ruby/bin/ruby
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct-remote
 patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/lib/libicui18n.so.76
+patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/lib/libgssapi_krb5.so.2
 
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
