@@ -12,8 +12,8 @@ proc call0(fn: JsObject): JsObject {.importjs: "#()".}
 proc call1(fn: JsObject; arg: JsObject): JsObject {.importjs: "#(#)".}
 proc construct1(ctor: JsObject; arg: JsObject): JsObject {.importjs: "new #(#)".}
 proc toJs(str: cstring): JsObject {.importjs: "#".}
-proc spawnDefault(child: JsObject; cmd: cstring): JsObject {.importjs: "#.spawn(#, ['--stdio'], {stdio: ['pipe', 'pipe', 'pipe']})".}
-proc spawnDefaultCwd(child: JsObject; cmd, cwd: cstring): JsObject {.importjs: "#.spawn(#, ['--stdio'], {stdio: ['pipe', 'pipe', 'pipe'], cwd: #})".}
+proc spawnDefault(child: JsObject; cmd: cstring): JsObject {.importjs: "#.spawn(#, [], {stdio: ['pipe', 'pipe', 'pipe']})".}
+proc spawnDefaultCwd(child: JsObject; cmd, cwd: cstring): JsObject {.importjs: "#.spawn(#, [], {stdio: ['pipe', 'pipe', 'pipe'], cwd: #})".}
 proc spawnNoArgs(child: JsObject; cmd: cstring): JsObject {.importjs: "#.spawn(#, [], {stdio: ['pipe', 'pipe', 'pipe']})".}
 proc spawnNoArgsCwd(child: JsObject; cmd, cwd: cstring): JsObject {.importjs: "#.spawn(#, [], {stdio: ['pipe', 'pipe', 'pipe'], cwd: #})".}
 proc onEvent(target: JsObject; event: cstring; handler: proc (arg: JsObject) {.closure.}) {.importjs: "#.on(#, #)".}
@@ -23,6 +23,7 @@ proc terminate(ws: JsObject) {.importjs: "#.terminate()".}
 proc kill(child: JsObject) {.importjs: "#.kill()".}
 proc isKilled(child: JsObject): bool {.importjs: "#.killed".}
 proc toUtf8String(buf: JsObject): JsObject {.importjs: "#.toString('utf8')".}
+proc readerListen(reader: JsObject; handler: proc(message: JsObject) {.closure.}) {.importjs: "#.listen(#)".}
 proc logError(msg: JsObject) {.importjs: "console.error(#)".}
 proc logWarn2(msg: JsObject; detail: JsObject) {.importjs: "console.warn(#, #)".}
 proc logInfo(msg: JsObject) {.importjs: "console.log(#)".}
@@ -117,8 +118,16 @@ proc startBridge*(port: cint = 3000; pathName: string = "/lsp"; lsCommand: strin
         kill(ls)
     )
 
-    discard onGenericNotification(serverConnection, proc(methodName, params: JsObject) {.closure.} =
-      dispatchNotification(methodName, params)
+    readerListen(lsReader, proc (message: JsObject) {.closure.} =
+      try:
+        let msgType = field(message, "type")
+        if not msgType.isNil and cast[int](msgType) == 2:
+          let methodName = field(message, "method")
+          let params = field(message, "params")
+          dispatchNotification(methodName, params)
+      except CatchableError:
+        let errMsg = getCurrentExceptionMsg()
+        logWarn2(toJs("LSP bridge notification tap failed"), toJs(errMsg.cstring))
     )
 
     forwardConnections(rpcServer, clientConnection, serverConnection)

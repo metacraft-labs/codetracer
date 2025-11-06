@@ -90,10 +90,21 @@ proc ready*(): Future[void] {.async.} =
 
   try:
     await startLspBridge()
+    # let initPayload = js{
+    #   "jsonrpc": cstring"2.0",
+    #   "id": 1,
+    #   "method": cstring"initialize",
+    #   "params": js{
+    #     "processId": 1,
+    #     "rootUri": jsNull,
+    #     "capabilities": js{}
+    #   }
+    # }
+    # sendLspProbe(initPayload)
   except CatchableError:
     warnPrint "index:lsp unable to start bridge: ", getCurrentExceptionMsg()
 
-  console.log("Started lspManager")
+  # console.log("Started lspManager")
 
   # we configure the listeners
   configureIpcMain()
