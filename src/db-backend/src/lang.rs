@@ -1,5 +1,5 @@
-use std::path::Path;
 use std::ffi::OsStr;
+use std::path::Path;
 
 use num_derive::FromPrimitive;
 use serde_repr::*;
@@ -47,7 +47,13 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
     // for now important mostly for system langs/rr support
     // but still good to add all supported langs: TODO
     match extension {
-        "rs" => if trace_kind == TraceKind::DB { Lang::RustWasm } else { Lang::Rust },
+        "rs" => {
+            if trace_kind == TraceKind::DB {
+                Lang::RustWasm
+            } else {
+                Lang::Rust
+            }
+        }
         "c" => Lang::C,
         "cpp" => Lang::Cpp,
         _ => Lang::Unknown,

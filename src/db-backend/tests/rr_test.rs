@@ -2,14 +2,14 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use serde_json::json;
 use ntest::timeout;
+use serde_json::json;
 
-use db_backend::transport::DapTransport;
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
+use db_backend::transport::DapTransport;
 // use db_backend::dap_types::StackTraceArguments;
-use db_backend::task;
 use db_backend::lang::Lang;
+use db_backend::task;
 
 #[test]
 #[timeout(5_000)] // try to detect hanging, e.g. waiting for response that doesn't come
@@ -50,13 +50,14 @@ fn test_rr() {
         typ: None,
         session_id: None,
         // TODO: env var, or taking from $PATH, or from local or test config?
-        ct_rr_worker_exe: Some(PathBuf::from("/home/alexander92/codetracer-rr-backend/src/build-debug/bin/ct-rr-worker")),
+        ct_rr_worker_exe: Some(PathBuf::from(
+            "/home/alexander92/codetracer-rr-backend/src/build-debug/bin/ct-rr-worker",
+        )),
     };
     let launch = client.launch(launch_args).unwrap();
     writer
         .send(&launch)
         .unwrap_or_else(|err| panic!("failed to send launch request: {err}"));
-
 
     let msg1 = dap::read_dap_message_from_reader(&mut reader).unwrap();
     match msg1 {
@@ -111,7 +112,6 @@ fn test_rr() {
             assert_eq!(filename.display().to_string(), "rr_gdb.rs");
             assert_eq!(move_state.location.line, 205);
             assert_eq!(move_state.location.function_name.starts_with("rr_gdb::main"), true);
-            
         }
         _ => panic!("expected a complete move events, but got {:?}", msg_complete_move),
     }
@@ -121,8 +121,8 @@ fn test_rr() {
     writer
         .send(&next_request)
         .unwrap_or_else(|err| panic!("failed to send next request: {err}"));
-    
-    // `stepIn` to `run` 
+
+    // `stepIn` to `run`
     let step_in_request = client.request("stepIn", json!({}));
     writer
         .send(&step_in_request)
@@ -133,7 +133,7 @@ fn test_rr() {
         .send(&next_request)
         .unwrap_or_else(|err| panic!("failed to send next request: {err}"));
 
-    for _ in 0 .. 4 {
+    for _ in 0..4 {
         let _ = dap::read_dap_message_from_reader(&mut reader).unwrap();
     }
 
@@ -151,23 +151,29 @@ fn test_rr() {
             assert_eq!(move_state.location.line, 70);
             assert_eq!(move_state.location.function_name.starts_with("rr_gdb::run"), true);
         }
-        _ => panic!("expected a complete move events, but got {:?}", msg_complete_move_before_local_check),
-
+        _ => panic!(
+            "expected a complete move events, but got {:?}",
+            msg_complete_move_before_local_check
+        ),
     }
     let _next_response = dap::read_dap_message_from_reader(&mut reader).unwrap();
 
     let _next_response = dap::read_dap_message_from_reader(&mut reader).unwrap();
 
-    let load_locals_request = client.request("ct/load-locals", serde_json::to_value(&task::CtLoadLocalsArguments {
-        count_budget: 3_000,
-        min_count_limit: 50,
-        rr_ticks: 0,
-        lang: Lang::Rust,
-    }).unwrap());    
+    let load_locals_request = client.request(
+        "ct/load-locals",
+        serde_json::to_value(&task::CtLoadLocalsArguments {
+            count_budget: 3_000,
+            min_count_limit: 50,
+            rr_ticks: 0,
+            lang: Lang::Rust,
+        })
+        .unwrap(),
+    );
     writer
         .send(&load_locals_request)
         .unwrap_or_else(|err| panic!("failed to send ct/load-locals request: {err}"));
-    
+
     let load_locals_response = dap::read_dap_message_from_reader(&mut reader).unwrap();
     if let DapMessage::Response(response) = load_locals_response {
         assert_eq!(response.command, "ct/load-locals");
@@ -182,8 +188,8 @@ fn test_rr() {
 
     // let threads_request = client.request("threads", json!({}));
     // writer
-        // .send(&threads_request)
-        // .unwrap_or_else(|err| panic!("failed to send threads request: {err}"));
+    // .send(&threads_request)
+    // .unwrap_or_else(|err| panic!("failed to send threads request: {err}"));
     // let msg_threads = dap::from_reader(&mut reader).unwrap();
     // match msg_threads {
     //     DapMessage::Response(r) => {
@@ -207,8 +213,8 @@ fn test_rr() {
     //     .unwrap(),
     // );
     // writer
-        // .send(&stack_trace_request)
-        // .unwrap_or_else(|err| panic!("failed to send stackTrace request: {err}"));
+    // .send(&stack_trace_request)
+    // .unwrap_or_else(|err| panic!("failed to send stackTrace request: {err}"));
     // let msg_stack_trace = dap::from_reader(&mut reader).unwrap();
     // match msg_stack_trace {
     //     DapMessage::Response(r) => assert_eq!(r.command, "stackTrace"), // TODO: test stackFrames / totalFrames ?
