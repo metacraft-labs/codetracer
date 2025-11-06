@@ -17,7 +17,6 @@ use super::{BinaryOperatorFunctions, Bytecode, UnaryOperatorFunctions};
 pub fn execute_bytecode(
     bytecode: &Bytecode,
     source: &str,
-    step_id: StepId,
     replay: &mut dyn Replay,
     unary_op_functions: &UnaryOperatorFunctions,
     binary_op_functions: &BinaryOperatorFunctions,
