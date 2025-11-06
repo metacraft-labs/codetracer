@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::ffi::OsStr;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
@@ -6,9 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
-use std::ffi::OsStr;
 
-use log::{info, error};
+use log::{error, info};
 use runtime_tracing::StepId;
 
 use crate::db::DbRecordEvent;
@@ -17,7 +17,7 @@ use crate::lang::Lang;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::Replay;
-use crate::task::{Action, Breakpoint, Events, Location, CtLoadLocalsArguments, ProgramEvent, VariableWithRecord};
+use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord};
 use crate::value::ValueRecordWithType;
 
 #[derive(Debug)]
@@ -81,7 +81,6 @@ impl CtRRWorker {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()?
-                
         } else {
             Command::new("appimage-run")
                 .arg(&self.ct_rr_worker_exe)
@@ -216,7 +215,8 @@ impl Replay for RRDispatcher {
 
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<Vec<VariableWithRecord>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
+        let res =
+            serde_json::from_str::<Vec<VariableWithRecord>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
         Ok(res)
     }
 
@@ -224,13 +224,15 @@ impl Replay for RRDispatcher {
         self.ensure_active_stable()?;
         let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadValue {
             expression: expression.to_string(),
-            lang, })?)?;
+            lang,
+        })?)?;
         Ok(res)
     }
 
     fn load_return_value(&mut self, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadReturnValue { lang })?)?;
+        let res =
+            serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadReturnValue { lang })?)?;
         Ok(res)
     }
 
@@ -250,61 +252,54 @@ impl Replay for RRDispatcher {
 
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let breakpoint = serde_json::from_str::<Breakpoint>(
-            &self.stable.run_query(
-                CtRRQuery::AddBreakpoint {
-                    path: path.to_string(),
-                    line,
-                })?
-        )?;
+        let breakpoint = serde_json::from_str::<Breakpoint>(&self.stable.run_query(CtRRQuery::AddBreakpoint {
+            path: path.to_string(),
+            line,
+        })?)?;
         Ok(breakpoint)
     }
 
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        Ok(serde_json::from_str::<bool>(
-            &self.stable.run_query(
-                CtRRQuery::DeleteBreakpoint {
-                    breakpoint: breakpoint.clone(),
-                }
-            )?
-        )?) 
+        Ok(serde_json::from_str::<bool>(&self.stable.run_query(
+            CtRRQuery::DeleteBreakpoint {
+                breakpoint: breakpoint.clone(),
+            },
+        )?)?)
     }
 
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>> {
         self.ensure_active_stable()?;
         Ok(serde_json::from_str::<bool>(
-            &self.stable.run_query(
-                CtRRQuery::DeleteBreakpoints
-            )?
+            &self.stable.run_query(CtRRQuery::DeleteBreakpoints)?,
         )?)
-    } 
+    }
 
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        Ok(serde_json::from_str::<Breakpoint>(
-            &self.stable.run_query(
-                CtRRQuery::ToggleBreakpoint { breakpoint: breakpoint.clone() },
-            )?
-        )?)
+        Ok(serde_json::from_str::<Breakpoint>(&self.stable.run_query(
+            CtRRQuery::ToggleBreakpoint {
+                breakpoint: breakpoint.clone(),
+            },
+        )?)?)
     }
 
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        Ok(serde_json::from_str::<Location>(
-            &self.stable.run_query(
-                CtRRQuery::JumpToCall { location: location.clone() }
-            )?
-        )?)
+        Ok(serde_json::from_str::<Location>(&self.stable.run_query(
+            CtRRQuery::JumpToCall {
+                location: location.clone(),
+            },
+        )?)?)
     }
 
     fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        Ok(serde_json::from_str::<bool>(
-            &self.stable.run_query(
-                CtRRQuery::EventJump { program_event: event.clone() }
-            )?
-        )?)
+        Ok(serde_json::from_str::<bool>(&self.stable.run_query(
+            CtRRQuery::EventJump {
+                program_event: event.clone(),
+            },
+        )?)?)
     }
 
     fn current_step_id(&mut self) -> StepId {

@@ -1,8 +1,12 @@
+use std::path::PathBuf;
+
 use log::info;
 use runtime_tracing::{StepId, TypeKind, ValueRecord, NONE_TYPE_ID};
 
 use crate::{
-    db::Db,
+    db::{Db, DbReplay},
+    lang::Lang,
+    replay::Replay,
     task::StringAndValueTuple,
     tracepoint_interpreter::Instruction,
     value::{Type, Value},
@@ -14,9 +18,10 @@ pub fn execute_bytecode(
     bytecode: &Bytecode,
     source: &str,
     step_id: StepId,
-    db: &Db,
+    replay: &mut dyn Replay,
     unary_op_functions: &UnaryOperatorFunctions,
     binary_op_functions: &BinaryOperatorFunctions,
+    lang: Lang,
 ) -> Vec<StringAndValueTuple> {
     let opcodes = &bytecode.opcodes;
 
@@ -48,7 +53,7 @@ pub fn execute_bytecode(
                 if let Some(x) = stack.pop() {
                     locals.push(StringAndValueTuple {
                         field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
-                        field1: db.to_ct_value(&x),
+                        field1: Db::new(&PathBuf::from("")).to_ct_value(&x),
                     });
                 } else {
                     let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -240,15 +245,16 @@ pub fn execute_bytecode(
                 }
             }
 
-            Instruction::PushVariable(var_name) => {
-                if let Some(x) = db.variables[step_id]
-                    .iter()
-                    .find(|&v| db.variable_name(v.variable_id) == var_name)
-                {
-                    stack.push(x.value.clone());
-                } else {
+            Instruction::PushVariable(var_name) => match replay.load_value(var_name, lang) {
+                Ok(x) => stack.push(
+                    DbReplay::new(Box::new(Db::new(&PathBuf::from(""))))
+                        .to_value_record(x)
+                        .clone(),
+                ),
+
+                Err(e) => {
                     let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-                    err_value.msg = "No such symbol in the current context".to_string();
+                    err_value.msg = format!("No such symbol in the current context: {:?}", e);
 
                     locals.push(StringAndValueTuple {
                         field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
@@ -256,7 +262,7 @@ pub fn execute_bytecode(
                     });
                     return locals;
                 }
-            }
+            },
 
             Instruction::JumpIfFalse(pc_add) => {
                 if let Some(x) = stack.pop() {

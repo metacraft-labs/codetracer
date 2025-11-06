@@ -1,22 +1,22 @@
-use std::path::{PathBuf, Path};
-use std::error::Error;
 use std::collections::HashSet;
+use std::error::Error;
+use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use serde_repr::*;
+use log::info;
 use num_derive::FromPrimitive;
 use runtime_tracing::FunctionId;
-use log::info;
+use serde::{Deserialize, Serialize};
+use serde_repr::*;
 
-use crate::db::{Db,DbReplay};
-use crate::task::{TraceKind, FlowUpdate};
-use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
+use crate::db::{Db, DbReplay};
 use crate::flow_preloader::FlowPreloader;
+use crate::task::{FlowUpdate, TraceKind};
+use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Diff {
     pub files: Vec<FileDiff>,
-} 
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +44,7 @@ pub struct Chunk {
     pub previous_count: i64,
     pub current_from: i64,
     pub current_count: i64,
-    pub lines: Vec<DiffLine>
+    pub lines: Vec<DiffLine>,
 }
 
 #[derive(Clone, Debug, Default, Copy, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
@@ -65,7 +65,6 @@ pub struct DiffLine {
     pub current_line_number: i64,
 }
 
-
 // loop shape 1:
 pub fn load_and_postprocess_trace(trace_folder: &Path) -> Result<Db, Box<dyn Error>> {
     info!("load_and_postprocess_trace {:?}", trace_folder.display());
@@ -76,7 +75,7 @@ pub fn load_and_postprocess_trace(trace_folder: &Path) -> Result<Db, Box<dyn Err
         trace_file_format = runtime_tracing::TraceEventsFileFormat::Binary;
     }
     let metadata_path = trace_folder.join("trace_metadata.json");
-    
+
     let meta = load_trace_metadata(&metadata_path)?;
     let trace = load_trace_data(&trace_path, trace_file_format)?;
     let mut db = Db::new(&meta.workdir);
@@ -96,7 +95,7 @@ fn index_function_flow(_db: &Db, function_id: FunctionId) -> Result<(), Box<dyn 
     //   simple;
     // }
 
-    // IPT: 
+    // IPT:
     // step_id: RR
     // call_key: name/ticks/depth/origin address
     // global flow: (call index/key, step_count)
@@ -106,7 +105,6 @@ fn index_function_flow(_db: &Db, function_id: FunctionId) -> Result<(), Box<dyn 
 
     todo!("index function flow for {function_id:?}");
 }
-
 
 pub fn index_diff(diff: Diff, trace_folder: &Path) -> Result<(), Box<dyn Error>> {
     info!("index_diff");
@@ -123,7 +121,7 @@ pub fn index_diff(diff: Diff, trace_folder: &Path) -> Result<(), Box<dyn Error>>
 
     // or
     // load individual flows for each call and send a new kind of object
-    // containing `functions: Vec<FunctionGlobalFlow>` and 
+    // containing `functions: Vec<FunctionGlobalFlow>` and
     // Vec<FlowUpdate> ? with special handling
     // or a function flow with loop for each repetition still (but maybe then assumptions for call key etc..? maybe easy to parametrize call keys)
 
@@ -143,8 +141,8 @@ pub fn index_diff(diff: Diff, trace_folder: &Path) -> Result<(), Box<dyn Error>>
                 }
             }
         }
-    }    
-    
+    }
+
     info!("diff_lines {diff_lines:?}");
     let mut flow_preloader = FlowPreloader::new();
     let mut replay = DbReplay::new(Box::new(db.clone()));
