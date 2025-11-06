@@ -20,159 +20,159 @@ mkShell {
   #   xvfb-run
   # ];
 
-  packages =
-    [
-      # Print a welcome banner for the shell
-      figlet
-      delta
+  packages = [
+    # Print a welcome banner for the shell
+    figlet
+    delta
 
-      # general dependencies
-      git
+    # general dependencies
+    git
 
-      binaryen
-      llvmPackages_21.clang-unwrapped
-      # clang
-      llvm
-      glibc_multi
+    binaryen
+    llvmPackages_21.clang-unwrapped
+    # clang
+    llvm
+    glibc_multi
 
-      wasm-pack
+    wasm-pack
 
-      gcc
-      binutils
+    gcc
+    binutils
 
-      electron
+    electron
 
-      # node and build tools
-      nodejs_22
-      nodePackages.webpack-cli
-      corepack
+    # node and build tools
+    nodejs_22
+    nodePackages.webpack-cli
+    corepack
 
-      # ourPkgs.chromedriver-102
+    # ourPkgs.chromedriver-102
 
-      ourPkgs.noir
+    ourPkgs.noir
 
-      capnproto
+    capnproto
 
-      # stylus
-      ourPkgs.cargo-stylus
+    # stylus
+    ourPkgs.cargo-stylus
 
-      yarn
-      yarn2nix
+    yarn
+    yarn2nix
 
-      gnugrep
-      gawk
-      wget
-      coreutils
-      killall
-      ripgrep
-      universal-ctags
+    gnugrep
+    gawk
+    wget
+    coreutils
+    killall
+    ripgrep
+    universal-ctags
 
-      # Tup builds
-      fuse
-      tup
+    # Tup builds
+    fuse
+    tup
 
-      # Make alternative
-      # https://github.com/casey/just
-      just
+    # Make alternative
+    # https://github.com/casey/just
+    just
 
-      rustup
-      rustfmt
-      emscripten
-      capnproto
-      # ourPkgs.codetracer-rust-wrapped
+    rust-analyzer
+    rustup
+    rustfmt
+    emscripten
+    capnproto
+    # ourPkgs.codetracer-rust-wrapped
 
-      # For inspecting our deb packages
-      dpkg
+    # For inspecting our deb packages
+    dpkg
 
-      sqlite
-      pcre
-      glib
-      libelf
-      # clang
-      # curl
-      openssl
-      which
-      unixtools.script
-      bashInteractive
-      # ovh-ttyrec
-      dash
-      lesspipe
-      unixtools.killall
-      # zip
-      # unzip
-      libzip
-      curl
+    sqlite
+    pcre
+    glib
+    libelf
+    # clang
+    # curl
+    openssl
+    which
+    unixtools.script
+    bashInteractive
+    # ovh-ttyrec
+    dash
+    lesspipe
+    unixtools.killall
+    # zip
+    # unzip
+    libzip
+    curl
 
-      # for pgrep at least
-      procps
+    # for pgrep at least
+    procps
 
-      # development
-      pstree
-      # watch-like tool with history/time travel support
-      viddy
-      # a tool to help with binary files
-      hexdump
+    # development
+    pstree
+    # watch-like tool with history/time travel support
+    viddy
+    # a tool to help with binary files
+    hexdump
 
-      # docs
-      mdbook
-      mdbook-alerts
+    # docs
+    mdbook
+    mdbook-alerts
 
-      # github CLI
-      gh
+    # github CLI
+    gh
 
-      # cachix support
-      cachix
+    # cachix support
+    cachix
 
-      # ruby experimental support
-      ruby
+    # ruby experimental support
+    ruby
 
-      # testing shell
-      tmux
-      vim
+    # testing shell
+    tmux
+    vim
 
-      # mac build
+    # mac build
 
-      tree-sitter
+    tree-sitter
 
-      # TODO: use eventually if more stable, instead of
-      # a lot of the shellHook logic
-      # ourPkgs.staticDeps
-      ourPkgs.upstream-nim-codetracer
+    # TODO: use eventually if more stable, instead of
+    # a lot of the shellHook logic
+    # ourPkgs.staticDeps
+    ourPkgs.upstream-nim-codetracer
 
-      # useful for lsp/editor support
-      nimlsp
-      nimlangserver
-      rust-analyzer
+    # useful for lsp/editor support
+    nimlsp
+    nimlangserver
+    rust-analyzer
 
-      # ci deps
-      python3Packages.flake8
-      shellcheck
-      awscli2
+    # ci deps
+    python3Packages.flake8
+    shellcheck
+    awscli2
 
-      # This dependency is needed only while compiling the `lzma-native`
-      # node.js module, and only when building an AppImage on Linux/ARM.
-      # (i.e. during the `yarn install` step).
-      # TODO: This is quite curious. We should investigate how the AppImage
-      # build environment is different from the regular one.
-      python3Packages.distutils
+    # This dependency is needed only while compiling the `lzma-native`
+    # node.js module, and only when building an AppImage on Linux/ARM.
+    # (i.e. during the `yarn install` step).
+    # TODO: This is quite curious. We should investigate how the AppImage
+    # build environment is different from the regular one.
+    python3Packages.distutils
 
-      # ui-test dependencies
-      playwright-driver.browsers
-      playwright
+    # ui-test dependencies
+    playwright-driver.browsers
+    playwright
 
-      # runtime_tracing build dependency
-      capnproto
-    ]
-    ++ pkgs.lib.optionals (!stdenv.isDarwin) [
-      # Building AppImage
-      inputs'.appimage-channel.legacyPackages.appimagekit
-      appimage-run
-      pax-utils
-    ]
-    ++ pkgs.lib.optionals stdenv.isDarwin [
-      # Building AppImage
-      create-dmg
-    ];
+    # runtime_tracing build dependency
+    capnproto
+  ]
+  ++ pkgs.lib.optionals (!stdenv.isDarwin) [
+    # Building AppImage
+    inputs'.appimage-channel.legacyPackages.appimagekit
+    appimage-run
+    pax-utils
+  ]
+  ++ pkgs.lib.optionals stdenv.isDarwin [
+    # Building AppImage
+    create-dmg
+  ];
 
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
