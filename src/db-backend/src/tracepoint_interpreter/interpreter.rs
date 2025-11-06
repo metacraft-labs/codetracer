@@ -18,7 +18,8 @@ use runtime_tracing::{StepId, TypeKind};
 use tree_sitter::{Node, Parser};
 use tree_sitter_traversal2::{traverse, Order};
 
-use crate::db::Db;
+use crate::lang::Lang;
+use crate::replay::Replay;
 use crate::task::StringAndValueTuple;
 use crate::tracepoint_interpreter::executor::execute_bytecode;
 use crate::value::{Type, Value};
@@ -190,7 +191,13 @@ impl TracepointInterpreter {
         Ok(())
     }
 
-    pub fn evaluate(&self, tracepoint_index: usize, step_id: StepId, db: &Db) -> Vec<StringAndValueTuple> {
+    pub fn evaluate(
+        &self,
+        tracepoint_index: usize,
+        step_id: StepId,
+        replay: &mut dyn Replay,
+        lang: Lang,
+    ) -> Vec<StringAndValueTuple> {
         if !self.compile_errors[tracepoint_index].is_empty() {
             let mut errors = vec![];
 
@@ -208,8 +215,7 @@ impl TracepointInterpreter {
             return errors;
         }
 
-        let step_count = db.steps.len();
-        info!("evaluate tracepoint {tracepoint_index} on #{step_id:?} (out of {step_count})");
+        info!("evaluate tracepoint {tracepoint_index} on #{step_id:?}");
 
         let bytecode = &self.bytecodes[tracepoint_index];
         let source = &self.sources[tracepoint_index];
@@ -218,9 +224,10 @@ impl TracepointInterpreter {
             bytecode,
             source,
             step_id,
-            db,
+            replay,
             &self.unary_op_functions,
             &self.binary_op_functions,
+            lang,
         )
         // %log(i)2
         // -> notification : syntax error; we won't try to evaluate tracepoint

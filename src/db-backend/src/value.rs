@@ -1,7 +1,7 @@
-use runtime_tracing::{TypeKind, TypeRecord, Place, TypeSpecificInfo};
+use num_bigint::BigInt;
+use runtime_tracing::{Place, TypeKind, TypeRecord, TypeSpecificInfo};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use num_bigint::BigInt;
 // TODO? from types if needed use runtime_tracing::base64;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -130,7 +130,6 @@ impl Value {
 //   Other
 // }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ValueRecordWithType {
@@ -164,7 +163,7 @@ pub enum ValueRecordWithType {
         typ: TypeRecord, // (if TypeId: must point to), must be Type with STRUCT kind and TypeSpecificInfo::Struct
     },
     Variant {
-        discriminator: String,      // TODO: eventually a more specific kind of value/type
+        discriminator: String,              // TODO: eventually a more specific kind of value/type
         contents: Box<ValueRecordWithType>, // usually a Struct or a Tuple
         typ: TypeRecord,
     },

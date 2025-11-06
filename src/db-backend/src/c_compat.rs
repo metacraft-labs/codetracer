@@ -5,7 +5,6 @@ use core::ffi::{c_char, c_int, c_void};
 use core::mem::{align_of, size_of};
 use core::ptr::null_mut;
 
-
 // Layout: [ usize: size ][ payload... ]
 const HEADER_ALIGN: usize = align_of::<usize>();
 const HEADER_SIZE: usize = size_of::<usize>();

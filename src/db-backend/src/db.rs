@@ -15,7 +15,10 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::Replay;
-use crate::task::{Action, Breakpoint, Call, CallArg, CoreTrace, Events, Location, ProgramEvent, RRTicks, NO_INDEX, NO_PATH, NO_POSITION, CtLoadLocalsArguments, VariableWithRecord};
+use crate::task::{
+    Action, Breakpoint, Call, CallArg, CoreTrace, CtLoadLocalsArguments, Events, Location, ProgramEvent, RRTicks,
+    VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
+};
 use crate::value::{Type, Value, ValueRecordWithType};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
@@ -261,7 +264,8 @@ impl Db {
     }
 
     fn to_ct_type(&self, type_id: &TypeId) -> Type {
-        if self.types.len() == 0 { // probably rr trace case
+        if self.types.len() == 0 {
+            // probably rr trace case
             warn!("to_ct_type: for now returning just a placeholder type: assuming rr trace!");
             return Type::new(TypeKind::None, "<None>");
         }
@@ -792,7 +796,13 @@ impl DbReplay {
     pub fn new(db: Box<Db>) -> DbReplay {
         let mut breakpoint_list: Vec<HashMap<usize, Breakpoint>> = Default::default();
         breakpoint_list.resize_with(db.paths.len(), HashMap::new);
-        DbReplay { db, step_id: StepId(0), call_key: CallKey(0), breakpoint_list, breakpoint_next_id: 0 }
+        DbReplay {
+            db,
+            step_id: StepId(0),
+            call_key: CallKey(0),
+            breakpoint_list,
+            breakpoint_next_id: 0,
+        }
     }
 
     pub fn register_type(&mut self, typ: TypeRecord) -> TypeId {
@@ -806,7 +816,7 @@ impl DbReplay {
             ValueRecordWithType::Int { i, typ } => {
                 let type_id = self.register_type(typ);
                 ValueRecord::Int { i, type_id }
-            },
+            }
             ValueRecordWithType::Float { f, typ } => {
                 let type_id = self.register_type(typ);
                 ValueRecord::Float { f, type_id }
@@ -819,25 +829,45 @@ impl DbReplay {
                 let type_id = self.register_type(typ);
                 ValueRecord::String { text, type_id }
             }
-            _ => todo!()
+            _ => {
+                warn!("---- NOT IMPLEMENTED! ----");
+                ValueRecord::Error {
+                    msg: "TODO!".to_string(),
+                    type_id: TypeId(0),
+                }
+            }
         }
     }
 
     pub fn to_value_record_with_type(&mut self, v: &ValueRecord) -> ValueRecordWithType {
         match v {
-            ValueRecord::Int { i, type_id } => {
-                ValueRecordWithType::Int { i: *i, typ: self.db.types[*type_id].clone() }
+            ValueRecord::Int { i, type_id } => ValueRecordWithType::Int {
+                i: *i,
+                typ: self.db.types[*type_id].clone(),
             },
-            ValueRecord::Float { f, type_id } => {
-                ValueRecordWithType::Float { f: *f, typ: self.db.types[*type_id].clone() }
+            ValueRecord::Float { f, type_id } => ValueRecordWithType::Float {
+                f: *f,
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Bool { b, type_id } => ValueRecordWithType::Bool {
+                b: *b,
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::String { text, type_id } => ValueRecordWithType::String {
+                text: text.to_string(),
+                typ: self.db.types[*type_id].clone(),
+            },
+            _ => {
+                warn!("---- NOT IMPLEMENTED! ----");
+                ValueRecordWithType::Error {
+                    msg: "TODO!".to_string(),
+                    typ: TypeRecord {
+                        kind: TypeKind::Error,
+                        lang_type: "TODO!".to_string(),
+                        specific_info: TypeSpecificInfo::None,
+                    },
+                }
             }
-            ValueRecord::Bool { b, type_id } => {
-                ValueRecordWithType::Bool { b: *b, typ: self.db.types[*type_id].clone() }
-            }
-            ValueRecord::String { text, type_id } => {
-                ValueRecordWithType::String { text: text.to_string(), typ: self.db.types[*type_id].clone() }
-            }
-            _ => todo!()
         }
     }
 
@@ -1060,10 +1090,10 @@ impl Replay for DbReplay {
         //   taking a set of expressions: probably best(maybe add an additional load_values)
         for variable in &self.db.variables[self.step_id] {
             if self.db.variable_names[variable.variable_id] == expression {
-                return Ok(self.to_value_record_with_type(&variable.value.clone()))
+                return Ok(self.to_value_record_with_type(&variable.value.clone()));
             }
         }
-        return Err(format!("variable {expression} not found on this step").into())
+        return Err(format!("variable {expression} not found on this step").into());
     }
 
     fn load_return_value(&mut self, _lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
@@ -1074,7 +1104,7 @@ impl Replay for DbReplay {
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent> {
         self.db.load_step_events(step_id, exact)
     }
-    
+
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
         self.step_id = step_id;
         Ok(true)
@@ -1086,37 +1116,45 @@ impl Replay for DbReplay {
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", path).into());
         let path_id = path_id_res?;
         let inner_map = &mut self.breakpoint_list[path_id.0];
-        let breakpoint = Breakpoint { enabled: true, id: self.breakpoint_next_id as i64 };
+        let breakpoint = Breakpoint {
+            enabled: true,
+            id: self.breakpoint_next_id as i64,
+        };
         self.breakpoint_next_id += 1;
         inner_map.insert(line as usize, breakpoint.clone());
         Ok(breakpoint)
     }
 
-    fn delete_breakpoint(&mut self, _breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
-        // let path_id_res: Result<PathId, Box<dyn Error>> = self
-        //     .load_path_id(&loc.path)
-        //     .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        // let path_id = path_id_res?;
-        // let inner_map = &mut self.breakpoint_list[path_id.0];
-        // inner_map.remove(&loc.line);
-        todo!()       
+    fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
+        for path_breakpoints in self.breakpoint_list.iter_mut() {
+            if let Some(line) = path_breakpoints
+                .iter()
+                .find(|(_, stored)| stored.id == breakpoint.id)
+                .map(|(line, _)| *line)
+            {
+                path_breakpoints.remove(&line);
+                return Ok(true);
+            }
+        }
+
+        Err(format!("breakpoint id {} not found", breakpoint.id).into())
     }
 
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>> {
         self.breakpoint_list.clear();
         self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
         Ok(true)
-    } 
+    }
 
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>> {
-        // let path_id_res: Result<PathId, Box<dyn Error>> = self
-        //     .load_path_id(&loc.path)
-        //     .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        // let path_id = path_id_res?;
-        // if let Some(breakpoint) = self.breakpoint_list[path_id.0].get_mut(&loc.line) {
-        let mut toggled_breakpoint = breakpoint.clone();
-        toggled_breakpoint.enabled = !toggled_breakpoint.enabled;
-        Ok(toggled_breakpoint)
+        for path_breakpoints in self.breakpoint_list.iter_mut() {
+            if let Some(stored) = path_breakpoints.values_mut().find(|stored| stored.id == breakpoint.id) {
+                stored.enabled = !stored.enabled;
+                return Ok(stored.clone());
+            }
+        }
+
+        Err(format!("breakpoint id {} not found", breakpoint.id).into())
     }
 
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
@@ -1130,7 +1168,7 @@ impl Replay for DbReplay {
 
     fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
         let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
-                                                            // for compat with rr/gdb core support    
+                                                              // for compat with rr/gdb core support
         self.jump_to(step_id)?;
         Ok(true)
     }

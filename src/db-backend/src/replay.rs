@@ -4,7 +4,7 @@ use std::error::Error;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
-use crate::task::{Action, Breakpoint, Events, Location, CtLoadLocalsArguments, ProgramEvent, VariableWithRecord};
+use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord};
 use crate::value::ValueRecordWithType;
 
 pub trait Replay: std::fmt::Debug {
@@ -15,7 +15,7 @@ pub trait Replay: std::fmt::Debug {
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>>;
     fn load_value(&mut self, expression: &str, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
-    // assuming currently the replay is stopped in the right `call`(frame) for both trace kinds; 
+    // assuming currently the replay is stopped in the right `call`(frame) for both trace kinds;
     //   and if rr: possibly near the return value
     fn load_return_value(&mut self, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>>;
 

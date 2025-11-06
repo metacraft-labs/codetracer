@@ -125,7 +125,6 @@ pub struct Variable {
     pub value: Value,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct VariableWithRecord {
@@ -137,7 +136,6 @@ pub struct VariableWithRecord {
 //     value: ValueRecord,
 //     typ: Type,
 // }
-
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -1675,7 +1673,6 @@ pub struct Events {
     pub first_events: Vec<ProgramEvent>,
     pub contents: String,
 }
-
 
 pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
 pub static mut EVENT_ID_MAP: &mut [usize] = &mut [0; 100];

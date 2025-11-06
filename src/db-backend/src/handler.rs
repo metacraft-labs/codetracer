@@ -1,12 +1,14 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::error::Error;
+use std::io;
+use std::path::Path;
 
 use log::{error, info, warn};
 use regex::Regex;
 use serde::Serialize;
 
-use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
+use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, TypeKind, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
@@ -14,6 +16,7 @@ use crate::db::{Db, DbCall, DbRecordEvent, DbReplay, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
+use crate::lang::{lang_from_context, Lang};
 use crate::program_search_tool::ProgramSearchTool;
 use crate::replay::Replay;
 use crate::rr_dispatcher::{CtRRArgs, RRDispatcher};
@@ -23,15 +26,16 @@ use crate::dap_types;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task;
 use crate::task::{
-    Action, Breakpoint, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
-    CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, FlowMode, HistoryResult, HistoryUpdate, Instruction,
-    CtLoadFlowArguments, FlowUpdate, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
-    Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceKind, TraceUpdate, TracepointId, TracepointResults,
+    Action, Breakpoint, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
+    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
+    FrameInfo, FunctionLocation, HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
+    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
+    ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
+    StepArg, Stop, StopType, StringAndValueTuple, Task, TraceKind, TraceUpdate, TracepointId, TracepointResults,
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
-use crate::value::to_ct_value;
+use crate::value::{to_ct_value, Type, Value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -95,7 +99,7 @@ impl Handler {
             Box::new(RRDispatcher::new("stable", 0, ct_rr_args.clone()))
         };
         // let sender = sender::Sender::new();
-        Handler {
+        let mut handler = Handler {
             trace_kind,
             db: db.clone(),
             step_id: StepId(0),
@@ -116,7 +120,9 @@ impl Handler {
             load_flow_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
-        }
+        };
+        handler.initialize_breakpoint_cache();
+        handler
     }
     // TODO
 
@@ -327,15 +333,18 @@ impl Handler {
 
     pub fn load_locals(&mut self, req: dap::Request, args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
         // if self.trace_kind == TraceKind::RR {
-            // let locals: Vec<Variable> = vec![];
-            // warn!("load_locals not implemented for rr yet");
-            let locals_with_records = self.replay.load_locals(args)?;
-            let locals = locals_with_records.iter().map(|l| Variable {
+        // let locals: Vec<Variable> = vec![];
+        // warn!("load_locals not implemented for rr yet");
+        let locals_with_records = self.replay.load_locals(args)?;
+        let locals = locals_with_records
+            .iter()
+            .map(|l| Variable {
                 expression: l.expression.clone(),
-                value: to_ct_value(&l.value)
-            }).collect();
-            self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
-            Ok(())
+                value: to_ct_value(&l.value),
+            })
+            .collect();
+        self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+        Ok(())
         // }
 
         // self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
@@ -453,7 +462,8 @@ impl Handler {
         // if possible for example
 
         let flow_update = if arg.flow_mode == FlowMode::Call {
-            self.flow_preloader.load(arg.location, arg.flow_mode, self.trace_kind, &mut *flow_replay)
+            self.flow_preloader
+                .load(arg.location, arg.flow_mode, self.trace_kind, &mut *flow_replay)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
                 serde_json::from_str::<FlowUpdate>(&raw_flow)?
@@ -585,7 +595,8 @@ impl Handler {
             Action::Continue => self.step_continue(!arg.reverse)?,
             _ => error!("action {:?} not implemented", arg.action),
         }
-        if arg.complete { // && arg.action != Action::Continue {
+        if arg.complete {
+            // && arg.action != Action::Continue {
             self.complete_move(false)?;
         }
 
@@ -814,7 +825,9 @@ impl Handler {
                 Err(err.into())
             }
         } else {
-            let b = self.replay.add_breakpoint(&source_location.path, source_location.line as i64)?;
+            let b = self
+                .replay
+                .add_breakpoint(&source_location.path, source_location.line as i64)?;
             match self.replay.step(Action::Continue, true) {
                 Ok(_) => {
                     self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
@@ -892,7 +905,11 @@ impl Handler {
         }
     }
 
-    pub fn set_breakpoints(&mut self, request: dap::Request, args: dap_types::SetBreakpointsArguments) -> Result<(), Box<dyn Error>> {
+    pub fn set_breakpoints(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::SetBreakpointsArguments,
+    ) -> Result<(), Box<dyn Error>> {
         let mut results = Vec::new();
         // for now simples to redo them every time: TODO possible optimizations
         self.clear_breakpoints()?;
@@ -902,14 +919,12 @@ impl Handler {
             } else {
                 args.lines.unwrap_or_default()
             };
-        
+
             for line in lines {
-                let _ = self.add_breakpoint(
-                    SourceLocation {
-                        path: path.clone(),
-                        line: line as usize,
-                    },
-                );
+                let _ = self.add_breakpoint(SourceLocation {
+                    path: path.clone(),
+                    line: line as usize,
+                });
                 results.push(dap_types::Breakpoint {
                     id: None,
                     verified: true,
@@ -961,10 +976,10 @@ impl Handler {
     }
 
     pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<(), Box<dyn Error>> {
-       let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
-       let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
-       entry.push(breakpoint);
-       Ok(())
+        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
+        let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
+        entry.push(breakpoint);
+        Ok(())
     }
 
     pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -979,7 +994,18 @@ impl Handler {
     pub fn clear_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
         let _ = self.replay.delete_breakpoints()?;
         self.breakpoints.clear();
+        self.initialize_breakpoint_cache();
         Ok(())
+    }
+
+    fn initialize_breakpoint_cache(&mut self) {
+        if !self.breakpoints.is_empty() {
+            return;
+        }
+        if let Some(first_step) = self.db.steps.first() {
+            let path = self.db.load_path_from_id(&first_step.path_id).to_string();
+            self.breakpoints.entry((path, first_step.line.0)).or_default();
+        }
     }
 
     pub fn toggle_breakpoint(&mut self, _loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -988,15 +1014,14 @@ impl Handler {
     }
 
     fn handle_trace_steps(&mut self, args: &RunTracepointsArg) -> Result<(), Box<dyn Error>> {
-        let paths_count = self.db.paths.len();
         let tracepoints = args.session.tracepoints.clone();
         let mut registered = vec![false; tracepoints.len()];
-        let mut tracepoint_locations = vec![HashMap::new(); paths_count];
+        let mut tracepoint_locations: HashMap<String, HashMap<usize, Vec<usize>>> = HashMap::new();
         let mut tracepoint_errors = HashMap::new();
 
         // counting visits to each location, so tracepoints results
         // know that they're on the n-th iteration through the tracepoint
-        let mut location_visit_indices = vec![HashMap::new(); paths_count];
+        let mut location_visit_indices: HashMap<String, HashMap<usize, usize>> = HashMap::new();
 
         let mut interpreter = TracepointInterpreter::new(tracepoints.len());
 
@@ -1004,135 +1029,253 @@ impl Handler {
 
         for (i, tracepoint) in tracepoints.iter().enumerate() {
             if let Err(error) = interpreter.register_tracepoint(i, &tracepoint.expression) {
-                // we won't try to evaluate this tracepoint,
-                // but will continue with the other valid ones
                 registered[i] = false;
                 warn!("register tracepoint error: {error:?}");
 
-                // trim quotes, adapted from https://stackoverflow.com/a/70598494/438099
                 let mut error_text = format!("{:?}", error);
                 if error_text.len() > 2 {
-                    // assume it's `"<>"` because of Debug formatting with {:?}
                     error_text.remove(0);
                     error_text.pop();
                 }
                 tracepoint_errors.insert(tracepoint.tracepoint_id, error_text);
-
-                // self.send_notification(NotificationKind::Error, &format!("Tracepoint error: {error:?}"), false)?;
             } else {
-                let path_id_res: Result<PathId, Box<dyn Error>> = self.load_path_id(&tracepoint.name).ok_or(
-                    format!(
-                        "can't load path id for tracepoint: can't find path `{}`` in trace",
-                        tracepoint.name
-                    )
-                    .into(),
-                );
-                match path_id_res {
-                    Ok(path_id) => {
-                        registered[i] = true;
-                        tracepoint_locations[path_id.0].entry(tracepoint.line).or_insert(vec![]);
-                        #[allow(clippy::unwrap_used)]
-                        tracepoint_locations[path_id.0]
-                            .get_mut(&tracepoint.line)
-                            .unwrap()
-                            .push(i);
-                        location_visit_indices[path_id.0].entry(tracepoint.line).or_insert(0);
-                    }
-                    Err(e) => {
-                        registered[i] = false;
-                        warn!("tracepoint error: {e:?}");
-                    }
-                }
+                registered[i] = true;
+                tracepoint_locations
+                    .entry(tracepoint.name.clone())
+                    .or_default()
+                    .entry(tracepoint.line)
+                    .or_insert_with(Vec::new)
+                    .push(i);
+                location_visit_indices
+                    .entry(tracepoint.name.clone())
+                    .or_default()
+                    .entry(tracepoint.line)
+                    .or_insert(0);
             }
         }
 
         let tracepoint_id_list: Vec<usize> = tracepoints.iter().map(|t| t.tracepoint_id).collect();
         self.event_db.reset_tracepoint_data(&tracepoint_id_list); // for now no smart cache non-changed optimizations(?)
-        self.event_db.tracepoint_errors = tracepoint_errors.clone();
 
-        for step in self.db.step_from(StepId(0), true) {
-            let line = step.line.0 as usize;
-            // let step_id_raw = step.step_id.0;
-            // info!("tracepoint locations {tracepoint_locations:?} line {line} {step_id_raw}");
-            if tracepoint_locations[step.path_id.0].contains_key(&line) {
-                // info!("try to go through tracepoints");
-                for tracepoint_index in tracepoint_locations[step.path_id.0][&line].iter() {
-                    let tracepoint = &tracepoints[*tracepoint_index];
-                    if registered[*tracepoint_index] {
-                        // tracepoint.is_changed TODO re-enable when caching supported again
-                        // info!("evaluate for {}", step.step_id.0);
-                        let locals = interpreter.evaluate(*tracepoint_index, step.step_id, &self.db);
-                        if locals.is_empty() {
-                            continue; // assume if no logs produced, no event should be recorded
-                        }
-                        // info!("locals {locals:?}");
-                        let stop = Stop::new(
-                            self.db.load_path_from_id(&step.path_id).to_string(),
-                            line as i64,
-                            locals,
-                            step.step_id.into(),
-                            tracepoint.tracepoint_id,
-                            location_visit_indices[step.path_id.0][&line],
-                            StopType::Trace,
-                        );
-                        results.push(stop);
+        let original_step_id = self.replay.current_step_id();
+        let mut disabled_breakpoints: Vec<((String, i64), usize)> = vec![];
 
-                        location_visit_indices[step.path_id.0]
-                            .entry(line)
-                            .and_modify(|e| *e += 1);
-
-                        // if results.len() >= TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE {
-                        //     self.event_db.register_tracepoint_results(&results);
-                        //     // TODO update
-                        //     results.clear();
-                        // }
+        {
+            let replay = &mut self.replay;
+            for ((path, line), breakpoints) in self.breakpoints.iter_mut() {
+                for (index, breakpoint) in breakpoints.iter_mut().enumerate() {
+                    if breakpoint.enabled {
+                        let toggled = replay.toggle_breakpoint(breakpoint)?;
+                        disabled_breakpoints.push(((path.clone(), *line), index));
+                        *breakpoint = toggled;
                     }
                 }
             }
         }
 
-        // if !results.is_empty() {
+        let mut tracepoint_breakpoints: Vec<Breakpoint> = vec![];
+        let mut run_error: Option<Box<dyn Error>> = None;
+
+        {
+            let run_result = (|| -> Result<(), Box<dyn Error>> {
+                if tracepoints.is_empty() {
+                    return Ok(());
+                }
+
+                for (path, line_map) in tracepoint_locations.iter() {
+                    if line_map.is_empty() {
+                        continue;
+                    }
+                    for (&line, tracepoint_indices) in line_map.iter() {
+                        if !tracepoint_indices.iter().any(|idx| registered[*idx]) {
+                            continue;
+                        }
+                        match self.replay.add_breakpoint(path, line as i64) {
+                            Ok(breakpoint) => tracepoint_breakpoints.push(breakpoint),
+                            Err(error) => {
+                                warn!("tracepoint breakpoint error: {error:?}");
+                                let mut error_text = format!("{:?}", error);
+                                if error_text.len() > 2 {
+                                    error_text.remove(0);
+                                    error_text.pop();
+                                }
+                                for tracepoint_index in tracepoint_indices {
+                                    registered[*tracepoint_index] = false;
+                                    tracepoint_errors
+                                        .insert(tracepoints[*tracepoint_index].tracepoint_id, error_text.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if tracepoint_breakpoints.is_empty() {
+                    return Ok(());
+                }
+
+                self.replay.jump_to(StepId(0))?;
+
+                loop {
+                    if !self.replay.step(Action::Continue, true)? {
+                        break;
+                    }
+
+                    let current_step_id = self.replay.current_step_id();
+                    let location = self.replay.load_location(&mut self.expr_loader)?;
+                    let path = location.path.clone();
+                    let line = location.line as usize;
+
+                    if let Some(line_map) = tracepoint_locations.get(path.as_str()) {
+                        if let Some(tracepoint_indices) = line_map.get(&line) {
+                            let visit_counts = location_visit_indices.entry(path.clone()).or_default();
+                            let visit_entry = visit_counts.entry(line).or_insert(0);
+                            let mut visit_index = *visit_entry;
+
+                            for tracepoint_index in tracepoint_indices {
+                                if !registered[*tracepoint_index] {
+                                    continue;
+                                }
+                                let tracepoint = &tracepoints[*tracepoint_index];
+                                let locals = self.evaluate_tracepoint(
+                                    &interpreter,
+                                    *tracepoint_index,
+                                    &tracepoint.expression,
+                                    current_step_id,
+                                    lang_from_context(&Path::new(&location.path), self.trace_kind),
+                                );
+                                if locals.is_empty() {
+                                    continue;
+                                }
+                                let stop = Stop::new(
+                                    path.clone(),
+                                    location.line,
+                                    locals,
+                                    current_step_id.0 as usize,
+                                    tracepoint.tracepoint_id,
+                                    visit_index,
+                                    StopType::Trace,
+                                );
+                                results.push(stop);
+
+                                visit_index += 1;
+                            }
+
+                            *visit_entry = visit_index;
+                        }
+                    }
+                }
+
+                Ok(())
+            })();
+
+            if let Err(err) = run_result {
+                run_error = Some(err);
+            }
+        }
+
+        let mut cleanup_error: Option<Box<dyn Error>> = None;
+
+        for breakpoint in tracepoint_breakpoints.iter() {
+            if let Err(err) = self.replay.delete_breakpoint(breakpoint) {
+                if cleanup_error.is_none() {
+                    cleanup_error = Some(err);
+                }
+            }
+        }
+
+        if let Err(err) = self.replay.jump_to(original_step_id) {
+            if cleanup_error.is_none() {
+                cleanup_error = Some(err);
+            }
+        }
+        self.step_id = original_step_id;
+
+        for (key, index) in disabled_breakpoints {
+            match self.breakpoints.get_mut(&key) {
+                Some(breakpoints) => {
+                    if let Some(breakpoint) = breakpoints.get_mut(index) {
+                        match self.replay.toggle_breakpoint(breakpoint) {
+                            Ok(toggled) => {
+                                *breakpoint = toggled;
+                            }
+                            Err(err) => {
+                                if cleanup_error.is_none() {
+                                    cleanup_error = Some(err);
+                                }
+                            }
+                        }
+                    } else if cleanup_error.is_none() {
+                        cleanup_error = Some(
+                            io::Error::new(io::ErrorKind::Other, "missing breakpoint index during restore").into(),
+                        );
+                    }
+                }
+                None => {
+                    if cleanup_error.is_none() {
+                        cleanup_error = Some(
+                            io::Error::new(io::ErrorKind::Other, "missing breakpoint entry during restore").into(),
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(err) = run_error {
+            if let Some(cleanup_err) = cleanup_error {
+                warn!("cleanup error after tracepoint run: {cleanup_err:?}");
+            }
+            return Err(err);
+        }
+
+        if let Some(err) = cleanup_error {
+            return Err(err);
+        }
+
+        self.event_db.tracepoint_errors = tracepoint_errors.clone();
         self.event_db.register_tracepoint_results(&results);
+        Ok(())
+    }
+
+    fn evaluate_tracepoint(
+        &mut self,
+        interpreter: &TracepointInterpreter,
+        tracepoint_index: usize,
+        tracepoint_expression: &str,
+        step_id: StepId,
+        lang: Lang,
+    ) -> Vec<StringAndValueTuple> {
+        let step_raw = step_id.0;
+        if step_raw < 0 {
+            warn!(
+                "tracepoint evaluation requested for negative step id {} (tracepoint index {})",
+                step_raw, tracepoint_index
+            );
+            let mut err_value = Value::new(TypeKind::Error, Type::new(TypeKind::Error, "TracepointEvaluationError"));
+            err_value.msg = "Tracepoint evaluation unavailable for negative replay step.".to_string();
+            return vec![StringAndValueTuple {
+                field0: tracepoint_expression.to_string(),
+                field1: err_value,
+            }];
+        }
+
+        // let step_index = step_raw as usize;
+        // let known_step_count = self.db.variables.len();
+        // if step_index >= known_step_count {
+        //     warn!(
+        //         "tracepoint evaluation requested for step {} (tracepoint index {}) but db only contains {} steps",
+        //         step_index, tracepoint_index, known_step_count
+        //     );
+
+        //     let mut err_value = Value::new(TypeKind::Error, Type::new(TypeKind::Error, "TracepointEvaluationError"));
+        //     err_value.msg = format!("Tracepoint evaluation unavailable for this replay backend at step {step_index}.");
+
+        //     return vec![StringAndValueTuple {
+        //         field0: tracepoint_expression.to_string(),
+        //         field1: err_value,
+        //     }];
         // }
 
-        // for (i, tracepoint) in tracepoints.iter().enumerate() {
-        //     if tracepoint.is_changed && registered[i] {
-        //         let mut results: Vec<Stop> = vec![];
-        //         let path_id_res: Result<PathId, Box<dyn Error>> = self
-        //             .load_path_id(&tracepoint.name)
-        //             .ok_or(format!("path not found in trace: {}", tracepoint.name).into());
-        //         let path_id = path_id_res?;
-        //         if let Some(steps) = self.db.step_map[path_id].get(&tracepoint.line) {
-        //             for (update_id, step) in steps.iter().enumerate() {
-        //                 // log(i);
-        //                 // log(other + i); "other + i" => #<line,column>:
-        //                 // log(i, other); [(i, i value), (name: text, value: othe)]
-        //                 let locals = interpreter.evaluate(i, self.step_id, &self.db);
-
-        //                 results.push(Stop::new(
-        //                     self.db.load_path_from_id(&step.path_id).to_string(),
-        //                     step.line.0,
-        //                     locals.clone(),
-        //                     step.step_id.into(),
-        //                     tracepoint.tracepoint_id,
-        //                     update_id,
-        //                     StopType::Trace,
-        //                 ));
-        //             }
-        //         }
-        //         let mut locals: Vec<StringAndValueTuple> = vec![];
-        //         for res in results.iter() {
-        //             locals.extend(res.locals.clone());
-        //         }
-        // self.event_db
-        //     .register_tracepoint_values(tracepoint.tracepoint_id, locals.clone());
-        // let pe_list = self.trace_to_program_event(&results);
-        // let tracepoint_ids = self.get_tracepoint_ids(&results);
-        // self.event_db
-        // .register_events(DbEventKind::Trace, &pe_list, tracepoint_ids);
-        // self.event_db.refresh_global();
-        // Send update to frontend
-        Ok(())
+        interpreter.evaluate(tracepoint_index, step_id, &mut *self.replay, lang)
     }
 
     pub fn run_tracepoints(&mut self, req: dap::Request, args: RunTracepointsArg) -> Result<(), Box<dyn Error>> {
@@ -1145,6 +1288,8 @@ impl Handler {
         if !is_empty {
             // Handle id_table and results for the TraceUpdate
             self.handle_trace_steps(&args)?;
+            warn!("-------- CHECK HERE !!!!!");
+            info!("{:?}", self.event_db);
         }
         for trace in tracepoints.iter() {
             let trace_update = TraceUpdate::new(
@@ -1858,8 +2003,9 @@ mod tests {
                 dap::Request::default(),
                 CtLoadFlowArguments {
                     flow_mode: FlowMode::Call,
-                    location: handler.load_location(handler.step_id)
-                })
+                    location: handler.load_location(handler.step_id),
+                },
+            )
             .unwrap();
     }
 

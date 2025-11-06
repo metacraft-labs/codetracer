@@ -6,9 +6,9 @@ use crate::handler::Handler;
 use crate::paths::CODETRACER_PATHS;
 use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
-    Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments,
-    CtLoadLocalsArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
+    Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
+    FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget,
+    SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
@@ -200,7 +200,9 @@ fn handle_request<T: DapTransport>(
         "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap_types::StackTraceArguments>()?)?,
         "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?)?,
         "restart" => handler.run_to_entry(req.clone())?,
-        "setBreakpoints" => handler.set_breakpoints(req.clone(), req.load_args::<dap_types::SetBreakpointsArguments>()?)?,
+        "setBreakpoints" => {
+            handler.set_breakpoints(req.clone(), req.load_args::<dap_types::SetBreakpointsArguments>()?)?
+        }
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
@@ -344,7 +346,8 @@ pub fn handle_message<T: DapTransport>(
                         &ctx.launch_trace_file,
                         ctx.launch_raw_diff_index.clone(),
                         &ctx.ct_rr_worker_exe,
-                        ctx.seq)?);
+                        ctx.seq,
+                    )?);
                     if let Some(h) = ctx.handler.as_mut() {
                         write_dap_messages(transport, h, &mut ctx.seq)?;
                     }
@@ -398,7 +401,8 @@ pub fn handle_message<T: DapTransport>(
                     &ctx.launch_trace_file,
                     ctx.launch_raw_diff_index.clone(),
                     &ctx.ct_rr_worker_exe,
-                    ctx.seq)?);
+                    ctx.seq,
+                )?);
                 if let Some(h) = ctx.handler.as_mut() {
                     write_dap_messages(transport, h, &mut ctx.seq)?;
                 }
@@ -453,14 +457,13 @@ fn handle_client<R: std::io::BufRead, T: DapTransport>(
                 if let Err(e) = res {
                     error!("handle_message error: {e:?}");
                 }
-            },
+            }
             Err(e) => {
                 error!("error from read_dap_message_from_reader: {e:?}");
                 break;
             }
         }
     }
-
 
     Ok(())
 }

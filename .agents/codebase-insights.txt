@@ -10,6 +10,11 @@
 - `DapParser` now buffers data via `add_bytes` and exposes parsed payloads with
   `get_message()`, so callers need to drain messages until `None` after feeding
   new bytes.
+- `DbReplay::toggle_breakpoint` now mutates its internal breakpoint cache so
+  handler state stays consistent after toggles.
+- BackendManager now auto-selects the most recently started replay so new DAP
+  traffic targets the fresh db-backend without needing an explicit
+  `ct/select-replay`.
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.

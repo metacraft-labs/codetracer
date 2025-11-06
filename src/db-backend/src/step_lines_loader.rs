@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use log::info;
 use runtime_tracing::{CallKey, StepId};
 
-use crate::db::{Db, DbStep, DbReplay};
+use crate::db::{Db, DbReplay, DbStep};
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
