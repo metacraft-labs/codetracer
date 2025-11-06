@@ -223,7 +223,6 @@ impl TracepointInterpreter {
         execute_bytecode(
             bytecode,
             source,
-            step_id,
             replay,
             &self.unary_op_functions,
             &self.binary_op_functions,

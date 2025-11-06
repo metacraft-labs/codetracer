@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use log::info;
-use runtime_tracing::{StepId, TypeKind, ValueRecord, NONE_TYPE_ID};
+use runtime_tracing::{TypeKind, ValueRecord, NONE_TYPE_ID};
 
 use crate::{
     db::{Db, DbReplay},
@@ -17,7 +17,6 @@ use super::{BinaryOperatorFunctions, Bytecode, UnaryOperatorFunctions};
 pub fn execute_bytecode(
     bytecode: &Bytecode,
     source: &str,
-    step_id: StepId,
     replay: &mut dyn Replay,
     unary_op_functions: &UnaryOperatorFunctions,
     binary_op_functions: &BinaryOperatorFunctions,
