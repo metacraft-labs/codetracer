@@ -9,7 +9,8 @@ pub struct Paths {
 impl Default for Paths {
     fn default() -> Self {
         let tmpdir: PathBuf = if cfg!(target_os = "macos") {
-            PathBuf::from(env::var("HOME").unwrap_or("/".to_string())).join("Library/Caches/com.codetracer.CodeTracer/")
+            PathBuf::from(env::var("HOME").unwrap_or("/".to_string()))
+                .join("Library/Caches/com.codetracer.CodeTracer/")
         } else {
             env::temp_dir().join("codetracer/")
         };
