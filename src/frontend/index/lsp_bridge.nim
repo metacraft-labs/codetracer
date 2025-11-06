@@ -19,6 +19,15 @@ var
 
 proc toDisplayString(value: JsObject): cstring {.importjs: "(function(value){ try { if (value === undefined) return 'undefined'; if (typeof value === 'string') return value; return JSON.stringify(value); } catch (err) { return String(value); } })(#)".}
 
+when not defined(ctRenderer):
+  proc createWs(url: cstring): JsObject {.importjs: "new (require('ws'))(#, 'jsonrpc')".}
+  proc wsOnOpen(ws: JsObject; handler: proc () {.closure.}) {.importjs: "#.on('open', #)".}
+  proc wsOnMessage(ws: JsObject; handler: proc (data: JsObject) {.closure.}) {.importjs: "#.on('message', #)".}
+  proc wsOnError(ws: JsObject; handler: proc (err: JsObject) {.closure.}) {.importjs: "#.on('error', #)".}
+  proc wsSendJson(ws: JsObject; payload: JsObject) {.importjs: "#.send(JSON.stringify(#))".}
+  proc wsClose(ws: JsObject) {.importjs: "#.close()".}
+  proc jsValueToString(value: JsObject): cstring {.importjs: "String(#)".}
+
 proc trimNotificationBuffer() =
   if lspNotifications.len > notificationHistoryLimit:
     let excess = lspNotifications.len - notificationHistoryLimit
@@ -41,6 +50,7 @@ proc resetNotificationHandler() =
   clearLspNotificationHandlers()
   lspNotificationHandler = nil
   lspNotifications.setLen(0)
+
 
 proc envValue(name: cstring): string =
   let raw = nodeProcess.env[name]
@@ -136,3 +146,32 @@ proc stopLspBridge* =
   setEnv("CODETRACER_LSP_PATH", "")
   infoPrint "index:lsp bridge stopped"
   resetNotificationHandler()
+
+proc sendLspProbe*(payload: JsObject) =
+  when defined(ctRenderer):
+    discard
+  else:
+    if lspBridgeHandle.isNil:
+      warnPrint "index:lsp probe skipped because bridge is not running"
+      return
+    let url = lspBridgeUrl()
+    var completed = false
+    let ws = createWs(url.cstring)
+    wsOnOpen(ws, proc () {.closure.} =
+      infoPrint fmt"index:lsp probe sending payload to {url}"
+      wsSendJson(ws, payload)
+    )
+    wsOnMessage(ws, proc (data: JsObject) {.closure.} =
+      if completed:
+        return
+      completed = true
+      infoPrint fmt"index:lsp probe response: {jsValueToString(data)}"
+      wsClose(ws)
+    )
+    wsOnError(ws, proc (err: JsObject) {.closure.} =
+      if completed:
+        return
+      completed = true
+      warnPrint "index:lsp probe error: ", jsValueToString(err)
+      wsClose(ws)
+    )
