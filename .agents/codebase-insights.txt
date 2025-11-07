@@ -18,9 +18,6 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
-- The Electron index process now boots an LSP bridge (ws://127.0.0.1:3100/lsp by default) using `bridge_reduced.nim`; port/path/command can be overridden with `CODETRACER_LSP_*` env vars.
-- Renderer/bridge coordination uses IPC channels `CODETRACER::lsp-get-url` (request) and `CODETRACER::lsp-url` (status updates).
-- The renderer’s LSP controller builds `workspaceFolders` and `initializationOptions.linkedProjects` directly from `window.data.trace` (workdir + sourceFolders), so language servers see the original project layout when traces provide it.
 
 - Electron lifecycle: the backend-manager process is spawned in
   `src/frontend/index.nim` during `ready()`. Previously, it was only stopped
