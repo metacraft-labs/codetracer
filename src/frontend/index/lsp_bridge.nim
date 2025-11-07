@@ -26,6 +26,9 @@ proc push(array: JsObject; value: JsObject) {.importjs: "#.push(#)".}
 proc boolToJs(flag: bool): JsObject {.importjs: "(# ? true : false)".}
 
 proc toDisplayString(value: JsObject): cstring {.importjs: "(function(value){ try { if (value === undefined) return 'undefined'; if (typeof value === 'string') return value; return JSON.stringify(value); } catch (err) { return String(value); } })(#)".}
+proc windowIsDestroyed(win: JsObject): bool {.importjs: "((w)=> (w && typeof w.isDestroyed === 'function') ? w.isDestroyed() : false)(#)".}
+proc windowWebContents(win: JsObject): JsObject {.importjs: "((w)=> (w ? w.webContents : undefined))(#)".}
+proc webContentsIsDestroyed(contents: JsObject): bool {.importjs: "((c)=> (c && typeof c.isDestroyed === 'function') ? c.isDestroyed() : false)(#)".}
 
 when not defined(ctRenderer):
   proc createWs(url: cstring): JsObject {.importjs: "new (require('ws'))(#, 'jsonrpc')".}
@@ -53,11 +56,15 @@ proc buildStatusPayload(running: bool): JsObject =
     setField(result, "notifications", notifArray)
 
 proc sendLspStatusToRenderer* =
-  if electron_vars.mainWindow.isNil:
+  let windowRef = electron_vars.mainWindow
+  if windowRef.isNil or windowIsDestroyed(windowRef):
+    return
+  let contents = windowWebContents(windowRef)
+  if contents.isNil or webContentsIsDestroyed(contents):
     return
   let payload = buildStatusPayload(not lspBridgeHandle.isNil)
   try:
-    electron_vars.mainWindow.webContents.send(cstring"CODETRACER::lsp-url", payload)
+    contents.send(cstring"CODETRACER::lsp-url", payload)
   except CatchableError:
     warnPrint "index:lsp failed to send status to renderer: ", getCurrentExceptionMsg()
 
@@ -217,4 +224,3 @@ proc sendLspProbe*(payload: JsObject) =
 
 proc onLspGetUrl*(sender: JsObject, response: JsObject) {.async.} =
   sendLspStatusToRenderer()
-
