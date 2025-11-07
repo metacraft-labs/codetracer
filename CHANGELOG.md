@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 25.11.1 - 2025-11-07(hotfix)
+
+Introduced a number of hotfixes for some bugs:
+
+- macOS: Fix Rossetta popups by forcing native execution
+- Linux: Fix AppImage RPATHs for some libraries
+
 ## 25.10.1 - 2025-10-30
 
 We are releasing our new version enabling support for Python recordings!
