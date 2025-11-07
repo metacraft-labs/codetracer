@@ -328,7 +328,7 @@ impl<'a> CallFlowPreloader<'a> {
     }
 
     fn call_key_from(&self, location: &Location) -> Result<CallKey, Box<dyn Error>> {
-        Ok(CallKey(location.key.parse::<i64>()?)) // for now still assume it's an integer
+        Ok(CallKey(location.global_call_key.parse::<i64>()?)) // for now still assume it's an integer
     }
 
     fn load_view_update(&mut self, replay: &mut dyn Replay) -> Result<FlowViewUpdate, Box<dyn Error>> {
