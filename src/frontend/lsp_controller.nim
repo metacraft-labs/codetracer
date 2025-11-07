@@ -19,11 +19,69 @@ when defined(js):
   proc setField(target: JsObject; name: cstring; value: JsObject) {.importjs: "#[#] = #".}
   proc push(target: JsObject; value: JsObject) {.importjs: "#.push(#)".}
   proc toJs(str: cstring): JsObject {.importjs: "#".}
+  proc requireModule(name: cstring): JsObject {.importjs: "require(#)".}
+  proc arrayLen(arr: JsObject): int {.importjs: "#.length".}
+  proc arrayAt(arr: JsObject; idx: int): JsObject {.importjs: "#[#]".}
+  proc toCString(value: JsObject): cstring {.importjs: "String(#)".}
 
 var
   activeClient*: JsObject = nil
   wsConnection: JsObject = nil
   retryTimer = 0
+
+proc normalizePathString(path: string): string =
+  var normalized = path.strip(chars = Whitespace)
+  if normalized.len == 0:
+    return normalized
+  for i in 0 ..< normalized.len:
+    if normalized[i] == '\\':
+      normalized[i] = '/'
+  let hasDrive = normalized.len >= 2 and normalized[1] == ':'
+  while normalized.len > 1 and normalized[^1] == '/':
+    if hasDrive and normalized.len == 3:
+      break
+    normalized.setLen(normalized.len - 1)
+  normalized
+
+proc folderDisplayName(path: string): string =
+  let normalized = normalizePathString(path)
+  if normalized.len == 0:
+    return ""
+  var endIdx = normalized.len - 1
+  while endIdx > 0 and normalized[endIdx] == '/':
+    dec endIdx
+  var idx = endIdx
+  while idx >= 0:
+    if normalized[idx] == '/':
+      if idx == endIdx:
+        return normalized
+      return normalized[idx + 1 .. endIdx]
+    dec idx
+  normalized[0 .. endIdx]
+
+proc joinPath(base: string; child: string): string =
+  if base.len == 0:
+    return child
+  if base[^1] == '/':
+    base & child
+  else:
+    base & "/" & child
+
+proc toFileUri(path: string): string =
+  var normalized = normalizePathString(path)
+  if normalized.len == 0:
+    return ""
+  if normalized.startsWith("file://"):
+    return normalized
+  if normalized[0] == '/':
+    return "file://" & normalized
+  "file:///" & normalized
+
+proc containsPath(list: seq[string]; value: string): bool =
+  for entry in list:
+    if entry == value:
+      return true
+  false
 
 proc startClient(url: string)
 
@@ -76,6 +134,7 @@ proc startClient(url: string) =
   if isUndefined(rpcHelpers):
     warnPrint "renderer:lsp vscode-ws-jsonrpc unavailable"
     return
+  let fsModule = requireModule("fs")
   try:
     wsConnection = newWebSocket(normalized.cstring)
     let openHandler = proc () {.closure.} =
@@ -94,6 +153,71 @@ proc startClient(url: string) =
 
         let clientOptions = newObject()
         setField(clientOptions, "documentSelector", docSelector)
+
+        let workspaceFolders = newArray()
+        let linkedProjects = newArray()
+        var workspacePaths: seq[string] = @[]
+        var linkedProjectPaths: seq[string] = @[]
+        let existsFn = field(fsModule, "existsSync")
+
+        proc addWorkspaceFolder(path: string) =
+          let normalized = normalizePathString(path)
+          if normalized.len == 0 or containsPath(workspacePaths, normalized):
+            return
+          workspacePaths.add(normalized)
+          let folderObj = newObject()
+          let display = folderDisplayName(normalized)
+          setField(folderObj, "name", toJs(display.cstring))
+          setField(folderObj, "uri", toJs(toFileUri(normalized).cstring))
+          push(workspaceFolders, folderObj)
+
+        proc addLinkedProject(folderPath: string) =
+          let normalized = normalizePathString(folderPath)
+          if normalized.len == 0:
+            return
+          let cargoPath = joinPath(normalized, "Cargo.toml")
+          if containsPath(linkedProjectPaths, cargoPath):
+            return
+          if not cast[bool](call1(existsFn, toJs(cargoPath.cstring))):
+            return
+          linkedProjectPaths.add(cargoPath)
+          let project = newObject()
+          setField(project, "kind", toJs(cstring"cargo"))
+          setField(project, "path", toJs(cargoPath.cstring))
+          push(linkedProjects, project)
+
+        proc registerFolder(path: string) =
+          if path.len == 0:
+            return
+          addWorkspaceFolder(path)
+          addLinkedProject(path)
+
+        let dataObj = field(domwindow, "data")
+        if not isUndefined(dataObj):
+          let traceObj = field(dataObj, "trace")
+          if not isUndefined(traceObj) and not traceObj.isNil:
+            let workdirVal = field(traceObj, "workdir")
+            if not isUndefined(workdirVal) and not workdirVal.isNil:
+              let workdir = $toCString(workdirVal)
+              registerFolder(workdir)
+            let sourceFolders = field(traceObj, "sourceFolders")
+            if not isUndefined(sourceFolders) and not sourceFolders.isNil:
+              let count = arrayLen(sourceFolders)
+              var idx = 0
+              while idx < count:
+                let folderVal = arrayAt(sourceFolders, idx)
+                if not folderVal.isNil:
+                  let folderPath = $toCString(folderVal)
+                  registerFolder(folderPath)
+                inc idx
+
+        if arrayLen(workspaceFolders) > 0:
+          setField(clientOptions, "workspaceFolders", workspaceFolders)
+          setField(clientOptions, "workspaceFolder", arrayAt(workspaceFolders, 0))
+        if arrayLen(linkedProjects) > 0:
+          let initOptions = newObject()
+          setField(initOptions, "linkedProjects", linkedProjects)
+          setField(clientOptions, "initializationOptions", initOptions)
 
         let transports = newObject()
         setField(transports, "reader", reader)
