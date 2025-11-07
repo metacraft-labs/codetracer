@@ -52,6 +52,8 @@ vfs = "0.12"
 expanduser = { version = "1.2.2", optional = true}
 
 ntest = "0.9.3"
+tree-sitter-c = "0.24.1"
+tree-sitter-cpp = "0.23.4"
 
 [lib]
 name = "db_backend"
