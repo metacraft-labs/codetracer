@@ -1,9 +1,43 @@
 import * as monaco from 'monaco-editor';
 window.monaco = monaco;
 
+import 'vscode/localExtensionHost';
 
 import { MonacoLanguageClient } from 'monaco-languageclient';
 window.MonacoLanguageClient = MonacoLanguageClient;
+import { MonacoVscodeApiWrapper } from 'monaco-languageclient/vscodeApiWrapper';
+window.MonacoVscodeApiWrapper = MonacoVscodeApiWrapper;
+import { useWorkerFactory } from 'monaco-languageclient/workerFactory';
+import { toSocket, WebSocketMessageReader, WebSocketMessageWriter } from 'vscode-ws-jsonrpc';
+window.VscodeWsJsonrpc = { toSocket, WebSocketMessageReader, WebSocketMessageWriter };
+
+const monacoWorkerFactory = () => {
+  const toWorker = (relativePath) =>
+    new Worker(new URL(relativePath, window.location.href), { type: 'module' });
+
+  useWorkerFactory({
+    workerLoaders: {
+      TextEditorWorker: () => toWorker('../node_modules/monaco-editor/esm/vs/editor/editor.worker.js'),
+      json: () => toWorker('../node_modules/monaco-editor/esm/vs/language/json/json.worker.js')
+    }
+  });
+};
+
+window.monacoServicesReadyFlag = false;
+window.monacoServicesReady = (async () => {
+  try {
+    window.monacoApiWrapper = new MonacoVscodeApiWrapper({
+      $type: 'classic',
+      viewsConfig: { $type: 'EditorService' },
+      monacoWorkerFactory
+    });
+    await window.monacoApiWrapper.start();
+    window.monacoServicesReadyFlag = true;
+  } catch (error) {
+    console.error('[monaco services] initialization failed', error);
+    window.monacoServicesReadyFlag = false;
+  }
+})();
 
 import { GoldenLayout, VirtualLayout, LayoutManager, LayoutConfig, ItemConfig } from 'golden-layout';
 window.GoldenLayout = GoldenLayout;

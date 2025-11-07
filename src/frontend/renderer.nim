@@ -15,7 +15,8 @@ import
     event_log_service, debugger_service, editor_service,
     flow_service, search_service, shell_service
   ],
-  lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ]
+  lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ],
+  lsp_client, lsp_controller
   # ui / datatable
 
 # (alexander): if i remember correctly: to prevent clashes with other dom-related modules 
@@ -45,6 +46,8 @@ proc duration*(name: string) =
 if inElectron:
   ipc = electron.ipcRenderer
   data.ipc = ipc
+  initLspClient(ipc)
+  initLspController()
 else:
   ipc = undefined
 

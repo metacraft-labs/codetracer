@@ -52,6 +52,7 @@ proc configureIpcMain* =
     "upload-trace-file"
     "download-trace-file"
     "delete-online-trace-file"
+    "lsp-get-url"
 
   when defined(ctmacos):
     indexIpcHandlers("CODETRACER::"):
@@ -129,6 +130,7 @@ proc ready*(): Future[void] {.async.} =
 
   debugPrint "index: creating window"
   mainWindow = createMainWindow()
+  sendLspStatusToRenderer()
 
   when not defined(server):
     mainWindow.setMenuBarVisibility(false)
