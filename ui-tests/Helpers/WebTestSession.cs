@@ -1,20 +1,24 @@
 using System.Diagnostics;
 using Microsoft.Playwright;
+using UiTests.Infrastructure;
 
 namespace UiTests.Helpers;
 
 public sealed class WebTestSession : IAsyncDisposable
 {
     private readonly Process _hostProcess;
+    private readonly IProcessLifecycleManager? _processLifecycle;
     private bool _disposed;
 
-    public WebTestSession(Process hostProcess, IPlaywright playwright, IBrowser browser, IBrowserContext context, IPage page)
+    internal WebTestSession(Process hostProcess, IPlaywright playwright, IBrowser browser, IBrowserContext context, IPage page, IProcessLifecycleManager? processLifecycle = null, string? processLabel = null)
     {
         _hostProcess = hostProcess;
+        _processLifecycle = processLifecycle;
         Playwright = playwright;
         Browser = browser;
         Context = context;
         Page = page;
+        _processLifecycle?.RegisterProcess(_hostProcess, processLabel ?? $"ct-host:{hostProcess.Id}");
     }
 
     public IPlaywright Playwright { get; }
@@ -99,6 +103,7 @@ public sealed class WebTestSession : IAsyncDisposable
         }
         finally
         {
+            _processLifecycle?.UnregisterProcess(_hostProcess.Id);
             _hostProcess.Dispose();
         }
     }

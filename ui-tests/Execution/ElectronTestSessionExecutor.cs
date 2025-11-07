@@ -15,18 +15,21 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
     private readonly ICodetracerLauncher _launcher;
     private readonly IMonitorLayoutService _monitorLayoutService;
     private readonly AppSettings _settings;
+    private readonly IProcessLifecycleManager _processLifecycle;
     private readonly ILogger<ElectronTestSessionExecutor> _logger;
 
     public ElectronTestSessionExecutor(
         ICodetracerLauncher launcher,
         IMonitorLayoutService monitorLayoutService,
         IOptions<AppSettings> settings,
-        ILogger<ElectronTestSessionExecutor> logger)
+        ILogger<ElectronTestSessionExecutor> logger,
+        IProcessLifecycleManager processLifecycle)
     {
         _launcher = launcher;
         _monitorLayoutService = monitorLayoutService;
         _settings = settings.Value;
         _logger = logger;
+        _processLifecycle = processLifecycle;
     }
 
     public TestMode Mode => TestMode.Electron;
@@ -87,12 +90,39 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
 
         var process = Process.Start(info) ?? throw new InvalidOperationException("Failed to start CodeTracer Electron process.");
-        await WaitForCdpAsync(port, TimeSpan.FromSeconds(_settings.Electron.CdpStartupTimeoutSeconds), cancellationToken);
+        var label = $"electron:{traceId}";
+        _processLifecycle.RegisterProcess(process, label);
+        try
+        {
+            await WaitForCdpAsync(port, TimeSpan.FromSeconds(_settings.Electron.CdpStartupTimeoutSeconds), cancellationToken);
 
-        var playwright = await Playwright.CreateAsync();
-        var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new() { Timeout = _settings.Electron.CdpStartupTimeoutSeconds * 1000 });
+            var playwright = await Playwright.CreateAsync();
+            var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new() { Timeout = _settings.Electron.CdpStartupTimeoutSeconds * 1000 });
 
-        return new CodeTracerSession(process, browser, playwright);
+            return new CodeTracerSession(process, browser, playwright, _processLifecycle, label);
+        }
+        catch
+        {
+            _processLifecycle.UnregisterProcess(process.Id);
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(5000);
+                }
+            }
+            catch
+            {
+                // ignore cleanup failures
+            }
+            finally
+            {
+                process.Dispose();
+            }
+
+            throw;
+        }
     }
 
     private static async Task WaitForCdpAsync(int port, TimeSpan timeout, CancellationToken cancellationToken)
