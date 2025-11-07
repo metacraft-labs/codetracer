@@ -1,12 +1,17 @@
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 const path = require('path');
 
+const monacoVscodeApiRoot = path.dirname(
+  require.resolve('@codingame/monaco-vscode-extension-api/localExtensionHost')
+);
+
 module.exports = {
   mode: 'development',
   resolve: {
     alias: {
-      // Provide the VS Code API shim expected by monaco-languageclient
-      vscode: require.resolve('@codingame/monaco-vscode-extension-api')
+      // Provide the VS Code API shim expected by monaco-languageclient.
+      // Alias the package root so nested imports (e.g. vscode/localExtensionHost) resolve.
+      vscode: monacoVscodeApiRoot
     },
     // mainFields: ['browser', 'module', 'main']
   },

@@ -2,7 +2,8 @@ import
   std/[asyncjs, jsffi, strformat, strutils],
   ../../lsp/bridge_reduced,
   ../lib/electron_lib,
-  ../../common/ct_logging
+  ../../common/ct_logging,
+  electron_vars
 
 const
   defaultLspPort = 3100
@@ -16,6 +17,13 @@ var
   lspBridgeStarting = false
   lspNotificationHandler: LspNotificationHandler = nil
   lspNotifications*: seq[string] = @[]
+  lastBridgeError* = ""
+
+proc newObject(): JsObject {.importjs: "({})".}
+proc setField(target: JsObject; name: cstring; value: JsObject) {.importjs: "#[#] = #".}
+proc newArray(): JsObject {.importjs: "([])".}
+proc push(array: JsObject; value: JsObject) {.importjs: "#.push(#)".}
+proc boolToJs(flag: bool): JsObject {.importjs: "(# ? true : false)".}
 
 proc toDisplayString(value: JsObject): cstring {.importjs: "(function(value){ try { if (value === undefined) return 'undefined'; if (typeof value === 'string') return value; return JSON.stringify(value); } catch (err) { return String(value); } })(#)".}
 
@@ -28,10 +36,36 @@ when not defined(ctRenderer):
   proc wsClose(ws: JsObject) {.importjs: "#.close()".}
   proc jsValueToString(value: JsObject): cstring {.importjs: "String(#)".}
 
+proc lspBridgeUrl*(): string =
+  "ws://127.0.0.1:" & $lspBridgePort & lspBridgePath
+
+proc buildStatusPayload(running: bool): JsObject =
+  result = newObject()
+  let urlText = if running: lspBridgeUrl() else: ""
+  setField(result, "url", toJs(urlText.cstring))
+  setField(result, "running", boolToJs(running))
+  if lastBridgeError.len > 0:
+    setField(result, "error", toJs(lastBridgeError.cstring))
+  if lspNotifications.len > 0:
+    let notifArray = newArray()
+    for note in lspNotifications:
+      push(notifArray, toJs(note.cstring))
+    setField(result, "notifications", notifArray)
+
+proc sendLspStatusToRenderer* =
+  if electron_vars.mainWindow.isNil:
+    return
+  let payload = buildStatusPayload(not lspBridgeHandle.isNil)
+  try:
+    electron_vars.mainWindow.webContents.send(cstring"CODETRACER::lsp-url", payload)
+  except CatchableError:
+    warnPrint "index:lsp failed to send status to renderer: ", getCurrentExceptionMsg()
+
+
 proc trimNotificationBuffer() =
   if lspNotifications.len > notificationHistoryLimit:
-    let excess = lspNotifications.len - notificationHistoryLimit
-    lspNotifications = lspNotifications[0 ..< excess - 1]
+    let startIndex = lspNotifications.len - notificationHistoryLimit
+    lspNotifications = lspNotifications[startIndex ..< lspNotifications.len]
 
 proc ensureNotificationHandler() =
   if not lspNotificationHandler.isNil:
@@ -42,6 +76,7 @@ proc ensureNotificationHandler() =
     debugPrint fmt"index:lsp notification received: {methodText}"
     lspNotifications.add(fmt"{methodText}: {payloadText}")
     trimNotificationBuffer()
+    sendLspStatusToRenderer()
   registerLspNotificationHandler(lspNotificationHandler)
 
 proc resetNotificationHandler() =
@@ -50,7 +85,7 @@ proc resetNotificationHandler() =
   clearLspNotificationHandlers()
   lspNotificationHandler = nil
   lspNotifications.setLen(0)
-
+  sendLspStatusToRenderer()
 
 proc envValue(name: cstring): string =
   let raw = nodeProcess.env[name]
@@ -81,8 +116,6 @@ proc parsePort(value: string): int =
     warnPrint "index:lsp failed to parse port value: ", value
     defaultLspPort
 
-proc lspBridgeUrl*(): string =
-  "ws://127.0.0.1:" & $lspBridgePort & lspBridgePath
 
 proc getField(target: JsObject; name: cstring): JsObject {.importjs: "#[#]".}
 proc serverClose(server: JsObject) {.importjs: "#.close()".}
@@ -112,13 +145,17 @@ proc startLspBridge*(lsCommand: string = ""; lsCwd: string = ""): Future[void] {
     lspBridgeHandle = handle
     lspBridgePort = port
     lspBridgePath = path
+    lastBridgeError = ""
     setEnv("CODETRACER_LSP_PORT", $port)
     setEnv("CODETRACER_LSP_PATH", path)
     setEnv("CODETRACER_LSP_URL", lspBridgeUrl())
     infoPrint fmt"index:lsp bridge listening on {lspBridgeUrl()}"
+    sendLspStatusToRenderer()
   except CatchableError:
     lspBridgeHandle = nil
-    errorPrint "index:lsp bridge failed to start: ", getCurrentExceptionMsg()
+    lastBridgeError = getCurrentExceptionMsg()
+    errorPrint "index:lsp bridge failed to start: ", lastBridgeError
+    sendLspStatusToRenderer()
     raise
   finally:
     lspBridgeStarting = false
@@ -139,6 +176,7 @@ proc stopLspBridge* =
       serverClose(server)
   except CatchableError:
     warnPrint "index:lsp bridge server close error: ", getCurrentExceptionMsg()
+  lastBridgeError = ""
   lspBridgePort = defaultLspPort
   lspBridgePath = defaultLspPath
   setEnv("CODETRACER_LSP_URL", "")
@@ -146,6 +184,7 @@ proc stopLspBridge* =
   setEnv("CODETRACER_LSP_PATH", "")
   infoPrint "index:lsp bridge stopped"
   resetNotificationHandler()
+  sendLspStatusToRenderer()
 
 proc sendLspProbe*(payload: JsObject) =
   when defined(ctRenderer):
@@ -175,3 +214,7 @@ proc sendLspProbe*(payload: JsObject) =
       warnPrint "index:lsp probe error: ", jsValueToString(err)
       wsClose(ws)
     )
+
+proc onLspGetUrl*(sender: JsObject, response: JsObject) {.async.} =
+  sendLspStatusToRenderer()
+
