@@ -46,6 +46,9 @@
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
 
+    <key>LSRequiresNativeExecution</key>
+    <true/>
+
     <key>LSEnvironment</key>
     <dict>
       <key>MallocNanoZone</key>
