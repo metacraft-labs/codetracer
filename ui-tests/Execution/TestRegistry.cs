@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using UiTests.Tests;
 using UiTests.Tests.ProgramAgnostic;
+using UiTests.Utils;
 
 namespace UiTests.Execution;
 
@@ -178,9 +179,21 @@ internal sealed class TestRegistry : ITestRegistry
 
     private void Register(UiTestDescriptor descriptor)
     {
-        if (!_tests.TryAdd(descriptor.Id, descriptor))
+        var wrapped = WrapWithCompletionLog(descriptor);
+        if (!_tests.TryAdd(wrapped.Id, wrapped))
         {
             throw new InvalidOperationException($"Duplicate test identifier registered: {descriptor.Id}");
         }
+    }
+
+    private static UiTestDescriptor WrapWithCompletionLog(UiTestDescriptor descriptor)
+    {
+        async Task Handler(TestExecutionContext context)
+        {
+            await descriptor.Handler(context);
+            DebugLogger.Log($"{descriptor.Id}: completed");
+        }
+
+        return descriptor with { Handler = Handler };
     }
 }

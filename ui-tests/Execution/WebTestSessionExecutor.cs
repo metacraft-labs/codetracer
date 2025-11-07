@@ -18,6 +18,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
     private readonly IMonitorLayoutService _monitorLayoutService;
     private readonly AppSettings _settings;
     private readonly ILogger<WebTestSessionExecutor> _logger;
+    private readonly IProcessLifecycleManager _processLifecycle;
 
     public WebTestSessionExecutor(
         ICodetracerLauncher launcher,
@@ -25,7 +26,8 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         IPortAllocator portAllocator,
         IMonitorLayoutService monitorLayoutService,
         IOptions<AppSettings> settings,
-        ILogger<WebTestSessionExecutor> logger)
+        ILogger<WebTestSessionExecutor> logger,
+        IProcessLifecycleManager processLifecycle)
     {
         _launcher = launcher;
         _hostLauncher = hostLauncher;
@@ -33,6 +35,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         _monitorLayoutService = monitorLayoutService;
         _settings = settings.Value;
         _logger = logger;
+        _processLifecycle = processLifecycle;
     }
 
     public TestMode Mode => TestMode.Web;
@@ -53,18 +56,26 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
 
         var label = $"{entry.Scenario.Id}-{entry.Mode}";
         var hostProcess = _hostLauncher.StartHostProcess(httpPort, backendPort, frontendPort, tracePath, label);
-        await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, cancellationToken);
-
-        if (entry.Scenario.DelaySeconds > 0)
+        _processLifecycle.RegisterProcess(hostProcess, $"ct-host:{label}");
+        await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, label, cancellationToken);
+        try
         {
-            await Task.Delay(TimeSpan.FromSeconds(entry.Scenario.DelaySeconds), cancellationToken);
-        }
 
-        var context = new TestExecutionContext(entry.Scenario, entry.Mode, session.Page, cancellationToken);
-        await entry.Test.Handler(context);
+            if (entry.Scenario.DelaySeconds > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(entry.Scenario.DelaySeconds), cancellationToken);
+            }
+
+            var context = new TestExecutionContext(entry.Scenario, entry.Mode, session.Page, cancellationToken);
+            await entry.Test.Handler(context);
+        }
+        finally
+        {
+            _processLifecycle.UnregisterProcess(hostProcess.Id);
+        }
     }
 
-    private async Task<WebTestSession> CreateWebSessionAsync(Process hostProcess, int port, TestPlanEntry entry, CancellationToken cancellationToken)
+    private async Task<WebTestSession> CreateWebSessionAsync(Process hostProcess, int port, TestPlanEntry entry, string label, CancellationToken cancellationToken)
     {
         await _hostLauncher.WaitForServerAsync(port, TimeSpan.FromSeconds(_settings.Web.HostStartupTimeoutSeconds), entry.Scenario.Id, cancellationToken);
 
@@ -114,7 +125,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             _logger.LogDebug("[{Scenario}] Window resize script could not adjust browser bounds.", entry.Scenario.Id);
         }
 
-        return new WebTestSession(hostProcess, playwright, browser, context, page);
+        return new WebTestSession(hostProcess, playwright, browser, context, page, _processLifecycle, $"ct-host:{label}");
     }
 
 }

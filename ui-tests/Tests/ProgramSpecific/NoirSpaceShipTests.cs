@@ -895,8 +895,7 @@ public static class NoirSpaceShipTests
                 throw new FailedTestException("Event log did not render any events.");
             }
 
-            var limit = Math.Min(events.Count, 10);
-            for (var i = 0; i < limit; i++)
+            for (var i = 0; i < events.Count; i++)
             {
                 var row = events[i];
                 await row.ClickAsync();

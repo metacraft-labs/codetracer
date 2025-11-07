@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
+using UiTests.Infrastructure;
 
 namespace UiTests.Helpers;
 
@@ -13,15 +14,20 @@ public sealed class CodeTracerSession : IAsyncDisposable
 {
     private readonly Process _process;
     private readonly IPlaywright _playwright;
+    private readonly IProcessLifecycleManager? _processLifecycle;
+    private readonly string _processLabel;
     private bool _disposed;
 
     public IBrowser Browser { get; }
 
-    internal CodeTracerSession(Process process, IBrowser browser, IPlaywright playwright)
+    internal CodeTracerSession(Process process, IBrowser browser, IPlaywright playwright, IProcessLifecycleManager? processLifecycle = null, string? processLabel = null)
     {
         _process = process;
         Browser = browser;
         _playwright = playwright;
+        _processLifecycle = processLifecycle;
+        _processLabel = processLabel ?? $"electron:{process.Id}";
+        _processLifecycle?.RegisterProcess(_process, _processLabel);
     }
 
     public async ValueTask DisposeAsync()
@@ -66,6 +72,7 @@ public sealed class CodeTracerSession : IAsyncDisposable
         {
             if (_process.HasExited)
             {
+                _processLifecycle?.UnregisterProcess(_process.Id);
                 return;
             }
 
@@ -88,6 +95,7 @@ public sealed class CodeTracerSession : IAsyncDisposable
         }
         finally
         {
+            _processLifecycle?.UnregisterProcess(_process.Id);
             _process.Dispose();
         }
     }

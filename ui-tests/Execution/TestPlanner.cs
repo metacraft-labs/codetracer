@@ -83,7 +83,8 @@ internal sealed class TestPlanner : ITestPlanner
                 continue;
             }
 
-            foreach (var mode in modes)
+            var scenarioModes = ResolveScenarioModes(scenario, modes);
+            foreach (var mode in scenarioModes)
             {
                 plan.Add(new TestPlanEntry(descriptor, scenario, mode));
             }
@@ -115,5 +116,15 @@ internal sealed class TestPlanner : ITestPlanner
         }
 
         return new[] { TestMode.Electron, TestMode.Web };
+    }
+
+    private static IReadOnlyList<TestMode> ResolveScenarioModes(ScenarioSettings scenario, IReadOnlyList<TestMode> runnerModes)
+    {
+        if (scenario.Id.StartsWith("auto-", StringComparison.OrdinalIgnoreCase))
+        {
+            return runnerModes;
+        }
+
+        return new[] { scenario.Mode };
     }
 }

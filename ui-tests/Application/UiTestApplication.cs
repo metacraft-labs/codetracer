@@ -29,8 +29,6 @@ internal sealed class UiTestApplication
         {
             using var scope = _logger.BeginScope("ui-tests");
             _processLifecycle.ReportProcessCounts("pre-run");
-            _processLifecycle.KillProcesses("pre-run cleanup");
-            _processLifecycle.ReportProcessCounts("post-cleanup snapshot");
             var cancellationToken = _lifetime.ApplicationStopping;
             var exitCode = await _pipeline.ExecuteAsync(cancellationToken);
             _processLifecycle.ReportProcessCounts("post-run");
