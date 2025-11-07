@@ -79,7 +79,15 @@ internal sealed class TestPlanner : ITestPlanner
 
             if (ShouldSkip(scenario, descriptor, includeSet, excludeSet))
             {
-                _logger.LogInformation("Skipping scenario {ScenarioId} ({Test}) due to include/exclude filters.", scenario.Id, descriptor.Id);
+                var logMessage = "Skipping scenario {ScenarioId} ({Test}) due to include/exclude filters.";
+                if (_settings.Runner.VerboseConsole)
+                {
+                    _logger.LogInformation(logMessage, scenario.Id, descriptor.Id);
+                }
+                else
+                {
+                    _logger.LogDebug(logMessage, scenario.Id, descriptor.Id);
+                }
                 continue;
             }
 

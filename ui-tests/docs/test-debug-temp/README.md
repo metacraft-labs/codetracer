@@ -48,6 +48,12 @@ When you add new information:
 - If a workaround or fix is applied, capture the change in the test file.
 - Keep this README aligned with the latest plan.
 
+## Logging Knobs
+- Runs are quiet by default. Use `--verbose-console` when you need per-test start/stop logs, process counts, and ct-host stdout while iterating.
+- Enable deep instrumentation for a single scenario by adding `"verboseLogging": true` to its config (or to the temporary config file under `docs/test-debug-temp/config/`). That flips `DebugLogger` and retry chatter on only for that scenario.
+- To capture `DebugLogger` output for every run without editing configs, export `UITESTS_DEBUG_LOG_DEFAULT=1`. Override the destination path via `UITESTS_DEBUG_LOG=/abs/path/to/log`.
+- Remember to call `DebugLogger.Reset()` ahead of a focused session so the log contains only the current attempt. Retry helpers now summarize attempts after the first three, so note the summarized ranges when reporting hangs.
+
 ## Manual command examples
 
 Run these from `ui-tests/` (after `direnv allow` or `nix develop`):

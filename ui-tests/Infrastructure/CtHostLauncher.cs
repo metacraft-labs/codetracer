@@ -8,7 +8,7 @@ namespace UiTests.Infrastructure;
 
 internal interface ICtHostLauncher
 {
-    Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label);
+    Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput);
     Task WaitForServerAsync(int port, TimeSpan timeout, string label, CancellationToken cancellationToken);
 }
 
@@ -23,7 +23,7 @@ internal sealed class CtHostLauncher : ICtHostLauncher
         _logger = logger;
     }
 
-    public Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label)
+    public Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput)
     {
         var psi = new ProcessStartInfo(_launcher.CtPath)
         {
@@ -41,7 +41,15 @@ internal sealed class CtHostLauncher : ICtHostLauncher
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ct host.");
 
-        _ = Task.Run(async () => await PumpAsync(process.StandardOutput, line => _logger.LogInformation("[ct host:{Label}] {Line}", label, line)));
+        if (emitOutput)
+        {
+            _ = Task.Run(async () => await PumpAsync(process.StandardOutput, line => _logger.LogInformation("[ct host:{Label}] {Line}", label, line)));
+        }
+        else
+        {
+            _ = Task.Run(async () => await PumpAsync(process.StandardOutput, _ => { }));
+        }
+
         _ = Task.Run(async () => await PumpAsync(process.StandardError, line => _logger.LogError("[ct host:{Label}] {Line}", label, line)));
 
         return process;

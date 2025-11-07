@@ -12,11 +12,15 @@ internal static class MonitorSelectionHelper
         string? preferredEdid,
         int? preferredIndex,
         ILogger logger,
-        string scenarioId)
+        string scenarioId,
+        bool verboseConsole)
     {
         if (monitors.Count == 0)
         {
-            logger.LogInformation("[{Scenario}] Could not detect monitor layout; using browser defaults.", scenarioId);
+            if (verboseConsole)
+            {
+                logger.LogInformation("[{Scenario}] Could not detect monitor layout; using browser defaults.", scenarioId);
+            }
             return null;
         }
 
@@ -61,15 +65,18 @@ internal static class MonitorSelectionHelper
                 .First();
         }
 
-        logger.LogInformation(
-            "[{Scenario}] Targeting monitor '{Monitor}' ({Width}x{Height} at {X},{Y}){Edid}.",
-            scenarioId,
-            selected.Value.Name,
-            selected.Value.Width,
-            selected.Value.Height,
-            selected.Value.X,
-            selected.Value.Y,
-            string.IsNullOrWhiteSpace(selected.Value.Edid) ? string.Empty : $" [EDID={selected.Value.Edid}]");
+        if (verboseConsole)
+        {
+            logger.LogInformation(
+                "[{Scenario}] Targeting monitor '{Monitor}' ({Width}x{Height} at {X},{Y}){Edid}.",
+                scenarioId,
+                selected.Value.Name,
+                selected.Value.Width,
+                selected.Value.Height,
+                selected.Value.X,
+                selected.Value.Y,
+                string.IsNullOrWhiteSpace(selected.Value.Edid) ? string.Empty : $" [EDID={selected.Value.Edid}]");
+        }
 
         return selected;
     }

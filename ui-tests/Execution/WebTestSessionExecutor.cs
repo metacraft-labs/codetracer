@@ -7,6 +7,7 @@ using Microsoft.Playwright;
 using UiTests.Configuration;
 using UiTests.Helpers;
 using UiTests.Infrastructure;
+using UiTests.Utils;
 
 namespace UiTests.Execution;
 
@@ -55,9 +56,10 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         int frontendPort = socketPort;
 
         var label = $"{entry.Scenario.Id}-{entry.Mode}";
-        var hostProcess = _hostLauncher.StartHostProcess(httpPort, backendPort, frontendPort, tracePath, label);
+        var verboseConsole = ShouldEmitVerboseConsole(entry);
+        var hostProcess = _hostLauncher.StartHostProcess(httpPort, backendPort, frontendPort, tracePath, label, verboseConsole);
         _processLifecycle.RegisterProcess(hostProcess, $"ct-host:{label}");
-        await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, label, cancellationToken);
+        await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, label, verboseConsole, cancellationToken);
         try
         {
 
@@ -67,6 +69,8 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             }
 
             var context = new TestExecutionContext(entry.Scenario, entry.Mode, session.Page, cancellationToken);
+            var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
+            using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
             await entry.Test.Handler(context);
         }
         finally
@@ -75,7 +79,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         }
     }
 
-    private async Task<WebTestSession> CreateWebSessionAsync(Process hostProcess, int port, TestPlanEntry entry, string label, CancellationToken cancellationToken)
+    private async Task<WebTestSession> CreateWebSessionAsync(Process hostProcess, int port, TestPlanEntry entry, string label, bool verboseConsole, CancellationToken cancellationToken)
     {
         await _hostLauncher.WaitForServerAsync(port, TimeSpan.FromSeconds(_settings.Web.HostStartupTimeoutSeconds), entry.Scenario.Id, cancellationToken);
 
@@ -87,7 +91,8 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             _settings.Web.BrowserWindow.PreferredDisplayEdid,
             _settings.Web.BrowserWindow.PreferredDisplayIndex,
             _logger,
-            entry.Scenario.Id);
+            entry.Scenario.Id,
+            verboseConsole);
 
         var positionOverride = Environment.GetEnvironmentVariable("PLAYGROUND_WINDOW_POSITION");
         var sizeOverride = Environment.GetEnvironmentVariable("PLAYGROUND_WINDOW_SIZE");
@@ -128,4 +133,6 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         return new WebTestSession(hostProcess, playwright, browser, context, page, _processLifecycle, $"ct-host:{label}");
     }
 
+    private bool ShouldEmitVerboseConsole(TestPlanEntry entry)
+        => _settings.Runner.VerboseConsole || entry.Scenario.VerboseLogging;
 }

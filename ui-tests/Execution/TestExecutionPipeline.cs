@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -60,26 +61,40 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
         using var throttler = new SemaphoreSlim(1, targetParallelism);
         var rampTask = RampUpParallelismAsync(throttler, targetParallelism, linkedCts.Token);
         var failures = new ConcurrentQueue<TestFailure>();
-        var tasks = plan.Select(entry => ExecuteEntryAsync(entry, throttler, linkedCts, failures)).ToList();
+        var results = new ConcurrentBag<TestRunResult>();
+        var tasks = plan.Select(entry => ExecuteEntryAsync(entry, throttler, linkedCts, failures, results)).ToList();
         await Task.WhenAll(tasks);
         linkedCts.Cancel();
         await rampTask;
 
+        var materializedResults = results.ToList();
+
         if (failures.IsEmpty)
         {
-            _logger.LogInformation("All UI tests completed successfully.");
+            EmitSummary(plan, materializedResults);
             return 0;
         }
 
         foreach (var failure in failures)
         {
-            _logger.LogError(failure.Exception, "Test {TestId} in scenario {ScenarioId} ({Mode}) failed.", failure.Entry.Test.Id, failure.Entry.Scenario.Id, failure.Entry.Mode);
+            _logger.LogError(
+                failure.Exception,
+                "Test {TestId} in scenario {ScenarioId} ({Mode}) failed.",
+                failure.Entry.Test.Id,
+                failure.Entry.Scenario.Id,
+                failure.Entry.Mode);
         }
 
+        EmitSummary(plan, materializedResults);
         return failures.Count;
     }
 
-    private async Task ExecuteEntryAsync(TestPlanEntry entry, SemaphoreSlim throttler, CancellationTokenSource linkedCts, ConcurrentQueue<TestFailure> failures)
+    private async Task ExecuteEntryAsync(
+        TestPlanEntry entry,
+        SemaphoreSlim throttler,
+        CancellationTokenSource linkedCts,
+        ConcurrentQueue<TestFailure> failures,
+        ConcurrentBag<TestRunResult> results)
     {
         try
         {
@@ -97,17 +112,29 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
                 return;
             }
 
-            _logger.LogInformation("Starting test {TestId} / scenario {ScenarioId} ({Mode}).", entry.Test.Id, entry.Scenario.Id, entry.Mode);
+            if (ShouldEmitConsole(entry))
+            {
+                _logger.LogInformation("Starting test {TestId} / scenario {ScenarioId} ({Mode}).", entry.Test.Id, entry.Scenario.Id, entry.Mode);
+            }
+
             await _executors[entry.Mode].ExecuteAsync(entry, linkedCts.Token);
-            _logger.LogInformation("Completed test {TestId} / scenario {ScenarioId} ({Mode}).", entry.Test.Id, entry.Scenario.Id, entry.Mode);
+
+            if (ShouldEmitConsole(entry))
+            {
+                _logger.LogInformation("Completed test {TestId} / scenario {ScenarioId} ({Mode}).", entry.Test.Id, entry.Scenario.Id, entry.Mode);
+            }
+
+            results.Add(new TestRunResult(entry, TestOutcome.Passed));
         }
         catch (OperationCanceledException ex) when (linkedCts.IsCancellationRequested)
         {
             failures.Enqueue(new TestFailure(entry, ex));
+            results.Add(new TestRunResult(entry, TestOutcome.Failed));
         }
         catch (Exception ex)
         {
             failures.Enqueue(new TestFailure(entry, ex));
+            results.Add(new TestRunResult(entry, TestOutcome.Failed));
             if (_settings.Runner.StopOnFirstFailure)
             {
                 linkedCts.Cancel();
@@ -117,6 +144,61 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
         {
             throttler.Release();
         }
+    }
+
+    private bool ShouldEmitConsole(TestPlanEntry entry)
+        => _settings.Runner.VerboseConsole || entry.Scenario.VerboseLogging;
+
+    private void EmitSummary(IReadOnlyCollection<TestPlanEntry> plan, IReadOnlyCollection<TestRunResult> results)
+    {
+        var executed = results.Count;
+        var skipped = Math.Max(0, plan.Count - executed);
+        var webRuns = results.Count(r => r.Entry.Mode == TestMode.Web);
+        var electronRuns = results.Count(r => r.Entry.Mode == TestMode.Electron);
+
+        var overallPass = results.Count(r => r.Outcome == TestOutcome.Passed);
+        var overallFail = results.Count(r => r.Outcome == TestOutcome.Failed);
+        var webPass = results.Count(r => r.Outcome == TestOutcome.Passed && r.Entry.Mode == TestMode.Web);
+        var webFail = results.Count(r => r.Outcome == TestOutcome.Failed && r.Entry.Mode == TestMode.Web);
+        var electronPass = results.Count(r => r.Outcome == TestOutcome.Passed && r.Entry.Mode == TestMode.Electron);
+        var electronFail = results.Count(r => r.Outcome == TestOutcome.Failed && r.Entry.Mode == TestMode.Electron);
+
+        _logger.LogInformation(
+            "Executed {Executed} test(s) | Web {WebCount} | Electron {ElectronCount}",
+            executed,
+            webRuns,
+            electronRuns);
+        _logger.LogInformation("Overall => pass {Pass} | fail {Fail}", ColorizePassCount(overallPass), ColorizeFailCount(overallFail));
+        _logger.LogInformation("Electron => pass {Pass} | fail {Fail}", ColorizePassCount(electronPass), ColorizeFailCount(electronFail));
+        _logger.LogInformation("Web => pass {Pass} | fail {Fail}", ColorizePassCount(webPass), ColorizeFailCount(webFail));
+
+        if (skipped > 0)
+        {
+            _logger.LogInformation("Skipped {SkipCount} test(s) due to filters or early cancellation.", ColorizeSkipCount(skipped));
+        }
+    }
+
+    private static string ColorizePassCount(int value) => Colorize(value, PassColor);
+    private static string ColorizeFailCount(int value) => Colorize(value, FailColor);
+    private static string ColorizeSkipCount(int value) => Colorize(value, SkipColor);
+
+    private static string Colorize(int value, string color)
+    {
+        var formatted = value.ToString(CultureInfo.InvariantCulture);
+        return value == 0 ? formatted : $"{color}{formatted}{AnsiReset}";
+    }
+
+    private const string PassColor = "\u001b[32m";
+    private const string FailColor = "\u001b[31m";
+    private const string SkipColor = "\u001b[33m";
+    private const string AnsiReset = "\u001b[0m";
+
+    private sealed record TestRunResult(TestPlanEntry Entry, TestOutcome Outcome);
+
+    private enum TestOutcome
+    {
+        Passed,
+        Failed
     }
 
     private static Task RampUpParallelismAsync(SemaphoreSlim throttler, int targetParallelism, CancellationToken cancellationToken)

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using UiTests.Configuration;
 using UiTests.Infrastructure;
 
 namespace UiTests.Application;
@@ -10,17 +12,20 @@ internal sealed class UiTestApplication
     private readonly IUiTestExecutionPipeline _pipeline;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly IProcessLifecycleManager _processLifecycle;
+    private readonly AppSettings _settings;
 
     public UiTestApplication(
         ILogger<UiTestApplication> logger,
         IUiTestExecutionPipeline pipeline,
         IHostApplicationLifetime lifetime,
-        IProcessLifecycleManager processLifecycle)
+        IProcessLifecycleManager processLifecycle,
+        IOptions<AppSettings> settings)
     {
         _logger = logger;
         _pipeline = pipeline;
         _lifetime = lifetime;
         _processLifecycle = processLifecycle;
+        _settings = settings.Value;
     }
 
     public async Task<int> RunAsync()
@@ -28,12 +33,27 @@ internal sealed class UiTestApplication
         try
         {
             using var scope = _logger.BeginScope("ui-tests");
-            _processLifecycle.ReportProcessCounts("pre-run");
+            var emitLifecycleTelemetry = _settings.Runner.VerboseConsole;
+            if (emitLifecycleTelemetry)
+            {
+                _processLifecycle.ReportProcessCounts("pre-run");
+            }
+
             var cancellationToken = _lifetime.ApplicationStopping;
             var exitCode = await _pipeline.ExecuteAsync(cancellationToken);
-            _processLifecycle.ReportProcessCounts("post-run");
+
+            if (emitLifecycleTelemetry || exitCode != 0)
+            {
+                _processLifecycle.ReportProcessCounts("post-run");
+            }
+
             _processLifecycle.KillProcesses("post-run cleanup");
-            _processLifecycle.ReportProcessCounts("final snapshot");
+
+            if (emitLifecycleTelemetry || exitCode != 0)
+            {
+                _processLifecycle.ReportProcessCounts("final snapshot");
+            }
+
             return exitCode;
         }
         catch (OperationCanceledException ex)

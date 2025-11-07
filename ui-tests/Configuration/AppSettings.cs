@@ -92,6 +92,12 @@ public sealed class RunnerSettings
     [FileExtensions(Extensions = "json,ndjson,txt")]
     public string? DiagnosticsOutput { get; set; }
         = null;
+
+    /// <summary>
+    /// Enables verbose console logging for the entire run (test lifecycle, process counts, etc.).
+    /// </summary>
+    public bool VerboseConsole { get; set; }
+        = false;
 }
 
 public sealed class ScenarioSettings
@@ -146,6 +152,12 @@ public sealed class ScenarioSettings
     /// Whether to collect extended telemetry for the scenario (pseudo-setting example).
     /// </summary>
     public bool CollectTelemetry { get; set; }
+        = false;
+
+    /// <summary>
+    /// Enables detailed debug logging (RetryHelpers, pane interactions, etc.) for this scenario.
+    /// </summary>
+    public bool VerboseLogging { get; set; }
         = false;
 }
 

@@ -8,29 +8,67 @@ namespace UiTests.Utils;
 /// </summary>
 public static class RetryHelpers
 {
+    private const int DetailedAttemptLimit = 3;
+    private const int SummaryBatchSize = 5;
+
     /// <summary>
     /// Repeatedly executes an asynchronous condition until it returns <c>true</c>
     /// or the retry count is exhausted.
     /// </summary>
-    /// <param name="condition">The asynchronous predicate to evaluate.</param>
-    /// <param name="maxAttempts">Maximum number of attempts.</param>
-    /// <param name="delayMs">Delay in milliseconds between attempts.</param>
-    /// <exception cref="TimeoutException">Thrown when the condition never evaluates to <c>true</c>.</exception>
     public static async Task RetryAsync(Func<Task<bool>> condition, int maxAttempts = 10, int delayMs = 1000)
     {
-        DebugLogger.Log($"RetryAsync<bool>: start (maxAttempts={maxAttempts}, delayMs={delayMs})");
-        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        var loggingEnabled = DebugLogger.IsEnabled;
+        RetrySuppressionState? suppression = null;
+
+        if (loggingEnabled)
         {
-            DebugLogger.Log($"RetryAsync<bool>: attempt {attempt + 1} evaluating condition");
+            DebugLogger.Log($"RetryAsync<bool>: start (maxAttempts={maxAttempts}, delayMs={delayMs})");
+        }
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            if (loggingEnabled && attempt <= DetailedAttemptLimit)
+            {
+                DebugLogger.Log($"RetryAsync<bool>: attempt {attempt} evaluating condition");
+            }
+
             if (await condition())
             {
-                DebugLogger.Log($"RetryAsync<bool>: attempt {attempt + 1} succeeded");
+                if (loggingEnabled)
+                {
+                    suppression?.Flush("bool");
+                    DebugLogger.Log($"RetryAsync<bool>: attempt {attempt} succeeded");
+                }
                 return;
             }
-            DebugLogger.Log($"RetryAsync<bool>: attempt {attempt + 1} failed; sleeping {delayMs}ms");
-            await Task.Delay(delayMs);
+
+            var willRetry = attempt < maxAttempts;
+            if (loggingEnabled)
+            {
+                if (attempt <= DetailedAttemptLimit)
+                {
+                    var suffix = willRetry ? $"; sleeping {delayMs}ms" : string.Empty;
+                    DebugLogger.Log($"RetryAsync<bool>: attempt {attempt} failed{suffix}");
+                }
+                else
+                {
+                    suppression ??= new RetrySuppressionState(SummaryBatchSize);
+                    suppression.RecordFailure("bool", attempt);
+                }
+            }
+
+            if (willRetry)
+            {
+                await Task.Delay(delayMs);
+            }
         }
-        DebugLogger.Log($"RetryAsync<bool>: exhausted {maxAttempts} attempts without success");
+
+        if (loggingEnabled)
+        {
+            suppression?.Flush("bool");
+            DebugLogger.Log($"RetryAsync<bool>: exhausted {maxAttempts} attempts without success");
+        }
+
         throw new TimeoutException($"Condition was not satisfied after {maxAttempts} attempts.");
     }
 
@@ -38,32 +76,116 @@ public static class RetryHelpers
     /// Repeatedly invokes an asynchronous action until it completes without
     /// throwing an exception or the retry count is exceeded.
     /// </summary>
-    /// <param name="action">The asynchronous action to execute.</param>
-    /// <param name="maxAttempts">Maximum number of attempts.</param>
-    /// <param name="delayMs">Delay in milliseconds between attempts.</param>
-    /// <exception cref="Exception">Rethrows the last exception when retries are exhausted.</exception>
     public static async Task RetryAsync(Func<Task> action, int maxAttempts = 50, int delayMs = 100)
     {
         Exception? lastError = null;
-        DebugLogger.Log($"RetryAsync<void>: start (maxAttempts={maxAttempts}, delayMs={delayMs})");
-        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        var loggingEnabled = DebugLogger.IsEnabled;
+        RetrySuppressionState? suppression = null;
+
+        if (loggingEnabled)
+        {
+            DebugLogger.Log($"RetryAsync<void>: start (maxAttempts={maxAttempts}, delayMs={delayMs})");
+        }
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             try
             {
-                DebugLogger.Log($"RetryAsync<void>: attempt {attempt + 1} executing action");
+                if (loggingEnabled && attempt <= DetailedAttemptLimit)
+                {
+                    DebugLogger.Log($"RetryAsync<void>: attempt {attempt} executing action");
+                }
+
                 await action();
-                DebugLogger.Log($"RetryAsync<void>: attempt {attempt + 1} completed");
+
+                if (loggingEnabled)
+                {
+                    suppression?.Flush("void");
+                    DebugLogger.Log($"RetryAsync<void>: attempt {attempt} completed");
+                }
+
                 return;
             }
             catch (Exception ex)
             {
-                DebugLogger.Log($"RetryAsync<void>: attempt {attempt + 1} threw {ex.GetType().Name}: {ex.Message}");
                 lastError = ex;
+                if (loggingEnabled)
+                {
+                    if (attempt <= DetailedAttemptLimit)
+                    {
+                        DebugLogger.Log($"RetryAsync<void>: attempt {attempt} threw {ex.GetType().Name}: {ex.Message}");
+                    }
+                    else
+                    {
+                        suppression ??= new RetrySuppressionState(SummaryBatchSize);
+                        suppression.RecordFailure("void", attempt);
+                    }
+                }
             }
-            DebugLogger.Log($"RetryAsync<void>: sleeping {delayMs}ms before next attempt");
+
+            var willRetry = attempt < maxAttempts;
+            if (!willRetry)
+            {
+                break;
+            }
+
+            if (loggingEnabled && attempt <= DetailedAttemptLimit)
+            {
+                DebugLogger.Log($"RetryAsync<void>: sleeping {delayMs}ms before next attempt");
+            }
+
             await Task.Delay(delayMs);
         }
-        DebugLogger.Log($"RetryAsync<void>: exhausted {maxAttempts} attempts; throwing TimeoutException");
+
+        if (loggingEnabled)
+        {
+            suppression?.Flush("void");
+            DebugLogger.Log($"RetryAsync<void>: exhausted {maxAttempts} attempts; throwing TimeoutException");
+        }
+
         throw new TimeoutException($"Action failed after {maxAttempts} attempts", lastError);
+    }
+
+    private sealed class RetrySuppressionState
+    {
+        private readonly int _summaryBatchSize;
+        private int _rangeStart = -1;
+        private int _count;
+
+        public RetrySuppressionState(int summaryBatchSize)
+        {
+            _summaryBatchSize = summaryBatchSize;
+        }
+
+        public void RecordFailure(string label, int attempt)
+        {
+            if (_rangeStart < 0)
+            {
+                _rangeStart = attempt;
+            }
+
+            _count++;
+
+            if (_count >= _summaryBatchSize)
+            {
+                Flush(label);
+            }
+        }
+
+        public void Flush(string label)
+        {
+            if (_count == 0 || _rangeStart < 0)
+            {
+                _rangeStart = -1;
+                _count = 0;
+                return;
+            }
+
+            var end = _rangeStart + _count - 1;
+            var descriptor = _rangeStart == end ? $"attempt {end}" : $"attempts {_rangeStart}-{end}";
+            DebugLogger.Log($"RetryAsync<{label}>: {descriptor} failed; continuing retries");
+            _rangeStart = -1;
+            _count = 0;
+        }
     }
 }

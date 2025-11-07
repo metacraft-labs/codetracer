@@ -88,7 +88,8 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
         }
 
         var traceId = ParseTraceId(stdout);
-        _logger.LogInformation("Recorded trace {TraceId} for program {Program}.", traceId, relativePath);
+        var logLevel = _settings.Runner.VerboseConsole ? LogLevel.Information : LogLevel.Debug;
+        _logger.Log(logLevel, "Recorded trace {TraceId} for program {Program}.", traceId, relativePath);
         return traceId;
     }
 
