@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "NoirSpaceShip.ScratchpadCompareIterations"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noirspaceship-scratchpadcompareiterations--electron",
+      "Description": "Focused Electron run for NoirSpaceShip.ScratchpadCompareIterations",
+      "Mode": "Electron",
+      "Test": "NoirSpaceShip.ScratchpadCompareIterations",
+      "Enabled": true
+    },
+    {
+      "Id": "noirspaceship-scratchpadcompareiterations--web",
+      "Description": "Focused Web run for NoirSpaceShip.ScratchpadCompareIterations",
+      "Mode": "Web",
+      "Test": "NoirSpaceShip.ScratchpadCompareIterations",
+      "Enabled": true
+    }
+  ]
+}

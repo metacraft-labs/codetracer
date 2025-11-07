@@ -62,6 +62,32 @@ Avoid `just build`; it never releases the terminal and leaves `tup` running.
 
 `UiTestApplication` performs pre/post-run sanitation via `ProcessLifecycleManager`: stray `ct`, `electron`, or `backend-manager` processes are logged and terminated before new sessions start. The Electron executor (`Execution/ElectronTestSessionExecutor.cs`) and the web executor (`Execution/WebTestSessionExecutor.cs`) both dispose their `CodeTracerSession`/`WebTestSession` instances with `await using`, ensuring Playwright and the spawned processes shut down even during debugger stops.
 
+### Manual launch quick reference
+
+Run these from the repository root (after `cd ui-tests` and `direnv allow` or `nix develop`):
+
+```bash
+# Full suite: stable tests across Electron & Web with ramped parallelism
+direnv exec . dotnet run -- --suite=stable-tests --profile=parallel
+
+# Full suite: flaky list (Electron + Web)
+direnv exec . dotnet run -- --suite=flaky-tests --profile=parallel
+
+# Single test in both modes (default profile picks up Electron and Web)
+direnv exec . dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint --profile=parallel
+
+# Single test in Electron only
+direnv exec . dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint --mode=Electron --max-parallel=1
+
+# Single test in Web only
+direnv exec . dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint --mode=Web --max-parallel=1
+
+# Single test with a slimmed config file (keeps CLI short)
+direnv exec . dotnet run -- --config=docs/test-debug-temp/config/NoirSpaceShip.CreateSimpleTracePoint.json
+```
+
+Adjust `--include` / `--suite` values to match the identifiers in `Execution/TestRegistry.cs` and `appsettings.json`.
+
 ## Capturing Additional Diagnostics
 
 - Wrap flaky assertions with `RetryHelpers.RetryAsync` and log contextual data (like locator text) before rethrowing.

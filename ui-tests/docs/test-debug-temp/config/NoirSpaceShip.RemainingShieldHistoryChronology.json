@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "NoirSpaceShip.RemainingShieldHistoryChronology"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noirspaceship-remainingshieldhistorychronology--electron",
+      "Description": "Focused Electron run for NoirSpaceShip.RemainingShieldHistoryChronology",
+      "Mode": "Electron",
+      "Test": "NoirSpaceShip.RemainingShieldHistoryChronology",
+      "Enabled": true
+    },
+    {
+      "Id": "noirspaceship-remainingshieldhistorychronology--web",
+      "Description": "Focused Web run for NoirSpaceShip.RemainingShieldHistoryChronology",
+      "Mode": "Web",
+      "Test": "NoirSpaceShip.RemainingShieldHistoryChronology",
+      "Enabled": true
+    }
+  ]
+}

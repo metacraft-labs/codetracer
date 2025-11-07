@@ -35,6 +35,36 @@ internal sealed class TestPlanner : ITestPlanner
         var runner = _settings.Runner;
         var includeSet = runner.IncludeTests.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var excludeSet = runner.ExcludeTests.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var scenarioTestSet = scenarios.Select(s => s.Test).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var descriptor in _registry.All.OrderBy(d => d.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            if (scenarioTestSet.Contains(descriptor.Id))
+            {
+                continue;
+            }
+
+            if (excludeSet.Contains(descriptor.Id))
+            {
+                continue;
+            }
+
+            if (includeSet.Count > 0 && !includeSet.Contains(descriptor.Id))
+            {
+                continue;
+            }
+
+            scenarios.Add(new ScenarioSettings
+            {
+                Id = $"auto-{descriptor.Id}",
+                Description = $"Auto-generated scenario for {descriptor.Id}",
+                Mode = runner.DefaultMode,
+                Test = descriptor.Id,
+                Enabled = true
+            });
+
+            scenarioTestSet.Add(descriptor.Id);
+        }
 
         var modes = ResolveExecutionModes(runner);
 

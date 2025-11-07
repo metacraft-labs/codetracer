@@ -1,6 +1,6 @@
 # Launching CodeTracer for Multi-Instance Testing
 
-This document captures the current best-practices for starting multiple CodeTracer instances (Electron and `ct host`) in parallel. The reference implementation lives in `ui-tests-startup-example/`; mirror its behaviour whenever you add or modify launch flows in `ui-tests-v3/`.
+This document captures the current best-practices for starting multiple CodeTracer instances (Electron and `ct host`) in parallel. The former `ui-tests-startup-example/` project has been removed; its behaviour is now documented here for direct reuse inside `ui-tests-v3/`.
 
 ## Prerequisites
 
@@ -24,9 +24,9 @@ This document captures the current best-practices for starting multiple CodeTrac
 2. **Run the harness with the correct library path**
    ```bash
    LD_LIBRARY_PATH=$(jq -r '.LD_LIBRARY_PATH' ct_paths.json) \
-     dotnet run --project ui-tests-startup-example/Playground.csproj
+     dotnet run --project <your-ui-tests-v3-harness>
    ```
-   Replace the project path when integrating into `ui-tests-v3/`.
+   Replace `<your-ui-tests-v3-harness>` with whichever project currently drives the experimental runner.
 
 3. **Socket allocation**
    - Reserve a free TCP port for the HTTP host (`GetFreeTcpPort()`).
@@ -60,7 +60,5 @@ This document captures the current best-practices for starting multiple CodeTrac
 
 ## Next Steps for `ui-tests-v3/`
 
-- Mirror the helper layout from `ui-tests-startup-example/Helpers` (ProcessUtilities, MonitorUtilities, CtHostLauncher, NetworkUtilities).
-- Keep this document updated whenever the startup example evolves. Link any behavioural changes in the `docs/progress.md` changelog.
-
-For deeper implementation details consult `ui-tests-startup-example/Program.cs` and associated helpers.
+- Mirror the helper layout described here (ProcessUtilities, MonitorUtilities, CtHostLauncher, NetworkUtilities) inside the V3 harness so every scenario shares the same startup contract.
+- Keep this document updated whenever the V3 launcher evolves and log the changes in `docs/progress.md`.

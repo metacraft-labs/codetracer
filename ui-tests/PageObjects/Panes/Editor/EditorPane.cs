@@ -103,6 +103,42 @@ public class EditorPane : TabObject
         => Root.Locator(".flow-loop-step-container");
 
     /// <summary>
+    /// Locates a flow value element by its element id.
+    /// </summary>
+    /// <param name="valueBoxId">The id attribute of the flow value box.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="valueBoxId"/> is null or whitespace.</exception>
+    public ILocator FlowValueElementById(string valueBoxId)
+    {
+        if (string.IsNullOrWhiteSpace(valueBoxId))
+        {
+            throw new ArgumentException("Value box id must be provided.", nameof(valueBoxId));
+        }
+
+        return Root.Locator($"#{valueBoxId}");
+    }
+
+    /// <summary>
+    /// Locates a flow value element by its displayed variable name.
+    /// </summary>
+    /// <param name="valueName">The label rendered next to the flow value.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="valueName"/> is null or whitespace.</exception>
+    public ILocator FlowValueElementByName(string valueName)
+    {
+        if (string.IsNullOrWhiteSpace(valueName))
+        {
+            throw new ArgumentException("Value name must be provided.", nameof(valueName));
+        }
+
+        var nameLocator = Root
+            .Locator(".flow-parallel-value-name, .flow-loop-value-name")
+            .Filter(new() { HasText = valueName });
+
+        return nameLocator
+            .Locator("xpath=following-sibling::*[contains(@class,'flow-parallel-value-box') or contains(@class,'flow-loop-value-box')]")
+            .First;
+    }
+
+    /// <summary>
     /// Returns all currently rendered line objects.
     /// </summary>
     public async Task<IReadOnlyList<EditorLine>> LinesAsync()
@@ -139,11 +175,73 @@ public class EditorPane : TabObject
         return await CurrentLineOverlay().CountAsync() > 0;
     }
 
+    private async Task<int?> TryReadViewLineFromStateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(FilePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await Page.EvaluateAsync<int?>(@"({ path }) => {
+                const globalScope = typeof window !== 'undefined' ? window : globalThis;
+                const data = globalScope?.data;
+                if (!data || !data.services || !data.services.editor) {
+                    return null;
+                }
+
+                const editorService = data.services.editor;
+                const openTabs = editorService.open;
+                if (!openTabs || !Object.prototype.hasOwnProperty.call(openTabs, path)) {
+                    return null;
+                }
+
+                const tab = openTabs[path];
+                if (!tab) {
+                    return null;
+                }
+
+                const viewLine = tab.viewLine;
+                if (typeof viewLine === 'number' && Number.isFinite(viewLine) && viewLine > 0) {
+                    return viewLine;
+                }
+
+                const monacoEditor = tab.monacoEditor;
+                if (monacoEditor && typeof monacoEditor.getPosition === 'function') {
+                    const position = monacoEditor.getPosition();
+                    if (position && typeof position.lineNumber === 'number' && Number.isFinite(position.lineNumber) && position.lineNumber > 0) {
+                        return position.lineNumber;
+                    }
+                }
+
+                if (editorService.active === path && typeof editorService.activeTabInfo === 'function') {
+                    const activeTab = editorService.activeTabInfo();
+                    if (activeTab && typeof activeTab.viewLine === 'number' && Number.isFinite(activeTab.viewLine) && activeTab.viewLine > 0) {
+                        return activeTab.viewLine;
+                    }
+                }
+
+                return null;
+            }", new { path = FilePath });
+        }
+        catch (PlaywrightException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Returns the currently active line number if one is selected.
     /// </summary>
     public async Task<int?> ActiveLineNumberAsync()
     {
+        var viewLine = await TryReadViewLineFromStateAsync();
+        if (viewLine.HasValue && viewLine.Value > 0)
+        {
+            return viewLine;
+        }
+
         if (await ActiveLineNumberLocator().CountAsync() == 0)
         {
             return null;
@@ -205,26 +303,6 @@ public class EditorPane : TabObject
     /// Convenience helper returning the numeric identifier for a given line object.
     /// </summary>
     public int LineNumber(EditorLine line) => line.LineNumber;
-
-    /// <summary>
-    /// Invokes the frontend helper to navigate to the specified line number.
-    /// </summary>
-    public async Task JumpToLineJsAsync(int lineNumber)
-    {
-        if (lineNumber <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(lineNumber), "Line number must be positive.");
-        }
-
-        await Page.EvaluateAsync(
-            @"({ line }) => {
-                if (typeof gotoLine !== 'function') {
-                    throw new Error('gotoLine is not available.');
-                }
-                gotoLine(line);
-            }",
-            new { line = lineNumber });
-    }
 
     /// <summary>
     /// Toggles a tracepoint at the requested line through the frontend API.

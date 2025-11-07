@@ -1,7 +1,7 @@
 # Settings Infrastructure Specification
 
 ## Objectives
-- Centralize all runtime configuration for `ui-tests-playground` and upcoming `ui-tests-v3`.
+- Centralize all runtime configuration for `ui-tests-v3`, replacing the retired `ui-tests-playground` experiments.
 - Support per-run overrides required by CI farms, Docker containers, and agent-driven workflows.
 - Provide deterministic, testable configuration access without relying on hard-coded globals.
 - Enable configuration reuse in library scenarios and future tooling by avoiding static state.

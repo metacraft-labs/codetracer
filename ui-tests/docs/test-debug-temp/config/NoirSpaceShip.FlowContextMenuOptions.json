@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "NoirSpaceShip.FlowContextMenuOptions"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noirspaceship-flowcontextmenuoptions--electron",
+      "Description": "Focused Electron run for NoirSpaceShip.FlowContextMenuOptions",
+      "Mode": "Electron",
+      "Test": "NoirSpaceShip.FlowContextMenuOptions",
+      "Enabled": true
+    },
+    {
+      "Id": "noirspaceship-flowcontextmenuoptions--web",
+      "Description": "Focused Web run for NoirSpaceShip.FlowContextMenuOptions",
+      "Mode": "Web",
+      "Test": "NoirSpaceShip.FlowContextMenuOptions",
+      "Enabled": true
+    }
+  ]
+}

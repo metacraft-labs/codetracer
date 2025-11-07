@@ -71,20 +71,12 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         var playwright = await Playwright.CreateAsync();
 
         var monitors = _monitorLayoutService.DetectMonitors();
-        MonitorInfo? selectedMonitor = null;
-        if (monitors.Count > 0)
-        {
-            selectedMonitor = monitors
-                .OrderByDescending(m => m.IsPrimary)
-                .ThenBy(m => m.Y)
-                .ThenBy(m => m.X)
-                .First();
-            _logger.LogInformation("[{Scenario}] Targeting monitor '{Monitor}' ({Width}x{Height} at {X},{Y}).", entry.Scenario.Id, selectedMonitor.Value.Name, selectedMonitor.Value.Width, selectedMonitor.Value.Height, selectedMonitor.Value.X, selectedMonitor.Value.Y);
-        }
-        else
-        {
-            _logger.LogInformation("[{Scenario}] Could not detect monitor layout; using browser defaults.", entry.Scenario.Id);
-        }
+        var selectedMonitor = MonitorSelectionHelper.SelectPreferredMonitor(
+            monitors,
+            _settings.Web.BrowserWindow.PreferredDisplayEdid,
+            _settings.Web.BrowserWindow.PreferredDisplayIndex,
+            _logger,
+            entry.Scenario.Id);
 
         var positionOverride = Environment.GetEnvironmentVariable("PLAYGROUND_WINDOW_POSITION");
         var sizeOverride = Environment.GetEnvironmentVariable("PLAYGROUND_WINDOW_SIZE");
@@ -114,8 +106,15 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         await page.EvaluateAsync("() => { document.body.style.zoom = '100%'; }");
         await page.EvaluateAsync("() => { document.documentElement.style.zoom = '100%'; }");
         await page.Keyboard.PressAsync("Control+0");
-        await page.EvaluateAsync("() => window.dispatchEvent(new Event('resize'))");
+
+        var resized = await WindowPositioningHelper.MoveWindowAsync(page, selectedMonitor);
+
+        if (!resized)
+        {
+            _logger.LogDebug("[{Scenario}] Window resize script could not adjust browser bounds.", entry.Scenario.Id);
+        }
 
         return new WebTestSession(hostProcess, playwright, browser, context, page);
     }
+
 }

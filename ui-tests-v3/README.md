@@ -9,18 +9,19 @@ Key resources:
 - `docs/progress.md` tracks completed work to keep alignment with stakeholders.
 - `docs/debugging.md`, `docs/extending-the-suite.md`, and `docs/coding-guidelines.md` mirror the current project’s documentation, updated for the new architecture.
 
-## Feature Snapshot (using `ui-tests-startup-example/` as reference)
+## Feature Snapshot (derived from the retired startup prototype)
 
-- **Parallel Startup (Electron + Web)** – See `ui-tests-startup-example/Playground.csproj` for the orchestration that launches three Electron windows alongside three `ct host` instances while sharing socket ports correctly.
-- **Process Hygiene** – `Helpers/ProcessUtilities.cs` in the startup example documents how pre/post-run cleanup prevents leaks when spawning multiple CodeTracer sessions.
-- **Environment Normalisation** – The startup example’s `MonitorUtilities` and `CtHostLauncher` demonstrate window sizing, zoom resets, and the `--flag=value` syntax required by `ct host`.
-- **Documented Troubleshooting** – `ui-tests-startup-example/docs/debugging.md` provides stable guidance for multi-instance debugging; use it as the canonical reference until V3 absorbs the patterns.
+The previous `ui-tests-startup-example/` reference application has been removed from the repository, but its patterns now live in this documentation set.
+
+- **Parallel Startup (Electron + Web)** – Follow `docs/launching-multi-instance.md` for the orchestration that launches multiple Electron windows alongside `ct host` instances while sharing socket ports correctly.
+- **Process Hygiene** – `docs/launching-multi-instance.md` and `docs/debugging.md` describe the pre/post-run cleanup necessary to prevent leaks when spawning multiple CodeTracer sessions.
+- **Environment Normalisation** – The same guides capture monitor sizing, zoom resets, and the `--flag=value` syntax required by `ct host`.
+- **Documented Troubleshooting** – Consolidated debugging steps now live under `docs/debugging.md`; consult it instead of the removed startup example.
 
 Reference projects:
 
 - `ui-tests/`: demonstrates the existing Electron-based Playwright flow for CodeTracer.
-- `ui-tests-startup-example/`: stable snapshot of the multi-instance startup flow; treat this as the go-to reference while V3 evolves.
-- `ui-tests-playground/`: volatile prototyping area for ideas that will eventually feed into V3 (expect breaking changes).
+- *Retired prototypes*: The former `ui-tests-startup-example/` and `ui-tests-playground/` projects have been removed. Their lessons are captured in this documentation set; no external folders are required.
 - `/home/franz/code/repos/Puppeteer`: historical Selenium/Puppeteer suite containing patterns slated for reuse.
 
 All new work happens here; once V3 stabilises we can deprecate or migrate the legacy suite.

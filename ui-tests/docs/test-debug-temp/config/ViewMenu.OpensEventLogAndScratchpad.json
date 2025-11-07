@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "ViewMenu.OpensEventLogAndScratchpad"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "viewmenu-openseventlogandscratchpad--electron",
+      "Description": "Focused Electron run for ViewMenu.OpensEventLogAndScratchpad",
+      "Mode": "Electron",
+      "Test": "ViewMenu.OpensEventLogAndScratchpad",
+      "Enabled": true
+    },
+    {
+      "Id": "viewmenu-openseventlogandscratchpad--web",
+      "Description": "Focused Web run for ViewMenu.OpensEventLogAndScratchpad",
+      "Mode": "Web",
+      "Test": "ViewMenu.OpensEventLogAndScratchpad",
+      "Enabled": true
+    }
+  ]
+}

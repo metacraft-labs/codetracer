@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "NoirSpaceShip.TraceLogContextMenuOptions"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noirspaceship-tracelogcontextmenuoptions--electron",
+      "Description": "Focused Electron run for NoirSpaceShip.TraceLogContextMenuOptions",
+      "Mode": "Electron",
+      "Test": "NoirSpaceShip.TraceLogContextMenuOptions",
+      "Enabled": true
+    },
+    {
+      "Id": "noirspaceship-tracelogcontextmenuoptions--web",
+      "Description": "Focused Web run for NoirSpaceShip.TraceLogContextMenuOptions",
+      "Mode": "Web",
+      "Test": "NoirSpaceShip.TraceLogContextMenuOptions",
+      "Enabled": true
+    }
+  ]
+}

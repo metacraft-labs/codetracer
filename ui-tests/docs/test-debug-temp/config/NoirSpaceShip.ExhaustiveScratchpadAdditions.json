@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "NoirSpaceShip.ExhaustiveScratchpadAdditions"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noirspaceship-exhaustivescratchpadadditions--electron",
+      "Description": "Focused Electron run for NoirSpaceShip.ExhaustiveScratchpadAdditions",
+      "Mode": "Electron",
+      "Test": "NoirSpaceShip.ExhaustiveScratchpadAdditions",
+      "Enabled": true
+    },
+    {
+      "Id": "noirspaceship-exhaustivescratchpadadditions--web",
+      "Description": "Focused Web run for NoirSpaceShip.ExhaustiveScratchpadAdditions",
+      "Mode": "Web",
+      "Test": "NoirSpaceShip.ExhaustiveScratchpadAdditions",
+      "Enabled": true
+    }
+  ]
+}

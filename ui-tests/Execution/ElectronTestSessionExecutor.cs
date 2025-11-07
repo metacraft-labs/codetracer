@@ -13,12 +13,18 @@ namespace UiTests.Execution;
 internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
 {
     private readonly ICodetracerLauncher _launcher;
+    private readonly IMonitorLayoutService _monitorLayoutService;
     private readonly AppSettings _settings;
     private readonly ILogger<ElectronTestSessionExecutor> _logger;
 
-    public ElectronTestSessionExecutor(ICodetracerLauncher launcher, IOptions<AppSettings> settings, ILogger<ElectronTestSessionExecutor> logger)
+    public ElectronTestSessionExecutor(
+        ICodetracerLauncher launcher,
+        IMonitorLayoutService monitorLayoutService,
+        IOptions<AppSettings> settings,
+        ILogger<ElectronTestSessionExecutor> logger)
     {
         _launcher = launcher;
+        _monitorLayoutService = monitorLayoutService;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -37,9 +43,22 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         _logger.LogInformation("[{Scenario}] Launching Electron trace {TraceId} on port {Port}.", entry.Scenario.Id, traceId, port);
 
         await using var session = await LaunchElectronAsync(traceId, port, cancellationToken);
+        var monitors = _monitorLayoutService.DetectMonitors();
+        var selectedMonitor = MonitorSelectionHelper.SelectPreferredMonitor(
+            monitors,
+            _settings.Electron.PreferredDisplayEdid,
+            _settings.Electron.PreferredDisplayIndex,
+            _logger,
+            entry.Scenario.Id);
+
         var page = await GetAppPageAsync(session.Browser, "CodeTracer", cancellationToken);
         page.SetDefaultTimeout(20_000);
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        if (await WindowPositioningHelper.MoveElectronWindowAsync(session, page, selectedMonitor) is false)
+        {
+            _logger.LogDebug("[{Scenario}] Electron window positioning script did not adjust bounds.", entry.Scenario.Id);
+        }
 
         if (entry.Scenario.DelaySeconds > 0)
         {

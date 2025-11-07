@@ -1,0 +1,20 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 2,
+    "IncludeTests": [
+      "NoirSpaceShip.EventLogJumpHighlightsActiveRow"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noir-event-log-highlight",
+      "Description": "Focused run for NoirSpaceShip.EventLogJumpHighlightsActiveRow during debugging.",
+      "Test": "NoirSpaceShip.EventLogJumpHighlightsActiveRow",
+      "Enabled": true
+    }
+  ]
+}

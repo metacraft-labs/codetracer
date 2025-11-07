@@ -49,14 +49,21 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
         }
 
         var maxParallel = _settings.Runner.MaxParallelInstances ?? 1;
-        _logger.LogInformation("Executing {ScenarioCount} scenario(s) across {ModeCount} mode(s) with max parallelism {Parallelism}.", plan.Count, _settings.Runner.ExecutionModes.Count, maxParallel);
+        var targetParallelism = Math.Max(1, Math.Min(maxParallel, plan.Count));
+        _logger.LogInformation(
+            "Executing {ScenarioCount} scenario(s) across {ModeCount} mode(s) with max parallelism {Parallelism} (ramped).",
+            plan.Count,
+            _settings.Runner.ExecutionModes.Count,
+            targetParallelism);
 
-        using var throttler = new SemaphoreSlim(maxParallel);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var throttler = new SemaphoreSlim(1, targetParallelism);
+        var rampTask = RampUpParallelismAsync(throttler, targetParallelism, linkedCts.Token);
         var failures = new ConcurrentQueue<TestFailure>();
-        var tasks = plan.Select(entry => ExecuteEntryAsync(entry, throttler, linkedCts, failures));
-
+        var tasks = plan.Select(entry => ExecuteEntryAsync(entry, throttler, linkedCts, failures)).ToList();
         await Task.WhenAll(tasks);
+        linkedCts.Cancel();
+        await rampTask;
 
         if (failures.IsEmpty)
         {
@@ -110,5 +117,42 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
         {
             throttler.Release();
         }
+    }
+
+    private static Task RampUpParallelismAsync(SemaphoreSlim throttler, int targetParallelism, CancellationToken cancellationToken)
+    {
+        if (targetParallelism <= 1)
+        {
+            return Task.CompletedTask;
+        }
+
+        return Task.Run(async () =>
+        {
+            for (var current = 1; current < targetParallelism; current++)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                try
+                {
+                    throttler.Release();
+                }
+                catch (SemaphoreFullException)
+                {
+                    break;
+                }
+            }
+        }, CancellationToken.None);
     }
 }
