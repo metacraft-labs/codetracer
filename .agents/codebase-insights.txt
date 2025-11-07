@@ -13,9 +13,6 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
-- The Electron index process now boots an LSP bridge (ws://127.0.0.1:3100/lsp by default) using `bridge_reduced.nim`; port/path/command can be overridden with `CODETRACER_LSP_*` env vars.
-- Renderer/bridge coordination uses IPC channels `CODETRACER::lsp-get-url` (request) and `CODETRACER::lsp-url` (status updates).
-- The renderer’s LSP controller builds `workspaceFolders` and `initializationOptions.linkedProjects` directly from `window.data.trace` (workdir + sourceFolders), so language servers see the original project layout when traces provide it.
 
 - Electron lifecycle: the backend-manager process is spawned in
   `src/frontend/index.nim` during `ready()`. Previously, it was only stopped
@@ -28,4 +25,3 @@
 - Interpreter overrides (e.g. `CODETRACER_PYTHON_INTERPRETER`) are now treated as authoritative; if the configured path cannot be resolved we error instead of silently falling back to PATH.
 - `ct record` verifies that `codetracer_python_recorder` is importable before launching the db backend and prints actionable guidance if the module is missing or broken.
 - Sudoku test-program datasets include intentionally invalid boards (e.g., examples #3 and #6) with duplicate digits inside a sub-grid; solvers should detect and report these gracefully.
-- Webpack expects the `vscode` alias to point at the `@codingame/monaco-vscode-extension-api` package root so that `monaco-languageclient` can load `vscode/localExtensionHost`.

@@ -1,205 +1,160 @@
 import
-  std/[jsffi, strutils, strformat],
+  std/[jsffi, strformat, tables, sequtils, strutils],
   lsp_client,
   ../common/ct_logging,
-  lib/jslib
+  lib/jslib,
+  lsp_js_bindings,
+  lsp_paths
 
-when defined(js):
-  proc newWebSocket(url: cstring): JsObject {.importjs: "new WebSocket(#)".}
-  proc closeWebSocket(ws: JsObject) {.importjs: "#.close()".}
-  proc setTimeout(callback: proc() {.closure.}; delay: int): int {.importjs: "setTimeout(#, #)".}
-  proc clearTimeout(timerId: int) {.importjs: "clearTimeout(#)".}
-  proc field(target: JsObject; name: cstring): JsObject {.importjs: "#[#]".}
-  proc isUndefined(value: JsObject): bool {.importjs: "(# === undefined)".}
-  proc construct1(ctor: JsObject; arg: JsObject): JsObject {.importjs: "new #(#)".}
-  proc call0(fn: JsObject): JsObject {.importjs: "#()".}
-  proc call1(fn: JsObject; arg: JsObject): JsObject {.importjs: "#(#)".}
-  proc newObject(): JsObject {.importjs: "({})".}
-  proc newArray(): JsObject {.importjs: "([])".}
-  proc setField(target: JsObject; name: cstring; value: JsObject) {.importjs: "#[#] = #".}
-  proc push(target: JsObject; value: JsObject) {.importjs: "#.push(#)".}
-  proc toJs(str: cstring): JsObject {.importjs: "#".}
-  proc requireModule(name: cstring): JsObject {.importjs: "require(#)".}
-  proc arrayLen(arr: JsObject): int {.importjs: "#.length".}
-  proc arrayAt(arr: JsObject; idx: int): JsObject {.importjs: "#[#]".}
-  proc toCString(value: JsObject): cstring {.importjs: "String(#)".}
+type
+  ControllerConfig = object
+    kind: string
+    clientId: string
+    clientName: string
+    languages: seq[string]
+    includeLinkedProjects: bool
 
-var
-  activeClient*: JsObject = nil
-  wsConnection: JsObject = nil
-  retryTimer = 0
+  ControllerState = ref object
+    activeClient: JsObject
+    wsConnection: JsObject
+    retryTimer: int
 
-proc normalizePathString(path: string): string =
-  var normalized = path.strip(chars = Whitespace)
-  if normalized.len == 0:
-    return normalized
-  for i in 0 ..< normalized.len:
-    if normalized[i] == '\\':
-      normalized[i] = '/'
-  let hasDrive = normalized.len >= 2 and normalized[1] == ':'
-  while normalized.len > 1 and normalized[^1] == '/':
-    if hasDrive and normalized.len == 3:
-      break
-    normalized.setLen(normalized.len - 1)
-  normalized
+let controllerConfigs = @[
+  ControllerConfig(
+    kind: defaultLspKind,
+    clientId: "codetracer-monaco-lsp",
+    clientName: "CodeTracer Language Client",
+    languages: @["rust", "json"],
+    includeLinkedProjects: true),
+  ControllerConfig(
+    kind: "ruby",
+    clientId: "codetracer-ruby-lsp",
+    clientName: "CodeTracer Ruby Language Client",
+    languages: @["ruby"],
+    includeLinkedProjects: false)
+]
 
-proc folderDisplayName(path: string): string =
-  let normalized = normalizePathString(path)
-  if normalized.len == 0:
-    return ""
-  var endIdx = normalized.len - 1
-  while endIdx > 0 and normalized[endIdx] == '/':
-    dec endIdx
-  var idx = endIdx
-  while idx >= 0:
-    if normalized[idx] == '/':
-      if idx == endIdx:
-        return normalized
-      return normalized[idx + 1 .. endIdx]
-    dec idx
-  normalized[0 .. endIdx]
+var controllerStates = initTable[string, ControllerState]()
 
-proc joinPath(base: string; child: string): string =
-  if base.len == 0:
-    return child
-  if base[^1] == '/':
-    base & child
-  else:
-    base & "/" & child
+proc startClient(kind: string; url: string)
 
-proc toFileUri(path: string): string =
-  var normalized = normalizePathString(path)
-  if normalized.len == 0:
-    return ""
-  if normalized.startsWith("file://"):
-    return normalized
-  if normalized[0] == '/':
-    return "file://" & normalized
-  "file:///" & normalized
+proc getConfig(kind: string): ControllerConfig =
+  for cfg in controllerConfigs:
+    if cfg.kind == kind:
+      return cfg
+  controllerConfigs[0]
 
-proc containsPath(list: seq[string]; value: string): bool =
-  for entry in list:
-    if entry == value:
-      return true
-  false
-
-proc startClient(url: string)
-
-proc stopClient() =
-  if retryTimer != 0:
-    clearTimeout(retryTimer)
-    retryTimer = 0
-  if not activeClient.isNil:
-    try:
-      discard call0(field(activeClient, "stop"))
-    except CatchableError:
-      warnPrint "renderer:lsp stop client failed: ", getCurrentExceptionMsg()
-    activeClient = nil
-  if not wsConnection.isNil:
-    try:
-      wsConnection.closeWebSocket()
-    except CatchableError:
-      warnPrint "renderer:lsp websocket close failed: ", getCurrentExceptionMsg()
-    wsConnection = nil
+proc getState(kind: string): ControllerState =
+  if controllerStates.hasKey(kind):
+    return controllerStates[kind]
+  let state = ControllerState(activeClient: nil, wsConnection: nil, retryTimer: 0)
+  controllerStates[kind] = state
+  state
 
 proc servicesReady(): bool =
   let flag = field(domwindow, "monacoServicesReadyFlag")
-  result = not isUndefined(flag) and cast[bool](flag)
+  not isUndefined(flag) and cast[bool](flag)
 
-proc scheduleRetry(url: string) =
-  if retryTimer != 0:
+proc stopClient(kind: string) =
+  let state = getState(kind)
+  if state.retryTimer != 0:
+    clearTimeout(state.retryTimer)
+    state.retryTimer = 0
+  if not state.activeClient.isNil:
+    try:
+      discard call0(field(state.activeClient, "stop"))
+    except CatchableError:
+      warnPrint fmt"renderer:lsp ({kind}) stop client failed: {getCurrentExceptionMsg()}"
+    state.activeClient = nil
+  if not state.wsConnection.isNil:
+    try:
+      state.wsConnection.closeWebSocket()
+    except CatchableError:
+      warnPrint fmt"renderer:lsp ({kind}) websocket close failed: {getCurrentExceptionMsg()}"
+    state.wsConnection = nil
+
+proc scheduleRetry(kind: string; url: string) =
+  let state = getState(kind)
+  if state.retryTimer != 0:
     return
-  retryTimer = setTimeout(proc () =
-    retryTimer = 0
-    startClient(url)
+  state.retryTimer = setTimeout(proc () =
+    state.retryTimer = 0
+    startClient(kind, url)
   , 250)
 
-proc startClient(url: string) =
-  if not servicesReady():
-    scheduleRetry(url)
+proc addWorkspaceFolder(workspaceFolders: JsObject; workspacePaths: var seq[string]; path: string) =
+  let normalized = normalizePathString(path)
+  if normalized.len == 0 or workspacePaths.contains(normalized):
     return
-  stopClient()
+  workspacePaths.add(normalized)
+  let folderObj = newObject()
+  setField(folderObj, "name", toJs(folderDisplayName(normalized).cstring))
+  setField(folderObj, "uri", toJs(toFileUri(normalized).cstring))
+  push(workspaceFolders, folderObj)
+
+proc addLinkedProject(linkedProjects: JsObject; linkedPaths: var seq[string]; fsModule: JsObject; folderPath: string) =
+  let normalized = normalizePathString(folderPath)
+  if normalized.len == 0 or linkedPaths.contains(normalized):
+    return
+  let cargoPath = joinPath(normalized, "Cargo.toml")
+  if not cast[bool](call1(field(fsModule, "existsSync"), toJs(cargoPath.cstring))):
+    return
+  linkedPaths.add(normalized)
+  let project = newObject()
+  setField(project, "kind", toJs(cstring"cargo"))
+  setField(project, "path", toJs(cargoPath.cstring))
+  push(linkedProjects, project)
+
+proc startClient(kind: string; url: string) =
+  if not servicesReady():
+    scheduleRetry(kind, url)
+    return
+  stopClient(kind)
   let normalized = url.strip(chars = Whitespace)
   if normalized.len == 0:
-    infoPrint "renderer:lsp bridge stopped"
+    infoPrint fmt"renderer:lsp bridge stopped ({kind})"
     return
   if not (normalized.startsWith("ws://") or normalized.startsWith("wss://")):
-    warnPrint "renderer:lsp ignoring non-websocket url: " & normalized
+    warnPrint fmt"renderer:lsp ignoring non-websocket url ({kind}): {normalized}"
     return
   let monacoLanguageClientCtor = field(domwindow, "MonacoLanguageClient")
   if isUndefined(monacoLanguageClientCtor):
-    warnPrint "renderer:lsp MonacoLanguageClient unavailable"
+    warnPrint fmt"renderer:lsp MonacoLanguageClient unavailable ({kind})"
     return
   let rpcHelpers = field(domwindow, "VscodeWsJsonrpc")
   if isUndefined(rpcHelpers):
-    warnPrint "renderer:lsp vscode-ws-jsonrpc unavailable"
+    warnPrint fmt"renderer:lsp vscode-ws-jsonrpc unavailable ({kind})"
     return
+  let cfg = getConfig(kind)
+  let state = getState(kind)
   let fsModule = requireModule("fs")
   try:
-    wsConnection = newWebSocket(normalized.cstring)
+    state.wsConnection = newWebSocket(normalized.cstring)
     let openHandler = proc () {.closure.} =
       try:
-        let transport = call1(field(rpcHelpers, "toSocket"), wsConnection)
+        let transport = call1(field(rpcHelpers, "toSocket"), state.wsConnection)
         let reader = construct1(field(rpcHelpers, "WebSocketMessageReader"), transport)
         let writer = construct1(field(rpcHelpers, "WebSocketMessageWriter"), transport)
 
         let docSelector = newArray()
-        let rustSelector = newObject()
-        setField(rustSelector, "language", toJs(cstring"rust"))
-        push(docSelector, rustSelector)
-        let jsonSelector = newObject()
-        setField(jsonSelector, "language", toJs(cstring"json"))
-        push(docSelector, jsonSelector)
+        for lang in cfg.languages:
+          let entry = newObject()
+          setField(entry, "language", toJs(lang.cstring))
+          push(docSelector, entry)
 
         let clientOptions = newObject()
         setField(clientOptions, "documentSelector", docSelector)
 
         let workspaceFolders = newArray()
-        let linkedProjects = newArray()
         var workspacePaths: seq[string] = @[]
-        var linkedProjectPaths: seq[string] = @[]
-        let existsFn = field(fsModule, "existsSync")
-
-        proc addWorkspaceFolder(path: string) =
-          let normalized = normalizePathString(path)
-          if normalized.len == 0 or containsPath(workspacePaths, normalized):
-            return
-          workspacePaths.add(normalized)
-          let folderObj = newObject()
-          let display = folderDisplayName(normalized)
-          setField(folderObj, "name", toJs(display.cstring))
-          setField(folderObj, "uri", toJs(toFileUri(normalized).cstring))
-          push(workspaceFolders, folderObj)
-
-        proc addLinkedProject(folderPath: string) =
-          let normalized = normalizePathString(folderPath)
-          if normalized.len == 0:
-            return
-          let cargoPath = joinPath(normalized, "Cargo.toml")
-          if containsPath(linkedProjectPaths, cargoPath):
-            return
-          if not cast[bool](call1(existsFn, toJs(cargoPath.cstring))):
-            return
-          linkedProjectPaths.add(cargoPath)
-          let project = newObject()
-          setField(project, "kind", toJs(cstring"cargo"))
-          setField(project, "path", toJs(cargoPath.cstring))
-          push(linkedProjects, project)
-
-        proc registerFolder(path: string) =
-          if path.len == 0:
-            return
-          addWorkspaceFolder(path)
-          addLinkedProject(path)
-
         let dataObj = field(domwindow, "data")
         if not isUndefined(dataObj):
           let traceObj = field(dataObj, "trace")
           if not isUndefined(traceObj) and not traceObj.isNil:
             let workdirVal = field(traceObj, "workdir")
-            if not isUndefined(workdirVal) and not workdirVal.isNil:
+            if not workdirVal.isNil:
               let workdir = $toCString(workdirVal)
-              registerFolder(workdir)
+              addWorkspaceFolder(workspaceFolders, workspacePaths, workdir)
             let sourceFolders = field(traceObj, "sourceFolders")
             if not isUndefined(sourceFolders) and not sourceFolders.isNil:
               let count = arrayLen(sourceFolders)
@@ -207,48 +162,57 @@ proc startClient(url: string) =
               while idx < count:
                 let folderVal = arrayAt(sourceFolders, idx)
                 if not folderVal.isNil:
-                  let folderPath = $toCString(folderVal)
-                  registerFolder(folderPath)
+                  addWorkspaceFolder(workspaceFolders, workspacePaths, $toCString(folderVal))
                 inc idx
 
         if arrayLen(workspaceFolders) > 0:
           setField(clientOptions, "workspaceFolders", workspaceFolders)
           setField(clientOptions, "workspaceFolder", arrayAt(workspaceFolders, 0))
-        if arrayLen(linkedProjects) > 0:
-          let initOptions = newObject()
-          setField(initOptions, "linkedProjects", linkedProjects)
-          setField(clientOptions, "initializationOptions", initOptions)
+
+        if cfg.includeLinkedProjects:
+          let linkedProjects = newArray()
+          var linkedPaths: seq[string] = @[]
+          for path in workspacePaths:
+            addLinkedProject(linkedProjects, linkedPaths, fsModule, path)
+          if arrayLen(linkedProjects) > 0:
+            let initOptions = newObject()
+            setField(initOptions, "linkedProjects", linkedProjects)
+            setField(clientOptions, "initializationOptions", initOptions)
 
         let transports = newObject()
         setField(transports, "reader", reader)
         setField(transports, "writer", writer)
 
         let clientConfig = newObject()
-        setField(clientConfig, "id", toJs(cstring"codetracer-monaco-lsp"))
-        setField(clientConfig, "name", toJs(cstring"CodeTracer Language Client"))
+        setField(clientConfig, "id", toJs(cfg.clientId.cstring))
+        setField(clientConfig, "name", toJs(cfg.clientName.cstring))
         setField(clientConfig, "clientOptions", clientOptions)
         setField(clientConfig, "messageTransports", transports)
 
-        activeClient = construct1(monacoLanguageClientCtor, clientConfig)
-        discard call0(field(activeClient, "start"))
-        infoPrint fmt"renderer:lsp client started @ {normalized}"
+        state.activeClient = construct1(monacoLanguageClientCtor, clientConfig)
+        discard call0(field(state.activeClient, "start"))
+        infoPrint fmt"renderer:lsp client ({kind}) started @ {normalized}"
       except CatchableError:
-        warnPrint "renderer:lsp start failed @ " & normalized & ": " & getCurrentExceptionMsg()
-        scheduleRetry(url)
-    setField(wsConnection, "onopen", toJs(openHandler))
+        warnPrint fmt"renderer:lsp start failed ({kind}) @ {normalized}: {getCurrentExceptionMsg()}"
+        scheduleRetry(kind, url)
+    setField(state.wsConnection, "onopen", toJs(openHandler))
   except CatchableError:
-    warnPrint "renderer:lsp websocket setup failed: ", getCurrentExceptionMsg()
-    scheduleRetry(url)
+    warnPrint fmt"renderer:lsp websocket setup failed ({kind}): {getCurrentExceptionMsg()}"
+    state.wsConnection = nil
+    scheduleRetry(kind, url)
 
-proc onUrlChange(url: string) =
-  startClient(url)
+proc onUrlChange(kind: string; url: string) =
+  startClient(kind, url)
 
-proc requestInitialStatus() =
-  if lsp_client.lspUrl.len > 0:
-    startClient(lsp_client.lspUrl)
+proc requestInitialStatus(kind: string) =
+  let currentUrl = lsp_client.getLspUrl(kind)
+  if currentUrl.len > 0:
+    startClient(kind, currentUrl)
   else:
-    lsp_client.requestLspUrl()
+    lsp_client.requestLspUrl(kind)
 
 proc initLspController* =
-  onLspUrlChange(onUrlChange)
-  requestInitialStatus()
+  for cfg in controllerConfigs:
+    let kind = cfg.kind
+    onLspUrlChange(proc(url: string) {.closure.} = onUrlChange(kind, url), kind = kind)
+    requestInitialStatus(kind)
