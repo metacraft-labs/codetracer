@@ -293,8 +293,12 @@ impl Handler {
         info!("complete_move");
 
         // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
-        let location = self.replay.load_location(&mut self.expr_loader)?;
+        let mut location = self.replay.load_location(&mut self.expr_loader)?;
         // let call_key = location.call_key; // self.db.call_key_for_step(self.step_id);
+        location = self
+            .flow_preloader
+            .expr_loader
+            .find_function_location(&location, &Line(location.line));
         // TODO: change if we need to support non-int keys
         let call_key = CallKey(location.key.parse::<i64>()?);
         let reset_flow = is_main || call_key != self.last_call_key;
@@ -476,7 +480,6 @@ impl Handler {
             }
         };
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
-
         self.send_dap(&raw_event)?;
 
         Ok(())
