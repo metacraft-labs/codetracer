@@ -7,6 +7,7 @@ using Microsoft.Playwright;
 using UiTests.Configuration;
 using UiTests.Helpers;
 using UiTests.Infrastructure;
+using UiTests.Utils;
 
 namespace UiTests.Execution;
 
@@ -43,7 +44,8 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
 
         var traceId = await _launcher.RecordProgramAsync(_settings.Electron.TraceProgram, cancellationToken);
         var port = await GetFreeTcpPortAsync();
-        _logger.LogInformation("[{Scenario}] Launching Electron trace {TraceId} on port {Port}.", entry.Scenario.Id, traceId, port);
+        var verboseConsole = ShouldEmitVerboseConsole(entry);
+        _logger.Log(verboseConsole ? LogLevel.Information : LogLevel.Debug, "[{Scenario}] Launching Electron trace {TraceId} on port {Port}.", entry.Scenario.Id, traceId, port);
 
         await using var session = await LaunchElectronAsync(traceId, port, cancellationToken);
         var monitors = _monitorLayoutService.DetectMonitors();
@@ -52,7 +54,8 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
             _settings.Electron.PreferredDisplayEdid,
             _settings.Electron.PreferredDisplayIndex,
             _logger,
-            entry.Scenario.Id);
+            entry.Scenario.Id,
+            verboseConsole);
 
         var page = await GetAppPageAsync(session.Browser, "CodeTracer", cancellationToken);
         page.SetDefaultTimeout(20_000);
@@ -69,6 +72,8 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         }
 
         var context = new TestExecutionContext(entry.Scenario, entry.Mode, page, cancellationToken);
+        var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
+        using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
         await entry.Test.Handler(context);
     }
 
@@ -204,4 +209,6 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
 
         return null;
     }
+    private bool ShouldEmitVerboseConsole(TestPlanEntry entry)
+        => _settings.Runner.VerboseConsole || entry.Scenario.VerboseLogging;
 }

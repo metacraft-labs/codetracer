@@ -1,29 +1,31 @@
 # You Are Taking Over
 
-## Recent Progress
-- Stable suite (`stable-tests` profile) is clean: Electron/Web variants of `NoirSpaceShip.EditorLoadedMainNrFile` and `NoirSpaceShip.CalculateDamageCalltraceNavigation` pass after the monitor-targeting/CDP move updates.
-- Flaky suite still fails across the board. Electron and Web runs are now interleaved (ramped parallelism) and both windows start on HDMI-3, but every Noir/trace scenario in the flaky list times out or misses selectors — see `docs/test-debug-temp/logs/flaky-tests-latest.log` for the current error signatures.
-- Added CDP + `wmctrl` fallbacks so Electron windows respect the requested monitor, and ramped the scheduler so parallelism increases gradually instead of spiking at startup.
+## Where We Landed
+- **Stable suite** runs cleanly again. Planner now respects each scenario’s configured mode so `NoirSpaceShip.JumpToAllEvents` no longer runs twice per Electron/Web cycle.
+- **Loop iteration slider test** uses the flow-textbox jump (same as `SimpleLoopIterationJump`) and verifies all eight iterations. It falls back to flow-loop values when the state pane doesn’t expose `damage`.
+- **Process lifecycle** is scoped: Electron and ct-host processes register with `ProcessLifecycleManager`, so cleanup only touches processes started by the current run. Each test logs `<TestId>: completed` when finished.
 
-## Lessons Learned
-- Tackle failures in order: if page load waits never finish, later steps (“clicks don’t work”) are red herrings. Always fix the earliest broken stage before investigating downstream behaviour.
-- Use temporary logging/`DebugLogger.Log` to bracket suspicious code. Note the last message that prints and the first one that doesn’t; focus on that slice.
-- Remove instrumentation once a stage is stable to keep logs clean for the next agent.
+## Next Focus
+1. **Improve logging controls**
+   - Add a configuration flag to switch between verbose retry logging and concise mode per scenario.
+   - Limit repeated retry output (e.g., summarize after N attempts).
+2. **Reduce log size**
+   - Emit Playwright traces / console dumps only on failure.
+   - Consider piping high-volume debug streams (event-log row tracing, call-trace dumps) into separate files when needed.
 
-## Where to Look for Guidance
-- `docs/debugging.md` – updated troubleshooting patterns (component waits, iterative debugging case study).
-- `docs/test-debug-temp/README.md` – workspace status, per-test workflow, instrumentation plan.
-- `docs/test-debug-temp/*.md` – per-scenario notes; check `NoirSpaceShip.CalculateDamageCalltraceNavigation.md` and `NoirSpaceShip.JumpToAllEvents.md` for the latest findings.
-- `docs/test-debug-temp/BatchDebuggingWithAgents.md` – quick logistics for running single tests and maintaining logs.
+## Quick Tests
+- `direnv exec . dotnet run -- --suite=stable-tests --max-parallel=$(nproc)`
+- `direnv exec . dotnet run -- --suite=flaky-tests --mode=Electron --max-parallel=1`
+- `direnv exec . dotnet run -- --include=NoirSpaceShip.JumpToAllEvents --mode=Web --max-parallel=1`
+- `direnv exec . dotnet run -- --config=docs/test-debug-temp/config/NoirSpaceShip.LoopIterationSliderTracksRemainingShield.json`
+- `direnv exec . dotnet run -- --profile=parallel`
+- `direnv exec . dotnet run -- --include=NoirSpaceShip.SimpleLoopIterationJump --include=NoirSpaceShip.EventLogJumpHighlightsActiveRow`
+- `direnv exec . dotnet run -- --exclude=NoirSpaceShip.JumpToAllEvents --suite=stable-tests`
+- `direnv exec . dotnet run -- --mode=Electron`
 
-## Remaining Focus Areas
-- **Flaky suite triage**: every scenario in `flaky-tests` is currently failing (timeouts, missing context menu options, ct host start failures). The next agent should pick a single failing test, reproduce once, and work forward from the earliest error message.
-- **Loop iteration slider**: `NoirSpaceShip.LoopIterationSliderTracksRemainingShield` now depends on activating `iterate_asteroids` in the call trace (or jumping to `shield.nr:14`) before waiting on `.flow-loop-slider`; see the per-test note for the updated Playwright drag workflow.
-- **Flow loop controls**: the loop state pane only exposes `i`, `initial_shield`, `masses`, `remaining_shield`, and `shield_regen_percentage` when parked on line 1. A new test should confirm we can pick iterations via the loop textarea; once that passes, revisit `LoopIterationSliderTracksRemainingShield` to collect `damage`/`regeneration` after stepping deeper (breakpoint + F8).
-- **Call-trace Monaco navigation**: `NoirSpaceShip.CalculateDamageCalltraceNavigation` still relies on the workaround (richer active-line detection). Investigate Monaco telemetry when time permits so we can remove the extra logging.
-- **Artifact writer**: once a few flaky cases are stable, implement the per-test artifact capture described in the workspace README so CI has structured outputs.
+Review `docs/debugging.md` and `docs/test-debug-temp/*` for per-test notes before diving in. Good luck!
 
-## Getting Started
-1. Review the documents above (especially the per-test Markdown files) before running anything.
-2. Use `direnv exec . dotnet run -- --include=<TestId>` for isolated runs; configs in `docs/test-debug-temp/config/` narrow the plan to a single test.
-3. Keep `ui-tests/bin/Debug/net8.0/ui-tests-debug.log` open while debugging; reset it with `DebugLogger.Reset()` when instrumenting new stages.
+## Logging Controls
+- Scenarios now accept `\"verboseLogging\": true` to opt into DebugLogger/console chatter when you need deep traces.
+- Pass `--verbose-console` to enable verbose runner output (process counts, trace recordings, start/stop messages) for every test.
+- Successful runs stay quiet and end with a colorized summary that lists total executions plus Electron/Web pass/fail counts; failures still print the same summary after error details.

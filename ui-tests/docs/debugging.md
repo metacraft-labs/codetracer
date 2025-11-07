@@ -88,11 +88,19 @@ direnv exec . dotnet run -- --config=docs/test-debug-temp/config/NoirSpaceShip.C
 
 Adjust `--include` / `--suite` values to match the identifiers in `Execution/TestRegistry.cs` and `appsettings.json`.
 
+## Logging Controls
+
+- Runs stay quiet by default; only the final summary prints unless a test fails. Pass `--verbose-console` (sets `Runner.VerboseConsole=true`) when you need per-test start/stop messages, process snapshots, and ct-host stdout on the console.
+- Individual scenarios can opt into deep instrumentation by setting `"verboseLogging": true` on the scenario entry (or in a focused config). That flips on `DebugLogger`, retry traces, and pane-level logging for just that test.
+- To enable `DebugLogger` globally without touching configs, set `UITESTS_DEBUG_LOG_DEFAULT=1` before running `dotnet run`. Override the destination with `UITESTS_DEBUG_LOG=/abs/path/to/log`.
+- Retry helpers now emit detailed output for the first three attempts and then summarize ranges (e.g., "attempts 4-8 failed") to keep debug logs readable.
+
 ## Capturing Additional Diagnostics
 
 - Wrap flaky assertions with `RetryHelpers.RetryAsync` and log contextual data (like locator text) before rethrowing.
 - Enable Playwright tracing by setting `PWDEBUG=1` before launching the test runner. This allows stepping through actions in a headed browser.
 - If Electron pages fail to appear, inspect the logs emitted by `Execution/ElectronTestSessionExecutor`. The service polls `http://localhost:<port>/json/version`; network proxies or stale Electron builds usually explain a missing CDP endpoint. Web-browser failures typically surface in the `ct host` logs streamed by `Infrastructure/CtHostLauncher`.
+- Configure `UITESTS_DEBUG_LOG` when you need the debug log somewhere other than `bin/Debug/net8.0`. Remember to call `DebugLogger.Reset()` at the beginning of instrumentation-heavy runs so timestamps remain meaningful.
 
 ## Common Failure Modes
 

@@ -28,7 +28,8 @@ internal static class Program
             ["--include"] = "Runner:IncludeTests",
             ["--exclude"] = "Runner:ExcludeTests",
             ["--mode"] = "Runner:ExecutionModes:0",
-            ["--default-mode"] = "Runner:DefaultMode"
+            ["--default-mode"] = "Runner:DefaultMode",
+            ["--verbose-console"] = "Runner:VerboseConsole"
         }.ToImmutableDictionary(StringComparer.OrdinalIgnoreCase);
 
     public static async Task<int> Main(string[] args)
