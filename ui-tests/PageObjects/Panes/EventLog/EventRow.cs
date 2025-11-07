@@ -56,9 +56,16 @@ public class EventRow
     public async Task<bool> IsHighlightedAsync()
     {
         var classes = await _root.GetAttributeAsync("class") ?? string.Empty;
-        return classes.Contains("eventLog-selected", StringComparison.OrdinalIgnoreCase)
+        if (classes.Contains("eventLog-selected", StringComparison.OrdinalIgnoreCase)
+            || classes.Contains("event-selected", StringComparison.OrdinalIgnoreCase)
             || classes.Contains("active", StringComparison.OrdinalIgnoreCase)
-            || classes.Contains("selected", StringComparison.OrdinalIgnoreCase);
+            || classes.Contains("selected", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var ariaSelected = await _root.GetAttributeAsync("aria-selected") ?? string.Empty;
+        return ariaSelected.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task ClickAsync()

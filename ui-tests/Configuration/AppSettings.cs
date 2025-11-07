@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using UiTests.Execution;
 
@@ -30,6 +31,16 @@ public sealed class AppSettings
     /// Declarative catalogue describing which scenarios to execute.
     /// </summary>
     public IReadOnlyList<ScenarioSettings> Scenarios { get; set; } = Array.Empty<ScenarioSettings>();
+
+    /// <summary>
+    /// Named test suites referencing sets of registered test identifiers.
+    /// </summary>
+    public Dictionary<string, SuiteDefinition> Suites { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Named runner profiles describing reusable scheduling presets.
+    /// </summary>
+    public Dictionary<string, RunnerProfileSettings> Profiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class RunnerSettings
@@ -157,6 +168,19 @@ public sealed class ElectronSettings
     /// </summary>
     public string? SharedMemoryDirectory { get; set; }
         = null;
+
+    /// <summary>
+    /// Optional EDID preference when positioning Electron windows.
+    /// </summary>
+    public string? PreferredDisplayEdid { get; set; }
+        = null;
+
+    /// <summary>
+    /// Optional display index (1-based) when selecting a monitor for Electron windows.
+    /// </summary>
+    [Range(1, 16)]
+    public int? PreferredDisplayIndex { get; set; }
+        = null;
 }
 
 public sealed class WebSettings
@@ -200,9 +224,16 @@ public sealed class BrowserWindowSettings
         = null;
 
     /// <summary>
-    /// Optional display identifier when multiple monitors are available.
+    /// Optional display identifier when multiple monitors are available (1-based index).
     /// </summary>
-    public string? PreferredDisplay { get; set; }
+    [Range(1, 16)]
+    public int? PreferredDisplayIndex { get; set; }
+        = null;
+
+    /// <summary>
+    /// Optional EDID preference when selecting a monitor.
+    /// </summary>
+    public string? PreferredDisplayEdid { get; set; }
         = null;
 }
 
@@ -225,4 +256,46 @@ public sealed class HostPortSettings
     /// Optional list of preferred ports to try before falling back to random allocation (pseudo-setting example).
     /// </summary>
     public IReadOnlyList<int> PreferredPorts { get; set; } = Array.Empty<int>();
+}
+
+public sealed class SuiteDefinition
+{
+    /// <summary>
+    /// Tests included in the suite.
+    /// </summary>
+    [Required]
+    public IReadOnlyList<string> Tests { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Optional tags for documentation or filtering purposes.
+    /// </summary>
+    public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+}
+
+public sealed class RunnerProfileSettings
+{
+    /// <summary>
+    /// Overrides the runner parallelism (null => fall back to the recommended value).
+    /// </summary>
+    [Range(1, 512)]
+    public int? MaxParallelInstances { get; set; }
+        = null;
+
+    /// <summary>
+    /// Overrides the stop-on-first-failure setting.
+    /// </summary>
+    public bool? StopOnFirstFailure { get; set; }
+        = null;
+
+    /// <summary>
+    /// Overrides execution modes when provided.
+    /// </summary>
+    public IReadOnlyList<TestMode>? ExecutionModes { get; set; }
+        = null;
+
+    /// <summary>
+    /// Overrides the default mode for scenarios.
+    /// </summary>
+    public TestMode? DefaultMode { get; set; }
+        = null;
 }

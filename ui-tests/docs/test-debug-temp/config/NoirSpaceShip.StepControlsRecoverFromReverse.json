@@ -1,0 +1,28 @@
+{
+  "Runner": {
+    "MaxParallelInstances": 1,
+    "IncludeTests": [
+      "NoirSpaceShip.StepControlsRecoverFromReverse"
+    ],
+    "ExecutionModes": [
+      "Electron",
+      "Web"
+    ]
+  },
+  "Scenarios": [
+    {
+      "Id": "noirspaceship-stepcontrolsrecoverfromreverse--electron",
+      "Description": "Focused Electron run for NoirSpaceShip.StepControlsRecoverFromReverse",
+      "Mode": "Electron",
+      "Test": "NoirSpaceShip.StepControlsRecoverFromReverse",
+      "Enabled": true
+    },
+    {
+      "Id": "noirspaceship-stepcontrolsrecoverfromreverse--web",
+      "Description": "Focused Web run for NoirSpaceShip.StepControlsRecoverFromReverse",
+      "Mode": "Web",
+      "Test": "NoirSpaceShip.StepControlsRecoverFromReverse",
+      "Enabled": true
+    }
+  ]
+}

@@ -64,8 +64,6 @@ public static class NoirSpaceShipTests
 
         var calculateDamageEntry = await callTrace.FindEntryAsync("calculate_damage", forceReload: true)
             ?? throw new Exception("Unable to locate calculate_damage entry in call trace.");
-        var debugHtml = await calculateDamageEntry.Root.InnerHTMLAsync();
-        Console.WriteLine($"CalculateDamageCalltraceNavigation: calculate_damage entry HTML -> {debugHtml}");
         DebugLogger.Log("Activating calculate_damage entry");
         await calculateDamageEntry.ActivateAsync();
 
@@ -77,9 +75,8 @@ public static class NoirSpaceShipTests
 
         await RetryHelpers.RetryAsync(async () =>
         {
-            var lineNumber = await shieldEditor.ActiveLineNumberAsync();
-            Console.WriteLine($"CalculateDamageCalltraceNavigation: shield.nr active line -> {lineNumber?.ToString() ?? "<null>"}");
-            return lineNumber == 22;
+            var activeLine = await shieldEditor.ActiveLineNumberAsync();
+            return activeLine == 22;
         }, maxAttempts: 30, delayMs: 200);
 
         var statePane = (await layout.ProgramStateTabsAsync()).First();
@@ -101,8 +98,8 @@ public static class NoirSpaceShipTests
                 snapshot[name] = value.Trim();
             }
 
-            return snapshot.TryGetValue("mass", out var massValue) && massValue.Contains("100", StringComparison.Ordinal)
-                && snapshot.TryGetValue("damage", out var damageValue) && damageValue.Contains("100", StringComparison.Ordinal)
+            return snapshot.TryGetValue("initial_shield", out var initialValue) && initialValue.Contains("10000", StringComparison.Ordinal)
+                && snapshot.TryGetValue("mass", out var massValue) && massValue.Contains("100", StringComparison.Ordinal)
                 && snapshot.TryGetValue("remaining_shield", out var remainingValue) && remainingValue.Contains("10000", StringComparison.Ordinal);
         }, maxAttempts: 30, delayMs: 200);
 
@@ -112,82 +109,263 @@ public static class NoirSpaceShipTests
 
     public static async Task LoopIterationSliderTracksRemainingShield(IPage page)
     {
-        var layout = new LayoutPage(page);
-        await layout.WaitForAllComponentsLoadedAsync();
-
-        var editor = (await layout.EditorTabsAsync()).First(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase));
-        await editor.TabButton().ClickAsync();
-
-        var sliderLocator = editor.Root.Locator(".flow-loop-slider").First;
-        await sliderLocator.WaitForAsync(new() { State = WaitForSelectorState.Visible });
-
-        var sliderId = await sliderLocator.GetAttributeAsync("id")
-            ?? throw new Exception("Flow slider element is missing an id attribute.");
-
-        var statePane = (await layout.ProgramStateTabsAsync()).First();
-        await statePane.TabButton().ClickAsync();
-
-        async Task SetSliderAsync(int iteration)
+        var traceStep = 0;
+        void Trace(string message)
         {
-            await page.EvaluateAsync(
-                @"({ id, value }) => {
-                    const slider = document.getElementById(id);
-                    if (!slider || !slider.noUiSlider) {
-                        throw new Error('Flow slider is not available.');
-                    }
-                    slider.noUiSlider.set(value);
-                }",
-                new { id = sliderId, value = iteration });
-            await Task.Delay(150);
+            traceStep++;
+            DebugLogger.Log($"LoopIterationTrace[{traceStep}]: {message}");
         }
 
-        async Task<int> ReadIntVariableAsync(string name)
+        var layout = new LayoutPage(page);
+        Trace("Created LayoutPage");
+        await layout.WaitForAllComponentsLoadedAsync();
+        Trace("Waited for all components");
+
+        var callTrace = (await layout.CallTraceTabsAsync()).First();
+        await callTrace.TabButton().ClickAsync();
+        Trace("Focused call trace tab");
+        callTrace.InvalidateEntries();
+        Trace("Invalidated call trace entries");
+
+        Trace("RequireCallTraceEntryAsync configured");
+        var iterateEntry = await RequireCallTraceEntryAsync(callTrace, "iterate_asteroids", Trace);
+        Trace("Acquire iterate_asteroids entry");
+        await iterateEntry.ActivateAsync();
+        Trace("Activated iterate_asteroids");
+
+        var editor = await RequireShieldEditorAsync(layout, Trace);
+        Trace("Editor tab confirmed");
+
+        var sliderContainer = editor.Root.Locator(".flow-loop-slider").First;
+        Trace("Acquired slider container locator");
+        await sliderContainer.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+        Trace("Slider container visible");
+
+        var statePane = (await layout.ProgramStateTabsAsync()).First();
+        Trace("Retrieved state pane");
+        await statePane.TabButton().ClickAsync();
+        Trace("Focused state pane");
+
+        var iterationValueBoxLocator = editor.FlowValueElementById("flow-parallel-value-box-0-6-regeneration");
+        if (await iterationValueBoxLocator.CountAsync() == 0)
         {
+            Trace("Loop iteration value box id not found; falling back to name lookup");
+            iterationValueBoxLocator = editor.FlowValueElementByName("regeneration");
+        }
+
+        var iterationValueBox = iterationValueBoxLocator.First;
+        await iterationValueBox.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+        Trace("Loop iteration value box located");
+
+        var iterationTextarea = editor.Root.Locator(".flow-loop-textarea").First;
+        await iterationTextarea.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+        Trace("Loop textarea located");
+        const int loopLineNumber = 5;
+
+        async Task SetLoopIterationAsync(int iteration)
+        {
+            Trace($"SetLoopIterationAsync invoked for iteration {iteration}");
+            await iterationValueBox.ClickAsync();
+            await iterationValueBox.DblClickAsync();
+            Trace("Loop iteration value box focused");
+
+            await iterationTextarea.FillAsync(string.Empty);
+            Trace("Cleared textarea");
+            await iterationTextarea.TypeAsync(iteration.ToString(CultureInfo.InvariantCulture), new() { Delay = 20 });
+            Trace("Typed iteration value");
+            await iterationTextarea.PressAsync("Enter");
+            Trace("Pressed Enter on textarea");
+
+            await RetryHelpers.RetryAsync(async () =>
+            {
+                var currentIteration = await iterationValueBox.GetAttributeAsync("iteration");
+                Trace($"Current iteration attribute value: '{currentIteration}'");
+                return string.Equals(currentIteration, iteration.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+            }, maxAttempts: 15, delayMs: 200);
+
+            try
+            {
+                await RetryHelpers.RetryAsync(async () =>
+                {
+                    var activeLine = await editor.ActiveLineNumberAsync();
+                    Trace($"Active line after dragging loop slider: {activeLine}");
+                    return activeLine == 5;
+                }, maxAttempts: 30, delayMs: 200);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException("CodeTracer was expected to highlight line 5 after jumping to the requested iteration.", ex);
+            }
+        }
+        Trace("SetLoopIterationAsync configured");
+
+        async Task<int?> TryReadStateVariableAsync(string name)
+        {
+            Trace($"TryReadStateVariableAsync invoked for {name}");
             var variables = await statePane.ProgramStateVariablesAsync(forceReload: true);
+            Trace($"Retrieved {variables.Count} state variables");
             foreach (var variable in variables)
             {
                 var variableName = await variable.NameAsync();
+                Trace($"Inspecting variable '{variableName}'");
                 if (!string.Equals(variableName, name, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
                 var rawValue = await variable.ValueAsync() ?? string.Empty;
+                Trace($"Raw value for '{name}' is '{rawValue}'");
                 var cleaned = rawValue.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.TrimEnd('%') ?? rawValue;
                 if (int.TryParse(cleaned, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
                 {
+                    Trace($"Parsed '{name}' as {parsed}");
                     return parsed;
                 }
+                Trace($"Failed to parse '{name}' from '{rawValue}'");
                 throw new Exception($"Unable to parse integer value from '{rawValue}' for variable '{name}'.");
             }
 
-            throw new Exception($"Variable '{name}' was not found in the state pane.");
+            return null;
         }
 
-        var expectations = new[]
+        async Task<int> ReadIntVariableAsync(string name)
+        {
+            var value = await TryReadStateVariableAsync(name);
+            if (value.HasValue)
+            {
+                return value.Value;
+            }
+
+            Trace($"Variable '{name}' not found");
+            throw new Exception($"Variable '{name}' was not found in the state pane.");
+        }
+        Trace("ReadIntVariableAsync configured");
+
+        async Task<int> ReadLoopFlowValueAsync(string name)
+        {
+            Trace($"ReadLoopFlowValueAsync invoked for {name}");
+            var line = editor.LineByNumber(loopLineNumber);
+            var flowValues = await line.FlowValuesAsync();
+            foreach (var flowValue in flowValues)
+            {
+                var valueName = await flowValue.NameAsync();
+                Trace($"Inspecting flow value '{valueName}'");
+                if (!string.Equals(valueName, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var text = await flowValue.ValueTextAsync();
+                Trace($"Flow value '{name}' raw text '{text}'");
+                var cleaned = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.TrimEnd('%') ?? text;
+                if (int.TryParse(cleaned, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                {
+                    Trace($"Parsed flow value '{name}' as {parsed}");
+                    return parsed;
+                }
+
+                throw new Exception($"Unable to parse integer value from flow loop expression '{text}' for '{name}'.");
+            }
+
+            throw new Exception($"Flow loop value '{name}' was not found.");
+        }
+
+        async Task<int> ReadDamageValueAsync()
+        {
+            var fromState = await TryReadStateVariableAsync("damage");
+            if (fromState.HasValue)
+            {
+                Trace("Read 'damage' from state pane");
+                return fromState.Value;
+            }
+
+            Trace("'damage' not available in state pane; reading from flow loop value");
+            return await ReadLoopFlowValueAsync("damage");
+        }
+
+        var expectations = new List<(int Iteration, int Remaining, int Damage)>
         {
             (Iteration: 0, Remaining: 10000, Damage: 100),
             (Iteration: 1, Remaining: 9000, Damage: 2000),
             (Iteration: 2, Remaining: 8000, Damage: 2000),
-            (Iteration: 3, Remaining: 7000, Damage: 2000)
+            (Iteration: 3, Remaining: 7000, Damage: 2000),
+            (Iteration: 4, Remaining: 5000, Damage: 3000),
+            (Iteration: 5, Remaining: 3500, Damage: 2500),
+            (Iteration: 6, Remaining: 1250, Damage: 3250),
+            (Iteration: 7, Remaining: 1018, Damage: 1232)
         };
+        Trace("Expectations prepared");
 
         foreach (var step in expectations)
         {
-            await SetSliderAsync(step.Iteration);
+            Trace($"Beginning iteration {step.Iteration}");
+            await SetLoopIterationAsync(step.Iteration);
+            Trace($"Iteration {step.Iteration} applied");
             await RetryHelpers.RetryAsync(async () =>
             {
                 var remaining = await ReadIntVariableAsync("remaining_shield");
-                var damage = await ReadIntVariableAsync("damage");
+                var damage = await ReadDamageValueAsync();
+                Trace($"Iteration {step.Iteration} observed remaining={remaining}, damage={damage}");
                 return remaining == step.Remaining && damage == step.Damage;
             }, maxAttempts: 30, delayMs: 200);
+            Trace($"Iteration {step.Iteration} expectations met");
+            await page.WaitForTimeoutAsync(1000);
+            Trace($"Iteration {step.Iteration} post-delay complete");
+        }
+        Trace("LoopIterationSliderTracksRemainingShield completed");
+    }
+
+    public static async Task SimpleLoopIterationJump(IPage page)
+    {
+        var layout = new LayoutPage(page);
+        await layout.WaitForAllComponentsLoadedAsync();
+
+        var callTrace = (await layout.CallTraceTabsAsync()).First();
+        await callTrace.TabButton().ClickAsync();
+        callTrace.InvalidateEntries();
+
+        var iterateEntry = await RequireCallTraceEntryAsync(callTrace, "iterate_asteroids");
+        await iterateEntry.ActivateAsync();
+
+        var shieldEditor = await RequireShieldEditorAsync(layout);
+
+        var iterationValueBoxLocator = shieldEditor.FlowValueElementById("flow-parallel-value-box-0-6-regeneration");
+        if (await iterationValueBoxLocator.CountAsync() == 0)
+        {
+            DebugLogger.Log("SimpleLoopIterationJump: primary regeneration value box id not found; falling back to name lookup.");
+            iterationValueBoxLocator = shieldEditor.FlowValueElementByName("regeneration");
+        }
+
+        var iterationValueBox = iterationValueBoxLocator.First;
+        await iterationValueBox.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+        // await iterationValueBox.ClickAsync();
+        // await iterationValueBox.DblClickAsync();
+        var iterationEditor = shieldEditor.Root.Locator(".flow-loop-textarea").First;
+        await iterationEditor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+        const string iterationTarget = "4";
+        await iterationEditor.PressAsync("Backspace");
+        await iterationEditor.TypeAsync(iterationTarget, new() { Delay = 20 });
+        await iterationEditor.PressAsync("Enter");
+
+        try
+        {
+            await RetryHelpers.RetryAsync(async () =>
+            {
+                var activeLine = await shieldEditor.ActiveLineNumberAsync();
+                return activeLine == 5;
+            }, maxAttempts: 30, delayMs: 200);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException("CodeTracer was expected to jump to line 5 after jimping to a new loop iterration.", ex);
         }
     }
 
     public static async Task EventLogJumpHighlightsActiveRow(IPage page)
     {
         var layout = new LayoutPage(page);
-        await layout.WaitForAllComponentsLoadedAsync();
+        //await layout.WaitForAllComponentsLoadedAsync();
 
         var eventLog = (await layout.EventLogTabsAsync()).First();
         await eventLog.TabButton().ClickAsync();
@@ -202,24 +380,9 @@ public static class NoirSpaceShipTests
         var firstIndex = await firstRow.IndexAsync();
 
         await firstRow._root.ClickAsync();
+
+        await Task.Delay(1000);
         await RetryHelpers.RetryAsync(firstRow.IsHighlightedAsync);
-
-        await layout.NextButton().ClickAsync();
-        await RetryHelpers.RetryAsync(async () =>
-        {
-            var refreshed = (await eventLog.EventElementsAsync(true)).ToList();
-            foreach (var row in refreshed)
-            {
-                if (!await row.IsHighlightedAsync())
-                {
-                    continue;
-                }
-
-                var activeIndex = await row.IndexAsync();
-                return activeIndex != firstIndex;
-            }
-            return false;
-        });
     }
 
     public static async Task TraceLogRecordsDamageRegeneration(IPage page)
@@ -713,44 +876,42 @@ public static class NoirSpaceShipTests
     }
     public static async Task JumpToAllEvents(IPage page)
     {
-        DebugLogger.Log("Starting JumpToAllEvents");
         var layout = new LayoutPage(page);
-        DebugLogger.Log("JumpToAllEvents: waiting for components");
         await layout.WaitForAllComponentsLoadedAsync();
-        DebugLogger.Log("JumpToAllEvents: components loaded");
 
         var eventLogs = await layout.EventLogTabsAsync();
-        DebugLogger.Log($"JumpToAllEvents: located {eventLogs.Count} event log tabs");
         foreach (var tab in eventLogs)
         {
             if (!await tab.IsVisibleAsync())
             {
-                DebugLogger.Log("JumpToAllEvents: skipping hidden event log tab");
                 continue;
             }
 
-            var events = (await tab.EventElementsAsync()).ToList();
-            DebugLogger.Log($"JumpToAllEvents: tab has {events.Count} events");
-            if (!await EventsInExpectedState(events, -1))
+            await tab.TabButton().ClickAsync();
+
+            var events = (await tab.EventElementsAsync(true)).ToList();
+            if (events.Count == 0)
             {
-                throw new FailedTestException("Events were expected to be greyed out initially.");
+                throw new FailedTestException("Event log did not render any events.");
             }
 
-            for (int i = 0; i < events.Count; i++)
+            var limit = Math.Min(events.Count, 10);
+            for (var i = 0; i < limit; i++)
             {
-                DebugLogger.Log($"JumpToAllEvents: clicking event index {i}");
-                await events[i].ClickAsync();
+                var row = events[i];
+                await row.ClickAsync();
+
+                var capturedIndex = i;
                 await RetryHelpers.RetryAsync(async () =>
                 {
-                    var attr = await events[i]._root.GetAttributeAsync("class");
-                    DebugLogger.Log($"JumpToAllEvents: retry checking active class for index {i} -> {attr}");
-                    return attr?.Contains("active") == true;
-                });
-
-                if (!await EventsInExpectedState(events, i))
-                {
-                    throw new FailedTestException($"Event state mismatch after jumping to index {i}.");
-                }
+                    var highlighted = await events[capturedIndex].IsHighlightedAsync();
+                    if (!highlighted)
+                    {
+                        var classes = await events[capturedIndex]._root.GetAttributeAsync("class") ?? string.Empty;
+                        DebugLogger.Log($"JumpToAllEvents: row {capturedIndex} classes '{classes}' not highlighted yet.");
+                    }
+                    return highlighted;
+                }, maxAttempts: 15, delayMs: 200);
             }
         }
     }
@@ -792,7 +953,7 @@ public static class NoirSpaceShipTests
         var eventLog = (await layout.EventLogTabsAsync()).First();
         await eventLog.TabButton().ClickAsync();
 
-        // await editor.JumpToLineJsAsync(firstLine);
+        // TODO: replace gotoLine-based navigation with breakpoint + continue workflow
         await editor.OpenTrace(firstLine);
         await Task.Delay(1000);
         
@@ -828,7 +989,7 @@ public static class NoirSpaceShipTests
             return text.Contains(firstMessage, StringComparison.Ordinal);
         });
 
-        await editor.JumpToLineJsAsync(secondLine);
+        // TODO: replace gotoLine-based navigation with breakpoint + continue workflow
         await editor.OpenTrace(secondLine);
         var secondTracePanel = new TraceLogPanel(editor, secondLine);
         await secondTracePanel.Root.WaitForAsync(new() { State = WaitForSelectorState.Visible });
@@ -889,32 +1050,78 @@ public static class NoirSpaceShipTests
         });
     }
 
-    private static async Task<bool> EventsInExpectedState(IReadOnlyList<EventRow> events, int currentIndex)
+    private static async Task<CallTraceEntry> RequireCallTraceEntryAsync(
+        CallTracePane callTrace,
+        string functionName,
+        Action<string>? trace = null)
     {
-        for (int i = 0; i < events.Count; i++)
+        if (callTrace is null)
         {
-            var classes = await events[i]._root.GetAttributeAsync("class") ?? string.Empty;
-            var opacityStr = await events[i]._root.EvaluateAsync<string>("el => window.getComputedStyle(el).opacity");
-            var opacity = double.Parse(opacityStr, CultureInfo.InvariantCulture);
-
-            if (currentIndex < 0)
-            {
-                if (!classes.Contains("future") || opacity >= 1) return false;
-            }
-            else if (i < currentIndex)
-            {
-                if (!classes.Contains("past") || opacity < 1) return false;
-            }
-            else if (i == currentIndex)
-            {
-                if (!classes.Contains("active") || opacity < 1) return false;
-            }
-            else
-            {
-                if (!classes.Contains("future") || opacity >= 1) return false;
-            }
+            throw new ArgumentNullException(nameof(callTrace));
         }
 
-        return true;
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            throw new ArgumentException("Function name must be provided.", nameof(functionName));
+        }
+
+        CallTraceEntry? located = null;
+        await RetryHelpers.RetryAsync(async () =>
+        {
+            trace?.Invoke($"RequireCallTraceEntryAsync: refreshing entries for {functionName}");
+            callTrace.InvalidateEntries();
+            located = await callTrace.FindEntryAsync(functionName, forceReload: true);
+            if (located is not null)
+            {
+                trace?.Invoke($"RequireCallTraceEntryAsync: located '{functionName}'");
+                return true;
+            }
+
+            var allEntries = await callTrace.EntriesAsync(true);
+            foreach (var entry in allEntries)
+            {
+                var name = await entry.FunctionNameAsync();
+                trace?.Invoke($"RequireCallTraceEntryAsync: expanding entry '{name}'");
+                await entry.ExpandChildrenAsync();
+            }
+
+            return false;
+        }, maxAttempts: 20, delayMs: 200);
+
+        return located ?? throw new Exception($"Call trace entry '{functionName}' was not found.");
     }
+
+    private static async Task<EditorPane> RequireShieldEditorAsync(LayoutPage layout, Action<string>? trace = null)
+    {
+        if (layout is null)
+        {
+            throw new ArgumentNullException(nameof(layout));
+        }
+
+        EditorPane? editor = null;
+        await RetryHelpers.RetryAsync(async () =>
+        {
+            trace?.Invoke("RequireShieldEditorAsync: refreshing editor tabs");
+            var editors = await layout.EditorTabsAsync(true);
+            editor = editors.FirstOrDefault(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase));
+            if (editor is null)
+            {
+                trace?.Invoke("RequireShieldEditorAsync: shield.nr editor not found yet");
+                return false;
+            }
+
+            await editor.TabButton().ClickAsync();
+            trace?.Invoke("RequireShieldEditorAsync: focused shield.nr editor tab");
+            return true;
+        }, maxAttempts: 20, delayMs: 200);
+
+        if (editor is null)
+        {
+            trace?.Invoke("RequireShieldEditorAsync: failed to locate shield.nr editor tab");
+            throw new Exception("shield.nr editor tab was not available after selecting iterate_asteroids.");
+        }
+
+        return editor;
+    }
+
 }

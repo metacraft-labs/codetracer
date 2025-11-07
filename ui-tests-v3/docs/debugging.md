@@ -21,7 +21,7 @@ The V3 project does not yet ship runnable code. While prototyping:
 - Reuse the `CodeTracerSession` disposal pattern from `ui-tests/` to guarantee Electron shuts down between runs.
 - Enable Playwright tracing (`PWDEBUG=1`) when working on the new harness. Document findings in `docs/progress.md`.
 - When the new suite begins driving CodeTracer, record any environment variables or preconditions that differ from the legacy setup. Update `docs/specifications.md` accordingly.
-- For parallel runs (Electron + `ct host`), mirror the logging and cleanup hooks from `ui-tests-startup-example/ProcessUtilities.cs`—the reference implementation prints pre/post process inventories to expose leaks quickly.
+- For parallel runs (Electron + `ct host`), mirror the logging and cleanup hooks documented in `docs/launching-multi-instance.md`—that guide captures the retired prototype’s practice of printing pre/post process inventories to expose leaks quickly.
 
 ## Launching Multiple Instances
 

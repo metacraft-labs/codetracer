@@ -45,6 +45,12 @@ internal sealed class TestRegistry : ITestRegistry
 
         Register(
             new UiTestDescriptor(
+                "NoirSpaceShip.SimpleLoopIterationJump",
+                "Noir Space Ship / Simple Loop Iteration Jump",
+                async context => await NoirSpaceShipTests.SimpleLoopIterationJump(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
                 "NoirSpaceShip.EventLogJumpHighlightsActiveRow",
                 "Noir Space Ship / Event Log Jump Highlights Active Row",
                 async context => await NoirSpaceShipTests.EventLogJumpHighlightsActiveRow(context.Page)));

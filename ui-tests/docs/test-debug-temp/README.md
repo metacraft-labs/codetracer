@@ -47,3 +47,26 @@ When you add new information:
 - Update the test file with the new status and findings.
 - If a workaround or fix is applied, capture the change in the test file.
 - Keep this README aligned with the latest plan.
+
+## Manual command examples
+
+Run these from `ui-tests/` (after `direnv allow` or `nix develop`):
+
+```bash
+# Stable suite (Electron + Web) with ramped parallelism
+direnv exec . dotnet run -- --suite=stable-tests --profile=parallel
+
+# Flaky suite in both modes
+direnv exec . dotnet run -- --suite=flaky-tests --profile=parallel
+
+# Focus a single test in Electron only
+direnv exec . dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint --mode=Electron --max-parallel=1
+
+# Focus the same test in Web
+direnv exec . dotnet run -- --include=NoirSpaceShip.CreateSimpleTracePoint --mode=Web --max-parallel=1
+
+# Focused run using the matching JSON config
+direnv exec . dotnet run -- --config=docs/test-debug-temp/config/NoirSpaceShip.CreateSimpleTracePoint.json
+```
+
+Swap the test id / config path to match the scenario you need to reproduce.
