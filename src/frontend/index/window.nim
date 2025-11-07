@@ -21,7 +21,7 @@ proc stopBackendManager* =
   if not backendManagerProcess.isNil:
     backendManagerProcess.stopProcess()
     backendManagerProcess = nil
-  stopLspBridge()
+  stopAllLspBridges()
 
 proc duration*(name: string) =
   infoPrint fmt"index: TIME for {name}: {now() - data.start}ms"

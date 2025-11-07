@@ -1,23 +1,65 @@
 import
-  std/[asyncjs, jsffi, strformat, strutils],
+  std/[asyncjs, jsffi, strformat, strutils, tables],
   ../../lsp/bridge_reduced,
   ../lib/electron_lib,
   ../../common/ct_logging,
   electron_vars
 
 const
-  defaultLspPort = 3100
-  defaultLspPath = "/lsp"
+  rustLspKind* = "rust"
+  rubyLspKind* = "ruby"
   notificationHistoryLimit = 50
 
+type
+  BridgeConfig = object
+    kind: string
+    defaultPort: int
+    defaultPath: string
+    defaultCommand: string
+    envPort: string
+    envPath: string
+    envUrl: string
+    envCommand: string
+    envCwd: string
+
+  BridgeState = ref object
+    handle: JsObject
+    port: int
+    path: string
+    starting: bool
+    lastBridgeError: string
+
+let configuredBridges = [
+  BridgeConfig(
+    kind: rustLspKind,
+    defaultPort: 3100,
+    defaultPath: "/lsp",
+    defaultCommand: "rust-analyzer",
+    envPort: "CODETRACER_LSP_PORT",
+    envPath: "CODETRACER_LSP_PATH",
+    envUrl: "CODETRACER_LSP_URL",
+    envCommand: "CODETRACER_LS_COMMAND",
+    envCwd: "CODETRACER_LS_CWD"),
+  BridgeConfig(
+    kind: rubyLspKind,
+    defaultPort: 3110,
+    defaultPath: "/ruby-lsp",
+    defaultCommand: "ruby-lsp",
+    envPort: "CODETRACER_RUBY_LSP_PORT",
+    envPath: "CODETRACER_RUBY_LSP_PATH",
+    envUrl: "CODETRACER_RUBY_LSP_URL",
+    envCommand: "CODETRACER_RUBY_LS_COMMAND",
+    envCwd: "CODETRACER_RUBY_LS_CWD")
+]
+
 var
-  lspBridgeHandle: JsObject = nil
-  lspBridgePort* = defaultLspPort
-  lspBridgePath* = defaultLspPath
-  lspBridgeStarting = false
+  bridgeConfigs = initTable[string, BridgeConfig]()
+  bridgeStates = initTable[string, BridgeState]()
   lspNotificationHandler: LspNotificationHandler = nil
   lspNotifications*: seq[string] = @[]
-  lastBridgeError* = ""
+
+for cfg in configuredBridges:
+  bridgeConfigs[cfg.kind] = cfg
 
 proc newObject(): JsObject {.importjs: "({})".}
 proc setField(target: JsObject; name: cstring; value: JsObject) {.importjs: "#[#] = #".}
@@ -26,6 +68,7 @@ proc push(array: JsObject; value: JsObject) {.importjs: "#.push(#)".}
 proc boolToJs(flag: bool): JsObject {.importjs: "(# ? true : false)".}
 
 proc toDisplayString(value: JsObject): cstring {.importjs: "(function(value){ try { if (value === undefined) return 'undefined'; if (typeof value === 'string') return value; return JSON.stringify(value); } catch (err) { return String(value); } })(#)".}
+proc toCStringValue(value: JsObject): cstring {.importjs: "String(#)".}
 proc windowIsDestroyed(win: JsObject): bool {.importjs: "((w)=> (w && typeof w.isDestroyed === 'function') ? w.isDestroyed() : false)(#)".}
 proc windowWebContents(win: JsObject): JsObject {.importjs: "((w)=> (w ? w.webContents : undefined))(#)".}
 proc webContentsIsDestroyed(contents: JsObject): bool {.importjs: "((c)=> (c && typeof c.isDestroyed === 'function') ? c.isDestroyed() : false)(#)".}
@@ -39,30 +82,57 @@ when not defined(ctRenderer):
   proc wsClose(ws: JsObject) {.importjs: "#.close()".}
   proc jsValueToString(value: JsObject): cstring {.importjs: "String(#)".}
 
-proc lspBridgeUrl*(): string =
-  "ws://127.0.0.1:" & $lspBridgePort & lspBridgePath
+proc getBridgeConfig(kind: string): BridgeConfig =
+  if bridgeConfigs.hasKey(kind):
+    bridgeConfigs[kind]
+  else:
+    bridgeConfigs[rustLspKind]
 
-proc buildStatusPayload(running: bool): JsObject =
+proc getBridgeState(kind: string): BridgeState =
+  if bridgeStates.hasKey(kind):
+    return bridgeStates[kind]
+  let cfg = getBridgeConfig(kind)
+  let state = BridgeState(
+    handle: nil,
+    port: cfg.defaultPort,
+    path: cfg.defaultPath,
+    starting: false,
+    lastBridgeError: "")
+  bridgeStates[kind] = state
+  state
+
+proc lspBridgeUrl(kind: string): string =
+  let state = getBridgeState(kind)
+  "ws://127.0.0.1:" & $state.port & state.path
+
+proc buildStatusPayload(kind: string; running: bool): JsObject =
+  let state = getBridgeState(kind)
   result = newObject()
-  let urlText = if running: lspBridgeUrl() else: ""
+  let urlText = if running: lspBridgeUrl(kind) else: ""
   setField(result, "url", toJs(urlText.cstring))
   setField(result, "running", boolToJs(running))
-  if lastBridgeError.len > 0:
-    setField(result, "error", toJs(lastBridgeError.cstring))
+  setField(result, "kind", toJs(kind.cstring))
+  if state.lastBridgeError.len > 0:
+    setField(result, "error", toJs(state.lastBridgeError.cstring))
   if lspNotifications.len > 0:
     let notifArray = newArray()
     for note in lspNotifications:
       push(notifArray, toJs(note.cstring))
     setField(result, "notifications", notifArray)
 
-proc sendLspStatusToRenderer* =
+proc sendLspStatusToRenderer*(kind: string = "") =
+  if kind.len == 0:
+    for cfg in configuredBridges:
+      sendLspStatusToRenderer(cfg.kind)
+    return
   let windowRef = electron_vars.mainWindow
   if windowRef.isNil or windowIsDestroyed(windowRef):
     return
   let contents = windowWebContents(windowRef)
   if contents.isNil or webContentsIsDestroyed(contents):
     return
-  let payload = buildStatusPayload(not lspBridgeHandle.isNil)
+  let state = getBridgeState(kind)
+  let payload = buildStatusPayload(kind, not state.handle.isNil)
   try:
     contents.send(cstring"CODETRACER::lsp-url", payload)
   except CatchableError:
@@ -94,8 +164,8 @@ proc resetNotificationHandler() =
   lspNotifications.setLen(0)
   sendLspStatusToRenderer()
 
-proc envValue(name: cstring): string =
-  let raw = nodeProcess.env[name]
+proc envValue(name: string): string =
+  let raw = nodeProcess.env[name.cstring]
   if raw.isNil:
     return ""
   $raw
@@ -103,108 +173,118 @@ proc envValue(name: cstring): string =
 proc setEnv(name, value: string) =
   nodeProcess.env[name.cstring] = value.cstring
 
-proc normalizePath(path: string): string =
+proc normalizePath(path: string; defaultValue: string): string =
   if path.len == 0:
-    return defaultLspPath
+    return defaultValue
   if path[0] == '/':
     return path
   '/' & path
 
-proc parsePort(value: string): int =
+proc parsePort(value: string; defaultValue: int): int =
   if value.len == 0:
-    return defaultLspPort
+    return defaultValue
   try:
     let parsed = value.parseInt()
     if parsed <= 0 or parsed >= 65536:
       warnPrint "index:lsp invalid port provided: ", value
-      return defaultLspPort
+      return defaultValue
     parsed
   except CatchableError:
     warnPrint "index:lsp failed to parse port value: ", value
-    defaultLspPort
+    defaultValue
 
 
 proc getField(target: JsObject; name: cstring): JsObject {.importjs: "#[#]".}
 proc serverClose(server: JsObject) {.importjs: "#.close()".}
 proc wssClose(wss: JsObject) {.importjs: "#.close()".}
 
-proc startLspBridge*(lsCommand: string = ""; lsCwd: string = ""): Future[void] {.async.} =
-  if not lspBridgeHandle.isNil:
+proc lspBridgeUrl*(): string =
+  lspBridgeUrl(rustLspKind)
+
+proc startLspBridge*(kind: string = rustLspKind; lsCommand: string = ""; lsCwd: string = ""): Future[void] {.async.} =
+  let cfg = getBridgeConfig(kind)
+  let state = getBridgeState(kind)
+  if not state.handle.isNil or state.starting:
     return
-  if lspBridgeStarting:
-    return
-  lspBridgeStarting = true
-  var port = parsePort(envValue(cstring"CODETRACER_LSP_PORT"))
-  var path = normalizePath(envValue(cstring"CODETRACER_LSP_PATH"))
-  var command = lsCommand
-  let commandOverride = envValue(cstring"CODETRACER_LS_COMMAND")
+  state.starting = true
+  var port = parsePort(envValue(cfg.envPort), cfg.defaultPort)
+  var path = normalizePath(envValue(cfg.envPath), cfg.defaultPath)
+  var command = if lsCommand.len > 0: lsCommand else: cfg.defaultCommand
+  let commandOverride = envValue(cfg.envCommand)
   if commandOverride.len > 0:
     command = commandOverride
   var commandDir = lsCwd
-  let cwdOverride = envValue(cstring"CODETRACER_LS_CWD")
+  let cwdOverride = envValue(cfg.envCwd)
   if cwdOverride.len > 0:
     commandDir = cwdOverride
   if path.len == 0:
-    path = defaultLspPath
+    path = cfg.defaultPath
   ensureNotificationHandler()
   try:
     let handle = await startBridge(cint(port), path, command, commandDir)
-    lspBridgeHandle = handle
-    lspBridgePort = port
-    lspBridgePath = path
-    lastBridgeError = ""
-    setEnv("CODETRACER_LSP_PORT", $port)
-    setEnv("CODETRACER_LSP_PATH", path)
-    setEnv("CODETRACER_LSP_URL", lspBridgeUrl())
-    infoPrint fmt"index:lsp bridge listening on {lspBridgeUrl()}"
-    sendLspStatusToRenderer()
+    state.handle = handle
+    state.port = port
+    state.path = path
+    state.lastBridgeError = ""
+    setEnv(cfg.envPort, $port)
+    setEnv(cfg.envPath, path)
+    setEnv(cfg.envUrl, lspBridgeUrl(kind))
+    infoPrint fmt"index:lsp bridge ({kind}) listening on {lspBridgeUrl(kind)}"
+    sendLspStatusToRenderer(kind)
   except CatchableError:
-    lspBridgeHandle = nil
-    lastBridgeError = getCurrentExceptionMsg()
-    errorPrint "index:lsp bridge failed to start: ", lastBridgeError
-    sendLspStatusToRenderer()
+    state.handle = nil
+    state.lastBridgeError = getCurrentExceptionMsg()
+    errorPrint fmt"index:lsp bridge ({kind}) failed to start: {state.lastBridgeError}"
+    sendLspStatusToRenderer(kind)
     raise
   finally:
-    lspBridgeStarting = false
+    state.starting = false
 
-proc stopLspBridge* =
-  if lspBridgeHandle.isNil:
+proc stopLspBridge*(kind: string = rustLspKind) =
+  let cfg = getBridgeConfig(kind)
+  let state = getBridgeState(kind)
+  if state.handle.isNil:
     return
-  let server = getField(lspBridgeHandle, "server")
-  let wss = getField(lspBridgeHandle, "wss")
-  lspBridgeHandle = nil
+  let server = getField(state.handle, "server")
+  let wss = getField(state.handle, "wss")
+  state.handle = nil
   try:
     if not wss.isNil:
       wssClose(wss)
   except CatchableError:
-    warnPrint "index:lsp bridge websocket close error: ", getCurrentExceptionMsg()
+    warnPrint fmt"index:lsp bridge websocket close error ({kind}): {getCurrentExceptionMsg()}"
   try:
     if not server.isNil:
       serverClose(server)
   except CatchableError:
-    warnPrint "index:lsp bridge server close error: ", getCurrentExceptionMsg()
-  lastBridgeError = ""
-  lspBridgePort = defaultLspPort
-  lspBridgePath = defaultLspPath
-  setEnv("CODETRACER_LSP_URL", "")
-  setEnv("CODETRACER_LSP_PORT", "")
-  setEnv("CODETRACER_LSP_PATH", "")
-  infoPrint "index:lsp bridge stopped"
-  resetNotificationHandler()
-  sendLspStatusToRenderer()
+    warnPrint fmt"index:lsp bridge server close error ({kind}): {getCurrentExceptionMsg()}"
+  state.lastBridgeError = ""
+  state.port = cfg.defaultPort
+  state.path = cfg.defaultPath
+  setEnv(cfg.envUrl, "")
+  setEnv(cfg.envPort, "")
+  setEnv(cfg.envPath, "")
+  infoPrint fmt"index:lsp bridge ({kind}) stopped"
+  sendLspStatusToRenderer(kind)
 
-proc sendLspProbe*(payload: JsObject) =
+proc stopAllLspBridges* =
+  for cfg in configuredBridges:
+    stopLspBridge(cfg.kind)
+  resetNotificationHandler()
+
+proc sendLspProbe*(payload: JsObject; kind: string = rustLspKind) =
   when defined(ctRenderer):
     discard
   else:
-    if lspBridgeHandle.isNil:
-      warnPrint "index:lsp probe skipped because bridge is not running"
+    let state = getBridgeState(kind)
+    if state.handle.isNil:
+      warnPrint fmt"index:lsp probe skipped ({kind}) because bridge is not running"
       return
-    let url = lspBridgeUrl()
+    let url = lspBridgeUrl(kind)
     var completed = false
     let ws = createWs(url.cstring)
     wsOnOpen(ws, proc () {.closure.} =
-      infoPrint fmt"index:lsp probe sending payload to {url}"
+      infoPrint fmt"index:lsp probe sending payload to {url} ({kind})"
       wsSendJson(ws, payload)
     )
     wsOnMessage(ws, proc (data: JsObject) {.closure.} =
@@ -223,4 +303,15 @@ proc sendLspProbe*(payload: JsObject) =
     )
 
 proc onLspGetUrl*(sender: JsObject, response: JsObject) {.async.} =
-  sendLspStatusToRenderer()
+  var kind = rustLspKind
+  let kindField = response["kind"]
+  if not kindField.isNil:
+    let rawKind = $toCStringValue(kindField)
+    if rawKind.len > 0:
+      kind = rawKind
+  if kind.len == 0:
+    sendLspStatusToRenderer()
+  elif bridgeConfigs.hasKey(kind):
+    sendLspStatusToRenderer(kind)
+  else:
+    sendLspStatusToRenderer(rustLspKind)
