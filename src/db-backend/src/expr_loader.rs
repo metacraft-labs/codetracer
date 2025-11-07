@@ -404,6 +404,7 @@ impl ExprLoader {
 
     pub fn load_branch_for_position(&self, position: Position, path: &PathBuf) -> HashMap<usize, BranchState> {
         let mut results: HashMap<usize, BranchState> = HashMap::default();
+        info!("branches {:?}", self.processed_files[path].position_branches);
         if self.processed_files.contains_key(path)
             && self.processed_files[path].position_branches.contains_key(&position)
         {

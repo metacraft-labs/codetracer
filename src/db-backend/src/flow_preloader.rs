@@ -446,6 +446,7 @@ impl<'a> CallFlowPreloader<'a> {
         step_count: i64,
     ) -> FlowViewUpdate {
         if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(line, path_buf) {
+            info!("loop shape {:?}", loop_shape);
             if loop_shape.first.0 == line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
@@ -463,6 +464,7 @@ impl<'a> CallFlowPreloader<'a> {
                     .loop_iteration_steps
                     .push(vec![LoopIterationSteps::default()]);
                 flow_view_update.branches_taken.push(vec![BranchesTaken::default()]);
+                info!("add active loop");
             } else if (flow_view_update.loops.last().unwrap().first.0) == line.0 {
                 flow_view_update.loops.last_mut().unwrap().iteration.inc();
                 flow_view_update
@@ -481,6 +483,7 @@ impl<'a> CallFlowPreloader<'a> {
                     .unwrap()
                     .rr_ticks_for_iterations
                     .push(RRTicks(step_id.0));
+                info!("add iteration");
             }
         }
 
@@ -507,6 +510,7 @@ impl<'a> CallFlowPreloader<'a> {
                     flow_view_update.loops.clone().last_mut().unwrap().base.0,
                     self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
                 );
+                info!("add branch for position {:?} {:?}", path_buf.display(), line);
             }
         } else {
             flow_view_update.loop_iteration_steps[0][0]
@@ -516,7 +520,9 @@ impl<'a> CallFlowPreloader<'a> {
                 0,
                 self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
             );
+            info!("add branch for position {:?} {:?}", path_buf.display(), line);
         }
+        info!("branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
     }
 
