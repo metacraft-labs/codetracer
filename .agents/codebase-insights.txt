@@ -18,6 +18,8 @@
 
 
 - The db-backend DAP server now responds to the `configurationDone` request.
+- The Electron index process now boots an LSP bridge (ws://127.0.0.1:3100/lsp by default) using `bridge_reduced.nim`; port/path/command can be overridden with `CODETRACER_LSP_*` env vars.
+- Renderer/bridge coordination uses IPC channels `CODETRACER::lsp-get-url` (request) and `CODETRACER::lsp-url` (status updates).
 
 - Electron lifecycle: the backend-manager process is spawned in
   `src/frontend/index.nim` during `ready()`. Previously, it was only stopped
@@ -53,3 +55,4 @@
 - `ct host` now accepts `--idle-timeout` (env: `CODETRACER_HOST_IDLE_TIMEOUT`, default 10m; units ms/s/m/h; `0`/`never` disable) and passes `--idle-timeout-ms` to server mode, which tracks last connection/activity and exits cleanly on idle.
 - Server mode now refreshes idle activity on every inbound socket.io event via `onAny`; the `__activity__` ping remains as a cheap manual/testing hook but is no longer required to keep the host alive during normal IPC traffic. Disconnects reset the “no-connection” timer so idle shutdown counts from the last detach.
 - Server mode emits `CODETRACER::connection-disconnected` to superseded sockets and before idle-timeout exits; the browser tracks this plus socket disconnects to show a persistent warning (with reconnect action) and a status-bar “Disconnected” badge.
+- Webpack expects the `vscode` alias to point at the `@codingame/monaco-vscode-extension-api` package root so that `monaco-languageclient` can load `vscode/localExtensionHost`.
