@@ -9,6 +9,7 @@ eprint_note() {
 
 eprint_error() {
     echo -e "\x1b[31m[CodeTracer installer Error]: $1\x1b[0m"
+    exit 1
 }
 
 eprint_warning() {
@@ -49,22 +50,22 @@ install_apt() {
     getw=$(which wget || echo "")
     if [ "$getw" == "" ]; then
         eprint_note "Installing wget!"
-        "$super" apt install -y wget || (eprint_error "Couldn't install wget!" && return 1)
+        "$super" apt install -y wget || eprint_error "Couldn't install wget!"
     fi
 
-    "$super" mkdir -p /etc/apt/sources.list.d /etc/apt/trusted.gpg.d &> /dev/null || (eprint_error "Couldn't created directories for repository!" && return 1)
+    "$super" mkdir -p /etc/apt/sources.list.d /etc/apt/trusted.gpg.d &> /dev/null || eprint_error "Couldn't created directories for repository!"
 
-    "$super" echo "deb [arch=amd64] https://deb.codetracer.com stable main" > /etc/apt/sources.list.d/metacraft-debs.list || (eprint_error "Couldn't install repository metadata!" && return 1)
+    "$super" echo "deb [arch=amd64] https://deb.codetracer.com stable main" > /etc/apt/sources.list.d/metacraft-debs.list || eprint_error "Couldn't install repository metadata!"
     eprint_note "Added apt repository as /etc/apt/sources.list.d/metacraft-debs.list"
 
-    (wget "https://deb.codetracer.com/keys/public.asc" && "$super" mv public.asc /etc/apt/trusted.gpg.d/metacraft-debs.asc) || (eprint_error "Couldn't install gpg public key!" && return 1)
+    (wget "https://deb.codetracer.com/keys/public.asc" && "$super" mv public.asc /etc/apt/trusted.gpg.d/metacraft-debs.asc) || eprint_error "Couldn't install gpg public key!"
     eprint_note "Installed the public key for CodeTracer as /etc/apt/trusted.gpg.d/metacraft-debs.asc"
 
     eprint_note "Running apt update!"
-    "$super" apt update -y || (eprint_error "Couldn't update repositories!" && return 1)
+    "$super" apt update -y || eprint_error "Couldn't update repositories!"
 
     eprint_note "Installing CodeTracer!"
-    "$super" apt install -y codetracer || (eprint_install_fail && return 1)
+    "$super" apt install -y codetracer || eprint_install_fail
 
     eprint_success
 }
@@ -89,13 +90,13 @@ install_dnf() {
         return 0
     fi
 
-    install_rpm || (eprint_error "Couldn't install rpm repository!" && return 1)
+    install_rpm || eprint_error "Couldn't install rpm repository!"
 
     eprint_note "Updating repositories"
-    "$super" dnf -y update || (eprint_error "Couldn't update repositories" && return 1)
+    "$super" dnf -y update || eprint_error "Couldn't update repositories"
 
     eprint_note "Installing CodeTracer"
-    "$super" dnf -y install codetracer || (eprint_install_fail && return 1)
+    "$super" dnf -y install codetracer || eprint_install_fail
 
     eprint_success
 }
@@ -105,13 +106,13 @@ install_yum() {
         return 0
     fi
 
-    install_rpm || (eprint_error "Couldn't install rpm repository!" && return 1)
+    install_rpm || eprint_error "Couldn't install rpm repository!"
 
     eprint_note "Updating repositories"
-    "$super" yum -y update || (eprint_error "Couldn't update repositories" && return 1)
+    "$super" yum -y update || eprint_error "Couldn't update repositories"
 
     eprint_note "Installing CodeTracer"
-    "$super" yum -y install codetracer || (eprint_install_fail && return 1)
+    "$super" yum -y install codetracer || eprint_install_fail
 
     eprint_success
 }
@@ -123,50 +124,50 @@ install_portage() {
 
     request_privilleged_access || return 1
 
-    emerge app-eselect/eselect-repository || (eprint_error "Couldn't install eselect-repository!" && return 1)
+    emerge app-eselect/eselect-repository || eprint_error "Couldn't install eselect-repository!"
 
     gitt=$(which git || echo "")
     if [ "$gitt" == "" ]; then
         eprint_note "Installing git"
-        emerge dev-vcs/git || (eprint_error "Couldn't install git!" && return 1)
+        emerge dev-vcs/git || eprint_error "Couldn't install git!"
     fi
 
     eprint_note "Adding ebuild overlay"
-    "$super" eselect repository add metacraft-overlay git https://github.com/metacraft-labs/metacraft-overlay.git || (eprint_error "Couldn't add gentoo overlay!" && return 1)
+    "$super" eselect repository add metacraft-overlay git https://github.com/metacraft-labs/metacraft-overlay.git || eprint_error "Couldn't add gentoo overlay!"
 
     eprint_note "Synchronizing repositories"
-    "$super" emerge --sync || (eprint_error "Couldn't sync repositories!" && return 1)
+    "$super" emerge --sync || eprint_error "Couldn't sync repositories!"
 
     eprint_note "Installing CodeTracer"
-    "$super" emerge codetracer-bin || (eprint_install_fail && return 1)
+    "$super" emerge codetracer-bin || eprint_install_fail
 
     eprint_success
 }
 
 install_pamac() {
     eprint_note "Installing CodeTracer"
-    pamac build codetracer --no-confirm || (eprint_install_fail && return 1)
+    pamac build codetracer --no-confirm || eprint_install_fail
     eprint_success
 }
 
 install_yay() {
     eprint_note "Installing CodeTracer"
-    yay -S codetracer --noconfirm || (eprint_install_fail && return 1)
+    yay -S codetracer --noconfirm || eprint_install_fail
     eprint_success
 }
 
 install_paru() {
     eprint_note "Installing CodeTracer"
-    paru -S codetracer --noconfirm || (eprint_install_fail && return 1)
+    paru -S codetracer --noconfirm || eprint_install_fail
     eprint_success
 }
 
 download_and_verify() {
     eprint_note "Downloading $1"
 
-    curl -fL --output "CodeTracer.pub.asc" "https://downloads.codetracer.com/CodeTracer.pub.asc" || (eprint_error "Couldn't download gpg public key!" && return 1)
-    curl -fL --output "CodeTracer.$1.asc" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1.asc" || (eprint_error "Couldn't download gpg signature!" && return 1)
-    curl -fL --output "CodeTracer.$1" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1" || (eprint_error "Couldn't download $1" && return 1)
+    curl -fL --output "CodeTracer.pub.asc" "https://downloads.codetracer.com/CodeTracer.pub.asc" || eprint_error "Couldn't download gpg public key!"
+    curl -fL --output "CodeTracer.$1.asc" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1.asc" || eprint_error "Couldn't download gpg signature!"
+    curl -fL --output "CodeTracer.$1" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1" || eprint_error "Couldn't download $1"
 
     if [ "$(which gpg)" != "" ]; then
         while true; do
@@ -207,7 +208,6 @@ install_dmg() {
 
     if [ -z "$MOUNT_POINT" ]; then
         eprint_error "Failed to mount DMG."
-        return 1
     fi
 
     eprint_note "Mounted at: $MOUNT_POINT"
@@ -216,9 +216,8 @@ install_dmg() {
     APP_PATH=$(find "$MOUNT_POINT" -maxdepth 1 -type d -name "CodeTracer.app" | head -n 1)
 
     if [ -z "$APP_PATH" ]; then
-        eprint_error " No .app bundle found in DMG."
-        hdiutil detach "$MOUNT_POINT" >/dev/null
-        return 1
+        hdiutil detach "$MOUNT_POINT" > /dev/null
+        eprint_error "No .app bundle found in DMG."
     fi
 
     eprint_note "Copying to /Applications..."
@@ -242,18 +241,18 @@ install_appimage() {
     download_and_verify AppImage amd64 || return 1
     
     eprint_note "Installing AppImage"
-    mkdir -p "$HOME/.local/bin" || (eprint_error "Couldn't create $HOME/.local/bin!" && return 1)
-    mv CodeTracer.AppImage "$HOME/.local/bin/ct" || (eprint_error "Couldn't install ct in $HOME/.local/bin!" && return 1)
+    mkdir -p "$HOME/.local/bin" || eprint_error "Couldn't create $HOME/.local/bin!"
+    mv CodeTracer.AppImage "$HOME/.local/bin/ct" || eprint_error "Couldn't install ct in $HOME/.local/bin!"
 
     "$HOME"/.local/bin/ct install
 
     eprint_success
 }
 
-install_apt || (eprint_error "Couldn't install using apt" && exit 1)
-install_dnf || (eprint_error "Couldn't install using dnf" && exit 1)
-install_yum || (eprint_error "Couldn't install using yum" && exit 1)
-install_portage || (eprint_error "Couldn't install using portage" && exit 1)
+install_apt
+install_dnf
+install_yum
+install_portage
 
 pamac=$(which pamac || echo "")
 yay=$(which yay || echo "")
@@ -261,17 +260,17 @@ paru=$(which paru || echo "")
 pacman=$(which pacman || echo "")
 
 if [ "$pamac" != "" ]; then
-    install_pamac || (eprint_error "Couldn't install using pamac" && exit 1)
+    install_pamac
     exit 0
 fi
 
 if [ "$yay" != "" ]; then
-    install_yay || (eprint_error "Couldn't install using yay" && exit 1)
+    install_yay
     exit 0
 fi
 
 if [ "$paru" != "" ]; then
-    install_paru || (eprint_error "Couldn't install using paru" && exit 1)
+    install_paru
     exit 0
 fi
 
@@ -282,5 +281,5 @@ Please install one of them, or request that we add support for your AUR helper, 
     eprint_warning "Installing as AppImage instead!"
 fi
 
-install_dmg || (eprint_error "Couldn't install dmg" && exit 1)
-install_appimage || (eprint_error "Couldn't install appimage" && exit 1)
+install_dmg
+install_appimage
