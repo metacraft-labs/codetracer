@@ -37,7 +37,6 @@ request_privilleged_access() {
         super="doas"
     else
         eprint_error "Could not find either sudo or doas. Please install either one so that we can ellevate privilleges!"
-        return 1
     fi
 }
 
@@ -55,7 +54,7 @@ install_apt() {
 
     "$super" mkdir -p /etc/apt/sources.list.d /etc/apt/trusted.gpg.d &> /dev/null || eprint_error "Couldn't created directories for repository!"
 
-    "$super" echo "deb [arch=amd64] https://deb.codetracer.com stable main" > /etc/apt/sources.list.d/metacraft-debs.list || eprint_error "Couldn't install repository metadata!"
+    "$super" sh -c 'echo "deb [arch=amd64] https://deb.codetracer.com stable main" > /etc/apt/sources.list.d/metacraft-debs.list' || eprint_error "Couldn't install repository metadata!"
     eprint_note "Added apt repository as /etc/apt/sources.list.d/metacraft-debs.list"
 
     (wget "https://deb.codetracer.com/keys/public.asc" && "$super" mv public.asc /etc/apt/trusted.gpg.d/metacraft-debs.asc) || eprint_error "Couldn't install gpg public key!"
@@ -74,13 +73,13 @@ install_rpm() {
     request_privilleged_access || return 1
     "$super" mkdir -p /etc/yum.repos.d &> /dev/null || return 1
 
-    "$super" echo " \
+    "$super" sh -c 'echo " \
 [metacraft-rpms]
 name=MetacraftRPM
 baseurl=https://rpm.codetracer.com/
 enabled=1
 gpgcheck=1
-gpgkey=https://rpm.codetracer.com/rpmkey.pub" > /etc/yum.repos.d/metacraft-rpms.repo || return 1
+gpgkey=https://rpm.codetracer.com/rpmkey.pub" > /etc/yum.repos.d/metacraft-rpms.repo' || return 1
 
     eprint_note "Added RPM repository as /etc/yum.repos.d/metacraft-rpms.repo"
 }
