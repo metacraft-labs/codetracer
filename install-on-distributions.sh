@@ -242,8 +242,21 @@ install_appimage() {
     eprint_note "Installing AppImage"
     mkdir -p "$HOME/.local/bin" || eprint_error "Couldn't create $HOME/.local/bin!"
     mv CodeTracer.AppImage "$HOME/.local/bin/ct" || eprint_error "Couldn't install ct in $HOME/.local/bin!"
+    chmod +x "$HOME/.local/bin/ct" || eprint_error "Couldn't make ct executable!"
 
-    "$HOME"/.local/bin/ct install
+    latest_resources=$(curl -fL "https://api.github.com/repos/metacraft-labs/codetracer/releases?per_page=1" | grep -m1 "browser_download_url" | sed 's/.*browser_download_url.*https/https/g' | sed 's/"//g')
+    curl -fL "resources.tar.xz" "$latest_resources" || eprint_error "Couldn't download resources.tar.xz from the latest release!"
+    tar -xf resources.tar.xz || eprint_error "Couldn't extract resources!"
+
+    install -Dm644 resources/Icon.iconset/icon_16x16.png "$HOME"/.local/share/icons/hicolor/16x16/apps/codetracer.png
+    install -Dm644 resources/Icon.iconset/icon_32x32.png "$HOME"/.local/share/icons/hicolor/32x32/apps/codetracer.png
+    install -Dm644 resources/Icon.iconset/icon_128x128.png "$HOME"/.local/share/icons/hicolor/128x128/apps/codetracer.png
+    install -Dm644 resources/Icon.iconset/icon_256x256.png "$HOME"/.local/share/icons/hicolor/256x256/apps/codetracer.png
+    install -Dm644 resources/Icon.iconset/icon_512x512.png "$HOME"/.local/share/icons/hicolor/512x512/apps/codetracer.png
+
+    install -Dm644 resources/codetracer.desktop "$HOME"/.local/share/applications/codetracer.desktop
+
+    rm -rf resources/ resources.tar.xz
 
     eprint_success
 }
