@@ -248,10 +248,12 @@ install_appimage() {
     eprint_success
 }
 
+# CAUTION: Please keep portage above apt, since Gentoo bundles an apt command which is related to some OpenJDK thing
+# and location-wise it is indistinguishable from the package manager!
+install_portage
 install_apt
 install_dnf
 install_yum
-install_portage
 
 pamac=$(which pamac || echo "")
 yay=$(which yay || echo "")
