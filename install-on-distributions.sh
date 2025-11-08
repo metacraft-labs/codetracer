@@ -206,6 +206,7 @@ install_dmg() {
     MOUNT_POINT=$(echo "$MOUNT_INFO" | awk '/\/Volumes\// {print $3; exit}')
 
     if [ -z "$MOUNT_POINT" ]; then
+        rm -rf CodeTracer.dmg
         eprint_error "Failed to mount DMG."
     fi
 
@@ -216,6 +217,7 @@ install_dmg() {
 
     if [ -z "$APP_PATH" ]; then
         hdiutil detach "$MOUNT_POINT" > /dev/null
+        rm -rf CodeTracer.dmg
         eprint_error "No .app bundle found in DMG."
     fi
 
@@ -237,16 +239,16 @@ install_dmg() {
 }
 
 install_appimage() {
-    download_and_verify AppImage amd64 || return 1
+    download_and_verify AppImage amd64 || 
     
     eprint_note "Installing AppImage"
-    mkdir -p "$HOME/.local/bin" || eprint_error "Couldn't create $HOME/.local/bin!"
-    mv CodeTracer.AppImage "$HOME/.local/bin/ct" || eprint_error "Couldn't install ct in $HOME/.local/bin!"
+    mkdir -p "$HOME/.local/bin" || (rm -rf CodeTracer.AppImage && eprint_error "Couldn't create $HOME/.local/bin!")
+    mv CodeTracer.AppImage "$HOME/.local/bin/ct" || (rm -rf CodeTracer.AppImage && eprint_error "Couldn't install ct in $HOME/.local/bin!")
     chmod +x "$HOME/.local/bin/ct" || eprint_error "Couldn't make ct executable!"
 
     latest_resources=$(curl -fL "https://api.github.com/repos/metacraft-labs/codetracer/releases?per_page=1" | grep -m1 "browser_download_url" | sed 's/.*browser_download_url.*https/https/g' | sed 's/"//g')
-    curl -fL "resources.tar.xz" "$latest_resources" || eprint_error "Couldn't download resources.tar.xz from the latest release!"
-    tar -xf resources.tar.xz || eprint_error "Couldn't extract resources!"
+    curl -fL --output "resources.tar.xz" "$latest_resources" || eprint_error "Couldn't download resources.tar.xz from the latest release!"
+    tar -xf resources.tar.xz || (rm -rf resources.tar.xz && eprint_error "Couldn't extract resources!")
 
     install -Dm644 resources/Icon.iconset/icon_16x16.png "$HOME"/.local/share/icons/hicolor/16x16/apps/codetracer.png
     install -Dm644 resources/Icon.iconset/icon_32x32.png "$HOME"/.local/share/icons/hicolor/32x32/apps/codetracer.png
