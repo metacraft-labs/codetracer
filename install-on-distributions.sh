@@ -18,6 +18,7 @@ eprint_warning() {
 
 eprint_success() {
     echo -e "\x1b[32mSuccessfully installed CodeTracer!\x1b[0m"
+    exit 0
 }
 
 eprint_install_fail() {
@@ -235,7 +236,6 @@ install_dmg() {
     rm -rf CodeTracer.dmg
 
     eprint_success
-    exit 0
 }
 
 install_appimage() {
