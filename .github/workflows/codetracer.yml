@@ -120,6 +120,19 @@ jobs:
         run: |
           nix develop .#devShells.x86_64-linux.default --command gpg --armor --export > CodeTracer.pub.asc
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.pub.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer.pub.asc
+
+  push-install-script:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Upload script
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp install-on-distributions.sh s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/install.sh
+
   dev-build:
     runs-on: [self-hosted, nixos]
     needs:
