@@ -28,8 +28,8 @@ eprint_install_fail() {
 
 super=""
 request_privilleged_access() {
-    sudo=$(which sudo || echo "")
-    doas=$(which doas || echo "")
+    sudo=$(which sudo 2> /dev/null || echo "")
+    doas=$(which doas 2> /dev/null || echo "")
 
     if [ "$sudo" != "" ]; then
         super="sudo"
@@ -41,12 +41,12 @@ request_privilleged_access() {
 }
 
 install_apt() {
-    if [ "$(which apt)" == "" ]; then
+    if [ "$(which apt 2> /dev/null)" == "" ]; then
         return 0
     fi
 
     request_privilleged_access || return 1
-    getw=$(which wget || echo "")
+    getw=$(which wget 2> /dev/null || echo "")
     if [ "$getw" == "" ]; then
         eprint_note "Installing wget!"
         "$super" apt install -y wget || eprint_error "Couldn't install wget!"
@@ -85,7 +85,7 @@ gpgkey=https://rpm.codetracer.com/rpmkey.pub" > /etc/yum.repos.d/metacraft-rpms.
 }
 
 install_dnf() {
-    if [ "$(which dnf)" == "" ]; then
+    if [ "$(which dnf 2> /dev/null)" == "" ]; then
         return 0
     fi
 
@@ -101,7 +101,7 @@ install_dnf() {
 }
 
 install_yum() {
-    if [ "$(which yum)" == "" ]; then
+    if [ "$(which yum 2> /dev/null)" == "" ]; then
         return 0
     fi
 
@@ -117,18 +117,18 @@ install_yum() {
 }
 
 install_portage() {
-    if [ "$(which emerge)" == "" ]; then
+    if [ "$(which emerge 2> /dev/null)" == "" ]; then
         return 0
     fi
 
     request_privilleged_access || return 1
 
-    emerge app-eselect/eselect-repository || eprint_error "Couldn't install eselect-repository!"
+    "$super" emerge app-eselect/eselect-repository || eprint_error "Couldn't install eselect-repository!"
 
-    gitt=$(which git || echo "")
+    gitt=$(which git 2> /dev/null || echo "")
     if [ "$gitt" == "" ]; then
         eprint_note "Installing git"
-        emerge dev-vcs/git || eprint_error "Couldn't install git!"
+        "$super" emerge dev-vcs/git || eprint_error "Couldn't install git!"
     fi
 
     eprint_note "Adding ebuild overlay"
@@ -168,7 +168,7 @@ download_and_verify() {
     curl -fL --output "CodeTracer.$1.asc" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1.asc" || eprint_error "Couldn't download gpg signature!"
     curl -fL --output "CodeTracer.$1" "https://downloads.codetracer.com/CodeTracer-latest-$2.$1" || eprint_error "Couldn't download $1"
 
-    if [ "$(which gpg)" != "" ]; then
+    if [ "$(which gpg 2> /dev/null)" != "" ]; then
         while true; do
             if ! gpg --import CodeTracer.pub.asc; then
                 eprint_warning "Couldn't import gpg key. Probably caused by an inactive gpg agent"
@@ -193,7 +193,7 @@ install_dmg() {
         return 0
     fi
 
-    if [ "$(which brew)" != "" ]; then
+    if [ "$(which brew 2> /dev/null)" != "" ]; then
         brew install ruby
     else
         eprint_warning "Homebrew was not found on your system. It is required for Ruby support to function. Please install it if possible."
@@ -255,10 +255,10 @@ install_apt
 install_dnf
 install_yum
 
-pamac=$(which pamac || echo "")
-yay=$(which yay || echo "")
-paru=$(which paru || echo "")
-pacman=$(which pacman || echo "")
+pamac=$(which pamac 2> /dev/null || echo "")
+yay=$(which yay 2> /dev/null || echo "")
+paru=$(which paru 2> /dev/null || echo "")
+pacman=$(which pacman 2> /dev/null || echo "")
 
 if [ "$pamac" != "" ]; then
     install_pamac
