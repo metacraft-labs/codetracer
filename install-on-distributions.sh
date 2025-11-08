@@ -135,7 +135,7 @@ install_portage() {
     "$super" eselect repository add metacraft-overlay git https://github.com/metacraft-labs/metacraft-overlay.git || eprint_error "Couldn't add gentoo overlay!"
 
     eprint_note "Synchronizing repositories"
-    "$super" emerge --sync || eprint_error "Couldn't sync repositories!"
+    "$super" emerge --sync metacraft-overlay || eprint_error "Couldn't sync repositories!"
 
     eprint_note "Installing CodeTracer"
     "$super" emerge codetracer-bin || eprint_install_fail
