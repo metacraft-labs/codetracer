@@ -47,7 +47,7 @@ pub fn ct_rr_worker_socket_path(
     //  if worker with the same name started/restarted multiple times
     //  by the same backend instance
     Ok(run_dir.join(format!(
-        "ct_rr_worker_{worker_name}_{worker_index_for_kind}_from_{from}.sock"
+        "ct_rr_support_{worker_name}_{worker_index_for_kind}_from_{from}.sock"
     )))
 
     // TODO: decide if we need to check/eventually remove or the unique run folder/paths are enough:
