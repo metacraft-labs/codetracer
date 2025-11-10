@@ -17,16 +17,20 @@ let LOG_LEVEL* = parseEnum[CtLogLevel](env.get("CODETRACER_LOG_LEVEL", codetrace
 
 template debugPrint*(args: varargs[untyped]) =
   if LOG_LEVEL <= CtLogLevel.Debug:
-    echo args
+    let i = instantiationInfo(0)
+    echo "INFO [ct](", i.filename & ":" & $i.line, "):", args
 
 template infoPrint*(args: varargs[untyped]) =
   if LOG_LEVEL <= CtLogLevel.Info:
-    echo args
+    let i = instantiationInfo(0)
+    echo "INFO [ct](", i.filename & ":" & $i.line, "):", args
 
 template warnPrint*(args: varargs[untyped]) =
   if LOG_LEVEL <= CtLogLevel.Warn:
-    echo "[warn]: ", args
+    let i = instantiationInfo(0)
+    echo "WARN [ct](", i.filename & ":" & $i.line, "):", args
 
 template errorPrint*(args: varargs[untyped]) =
   if LOG_LEVEL <= CtLogLevel.Error:
-    echo "[error]: ", args
+    let i = instantiationInfo(0)
+    echo "ERROR [ct](", i.filename & ":" & $i.line, "):", args
