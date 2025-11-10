@@ -401,7 +401,7 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
         .read_exact(&mut buf)
         .map_err(|e| serde_json::Error::custom(e.to_string()))?;
     let json_text = std::str::from_utf8(&buf).map_err(|e| serde_json::Error::custom(e.to_string()))?;
-    // info!("DAP raw <- {json_text}");
+    info!("DAP raw <- {json_text}");
     from_json(json_text)
 }
 
