@@ -16,7 +16,7 @@ when not defined(ctInExtension):
     data.dapApi.sendCtRequest(DapLaunch, js{
       traceFolder: data.trace.outputFolder,
       rawDiffIndex: data.startOptions.rawDiffIndex,
-      ctRRWorkerExe: data.config.rrBackend.ctRRWorkerExe,
+      ctRRWorkerExe: data.config.rrBackend.path,
     })
 
   proc newOperationHandler*(viewsApi: MediatorWithSubscribers, operation: NewOperation) =

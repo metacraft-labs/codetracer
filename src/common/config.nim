@@ -9,9 +9,6 @@ type
   RRBackendConfig* = object
     enabled*:           bool
     path*:              string
-    ctPaths*:           string
-    debugInfoToolPath*: string
-    ctRRWorkerExe*:     string
 
   FlowConfigObjWrapper* = object
     enabled*:                             bool
@@ -63,9 +60,6 @@ type
     rrBackend* {.defaultVal: RRBackendConfig(
       enabled: false,
       path: "",
-      ctPaths: "",
-      debugInfoToolPath: "",
-      ctRRWorkerExe: "",
     ).}:                                                  RRBackendConfig
     skipInstall:                                          bool
 

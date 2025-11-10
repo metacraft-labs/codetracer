@@ -173,18 +173,18 @@ else:
     let combined = if diagnostics.len > 0: diagnostics else: lines.join("\n")
     return (recorderError, version, combined)
 
-proc recordInternal(exe: string, args: seq[string], withDiff: string, upload: bool, configPath: string): Trace =
-  let env = if configPath.len > 0:
-      setupEnv(configPath)
-    else:
-      var env = newStringTable(modeStyleInsensitive)
-      for name, value in envPairs():
-        env[name] = value
-      env
+proc recordInternal(exe: string, args: seq[string], withDiff: string, upload: bool): Trace =
+  # let env = if configPath.len > 0:
+  #     setupEnv(configPath)
+  #   else:
+  #     var env = newStringTable(modeStyleInsensitive)
+  #     for name, value in envPairs():
+  #       env[name] = value
+  #     env
   let p = startProcess(
     exe,
     args = args,
-    env = env,
+    # env = env,
     options = {poStdErrToStdOut, poUsePath})
 
   let (lines, exCode) = p.readLines
@@ -298,11 +298,11 @@ proc record*(lang: string,
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall, LangPythonDb]:
-    return recordInternal(dbBackendRecordExe, pargs, withDiff, upload, "")
+    return recordInternal(dbBackendRecordExe, pargs, withDiff, upload)
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
-      let configPath = ctConfig.rrBackend.ctPaths
-      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), withDiff, upload, configPath)
+      # let configPath = ctConfig.rrBackend.ctPaths
+      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), withDiff, upload)
     else:
       echo "This functionality requires a codetracer-rr-backend installation"
