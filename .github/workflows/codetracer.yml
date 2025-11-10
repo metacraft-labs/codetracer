@@ -704,7 +704,7 @@ jobs:
           git config init.defaultBranch main
 
           git remote set-url origin https://x-access-token:${{ secrets.CODETRACER_PUSH_GITHUB_TOKEN }}@github.com/metacraft-labs/codetracer
-          
+
           nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/docs.sh
 
   push-tag:

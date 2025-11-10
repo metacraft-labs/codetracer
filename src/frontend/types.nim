@@ -1530,9 +1530,6 @@ type
   RRBackendConfig* = ref object
     enabled*: bool
     path*: cstring
-    ctPaths*: cstring
-    debugInfoToolPath*: cstring
-    ctRRWorkerExe*: cstring
 
   BreakpointSave* = ref object of js
     # Serialized breakpoint
