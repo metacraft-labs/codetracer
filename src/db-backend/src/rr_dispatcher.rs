@@ -72,7 +72,7 @@ impl CtRRWorker {
 
         let ct_worker = if !is_appimage {
             Command::new(&self.ct_rr_worker_exe)
-                .arg("replay")
+                .arg("replay-worker")
                 .arg("--name")
                 .arg(&self.name)
                 .arg("--index")
@@ -84,7 +84,7 @@ impl CtRRWorker {
         } else {
             Command::new("appimage-run")
                 .arg(&self.ct_rr_worker_exe)
-                .arg("replay")
+                .arg("replay-worker")
                 .arg("--name")
                 .arg(&self.name)
                 .arg("--index")
@@ -167,7 +167,11 @@ impl RRDispatcher {
     pub fn ensure_active_stable(&mut self) -> Result<(), Box<dyn Error>> {
         // start stable process if not active, store fields, setup ipc? store in stable
         if !self.stable.active {
-            self.stable.start()?;
+            let res = self.stable.start();
+            if let Err(e) = res {
+                error!("can't start ct rr worker for {}! error is {:?}", self.name, e);
+                return Err(e.into());
+            }
         }
         // check again:
         if !self.stable.active {

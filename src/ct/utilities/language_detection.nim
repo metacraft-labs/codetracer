@@ -83,8 +83,8 @@ proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
   let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
   if ctConfig.rrBackend.enabled:
     let rawLang = execProcess(
-      ctConfig.rrBackend.debugInfoToolPath,
-      args = @["lang", program],
+      ctConfig.rrBackend.path,
+      args = @["debuginfo", "lang", program],
       options={}).strip
     result = toLang(rawLang)
 

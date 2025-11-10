@@ -28,20 +28,20 @@ proc setupEnv*(configPath: string): StringTableRef =
 proc build*(programPath: string, outputPath: string) =
   let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
   if ctConfig.rrBackend.enabled:
-    let configPath = ctConfig.rrBackend.ctPaths
+    # TODO: is it still required for ct-rr-support?
+    # let configPath = ctConfig.rrBackend.ctPaths
 
     try:
-      var env = setupEnv(configPath)
+      # var env = setupEnv(configPath)
       let args = @["build", programPath, outputPath]
       let p = startProcess(
         ctConfig.rrBackend.path,
         args = args,
-        env = env,
+        # env = env,
         options = {poParentStreams, poStdErrToStdOut})
       quit(waitForExit(p))
     except:
-      errorPrint "ct helper error: ", getCurrentExceptionMsg()
-      errorPrint "  ct paths config path: ", configPath
+      errorPrint "ct build plugin error: ", getCurrentExceptionMsg()
       quit(1)
   else:
     errorPrint "This functionality requires a codetracer-rr-backend installation"
