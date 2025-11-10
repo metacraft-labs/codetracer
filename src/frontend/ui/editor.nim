@@ -75,7 +75,7 @@ proc loadKeyPlugins*(self: Component) =
           column: column,
           startColumn: startColumn,
           endColumn: endColumn,
-          word: word,
+          word: if not word.isNil: word else: cstring"",
           data: self.data)
         discard plugin(context), cstring"")
 
@@ -142,7 +142,7 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
       let targetToken = editor.toJs.getModel().getWordAtPosition(position)
 
       if not targetToken.isNil:
-        e.sourceCallJump(e.name, position.lineNumber, cast[cstring](targetToken.word), SmartJump)
+        e.sourceCallJump(e.name, position.lineNumber, if not targetToken.word.isNil: cast[cstring](targetToken.word) else: cstring"", SmartJump)
 }
 
 for i in 1 .. 9:
@@ -613,7 +613,10 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
     let model = self.monacoEditor.toJs.getModel()
     let currentWord = model.getWordAtPosition(position)
 
-    result = cast[cstring](currentWord.word)
+    if currentWord.isNil:
+      return cstring""
+
+    result = if not currentWord.word.isNil: cast[cstring](currentWord.word) else: cstring""
 
     let lang = fromPath(self.data.services.debugger.location.path)
 
