@@ -160,6 +160,7 @@ for i in 1 .. 9:
 
 proc delegateShortcuts*(self: EditorViewComponent, editor: MonacoEditor) =
   cdebug "create context key"
+  console.log("SETTING READONLY")
   self.readOnly = editor.toJs.createContextKey(cstring"readOnly", self.data.ui.readOnly)
   for sh, command in commands:
     cdebug "editor: delegate shortcut " & sh
@@ -248,9 +249,13 @@ proc removeClasses(index: int, class: cstring, name: string) =
     cast[ClassList](element.classList).remove(class)
 
 proc disableDebugShortcuts*(self: EditorViewComponent) =
+  console.log("EDITOR VIEW COMPONENT")
+  console.log(self)
   self.readOnly.set(false)
 
 proc enableDebugShortcuts*(self: EditorViewComponent) =
+  console.log("EDITOR VIEW COMPONENT")
+  console.log(self)
   self.readOnly.set(true)
 
 proc highlightTag(path: cstring, tag: Tag, name: cstring) =
@@ -1279,6 +1284,8 @@ proc makeDiffViewZones(self: EditorViewComponent) =
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
 
+  console.log("DOING SHIT")
+
   if tabInfo.isNil:
     return buildHtml(
       tdiv()
@@ -1299,7 +1306,11 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
     result = buildHtml(tdiv())
     return
 
+  if not tabInfo.monacoEditor.isNil:
+    console.log("MONACO EDITOR IS NOT NIL")
+
   if tabInfo.monacoEditor.isNil:
+    console.log("MONACO EDITOR IS NIL")
     self.renderer.afterRedraws.add(proc: void =
       let trace = not self.data.trace.isNil
       var readOnly: bool
@@ -1311,6 +1322,8 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       const whiteThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
       const darkThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
 
+      cdebug "HEHE XD"
+
       try:
         {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
         {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
@@ -1320,6 +1333,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
 
       let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
 
+      var editorReady = false
       try:
         let documentTmp = domWindow.document
         let overflowHost = documentTmp.createElement(cstring("div"))
@@ -1328,6 +1342,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
 
         cdebug "editor: creating monaco editor " & $self.name
         var lang = fromPath(self.data.services.debugger.location.path)
+
         if lang == LangNoir:
           lang = LangRust
 
@@ -1360,13 +1375,30 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
             fixedOverflowWidgets: true
           )
         )
+
+        cdebug "HEHE XD AFTER"
+
         tabInfo.monacoEditor.config = getConfiguration(tabInfo.monacoEditor)
+        editorReady = true
       except:
         cerror "editor: " & getCurrentExceptionMsg()
-        return
+        if tabInfo.monacoEditor.isNil:
+          return
+      finally:
+        if not tabInfo.monacoEditor.isNil:
+          self.monacoEditor = tabInfo.monacoEditor
+          if self.monacoEditor notin self.data.ui.monacoEditors:
+            self.data.ui.monacoEditors.add(self.monacoEditor)
+          try:
+            self.delegateShortcuts(self.monacoEditor)
+          except:
+            cerror "delegateShortcuts " & getCurrentExceptionMsg()
+        if not editorReady:
+          return
 
       self.monacoEditor = tabInfo.monacoEditor
-      self.data.ui.monacoEditors.add(self.monacoEditor)
+      if self.monacoEditor notin self.data.ui.monacoEditors:
+        self.data.ui.monacoEditors.add(self.monacoEditor)
 
       tabInfo.monacoEditor.onMouseWheel(proc(e: js) =
         if not self.flow.isNil and self.flow.shouldRecalcFlow:
@@ -1430,6 +1462,8 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           tabInfo.reloadChange = false
         else:
           tabInfo.changed = true)
+
+      console.log("DELEGATING SHORTCUTS")
 
       try:
         # echo "delegate shortcuts"
