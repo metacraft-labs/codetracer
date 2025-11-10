@@ -62,7 +62,7 @@ impl CtRRWorker {
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
         let is_appimage = self.ct_rr_worker_exe.extension() == Some(OsStr::new("AppImage"));
         info!(
-            "start: {}{} replay --name {} --index {} {}",
+            "start: {}{} replay-worker --name {} --index {} {}",
             if !is_appimage { "" } else { "appimage-run " },
             self.ct_rr_worker_exe.display(),
             self.name,
