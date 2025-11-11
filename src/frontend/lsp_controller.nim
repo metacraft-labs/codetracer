@@ -110,7 +110,13 @@ proc startClient(kind: string; url: string) =
     scheduleRetry(kind, url)
     return
   stopClient(kind)
-  let normalized = url.strip(chars = Whitespace)
+  var effectiveUrl = url
+  let cachedUrl = lsp_client.getLspUrl(kind)
+  if kind != defaultLspKind and cachedUrl.len > 0 and cachedUrl != url:
+    infoPrint fmt"renderer:lsp overriding url ({kind}): requested={url}, cached={cachedUrl}"
+    effectiveUrl = cachedUrl
+  infoPrint fmt"renderer:lsp startClient requested ({kind}) => {effectiveUrl}"
+  let normalized = effectiveUrl.strip(chars = Whitespace)
   if normalized.len == 0:
     infoPrint fmt"renderer:lsp bridge stopped ({kind})"
     return
@@ -206,6 +212,7 @@ proc onUrlChange(kind: string; url: string) =
 
 proc requestInitialStatus(kind: string) =
   let currentUrl = lsp_client.getLspUrl(kind)
+  infoPrint fmt"renderer:lsp requestInitialStatus {kind}, cachedUrl='{currentUrl}'"
   if currentUrl.len > 0:
     startClient(kind, currentUrl)
   else:
