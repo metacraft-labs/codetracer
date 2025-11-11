@@ -4,7 +4,8 @@ import
   ../common/ct_logging,
   lib/jslib,
   lsp_js_bindings,
-  lsp_paths
+  lsp_paths,
+  lsp_router
 
 type
   ControllerConfig = object
@@ -62,6 +63,7 @@ proc stopClient(kind: string) =
     state.retryTimer = 0
   if not state.activeClient.isNil:
     try:
+      detachLspDiagnostics(kind)
       discard call0(field(state.activeClient, "stop"))
     except CatchableError:
       warnPrint fmt"renderer:lsp ({kind}) stop client failed: {getCurrentExceptionMsg()}"
@@ -153,6 +155,7 @@ proc startClient(kind: string; url: string) =
 
         let workspaceFolders = newArray()
         var workspacePaths: seq[string] = @[]
+        var hasExistingWorkspace = false
         let dataObj = field(domwindow, "data")
         if not isUndefined(dataObj):
           let traceObj = field(dataObj, "trace")
@@ -170,6 +173,17 @@ proc startClient(kind: string; url: string) =
                 if not folderVal.isNil:
                   addWorkspaceFolder(workspaceFolders, workspacePaths, $toCString(folderVal))
                 inc idx
+            for candidate in workspacePaths:
+              if cast[bool](call1(field(fsModule, "existsSync"), toJs(candidate.cstring))):
+                hasExistingWorkspace = true
+                break
+            if not hasExistingWorkspace:
+              let outputFolderVal = field(traceObj, "outputFolder")
+              if not outputFolderVal.isNil:
+                let filesPath = joinPath(normalizePathString($toCString(outputFolderVal)), "files")
+                addWorkspaceFolder(workspaceFolders, workspacePaths, filesPath)
+                if cast[bool](call1(field(fsModule, "existsSync"), toJs(filesPath.cstring))):
+                  hasExistingWorkspace = true
 
         if arrayLen(workspaceFolders) > 0:
           setField(clientOptions, "workspaceFolders", workspaceFolders)
@@ -196,7 +210,12 @@ proc startClient(kind: string; url: string) =
         setField(clientConfig, "messageTransports", transports)
 
         state.activeClient = construct1(monacoLanguageClientCtor, clientConfig)
+        if cfg.kind == "ruby":
+          let targetClient = state.activeClient
+          proc attachDidOpenLogger(client: JsObject) {.importjs: "(function(c){ var origStart = c.start.bind(c); c.start = function(){ var origSend; if (!c.__diagnosticHook){ var origNotify = c.sendNotification.bind(c); c.sendNotification = function(method, params){ if (method && method.method === 'textDocument/didOpen'){ console.log('[LSP didOpen ruby]', params && params.textDocument ? params.textDocument.uri : params); } return origNotify(method, params); }; c.__diagnosticHook = true; } return origStart(); }; })(#)".}
+          attachDidOpenLogger(targetClient)
         discard call0(field(state.activeClient, "start"))
+        attachLspDiagnostics(kind, state.activeClient)
         infoPrint fmt"renderer:lsp client ({kind}) started @ {normalized}"
       except CatchableError:
         warnPrint fmt"renderer:lsp start failed ({kind}) @ {normalized}: {getCurrentExceptionMsg()}"
