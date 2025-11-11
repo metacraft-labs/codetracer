@@ -43,7 +43,7 @@ type
     `range`*:         MonacoRange
     options*:         js
 
-  MonacoTextModel* = object
+  MonacoTextModel* = ref object
     getLineMaxColumn*:     proc(line: int): int
     getLineFirstNonWhitespaceColumn*: proc(line: int): int
     getLineContent*:       proc(line: int): cstring
@@ -52,6 +52,7 @@ type
                                 isRegex: bool,
                                 matchCase: bool,
                                 captureMatches: bool): js
+    getValue*:             proc(): cstring
     applyEdits*:           proc(operations: seq[js]): void
     getValueInRange*:      proc(`range`: MonacoRange, endOfLinePreference: int = 0): cstring
 

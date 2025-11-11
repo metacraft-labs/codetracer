@@ -4547,9 +4547,9 @@ __metadata:
     js-yaml: "npm:^4.1.1"
     jstree: "npm:3.3.17"
     livereload: "npm:^0.10.3"
-    monaco-editor: "npm:^0.52.0"
+    monaco-editor: "npm:0.54.0"
     monaco-editor-webpack-plugin: "npm:7.1.1"
-    monaco-languageclient: "npm:^10.0.0"
+    monaco-languageclient: "npm:10.2.0"
     mousetrap: "npm:^1.6.5"
     napi-build-utils: "npm:^2.0.0"
     node-abi: "npm:^4.24.0"
@@ -5299,6 +5299,13 @@ __metadata:
   version: 1.4.0
   resolution: "domify@npm:1.4.0"
   checksum: 10c0/f0ddd9434f0a6245c5d354170e7a30ec09e9ed0c730262e3d286500e7b97b82cc68ba0f78caa6cad17aad270504d92363def890c114b2c3733396b477a9cda27
+  languageName: node
+  linkType: hard
+
+"dompurify@npm:3.1.7":
+  version: 3.1.7
+  resolution: "dompurify@npm:3.1.7"
+  checksum: 10c0/fcceef2e9f824d712a056fa699b0538f3337f5cf00ccb7227bdc7eba5463823e15d9aecc00a2fd81c726b28a71e7b09f0eb8a2fde1021c40e35f12dc67b66394
   languageName: node
   linkType: hard
 
@@ -9033,14 +9040,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"monaco-editor@npm:^0.52.0":
-  version: 0.52.2
-  resolution: "monaco-editor@npm:0.52.2"
-  checksum: 10c0/5a92da64f1e2ab375c0ce99364137f794d057c97bed10ecc65a08d6e6846804b8ecbd377eacf01e498f7dfbe1b21e8be64f728256681448f0484df90e767b435
+"monaco-editor@npm:0.54.0":
+  version: 0.54.0
+  resolution: "monaco-editor@npm:0.54.0"
+  dependencies:
+    dompurify: "npm:3.1.7"
+    marked: "npm:14.0.0"
+  checksum: 10c0/40198c0bac873d10804a89c991c014088943b23625d68149cb38fc52c3438c896803f645a36a6f75e0d961c87e8726073cb504e2427fc33850e0b034ff6229ee
   languageName: node
   linkType: hard
 
-"monaco-languageclient@npm:^10.0.0":
+"monaco-languageclient@npm:10.2.0":
   version: 10.2.0
   resolution: "monaco-languageclient@npm:10.2.0"
   dependencies:

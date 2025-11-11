@@ -125,7 +125,9 @@ in
           cachix
 
           # ruby experimental support
+          libyaml
           ruby
+          ruby-lsp
 
           # testing shell
           tmux
