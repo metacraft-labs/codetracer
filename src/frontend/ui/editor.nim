@@ -1,7 +1,7 @@
 import
   std/[ cstrutils, jsre ],
   ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom,
-  ../[ renderer, communication, event_helpers ],
+  ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/ct_event
 
 from welcome_screen import resetView
@@ -186,6 +186,7 @@ proc closeEditorTab*(data: Data, id: cstring) =
 
   # get the editor
   let editor = data.ui.editors[id]
+  unregisterLspEditor(editor)
 
   # remove editor from open editors registry
   if editor.service.open.hasKey(id):
@@ -1341,8 +1342,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         documentTmp.body.appendChild(overflowHost)
 
         cdebug "editor: creating monaco editor " & $self.name
-        var lang = fromPath(self.data.services.debugger.location.path)
-
+        var lang = fromPath(path)
         if lang == LangNoir:
           lang = LangRust
 
@@ -1389,6 +1389,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           self.monacoEditor = tabInfo.monacoEditor
           if self.monacoEditor notin self.data.ui.monacoEditors:
             self.data.ui.monacoEditors.add(self.monacoEditor)
+          registerLspEditor(self)
           try:
             self.delegateShortcuts(self.monacoEditor)
           except:
