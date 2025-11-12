@@ -16,6 +16,12 @@
   traffic targets the fresh db-backend without needing an explicit
   `ct/select-replay`.
 
+- Ruby LSP operates diagnostics in pull mode (`textDocument/diagnostic`), and
+  only reports semantic issues when a linter such as RuboCop is configured
+  (e.g., via `.rubocop.yml` or `linters: ["rubocop_internal"]` in the
+  initialize request). Without a linter the server only returns syntax
+  warnings, so `missing_helper`-style errors won't surface.
+
 
 - The db-backend DAP server now responds to the `configurationDone` request.
 
@@ -54,3 +60,6 @@
 - Server mode now refreshes idle activity on every inbound socket.io event via `onAny`; the `__activity__` ping remains as a cheap manual/testing hook but is no longer required to keep the host alive during normal IPC traffic. Disconnects reset the “no-connection” timer so idle shutdown counts from the last detach.
 - Server mode emits `CODETRACER::connection-disconnected` to superseded sockets and before idle-timeout exits; the browser tracks this plus socket disconnects to show a persistent warning (with reconnect action) and a status-bar “Disconnected” badge.
 - Webpack expects the `vscode` alias to point at the `@codingame/monaco-vscode-extension-api` package root so that `monaco-languageclient` can load `vscode/localExtensionHost`.
+- A Nim-side diagnostics/sync router now tracks Monaco editors per normalized path (including trace `files/` snapshots), sends `textDocument/didOpen|didChange|didClose` notifications for each live buffer, and proactively requests `textDocument/diagnostic` so Ruby warnings land in the correct tab even without MonacoServices.
+- `initLspController` now delegates to `registerKindController`, ensuring each language kind registers its observer with an independent closure so the correct LSP client starts when its URL is received.
+- LSP startup only begins once a Monaco editor of that kind is registered; document observers fire when the first tab opens, allowing the client to start with real context instead of empty workspaces.

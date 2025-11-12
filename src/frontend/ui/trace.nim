@@ -854,7 +854,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
       e.preventDefault()
     )
     # subscribe to trace monaco editor change event
-    self.monacoEditor.onDidChangeModelContent(proc =
+    self.monacoEditor.onDidChangeModelContent(proc (event: JsObject) =
       self.error = nil
       self.saveSource()
 
