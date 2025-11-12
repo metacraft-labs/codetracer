@@ -1,46 +1,14 @@
 [![CI Status](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml/badge.svg?branch=main)](https://github.com/metacraft-labs/codetracer/actions/workflows/codetracer.yml)
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
-Available downloads:
-
-<a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
-<a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
-<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
-<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
-<a href="https://github.com/metacraft-labs/metacraft-overlay"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/4/48/Gentoo_Linux_logo_matte.svg"></a>
-<a href="https://aur.archlinux.org/packages/codetracer"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/13/Arch_Linux_%22Crystal%22_icon.svg"></a>
-<a href="https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a>
-<a href="https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
-
-Key signatures:
-
-[![Download macOS Signature](https://img.shields.io/badge/Download-macOS%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg.asc)
-[![Download AppImage Signature](https://img.shields.io/badge/Download-AppImage%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage.asc)
-[![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)
-
-> [!TIP]
-> You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS or `~/.local/bin` on Linux).
->
-> When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
-
-> [!CAUTION]
-> Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `user $ xattr -c <path/to/CodeTracer.app>`.
->
-> We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program which will ensure CodeTracer is properly signed and whitelisted by Apple.
-> See [this discussion](https://discussions.apple.com/thread/253714860?sortBy=rank) for more details.
-
-> [!CAUTION]
-> Recording ruby on macOS requires you to install ruby through [homebrew](https://brew.sh), otherwise trying to record ruby programs will fail due to the built-in ruby binary on macOS being more than 7 years old.
->
-> Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
-
 # Introduction
 
 CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages.
 
-It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward through the execution and to examine the history of all memory locations. They say a picture is worth a thousand words — well, a video is even better! Watch the demo below to see CodeTracer in action:
+It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward 
+through the execution and to examine the history of all memory locations. They say a picture is worth a thousand words — well, a video is even better! Watch the demo below to see CodeTracer in action:
 
-  [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
+[![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
 
 ## The Benefits of Time-Travel
 
@@ -142,16 +110,84 @@ Explore the right-click context menu for additional operations.
 
 The scratchpad provides a play area where you can pin values from different locations and moments in time. You can explore their differences both manually and algorithmically to gain quick insights into the behavior of your program.
 
-### The CodeTracer CLI
+# Installating CodeTracer
+## Recommended: using the CodeTracer installer
+On any system, you can use the CodeTracer installer script by running the following command:
+```
+user $ curl "https://downloads.codetracer.com/install.sh" | sh
+```
+You may be asked for sudo access depending on your installation method.
 
-When you launch the CodeTracer GUI, it will offer you the option to also install the CodeTracer CLI. It provides convenient ways to create and load trace files from the command-line or to integrate CodeTracer with CI processes.
+This script is handy, because it installs CodeTracer in the best possible manner depending on your OS.
+
+> [!CAUTION]
+> CodeTracer requires ruby to be installed through [homebrew](https://brew.sh) for ruby support. It's recommended that you install homebrew if possible
+> so that you can automatically get ruby support through the installer.
+
+## Installing CodeTracer manually
+Click on the icons below that corresponds to your distribution or packaging model:
+
+<a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
+<a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/6/66/Openlogo-debianV2.svg"></a>
+<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/d/d8/Red_Hat_logo.svg"></a>
+<a href="https://rpm.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Fedora_logo.svg"></a>
+<a href="https://github.com/metacraft-labs/metacraft-overlay"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/4/48/Gentoo_Linux_logo_matte.svg"></a>
+<a href="https://aur.archlinux.org/packages/codetracer"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/13/Arch_Linux_%22Crystal%22_icon.svg"></a>
+<a href="https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/7/73/App-image-logo.svg"></a>
+<a href="https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
+
+PGP Key signatures:
+
+[![Download macOS Signature](https://img.shields.io/badge/Download-macOS%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg.asc)
+[![Download AppImage Signature](https://img.shields.io/badge/Download-AppImage%20Signature-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-latest-amd64.AppImage.asc)
+[![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)
+
+> [!CAUTION]
+> When launched for the first time, macOS users will see the error message "CodeTracer is damaged and can't be opened". 
+> To resolve this problem, please execute the command `user $ xattr -c <path/to/CodeTracer.app>`.
+>
+> We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program which will ensure CodeTracer is properly signed and whitelisted by Apple.
+> See [this discussion](https://discussions.apple.com/thread/253714860?sortBy=rank) for more details.
+
+> [!CAUTION]
+> Recording ruby on macOS requires you to install ruby through [homebrew](https://brew.sh), otherwise trying to record ruby programs will fail
+> due to the built-in ruby binary on macOS being more than 7 years old.
+>
+> Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
+
+## Building from source
+### Linux
+The Metacraft Labs team is using [Nix](https://nixos.org/) to define a reproducible development environment for working on CodeTracer. Linux is our primary development platform, while some of our team members use macOS. Building on Windows will be supported in the near future.
+
+To enter the Nix development environment, perform the following steps:
+
+1) [Install Nix](https://zero-to-nix.com/start/install/).
+2) Clone this repository.
+3) At the repository root, execute `git submodule update --init --recursive`.
+4) At the repository root, execute `nix develop` (or `direnv allow` for users of `direnv`).
+5) In the resulting shell, you can build all targets by running `just build-once` or `just build` if you intend to make continuous changes to the source code.
+
+### macOS
+On macOS, we do not yet have support for Nix, instead we compile by using the non-nix-build scripts:
+
+1. Clone this repository
+1. Open a terminal and run `bash non-nix-build/build.sh`
+1. Wait until it finishes installing and packaging
+1. The end result will be a `CodeTracer.dmg` file that can be found under the `non-nix-build` folder. 
+1. For quicker testing without manually unpacking CodeTracer every time you can experiment with the contents of the `non-nix-build/CodeTracer.app` folder, which is equivalent to the final app bundle
+
+## The CodeTracer CLI
+
+When you launch the CodeTracer GUI, it will offer you the option to also install the CodeTracer CLI. It provides convenient ways to create and load trace files from the command-line or to integrate CodeTracer w
+ith CI processes.
 
 Run `ct --help` to see the full list of supported subcommands, but the most commonly used ones are the following:
 
 `<application>` can be a source file or a project folder (depending on the language):
 
 1. `ct run <application>` - Creates a recording and load it in CodeTracer with a single command.
-1. `ct record <application>` - Creates a trace file that can be loaded later or shared. For Python scripts this reuses the interpreter you would get by running `python` in the same shell (honoring the `CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, and `PYTHON` environment variables before falling back to `PATH`) and that interpreter must have `codetracer_python_recorder` installed.
+1. `ct record <application>` - Creates a trace file that can be loaded later or shared. For Python scripts this reuses the interpreter you would get by running `python` in the same shell (honoring the `CODETRAC
+ER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, and `PYTHON` environment variables before falling back to `PATH`) and that interpreter must have `codetracer_python_recorder` installed.
 1. `ct replay` - Launches the CodeTracer GUI with a previously recorded trace file. Common usages are:
    - `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
    - `ct replay <program-name>` - Opens the last trace of an application.
@@ -170,18 +206,15 @@ Since CodeTracer provides a reverse counterpart to most traditional debugging op
 
 The user config file located at `~/.config/codetracer/.config.yml` allows you to specify custom shortcuts for all operations.
 
-## Building from source
+# Contributing
+Check out our [Contributors Guide](./CONTRIBUTING.md) for more details.
 
-The Metacraft Labs team is using [Nix](https://nixos.org/) to define a reproducible development environment for working on CodeTracer. Linux is our primary development platform, while some of our team members use macOS. Building on Windows will be supported in the near future.
+## License
+CodeTracer is distributed under the GNU Affero General Public License (AGPLv3).
 
-To enter the Nix development environment, perform the following steps:
+The wasm-sysroot is copied from the tree-sitter repo: (https://github.com/tree-sitter/tree-sitter) : specifically https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include. The C headers there are a modified version of glibc headers, which are originally under LGPL license.
 
-1) [Install Nix](https://zero-to-nix.com/start/install/).
-2) Clone this repository.
-3) At the repository root, execute `git submodule update --init --recursive`.
-4) At the repository root, execute `nix develop` (or `direnv allow` for users of `direnv`).
-5) In the resulting shell, you can build all targets by running `just build-once` or `just build` if you intend to make continuous changes to the source code.
-
+# Miscellaneous
 ## Small Language Constructs
 
 CodeTracer includes a miniature Lisp-like language called **small** used in some of the example programs. The constructs demonstrate how a language can integrate with the [`runtime_tracing`](https://github.com/metacraft-labs/runtime_tracing) format.
