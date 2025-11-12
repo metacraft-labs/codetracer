@@ -52,6 +52,33 @@ proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
     echo "WARNING: Can't extract symbols. Some functionality may not work correctly!"
     echo ""
 
+proc recordWithRR(
+    ctRRSupportExe: string,
+    program: string, args: seq[string],
+    traceFolder: string,
+    traceId: int): Trace =
+  
+  createDir(traceFolder)
+  let traceMetadataPath = traceFolder / "trace_metadata.json"
+  let traceDbMetadataPath = traceFolder / "trace_db_metadata.json"
+  let process = startProcess(
+    ctRRSupportExe,
+    args = @[
+      "record", "-o", traceFolder, program
+    ].concat(args),
+    options = {poEchoCmd, poParentStreams}
+  )
+  let code = waitForExit(process)
+  if code != 0:
+    echo fmt"error: ct-rr-support returned exit code ", code
+    quit(code)
+  
+  var trace = Json.decode(readFile(traceDbMetadataPath), Trace)
+  trace.id = traceId
+
+  result = importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT)
+
+
 # rr patches for ruby/other vm-s: not supported now, instead
 # in db backend support only direct traces
 
@@ -164,6 +191,7 @@ proc record(
     langArg: Lang, backend: string, stylusTrace: string,
     test = false, basic = false,
     traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = "",
+    traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false): Trace =
   var traceID: int
   if traceIDRecord == -1:
@@ -201,12 +229,15 @@ proc record(
   let lang = detectLang(executable, langArg)
   # echo "in db ", lang, " ", executable
   if lang == LangUnknown:
-    errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
-    quit(1)
+    if traceKind == "db":
+      errorMessage fmt"error: lang unknown: probably an unsupported type of project/extension, or folder/path doesn't exist?"
+      quit(1)
   elif not lang.isDbBased:
     # TODO integrate with rr/gdb backend
-    errorMessage fmt"error: {lang} not supported currently!"
-    quit(1)
+    if traceKind == "db":
+      errorMessage fmt"error: {lang} not supported currently with db: maybe you need a rr trace for it?"
+      quit(1)
+
   let (executableDir, executableFile, executableExt) = executable.splitFile
   discard executableDir
   discard executableExt
@@ -281,6 +312,10 @@ proc record(
         stylusTrace,
         traceId,
         pythonActivationPath = activationPathResolved)
+    elif traceKind == "rr":
+      echo "TODO rr"
+      echo rrSupportPath
+      quit(1)
     else:
       echo fmt"ERROR: unsupported lang {lang}"
       quit(1)
@@ -364,6 +399,7 @@ proc main*(): Trace =
   #   [-e/--export <export-zip>] [-c/--cleanup-output-folder]
   #   [-t/--stylus-trace <trace-path>]
   #   [-a/--address <address>] [--socket <socket-path>]
+  #   [--trace-kind db/rr] [--rr-support-path <rr-support-path>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:
@@ -385,6 +421,10 @@ proc main*(): Trace =
   var socketPath = ""
   var isExportedWithArg = false
   var pythonInterpreter = ""
+  var traceKind = "db" # by default
+  var rrSupportPath = ""
+
+  echo args
 
   # for i, arg in args:
   var i = 0
@@ -443,6 +483,18 @@ proc main*(): Trace =
         displayHelp()
         return
       socketPath = args[i + 1]
+      i += 2
+    elif arg == "--trace-kind":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      traceKind = args[i + 1]
+      i += 2
+    elif arg == "--rr-support-path":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      rrSupportPath = args[i + 1]
       i += 2
     else:
       if program == "":
@@ -532,6 +584,7 @@ proc main*(): Trace =
     var trace = record(
       program, recordArgs, "", lang, backend, stylusTrace,
       traceIDRecord=traceID, outputFolderArg=outputFolder,
+      traceKind=traceKind, rrSupportPath=rrSupportPath,
       pythonInterpreter=pythonInterpreter)
     traceId = trace.id
     outputFolder = trace.outputFolder

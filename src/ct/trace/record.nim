@@ -298,11 +298,11 @@ proc record*(lang: string,
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall, LangPythonDb]:
-    return recordInternal(dbBackendRecordExe, pargs, withDiff, upload)
+    return recordInternal(dbBackendRecordExe, pargs.concat(@["--trace-kind", "db"]), withDiff, upload)
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
       # let configPath = ctConfig.rrBackend.ctPaths
-      return recordInternal(ctConfig.rrBackend.path, concat(@["record"], pargs), withDiff, upload)
+      return recordInternal(dbBackendRecordExe, pargs.concat(@["--trace-kind", "rr", "--rr-support-path", ctConfig.rrBackend.path]), withDiff, upload)
     else:
       echo "This functionality requires a codetracer-rr-backend installation"
