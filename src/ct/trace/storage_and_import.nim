@@ -89,9 +89,11 @@ proc importDbTrace*(
   recordPid: int,
   langArg: Lang = LangNoir,
   selfContained: bool = true,
-  downloadUrl: string = ""
+  downloadUrl: string = "",
+  traceKind: string = "db",
 ): Trace =
   
+  # for rr: trace_db_metadata.json: has those fields but also many others
   echo traceMetadataPath
   let rawTraceMetadata = readFile(traceMetadataPath)
   let untypedJson = parseJson(rawTraceMetadata)
