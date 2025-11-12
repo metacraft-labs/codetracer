@@ -18,7 +18,7 @@ eprint_warning() {
 }
 
 eprint_success() {
-    echo -e "\x1b[32mSuccessfully installed CodeTracer!\x1b[0m"
+    echo -e "\x1b[32mSuccessfully installed CodeTracer. You can start CodeTracer by opening it through your app drawer or by running 'ct' in a terminal!\x1b[0m"
     exit 0
 }
 
