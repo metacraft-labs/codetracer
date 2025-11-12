@@ -73,10 +73,8 @@ proc recordWithRR(
     echo fmt"error: ct-rr-support returned exit code ", code
     quit(code)
   
-  var trace = Json.decode(readFile(traceDbMetadataPath), Trace)
-  trace.id = traceId
-
-  result = importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT)
+  # record pid and lang in trace_db_metadata.json
+  result = importTrace(traceFolder, traceId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind="rr")
 
 
 # rr patches for ruby/other vm-s: not supported now, instead
@@ -182,7 +180,7 @@ proc recordDb(
     echo fmt"error: recorder exited with {exitCode} for {lang}"
     quit(1)
 
-  result = importDbTrace(traceMetadataPath, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT)
+  result = importTrace(traceFolder, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
 
 # record a program run
@@ -313,9 +311,14 @@ proc record(
         traceId,
         pythonActivationPath = activationPathResolved)
     elif traceKind == "rr":
-      echo "TODO rr"
+      echo "rr"
       echo rrSupportPath
-      quit(1)
+      return recordWithRR(
+        rrSupportPath,
+        executable,
+        args,
+        outputFolder,
+        traceId)
     else:
       echo fmt"ERROR: unsupported lang {lang}"
       quit(1)
