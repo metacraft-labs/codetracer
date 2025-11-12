@@ -47,6 +47,7 @@ type
     getLineMaxColumn*:     proc(line: int): int
     getLineFirstNonWhitespaceColumn*: proc(line: int): int
     getLineContent*:       proc(line: int): cstring
+    getLineCount*:         proc(): int
     findMatches*:          proc(searchString: cstring,
                                 searchOnlyEditableRange: bool,
                                 isRegex: bool,
@@ -55,6 +56,7 @@ type
     getValue*:             proc(): cstring
     applyEdits*:           proc(operations: seq[js]): void
     getValueInRange*:      proc(`range`: MonacoRange, endOfLinePreference: int = 0): cstring
+    getVersionId*:         proc(): int
 
   MonacoEditorLayoutInfo* = ref object
     contentLeft*: int
@@ -131,7 +133,7 @@ type
     onDidScrollChange*:    proc(handler: proc(ev: js))
     getAction*:            proc(a: cstring): js
     onKeyDown*:            js #proc(e: js)
-    onDidChangeModelContent*:    proc(handler: proc: void): void
+    onDidChangeModelContent*:    proc(handler: proc(event: JsObject) {.closure.}): void
     hasTextFocus*:         proc: bool
     updateOptions*:        proc(options: MonacoEditorOptions)
     dispose*:              proc: void
