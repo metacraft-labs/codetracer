@@ -4,8 +4,17 @@
 > CodeTracer can only be installed on Linux and macOS currently.
 
 ## Download binaries
+### Recommended: automatically
+We provide a automatic installer that installs CodeTracer in the best possible way for your current system. You can run it by running the following in a terminal:
+```
+user $ curl "https://downloads.codetracer.com/install.sh" | sh
+```
 
-### Linux
+> [!CAUTION]
+> On macOS it's recommended that you install homebrew beforehand. This is because the installer tries to install ruby from homebrew to enable our ruby recording
+> features. Make sure you install homebrew in order to not lose this feature.
+
+### Manually on Linux
 Here is a list of our Linux packages:
 
 <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
@@ -19,7 +28,7 @@ Here is a list of our Linux packages:
 > [!TIP]
 > You can place the downloaded app in a location of your choosing (e.g. `~/.local/bin`)
 
-### macOS
+### Manually on macOS
 You can download a `.dmg` app bundle from our website:
 
 <a href="https://downloads.codetracer.com/CodeTracer-latest-arm64.dmg"><img width="75px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/1/1b/Apple_logo_grey.svg"></a>
