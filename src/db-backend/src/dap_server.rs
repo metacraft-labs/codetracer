@@ -119,7 +119,7 @@ fn launch(
         Ok(handler)
     } else {
         warn!("problem with reading metadata or path trace files: try rr?");
-        let path = trace_folder.join("rr").join("latest-trace");
+        let path = trace_folder.join("rr");
         if path.exists() {
             let db = Db::new(&PathBuf::from(""));
             let ct_rr_args = CtRRArgs {

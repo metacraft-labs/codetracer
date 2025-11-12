@@ -139,7 +139,7 @@ proc replay*(
     trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
 
     if trace.isNil and traceFolderArg.isSome:
-      trace = importDbTrace(traceFolderArg.get() / "trace_metadata.json", NO_TRACE_ID, NO_PID, LangUnknown)
+      trace = importTrace(traceFolderArg.get(), NO_TRACE_ID, NO_PID, LangUnknown)
     if trace.isNil:
       echo "ERROR: can't find or import trace"
       quit(1)
