@@ -12,7 +12,7 @@ use std::{
 use runtime_tracing::{StepId, TypeKind};
 
 use crate::{
-    db::Db,
+    db::{Db, DbReplay},
     lang::Lang,
     task::StringAndValueTuple,
     trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor},
@@ -99,11 +99,12 @@ fn check_tracepoint_evaluate(
     let mut interpreter = TracepointInterpreter::new(1);
     interpreter.register_tracepoint(0, src)?;
 
+    let mut db_replay = DbReplay::new(Box::new(db.clone()));
     for step in db.step_from(StepId(0), true) {
         let curr_line = step.line.0 as usize;
 
         if line == curr_line {
-            let actual = interpreter.evaluate(0, step.step_id, &db);
+            let actual = interpreter.evaluate(0, step.step_id, &mut db_replay, lang);
             check_equal(&actual, expected);
             return Ok(());
         }
