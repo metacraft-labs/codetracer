@@ -36,8 +36,64 @@ let controllerConfigs = @[
 ]
 
 var controllerStates = initTable[string, ControllerState]()
+var pathModuleCache: JsObject
+var pendingStartUrls = initTable[string, string]()
 
-proc startClient(kind: string; url: string)
+proc startClient(kind: string; url: string; allowDefer: bool = true)
+
+proc ensurePathModule(): JsObject =
+  if pathModuleCache.isNil:
+    pathModuleCache = requireModule("path")
+  pathModuleCache
+
+proc normalizeKind(kind: string): string =
+  if kind.len == 0:
+    ""
+  else:
+    kind.toLowerAscii()
+
+proc logClientConfig(label: cstring; payload: JsObject) {.importjs: "console.log(#, JSON.stringify(#, null, 2))".}
+
+proc fileExists(fsModule: JsObject; path: string): bool =
+  if path.len == 0:
+    return false
+  try:
+    cast[bool](call1(field(fsModule, "existsSync"), toJs(path.cstring)))
+  except CatchableError:
+    false
+
+proc dirname(pathModule: JsObject; target: string): string =
+  if target.len == 0:
+    return ""
+  try:
+    let dirValue = call1(field(pathModule, "dirname"), toJs(target.cstring))
+    normalizePathString($toCString(dirValue))
+  except CatchableError:
+    ""
+
+proc findCargoRoot(fsModule, pathModule: JsObject; filePath: string): string =
+  var current = normalizePathString(filePath)
+  if current.len == 0:
+    return ""
+  var currentDir = dirname(pathModule, current)
+  var guard = 0
+  while currentDir.len > 0 and guard < 256:
+    let cargoPath = joinPath(currentDir, "Cargo.toml")
+    infoPrint fmt"renderer:lsp cargo search ({filePath}) checking {cargoPath}"
+    if fileExists(fsModule, cargoPath):
+      infoPrint fmt"renderer:lsp cargo root detected: {currentDir}"
+      return currentDir
+    let parentDir = dirname(pathModule, currentDir)
+    if parentDir.len == 0 or parentDir == currentDir:
+      break
+    currentDir = parentDir
+    inc guard
+  infoPrint fmt"renderer:lsp cargo search failed for {filePath}"
+  ""
+
+proc attachDidOpenLogger(client: JsObject; kind: cstring) {.importjs: "(function(c,label){ var origStart = c.start.bind(c); c.start = function(){ if (!c.__diagnosticHook){ var origNotify = c.sendNotification.bind(c); c.sendNotification = function(method, params){ if (method && method.method === 'textDocument/didOpen'){ console.log('[LSP didOpen ' + label + ']', params && params.textDocument ? params.textDocument.uri : params); } return origNotify(method, params); }; c.__diagnosticHook = true; } return origStart(); }; })(#, #)".}
+
+proc attachWiretap(client: JsObject; kind: cstring) {.importjs: "(function(c,label){ if (c && !c.__wiretap){ var origSendNotification = c.sendNotification ? c.sendNotification.bind(c) : null; var origSendRequest = c.sendRequest ? c.sendRequest.bind(c) : null; if (origSendNotification){ c.sendNotification = function(method, params){ console.log('[LSP -> ' + label + ' notify]', method, JSON.stringify(params, null, 2)); return origSendNotification(method, params); }; } if (origSendRequest){ c.sendRequest = function(method, params){ console.log('[LSP -> ' + label + ' request]', method, JSON.stringify(params, null, 2)); return origSendRequest(method, params); }; } c.__wiretap = true; } })(#, #)".}
 
 proc getConfig(kind: string): ControllerConfig =
   for cfg in controllerConfigs:
@@ -102,14 +158,40 @@ proc addLinkedProject(linkedProjects: JsObject; linkedPaths: var seq[string]; fs
   if not cast[bool](call1(field(fsModule, "existsSync"), toJs(cargoPath.cstring))):
     return
   linkedPaths.add(normalized)
-  let project = newObject()
-  setField(project, "kind", toJs(cstring"cargo"))
-  setField(project, "path", toJs(cargoPath.cstring))
-  push(linkedProjects, project)
+  push(linkedProjects, toJs(cargoPath.cstring))
 
-proc startClient(kind: string; url: string) =
+proc addEditorWorkspaceFolders(kind: string; fsModule: JsObject; workspaceFolders: JsObject; workspacePaths: var seq[string]; hasExistingWorkspace: var bool) =
+  let editorPaths = getRegisteredDocumentPaths(kind)
+  if editorPaths.len == 0:
+    return
+  let pathModule = ensurePathModule()
+  let normalizedKind = normalizeKind(kind)
+  for filePath in editorPaths:
+    var targetFolder = ""
+    if normalizedKind == "rust":
+      targetFolder = findCargoRoot(fsModule, pathModule, filePath)
+    else:
+      targetFolder = dirname(pathModule, normalizePathString(filePath))
+    if targetFolder.len == 0:
+      continue
+    if workspacePaths.contains(targetFolder):
+      continue
+    addWorkspaceFolder(workspaceFolders, workspacePaths, targetFolder)
+    if not hasExistingWorkspace and fileExists(fsModule, targetFolder):
+      hasExistingWorkspace = true
+
+proc shouldDeferStart(kind: string): bool =
+  not hasRegisteredDocuments(kind)
+
+proc tryStartPendingClient(kind: string)
+
+proc startClient(kind: string; url: string; allowDefer: bool = true) =
   if not servicesReady():
     scheduleRetry(kind, url)
+    return
+  if allowDefer and shouldDeferStart(kind):
+    infoPrint fmt"renderer:lsp deferring start ({kind}) until workspace is available"
+    pendingStartUrls[kind] = url
     return
   stopClient(kind)
   var effectiveUrl = url
@@ -185,6 +267,7 @@ proc startClient(kind: string; url: string) =
                 if cast[bool](call1(field(fsModule, "existsSync"), toJs(filesPath.cstring))):
                   hasExistingWorkspace = true
 
+        addEditorWorkspaceFolders(kind, fsModule, workspaceFolders, workspacePaths, hasExistingWorkspace)
         if arrayLen(workspaceFolders) > 0:
           setField(clientOptions, "workspaceFolders", workspaceFolders)
           setField(clientOptions, "workspaceFolder", arrayAt(workspaceFolders, 0))
@@ -208,14 +291,16 @@ proc startClient(kind: string; url: string) =
         setField(clientConfig, "name", toJs(cfg.clientName.cstring))
         setField(clientConfig, "clientOptions", clientOptions)
         setField(clientConfig, "messageTransports", transports)
+        let logLabel = cstring(fmt"[LSP clientConfig {kind}]")
+        logClientConfig(logLabel, clientConfig)
 
         state.activeClient = construct1(monacoLanguageClientCtor, clientConfig)
-        if cfg.kind == "ruby":
-          let targetClient = state.activeClient
-          proc attachDidOpenLogger(client: JsObject) {.importjs: "(function(c){ var origStart = c.start.bind(c); c.start = function(){ var origSend; if (!c.__diagnosticHook){ var origNotify = c.sendNotification.bind(c); c.sendNotification = function(method, params){ if (method && method.method === 'textDocument/didOpen'){ console.log('[LSP didOpen ruby]', params && params.textDocument ? params.textDocument.uri : params); } return origNotify(method, params); }; c.__diagnosticHook = true; } return origStart(); }; })(#)".}
-          attachDidOpenLogger(targetClient)
+        if not state.activeClient.isNil:
+          attachDidOpenLogger(state.activeClient, cfg.kind.cstring)
+          attachWiretap(state.activeClient, cfg.kind.cstring)
         discard call0(field(state.activeClient, "start"))
         attachLspDiagnostics(kind, state.activeClient)
+        markClientReady(kind)
         infoPrint fmt"renderer:lsp client ({kind}) started @ {normalized}"
       except CatchableError:
         warnPrint fmt"renderer:lsp start failed ({kind}) @ {normalized}: {getCurrentExceptionMsg()}"
@@ -225,6 +310,14 @@ proc startClient(kind: string; url: string) =
     warnPrint fmt"renderer:lsp websocket setup failed ({kind}): {getCurrentExceptionMsg()}"
     state.wsConnection = nil
     scheduleRetry(kind, url)
+
+proc tryStartPendingClient(kind: string) =
+  if not pendingStartUrls.hasKey(kind):
+    return
+  let url = pendingStartUrls[kind]
+  pendingStartUrls.del(kind)
+  infoPrint fmt"renderer:lsp resuming deferred start ({kind}) => {url}"
+  startClient(kind, url, false)
 
 proc onUrlChange(kind: string; url: string) =
   startClient(kind, url)
@@ -237,8 +330,14 @@ proc requestInitialStatus(kind: string) =
   else:
     lsp_client.requestLspUrl(kind)
 
+proc registerKindController(cfg: ControllerConfig) =
+  let capturedKind = cfg.kind
+  registerDocumentObserver(capturedKind, proc () {.closure.} =
+    tryStartPendingClient(capturedKind)
+  )
+  onLspUrlChange(proc(url: string) {.closure.} = onUrlChange(capturedKind, url), kind = capturedKind)
+  requestInitialStatus(capturedKind)
+
 proc initLspController* =
   for cfg in controllerConfigs:
-    let kind = cfg.kind
-    onLspUrlChange(proc(url: string) {.closure.} = onUrlChange(kind, url), kind = kind)
-    requestInitialStatus(kind)
+    registerKindController(cfg)
