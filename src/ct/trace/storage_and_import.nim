@@ -83,8 +83,8 @@ proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = 
   result = sortedFolders
 
 
-proc importDbTrace*(
-  traceMetadataPath: string,
+proc importTrace*(
+  traceFolder: string,
   traceIdArg: int,
   recordPid: int,
   langArg: Lang = LangNoir,
@@ -93,8 +93,16 @@ proc importDbTrace*(
   traceKind: string = "db",
 ): Trace =
   
-  # for rr: trace_db_metadata.json: has those fields but also many others
-  echo traceMetadataPath
+  # for now support different files with the same subset of fields:
+  #   db: trace_metadata.json
+  #   rr: trace_db_metadata.json: 
+  # both should have `program`, `args`, `workdir`(but maybe also others)
+  let traceMetadataPath = if traceKind == "db":
+      traceFolder / "trace_metadata.json"
+    else:
+      traceFolder / "trace_db_metadata.json"
+
+  # echo traceMetadataPath
   let rawTraceMetadata = readFile(traceMetadataPath)
   let untypedJson = parseJson(rawTraceMetadata)
   let program = untypedJson{"program"}.getStr()
@@ -120,7 +128,11 @@ proc importDbTrace*(
       traceFolder
   if traceIdArg == NO_TRACE_ID:
     createDir(outputFolder)
-    copyFile(traceMetadataPath, outputFolder / "trace_metadata.json")
+    if traceMetadataPath.endsWith("trace_metadata.json"):
+      copyFile(traceMetadataPath, outputFolder / "trace_metadata.json")
+    elif traceMetadataPath.endsWith("trace_db_metadata.json"):
+      copyFile(traceMetadataPath, outputFolder / "trace_db_metadata.json")
+
     try:
       copyFile(tracePathsPath, outputFolder / "trace_paths.json")
     except CatchableError as e:
@@ -152,9 +164,9 @@ proc importDbTrace*(
         # for now assume this is used only for db traces
         # and that C/C++/Rust there can come only from wasm targets currently
         if traceLang == LangRust:
-          lang = LangRustWasm
+          lang = if traceKind == "db": LangRustWasm else: LangRust
         elif traceLang in {LangC, LangCpp}:
-          lang = LangCppWasm
+          lang = if traceKind == "db": LangCppWasm else: traceLang
         else:
           lang = traceLang
         break # for now assume the first detected lang is ok
@@ -176,27 +188,41 @@ proc importDbTrace*(
   let sourceFolders = processSourceFoldersList(sourceFoldersInitialSet, workdir)
   let sourceFoldersText = sourceFolders.join(" ")
 
-  trace_index.recordTrace(
-    traceID,
-    program = program,
-    args = args,
-    compileCommand = "",
-    env = "",
-    workdir = workdir,
-    lang = lang,
-    sourceFolders = sourceFoldersText,
-    lowLevelFolder = "",
-    outputFolder = outputFolder,
-    test = false,
-    imported = selfContained,
-    shellID = -1,
-    rrPid = recordPid,
-    exitCode = -1,
-    calltrace = true,
-    # for now always use FullRecord for db-backend
-    # and ignore possible env var override
-    calltraceMode = CalltraceMode.FullRecord,
-    fileId = downloadUrl)
+  # echo "traceKind ", traceKind
+  if traceKind == "db":
+    trace_index.recordTrace(
+      traceID,
+      program = program,
+      args = args,
+      compileCommand = "",
+      env = "",
+      workdir = workdir,
+      lang = lang,
+      sourceFolders = sourceFoldersText,
+      lowLevelFolder = "",
+      outputFolder = outputFolder,
+      test = false,
+      imported = selfContained,
+      shellID = -1,
+      rrPid = recordPid,
+      exitCode = -1,
+      calltrace = true,
+      # for now always use FullRecord for db-backend
+      # and ignore possible env var override
+      calltraceMode = CalltraceMode.FullRecord,
+      fileId = downloadUrl)
+  else:
+    try:
+      var trace = Json.decode(readFile(traceMetadataPath), Trace)
+      trace.id = traceID
+      # trace.sourceFolders = sourceFolders
+      trace.outputFolder = outputFolder
+      trace.imported = selfContained
+      # echo trace.repr
+      trace_index.recordTrace(trace, test=false)
+    except CatchableError as e:
+      echo "[codetracer importTrace error]: ", e.repr
+      quit(1)
 
 proc getFolderSize(folderPath: string): int64 =
   var totalSize: int64 = 0
