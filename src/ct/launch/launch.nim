@@ -144,7 +144,7 @@ proc runInitial*(conf: CodetracerConf) =
     #   # eventually enable?
     #   # downloadCommand(conf.traceRegistryId)
     of StartupCommand.build:
-      build(conf.buildProgramPath, conf.buildOutputPath)
+      discard build(conf.buildProgramPath, conf.buildOutputPath)
     of StartupCommand.record:
       discard record(
         conf.recordLang, conf.recordOutputFolder,
