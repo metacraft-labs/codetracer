@@ -4,14 +4,28 @@
 <!-- bootstrap 4 : credit to bootstrap authors-->
 
 <!doctype html>
-<html>
+<html lang="en">
     <head>
         <meta charset='utf-8'>
         <title>CodeTracer</title>
 
+        <meta http-equiv="Content-Security-Policy" content="
+            default-src 'none';
+            script-src 'self';
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data: blob:;
+            font-src 'self' data:;
+            connect-src 'self';
+            worker-src 'self' blob:;
+            media-src 'self';
+            object-src 'none';
+            base-uri 'self';
+            form-action 'self';
+        ">
         <!--
           don't remove this: placeholder and default,
-          later we use `loadTheme` in ui_js.nim to load the configured theme -->
+          later we use `loadTheme` in ui_js.nim to load the configured theme
+        -->
         <link id='theme' rel='stylesheet' href='frontend/styles/default_dark_theme_electron.css'>
 
         <link rel='stylesheet' href='frontend/styles/loader.css'>
@@ -38,15 +52,7 @@
         <link rel="stylesheet" href="public/third_party/@exuanbo/file-icons-js/dist/css/file-icons.css" type="text/css" />
         <link rel="stylesheet" href="public/third_party/devicon-base.css" type="text/css" />
 
-        <script>
-          self.module = undefined
-          self.process.browser = true
-
-          window.electron = require('electron');
-
-          inElectron = true
-          loadScripts = true
-      </script>
+        <script type='text/javascript' src="init.js"></script>
 
     </head>
     <body>
@@ -57,7 +63,7 @@
         </div>
         <div id='root-container' class='container'>
           <div id='ROOT'>
-            <div id="context-menu-container" style="display: none;"></div>
+            <div id="context-menu-container"></div>
             <div id='fixed-search'>
             </div>
             <section id="main">

@@ -192,6 +192,9 @@ cp "${ROOT_PATH}/src/helpers.js" "${APP_DIR}/helpers.js"
 cp "${ROOT_PATH}/src/frontend/index.html" "${APP_DIR}/src/index.html"
 cp "${ROOT_PATH}/src/frontend/index.html" "${APP_DIR}/index.html"
 
+cp "${ROOT_PATH}/src/frontend/init.js" "${APP_DIR}/src/init.js"
+cp "${ROOT_PATH}/src/frontend/init.js" "${APP_DIR}/init.js"
+
 cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/subwindow.html"
 cp "${ROOT_PATH}/src/frontend/subwindow.html" "${APP_DIR}/src/subwindow.html"
 

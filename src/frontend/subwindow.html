@@ -1,20 +1,28 @@
 <!DOCTYPE html>
-<html>
-  <head>
-      <meta charset="UTF-8">
-      <title>Install Subwindow</title>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="
+            default-src 'none';
+            script-src 'self';
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data: blob:;
+            font-src 'self' data:;
+            connect-src 'self';
+            worker-src 'self' blob:;
+            media-src 'self';
+            object-src 'none';
+            base-uri 'self';
+            form-action 'self';
+        ">
 
+        <title>Install Subwindow</title>
         <link rel='stylesheet' href='frontend/styles/subwindow.css'>
-  </head>
-  <body>
+    </head>
+    <body>
+        <div id="ROOT"></div>
 
-    <div id="ROOT"></div>
-
-    <script> 
-      window.electron = require('electron');
-      let inElectron = true
-    </script>
-    <script type="text/javascript" src="subwindow.js"></script>
-
-  </body>
+        <script type='text/javascript' src="init.js"></script>
+        <script type="text/javascript" src="subwindow.js"></script>
+    </body>
 </html>

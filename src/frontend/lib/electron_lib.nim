@@ -104,8 +104,8 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
 var nodePath*: NodePath
 
 when defined(ctRenderer):
-  var inElectron* {.importc.}: bool
-  var loadScripts* {.importc.}: bool
+  var inElectron* {.importc: "window.inElectron".}: bool
+  var loadScripts* {.importc: "window.loadScripts".}: bool
 else:
   var inElectron*: bool = false
   var loadScripts*: bool = false

@@ -50,6 +50,8 @@ cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/src/helpers.js
 cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/helpers.js
 cp "$ROOT_DIR"/src/frontend/*.html "$DIST_DIR"/src/
 cp "$ROOT_DIR"/src/frontend/*.html "$DIST_DIR"/
+cp "$ROOT_DIR"/src/frontend/*.js "$DIST_DIR"/src/
+cp "$ROOT_DIR"/src/frontend/*.js "$DIST_DIR"/
 rm -f "$DIST_DIR"/config
 rm -f "$DIST_DIR"/public
 cp -r "$ROOT_DIR"/src/config "$DIST_DIR"/config
