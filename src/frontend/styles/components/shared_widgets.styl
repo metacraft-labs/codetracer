@@ -144,11 +144,11 @@ input
   overflow: hidden !important
   text-overflow: ellipsis !important
   white-space: nowrap !important
-  border: 1px solid INPUT_BORDER_COLOR
-  background-image: INPUT_DEFAULT_SEARCH_ICON
-  background-repeat: no-repeat
-  background-position: 8px center
-  background-size: 12px 12px
+  border: 1px solid INPUT_BORDER_COLOR !important
+  background-image: INPUT_DEFAULT_SEARCH_ICON !important
+  background-repeat: no-repeat !important
+  background-position: 8px center !important
+  background-size: 12px 12px !important
 
   &:focus
     outline: 0px solid BORDERS_COLOR !important
@@ -340,7 +340,7 @@ input:checked ~ .checkmark:after
     border-radius: 4px
     width: fit-content
     padding-right: 4px
-  
+
   li
     padding-left: 4px
 
@@ -424,7 +424,7 @@ input:checked ~ .checkmark:after
 
   &:hover
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
-  
+
   &.active
     background-image: ACTIVE_LAYOUT_TAB_NESTED_ICON
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
@@ -442,7 +442,7 @@ input:checked ~ .checkmark:after
     color: PRIMARY_TEXT_COLOR
     font-weight: 400
     padding: 4px
-  
+
     .layout-dropdown-node
       border-radius: 4px
       padding-left: 4px
@@ -514,7 +514,7 @@ input:checked ~ .checkmark:after
 .run-trace-button
   .custom-tooltip
     right: 0px
-  
+
     &:after
       left: 90%
 
