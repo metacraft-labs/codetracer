@@ -34,7 +34,7 @@ proc listenAsync(server: JsObject; port: cint): Future[void] {.async.} =
   )
 proc createConnection(server: JsObject; reader, writer: JsObject; disposer: proc () {.closure.}): JsObject {.importjs: "#.createConnection(#, #, #)".}
 proc forwardConnections(server: JsObject; a, b: JsObject) {.importjs: "#.forward(#, #)".}
-proc unusedOnNotification(connection: JsObject; handler: proc(methodName, params: JsObject) {.closure.}): JsObject {.importjs: "#.onNotification(#)".}
+proc onGenericNotification(connection: JsObject; handler: proc(methodName, params: JsObject) {.closure.}): JsObject {.importjs: "#.onNotification(#)".}
 
 type
   LspNotificationHandler* = proc(methodName, params: JsObject) {.closure.}
@@ -42,9 +42,23 @@ type
 var
   notificationHandlers*: seq[LspNotificationHandler] = @[]
 
-proc registerLspNotificationHandler*(handler: LspNotificationHandler) = discard
-proc clearLspNotificationHandlers* = discard
-proc dispatchNotification(methodName, params: JsObject) = discard
+proc registerLspNotificationHandler*(handler: LspNotificationHandler) =
+  ## Register a handler invoked for every notification received from the language server.
+  if handler.isNil:
+    return
+  notificationHandlers.add(handler)
+
+proc clearLspNotificationHandlers* =
+  ## Remove all registered notification handlers.
+  notificationHandlers.setLen(0)
+
+proc dispatchNotification(methodName, params: JsObject) =
+  for handler in notificationHandlers:
+    try:
+      handler(methodName, params)
+    except CatchableError:
+      let message = getCurrentExceptionMsg()
+      logWarn2(toJs("LSP bridge notification handler failure"), toJs(message.cstring))
 
 const
   defaultRustAnalyzerCmd = "rust-analyzer"
@@ -102,6 +116,18 @@ proc startBridge*(port: cint = 3000; pathName: string = "/lsp"; lsCommand: strin
     let serverConnection = createConnection(rpcServer, lsReader, lsWriter, proc () {.closure.} =
       if not isKilled(ls):
         kill(ls)
+    )
+
+    readerListen(lsReader, proc (message: JsObject) {.closure.} =
+      try:
+        let msgType = field(message, "type")
+        if not msgType.isNil and cast[int](msgType) == 2:
+          let methodName = field(message, "method")
+          let params = field(message, "params")
+          dispatchNotification(methodName, params)
+      except CatchableError:
+        let errMsg = getCurrentExceptionMsg()
+        logWarn2(toJs("LSP bridge notification tap failed"), toJs(errMsg.cstring))
     )
 
     forwardConnections(rpcServer, clientConnection, serverConnection)
