@@ -1,7 +1,10 @@
 #command-data
   height: 28px
 
-#command-view
+.ct-p-8
+  padding: 8px
+
+.command-view
   background-color: BACKGROUND_COLOR
   color: TEXT_CONTENT_COLOR
   font-size: 14px
@@ -11,42 +14,46 @@
   left: 35vw
   width: 30vw
   right: 35vw
+  border-radius: 8px
+  outline: 2px solid COMMAND_BORDERS_COLOR
 
   input
-    height: 28px !important
-    width: 30vw !important
-    font-size: 14px !important
-    position: absolute
-    z-index: 21
-    // outline: 2px solid COMMAND_BORDERS_COLOR
-    margin-left: 0 !important
-    border-radius: 6px !important
+    width: 100% !important
+    margin-left: 0px !important
+    margin-bottom: 0px !important
+
+    // height: 28px !important
+    // width: 30vw !important
+    // font-size: 14px !important
+    // position: absolute
+    // z-index: 21
+    // // outline: 2px solid COMMAND_BORDERS_COLOR
+    // margin-left: 0 !important
+    // border-radius: 6px !important
     background-color: BACKGROUND_COLOR
-    border: 1px solid INPUT_BORDER_COLOR !important
-    background-image: INPUT_DEFAULT_SEARCH_ICON
-    background-size: 14px 14px
-    padding-left: 26px
+    // border: 1px solid INPUT_BORDER_COLOR !important
+    // background-image: INPUT_DEFAULT_SEARCH_ICON
+    // background-size: 14px 14px
+    // padding-left: 26px
 
-    &:focus
-      border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
-      margin-left: 0 !important
+  //   &:focus
+  //     border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
+  //     margin-left: 0 !important
 
-    &.disabled
-      pointer-events: none
+  //   &.disabled
+  //     pointer-events: none
 
-  #command-query-text
-    background: transparent
+  // #command-query-text
+  //   background: transparent
+
+  .ct-input-cp-background
+    background: #484848 !important
+    padding-left: 8px !important
 
   #command-results
     width: inherit
-    position: absolute
-    padding-top: 4px
-    top: 36px
-    padding-left: 4px
-    padding-right: 4px
-    padding-bottom: 4px
-    outline: 1px solid COMMAND_BORDERS_COLOR
     border-radius: 6px
+    margin-top: 8px
     background-color: COMMAND_RESULT_BACKGROUND_COLOR
 
   .command-result

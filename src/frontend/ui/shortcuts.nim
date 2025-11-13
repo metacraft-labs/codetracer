@@ -82,6 +82,19 @@ proc configureShortcuts* =
       bindShortcut(action, shortcut.renderer)
 
   kdom.document.addEventListener("mousedown", proc(e: Event) =
+    # Command palette active state control
+    let element = getElementById("command-view")
+    if element != nil:
+      let rect = element.getBoundingClientRect()
+      let mouseEvent = MouseEvent(e)
+      let inside = mouseEvent.clientX.float >= rect.left and mouseEvent.clientX.float <= rect.right and
+                  mouseEvent.clientY.float >= rect.top and mouseEvent.clientY.float <= rect.bottom
+      if inside:
+        data.ui.commandPalette.active = true
+        data.search(SearchFileRealTime, "".cstring)
+      else:
+        data.ui.commandPalette.active = false
+
     if cast[int](e.toJs.button) == BROWSER_FORWARD:
       cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = true)
     elif cast[int](e.toJs.button) == BROWSER_BACK:
