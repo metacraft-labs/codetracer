@@ -23,6 +23,10 @@ type
     editor: MonacoEditor
     model: MonacoTextModel
     opened: bool
+    snapshot: bool
+  PathCandidate = object
+    path: string
+    snapshot: bool
 
 const
   baseMarkerOwner = cstring("codetracer-lsp")
@@ -39,12 +43,18 @@ var
   fsModuleCache: JsObject
   syncedByEditorId = initTable[int, SyncedEntry]()
   clientsByKind = initTable[string, JsObject]()
+  documentObservers = initTable[string, seq[proc () {.closure.}]]()
+  readyKinds = initTable[string, bool]()
 
 proc detachLspDiagnostics*(kind: string)
 proc requestDiagnostics(entry: SyncedEntry)
 proc processDiagnosticResult(entry: SyncedEntry; response: JsObject)
 proc buildMarker(diag: JsObject): JsObject
 proc buildMarkers(params: JsObject): JsObject
+proc notifyDocumentObservers(kind: string)
+proc registerDocumentObserver*(kind: string; observer: proc () {.closure.})
+proc kindReady(kind: string): bool
+proc markClientReady*(kind: string)
 
 proc decodeUriComponent(value: cstring): cstring {.importjs: "decodeURIComponent(#)".}
 proc clientOnNotification(
@@ -56,7 +66,9 @@ proc sendDiagnosticsRequest(
   client: JsObject;
   params: JsObject;
   handler: proc(response: JsObject) {.closure.}
-) {.importjs: "(function(c,p,h){ c.sendRequest('textDocument/diagnostic', p).then(h, function(err){ console.error('[LSP diagnostics]', err); }); })(#, #, #)".}
+) {.importjs: "(function(c,p,h){ var promise = c.sendRequest('textDocument/diagnostic', p); if (promise && typeof promise.then === 'function'){ promise.then(h, function(err){ console.error('[LSP diagnostics]', err); }); } })(#, #, #)".}
+
+proc sendInitializePromise(client: JsObject): JsObject {.importjs: "#.onReady()".}
 proc sendNotification(client: JsObject; methodName: cstring; payload: JsObject) {.importjs: "#.sendNotification(#, #)".}
 proc logPayload(prefix: cstring; payload: JsObject) {.importjs: "console.log(#, JSON.stringify(#, null, 2))".}
 proc objectKeys(obj: JsObject): JsObject {.importjs: "Object.keys(#)".}
@@ -146,18 +158,24 @@ proc traceSnapshotPath(data: Data; originalPath: string): string =
   else:
     ""
 
-proc candidatePaths(data: Data; rawPath: string): seq[string] =
+proc containsCandidate(results: seq[PathCandidate]; path: string): bool =
+  for candidate in results:
+    if candidate.path == path:
+      return true
+  false
+
+proc candidatePaths(data: Data; rawPath: string): seq[PathCandidate] =
   if data.isNil:
     return @[]
-  var results: seq[string] = @[]
+  var results: seq[PathCandidate] = @[]
   let normalized = normalizePathString(rawPath)
   if normalized.len > 0:
-    results.add(normalized)
+    results.add(PathCandidate(path: normalized, snapshot: false))
   let snapshot = traceSnapshotPath(data, if normalized.len > 0: normalized else: rawPath)
   if snapshot.len > 0:
     let normalizedSnapshot = normalizePathString(snapshot)
-    if normalizedSnapshot.len > 0 and normalizedSnapshot notin results:
-      results.add(normalizedSnapshot)
+    if normalizedSnapshot.len > 0 and not containsCandidate(results, normalizedSnapshot):
+      results.add(PathCandidate(path: normalizedSnapshot, snapshot: true))
   results
 
 proc lspKindForLang(lang: Lang): string =
@@ -169,14 +187,16 @@ proc lspKindForLang(lang: Lang): string =
   else:
     ""
 
-proc pickSyncPath(paths: seq[string]): string =
+proc pickSyncCandidate(paths: seq[PathCandidate]): PathCandidate =
+  var fallback: PathCandidate
   for candidate in paths:
-    if pathExists(candidate):
+    if candidate.path.len == 0:
+      continue
+    if not candidate.snapshot and pathExists(candidate.path):
       return candidate
-  if paths.len > 0:
-    paths[0]
-  else:
-    ""
+    if fallback.path.len == 0:
+      fallback = candidate
+  fallback
 
 proc sendDidClose(entry: SyncedEntry)
 
@@ -291,7 +311,7 @@ proc sendDidClose(entry: SyncedEntry) =
 proc requestDiagnostics(entry: SyncedEntry) =
   if entry.isNil:
     return
-  if normalizeKind(entry.lspKind) != "ruby":
+  if not kindReady(entry.lspKind):
     return
   let client = getClient(entry.lspKind)
   if client.isNil:
@@ -360,11 +380,11 @@ proc processDiagnosticResult(entry: SyncedEntry; response: JsObject) =
         applyDiagnosticsForUri(uriText, field(report, "items"))
     inc idx
 
-proc registerSyncedEditor(component: EditorViewComponent; kind: string; paths: seq[string]) =
+proc registerSyncedEditor(component: EditorViewComponent; kind: string; candidates: seq[PathCandidate]) =
   if component.monacoEditor.isNil or component.tabInfo.isNil:
     return
-  let syncPath = pickSyncPath(paths)
-  if syncPath.len == 0:
+  let choice = pickSyncCandidate(candidates)
+  if choice.path.len == 0:
     return
   removeSyncedEntry(component.id)
   let model = component.monacoEditor.getModel()
@@ -372,18 +392,20 @@ proc registerSyncedEditor(component: EditorViewComponent; kind: string; paths: s
     return
   let entry = SyncedEntry(
     editorId: component.id,
-    path: syncPath,
-    uri: toFileUri(syncPath),
+    path: choice.path,
+    uri: toFileUri(choice.path),
     languageId: component.tabInfo.lang.toCLang(),
     lspKind: kind,
     editor: component.monacoEditor,
     model: model,
-    opened: false
+    opened: false,
+    snapshot: choice.snapshot
   )
   component.monacoEditor.onDidChangeModelContent(proc (event: JsObject) =
     sendDidChange(entry, event)
   )
   syncedByEditorId[component.id] = entry
+  notifyDocumentObservers(kind)
   ensureDocumentOpened(entry)
 
 proc removeEditorPaths(editorId: int) =
@@ -480,17 +502,31 @@ proc registerLspEditor*(component: EditorViewComponent) =
   if kind.len == 0:
     return
   let pathValue = if component.path.isNil: "" else: $component.path
-  var paths: seq[string] = @[]
-  for rawPath in candidatePaths(component.data, pathValue):
-    let normalizedPath = uriToNormalizedPath(rawPath)
-    if normalizedPath.len > 0 and normalizedPath notin paths:
-      paths.add(normalizedPath)
-  if paths.len == 0:
+  var candidates: seq[PathCandidate] = @[]
+  for candidate in candidatePaths(component.data, pathValue):
+    if candidate.path.len == 0:
+      continue
+    if containsCandidate(candidates, candidate.path):
+      continue
+    candidates.add(candidate)
+  if candidates.len == 0:
     return
   removeEditorPaths(component.id)
   let entry = EditorEntry(editor: component.monacoEditor, owner: ownerForKind(kind), kind: kind)
-  registerEntry(component.id, paths, entry)
-  registerSyncedEditor(component, kind, paths)
+  let debugInfo = newObject()
+  setFieldInt(debugInfo, "editorId", component.id)
+  setField(debugInfo, "kind", toJs(kind.cstring))
+  let pathArray = newArray()
+  var registeredPaths: seq[string] = @[]
+  for candidate in candidates:
+    let pathValue = candidate.path
+    push(pathArray, toJs(pathValue.cstring))
+    if pathValue notin registeredPaths:
+      registeredPaths.add(pathValue)
+  setField(debugInfo, "paths", pathArray)
+  logPayload(cstring"[LSP registerEditor]", debugInfo)
+  registerEntry(component.id, registeredPaths, entry)
+  registerSyncedEditor(component, kind, candidates)
 
 proc unregisterLspEditor*(component: EditorViewComponent) =
   if component.isNil:
@@ -506,6 +542,7 @@ proc attachLspDiagnostics*(kind: string; client: JsObject) =
     handleDiagnostics(key, params)
   diagnosticsHandlers[key] = clientOnNotification(client, diagnosticsMethod, handler)
   clientsByKind[key] = client
+  readyKinds[key] = true
   reopenDocumentsForClient(key)
 
 proc detachLspDiagnostics*(kind: string) =
@@ -515,6 +552,59 @@ proc detachLspDiagnostics*(kind: string) =
     diagnosticsHandlers.del(key)
   if clientsByKind.hasKey(key):
     clientsByKind.del(key)
+  if readyKinds.hasKey(key):
+    readyKinds.del(key)
   for _, entry in syncedByEditorId:
     if not entry.isNil and normalizeKind(entry.lspKind) == key:
       entry.opened = false
+
+proc registerDocumentObserver*(kind: string; observer: proc () {.closure.}) =
+  if observer.isNil:
+    return
+  let key = normalizeKind(kind)
+  var handlers = documentObservers.getOrDefault(key, @[])
+  handlers.add(observer)
+  documentObservers[key] = handlers
+
+proc notifyDocumentObservers(kind: string) =
+  let key = normalizeKind(kind)
+  if not documentObservers.hasKey(key):
+    return
+  for observer in documentObservers[key]:
+    try:
+      observer()
+    except CatchableError:
+      discard
+
+proc kindReady(kind: string): bool =
+  let key = normalizeKind(kind)
+  readyKinds.getOrDefault(key, false)
+
+proc markClientReady*(kind: string) =
+  let key = normalizeKind(kind)
+  readyKinds[key] = true
+  reopenDocumentsForClient(key)
+
+proc getRegisteredDocumentPaths*(kind: string): seq[string] =
+  let normalized = normalizeKind(kind)
+  for _, entry in syncedByEditorId:
+    if entry.isNil:
+      continue
+    if normalizeKind(entry.lspKind) != normalized:
+      continue
+    if entry.snapshot:
+      continue
+    if entry.path.len == 0:
+      continue
+    if entry.path notin result:
+      result.add(entry.path)
+
+proc hasRegisteredDocuments*(kind: string): bool =
+  let normalized = normalizeKind(kind)
+  for _, entry in syncedByEditorId:
+    if entry.isNil:
+      continue
+    if normalizeKind(entry.lspKind) != normalized:
+      continue
+    return true
+  false
