@@ -18,7 +18,7 @@ import
   lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ]
   # ui / datatable
 
-# (alexander): if i remember correctly: to prevent clashes with other dom-related modules 
+# (alexander): if i remember correctly: to prevent clashes with other dom-related modules
 from std / dom import Element, getAttribute, Node, preventDefault, document, window,
                 Document, getElementById, querySelectorAll, querySelector,
                 getElementsByClassName, contains, add
@@ -918,7 +918,6 @@ proc loadFileDialog*(options: js) =
 
 proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
   cdebug fmt"search: {query}"
-  data.ui.commandPalette.active = not data.ui.commandPalette.active
   if not data.ui.commandPalette.active:
     # data.services.search.queries[mode] = cstring""
     data.ui.commandPalette.results = @[]
@@ -1087,7 +1086,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     else:
       x
 
-  var heightOffset = 
+  var heightOffset =
     if inExtension:
       40
     else:
@@ -1099,7 +1098,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     else:
       y
   container.style.top = cstring(fmt"{topPos + heightOffset}px")
-  container.style.left = cstring(fmt"{leftPos}px") 
+  container.style.left = cstring(fmt"{leftPos}px")
 
   kdom.document.addEventListener("click", proc(e: Event) =
     container.style.display = "none")

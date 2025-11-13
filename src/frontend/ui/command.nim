@@ -12,7 +12,7 @@ proc close(self: CommandPaletteComponent) =
   redrawAll()
   self.clear()
 
-proc resetCommandPalette(self: CommandPaletteComponent) =
+proc resetCommandPalette*(self: CommandPaletteComponent) =
   self.inputField.toJs.value = "".cstring
   self.close()
   data.redraw()
@@ -235,32 +235,83 @@ proc onTab(self: CommandPaletteComponent) =
     self.inputField.toJs.value = self.inputPlaceholder
     self.onInput(self.inputPlaceholder)
 
+proc agentHWindow(self: CommandPaletteComponent): VNode =
+  buildHtml(
+    tdiv(class="agent-ha-container")
+  ):
+    tdiv(class = "agent-ha-card agent-ha-author"):
+      tdiv(class = "agent-ha-card-header"):
+        tdiv(class = "agent-ha-avatar"):
+          text "THIS IS THE TITLE!"
+        tdiv(class = "agent-ha-header-text"):
+          span(class = "agent-ha-title"):
+            text "TITLE AGAIN?"
+          span(class = "agent-ha-subtitle"):
+            text "SUBTITLE???"
+        tdiv(class = "agent-ha-actions"):
+          button(class = "agent-ha-action", `type` = "button"):
+            span(class = "icon-copy")
+          button(class = "agent-ha-action", `type` = "button"):
+            span(class = "icon-edit")
+      tdiv(class = "agent-ha-code-block"):
+        pre:
+          code:
+            text "ALABALA THIS IS THE NEW TEXT BU"
+    tdiv(class = "agent-ha-card agent-ha-response"):
+      tdiv(class = "agent-ha-card-header"):
+        tdiv(class = "agent-ha-avatar agent-ha-avatar--agent"):
+          text "g"
+        tdiv(class = "agent-ha-header-text"):
+          span(class = "agent-ha-title"):
+            text "agent working..."
+      tdiv(class = "agent-ha-body"):
+        p:
+          text "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Praesent nec rutrum nibh. Donec euismod libero nec justo mattis laoreet. Integer sed sapien et felis lacinia consectetur in ut felis."
+    tdiv(class = "agent-ha-input-area"):
+      tdiv(class = "agent-ha-input-bar"):
+        button(class = "agent-ha-input-icon", `type` = "button"):
+          span(class = "icon-plus")
+        textarea(
+          class = "agent-ha-textarea",
+          placeholder = "Ask anything",
+          rows = "1"
+        )
+      tdiv(class = "agent-ha-input-toolbar"):
+        button(class = "agent-ha-chip", `type` = "button"):
+          span(class = "icon-attachment")
+          span:
+            text "Add files and more"
+        button(class = "agent-ha-chip agent-ha-chip--model", `type` = "button"):
+          span:
+            text "Model "
+          span(class = "agent-ha-chip-value"):
+            text "GPT-5"
+          span(class = "icon-caret")
+        button(class = "agent-ha-send", `type` = "button"):
+          span(class = "icon-send")
+
 method onProgramSearchResults*(self: CommandPaletteComponent, results: seq[CommandPanelResult]) {.async.} =
   clog "onProgramSearchResults commands"
   self.results = results
   self.data.redraw()
 
 method render*(self: CommandPaletteComponent): VNode =
+  let (padClass, inputClass, activeClass) = if self.active: ("ct-p-8", "ct-input-cp-background", "ct-active") else: ("", "", "")
   result = buildHtml(
     tdiv(id = "command-data")
   ):
-    tdiv(id = "command-view"):
+    tdiv(class = fmt"command-view {padClass} {activeClass}", id = "command-view"):
       tdiv(id = "command-query"):
-        input(class = "disabled",
-        placeholder = self.inputPlaceholder)
         input(
           `type` = "text",
           id = "command-query-text",
           name = "command-query",
           placeholder = "Navigate to file or run a :command",
-          class = "mousetrap",
+          class = fmt"mousetrap {inputClass}",
           autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
           autocorrect="off",
           autocapitalize="off",
           spellcheck="false",
-          onblur = proc =
-            data.ui.commandPalette.active = false
-            self.resetCommandPalette(),
           onmousedown = proc =
             data.search(SearchFileRealTime, "".cstring),
           oninput = proc(ev: Event, tg: VNode) =
@@ -280,36 +331,17 @@ method render*(self: CommandPaletteComponent): VNode =
               e.preventDefault()
               self.onTab()
         )
-        tdiv(class = "custom-tooltip"):
-          # TODO: we should build this dynamically from a list of registered short-cuts
-          #
-          # There are two things to consider:
-          #
-          #  * The user can change the default bindings, so the shortcuts
-          #    here should change as well
-          #
-          #  * Developers and users can add new bindings independently from
-          #    each other. This needs to be done through a facility that
-          #    creates a short-cut to a prepopulated command pallete. We
-          #    should be able to ask the table of configured short-cuts to
-          #    give us all active bindings that active the command pallete
-          #    in one way or another.
-          text "Navigate to file (ctrl+p) / Run command (alt+p)"
+        # tdiv(class = "custom-tooltip"):
+        #   text "Navigate to file (ctrl+p) / Run command (alt+p)"
 
-      var resultsClass =
-        if self.results.len == 0 and self.inputValue == cstring"":
-          "no-results"
-        else:
-          ""
-
-      tdiv(
-        id = "command-results",
-        class = resultsClass,
-        onmousedown = proc(e: Event, et: VNode) = e.preventDefault()
-      ):
-        if self.results.len > 0:
-          for i, result in self.results:
-            commandResultView(self, result, i == self.selected, i mod 2 == 0, i, data.services.search.activeCommandName)
-        else:
-          tdiv(class = "command-result empty"):
-            text "No matching result found."
+        if self.active:
+          tdiv(
+            id = "command-results",
+            onmousedown = proc(e: Event, et: VNode) = e.preventDefault()
+          ):
+            if self.results.len > 0:
+              for i, result in self.results:
+                commandResultView(self, result, i == self.selected, i mod 2 == 0, i, data.services.search.activeCommandName)
+            else:
+              tdiv(class = "command-result empty"):
+                text "No matching result found."

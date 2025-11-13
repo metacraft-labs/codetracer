@@ -1238,6 +1238,7 @@ type
     inputField*: dom.Node
     inputValue*: cstring
     inputPlaceholder*: cstring
+    isFocused*: bool
 
   NoSourceComponent* = ref object of Component
     message*: cstring
