@@ -112,6 +112,10 @@ The scratchpad provides a play area where you can pin values from different loca
 
 # Installating CodeTracer
 ## Recommended: using the CodeTracer installer
+> [!WARNING]
+> On NixOS, this script currently installs CodeTracer as a raw AppImage, since our Nix package is not yet merged in nixpkgs.
+> Nix users which want to use the package should install it manually from source.
+
 On any system, you can use the CodeTracer installer script by running the following command:
 ```
 user $ curl "https://downloads.codetracer.com/install.sh" | sh
@@ -124,7 +128,7 @@ This script is handy, because it installs CodeTracer in the best possible manner
 > CodeTracer requires ruby to be installed through [homebrew](https://brew.sh) for ruby support. It's recommended that you install homebrew if possible
 > so that you can automatically get ruby support through the installer.
 
-## Installing CodeTracer manually
+## Installing CodeTracer binaries manually
 Click on the icons below that corresponds to your distribution or packaging model:
 
 <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
@@ -166,6 +170,9 @@ To enter the Nix development environment, perform the following steps:
 3) At the repository root, execute `git submodule update --init --recursive`.
 4) At the repository root, execute `nix develop` (or `direnv allow` for users of `direnv`).
 5) In the resulting shell, you can build all targets by running `just build-once` or `just build` if you intend to make continuous changes to the source code.
+
+#### NixOS
+On NixOS, you can install our Nix package by running `just build-nix`.
 
 ### macOS
 On macOS, we do not yet have support for Nix, instead we compile by using the non-nix-build scripts:
