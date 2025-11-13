@@ -63,3 +63,4 @@
 - A Nim-side diagnostics/sync router now tracks Monaco editors per normalized path (including trace `files/` snapshots), sends `textDocument/didOpen|didChange|didClose` notifications for each live buffer, and proactively requests `textDocument/diagnostic` so Ruby warnings land in the correct tab even without MonacoServices.
 - `initLspController` now delegates to `registerKindController`, ensuring each language kind registers its observer with an independent closure so the correct LSP client starts when its URL is received.
 - LSP startup only begins once a Monaco editor of that kind is registered; document observers fire when the first tab opens, allowing the client to start with real context instead of empty workspaces.
+- Only the Ruby LSP supports pull diagnostics (`textDocument/diagnostic`); other languages rely on `publishDiagnostics`, so guard `requestDiagnostics` by kind to avoid crashing rust-analyzer.
