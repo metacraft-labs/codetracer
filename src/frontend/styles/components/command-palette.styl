@@ -15,7 +15,7 @@
   width: 30vw
   right: 35vw
   border-radius: 8px
-  outline: 2px solid COMMAND_BORDERS_COLOR
+  outline: 4px solid COMMAND_BORDERS_COLOR
 
   input
     width: 100% !important
@@ -49,6 +49,15 @@
   .ct-input-cp-background
     background: #484848 !important
     padding-left: 8px !important
+
+  .agent-command-input
+    color: #A5F3FC !important
+
+    &::placeholder
+      color: #a5f3fc
+
+    &:focus
+      border: 1px solid #0E7490 !important
 
   #command-results
     width: inherit
@@ -143,3 +152,54 @@
 
 .command-program-search-result-line
   font-weight: normal
+
+.agent-buttons-container
+  display: flex
+  justify-content: space-between
+  margin-top: 8px
+  align-items: center
+
+  .agent-button
+    display: flex
+    cursor: pointer
+    border: 1px solid DEBUG_BUTTON_ACTIVE_BACKGROUND
+    padding: 4px
+    align-items: center
+    border-radius: 6px
+    padding-right: 8px
+    white-space: nowrap
+    height: 28px
+    margin-right: 6px
+
+    .add-file-img
+      background-image: COMMAND_PALETTE_ADD_FILE_IMG
+      background-size: 10px, 16px
+      background-position: center
+      background-repeat: no-repeat
+      width: 24px
+      height: 24px
+      margin-right: 4px
+
+  .agent-model-select
+    width: -webkit-fill-available
+    display: flex
+    justify-content: space-between
+    padding-right: 0px !important
+
+  .agent-model-img
+    height: 24px
+    min-width: 24px
+    background-image: COMMAND_PALETTE_ARROW_IMG
+    background-repeat: no-repeat
+    background-size: 9px, 6px
+    background-position: center
+
+  .agent-enter
+    height: 24px
+    min-width: 24px
+    border-radius: 6px
+    background: #0E7490
+    background-image: COMMAND_PALETTE_ENTER_MSG_IMG
+    background-repeat: no-repeat
+    background-size: 16px, 16px
+    background-position: center
