@@ -55,6 +55,7 @@ proc notifyDocumentObservers(kind: string)
 proc registerDocumentObserver*(kind: string; observer: proc () {.closure.})
 proc kindReady(kind: string): bool
 proc markClientReady*(kind: string)
+proc usesPullDiagnostics(kind: string): bool
 
 proc decodeUriComponent(value: cstring): cstring {.importjs: "decodeURIComponent(#)".}
 proc clientOnNotification(
@@ -219,7 +220,8 @@ proc ensureDocumentOpened(entry: SyncedEntry) =
   logPayload(cstring"[LSP didOpen]", params)
   sendNotification(client, didOpenMethod, params)
   entry.opened = true
-  requestDiagnostics(entry)
+  if usesPullDiagnostics(entry.lspKind):
+    requestDiagnostics(entry)
 
 proc jsToInt(value: JsObject; fallback: int = 0): int =
   if value.isNil:
@@ -291,7 +293,8 @@ proc sendDidChange(entry: SyncedEntry; changeEvent: JsObject = nil) =
   setField(params, "contentChanges", lspChanges)
   logPayload(cstring"[LSP didChange]", params)
   sendNotification(client, didChangeMethod, params)
-  requestDiagnostics(entry)
+  if usesPullDiagnostics(entry.lspKind):
+    requestDiagnostics(entry)
 
 proc sendDidClose(entry: SyncedEntry) =
   if entry.isNil or not entry.opened:
@@ -310,6 +313,8 @@ proc sendDidClose(entry: SyncedEntry) =
 
 proc requestDiagnostics(entry: SyncedEntry) =
   if entry.isNil:
+    return
+  if not usesPullDiagnostics(entry.lspKind):
     return
   if not kindReady(entry.lspKind):
     return
@@ -584,6 +589,10 @@ proc markClientReady*(kind: string) =
   let key = normalizeKind(kind)
   readyKinds[key] = true
   reopenDocumentsForClient(key)
+
+proc usesPullDiagnostics(kind: string): bool =
+  let normalized = normalizeKind(kind)
+  normalized == "ruby" or normalized == "rust"
 
 proc getRegisteredDocumentPaths*(kind: string): seq[string] =
   let normalized = normalizeKind(kind)

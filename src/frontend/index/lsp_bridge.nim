@@ -147,22 +147,12 @@ proc trimNotificationBuffer() =
 proc ensureNotificationHandler() =
   if not lspNotificationHandler.isNil:
     return
-  lspNotificationHandler = proc(methodName, params: JsObject) {.closure.} =
-    let methodText = toDisplayString(methodName)
-    let payloadText = toDisplayString(params)
-    debugPrint fmt"index:lsp notification received: {methodText}"
-    lspNotifications.add(fmt"{methodText}: {payloadText}")
-    trimNotificationBuffer()
-    sendLspStatusToRenderer()
-  registerLspNotificationHandler(lspNotificationHandler)
+  # Bridge stays transport-only; renderer handles notifications directly.
+  registerLspNotificationHandler(nil)
 
 proc resetNotificationHandler() =
-  if lspNotificationHandler.isNil:
-    return
-  clearLspNotificationHandlers()
   lspNotificationHandler = nil
   lspNotifications.setLen(0)
-  sendLspStatusToRenderer()
 
 proc envValue(name: string): string =
   let raw = nodeProcess.env[name.cstring]
