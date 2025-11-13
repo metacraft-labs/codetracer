@@ -15,6 +15,8 @@ import
 proc detectFolderLang(folder: string): Lang =
   if fileExists(folder / "Nargo.toml"):
     LangNoir
+  elif fileExists(folder / "Cargo.toml"):
+    LangRust
   else:
     # TODO: rust/ruby/others?
     LangUnknown

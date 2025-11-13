@@ -1,5 +1,5 @@
 import
-  std / [os, osproc, strformat, strtabs],
+  std / [os, osproc, strformat, strutils, strtabs],
   json_serialization,
   json_serialization / std / tables,
   ../../common/[ config, ct_logging ]
@@ -25,23 +25,33 @@ proc setupEnv*(configPath: string): StringTableRef =
   result = env
 
 
-proc build*(programPath: string, outputPath: string) =
+proc build*(programPath: string, outputPath: string): string =
   let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
   if ctConfig.rrBackend.enabled:
-    # TODO: is it still required for ct-rr-support?
-    # let configPath = ctConfig.rrBackend.ctPaths
-
     try:
-      # var env = setupEnv(configPath)
-      let args = @["build", programPath, outputPath]
+      var args = @["build", programPath]
+      if outputPath.len > 0:
+        args.add(outputPath)
+      # assume for now that the build process prints the `binary` result
+      #   if it is succesful
       let p = startProcess(
         ctConfig.rrBackend.path,
         args = args,
         # env = env,
-        options = {poParentStreams, poStdErrToStdOut})
-      quit(waitForExit(p))
+        options = {poStdErrToStdOut})
+      let (lines, exitCode) = p.readLines
+      echo lines.join("\n") & "\n"
+      if exitCode == 0:
+        if lines.len > 0 and lines[^1].startsWith("binary:"):
+          return lines[^1].split(": ", 1)[1]
+        else:
+          echo "[codetracer] error: build succesful, but couldn't extract the resulting binary path"
+          quit(1)
+      else:
+        echo "[codetracer] error: build exitted with code ", exitCode
+        quit(exitCode)
     except:
-      errorPrint "ct build plugin error: ", getCurrentExceptionMsg()
+      errorPrint "[codetracer] error: ct build plugin error: ", getCurrentExceptionMsg()
       quit(1)
   else:
-    errorPrint "This functionality requires a codetracer-rr-backend installation"
+    errorPrint "This functionality requires a ct-rr-support installation"

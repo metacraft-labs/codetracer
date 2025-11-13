@@ -2,7 +2,7 @@ import std/[os, osproc, strformat, sequtils],
   ../../common/[ paths, lang, types ],
   ../launch/electron,
   ../utilities/[ env, language_detection ],
-  ../cli/[logging],
+  ../cli/[logging, build],
   record
 
 # run a recorded trace based on args, a saving project for it in the process
@@ -46,6 +46,13 @@ proc runWithRestart(
           getExtension(lang)
         else:
           "wasm"
+      
+      let program = if lang.isDbBased:
+          recordArgs[0]
+        else:
+          let binary = build(recordArgs[0], "")
+          binary
+    
       recordedTrace = record(lang=extension,
                              outputFolder="",
                              exportFile="",
@@ -54,7 +61,7 @@ proc runWithRestart(
                              socketPath="",
                              withDiff="",
                              upload=false,
-                             program=recordArgs[0],
+                             program=program,
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:
       let shouldRestart =
