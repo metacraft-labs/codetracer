@@ -16,6 +16,8 @@ pub enum CtRRQuery {
     DeleteBreakpoint { breakpoint: Breakpoint },
     DeleteBreakpoints,
     ToggleBreakpoint { breakpoint: Breakpoint },
+    EnableBreakpoints,
+    DisableBreakpoints,
     JumpToCall { location: Location },
     LoadAllEvents,
     EventJump { program_event: ProgramEvent },
