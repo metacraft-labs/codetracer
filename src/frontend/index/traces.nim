@@ -5,7 +5,69 @@ import
   ipc_subsystems/[ dap, socket ],
   ../lib/[ jslib, electron_lib ],
   ../[ trace_metadata, config, types ],
-  ../../common/[ ct_logging, paths ]
+  ../../common/[ ct_logging, paths ],
+  ./js_helpers
+
+var
+  selectedReplayId = -1
+  pendingReplayStart: Future[int] = nil
+  replayStartResolver: proc(replayId: int) = nil
+  prefetchedTrace*: Trace = nil
+
+proc asyncSleep(ms: int): Future[void] =
+  newPromise(proc(resolve: proc(): void) =
+    discard windowSetTimeout(resolve, ms)
+  )
+
+proc newReplayStartFuture(): Future[int] =
+  let future = newPromise(proc (resolve: proc (replayId: int)) =
+    replayStartResolver = resolve
+  )
+  pendingReplayStart = future
+  future
+
+proc handleReplayStartResponse(body: JsObject) =
+  if replayStartResolver.isNil:
+    return
+
+  var replayId = -1
+  var success = true
+  if jsHasKey(body, cstring"success"):
+    success = body["success"].to(bool)
+  if success and jsHasKey(body, cstring"body"):
+    let bodyNode = body["body"]
+    if jsHasKey(bodyNode, cstring"replayId"):
+      replayId = bodyNode["replayId"].to(int)
+
+  if replayId >= 0:
+    debugPrint("index: backend-manager reported replayId ", $replayId)
+  else:
+    debugPrint("index: backend-manager failed to start replay: ", body)
+
+  replayStartResolver(replayId)
+  replayStartResolver = nil
+  pendingReplayStart = nil
+
+registerStartReplayHandler(handleReplayStartResponse)
+
+proc assignTrace(traceId: int): Future[bool] {.async.} =
+  var attempts = 0
+  var trace: Trace = nil
+  while trace.isNil and attempts < 60:
+    trace = await electron_vars.app.findTraceWithCodetracer(traceId)
+    if trace.isNil:
+      await asyncSleep(100)
+      inc attempts
+  if trace.isNil:
+    errorPrint "Unable to locate trace metadata for ", traceId
+    return false
+  prefetchedTrace = trace
+  data.trace = trace
+  data.pluginClient.trace = trace
+  if data.trace.compileCommand.len == 0:
+    data.trace.compileCommand = data.config.defaultBuild
+  infoPrint "index: assignTrace resolved trace ", $trace.id, " folder ", $trace.outputFolder
+  return true
 
 when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
   proc startProcess*(
@@ -103,13 +165,17 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
 
 proc loadExistingRecord*(traceId: int) {.async.} =
   debugPrint "[info]: load existing record with ID: ", $traceId
-  let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
+  if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
+    if not await assignTrace(traceId):
+      return
+  let trace = prefetchedTrace
+  prefetchedTrace = nil
   data.trace = trace
   data.pluginClient.trace = trace
   if data.trace.compileCommand.len == 0:
     data.trace.compileCommand = data.config.defaultBuild
 
-  debugPrint "index: init frontend"
+  infoPrint "index: init frontend"
   mainWindow.webContents.send(
     "CODETRACER::init",
     js{
@@ -121,7 +187,7 @@ proc loadExistingRecord*(traceId: int) {.async.} =
       bypass: true})
 
   if not data.trace.isNil:
-    debugPrint "index: loading trace in mainWindow"
+    infoPrint "index: loading trace in mainWindow"
     await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
   try:
@@ -136,13 +202,53 @@ proc loadExistingRecord*(traceId: int) {.async.} =
 
 proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
   callerProcessPid = pid
-  # TODO: use type/function for this
+  if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
+    if not await assignTrace(traceId):
+      return
+  else:
+    infoPrint "index: reuse prefetched trace ", $prefetchedTrace.id, " folder ", $prefetchedTrace.outputFolder
+    data.trace = prefetchedTrace
+    data.pluginClient.trace = prefetchedTrace
+    if data.trace.compileCommand.len == 0:
+      data.trace.compileCommand = data.config.defaultBuild
+
+  let replayStartFuture = newReplayStartFuture()
+  infoPrint "index: requesting new replay for trace ", $traceId
+  if not data.trace.isNil:
+    infoPrint "index: ct/start-replay for trace folder ", $data.trace.outputFolder
+
+  if selectedReplayId >= 0:
+    let stopPacket = wrapJsonForSending js{
+      "type": cstring"request",
+      "command": cstring"ct/stop-replay",
+      "arguments": [selectedReplayId]
+    }
+    backendManagerSocket.write(stopPacket)
+
   let packet = wrapJsonForSending js{
     "type": cstring"request",
     "command": cstring"ct/start-replay",
     "arguments": [cstring(dbBackendExe), cstring"dap-server"],
   }
   backendManagerSocket.write(packet)
+
+  let replayId = await replayStartFuture
+  if replayId < 0:
+    errorPrint "Unable to start replay for new trace"
+    return
+
+  selectedReplayId = replayId
+  infoPrint "index: selecting replayId ", $replayId
+
+  let selectPacket = wrapJsonForSending js{
+    "type": cstring"request",
+    "command": cstring"ct/select-replay",
+    "arguments": [replayId]
+  }
+  backendManagerSocket.write(selectPacket)
+  mainWindow.webContents.send(
+    "CODETRACER::dap-replay-selected",
+    js{trace: data.trace})
 
 proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
   callerProcessPid = pid
@@ -190,6 +296,9 @@ proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.
 
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await electron_vars.app.findTraceByRecordProcessId(pid)
+  prefetchedTrace = trace
+  data.trace = trace
+  data.pluginClient.trace = trace
   await prepareForLoadingTrace(trace.id, pid)
   await loadExistingRecord(trace.id)
 
@@ -212,6 +321,9 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     if not trace.isNil:
       mainWindow.webContents.send "CODETRACER::loading-trace",
         js{trace: trace}
+      prefetchedTrace = trace
+      data.trace = trace
+      data.pluginClient.trace = trace
       await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
       await loadExistingRecord(trace.id)
     else:

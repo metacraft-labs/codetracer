@@ -119,7 +119,7 @@ proc configureShortcuts* =
         discard data.ui.activeFocus.onCtrlNumber(i)
 
   Mousetrap.`bind`("ctrl+r") do ():
-    discard
+    data.reRecordCurrentTrace()
 
   Mousetrap.`bind`("alt+t") do ():
     runTracepoints(data)

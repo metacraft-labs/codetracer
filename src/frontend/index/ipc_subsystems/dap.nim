@@ -10,8 +10,13 @@ type
     raw*: cstring
 
 var backendManagerSocket*: JsObject = nil
+var replayStartHandler*: proc(body: JsObject) = nil
+
+proc registerStartReplayHandler*(handler: proc(body: JsObject)) =
+  replayStartHandler = handler
 
 proc stringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
 proc wrapJsonForSending*(obj: JsObject): cstring =
     let stringified_packet = stringify(obj)
@@ -34,6 +39,12 @@ proc handleFrame(frame: string) =
   let msgtype = body["type"].to(cstring)
 
   if msgtype == "response":
+    if jsHasKey(body, cstring"command"):
+      let command = body["command"].to(cstring)
+      if command == cstring("ct/start-replay"):
+        if not replayStartHandler.isNil:
+          replayStartHandler(body)
+        return
     mainWindow.webContents.send("CODETRACER::dap-receive-response", body)
   elif msgtype == "event":
     mainWindow.webContents.send("CODETRACER::dap-receive-event", body)

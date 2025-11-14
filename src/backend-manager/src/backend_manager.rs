@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Debug, sync::Arc, time::Duration};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::{
     fs::{create_dir_all, remove_file},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -25,6 +25,8 @@ pub struct BackendManager {
     children_receivers: Vec<Option<UnboundedReceiver<Value>>>,
     parent_senders: Vec<Option<UnboundedSender<Value>>>,
     selected: usize,
+    manager_receiver: Option<UnboundedReceiver<Value>>,
+    manager_sender: Option<UnboundedSender<Value>>,
 }
 
 // TODO: cleanup on exit
@@ -36,6 +38,8 @@ impl BackendManager {
             children_receivers: vec![],
             parent_senders: vec![],
             selected: 0,
+            manager_receiver: None,
+            manager_sender: None,
         }));
 
         let res1 = res.clone();
@@ -65,6 +69,13 @@ impl BackendManager {
 
         info!("Connected");
 
+        let (manager_tx, manager_rx) = mpsc::unbounded_channel::<Value>();
+        {
+            let mut locked = res.lock().await;
+            locked.manager_receiver = Some(manager_rx);
+            locked.manager_sender = Some(manager_tx);
+        }
+
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_millis(10)).await;
@@ -81,6 +92,24 @@ impl BackendManager {
                             Ok(()) => {}
                             Err(err) => {
                                 error!("Can't write to frontend socket! Error: {err}");
+                            }
+                        }
+                    }
+                }
+
+                if let Some(manager_rx) = res.manager_receiver.as_mut() {
+                    if !manager_rx.is_empty()
+                        && let Some(message) = manager_rx.recv().await
+                    {
+                        let write_res =
+                            socket_write.write_all(&DapParser::to_bytes(&message)).await;
+
+                        match write_res {
+                            Ok(()) => {}
+                            Err(err) => {
+                                error!(
+                                    "Can't write manager message to frontend socket! Error: {err}"
+                                );
                             }
                         }
                     }
@@ -126,6 +155,14 @@ impl BackendManager {
         });
 
         Ok(res)
+    }
+
+    fn send_manager_message(&self, message: Value) {
+        if let Some(sender) = &self.manager_sender {
+            if let Err(err) = sender.send(message) {
+                error!("Can't enqueue manager message. Error: {err}");
+            }
+        }
     }
 
     fn check_id(&self, id: usize) -> Result<(), Box<dyn Error>> {
@@ -317,8 +354,15 @@ impl BackendManager {
                                     return Ok(());
                                 }
                             }
-                            self.start_replay(command, &cmd_args).await?;
-                            // TODO: send response
+                            let replay_id = self.start_replay(command, &cmd_args).await?;
+                            self.send_manager_message(json!({
+                                "type": "response",
+                                "success": true,
+                                "command": "ct/start-replay",
+                                "body": {
+                                    "replayId": replay_id
+                                }
+                            }));
                             return Ok(());
                         }
                         // TODO: return error

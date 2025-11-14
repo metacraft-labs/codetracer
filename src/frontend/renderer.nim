@@ -10,6 +10,7 @@ import
   # internal
   types, utils, lang,
   communication, dap,
+  event_helpers,
   .. / common / ct_event,
   services / [
     event_log_service, debugger_service, editor_service,
@@ -244,6 +245,42 @@ proc loadFlowUI*(ui: cstring): FlowUI =
 
 var helpers*: Helpers
 
+proc destroyLayoutInstance(layout: GoldenLayout) {.importjs: "#.destroy()".}
+
+proc resetLayoutState*(data: Data) =
+  ## Tear down the current GoldenLayout instance so createUIComponents/tryInitLayout can rebuild from scratch.
+  if not data.ui.layout.isNil:
+    try:
+      destroyLayoutInstance(data.ui.layout)
+    except:
+      cwarn fmt"layout: destroy failed: {getCurrentExceptionMsg()}"
+    data.ui.layout = nil
+
+  let pageLoaded = data.ui.pageLoaded
+  let initEventReceived = data.ui.initEventReceived
+  let fontSize = data.ui.fontSize
+
+  data.ui = Components(
+    editors: JsAssoc[cstring, EditorViewComponent]{},
+    idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
+    layoutSizes: LayoutSizes(startSize: true),
+    monacoEditors: @[],
+    traceMonacoEditors: @[],
+    fontSize: fontSize,
+    focusHistory: @[],
+    editModeHiddenPanels: @[],
+    savedLayoutBeforeEdit: nil
+  )
+  data.ui.pageLoaded = pageLoaded
+  data.ui.initEventReceived = initEventReceived
+
+  for content in Content:
+    data.ui.componentMapping[content] = JsAssoc[int, Component]{}
+    data.ui.openComponentIds[content] = @[]
+
+  if not data.services.eventLog.isNil:
+    data.services.eventLog.restart()
+
 proc createUIComponent(componentState: JsObject) =
   try:
     discard data.makeComponent(
@@ -275,6 +312,11 @@ proc createUIComponents*(data: Data) =
   # create components defined in layout
   if not data.ui.resolvedConfig.isNil:
     createUILayoutComponents(data.ui.resolvedConfig.root)
+
+proc requestInitialPanelData*(data: Data) =
+  ## Ask backend to resend panel data that isn't automatically replayed.
+  data.viewsApi.emit(CtLoadTerminal, EmptyArg())
+  data.viewsApi.emit(CtEventLoad, EmptyArg())
 
 # proc saveNew(data: Data, file: SaveFile) =
 #   ipc.send "CODETRACER::save-new", file
@@ -1206,6 +1248,40 @@ proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false) =
         ipc.send "CODETRACER::save-untitled", js{name: name, raw: tab.source, saveAs: true}
       else: #elif tab.changed or saveAs:
         ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
+
+proc reRecordCurrentTrace*(data: Data) =
+  ## Save edits and restart the recorder using the currently loaded trace metadata.
+  if data.trace.isNil:
+    data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
+    return
+
+  if data.ui.mode != EditMode:
+    data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
+    return
+
+  data.saveFiles()
+
+  if data.trace.program.len == 0:
+    data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
+    return
+
+  var args: seq[cstring] = @[data.trace.program]
+  for arg in data.trace.args:
+    args.add(arg)
+
+  let workDir = if data.trace.workdir.len == 0:
+      jsUndefined
+    else:
+      cast[JsObject](data.trace.workdir)
+
+  data.viewsApi.infoMessage(cstring"Recording a new trace…")
+  data.ipc.send(
+    "CODETRACER::new-record",
+    js{
+      args: args,
+      options: js{ cwd: workDir }
+    }
+  )
 
 proc commandSelectPrevious* =
   if data.ui.commandPalette.selected > 0:
