@@ -1,7 +1,10 @@
 #command-data
   height: 28px
 
-#command-view
+.ct-p-8
+  padding: 8px
+
+.command-view
   background-color: BACKGROUND_COLOR
   color: TEXT_CONTENT_COLOR
   font-size: 14px
@@ -11,42 +14,55 @@
   left: 35vw
   width: 30vw
   right: 35vw
+  border-radius: 8px
+  outline: 4px solid COMMAND_BORDERS_COLOR
 
   input
-    height: 28px !important
-    width: 30vw !important
-    font-size: 14px !important
-    position: absolute
-    z-index: 21
-    // outline: 2px solid COMMAND_BORDERS_COLOR
-    margin-left: 0 !important
-    border-radius: 6px !important
+    width: 100% !important
+    margin-left: 0px !important
+    margin-bottom: 0px !important
+
+    // height: 28px !important
+    // width: 30vw !important
+    // font-size: 14px !important
+    // position: absolute
+    // z-index: 21
+    // // outline: 2px solid COMMAND_BORDERS_COLOR
+    // margin-left: 0 !important
+    // border-radius: 6px !important
     background-color: BACKGROUND_COLOR
-    border: 1px solid INPUT_BORDER_COLOR !important
-    background-image: INPUT_DEFAULT_SEARCH_ICON
-    background-size: 14px 14px
-    padding-left: 26px
+    // border: 1px solid INPUT_BORDER_COLOR !important
+    // background-image: INPUT_DEFAULT_SEARCH_ICON
+    // background-size: 14px 14px
+    // padding-left: 26px
+
+  //   &:focus
+  //     border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
+  //     margin-left: 0 !important
+
+  //   &.disabled
+  //     pointer-events: none
+
+  // #command-query-text
+  //   background: transparent
+
+  .ct-input-cp-background
+    background: #484848 !important
+    padding-left: 8px !important
+
+  .agent-command-input
+    color: #A5F3FC !important
+
+    &::placeholder
+      color: #a5f3fc
 
     &:focus
-      border: 1px solid INPUT_FOCUSED_BORDER_COLOR !important
-      margin-left: 0 !important
-
-    &.disabled
-      pointer-events: none
-
-  #command-query-text
-    background: transparent
+      border: 1px solid #0E7490 !important
 
   #command-results
     width: inherit
-    position: absolute
-    padding-top: 4px
-    top: 36px
-    padding-left: 4px
-    padding-right: 4px
-    padding-bottom: 4px
-    outline: 1px solid COMMAND_BORDERS_COLOR
     border-radius: 6px
+    margin-top: 8px
     background-color: COMMAND_RESULT_BACKGROUND_COLOR
 
   .command-result
@@ -136,3 +152,54 @@
 
 .command-program-search-result-line
   font-weight: normal
+
+.agent-buttons-container
+  display: flex
+  justify-content: space-between
+  margin-top: 8px
+  align-items: center
+
+  .agent-button
+    display: flex
+    cursor: pointer
+    border: 1px solid DEBUG_BUTTON_ACTIVE_BACKGROUND
+    padding: 4px
+    align-items: center
+    border-radius: 6px
+    padding-right: 8px
+    white-space: nowrap
+    height: 28px
+    margin-right: 6px
+
+    .add-file-img
+      background-image: COMMAND_PALETTE_ADD_FILE_IMG
+      background-size: 10px, 16px
+      background-position: center
+      background-repeat: no-repeat
+      width: 24px
+      height: 24px
+      margin-right: 4px
+
+  .agent-model-select
+    width: -webkit-fill-available
+    display: flex
+    justify-content: space-between
+    padding-right: 0px !important
+
+  .agent-model-img
+    height: 24px
+    min-width: 24px
+    background-image: COMMAND_PALETTE_ARROW_IMG
+    background-repeat: no-repeat
+    background-size: 9px, 6px
+    background-position: center
+
+  .agent-enter
+    height: 24px
+    min-width: 24px
+    border-radius: 6px
+    background: #0E7490
+    background-image: COMMAND_PALETTE_ENTER_MSG_IMG
+    background-repeat: no-repeat
+    background-size: 16px, 16px
+    background-position: center

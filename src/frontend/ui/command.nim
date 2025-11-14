@@ -12,7 +12,7 @@ proc close(self: CommandPaletteComponent) =
   redrawAll()
   self.clear()
 
-proc resetCommandPalette(self: CommandPaletteComponent) =
+proc resetCommandPalette*(self: CommandPaletteComponent) =
   self.inputField.toJs.value = "".cstring
   self.close()
   data.redraw()
@@ -173,6 +173,10 @@ proc showResults(self: CommandPaletteComponent) =
 proc onInput(self: CommandPaletteComponent, value: cstring) =
   self.eventuallyClearPlaceholder(value)
   self.showResults()
+  if self.inputValue == cstring"/ai ":
+    self.inAgentMode = true
+    self.inputValue = ""
+    redrawAll()
 
 proc runQuery(self: CommandPaletteComponent) =
   clog "runQuery "
@@ -235,81 +239,113 @@ proc onTab(self: CommandPaletteComponent) =
     self.inputField.toJs.value = self.inputPlaceholder
     self.onInput(self.inputPlaceholder)
 
+proc agentHWindow(self: CommandPaletteComponent): VNode =
+  buildHtml(
+    tdiv(class="agent-ha-container")
+  ):
+    tdiv(class="agent-com")
+      # TODO: Integrate it
+    tdiv(class="agent-interaction"):
+      input(
+        `type` = "text",
+        id = "command-query-text",
+        name = "command-query",
+        placeholder = "Ask anything",
+        class = "mousetrap ct-input-cp-background agent-command-input",
+        autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
+        autocorrect="off",
+        autocapitalize="off",
+        spellcheck="false",
+        onmousedown = proc =
+          data.search(SearchFileRealTime, "".cstring),
+        oninput = proc(ev: Event, tg: VNode) =
+          let value = self.inputField.toJs.value.to(cstring)
+          self.onInput(value),
+        onkeydown = proc(e: KeyboardEvent, v: VNode) =
+          echo "command ", e.keyCode
+          if e.keyCode == ENTER_KEY_CODE: # enter
+            #TODO: Add functionality
+            discard
+          elif e.keyCode == ESC_KEY_CODE: # escape
+            self.resetCommandPalette()
+      )
+      tdiv(class="agent-buttons-container"):
+        tdiv(
+          class="agent-button",
+          onclick = proc =
+            echo "#TODO: add a file"
+        ):
+          span(class="add-file-img")
+          text "Add files and more"
+        tdiv(
+          class="agent-button agent-model-select",
+          onclick = proc =
+            echo "#TODO: Open the model table"
+        ):
+          tdiv(): text "#TODO: name"
+          tdiv(class="agent-model-img")
+        tdiv(
+          class="agent-enter",
+          onclick = proc =
+            echo "#TODO: Upload me master!"
+        )
+
+
 method onProgramSearchResults*(self: CommandPaletteComponent, results: seq[CommandPanelResult]) {.async.} =
   clog "onProgramSearchResults commands"
   self.results = results
   self.data.redraw()
 
 method render*(self: CommandPaletteComponent): VNode =
+  let (padClass, inputClass, activeClass) = if self.active: ("ct-p-8", "ct-input-cp-background", "ct-active") else: ("", "", "")
   result = buildHtml(
     tdiv(id = "command-data")
   ):
-    tdiv(id = "command-view"):
-      tdiv(id = "command-query"):
-        input(class = "disabled",
-        placeholder = self.inputPlaceholder)
-        input(
-          `type` = "text",
-          id = "command-query-text",
-          name = "command-query",
-          placeholder = "Navigate to file or run a :command",
-          class = "mousetrap",
-          autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
-          autocorrect="off",
-          autocapitalize="off",
-          spellcheck="false",
-          onblur = proc =
-            data.ui.commandPalette.active = false
-            self.resetCommandPalette(),
-          onmousedown = proc =
-            data.search(SearchFileRealTime, "".cstring),
-          oninput = proc(ev: Event, tg: VNode) =
-            let value = self.inputField.toJs.value.to(cstring)
-            self.onInput(value),
-          onkeydown = proc(e: KeyboardEvent, v: VNode) =
-            echo "command ", e.keyCode
-            if e.keyCode == DOWN_KEY_CODE: # down
-              commandSelectNext()
-            elif e.keyCode == UP_KEY_CODE: # up
-              commandSelectPrevious()
-            elif e.keyCode == ENTER_KEY_CODE: # enter
-              self.runQuery()
-            elif e.keyCode == ESC_KEY_CODE: # escape
-              self.resetCommandPalette()
-            elif e.keyCode == TAB_KEY_CODE: # tab
-              e.preventDefault()
-              self.onTab()
-        )
-        tdiv(class = "custom-tooltip"):
-          # TODO: we should build this dynamically from a list of registered short-cuts
-          #
-          # There are two things to consider:
-          #
-          #  * The user can change the default bindings, so the shortcuts
-          #    here should change as well
-          #
-          #  * Developers and users can add new bindings independently from
-          #    each other. This needs to be done through a facility that
-          #    creates a short-cut to a prepopulated command pallete. We
-          #    should be able to ask the table of configured short-cuts to
-          #    give us all active bindings that active the command pallete
-          #    in one way or another.
-          text "Navigate to file (ctrl+p) / Run command (alt+p)"
+    tdiv(class = fmt"command-view {padClass} {activeClass}", id = "command-view"):
+      if not self.inAgentMode:
+        tdiv(id = "command-query"):
+          input(
+            `type` = "text",
+            id = "command-query-text",
+            name = "command-query",
+            placeholder = "Navigate to file or run a :command",
+            class = fmt"mousetrap {inputClass}",
+            autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
+            autocorrect="off",
+            autocapitalize="off",
+            spellcheck="false",
+            onmousedown = proc =
+              data.search(SearchFileRealTime, "".cstring),
+            oninput = proc(ev: Event, tg: VNode) =
+              let value = self.inputField.toJs.value.to(cstring)
+              self.onInput(value),
+            onkeydown = proc(e: KeyboardEvent, v: VNode) =
+              echo "command ", e.keyCode
+              if e.keyCode == DOWN_KEY_CODE: # down
+                commandSelectNext()
+              elif e.keyCode == UP_KEY_CODE: # up
+                commandSelectPrevious()
+              elif e.keyCode == ENTER_KEY_CODE: # enter
+                self.runQuery()
+              elif e.keyCode == ESC_KEY_CODE: # escape
+                self.resetCommandPalette()
+              elif e.keyCode == TAB_KEY_CODE: # tab
+                e.preventDefault()
+                self.onTab()
+          )
+          # tdiv(class = "custom-tooltip"):
+          #   text "Navigate to file (ctrl+p) / Run command (alt+p)"
 
-      var resultsClass =
-        if self.results.len == 0 and self.inputValue == cstring"":
-          "no-results"
-        else:
-          ""
-
-      tdiv(
-        id = "command-results",
-        class = resultsClass,
-        onmousedown = proc(e: Event, et: VNode) = e.preventDefault()
-      ):
-        if self.results.len > 0:
-          for i, result in self.results:
-            commandResultView(self, result, i == self.selected, i mod 2 == 0, i, data.services.search.activeCommandName)
-        else:
-          tdiv(class = "command-result empty"):
-            text "No matching result found."
+          if self.active:
+            tdiv(
+              id = "command-results",
+              onmousedown = proc(e: Event, et: VNode) = e.preventDefault()
+            ):
+              if self.results.len > 0:
+                for i, result in self.results:
+                  commandResultView(self, result, i == self.selected, i mod 2 == 0, i, data.services.search.activeCommandName)
+              else:
+                tdiv(class = "command-result empty"):
+                  text "No matching result found."
+      else:
+        agentHWindow(self)
