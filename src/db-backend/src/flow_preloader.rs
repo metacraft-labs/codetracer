@@ -1,15 +1,22 @@
-use crate::{
-    db::{Db, DbRecordEvent, DbStep},
-    expr_loader::ExprLoader,
-    task::{
-        BranchesTaken, CoreTrace, FlowEvent, FlowStep, FlowUpdate, FlowUpdateState, FlowUpdateStateKind,
-        FlowMode, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks, StepCount,
-    },
-};
-use log::{info, warn};
-use runtime_tracing::{CallKey, FullValueRecord, Line, StepId};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::error::Error;
+use std::path::{Path, PathBuf};
+
+use log::{error, info, warn};
+use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
+
+use crate::{
+    db::{Db, DbRecordEvent},
+    expr_loader::ExprLoader,
+    lang::{lang_from_context, Lang},
+    replay::Replay,
+    task::{
+        Action, BranchesTaken, CoreTrace, FlowEvent, FlowMode, FlowStep, FlowUpdate, FlowUpdateState,
+        FlowUpdateStateKind, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks,
+        StepCount, TraceKind,
+    },
+    value::{to_ct_value, Value, ValueRecordWithType},
+};
 
 #[derive(Debug)]
 pub struct FlowPreloader {
@@ -24,14 +31,15 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load(&mut self, location: Location, line: Line, mode: FlowMode, db: &Db) -> FlowUpdate {
+    pub fn load(&mut self, location: Location, mode: FlowMode, kind: TraceKind, replay: &mut dyn Replay) -> FlowUpdate {
         info!("flow: load: {:?}", location);
         let path_buf = PathBuf::from(&location.path);
         match self.expr_loader.load_file(&path_buf) {
             Ok(_) => {
                 info!("Expression loader complete!");
-                let mut call_flow_preloader: CallFlowPreloader = CallFlowPreloader::new(self, location, HashSet::new(), HashSet::new(), mode);
-                call_flow_preloader.load_flow(line, db)
+                let mut call_flow_preloader: CallFlowPreloader =
+                    CallFlowPreloader::new(self, location.clone(), HashSet::new(), HashSet::new(), mode, kind);
+                call_flow_preloader.load_flow(location, replay)
             }
             Err(e) => {
                 warn!("can't process file {}: error {}", location.path, e);
@@ -40,7 +48,13 @@ impl FlowPreloader {
         }
     }
 
-    pub fn load_diff_flow(&mut self, diff_lines: HashSet<(PathBuf, i64)>, db: &Db) -> FlowUpdate {
+    pub fn load_diff_flow(
+        &mut self,
+        diff_lines: HashSet<(PathBuf, i64)>,
+        db: &Db,
+        trace_kind: TraceKind,
+        replay: &mut dyn Replay,
+    ) -> Result<FlowUpdate, Box<dyn Error>> {
         info!("load_diff_flow");
         for diff_line in &diff_lines {
             match self.expr_loader.load_file(&diff_line.0) {
@@ -49,32 +63,59 @@ impl FlowPreloader {
                 }
                 Err(e) => {
                     warn!("can't process file {}: error {}", diff_line.0.display(), e);
-                    return FlowUpdate::error(&format!("can't process file {}", diff_line.0.display()));
+                    return Err(format!("can't process file {}", diff_line.0.display()).into());
+                    // FlowUpdate::error(&format!("can't process file {}", diff_line.0.display()));
                 }
             }
         }
 
         let mut diff_call_keys = HashSet::new();
+        // put breakpoints on all of them
+        for diff_line in &diff_lines {
+            let _ = replay.add_breakpoint(&diff_line.0.display().to_string(), diff_line.1)?;
+        }
+        // TODO: breakpoints on function entries or function names as well
+        //   so => we can count how many stops?
+        //
+        // just continue for now in next diff flow step; and if we go through the function/function entry line or
+        // breakpoint; count a next call for it;
+        // maybe this will just work because they're registered as loop first line
+
         for step in db.step_from(runtime_tracing::StepId(0), true) {
             if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
                 diff_call_keys.insert(step.call_key.0);
                 let location = db.load_location(step.step_id, step.call_key, &mut self.expr_loader);
                 // register an artifficial loop for each function from the diff,
                 //   that we track, so we can visualize different global calls to those functions
-                //   with sliders/count etc: 
-                self.expr_loader.register_loop(Position(location.function_first), Position(location.function_last), &PathBuf::from(&db.paths[step.path_id]));
+                //   with sliders/count etc:
+                self.expr_loader.register_loop(
+                    Position(location.function_first),
+                    Position(location.function_last),
+                    &PathBuf::from(&db.paths[step.path_id]),
+                );
             }
         }
-       
-        let mut call_flow_preloader = CallFlowPreloader::new(self, Location::default(), diff_lines, diff_call_keys, FlowMode::Diff);
-        call_flow_preloader.load_flow(Line(1), db)
+
+        let mut call_flow_preloader = CallFlowPreloader::new(
+            self,
+            Location::default(),
+            diff_lines,
+            diff_call_keys,
+            FlowMode::Diff,
+            trace_kind,
+        );
+        let location = Location {
+            line: 1,
+            ..Location::default()
+        };
+        Ok(call_flow_preloader.load_flow(location, replay))
     }
 
     // fn load_file(&mut self, path: &str) {
     // self.expr_loader.load_file(&PathBuf::from(path.to_string())).unwrap();
     // }
 
-    pub fn get_var_list(&self, line: Line, location: &Location) -> Option<Vec<String>> {
+    pub fn get_var_list(&self, line: Position, location: &Location) -> Option<Vec<String>> {
         self.expr_loader.get_expr_list(line, location)
     }
 
@@ -82,7 +123,6 @@ impl FlowPreloader {
     // self.expr_loader.find_function_location(location, line)
     // }
 }
-
 
 pub struct CallFlowPreloader<'a> {
     flow_preloader: &'a FlowPreloader,
@@ -93,19 +133,30 @@ pub struct CallFlowPreloader<'a> {
     diff_lines: HashSet<(PathBuf, i64)>,
     diff_call_keys: HashSet<i64>, //  TODO: if we add Eq, Hash it seems we can do CallKey
     mode: FlowMode,
+    trace_kind: TraceKind,
+    lang: Lang,
 }
 
 impl<'a> CallFlowPreloader<'a> {
-    pub fn new(flow_preloader: &'a FlowPreloader, location: Location, diff_lines: HashSet<(PathBuf, i64)>, diff_call_keys: HashSet<i64>, mode: FlowMode) -> Self {
+    pub fn new(
+        flow_preloader: &'a FlowPreloader,
+        location: Location,
+        diff_lines: HashSet<(PathBuf, i64)>,
+        diff_call_keys: HashSet<i64>,
+        mode: FlowMode,
+        trace_kind: TraceKind,
+    ) -> Self {
         CallFlowPreloader {
             flow_preloader,
-            location,
+            location: location.clone(),
             active_loops: vec![],
             last_step_id: StepId(-1),
             last_expr_order: vec![],
             diff_lines,
             diff_call_keys,
             mode,
+            trace_kind,
+            lang: lang_from_context(&Path::new(&location.path), trace_kind),
         }
     }
 
@@ -123,39 +174,65 @@ impl<'a> CallFlowPreloader<'a> {
     //   last
     //
     #[allow(clippy::unwrap_used)]
-    pub fn load_flow(&mut self, line: Line, db: &Db) -> FlowUpdate {
+    pub fn load_flow(&mut self, location: Location, replay: &mut dyn Replay) -> FlowUpdate {
         // Update location on flow load
         if self.mode == FlowMode::Call {
+            // let step_id = StepId(location.rr_ticks.0);
+            // let call_key = self.db.steps[step_id].call_key;
+            // let function_id = self.db.calls[call_key].function_id;
+            // let function_first = self.db.functions[function_id].line;
+            // info!("load {arg:?}");
+
             self.location = self
                 .flow_preloader
                 .expr_loader
-                .find_function_location(&self.location, &line);
+                .find_function_location(&location, &Line(location.line));
         }
 
         // info!("location flow {:?}", self.location);
 
-        let mut flow_update = FlowUpdate::new();
-        let flow_view_update = self.load_view_update(db);
-
-        flow_update.location = self.location.clone();
-        flow_update.view_updates.push(flow_view_update);
-        flow_update.status = FlowUpdateState {
-            kind: FlowUpdateStateKind::FlowFinished,
-            steps: 0,
-        };
-        flow_update
+        match self.load_view_update(replay) {
+            Ok(flow_view_update) => {
+                let mut flow_update = FlowUpdate::new();
+                flow_update.location = self.location.clone();
+                flow_update.view_updates.push(flow_view_update);
+                flow_update.status = FlowUpdateState {
+                    kind: FlowUpdateStateKind::FlowFinished,
+                    steps: 0,
+                };
+                flow_update
+            }
+            Err(e) => FlowUpdate::error(&format!("{:?}", e)),
+        }
     }
 
-    fn add_return_value(&mut self, mut flow_view_update: FlowViewUpdate, db: &Db, call_key: CallKey) -> FlowViewUpdate {
+    fn add_return_value(&mut self, mut flow_view_update: FlowViewUpdate, replay: &mut dyn Replay) -> FlowViewUpdate {
+        // assumes that replay is stopped on the place where return value is available
+
+        let return_string = "return".to_string();
+
         // The if condition ensures, that the Options on which .unwrap() is called
         // are never None, so it is safe to unwrap them.
-        let return_string = "return".to_string();
         if !flow_view_update.steps.is_empty() {
+            let return_value_record = replay
+                .load_return_value(self.lang)
+                .unwrap_or(ValueRecordWithType::Error {
+                    msg: "<return value error>".to_string(),
+                    typ: TypeRecord {
+                        kind: TypeKind::Error,
+                        lang_type: "<error>".to_string(),
+                        specific_info: TypeSpecificInfo::None,
+                    },
+                });
+            let return_value = to_ct_value(&return_value_record);
+
             #[allow(clippy::unwrap_used)]
-            flow_view_update.steps.last_mut().unwrap().before_values.insert(
-                return_string.clone(),
-                db.to_ct_value(&db.calls[call_key].return_value.clone()),
-            );
+            flow_view_update
+                .steps
+                .last_mut()
+                .unwrap()
+                .before_values
+                .insert(return_string.clone(), return_value.clone());
 
             #[allow(clippy::unwrap_used)]
             flow_view_update
@@ -166,10 +243,12 @@ impl<'a> CallFlowPreloader<'a> {
                 .push(return_string.clone());
 
             #[allow(clippy::unwrap_used)]
-            flow_view_update.steps.first_mut().unwrap().before_values.insert(
-                return_string.clone(),
-                db.to_ct_value(&db.calls[call_key].return_value.clone()),
-            );
+            flow_view_update
+                .steps
+                .first_mut()
+                .unwrap()
+                .before_values
+                .insert(return_string.clone(), return_value.clone());
 
             #[allow(clippy::unwrap_used)]
             flow_view_update
@@ -182,95 +261,171 @@ impl<'a> CallFlowPreloader<'a> {
         flow_view_update
     }
 
-    fn next_diff_flow_step(&self, from_step_id: StepId, including_from: bool, db: &Db) -> (StepId, bool) {
-        if from_step_id.0 >= db.steps.len() as i64 {
-            (from_step_id, false)
-        } else {
-            // TODO: next diff step
-            let mut next_step_id = if !including_from { from_step_id + 1 } else { from_step_id };
-            loop {
-                if next_step_id.0 >= db.steps.len() as i64 { // must be + 1! then we assume we should stay and report not progressing
-                    return (from_step_id, false);
-                }
-                let next_step = db.steps[next_step_id];
-                info!("check {:?}", (PathBuf::from(db.paths[next_step.path_id].clone()), next_step.line.0));
-                if self.diff_call_keys.contains(&next_step.call_key.0) {
-                    // &(PathBuf::from(db.paths[next_step.path_id].clone()), next_step.line.0)) {
-                    return (next_step_id, true);
-                } else {
-                    next_step_id = next_step_id + 1;
-                    continue;
-                }
-            }
-        }
+    fn next_diff_flow_step(
+        &self,
+        _from_step_id: StepId,
+        _including_from: bool,
+        _replay: &mut dyn Replay,
+    ) -> (StepId, bool) {
+        // TODO: maybe combination of replay.next, diff_call_keys check, different for cases?s
+        //
+        // if from_step_id.0 >= db.steps.len() as i64 {
+        //     (from_step_id, false)
+        // } else {
+        //     // TODO: next diff step
+        //     let mut next_step_id = if !including_from { from_step_id + 1 } else { from_step_id };
+        //     loop {
+        //         if next_step_id.0 >= db.steps.len() as i64 { // must be + 1! then we assume we should stay and report not progressing
+        //             return (from_step_id, false);
+        //         }
+        //         let next_step = db.steps[next_step_id];
+        //         info!("check {:?}", (PathBuf::from(db.paths[next_step.path_id].clone()), next_step.line.0));
+        //         if self.diff_call_keys.contains(&next_step.call_key.0) {
+        //             // &(PathBuf::from(db.paths[next_step.path_id].clone()), next_step.line.0)) {
+        //             return (next_step_id, true);
+        //         } else {
+        //             next_step_id = next_step_id + 1;
+        //             continue;
+        //         }
+        //     }
+        // }
+        todo!()
     }
 
-    fn find_first_step(&self, from_step_id: StepId, db: &Db) -> (StepId, bool) {
-        match self.mode {
+    fn move_to_first_step(
+        &self,
+        from_step_id: StepId,
+        replay: &mut dyn Replay,
+    ) -> Result<(StepId, bool), Box<dyn Error>> {
+        let (mut step_id, mut progressing) = match self.mode {
             FlowMode::Call => (from_step_id, true),
-            FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, db),
+            FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
+        };
+        if self.trace_kind == TraceKind::DB {
+            replay.jump_to(step_id)?;
+        } else {
+            let location = replay.jump_to_call(&self.location)?;
+            step_id = StepId(location.rr_ticks.0);
+            progressing = true;
         }
+        Ok((step_id, progressing))
     }
 
-    fn find_next_step(&self, from_step_id: StepId, db: &Db) -> (StepId, bool) {
-        let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
+    fn move_to_next_step(&mut self, from_step_id: StepId, replay: &mut dyn Replay) -> (StepId, bool) {
         match self.mode {
-            FlowMode::Call => db.next_step_id_relative_to(from_step_id, true, step_to_different_line),
-            FlowMode::Diff => self.next_diff_flow_step(from_step_id, false, db),
+            FlowMode::Call => {
+                // let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
+                // db.next_step_id_relative_to(from_step_id, true, step_to_different_line),
+                replay.step(Action::Next, true).unwrap(); // TODO: handle error
+                let mut expr_loader = ExprLoader::new(CoreTrace::default());
+                let location = replay.load_location(&mut expr_loader).unwrap(); // TODO: handle error
+                let new_step_id = StepId(location.rr_ticks.0);
+                let progressing = new_step_id != from_step_id;
+                (new_step_id, progressing)
+            }
+            FlowMode::Diff => self.next_diff_flow_step(from_step_id, false, replay),
         }
     }
 
-    fn load_view_update(&mut self, db: &Db) -> FlowViewUpdate {
-        let start_step_id = StepId(self.location.rr_ticks.0);
-        let call_key: CallKey = db.steps[start_step_id].call_key;
+    fn call_key_from(&self, location: &Location) -> Result<CallKey, Box<dyn Error>> {
+        Ok(CallKey(location.key.parse::<i64>()?)) // for now still assume it's an integer
+    }
+
+    fn load_view_update(&mut self, replay: &mut dyn Replay) -> Result<FlowViewUpdate, Box<dyn Error>> {
+        // let start_step_id = StepId(self.location.rr_ticks.0);
+        // db.calls[call_key].step_id;
         // let mut path_buf = &PathBuf::from(&self.location.path);
-        let mut iter_step_id = db.calls[call_key].step_id;
+        let mut iter_step_id = StepId(self.location.rr_ticks.0);
         let mut flow_view_update = FlowViewUpdate::new(self.location.clone());
         let mut step_count = 0;
         let mut first = true;
+        let tracked_call_key_result = self.call_key_from(&self.location);
+        let tracked_call_key; // = CallKey(0);
+        match tracked_call_key_result {
+            Ok(call_key) => {
+                tracked_call_key = call_key;
+            }
+            Err(e) => {
+                error!("call key parse error: {e:?}");
+                return Err(e);
+            }
+        }
+
         info!("loop");
         loop {
+            // let (step_id, progressing) = if first {
+            //     first = false;
+            //     self.find_first_step(iter_step_id, replay)
+            // } else {
+            //     self.find_next_step(iter_step_id, replay)
+            // };
             let (step_id, progressing) = if first {
                 first = false;
-                self.find_first_step(iter_step_id, db)
+                self.move_to_first_step(iter_step_id, replay)?
             } else {
-                self.find_next_step(iter_step_id, db)
+                self.move_to_next_step(iter_step_id, replay)
             };
+
             iter_step_id = step_id;
-            let step = db.steps[step_id];
-            if self.mode == FlowMode::Diff {
-                let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                self.location = db.load_location(step_id, step.call_key, &mut expr_loader);
-            }
-            if self.mode == FlowMode::Call && call_key != step.call_key || !progressing {
-                flow_view_update = self.add_return_value(flow_view_update, db, call_key);
+            let mut expr_loader = ExprLoader::new(CoreTrace::default());
+            self.location = replay.load_location(&mut expr_loader)?;
+            let new_call_key = match self.call_key_from(&self.location) {
+                Ok(call_key) => call_key,
+                Err(e) => {
+                    error!("error when parsing call key: stopping flow preload: {e:?}");
+                    break;
+                }
+            };
+
+            if self.mode == FlowMode::Call && tracked_call_key != new_call_key || !progressing {
+                replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
+                let return_location = replay.load_location(&mut expr_loader)?;
+                let mut load_return_value = false;
+                // maybe this can be improved with a limited loop/jump to return/exit of call in the future
+                if let Ok(return_call_key) = self.call_key_from(&return_location) {
+                    if return_call_key == tracked_call_key {
+                        flow_view_update = self.add_return_value(flow_view_update, replay);
+                        load_return_value = true;
+                    }
+                }
+                if !load_return_value {
+                    warn!("we can't load return value");
+                }
                 info!("break flow");
                 break;
             }
 
-            let events = self.load_step_flow_events(db, step_id);
+            let events = self.load_step_flow_events(replay, step_id);
             // for now not sending last step id for line visit
             // but this flow step object *can* contain info about several actual steps
             // e.g. events from some of the next steps on the same line visit
             // one can analyze the step id of the next step, or we can add this info to the object
+            let line = self.location.line;
             flow_view_update.steps.push(FlowStep::new(
-                step.line.0,
+                line,
                 step_count,
-                step.step_id,
+                replay.current_step_id(),
                 Iteration(0),
                 LoopId(0),
                 events,
             ));
-            flow_view_update.relevant_step_count.push(step.line.0 as usize);
-            flow_view_update.add_step_count(step.line.0, step_count);
+            flow_view_update.relevant_step_count.push(line as usize);
+            flow_view_update.add_step_count(line, step_count);
             info!("process loops");
             let path_buf = &PathBuf::from(&self.location.path);
-            flow_view_update = self.process_loops(flow_view_update.clone(), step, path_buf, step_count);
-            flow_view_update = self.log_expressions(flow_view_update.clone(), step, db, step_id);
+            flow_view_update = self.process_loops(
+                flow_view_update.clone(),
+                Position(self.location.line),
+                replay.current_step_id(),
+                path_buf,
+                step_count,
+            );
+            flow_view_update =
+                self.log_expressions(flow_view_update.clone(), Position(self.location.line), replay, step_id);
             step_count += 1;
         }
         let path_buf = &PathBuf::from(&self.location.path);
-        // TODO: maybe not true for diff flow, we can have multiple files/paths there 
+        // TODO: maybe not true for diff flow, we can have multiple files/paths there
         flow_view_update.comment_lines = self.flow_preloader.expr_loader.get_comment_positions(path_buf);
         flow_view_update.add_branches(
             0,
@@ -278,19 +433,21 @@ impl<'a> CallFlowPreloader<'a> {
                 .expr_loader
                 .final_branch_load(path_buf, &flow_view_update.branches_taken[0][0].table),
         );
-        flow_view_update
+        Ok(flow_view_update)
     }
 
     #[allow(clippy::unwrap_used)]
     fn process_loops(
         &mut self,
         mut flow_view_update: FlowViewUpdate,
-        step: DbStep,
+        line: Position,
+        step_id: StepId,
         path_buf: &PathBuf,
         step_count: i64,
     ) -> FlowViewUpdate {
-        if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(&step, path_buf) {
-            if loop_shape.first.0 == step.line.0 && !self.active_loops.contains(&loop_shape.first) {
+        if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(line, path_buf) {
+            info!("loop shape {:?}", loop_shape);
+            if loop_shape.first.0 == line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
                     base_iteration: Iteration(0),
@@ -300,14 +457,15 @@ impl<'a> CallFlowPreloader<'a> {
                     registered_line: loop_shape.first,
                     iteration: Iteration(0),
                     step_counts: vec![StepCount(step_count)],
-                    rr_ticks_for_iterations: vec![RRTicks(step.step_id.0)],
+                    rr_ticks_for_iterations: vec![RRTicks(step_id.0)],
                 });
                 self.active_loops.push(loop_shape.first);
                 flow_view_update
                     .loop_iteration_steps
                     .push(vec![LoopIterationSteps::default()]);
                 flow_view_update.branches_taken.push(vec![BranchesTaken::default()]);
-            } else if (flow_view_update.loops.last().unwrap().first.0) == step.line.0 {
+                info!("add active loop");
+            } else if (flow_view_update.loops.last().unwrap().first.0) == line.0 {
                 flow_view_update.loops.last_mut().unwrap().iteration.inc();
                 flow_view_update
                     .loop_iteration_steps
@@ -324,12 +482,13 @@ impl<'a> CallFlowPreloader<'a> {
                     .last_mut()
                     .unwrap()
                     .rr_ticks_for_iterations
-                    .push(RRTicks(step.step_id.0));
+                    .push(RRTicks(step_id.0));
+                info!("add iteration");
             }
         }
 
-        if flow_view_update.loops.last().unwrap().first.0 <= step.line.0
-            && flow_view_update.loops.last().unwrap().last.0 >= step.line.0
+        if flow_view_update.loops.last().unwrap().first.0 <= line.0
+            && flow_view_update.loops.last().unwrap().last.0 >= line.0
         {
             flow_view_update.steps.last_mut().unwrap().iteration =
                 Iteration(flow_view_update.loops.last().unwrap().iteration.0);
@@ -346,18 +505,24 @@ impl<'a> CallFlowPreloader<'a> {
                     .last_mut()
                     .unwrap()
                     .table
-                    .insert(step.line.0 as usize, step_count as usize);
+                    .insert(line.0 as usize, step_count as usize);
                 flow_view_update.add_branches(
                     flow_view_update.loops.clone().last_mut().unwrap().base.0,
-                    self.flow_preloader.expr_loader.load_branch_for_step(&step, path_buf),
+                    self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
                 );
+                info!("add branch for position {:?} {:?}", path_buf.display(), line);
             }
         } else {
             flow_view_update.loop_iteration_steps[0][0]
                 .table
-                .insert(step.line.0 as usize, step_count as usize);
-            flow_view_update.add_branches(0, self.flow_preloader.expr_loader.load_branch_for_step(&step, path_buf));
+                .insert(line.0 as usize, step_count as usize);
+            flow_view_update.add_branches(
+                0,
+                self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
+            );
+            info!("add branch for position {:?} {:?}", path_buf.display(), line);
         }
+        info!("branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
     }
 
@@ -370,12 +535,12 @@ impl<'a> CallFlowPreloader<'a> {
         }
     }
 
-    fn load_step_flow_events(&self, db: &Db, step_id: StepId) -> Vec<FlowEvent> {
+    fn load_step_flow_events(&self, replay: &mut dyn Replay, step_id: StepId) -> Vec<FlowEvent> {
         // load not only exactly this step, but for the whole step line "visit":
         // include events for next steps for this visit, because we don't process those steps in flow
         // otherwise, but we do something like a `next`
         let exact = false;
-        let step_events = db.load_step_events(step_id, exact);
+        let step_events = replay.load_step_events(step_id, exact);
         let flow_events = step_events.iter().map(|event| self.to_flow_event(event)).collect();
         // info!("flow events: {flow_events:?}");
         #[allow(clippy::let_and_return)] // useful to have the variable for debugging/logging
@@ -386,40 +551,43 @@ impl<'a> CallFlowPreloader<'a> {
     fn log_expressions(
         &mut self,
         mut flow_view_update: FlowViewUpdate,
-        step: DbStep,
-        db: &Db,
+        line: Position,
+        replay: &mut dyn Replay,
         step_id: StepId,
     ) -> FlowViewUpdate {
         let mut expr_order: Vec<String> = vec![];
-        let mut variable_map: HashMap<String, FullValueRecord> = HashMap::default();
+        let mut variable_map: HashMap<String, Value> = HashMap::default();
 
-        for value_record in &db.variables[step_id] {
-            variable_map.insert(
-                db.variable_names[value_record.variable_id].clone(),
-                value_record.clone(),
-            );
-        }
+        // for value_record in &db.variables[step_id] {
+        //     variable_map.insert(
+        //         db.variable_names[value_record.variable_id].clone(),
+        //         value_record.clone(),
+        //     );
+        // }
 
-        for (variable_id, place) in &db.variable_cells[step_id] {
-            let value_record = db.load_value_for_place(*place, step_id);
-            let full_value_record = FullValueRecord {
-                variable_id: *variable_id,
-                value: value_record,
-            };
-            let name = db.variable_name(*variable_id);
-            variable_map.insert(name.clone(), full_value_record);
-        }
+        // for (variable_id, place) in &db.variable_cells[step_id] {
+        //     let value_record = db.load_value_for_place(*place, step_id);
+        //     let full_value_record = FullValueRecord {
+        //         variable_id: *variable_id,
+        //         value: value_record,
+        //     };
+        //     let name = db.variable_name(*variable_id);
+        //     variable_map.insert(name.clone(), full_value_record);
+        // }
 
-        if let Some(var_list) = self.flow_preloader.get_var_list(step.line, &self.location) {
+        if let Some(var_list) = self.flow_preloader.get_var_list(line, &self.location) {
             info!("var_list {:?}", var_list.clone());
             for value_name in &var_list {
-                if variable_map.contains_key(value_name) {
+                if let Ok(value) = replay.load_value(value_name, self.lang) {
+                    // if variable_map.contains_key(value_name) {
+                    let ct_value = to_ct_value(&value);
                     flow_view_update
                         .steps
                         .last_mut()
                         .unwrap()
                         .before_values
-                        .insert(value_name.clone(), db.to_ct_value(&variable_map[value_name].value));
+                        .insert(value_name.clone(), ct_value.clone());
+                    variable_map.insert(value_name.clone(), ct_value);
                 }
                 expr_order.push(value_name.clone());
             }
@@ -434,7 +602,7 @@ impl<'a> CallFlowPreloader<'a> {
                 if variable_map.contains_key(variable) {
                     flow_view_update.steps[index]
                         .after_values
-                        .insert(variable.clone(), db.to_ct_value(&variable_map[variable].value));
+                        .insert(variable.clone(), variable_map[variable].clone());
                 }
             }
         }

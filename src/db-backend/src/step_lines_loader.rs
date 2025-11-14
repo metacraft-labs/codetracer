@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use log::info;
 use runtime_tracing::{CallKey, StepId};
 
-use crate::db::{Db, DbStep};
+use crate::db::{Db, DbReplay, DbStep};
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
-use crate::task::{FlowMode, LineStep, LineStepKind, LineStepValue, Location};
+use crate::task::{FlowMode, LineStep, LineStepKind, LineStepValue, Location, TraceKind};
 
 #[derive(Debug, Clone)]
 pub struct StepLinesLoader {
@@ -84,9 +84,10 @@ impl StepLinesLoader {
             let call_key = db.call_key_for_step(step_id);
             if !self.flow_loaded.contains(&call_key.0) {
                 let location = self.global_line_steps[step_id].location.clone();
-                let function_id = db.calls[call_key].function_id;
-                let function_first = db.functions[function_id].line;
-                let flow_update = flow_preloader.load(location, function_first, FlowMode::Call, db);
+                // let function_id = db.calls[call_key].function_id;
+                // let function_first = db.functions[function_id].line;
+                let mut replay = DbReplay::new(Box::new(db.clone()));
+                let flow_update = flow_preloader.load(location, FlowMode::Call, TraceKind::DB, &mut replay);
                 if !flow_update.error && !flow_update.view_updates.is_empty() {
                     let flow_view_update = &flow_update.view_updates[0];
                     for flow_step in flow_view_update.steps.iter() {

@@ -1,13 +1,14 @@
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
-use crate::dap_types::{self, Breakpoint, SetBreakpointsArguments, SetBreakpointsResponseBody, Source};
+use crate::dap_types;
 
 use crate::db::Db;
 use crate::handler::Handler;
 use crate::paths::CODETRACER_PATHS;
+use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments,
-    CtLoadLocalsArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
+    Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
+    FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget,
+    SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
@@ -17,9 +18,9 @@ use crate::transport::DapTransport;
 #[cfg(feature = "browser-transport")]
 use crate::transport::{DapResult, WorkerTransport};
 
-use log::info;
+use log::{info, warn};
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+// use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 
@@ -86,8 +87,13 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     handle_client(&mut reader, &mut writer)
 }
 
-fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>, seq: i64) -> Result<Handler, Box<dyn Error>> {
-    // TODO: log this when logging logic is properly abstracted
+fn launch(
+    trace_folder: &Path,
+    trace_file: &Path,
+    raw_diff_index: Option<String>,
+    ct_rr_worker_exe: &Path,
+    seq: i64,
+) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
@@ -106,13 +112,28 @@ fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
 
-        let mut handler = Handler::new(Box::new(db));
+        let mut handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.dap_client.seq = seq;
         handler.raw_diff_index = raw_diff_index;
         handler.run_to_entry(dap::Request::default())?;
         Ok(handler)
     } else {
-        Err("problem with reading metadata or path trace files".into())
+        warn!("problem with reading metadata or path trace files: try rr?");
+        let path = trace_folder.join("rr");
+        if path.exists() {
+            let db = Db::new(&PathBuf::from(""));
+            let ct_rr_args = CtRRArgs {
+                worker_exe: PathBuf::from(ct_rr_worker_exe),
+                rr_trace_folder: path,
+            };
+            let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
+            handler.dap_client.seq = seq;
+            handler.raw_diff_index = raw_diff_index;
+            handler.run_to_entry(dap::Request::default())?;
+            Ok(handler)
+        } else {
+            Err("problem with reading metadata or path trace files".into())
+        }
     }
 }
 
@@ -179,6 +200,9 @@ fn handle_request<T: DapTransport>(
         "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap_types::StackTraceArguments>()?)?,
         "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?)?,
         "restart" => handler.run_to_entry(req.clone())?,
+        "setBreakpoints" => {
+            handler.set_breakpoints(req.clone(), req.load_args::<dap_types::SetBreakpointsArguments>()?)?
+        }
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?)?,
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
@@ -229,12 +253,12 @@ fn handle_request<T: DapTransport>(
 
 pub struct Ctx {
     pub seq: i64,
-    pub breakpoints: HashMap<String, HashSet<i64>>,
     pub handler: Option<Handler>,
     pub received_launch: bool,
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
     pub launch_raw_diff_index: Option<String>,
+    pub ct_rr_worker_exe: PathBuf,
     pub received_configuration_done: bool,
 }
 
@@ -242,12 +266,12 @@ impl Default for Ctx {
     fn default() -> Self {
         Self {
             seq: 1i64,
-            breakpoints: HashMap::new(),
             handler: None,
             received_launch: false,
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
+            ct_rr_worker_exe: PathBuf::from(""),
             received_configuration_done: false,
         }
     }
@@ -259,6 +283,10 @@ pub fn handle_message<T: DapTransport>(
     ctx: &mut Ctx,
 ) -> Result<(), Box<dyn Error>> {
     info!("Handling message: {:?}", msg);
+    if let DapMessage::Request(req) = msg {
+        info!("  request {}", req.command);
+    }
+
     match msg {
         DapMessage::Request(req) if req.command == "initialize" => {
             let capabilities = Capabilities {
@@ -295,92 +323,6 @@ pub fn handle_message<T: DapTransport>(
             ctx.seq += 1;
             transport.send(&event)?;
         }
-        DapMessage::Request(req) if req.command == "setBreakpoints" => {
-            let mut results = Vec::new();
-            let args = req.load_args::<SetBreakpointsArguments>()?;
-            if let Some(path) = args.source.path.clone() {
-                let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
-                    bps.into_iter().map(|b| b.line).collect()
-                } else {
-                    args.lines.unwrap_or_default()
-                };
-                let entry = ctx.breakpoints.entry(path.clone()).or_default();
-                if let Some(h) = ctx.handler.as_mut() {
-                    h.clear_breakpoints();
-                    for line in lines {
-                        entry.insert(line);
-                        let _ = h.add_breakpoint(
-                            SourceLocation {
-                                path: path.clone(),
-                                line: line as usize,
-                            },
-                            Task {
-                                kind: TaskKind::AddBreak,
-                                id: gen_task_id(TaskKind::AddBreak),
-                            },
-                        );
-                        results.push(Breakpoint {
-                            id: None,
-                            verified: true,
-                            message: None,
-                            source: Some(Source {
-                                name: args.source.name.clone(),
-                                path: Some(path.clone()),
-                                source_reference: args.source.source_reference,
-                                presentation_hint: None,
-                                origin: None,
-                                sources: None,
-                                adapter_data: None,
-                                checksums: None,
-                            }),
-                            line: Some(line),
-                            column: None,
-                            end_line: None,
-                            end_column: None,
-                            instruction_reference: None,
-                            offset: None,
-                            reason: None,
-                        });
-                    }
-                }
-            } else {
-                let lines = args
-                    .breakpoints
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|b| b.line)
-                    .collect::<Vec<_>>();
-                for line in lines {
-                    results.push(Breakpoint {
-                        id: None,
-                        verified: false,
-                        message: Some("missing source path".to_string()),
-                        source: None,
-                        line: Some(line),
-                        column: None,
-                        end_line: None,
-                        end_column: None,
-                        instruction_reference: None,
-                        offset: None,
-                        reason: None,
-                    });
-                }
-            }
-            let body = SetBreakpointsResponseBody { breakpoints: results };
-            let resp = DapMessage::Response(Response {
-                base: ProtocolMessage {
-                    seq: ctx.seq,
-                    type_: "response".to_string(),
-                },
-                request_seq: req.base.seq,
-                success: true,
-                command: "setBreakpoints".to_string(),
-                message: None,
-                body: serde_json::to_value(body)?,
-            });
-            ctx.seq += 1;
-            transport.send(&resp)?;
-        }
         DapMessage::Request(req) if req.command == "launch" => {
             ctx.received_launch = true;
             let args = req.load_args::<dap::LaunchRequestArguments>()?;
@@ -396,9 +338,16 @@ pub fn handle_message<T: DapTransport>(
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
 
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
+                ctx.ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
 
                 if ctx.received_configuration_done {
-                    ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.launch_raw_diff_index.clone(), ctx.seq)?);
+                    ctx.handler = Some(launch(
+                        &ctx.launch_trace_folder,
+                        &ctx.launch_trace_file,
+                        ctx.launch_raw_diff_index.clone(),
+                        &ctx.ct_rr_worker_exe,
+                        ctx.seq,
+                    )?);
                     if let Some(h) = ctx.handler.as_mut() {
                         write_dap_messages(transport, h, &mut ctx.seq)?;
                     }
@@ -447,7 +396,13 @@ pub fn handle_message<T: DapTransport>(
             //     ctx.received_launch
             // );
             if ctx.received_launch {
-                ctx.handler = Some(launch(&ctx.launch_trace_folder, &ctx.launch_trace_file, ctx.launch_raw_diff_index.clone(), ctx.seq)?);
+                ctx.handler = Some(launch(
+                    &ctx.launch_trace_folder,
+                    &ctx.launch_trace_file,
+                    ctx.launch_raw_diff_index.clone(),
+                    &ctx.ct_rr_worker_exe,
+                    ctx.seq,
+                )?);
                 if let Some(h) = ctx.handler.as_mut() {
                     write_dap_messages(transport, h, &mut ctx.seq)?;
                 }
@@ -495,10 +450,20 @@ fn handle_client<R: std::io::BufRead, T: DapTransport>(
 
     let mut ctx = Ctx::default();
 
-    while let Ok(msg) = dap::read_dap_message_from_reader(reader) {
-        let _ = handle_message(&msg, transport, &mut ctx);
+    loop {
+        match dap::read_dap_message_from_reader(reader) {
+            Ok(msg) => {
+                let res = handle_message(&msg, transport, &mut ctx);
+                if let Err(e) = res {
+                    error!("handle_message error: {e:?}");
+                }
+            }
+            Err(e) => {
+                error!("error from read_dap_message_from_reader: {e:?}");
+                break;
+            }
+        }
     }
 
-    error!("maybe error from reader");
     Ok(())
 }

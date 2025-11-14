@@ -1,34 +1,41 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::error::Error;
+use std::io;
+use std::path::Path;
 
 use log::{error, info, warn};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, VariableId, NO_KEY};
+use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, TypeKind, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{Db, DbCall, DbRecordEvent, DbStep};
+use crate::db::{Db, DbCall, DbRecordEvent, DbReplay, DbStep};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
+use crate::lang::{lang_from_context, Lang};
 use crate::program_search_tool::ProgramSearchTool;
+use crate::replay::Replay;
+use crate::rr_dispatcher::{CtRRArgs, RRDispatcher};
 // use crate::response::{};
 use crate::dap_types;
 // use crate::dap_types::Source;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task;
 use crate::task::{
-    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
-    CollapseCallsArgs, CoreTrace, DbEventKind, FrameInfo, FunctionLocation, FlowMode, HistoryResult, HistoryUpdate, Instruction,
-    CtLoadFlowArguments, FlowUpdate, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
-    Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
+    Action, Breakpoint, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
+    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
+    FrameInfo, FunctionLocation, HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
+    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
+    ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
+    StepArg, Stop, StopType, StringAndValueTuple, Task, TraceKind, TraceUpdate, TracepointId, TracepointResults,
     UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
+use crate::value::{to_ct_value, Type, Value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -50,16 +57,13 @@ pub struct Handler {
     pub resulting_dap_messages: Vec<DapMessage>,
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
+    pub breakpoints: HashMap<(String, i64), Vec<Breakpoint>>,
 
-    pub breakpoint_list: Vec<HashMap<usize, BreakpointRecord>>,
+    pub trace_kind: TraceKind,
+    pub replay: Box<dyn Replay>,
+    pub ct_rr_args: CtRRArgs,
+    pub load_flow_index: usize,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BreakpointRecord {
-    pub is_active: bool,
-}
-
-type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 
 // two choices:
 //   return results and potentially
@@ -80,25 +84,28 @@ type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 //   sender.
 
 impl Handler {
-    pub fn new(db: Box<Db>) -> Handler {
-        Self::construct(db, false)
+    pub fn new(trace_kind: TraceKind, ct_rr_args: CtRRArgs, db: Box<Db>) -> Handler {
+        Self::construct(trace_kind, ct_rr_args, db, false)
     }
 
-    pub fn construct(db: Box<Db>, indirect_send: bool) -> Handler {
+    pub fn construct(trace_kind: TraceKind, ct_rr_args: CtRRArgs, db: Box<Db>, indirect_send: bool) -> Handler {
         let calltrace = Calltrace::new(&db);
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
-        let mut breakpoint_list: Vec<HashMap<usize, BreakpointRecord>> = Default::default();
-        breakpoint_list.resize_with(db.paths.len(), HashMap::new);
         let step_lines_loader = StepLinesLoader::new(&db, &mut expr_loader);
+        let replay: Box<dyn Replay> = if trace_kind == TraceKind::DB {
+            Box::new(DbReplay::new(db.clone()))
+        } else {
+            Box::new(RRDispatcher::new("stable", 0, ct_rr_args.clone()))
+        };
         // let sender = sender::Sender::new();
-        Handler {
-            db,
+        let mut handler = Handler {
+            trace_kind,
+            db: db.clone(),
             step_id: StepId(0),
             last_call_key: CallKey(0),
             indirect_send,
             // sender,
-            breakpoint_list,
             event_db: EventDb::new(),
             flow_preloader: FlowPreloader::new(),
             expr_loader,
@@ -107,9 +114,15 @@ impl Handler {
             step_lines_loader,
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
+            breakpoints: HashMap::new(),
+            replay,
+            ct_rr_args,
+            load_flow_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
-        }
+        };
+        handler.initialize_breakpoint_cache();
+        handler
     }
     // TODO
 
@@ -204,29 +217,28 @@ impl Handler {
         self.send_dap(&response)
     }
 
-    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
-        let call_key = self.db.call_key_for_step(self.step_id);
-        let reset_flow = is_main || call_key != self.last_call_key;
-        self.last_call_key = call_key;
-        info!("complete move: step_id: {:?}", self.step_id);
-        let move_state = MoveState {
-            status: "".to_string(),
-            location: self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
-            c_location: Location::default(),
-            main: is_main,
-            reset_flow,
-            stop_signal: RRGDBStopSignal::OtherStopSignal,
-            frame_info: FrameInfo::default(),
-        };
-
-        // info!("move_state {:?}", move_state);
+    // will be sent after completion of query
+    fn prepare_stopped_event(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         let reason = if is_main { "entry" } else { "step" };
         info!("generate stopped event");
         let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
         self.send_dap(&raw_event)?;
-        let raw_complete_move_event = self.dap_client.complete_move_event(&move_state)?;
+        Ok(())
+    }
+
+    fn prepare_complete_move_event(&mut self, move_state: &MoveState) -> Result<(), Box<dyn Error>> {
+        let raw_complete_move_event = self.dap_client.complete_move_event(move_state)?;
         self.send_dap(&raw_complete_move_event)?;
+        Ok(())
+    }
+
+    fn prepare_output_events(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("prepare_output_events not implemented for rr");
+            return Ok(()); // TODO
+        }
+
         if self.step_id.0 > self.previous_step_id.0 {
             let mut raw_output_events: Vec<dap::DapMessage> = vec![];
             for event in self.db.events.iter() {
@@ -253,9 +265,14 @@ impl Handler {
                 self.send_dap(raw_output_event)?;
             }
         }
-        self.previous_step_id = self.step_id;
+        Ok(())
+    }
 
-        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+    fn prepare_eventual_error_event(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("prepare_eventual_error_event not implemented for rr");
+            return Ok(()); // TODO
+        }
 
         let exact = false; // or for now try as flow // true just for this exact step
         let step_events = self.db.load_step_events(self.step_id, exact);
@@ -272,43 +289,70 @@ impl Handler {
         Ok(())
     }
 
+    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
+        info!("complete_move");
+
+        // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
+        let mut location = self.replay.load_location(&mut self.expr_loader)?;
+        // let call_key = location.call_key; // self.db.call_key_for_step(self.step_id);
+        location = self
+            .flow_preloader
+            .expr_loader
+            .find_function_location(&location, &Line(location.line));
+        // TODO: change if we need to support non-int keys
+        let call_key = CallKey(location.key.parse::<i64>()?);
+        let reset_flow = is_main || call_key != self.last_call_key;
+        self.last_call_key = call_key;
+        info!("  location: {location:?}");
+
+        let move_state = MoveState {
+            status: "".to_string(),
+            location,
+            c_location: Location::default(),
+            main: is_main,
+            reset_flow,
+            stop_signal: RRGDBStopSignal::OtherStopSignal,
+            frame_info: FrameInfo::default(),
+        };
+
+        self.prepare_stopped_event(is_main)?;
+        self.prepare_complete_move_event(&move_state)?;
+        self.prepare_output_events()?;
+
+        self.previous_step_id = self.step_id;
+
+        // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
+
+        self.prepare_eventual_error_event()?;
+
+        Ok(())
+    }
+
     pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(0));
+        self.replay.run_to_entry()?;
+        self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
         self.complete_move(true)?;
         Ok(())
     }
 
-    pub fn load_locals(&mut self, req: dap::Request, _args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
-        let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
+    pub fn load_locals(&mut self, req: dap::Request, args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
+        // if self.trace_kind == TraceKind::RR {
+        // let locals: Vec<Variable> = vec![];
+        // warn!("load_locals not implemented for rr yet");
+        let locals_with_records = self.replay.load_locals(args)?;
+        let locals = locals_with_records
             .iter()
-            .map(|v| Variable {
-                expression: self.db.variable_name(v.variable_id).to_string(),
-                value: self.db.to_ct_value(&v.value),
+            .map(|l| Variable {
+                expression: l.expression.clone(),
+                value: to_ct_value(&l.value),
             })
             .collect();
-
-        // TODO: fix random order here as well: ensure order(or in final locals?)
-        let value_tracking_locals: Vec<Variable> = self.db.variable_cells[self.step_id]
-            .iter()
-            .map(|(variable_id, place)| {
-                let name = self.db.variable_name(*variable_id);
-                info!("log local {variable_id:?} {name} place: {place:?}");
-                let value = self.db.load_value_for_place(*place, self.step_id);
-                Variable {
-                    expression: self.db.variable_name(*variable_id).to_string(),
-                    value: self.db.to_ct_value(&value),
-                }
-            })
-            .collect();
-        // based on https://stackoverflow.com/a/56490417/438099
-        let mut locals: Vec<Variable> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
-
-        locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
-        // for now just removing duplicated variables/expressions: even if storing different values
-        locals.dedup_by(|a, b| a.expression == b.expression);
-
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
         Ok(())
+        // }
+
+        // self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+        // Ok(())
     }
 
     // pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
@@ -388,6 +432,11 @@ impl Handler {
         _req: dap::Request,
         args: CalltraceLoadArgs,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("load_calltrace_section not implemented for rr");
+            return Ok(());
+        }
+
         let start_call_line_index = args.start_call_line_index;
         let call_lines = self.load_local_calltrace(args)?;
         let total_count = self.calc_total_calls();
@@ -406,13 +455,19 @@ impl Handler {
     }
 
     pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
+        let mut flow_replay: Box<dyn Replay> = if self.trace_kind == TraceKind::DB {
+            Box::new(DbReplay::new(self.db.clone()))
+        } else {
+            Box::new(RRDispatcher::new("flow", self.load_flow_index, self.ct_rr_args.clone()))
+        };
+        self.load_flow_index += 1;
+
+        // TODO: eventually cleanup or manage in a more optimal way flow replays: caching
+        // if possible for example
+
         let flow_update = if arg.flow_mode == FlowMode::Call {
-            let step_id = StepId(arg.location.rr_ticks.0);
-            let call_key = self.db.steps[step_id].call_key;
-            let function_id = self.db.calls[call_key].function_id;
-            let function_first = self.db.functions[function_id].line;
-            info!("load {arg:?}");
-            self.flow_preloader.load(arg.location, function_first, arg.flow_mode, &self.db)
+            self.flow_preloader
+                .load(arg.location, arg.flow_mode, self.trace_kind, &mut *flow_replay)
         } else {
             if let Some(raw_flow) = &self.raw_diff_index {
                 serde_json::from_str::<FlowUpdate>(&raw_flow)?
@@ -425,7 +480,6 @@ impl Handler {
             }
         };
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
-
         self.send_dap(&raw_event)?;
 
         Ok(())
@@ -478,7 +532,9 @@ impl Handler {
     }
 
     pub fn step_in(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
+        self.replay.step(Action::StepIn, forward)?;
+        self.step_id = self.replay.current_step_id();
+
         Ok(())
     }
 
@@ -509,57 +565,23 @@ impl Handler {
     }
 
     pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        let step_to_different_line = true; // which is better/should be let the user configure it?
-        (self.step_id, _) = self
-            .db
-            .next_step_id_relative_to(self.step_id, forward, step_to_different_line);
+        self.replay.step(Action::Next, forward)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
     pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        (self.step_id, _) = self.db.step_out_step_id_relative_to(self.step_id, forward);
+        self.replay.step(Action::StepOut, forward)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
     #[allow(clippy::expect_used)]
     pub fn step_continue(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
-        for step in self.db.step_from(self.step_id, forward) {
-            if !self.breakpoint_list.is_empty() {
-                if let Some(is_active) = self.breakpoint_list[step.path_id.0]
-                    .get(&step.line.into())
-                    .map(|bp| bp.is_active)
-                {
-                    if is_active {
-                        self.step_id_jump(step.step_id);
-                        self.complete_move(false)?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                break;
-            }
+        if !self.replay.step(Action::Continue, forward)? {
+            self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
         }
-
-        // If the continue step doesn't find a valid breakpoint.
-        if forward {
-            self.step_id_jump(
-                self.db
-                    .steps
-                    .last()
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            );
-        } else {
-            self.step_id_jump(
-                self.db
-                    .steps
-                    .first()
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            )
-        }
-        self.complete_move(false)?;
-        self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
+        self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
@@ -576,21 +598,24 @@ impl Handler {
             Action::Continue => self.step_continue(!arg.reverse)?,
             _ => error!("action {:?} not implemented", arg.action),
         }
-        if arg.complete && arg.action != Action::Continue {
+        if arg.complete {
+            // && arg.action != Action::Continue {
             self.complete_move(false)?;
         }
 
-        if original_step_id == self.step_id {
-            let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
-            self.send_notification(
-                NotificationKind::Warning,
-                &format!("Limit of record at the {location} already reached!"),
-                false,
-            )?;
-        } else if self.step_id == StepId(0) {
-            self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
-        } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
-            self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+        if self.trace_kind == TraceKind::DB {
+            if original_step_id == self.step_id {
+                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                )?;
+            } else if self.step_id == StepId(0) {
+                self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
+            } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
+                self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+            }
         }
         // } else if arg.action == Action::Next {
         //     let new_step = self.db.steps[self.step_id];
@@ -610,19 +635,11 @@ impl Handler {
     }
 
     pub fn event_load(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
-        let mut events: Vec<ProgramEvent> = vec![];
-        let mut first_events: Vec<ProgramEvent> = vec![];
-        let mut contents: String = "".to_string();
+        let events_data = self.replay.load_events()?;
 
-        for (i, event_record) in self.db.events.iter().enumerate() {
-            let mut event = self.to_program_event(event_record, i);
-            event.content = event_record.content.to_string();
-            events.push(event.clone());
-            if i < 20 {
-                first_events.push(event);
-                contents.push_str(&format!("{}\\n\n", event_record.content));
-            }
-        }
+        let events = events_data.events;
+        let first_events = events_data.first_events;
+        let contents = events_data.contents;
 
         self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
         self.event_db.refresh_global();
@@ -637,9 +654,8 @@ impl Handler {
     }
 
     pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
-        let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
-                                                              // for compat with rr/gdb core support
-        self.step_id_jump(step_id);
+        let _ = self.replay.event_jump(&event)?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
 
         Ok(())
@@ -648,7 +664,8 @@ impl Handler {
     pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
         let step_id = StepId(location.rr_ticks.0); // using this field
                                                    // for compat with rr/gdb core support
-        self.step_id_jump(step_id);
+        self.replay.jump_to(step_id)?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
 
         Ok(())
@@ -745,7 +762,8 @@ impl Handler {
     }
 
     pub fn history_jump(&mut self, _req: dap::Request, loc: Location) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(loc.rr_ticks.0));
+        self.replay.jump_to(StepId(loc.rr_ticks.0))?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
         Ok(())
     }
@@ -799,21 +817,69 @@ impl Handler {
         _req: dap::Request,
         source_location: SourceLocation,
     ) -> Result<(), Box<dyn Error>> {
-        if let Some(step_id) = self.get_closest_step_id(&source_location) {
-            self.step_id_jump(step_id);
+        if self.trace_kind == TraceKind::DB {
+            if let Some(step_id) = self.get_closest_step_id(&source_location) {
+                self.replay.jump_to(step_id)?;
+                self.step_id = self.replay.current_step_id();
+                self.complete_move(false)?;
+                Ok(())
+            } else {
+                let err: String = format!("unknown location: {}", &source_location);
+                Err(err.into())
+            }
+        } else {
+            // TODO: eventually do this in a separate replay and if we can't get to this place
+            //   just discard it? or jump back to original start?
+            //   for now if we can't go there, we run to entry(maybe TODO notification)
+
+            //  if this fails, we stop and don't do the run to entry(the error returns because of `?`):
+            //    i think it can't really return an error in our current impl though
+            self.replay.disable_breakpoints()?;
+            let b = self
+                .replay
+                .add_breakpoint(&source_location.path, source_location.line as i64)?;
+
+            let mut move_error = false;
+            if let Err(e) = self.source_line_jump_moves_for_rr(&source_location) {
+                warn!("  error in source line jump moves: {e:?}");
+                warn!("  will try to run to entry");
+                move_error = true;
+            }
+            self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
+            self.replay.enable_breakpoints()?;
+
+            let location = self.replay.load_location(&mut self.expr_loader)?;
+            if move_error || location.path != source_location.path || location.line != source_location.line as i64 {
+                self.replay.run_to_entry()?;
+                // TODO: send a notification error like "can't jump there"
+                // or find a way to return to/stay in original place
+            }
+
+            self.step_id = self.replay.current_step_id();
             self.complete_move(false)?;
             Ok(())
-        } else {
-            let err: String = format!("unknown location: {}", &source_location);
-            Err(err.into())
         }
     }
 
-    fn step_id_jump(&mut self, step_id: StepId) {
-        if step_id.0 != NO_INDEX {
-            self.step_id = step_id;
+    fn source_line_jump_moves_for_rr(&mut self, source_location: &SourceLocation) -> Result<(), Box<dyn Error>> {
+        // easier to handle errors from here in one place where we call it, so we can cleanup/restore breakpoints after it
+
+        // forward-continue
+        self.replay.step(Action::Continue, true)?;
+        // self.source_line_jump_in_direction(source_location, Direction::Forward)?;
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        if location.path != source_location.path || location.line != source_location.line as i64 {
+            // reverse-continue
+            self.replay.step(Action::Continue, false)?;
         }
+        Ok(())
     }
+
+    // fn step_id_jump(&mut self, step_id: StepId) {
+    //     if step_id.0 != NO_INDEX {
+    //         self.step_id = step_id;
+    //     }
+    // }
 
     fn get_call_target(&self, loc: &SourceCallJumpTarget) -> Option<StepId> {
         let mut line: Line = Line(loc.line as i64);
@@ -849,11 +915,13 @@ impl Handler {
             line: call_target.line,
             path: call_target.path.clone(),
         }) {
-            self.step_id_jump(line_step_id);
+            self.replay.jump_to(line_step_id)?;
+            self.step_id = self.replay.current_step_id();
         }
 
         if let Some(call_step_id) = self.get_call_target(&call_target) {
-            self.step_id_jump(call_step_id);
+            self.replay.jump_to(call_step_id)?;
+            self.step_id = self.replay.current_step_id();
             self.complete_move(false)?;
             Ok(())
         } else {
@@ -868,52 +936,123 @@ impl Handler {
         }
     }
 
-    pub fn add_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        let path_id = path_id_res?;
-        let inner_map = &mut self.breakpoint_list[path_id.0];
-        inner_map.insert(loc.line, BreakpointRecord { is_active: true });
+    pub fn set_breakpoints(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::SetBreakpointsArguments,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut results = Vec::new();
+        // for now simples to redo them every time: TODO possible optimizations
+        self.clear_breakpoints()?;
+        if let Some(path) = args.source.path.clone() {
+            let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
+                bps.into_iter().map(|b| b.line).collect()
+            } else {
+                args.lines.unwrap_or_default()
+            };
+
+            for line in lines {
+                let _ = self.add_breakpoint(SourceLocation {
+                    path: path.clone(),
+                    line: line as usize,
+                });
+                results.push(dap_types::Breakpoint {
+                    id: None,
+                    verified: true,
+                    message: None,
+                    source: Some(dap_types::Source {
+                        name: args.source.name.clone(),
+                        path: Some(path.clone()),
+                        source_reference: args.source.source_reference,
+                        presentation_hint: None,
+                        origin: None,
+                        sources: None,
+                        adapter_data: None,
+                        checksums: None,
+                    }),
+                    line: Some(line),
+                    column: None,
+                    end_line: None,
+                    end_column: None,
+                    instruction_reference: None,
+                    offset: None,
+                    reason: None,
+                });
+            }
+        } else {
+            let lines = args
+                .breakpoints
+                .unwrap_or_default()
+                .into_iter()
+                .map(|b| b.line)
+                .collect::<Vec<_>>();
+            for line in lines {
+                results.push(dap_types::Breakpoint {
+                    id: None,
+                    verified: false,
+                    message: Some("missing source path".to_string()),
+                    source: None,
+                    line: Some(line),
+                    column: None,
+                    end_line: None,
+                    end_column: None,
+                    instruction_reference: None,
+                    offset: None,
+                    reason: None,
+                });
+            }
+        }
+        self.respond_dap(request, dap_types::SetBreakpointsResponseBody { breakpoints: results })?;
         Ok(())
     }
 
-    pub fn delete_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        let path_id = path_id_res?;
-        let inner_map = &mut self.breakpoint_list[path_id.0];
-        inner_map.remove(&loc.line);
+    pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<(), Box<dyn Error>> {
+        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
+        let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
+        entry.push(breakpoint);
         Ok(())
     }
 
-    pub fn clear_breakpoints(&mut self) {
-        self.breakpoint_list.clear();
-        self.breakpoint_list.resize_with(self.db.paths.len(), HashMap::new);
-    }
-
-    pub fn toggle_breakpoint(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(&loc.path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", loc.path).into());
-        let path_id = path_id_res?;
-        if let Some(breakpoint) = self.breakpoint_list[path_id.0].get_mut(&loc.line) {
-            breakpoint.is_active = !breakpoint.is_active;
+    pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
+        if self.breakpoints.contains_key(&(loc.path.clone(), loc.line as i64)) {
+            for breakpoint in &self.breakpoints[&(loc.path.clone(), loc.line as i64)] {
+                self.replay.delete_breakpoint(breakpoint)?;
+            }
         }
         Ok(())
     }
 
+    pub fn clear_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        let _ = self.replay.delete_breakpoints()?;
+        self.breakpoints.clear();
+        self.initialize_breakpoint_cache();
+        Ok(())
+    }
+
+    fn initialize_breakpoint_cache(&mut self) {
+        if !self.breakpoints.is_empty() {
+            return;
+        }
+        if let Some(first_step) = self.db.steps.first() {
+            let path = self.db.load_path_from_id(&first_step.path_id).to_string();
+            self.breakpoints.entry((path, first_step.line.0)).or_default();
+        }
+    }
+
+    pub fn toggle_breakpoint(&mut self, _loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
+        // TODO: use path,line to id map: self.replay.toggle_breakpoint()?;
+        Ok(())
+    }
+
     fn handle_trace_steps(&mut self, args: &RunTracepointsArg) -> Result<(), Box<dyn Error>> {
-        let paths_count = self.db.paths.len();
         let tracepoints = args.session.tracepoints.clone();
         let mut registered = vec![false; tracepoints.len()];
-        let mut tracepoint_locations = vec![HashMap::new(); paths_count];
+        let mut tracepoint_locations: HashMap<String, HashMap<usize, Vec<usize>>> = HashMap::new();
         let mut tracepoint_errors = HashMap::new();
 
         // counting visits to each location, so tracepoints results
         // know that they're on the n-th iteration through the tracepoint
-        let mut location_visit_indices = vec![HashMap::new(); paths_count];
+        let mut location_visit_indices: HashMap<String, HashMap<usize, usize>> = HashMap::new();
 
         let mut interpreter = TracepointInterpreter::new(tracepoints.len());
 
@@ -921,135 +1060,253 @@ impl Handler {
 
         for (i, tracepoint) in tracepoints.iter().enumerate() {
             if let Err(error) = interpreter.register_tracepoint(i, &tracepoint.expression) {
-                // we won't try to evaluate this tracepoint,
-                // but will continue with the other valid ones
                 registered[i] = false;
                 warn!("register tracepoint error: {error:?}");
 
-                // trim quotes, adapted from https://stackoverflow.com/a/70598494/438099
                 let mut error_text = format!("{:?}", error);
                 if error_text.len() > 2 {
-                    // assume it's `"<>"` because of Debug formatting with {:?}
                     error_text.remove(0);
                     error_text.pop();
                 }
                 tracepoint_errors.insert(tracepoint.tracepoint_id, error_text);
-
-                // self.send_notification(NotificationKind::Error, &format!("Tracepoint error: {error:?}"), false)?;
             } else {
-                let path_id_res: Result<PathId, Box<dyn Error>> = self.load_path_id(&tracepoint.name).ok_or(
-                    format!(
-                        "can't load path id for tracepoint: can't find path `{}`` in trace",
-                        tracepoint.name
-                    )
-                    .into(),
-                );
-                match path_id_res {
-                    Ok(path_id) => {
-                        registered[i] = true;
-                        tracepoint_locations[path_id.0].entry(tracepoint.line).or_insert(vec![]);
-                        #[allow(clippy::unwrap_used)]
-                        tracepoint_locations[path_id.0]
-                            .get_mut(&tracepoint.line)
-                            .unwrap()
-                            .push(i);
-                        location_visit_indices[path_id.0].entry(tracepoint.line).or_insert(0);
-                    }
-                    Err(e) => {
-                        registered[i] = false;
-                        warn!("tracepoint error: {e:?}");
-                    }
-                }
+                registered[i] = true;
+                tracepoint_locations
+                    .entry(tracepoint.name.clone())
+                    .or_default()
+                    .entry(tracepoint.line)
+                    .or_insert_with(Vec::new)
+                    .push(i);
+                location_visit_indices
+                    .entry(tracepoint.name.clone())
+                    .or_default()
+                    .entry(tracepoint.line)
+                    .or_insert(0);
             }
         }
 
         let tracepoint_id_list: Vec<usize> = tracepoints.iter().map(|t| t.tracepoint_id).collect();
         self.event_db.reset_tracepoint_data(&tracepoint_id_list); // for now no smart cache non-changed optimizations(?)
-        self.event_db.tracepoint_errors = tracepoint_errors.clone();
 
-        for step in self.db.step_from(StepId(0), true) {
-            let line = step.line.0 as usize;
-            // let step_id_raw = step.step_id.0;
-            // info!("tracepoint locations {tracepoint_locations:?} line {line} {step_id_raw}");
-            if tracepoint_locations[step.path_id.0].contains_key(&line) {
-                // info!("try to go through tracepoints");
-                for tracepoint_index in tracepoint_locations[step.path_id.0][&line].iter() {
-                    let tracepoint = &tracepoints[*tracepoint_index];
-                    if registered[*tracepoint_index] {
-                        // tracepoint.is_changed TODO re-enable when caching supported again
-                        // info!("evaluate for {}", step.step_id.0);
-                        let locals = interpreter.evaluate(*tracepoint_index, step.step_id, &self.db);
-                        if locals.is_empty() {
-                            continue; // assume if no logs produced, no event should be recorded
-                        }
-                        // info!("locals {locals:?}");
-                        let stop = Stop::new(
-                            self.db.load_path_from_id(&step.path_id).to_string(),
-                            line as i64,
-                            locals,
-                            step.step_id.into(),
-                            tracepoint.tracepoint_id,
-                            location_visit_indices[step.path_id.0][&line],
-                            StopType::Trace,
-                        );
-                        results.push(stop);
+        let original_step_id = self.replay.current_step_id();
+        let mut disabled_breakpoints: Vec<((String, i64), usize)> = vec![];
 
-                        location_visit_indices[step.path_id.0]
-                            .entry(line)
-                            .and_modify(|e| *e += 1);
-
-                        // if results.len() >= TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE {
-                        //     self.event_db.register_tracepoint_results(&results);
-                        //     // TODO update
-                        //     results.clear();
-                        // }
+        {
+            let replay = &mut self.replay;
+            for ((path, line), breakpoints) in self.breakpoints.iter_mut() {
+                for (index, breakpoint) in breakpoints.iter_mut().enumerate() {
+                    if breakpoint.enabled {
+                        let toggled = replay.toggle_breakpoint(breakpoint)?;
+                        disabled_breakpoints.push(((path.clone(), *line), index));
+                        *breakpoint = toggled;
                     }
                 }
             }
         }
 
-        // if !results.is_empty() {
+        let mut tracepoint_breakpoints: Vec<Breakpoint> = vec![];
+        let mut run_error: Option<Box<dyn Error>> = None;
+
+        {
+            let run_result = (|| -> Result<(), Box<dyn Error>> {
+                if tracepoints.is_empty() {
+                    return Ok(());
+                }
+
+                for (path, line_map) in tracepoint_locations.iter() {
+                    if line_map.is_empty() {
+                        continue;
+                    }
+                    for (&line, tracepoint_indices) in line_map.iter() {
+                        if !tracepoint_indices.iter().any(|idx| registered[*idx]) {
+                            continue;
+                        }
+                        match self.replay.add_breakpoint(path, line as i64) {
+                            Ok(breakpoint) => tracepoint_breakpoints.push(breakpoint),
+                            Err(error) => {
+                                warn!("tracepoint breakpoint error: {error:?}");
+                                let mut error_text = format!("{:?}", error);
+                                if error_text.len() > 2 {
+                                    error_text.remove(0);
+                                    error_text.pop();
+                                }
+                                for tracepoint_index in tracepoint_indices {
+                                    registered[*tracepoint_index] = false;
+                                    tracepoint_errors
+                                        .insert(tracepoints[*tracepoint_index].tracepoint_id, error_text.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if tracepoint_breakpoints.is_empty() {
+                    return Ok(());
+                }
+
+                self.replay.jump_to(StepId(0))?;
+
+                loop {
+                    if !self.replay.step(Action::Continue, true)? {
+                        break;
+                    }
+
+                    let current_step_id = self.replay.current_step_id();
+                    let location = self.replay.load_location(&mut self.expr_loader)?;
+                    let path = location.path.clone();
+                    let line = location.line as usize;
+
+                    if let Some(line_map) = tracepoint_locations.get(path.as_str()) {
+                        if let Some(tracepoint_indices) = line_map.get(&line) {
+                            let visit_counts = location_visit_indices.entry(path.clone()).or_default();
+                            let visit_entry = visit_counts.entry(line).or_insert(0);
+                            let mut visit_index = *visit_entry;
+
+                            for tracepoint_index in tracepoint_indices {
+                                if !registered[*tracepoint_index] {
+                                    continue;
+                                }
+                                let tracepoint = &tracepoints[*tracepoint_index];
+                                let locals = self.evaluate_tracepoint(
+                                    &interpreter,
+                                    *tracepoint_index,
+                                    &tracepoint.expression,
+                                    current_step_id,
+                                    lang_from_context(&Path::new(&location.path), self.trace_kind),
+                                );
+                                if locals.is_empty() {
+                                    continue;
+                                }
+                                let stop = Stop::new(
+                                    path.clone(),
+                                    location.line,
+                                    locals,
+                                    current_step_id.0 as usize,
+                                    tracepoint.tracepoint_id,
+                                    visit_index,
+                                    StopType::Trace,
+                                );
+                                results.push(stop);
+
+                                visit_index += 1;
+                            }
+
+                            *visit_entry = visit_index;
+                        }
+                    }
+                }
+
+                Ok(())
+            })();
+
+            if let Err(err) = run_result {
+                run_error = Some(err);
+            }
+        }
+
+        let mut cleanup_error: Option<Box<dyn Error>> = None;
+
+        for breakpoint in tracepoint_breakpoints.iter() {
+            if let Err(err) = self.replay.delete_breakpoint(breakpoint) {
+                if cleanup_error.is_none() {
+                    cleanup_error = Some(err);
+                }
+            }
+        }
+
+        if let Err(err) = self.replay.jump_to(original_step_id) {
+            if cleanup_error.is_none() {
+                cleanup_error = Some(err);
+            }
+        }
+        self.step_id = original_step_id;
+
+        for (key, index) in disabled_breakpoints {
+            match self.breakpoints.get_mut(&key) {
+                Some(breakpoints) => {
+                    if let Some(breakpoint) = breakpoints.get_mut(index) {
+                        match self.replay.toggle_breakpoint(breakpoint) {
+                            Ok(toggled) => {
+                                *breakpoint = toggled;
+                            }
+                            Err(err) => {
+                                if cleanup_error.is_none() {
+                                    cleanup_error = Some(err);
+                                }
+                            }
+                        }
+                    } else if cleanup_error.is_none() {
+                        cleanup_error = Some(
+                            io::Error::new(io::ErrorKind::Other, "missing breakpoint index during restore").into(),
+                        );
+                    }
+                }
+                None => {
+                    if cleanup_error.is_none() {
+                        cleanup_error = Some(
+                            io::Error::new(io::ErrorKind::Other, "missing breakpoint entry during restore").into(),
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(err) = run_error {
+            if let Some(cleanup_err) = cleanup_error {
+                warn!("cleanup error after tracepoint run: {cleanup_err:?}");
+            }
+            return Err(err);
+        }
+
+        if let Some(err) = cleanup_error {
+            return Err(err);
+        }
+
+        self.event_db.tracepoint_errors = tracepoint_errors.clone();
         self.event_db.register_tracepoint_results(&results);
+        Ok(())
+    }
+
+    fn evaluate_tracepoint(
+        &mut self,
+        interpreter: &TracepointInterpreter,
+        tracepoint_index: usize,
+        tracepoint_expression: &str,
+        step_id: StepId,
+        lang: Lang,
+    ) -> Vec<StringAndValueTuple> {
+        let step_raw = step_id.0;
+        if step_raw < 0 {
+            warn!(
+                "tracepoint evaluation requested for negative step id {} (tracepoint index {})",
+                step_raw, tracepoint_index
+            );
+            let mut err_value = Value::new(TypeKind::Error, Type::new(TypeKind::Error, "TracepointEvaluationError"));
+            err_value.msg = "Tracepoint evaluation unavailable for negative replay step.".to_string();
+            return vec![StringAndValueTuple {
+                field0: tracepoint_expression.to_string(),
+                field1: err_value,
+            }];
+        }
+
+        // let step_index = step_raw as usize;
+        // let known_step_count = self.db.variables.len();
+        // if step_index >= known_step_count {
+        //     warn!(
+        //         "tracepoint evaluation requested for step {} (tracepoint index {}) but db only contains {} steps",
+        //         step_index, tracepoint_index, known_step_count
+        //     );
+
+        //     let mut err_value = Value::new(TypeKind::Error, Type::new(TypeKind::Error, "TracepointEvaluationError"));
+        //     err_value.msg = format!("Tracepoint evaluation unavailable for this replay backend at step {step_index}.");
+
+        //     return vec![StringAndValueTuple {
+        //         field0: tracepoint_expression.to_string(),
+        //         field1: err_value,
+        //     }];
         // }
 
-        // for (i, tracepoint) in tracepoints.iter().enumerate() {
-        //     if tracepoint.is_changed && registered[i] {
-        //         let mut results: Vec<Stop> = vec![];
-        //         let path_id_res: Result<PathId, Box<dyn Error>> = self
-        //             .load_path_id(&tracepoint.name)
-        //             .ok_or(format!("path not found in trace: {}", tracepoint.name).into());
-        //         let path_id = path_id_res?;
-        //         if let Some(steps) = self.db.step_map[path_id].get(&tracepoint.line) {
-        //             for (update_id, step) in steps.iter().enumerate() {
-        //                 // log(i);
-        //                 // log(other + i); "other + i" => #<line,column>:
-        //                 // log(i, other); [(i, i value), (name: text, value: othe)]
-        //                 let locals = interpreter.evaluate(i, self.step_id, &self.db);
-
-        //                 results.push(Stop::new(
-        //                     self.db.load_path_from_id(&step.path_id).to_string(),
-        //                     step.line.0,
-        //                     locals.clone(),
-        //                     step.step_id.into(),
-        //                     tracepoint.tracepoint_id,
-        //                     update_id,
-        //                     StopType::Trace,
-        //                 ));
-        //             }
-        //         }
-        //         let mut locals: Vec<StringAndValueTuple> = vec![];
-        //         for res in results.iter() {
-        //             locals.extend(res.locals.clone());
-        //         }
-        // self.event_db
-        //     .register_tracepoint_values(tracepoint.tracepoint_id, locals.clone());
-        // let pe_list = self.trace_to_program_event(&results);
-        // let tracepoint_ids = self.get_tracepoint_ids(&results);
-        // self.event_db
-        // .register_events(DbEventKind::Trace, &pe_list, tracepoint_ids);
-        // self.event_db.refresh_global();
-        // Send update to frontend
-        Ok(())
+        interpreter.evaluate(tracepoint_index, step_id, &mut *self.replay, lang)
     }
 
     pub fn run_tracepoints(&mut self, req: dap::Request, args: RunTracepointsArg) -> Result<(), Box<dyn Error>> {
@@ -1062,6 +1319,8 @@ impl Handler {
         if !is_empty {
             // Handle id_table and results for the TraceUpdate
             self.handle_trace_steps(&args)?;
+            warn!("-------- CHECK HERE !!!!!");
+            info!("{:?}", self.event_db);
         }
         for trace in tracepoints.iter() {
             let trace_update = TraceUpdate::new(
@@ -1077,7 +1336,8 @@ impl Handler {
     }
 
     pub fn trace_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(event.direct_location_rr_ticks));
+        self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
         Ok(())
     }
@@ -1147,7 +1407,8 @@ impl Handler {
     }
 
     pub fn local_step_jump(&mut self, _req: dap::Request, arg: LocalStepJump) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(arg.rr_ticks));
+        self.replay.jump_to(StepId(arg.rr_ticks))?;
+        self.step_id = self.replay.current_step_id();
         self.complete_move(false)?;
         Ok(())
     }
@@ -1550,7 +1811,7 @@ mod tests {
     #[test]
     fn test_struct_handling() {
         let db = setup_db();
-        let handler: Handler = Handler::new(Box::new(db));
+        let handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let value = handler.db.to_ct_value(&ValueRecord::Struct {
             field_values: vec![],
             type_id: TypeId(1),
@@ -1563,18 +1824,18 @@ mod tests {
         let db = setup_db();
 
         // Act: Create a new Handler instance
-        let handler: Handler = Handler::new(Box::new(db));
+        let handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
-        assert!(!handler.breakpoint_list.is_empty());
+        assert!(!handler.breakpoints.is_empty());
     }
 
     // Test single tracepoint
     #[test]
     fn test_run_single_tracepoint() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0))?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
@@ -1585,7 +1846,7 @@ mod tests {
     #[test]
     fn test_multiple_tracepoints() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         // TODO
         // this way we are resetting them after reforms
@@ -1620,7 +1881,7 @@ mod tests {
     fn test_multile_tracepoints_with_multiline_logs() -> Result<(), Box<dyn Error>> {
         let size: usize = 10000;
         let db: Db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(
             dap::Request::default(),
@@ -1647,7 +1908,7 @@ mod tests {
     fn test_tracepoint_in_loop() -> Result<(), Box<dyn Error>> {
         let size = 10000;
         let db: Db = setup_db_loop(size);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0))?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
@@ -1661,7 +1922,7 @@ mod tests {
         // Number of tracepoints and steps
         let count: usize = 10000;
         let db: Db = setup_db_with_step_count(count);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.event_load(dap::Request::default())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count))?;
 
@@ -1674,7 +1935,7 @@ mod tests {
         let db = setup_db();
 
         // Act: Create a new Handler instance
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let request = dap::Request::default();
         handler.step(request, make_step_in())?;
         assert_eq!(handler.step_id, StepId(1_i64));
@@ -1684,7 +1945,7 @@ mod tests {
     #[test]
     fn test_source_jumps() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let path = "/test/workdir";
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
@@ -1715,7 +1976,7 @@ mod tests {
     #[test]
     fn test_local_calltrace() -> Result<(), Box<dyn Error>> {
         let db = setup_db_with_calls();
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         let calltrace_load_args = CalltraceLoadArgs {
             location: handler
@@ -1757,7 +2018,7 @@ mod tests {
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/alexander92/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);
-        let mut handler: Handler = Handler::new(Box::new(db));
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // step-in from 1 to end(maybe also a parameter?)
         // on each step check validity, load locals, load callstack
@@ -1773,8 +2034,9 @@ mod tests {
                 dap::Request::default(),
                 CtLoadFlowArguments {
                     flow_mode: FlowMode::Call,
-                    location: handler.load_location(handler.step_id)
-                })
+                    location: handler.load_location(handler.step_id),
+                },
+            )
             .unwrap();
     }
 
@@ -1814,6 +2076,7 @@ mod tests {
         }
         let trace_metadata_file = path.join("trace_metadata.json");
         let trace = load_trace_data(&trace_file, trace_file_format).expect("expected that it can load the trace file");
+        info!("trace {:?}", trace);
         let trace_metadata =
             load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
         let mut db = Db::new(&trace_metadata.workdir);

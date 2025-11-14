@@ -232,6 +232,7 @@ type
       .} : string
       buildOutputPath* {.
         argument
+        defaultValue: ""
         desc: "Output path"
       .} : string
     of StartupCommand.record:

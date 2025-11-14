@@ -114,8 +114,6 @@ bindings:
 rrBackend:
   enabled: false
   path: ""
-  ctPaths: ""
-  debugInfoToolPath: ""
 
 skipInstall: true
 

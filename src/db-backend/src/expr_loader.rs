@@ -1,5 +1,4 @@
 use crate::{
-    db::DbStep,
     lang::Lang,
     task::{
         Branch, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, Position, NO_BRANCH_ID, NO_POSITION,
@@ -74,7 +73,7 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     m.insert(
         Lang::PythonDb,
         NodeNames {
-            if_conditions: vec!["if_statement".to_string(), "match_statement".to_string(),],
+            if_conditions: vec!["if_statement".to_string(), "match_statement".to_string()],
             else_conditions: vec!["else_clause".to_string()], // TODO: "case_clause".to_string(),?
             loops: vec!["for_statement".to_string(), "while_statement".to_string()],
             branches_body: vec!["block".to_string()],
@@ -82,7 +81,7 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
             functions: vec!["function_definition".to_string()],
             values: vec!["identifier".to_string()],
             comments: vec!["comment".to_string()],
-        }
+        },
     );
 
     m
@@ -162,7 +161,7 @@ impl ExprLoader {
             } else if extension == "rs" {
                 Lang::RustWasm // TODO RustWasm?
             } else if extension == "py" {
-                Lang::PythonDb   
+                Lang::PythonDb
             } else {
                 Lang::Unknown
             }
@@ -295,13 +294,15 @@ impl ExprLoader {
         // extract function names and positions
         } else if NODE_NAMES[&lang].functions.contains(&node.kind().to_string()) {
             if let Some(name) = self.get_method_name(node, path, row) {
-                self.processed_files
-                    .get_mut(path)
-                    .unwrap()
-                    .functions
-                    .entry(start)
-                    .or_default()
-                    .push((name.to_string(), start, end));
+                for i in start.0..end.0 {
+                    self.processed_files
+                        .get_mut(path)
+                        .unwrap()
+                        .functions
+                        .entry(Position(i))
+                        .or_default()
+                        .push((name.to_string(), start, end));
+                }
                 self.loop_index = 1;
             }
         } else if NODE_NAMES[&lang].loops.contains(&node.kind().to_string()) && start != end {
@@ -401,10 +402,12 @@ impl ExprLoader {
         Ok(())
     }
 
-    pub fn load_branch_for_step(&self, step: &DbStep, path: &PathBuf) -> HashMap<usize, BranchState> {
-        let position = Position(step.line.0);
+    pub fn load_branch_for_position(&self, position: Position, path: &PathBuf) -> HashMap<usize, BranchState> {
         let mut results: HashMap<usize, BranchState> = HashMap::default();
-        if self.processed_files[path].position_branches.contains_key(&position) {
+        info!("branches {:?}", self.processed_files[path].position_branches);
+        if self.processed_files.contains_key(path)
+            && self.processed_files[path].position_branches.contains_key(&position)
+        {
             let mut branch = self.processed_files[path].position_branches[&position].clone();
             branch.status = BranchState::Taken;
             results.insert(branch.header_line.0 as usize, branch.status);
@@ -434,14 +437,15 @@ impl ExprLoader {
         results
     }
 
-    pub fn get_loop_shape(&self, step: &DbStep, path: &PathBuf) -> Option<LoopShape> {
+    pub fn get_loop_shape(&self, line: Position, path: &PathBuf) -> Option<LoopShape> {
         info!("path {}", path.display());
         info!(
             "get_loop_shape {} {:?}",
-            step.line.0, self.processed_files[path].position_loops
+            line.0,
+            self.processed_files.get(path)?.position_loops
         );
-        if let Some(loop_shape_id) = self.processed_files[path].position_loops.get(&Position(step.line.0)) {
-            return Some(self.processed_files[path].loop_shapes[loop_shape_id.0 as usize].clone());
+        if let Some(loop_shape_id) = self.processed_files.get(path)?.position_loops.get(&line) {
+            return Some(self.processed_files.get(path)?.loop_shapes[loop_shape_id.0 as usize].clone());
         }
         None
     }
@@ -508,6 +512,8 @@ impl ExprLoader {
     }
 
     pub fn get_first_last_fn_lines(&self, location: &Location, line: &Line) -> (i64, i64) {
+        info!("functions {:?}", self.processed_files);
+        info!("get_first_last_fn_lines {:?}:{}", location.path, line.0);
         let (_, mut start, mut end): (String, Position, Position) =
             (String::default(), Position(NO_POSITION), Position(NO_POSITION));
         let path_buf = &PathBuf::from(&location.path);
@@ -539,15 +545,19 @@ impl ExprLoader {
         updated_location
     }
 
-    pub fn get_expr_list(&self, line: Line, location: &Location) -> Option<Vec<String>> {
+    pub fn get_expr_list(&self, line: Position, location: &Location) -> Option<Vec<String>> {
         self.processed_files
             .get(&PathBuf::from(&location.path))
-            .and_then(|file| file.variables.get(&Position(line.0)).cloned())
+            .and_then(|file| file.variables.get(&line).cloned())
     }
     // pub fn load_loops(&mut self, )
 
     pub fn get_comment_positions(&self, path: &PathBuf) -> Vec<Position> {
-        self.processed_files.get(path).unwrap_or(&FileInfo::new("")).comment_lines.clone()
+        self.processed_files
+            .get(path)
+            .unwrap_or(&FileInfo::new(""))
+            .comment_lines
+            .clone()
     }
 }
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::*;
 
 use crate::lang::*;
-use crate::value::{Type, Value};
+use crate::value::{Type, Value, ValueRecordWithType};
 use schemars::JsonSchema;
 
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
@@ -24,6 +24,7 @@ pub struct CtLoadLocalsArguments {
     pub rr_ticks: i64,
     pub count_budget: i64,
     pub min_count_limit: i64,
+    pub lang: Lang,
 }
 
 /// response for `ct/load-locals`
@@ -123,6 +124,18 @@ pub struct Variable {
     pub expression: String,
     pub value: Value,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct VariableWithRecord {
+    pub expression: String,
+    pub value: ValueRecordWithType,
+}
+
+// pub struct ValueRecordAndType {
+//     value: ValueRecord,
+//     typ: Type,
+// }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -658,7 +671,7 @@ impl FlowUpdate {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct ProgramEvent {
     pub kind: EventLogKind,
@@ -1638,6 +1651,27 @@ pub struct TracepointResults {
     pub events: Vec<ProgramEvent>,
     pub last_in_session: bool,
     pub first_update: bool,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct Breakpoint {
+    pub id: i64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TraceKind {
+    DB,
+    RR,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct Events {
+    pub events: Vec<ProgramEvent>,
+    pub first_events: Vec<ProgramEvent>,
+    pub contents: String,
 }
 
 pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
