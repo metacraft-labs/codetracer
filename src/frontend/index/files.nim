@@ -13,6 +13,8 @@ let
   fileIcons = require("@exuanbo/file-icons-js")
   fsAsync = require("fs").promises
 
+proc writeFileAsync(fs: JsObject, path: cstring, data: cstring): Future[JsObject] {.importjs: "#.writeFile(#, #)".}
+
 proc showOpenDialog(dialog: JsObject, browserWindow: JsObject, options: JsObject): Future[JsObject] {.importjs: "#.showOpenDialog(#,#)".}
 proc getClass(icons: js, name: cstring, options: js): Future[cstring] {.importjs: "#.getClass(#,#)".}
 
@@ -158,6 +160,24 @@ proc loadFilesystem*(paths: seq[cstring], traceFilesPath: cstring, selfContained
 proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
   var save = Save(project: Project(), files: @[], id: -1)
   return save
+
+proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
+  try:
+    discard await writeFileAsync(fsAsync, response.name, response.raw)
+    mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
+  except:
+    errorPrint "save-file error: ", getCurrentExceptionMsg()
+    mainWindow.webContents.send "CODETRACER::save-file-error",
+      js{name: response.name, error: cstring(getCurrentExceptionMsg())}
+
+proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
+  try:
+    discard await writeFileAsync(fsAsync, response.name, response.raw)
+    mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
+  except:
+    errorPrint "save-untitled error: ", getCurrentExceptionMsg()
+    mainWindow.webContents.send "CODETRACER::save-file-error",
+      js{name: response.name, error: cstring(getCurrentExceptionMsg())}
 
 proc selectFileOrFolder*(options: JsObject): Future[cstring] {.async.} =
   let selection = await electron.dialog.showOpenDialog(mainWindow, options)

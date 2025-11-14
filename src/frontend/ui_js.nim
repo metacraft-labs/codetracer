@@ -405,7 +405,12 @@ proc update*(self: Data, build: bool = false) =
     buildComponent.build = Build(output: @[], running: true)
     data.saveFiles()
   else:
-    data.saveFiles(data.services.editor.active)
+    let activePath = self.services.editor.active
+    if not activePath.isNil and activePath.len > 0:
+      console.log(cstring(fmt"[ui] saving active editor path: {activePath}"))
+      data.saveFiles(activePath)
+    else:
+      console.log(cstring"[ui] skip saveFiles — no active editor")
   if build:
     data.services.calltrace.restart()
     data.services.eventLog.restart()
@@ -421,7 +426,16 @@ proc update*(self: Data, build: bool = false) =
   # there are a possible edge case, good to be handled as an empty cstring
   # is active focus ok in general?
   # document with active
-  ipc.send "CODETRACER::update", js{build: build, currentPath: cast[cstring](self.ui.activeFocus.toJs.path)}
+  var currentPath = cstring""
+  if not self.services.editor.active.isNil:
+    currentPath = self.services.editor.active
+  elif not self.ui.activeFocus.isNil:
+    let focusPath = self.ui.activeFocus.toJs.path
+    if not focusPath.isNil:
+      currentPath = cast[cstring](focusPath)
+
+  console.log(cstring(fmt"[ui] sending CODETRACER::update (build={build}) for path: {currentPath}"))
+  ipc.send "CODETRACER::update", js{build: build, currentPath: currentPath}
   redrawAll()
 
 # alt+1 => low level view source 1
@@ -595,7 +609,6 @@ proc toggleReadOnly*(data: Data) =
   else:
     data.ui.mode = EditMode
   redrawAll()
-
 
 data.functions.toggleMode = toggleMode
 data.functions.toggleReadOnly = toggleReadOnly
@@ -1203,17 +1216,25 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     data.ui.editors[newPath] = data.ui.editors[untitledName]
     discard jsDelete(data.ui.editors[untitledName])
     data.ui.editors[newPath].path = newPath
-    data.ui.editors[newPath].name = newPath
-    if not data.services.search.paths.hasKey(newPath):
-      data.services.search.pathsPrepared.add(fuzzysort.prepare(newPath))
-      data.services.search.paths[newPath] = true
-    var tokens = rsplit($newPath, {'/'}, maxsplit=1)
-    var label = $newPath
+
+proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
+  if data.services.editor.open.hasKey(response.name):
+    data.services.editor.open[response.name].changed = false
+  if data.ui.editors.hasKey(response.name):
+    let editor = data.ui.editors[response.name]
+    if not editor.tabInfo.isNil:
+      editor.tabInfo.changed = false
+    editor.name = response.name
+    if not data.services.search.paths.hasKey(response.name):
+      data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
+      data.services.search.paths[response.name] = true
+    var tokens = rsplit($response.name, {'/'}, maxsplit=1)
+    var label = $response.name
     if tokens.len >= 2:
       label = tokens[1]
-    data.ui.editors[newPath].contentItem.setTitle(cstring(label))
-    data.ui.editors[newPath].contentItem.config.componentState.label = newPath
-    data.ui.editors[newPath].contentItem.config.componentState.fullPath = newPath
+    editor.contentItem.setTitle(cstring(label))
+    editor.contentItem.config.componentState.label = response.name
+    editor.contentItem.config.componentState.fullPath = response.name
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =
@@ -1347,6 +1368,7 @@ proc configureIPC(data: Data) =
     "no-trace"
     "welcome-screen"
     "saved-as"
+    "saved-file"
 
     # notifications
     "new-notification"

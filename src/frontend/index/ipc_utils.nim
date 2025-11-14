@@ -28,6 +28,8 @@ proc configureIpcMain* =
     "stop-recording-process"
     "load-trace-by-record-process-id"
     "path-validation"
+    "save-file"
+    "save-untitled"
 
     # welcome screen options
     "load-codetracer-shell"

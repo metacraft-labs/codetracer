@@ -25,6 +25,7 @@ const MONACO_SHORTCUTS_WHITELIST: seq[cstring] =
       "SHIFT+F10",
       "SHIFT+F11",
       "SHIFT+F12",
+      "CTRL+KeyS",
   ]
 const EDITOR_GUTTER_PADDING = 2 #px
 
@@ -120,7 +121,10 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
     runTracepoints(data),
 
   cstring"CTRL+KeyS":      proc(editor: MonacoEditor, e: EditorViewComponent) =
-    data.functions.update(data, build=false),
+    if not data.functions.update.isNil:
+      data.functions.update(data, false)
+    else:
+      data.saveFiles(data.services.editor.active),
 
   cstring"CTRL+F5":     proc(editor: MonacoEditor, e: EditorViewComponent) =
     if not data.functions.toggleMode.isNil:
