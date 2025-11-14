@@ -288,6 +288,18 @@ impl Replay for RRDispatcher {
         )?)?)
     }
 
+    fn enable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let _ = self.stable.run_query(CtRRQuery::EnableBreakpoints)?;
+        Ok(())
+    }
+
+    fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let _ = self.stable.run_query(CtRRQuery::DisableBreakpoints)?;
+        Ok(())
+    }
+
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
         self.ensure_active_stable()?;
         Ok(serde_json::from_str::<Location>(&self.stable.run_query(

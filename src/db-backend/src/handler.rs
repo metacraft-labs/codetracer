@@ -828,23 +828,51 @@ impl Handler {
                 Err(err.into())
             }
         } else {
+            // TODO: eventually do this in a separate replay and if we can't get to this place
+            //   just discard it? or jump back to original start?
+            //   for now if we can't go there, we run to entry(maybe TODO notification)
+
+            //  if this fails, we stop and don't do the run to entry(the error returns because of `?`):
+            //    i think it can't really return an error in our current impl though
+            self.replay.disable_breakpoints()?;
             let b = self
                 .replay
                 .add_breakpoint(&source_location.path, source_location.line as i64)?;
-            match self.replay.step(Action::Continue, true) {
-                Ok(_) => {
-                    self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
-                    let _location = self.replay.load_location(&mut self.expr_loader)?;
-                    self.step_id = self.replay.current_step_id();
-                    self.complete_move(false)?;
-                    Ok(())
-                }
-                Err(e) => {
-                    self.replay.delete_breakpoint(&b)?;
-                    Err(e)
-                }
+
+            let mut move_error = false;
+            if let Err(e) = self.source_line_jump_moves_for_rr(&source_location) {
+                warn!("  error in source line jump moves: {e:?}");
+                warn!("  will try to run to entry");
+                move_error = true;
             }
+            self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
+            self.replay.enable_breakpoints()?;
+
+            let location = self.replay.load_location(&mut self.expr_loader)?;
+            if move_error || location.path != source_location.path || location.line != source_location.line as i64 {
+                self.replay.run_to_entry()?;
+                // TODO: send a notification error like "can't jump there"
+                // or find a way to return to/stay in original place
+            }
+
+            self.step_id = self.replay.current_step_id();
+            self.complete_move(false)?;
+            Ok(())
         }
+    }
+
+    fn source_line_jump_moves_for_rr(&mut self, source_location: &SourceLocation) -> Result<(), Box<dyn Error>> {
+        // easier to handle errors from here in one place where we call it, so we can cleanup/restore breakpoints after it
+
+        // forward-continue
+        self.replay.step(Action::Continue, true)?;
+        // self.source_line_jump_in_direction(source_location, Direction::Forward)?;
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        if location.path != source_location.path || location.line != source_location.line as i64 {
+            // reverse-continue
+            self.replay.step(Action::Continue, false)?;
+        }
+        Ok(())
     }
 
     // fn step_id_jump(&mut self, step_id: StepId) {

@@ -1157,6 +1157,24 @@ impl Replay for DbReplay {
         Err(format!("breakpoint id {} not found", breakpoint.id).into())
     }
 
+    fn enable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        for path_breakpoints in self.breakpoint_list.iter_mut() {
+            for b in path_breakpoints.values_mut() {
+                b.enabled = false;
+            }
+        }
+        Ok(())
+    }
+
+    fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        for path_breakpoints in self.breakpoint_list.iter_mut() {
+            for b in path_breakpoints.values_mut() {
+                b.enabled = false;
+            }
+        }
+        Ok(())
+    }
+
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
         let step = self.db.steps[StepId(location.rr_ticks.0)];
         let call_key = step.call_key;
