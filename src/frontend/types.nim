@@ -1771,6 +1771,9 @@ method restart*(self: Component) {.base.} =
 method clear*(self: Component) {.base.} =
   discard
 
+method dispose*(self: Component) {.base.} =
+  discard
+
 method render*(self: Component): VNode {.base.} =
   discard
 

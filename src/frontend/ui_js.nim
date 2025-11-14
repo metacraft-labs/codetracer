@@ -8,7 +8,8 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code],
   lib/[ jslib ],
-  types, lang, renderer, config, dap, utils,
+  types, lang, utils, renderer, config, dap,
+  ../common/ct_logging,
   property_test / test,
   event_helpers
 
@@ -459,7 +460,12 @@ proc update*(self: Data, build: bool = false) =
     buildComponent.build = Build(output: @[], running: true)
     data.saveFiles()
   else:
-    data.saveFiles(data.services.editor.active)
+    let activePath = self.services.editor.active
+    if not activePath.isNil and activePath.len > 0:
+      console.log(cstring(fmt"[ui] saving active editor path: {activePath}"))
+      data.saveFiles(activePath)
+    else:
+      console.log(cstring"[ui] skip saveFiles — no active editor")
   if build:
     data.services.calltrace.restart()
     data.services.eventLog.restart()
@@ -475,7 +481,16 @@ proc update*(self: Data, build: bool = false) =
   # there are a possible edge case, good to be handled as an empty cstring
   # is active focus ok in general?
   # document with active
-  ipc.send "CODETRACER::update", js{build: build, currentPath: cast[cstring](self.ui.activeFocus.toJs.path)}
+  var currentPath = cstring""
+  if not self.services.editor.active.isNil:
+    currentPath = self.services.editor.active
+  elif not self.ui.activeFocus.isNil:
+    let focusPath = self.ui.activeFocus.toJs.path
+    if not focusPath.isNil:
+      currentPath = cast[cstring](focusPath)
+
+  console.log(cstring(fmt"[ui] sending CODETRACER::update (build={build}) for path: {currentPath}"))
+  ipc.send "CODETRACER::update", js{build: build, currentPath: currentPath}
   redrawAll()
 
 # alt+1 => low level view source 1
@@ -650,7 +665,6 @@ proc toggleReadOnly*(data: Data) =
     data.ui.mode = EditMode
   redrawAll()
 
-
 data.functions.toggleMode = toggleMode
 data.functions.toggleReadOnly = toggleReadOnly
 data.functions.update = update
@@ -796,6 +810,8 @@ proc onInit*(
   data.startOptions = response.startOptions
   data.homedir = response.home
   data.config = response.config
+  if response.bypass:
+    renderer.resetLayoutState(data)
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.services.flow.enabledFlow = response.config.flow.enabled
@@ -872,7 +888,7 @@ proc onTraceLoaded(
   # console.log response.withDiff, response.diff, response.rawDiffIndex
 
   data.trace = response.trace
-  data.ui.readOnly = true
+  data.setEditorsReadOnlyState(true)
   data.services.debugger.functions = response.functions
   data.services.editor.tags = response.tags
   data.save = response.save
@@ -903,8 +919,32 @@ proc onTraceLoaded(
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
+    data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
+      let trace = response["trace"].to(Trace)
+      infoPrint "ui: reinitializing dap for trace ", $trace.id
+      configureMiddleware()
+      data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+      data.dapApi.sendCtRequest(DapLaunch, js{
+        traceFolder: trace.outputFolder,
+        rawDiffIndex: data.startOptions.rawDiffIndex,
+      })
+
   when not defined(ctInExtension):
     configureMiddleware()
+    data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
+      let trace = response["trace"].to(Trace)
+      infoPrint "ui: reinitializing dap for trace ", $trace.id
+      data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+        clientName: "codetracer"
+      )))
+      data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+      data.dapApi.sendCtRequest(DapLaunch, js{
+        traceFolder: trace.outputFolder,
+        rawDiffIndex: data.startOptions.rawDiffIndex,
+      })
+
+  data.switchToDebug()
+  renderer.requestInitialPanelData(data)
 
   if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
     data.viewsApi.installMessage()
@@ -1157,15 +1197,23 @@ proc onPathValidated(
 proc onSuccessfulRecord(
   sender: js,
   response: jsobject()) =
+  if not data.ui.welcomeScreen.isNil and
+      not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordSuccess
     redrawAll()
+  else:
+    data.viewsApi.successMessage(cstring"Recording finished. Reloading trace...")
 
 proc onFailedRecord(
   sender: js,
   response: jsobject(errorMessage=cstring)) =
+  if not data.ui.welcomeScreen.isNil and
+      not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordError
     data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
     redrawAll()
+  else:
+    data.viewsApi.errorMessage(response.errorMessage)
 
 proc onLoadingTrace(
   sender: js,
@@ -1258,17 +1306,25 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     data.ui.editors[newPath] = data.ui.editors[untitledName]
     discard jsDelete(data.ui.editors[untitledName])
     data.ui.editors[newPath].path = newPath
-    data.ui.editors[newPath].name = newPath
-    if not data.services.search.paths.hasKey(newPath):
-      data.services.search.pathsPrepared.add(fuzzysort.prepare(newPath))
-      data.services.search.paths[newPath] = true
-    var tokens = rsplit($newPath, {'/'}, maxsplit=1)
-    var label = $newPath
+
+proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
+  if data.services.editor.open.hasKey(response.name):
+    data.services.editor.open[response.name].changed = false
+  if data.ui.editors.hasKey(response.name):
+    let editor = data.ui.editors[response.name]
+    if not editor.tabInfo.isNil:
+      editor.tabInfo.changed = false
+    editor.name = response.name
+    if not data.services.search.paths.hasKey(response.name):
+      data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))
+      data.services.search.paths[response.name] = true
+    var tokens = rsplit($response.name, {'/'}, maxsplit=1)
+    var label = $response.name
     if tokens.len >= 2:
       label = tokens[1]
-    data.ui.editors[newPath].contentItem.setTitle(cstring(label))
-    data.ui.editors[newPath].contentItem.config.componentState.label = newPath
-    data.ui.editors[newPath].contentItem.config.componentState.fullPath = newPath
+    editor.contentItem.setTitle(cstring(label))
+    editor.contentItem.config.componentState.label = response.name
+    editor.contentItem.config.componentState.fullPath = response.name
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =
@@ -1402,6 +1458,7 @@ proc configureIPC(data: Data) =
     "no-trace"
     "welcome-screen"
     "saved-as"
+    "saved-file"
 
     # notifications
     "new-notification"

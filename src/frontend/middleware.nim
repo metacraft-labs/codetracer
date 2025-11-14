@@ -1,6 +1,6 @@
 import
   std/[jsffi, jsconsole],
-  ../common/ct_event,
+  ../common/[ct_event, ct_logging],
   lib/jslib,
   types,
   communication, dap,
@@ -12,6 +12,7 @@ when not defined(ctInExtension):
   import utils
 
   proc dapInitializationHandler() =
+    infoPrint "middleware: launching trace id=", $data.trace.id, " folder=", $data.trace.outputFolder
     data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     data.dapApi.sendCtRequest(DapLaunch, js{
       traceFolder: data.trace.outputFolder,
