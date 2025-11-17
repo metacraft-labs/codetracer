@@ -56,6 +56,10 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         }
         "c" => Lang::C,
         "cpp" => Lang::Cpp,
+        "pas" => Lang::Pascal,
+        "nim" => Lang::Nim,
+        "d" => Lang::C, // TODO
+        "go" => Lang::Go,
         _ => Lang::Unknown,
     }
 }
