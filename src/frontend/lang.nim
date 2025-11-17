@@ -23,7 +23,8 @@ proc toLang*(lang: cstring): Lang =
     lua: LangLua,
     nr: LangNoir,
     small: LangSmall,
-    noir: LangNoir
+    noir: LangNoir,
+    d: LangC, # TODO
   }
   if langs.hasKey(lang):
     result = langs[lang]

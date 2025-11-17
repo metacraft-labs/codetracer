@@ -162,5 +162,6 @@ when defined(server):
         debugPrint "call ready"
         discard jsAsFunction[proc: Future[void]](readyVar)()
         readyVar = undefined
+
     infoPrint fmt"socket.io listening on localhost:{backendSocketPort}"
     httpServer.listen(backendSocketPort)

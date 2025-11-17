@@ -31,6 +31,7 @@ const LANGS = {
   "py": LangPythonDb,
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
+  "d": LangC, # TODO
   "small": LangSmall,
   "wasm": LangRustWasm, # TODO: can be Cpp or other as well, maybe pass
     # explicitly or check trace/other debug info?
@@ -44,15 +45,21 @@ const WASM_LANGS = {
 
 proc detectLangFromPath*(path: string, isWasm: bool): Lang =
   let filename = path.extractFilename
-  let extension = rsplit(filename[1..^1], ".", 1)[1].toLowerAscii()
+  echo filename
+  let tokens = rsplit(filename[1..^1], ".", 1)
+  if tokens.len > 1:
+    let extension = tokens[1].toLowerAscii()
 
-  if isWasm and WASM_LANGS.hasKey(extension):
-    return WASM_LANGS[extension]
+    if isWasm and WASM_LANGS.hasKey(extension):
+      return WASM_LANGS[extension]
 
-  if LANGS.hasKey(extension):
-    result = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
-    if result != LangUnknown:
-      return result
+    if LANGS.hasKey(extension):
+      result = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
+      if result != LangUnknown:
+        return result
+  else:
+    return LangUnknown
+
 
 proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
   # TODO: under a debug print flag?
