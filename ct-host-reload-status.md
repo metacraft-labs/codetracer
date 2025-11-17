@@ -29,7 +29,8 @@
 - Fixed the runtime `_events` error by binding/unbinding handlers with the socket as `self` in the registry (`frontend/index/ipc_registry.nim`).
 - Added a reconnect bootstrap cache: the server send shim now records handshake/init/trace payloads (see `bootstrap_cache.nim`), and `ipc.replayBootstrap` replays the cached messages in handshake-first order when a new socket attaches.
 - Extended the headless reconnect suite with a bootstrap replay check to guarantee the latest cached payload is emitted exactly once; still runnable via `nim js -r src/frontend/tests/test_suites/reload_reconnect.nim`.
+- Added a headless host-mode smoke test that drives `server_index.js` through welcome, edit, and shell-ui flows and asserts cached bootstrap replay after reconnect (`tests/reload_bootstrap_host.js`); includes a `--welcome-screen` start flag so server builds can enter the welcome flow under test.
 
-## Next tasks (Part 2)
-- Smoke-test `ct host` reloads to confirm the cached bootstrap whitelist (`started/init/welcome/no-trace/trace-loaded/...`) covers welcome/edit/shell flows; extend caching if any initial UI state is still missing after a reload.
-- Wire the cached bootstrap replay into broader automation once stable (tester ui harness pickup + Playwright reload flow) so reconnect coverage runs in CI.
+## Next tasks (Part 3)
+- Wire the reconnect coverage into CI (tester `ui` + Playwright reload) so reload resilience runs automatically during PR checks.
+- Fill out the remaining validation/doc tasks from the plan once CI coverage lands.

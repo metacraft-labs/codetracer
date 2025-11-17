@@ -65,6 +65,9 @@ proc parseArgs* =
           break
       elif arg == cstring"--no-record":
         data.startOptions.record = false
+      elif arg == cstring"--welcome-screen":
+        data.startOptions.welcomeScreen = true
+        data.startOptions.traceID = -1
       elif arg == cstring"edit":
         data.startOptions.edit = true
         data.startOptions.name = argsExceptNoSandbox[i + 3]
