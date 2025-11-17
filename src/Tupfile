@@ -8,6 +8,7 @@ include_rules
 # headless frontend tests
 : frontend/tests/ipc_registry_test.nim |> !nim_js |> tests/ipc_registry_test.js
 : frontend/tests/test_suites/reload_reconnect.nim |> !nim_js |> tests/reload_reconnect.js
+: frontend/tests/test_suites/reload_bootstrap_host.js |> !tup_preserve |> tests/reload_bootstrap_host.js
 # : frontend/browsersync_serv.nim |> !nim_node |> browsersync_serv.js
 # : frontend/codetracer_shell.nim |> !codetracer_shell |> bin/codetracer_shell.js
 
