@@ -1,0 +1,9 @@
+suite: "Event Log — Electron"
+variant: desktop
+matrix:
+  os: [ubuntu, fedora, nixos, macos]
+include:
+  - TC-ELOG-JUMP-001
+  - TC-ELOG-EDITOR-001
+  - TC-ELOG-PAST-FUTURE-001
+  - TC-ELOG-REACT-CTREE-001

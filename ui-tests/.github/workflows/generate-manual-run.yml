@@ -1,0 +1,123 @@
+name: Generate Manual Test Run
+on:
+  workflow_dispatch:
+    inputs:
+      suite_path:
+        description: "Path to suite YAML (e.g., test-scenarios/suites/components/event_log.electron.yml)"
+        required: true
+        type: string
+      run_id:
+        description: "Identifier for this run (e.g., 2025-11-14-Run-01)"
+        required: true
+        type: string
+      variant:
+        description: "desktop or web (overrides suite if set)"
+        required: false
+        type: string
+      os:
+        description: "OS for this run (e.g., ubuntu, macos, fedora, nixos)"
+        required: true
+        type: string
+      browser:
+        description: "Browser (for web variant) (chrome/chromium/firefox/safari or blank)"
+        required: false
+        type: string
+      title_suffix:
+        description: "Optional extra title text"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Manual Run Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const suitePath = core.getInput('suite_path');
+            const runId = core.getInput('run_id');
+            const variantOverride = core.getInput('variant');
+            const os = core.getInput('os');
+            const browser = core.getInput('browser');
+            const titleSuffix = core.getInput('title_suffix') || '';
+
+            function readYml(p) {
+              const txt = fs.readFileSync(p, 'utf8');
+              const lines = txt.split(/\r?\n/);
+              const out = { include: [], matrix: {}, suite: '', variant: null };
+              let currentKey = null;
+              for (const line of lines) {
+                if (/^\s*suite:\s*/.test(line)) out.suite = line.split(':')[1].trim().replace(/^"|"$/g,'');
+                if (/^\s*variant:\s*/.test(line)) {
+                  const v = line.split(':')[1].trim();
+                  out.variant = v.startsWith('[') ? JSON.parse(v.replace(/'/g,'"')) : v;
+                }
+                if (/^\s*include:\s*$/.test(line)) { currentKey = 'include'; continue; }
+                if (currentKey === 'include' && /^\s*-\s*/.test(line)) {
+                  out.include.push(line.replace(/^\s*-\s*/, '').trim());
+                }
+              }
+              return out;
+            }
+
+            function readCaseMeta(p) {
+              const txt = fs.readFileSync(p, 'utf8');
+              const m = txt.match(/^---([\s\S]*?)---/);
+              if (!m) return null;
+              const fm = m[1];
+              const id = (fm.match(/^\s*id:\s*(.+)\s*$/m)||[])[1]?.trim();
+              const title = (fm.match(/^\s*title:\s*(.+)\s*$/m)||[])[1]?.trim();
+              return { id, title };
+            }
+
+            const suite = readYml(suitePath);
+            const variant = variantOverride || (Array.isArray(suite.variant) ? suite.variant.join(',') : suite.variant || 'desktop');
+
+            function walk(dir, out=[]) {
+              for (const f of fs.readdirSync(dir)) {
+                const p = path.join(dir, f);
+                const st = fs.statSync(p);
+                if (st.isDirectory()) walk(p, out);
+                else if (st.isFile() && f.endsWith('.md')) out.push(p);
+              }
+              return out;
+            }
+
+            const files = walk('test-scenarios/testcases');
+            const map = {};
+            for (const p of files) {
+              const meta = readCaseMeta(p);
+              if (meta?.id) map[meta.id] = { title: meta.title, path: p };
+            }
+
+            let body = `# Manual Test Run — ${suite.suite || path.basename(suitePath)} — ${runId}\n\n`;
+            body += `**Variant:** ${variant}\n\n**OS:** ${os}${browser ? `  **Browser:** ${browser}` : ''}\n\n`;
+            body += `## Cases\n`;
+            for (const id of suite.include) {
+              const item = map[id];
+              const rel = item ? item.path : '(missing)';
+              const title = item ? item.title : '(title not found)';
+              body += `- [ ] ${id} — ${title}  \n      [Open case](/${rel})\n`;
+            }
+
+            const title = `Manual Test Run — ${suite.suite || path.basename(suitePath)} — ${runId}${titleSuffix?` — ${titleSuffix}`:''}`;
+
+            const { data: issue } = await github.rest.issues.create({
+              ...context.repo,
+              title,
+              body,
+              labels: ['manual-test-run']
+            });
+
+            core.info(`Created issue #${issue.number}: ${issue.html_url}`);

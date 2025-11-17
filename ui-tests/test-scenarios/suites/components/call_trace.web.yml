@@ -1,0 +1,12 @@
+suite: "Call Trace — Web"
+variant: web
+matrix:
+  os: [ubuntu, macos]
+  browser: [chrome, chromium, firefox, safari]
+include:
+  - TC-CTREE-COLLAPSE-001
+  - TC-CTREE-JUMP-001
+  - TC-CTREE-CONTEXT-001
+  - TC-CTREE-SEARCH-001
+  - TC-CTREE-OPEN-CLOSE-001
+  - TC-CTREE-REACT-ELOG-001

@@ -1,0 +1,32 @@
+name: "Bug"
+description: "Defect found during manual testing"
+title: "Bug: <short title>"
+labels: ["bug"]
+body:
+  - type: input
+    id: run
+    attributes:
+      label: Run ID
+      placeholder: "2025-11-14-Run-01"
+  - type: input
+    id: testcase
+    attributes:
+      label: Test Case ID
+      placeholder: "TC-ELOG-JUMP-001"
+  - type: input
+    id: env
+    attributes:
+      label: Environment (OS/Browser/Variant)
+      placeholder: "macOS 14 + Safari (web)"
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro steps (exact)
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual + screenshots/logs

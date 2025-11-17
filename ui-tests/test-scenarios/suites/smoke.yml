@@ -1,0 +1,9 @@
+suite: "Smoke — Core Navigation"
+variant: [desktop, web]
+matrix:
+  os: [ubuntu, macos]
+  browser: [chrome, firefox]
+include:
+  - TC-ELOG-JUMP-001
+  - TC-CTREE-JUMP-001
+  - TC-CTREE-OPEN-CLOSE-001
