@@ -1,6 +1,5 @@
 import
-  std / [ jsffi ],
-  ../lib/jslib
+  std / [ jsffi ]
 
 type
   IpcHandler* = object
@@ -11,6 +10,9 @@ type
     handlers*: seq[IpcHandler]
     socket*: JsObject
 
+proc callOn(fn: JsObject, self: JsObject, event: cstring, handler: JsObject): JsObject {.importcpp: "((#)).call(#, #, #)".}
+proc callOff(fn: JsObject, self: JsObject, event: cstring, handler: JsObject): JsObject {.importcpp: "((#)).call(#, #, #)".}
+
 proc initIpcRegistry*(): IpcRegistry =
   IpcRegistry(handlers: @[], socket: nil)
 
@@ -19,8 +21,7 @@ proc registerHandler*(registry: IpcRegistry, event: cstring, handler: JsObject) 
   if not registry.socket.isNil:
     let onFn = registry.socket[cstring"on"]
     if not onFn.isUndefined:
-      let onProc = jsAsFunction[proc(id: cstring, handler: JsObject): JsObject](onFn)
-      discard onProc(event, handler)
+      discard callOn(onFn, registry.socket, event, handler)
 
 proc unbindAll(registry: IpcRegistry, socket: JsObject) =
   if socket.isNil:
@@ -28,9 +29,8 @@ proc unbindAll(registry: IpcRegistry, socket: JsObject) =
   let offFn = socket[cstring"off"]
   if offFn.isUndefined:
     return
-  let offProc = jsAsFunction[proc(id: cstring, handler: JsObject): JsObject](offFn)
   for handler in registry.handlers:
-    discard offProc(handler.event, handler.handler)
+    discard callOff(offFn, socket, handler.event, handler.handler)
 
 proc bindAll(registry: IpcRegistry, socket: JsObject) =
   if socket.isNil:
@@ -38,9 +38,8 @@ proc bindAll(registry: IpcRegistry, socket: JsObject) =
   let onFn = socket[cstring"on"]
   if onFn.isUndefined:
     return
-  let onProc = jsAsFunction[proc(id: cstring, handler: JsObject): JsObject](onFn)
   for handler in registry.handlers:
-    discard onProc(handler.event, handler.handler)
+    discard callOn(onFn, socket, handler.event, handler.handler)
 
 proc attachSocket*(registry: IpcRegistry, socket: JsObject) =
   if registry.socket == socket:

@@ -2,6 +2,7 @@ import
   std / [ async, jsffi, os, strformat, strutils, sequtils, jsconsole ],
   ../[ config, types, lang ],
   ../lib/[ jslib, electron_lib, misc_lib ],
+  ./bootstrap_cache,
   ../../common/[ paths, ct_logging ]
 
 type
@@ -22,6 +23,7 @@ type
     recordProcess*: NodeSubProcess
     layout*: js
     helpers*: Helpers
+    bootstrapMessages*: seq[BootstrapPayload]
 
   DebugInstance* = object
     process*:       NodeSubProcess
@@ -41,6 +43,7 @@ var data* = ServerData(
   tabs: JsAssoc[cstring, ServerTab]{},
   closedTabs: @[],
   closedPanels: @[],
+  bootstrapMessages: @[],
   startOptions: StartOptions(
     loading: true,
     screen: true,

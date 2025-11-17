@@ -5,6 +5,9 @@ include_rules
 : frontend/subwindow.nim |> !nim_node_subwindow |> subwindow.js | subwindow.js.map
 : frontend/index.nim |> !nim_node_index_server |> server_index.js | server_index.js.map
 : frontend/ui_js.nim |> !nim_js |> ui.js
+# headless frontend tests
+: frontend/tests/ipc_registry_test.nim |> !nim_js |> tests/ipc_registry_test.js
+: frontend/tests/test_suites/reload_reconnect.nim |> !nim_js |> tests/reload_reconnect.js
 # : frontend/browsersync_serv.nim |> !nim_node |> browsersync_serv.js
 # : frontend/codetracer_shell.nim |> !codetracer_shell |> bin/codetracer_shell.js
 
