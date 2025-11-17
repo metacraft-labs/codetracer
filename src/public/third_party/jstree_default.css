@@ -526,7 +526,7 @@
   background: url("../resources/jstree/throbber.gif") center center no-repeat;
 }
 .jstree-default .jstree-file {
-  background: url("../resources/shared/filesystm/filesystem_default_file.svg") center center no-repeat;
+  background: url("../resources/shared/filesystem/filesystem_default_file.svg") center center no-repeat;
   background-size: 16px 16px;
 }
 .jstree-default .jstree-folder {
