@@ -43,7 +43,7 @@ when not defined(server):
 
   var ipc* = DebugMainIPC(electron: electron.ipcMain)
 else:
-  var ipc* = FrontendIPC()
+  var ipc* = initFrontendIPC()
 
 
 when defined(server):
@@ -92,7 +92,11 @@ when defined(server):
     })
     socketIOServer.on(cstring"connection") do (client: base_handlers.WebSocket):
       debugPrint "connection"
-      ipc.socket = client
+      ipc.attachSocket(client)
+
+      client.on(cstring"disconnect") do ():
+        debugPrint "socket disconnect"
+        ipc.detachSocket()
 
       if not readyVar.isNil:
         debugPrint "call ready"

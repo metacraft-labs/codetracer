@@ -90,7 +90,7 @@ proc createMainWindow*: js =
     return win
   else:
     # we make a test-only placeholder instance of it
-    let win = FrontendIPC(webContents: FrontendIPCSender())
+    let win = initFrontendIPC()
     return win.toJs
 
 

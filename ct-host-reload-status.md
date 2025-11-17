@@ -15,10 +15,9 @@
 ## Progress
 - Established root cause (handlers pinned to first socket) and documented solution in ADR/plan.
 - Added TDD scenarios to the plan for registry/rebind behavior.
-- No code changes for Part 1 yet.
+- Added headless test scaffold for registry attach/detach (`src/frontend/tests/ipc_registry_test.nim`) and implemented `ipc_registry` with attach/detach bindings; test now passes via `nim js -r src/frontend/tests/ipc_registry_test.nim`.
+- Updated `FrontendIPC` to use the new registry, hooked socket attach/detach in `server_config.nim`, and guarded server-side sends via `ipc.emit` when no socket is attached.
 
 ## Next tasks (Part 1)
-- Implement `FrontendIPC` handler registry with `attachSocket`/`detachSocket`.
-- Adapt `indexIpcHandlers` (and direct `ipc.on` usages) to stash handlers and rebind via the registry.
-- Make `mainWindow.webContents.send` resilient to missing socket and refresh routing through the attached socket.
-- Add headless Nim test in `tester ui` set that exercises disconnect/reconnect (`CODETRACER::open-tab`/`load-recent-trace` style) to validate rebinding.
+- Align remaining server-mode send/receive paths with the registry (audit any direct `ipc.socket` uses and ensure reconnect safety where needed).
+- Add headless Nim test in `tester ui` set that exercises disconnect/reconnect (`CODETRACER::open-tab`/`load-recent-trace` style) to validate rebinding (current unit-level registry test passes; still need end-to-end UI harness scenario).
