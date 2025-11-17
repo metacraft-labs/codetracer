@@ -1,0 +1,2 @@
+# ignore nim-produced javascript artifacts
+*.js
