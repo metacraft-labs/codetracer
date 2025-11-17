@@ -829,12 +829,79 @@ impl DbReplay {
                 let type_id = self.register_type(typ);
                 ValueRecord::String { text, type_id }
             }
-            _ => {
-                warn!("---- NOT IMPLEMENTED! ----");
-                ValueRecord::Error {
-                    msg: "TODO!".to_string(),
-                    type_id: TypeId(0),
+            ValueRecordWithType::Sequence {
+                elements,
+                is_slice,
+                typ,
+            } => {
+                let type_id = self.register_type(typ);
+                let element_records = elements.iter().map(|e| self.to_value_record(e.clone())).collect();
+                ValueRecord::Sequence {
+                    elements: element_records,
+                    is_slice,
+                    type_id,
                 }
+            }
+            ValueRecordWithType::Tuple { elements, typ } => {
+                let type_id = self.register_type(typ);
+                let element_records = elements.iter().map(|e| self.to_value_record(e.clone())).collect();
+                ValueRecord::Tuple {
+                    elements: element_records,
+                    type_id,
+                }
+            }
+            ValueRecordWithType::Struct { field_values, typ } => {
+                let type_id = self.register_type(typ);
+                let field_value_records = field_values.iter().map(|v| self.to_value_record(v.clone())).collect();
+                ValueRecord::Struct {
+                    field_values: field_value_records,
+                    type_id,
+                }
+            }
+            ValueRecordWithType::Variant {
+                discriminator,
+                contents,
+                typ,
+            } => {
+                let type_id = self.register_type(typ);
+                let contents_record = self.to_value_record(*contents);
+                ValueRecord::Variant {
+                    discriminator,
+                    contents: Box::new(contents_record),
+                    type_id,
+                }
+            }
+            ValueRecordWithType::Reference {
+                dereferenced,
+                address,
+                mutable,
+                typ,
+            } => {
+                let type_id = self.register_type(typ);
+                let dereferenced_record = self.to_value_record(*dereferenced);
+                ValueRecord::Reference {
+                    dereferenced: Box::new(dereferenced_record),
+                    address,
+                    mutable,
+                    type_id,
+                }
+            }
+            ValueRecordWithType::Raw { r, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::Raw { r, type_id }
+            }
+            ValueRecordWithType::Error { msg, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::Error { msg, type_id }
+            }
+            ValueRecordWithType::None { typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::None { type_id }
+            }
+            ValueRecordWithType::Cell { place } => ValueRecord::Cell { place },
+            ValueRecordWithType::BigInt { b, negative, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::BigInt { b, negative, type_id }
             }
         }
     }
@@ -857,17 +924,60 @@ impl DbReplay {
                 text: text.to_string(),
                 typ: self.db.types[*type_id].clone(),
             },
-            _ => {
-                warn!("---- NOT IMPLEMENTED! ----");
-                ValueRecordWithType::Error {
-                    msg: "TODO!".to_string(),
-                    typ: TypeRecord {
-                        kind: TypeKind::Error,
-                        lang_type: "TODO!".to_string(),
-                        specific_info: TypeSpecificInfo::None,
-                    },
-                }
-            }
+            ValueRecord::Sequence {
+                elements,
+                is_slice,
+                type_id,
+            } => ValueRecordWithType::Sequence {
+                elements: elements.iter().map(|e| self.to_value_record_with_type(e)).collect(),
+                is_slice: *is_slice,
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Tuple { elements, type_id } => ValueRecordWithType::Tuple {
+                elements: elements.iter().map(|e| self.to_value_record_with_type(e)).collect(),
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Struct { field_values, type_id } => ValueRecordWithType::Struct {
+                field_values: field_values.iter().map(|v| self.to_value_record_with_type(v)).collect(),
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Variant {
+                discriminator,
+                contents,
+                type_id,
+            } => ValueRecordWithType::Variant {
+                discriminator: discriminator.clone(),
+                contents: Box::new(self.to_value_record_with_type(&**contents)),
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Reference {
+                dereferenced,
+                address,
+                mutable,
+                type_id,
+            } => ValueRecordWithType::Reference {
+                dereferenced: Box::new(self.to_value_record_with_type(&**&dereferenced)),
+                address: *address,
+                mutable: *mutable,
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Raw { r, type_id } => ValueRecordWithType::Raw {
+                r: r.clone(),
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Error { msg, type_id } => ValueRecordWithType::Error {
+                msg: msg.clone(),
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::None { type_id } => ValueRecordWithType::None {
+                typ: self.db.types[*type_id].clone(),
+            },
+            ValueRecord::Cell { place } => ValueRecordWithType::Cell { place: place.clone() },
+            ValueRecord::BigInt { b, negative, type_id } => ValueRecordWithType::BigInt {
+                b: b.clone(),
+                negative: *negative,
+                typ: self.db.types[*type_id].clone(),
+            },
         }
     }
 
