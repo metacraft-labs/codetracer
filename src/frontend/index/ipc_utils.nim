@@ -138,7 +138,7 @@ proc ready* {.async.} =
       debugPrint cstring"frontend ... <=== index: ", id, response
       let serialized = JSON.stringify(response, replacer, 2.toJs)
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {serialized}"
-      ipc.socket.emit(id, serialized)
+      ipc.emit(id, serialized)
 
   let layout = await mainWindow.loadLayoutConfig(string(fmt"{userLayoutDir / $config.layout}.json"))
   data.layout = layout

@@ -2,6 +2,7 @@ import
   std / [ async, jsffi, macros ],
   ../lib/[ jslib ],
   ../[ types ],
+  ./ipc_registry,
   ../../common/[ ct_logging ]
 
 
@@ -14,11 +15,13 @@ type
     send*: proc(id: cstring, message: js)
 
   WebSocket* = ref object
+    off*: proc(id: cstring, handler: JsObject)
     emit*: proc(id: cstring, value: cstring)
 
   FrontendIPC* = ref object
     webContents*: FrontendIPCSender
     socket*: WebSocket # from socket.io
+    registry*: IpcRegistry
 
 proc on*(socket: WebSocket, name: cstring, handler: proc) {.importcpp: "#.on(#, #)".}
 
@@ -53,6 +56,30 @@ proc send*(debugger: DebuggerIPC, message: cstring, taskId: cstring, arg: cstrin
   else:
     errorPrint "index: no internalSend"
 
+proc initFrontendIPC*(): FrontendIPC =
+  FrontendIPC(
+    webContents: FrontendIPCSender(),
+    socket: nil,
+    registry: initIpcRegistry())
+
+proc attachSocket*(frontend: FrontendIPC, socket: WebSocket) =
+  # detach old bindings and rebind to the new socket
+  frontend.registry.attachSocket(socket.toJs)
+  frontend.socket = socket
+
+proc detachSocket*(frontend: FrontendIPC) =
+  frontend.registry.detachSocket()
+  frontend.socket = nil
+
+proc emit*(frontend: FrontendIPC, id: cstring, payload: cstring) =
+  if frontend.socket.isNil:
+    debugPrint "ipc emit dropped: no socket attached"
+    return
+  frontend.socket.emit(id, payload)
+
 proc on*(frontend: FrontendIPC, id: cstring, handler: JsObject) =
   let handlerFunction = jsAsFunction[proc(sender: JsObject, response: JsObject): Future[void]](handler)
-  frontend.socket.on(id, proc(value: JsObject) = discard handlerFunction(undefined, value))
+  let wrappedHandler = functionAsJs(proc(value: JsObject) =
+    discard handlerFunction(undefined, value)
+  )
+  frontend.registry.registerHandler(id, wrappedHandler)
