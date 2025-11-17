@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
-  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers,
+  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache,
   ipc_subsystems/[ dap, socket ],
   results,
   ../lib/[ jslib, misc_lib ],
@@ -72,7 +72,7 @@ proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
   var res = cast[Helpers](yaml.load(raw)[cstring"helpers"])
   return res
 
-proc ready* {.async.} =
+proc ready*(): Future[void] {.async.} =
   let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
   if backendManager.isOk:
     backendManagerProcess = backendManager.value
@@ -93,6 +93,15 @@ proc ready* {.async.} =
 
   # we load the config file
   var config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
+  when defined(server):
+    # replay bootstrap state on reconnect (server builds only)
+    ipc.replayBootstrap = proc() =
+      if data.bootstrapMessages.len == 0:
+        debugPrint "ipc replay bootstrap: nothing cached"
+      else:
+        debugPrint cstring(fmt"ipc replay bootstrap: {data.bootstrapMessages.len} messages")
+        replayBootstrap(data.bootstrapMessages, proc(id: cstring, payload: cstring) =
+          ipc.emit(id, payload))
 
   when not defined(server):
     config.skipInstall = isCtInstalled(config)
@@ -134,17 +143,24 @@ proc ready* {.async.} =
       else:
         value
 
+    proc recordBootstrap(id: cstring, serialized: cstring) =
+      if id in bootstrapEvents:
+        let payload = BootstrapPayload(id: id, payload: serialized)
+        upsertBootstrap(data.bootstrapMessages, payload)
+
     mainWindow.webContents.send = proc(id: cstring, response: js) =
       debugPrint cstring"frontend ... <=== index: ", id, response
       let serialized = JSON.stringify(response, replacer, 2.toJs)
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {serialized}"
+      recordBootstrap(id, serialized)
       ipc.emit(id, serialized)
 
+  # bootstrap payloads that may need replay after reconnect
   let layout = await mainWindow.loadLayoutConfig(string(fmt"{userLayoutDir / $config.layout}.json"))
   data.layout = layout
-  # we load helpers
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
+  data.config = config
 
   # init the UI
   discard windowSetTimeout(proc = discard data.init(config, layout, helpers), 250)

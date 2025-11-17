@@ -22,6 +22,8 @@ type
     webContents*: FrontendIPCSender
     socket*: WebSocket # from socket.io
     registry*: IpcRegistry
+    replayBootstrap*: proc(): void
+    logRecorder*: proc(message: cstring)
 
 proc on*(socket: WebSocket, name: cstring, handler: proc) {.importcpp: "#.on(#, #)".}
 
@@ -60,14 +62,29 @@ proc initFrontendIPC*(): FrontendIPC =
   FrontendIPC(
     webContents: FrontendIPCSender(),
     socket: nil,
-    registry: initIpcRegistry())
+    registry: initIpcRegistry(),
+    replayBootstrap: nil,
+    logRecorder: nil)
+
+proc logEvent(frontend: FrontendIPC, message: cstring) =
+  if not frontend.logRecorder.isNil:
+    frontend.logRecorder(message)
+  debugPrint message
 
 proc attachSocket*(frontend: FrontendIPC, socket: WebSocket) =
   # detach old bindings and rebind to the new socket
+  if not frontend.socket.isNil:
+    frontend.logEvent(cstring"ipc detach socket")
   frontend.registry.attachSocket(socket.toJs)
   frontend.socket = socket
+  frontend.logEvent(cstring"ipc attach socket")
+  if not frontend.replayBootstrap.isNil:
+    frontend.replayBootstrap()
 
 proc detachSocket*(frontend: FrontendIPC) =
+  if frontend.socket.isNil:
+    return
+  frontend.logEvent(cstring"ipc detach socket")
   frontend.registry.detachSocket()
   frontend.socket = nil
 
