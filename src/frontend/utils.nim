@@ -348,6 +348,22 @@ proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): Ca
   )
   data.registerComponent(result, Content.Calltrace)
 
+proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false): AgentActivityComponent =
+  result = AgentActivityComponent(
+    id: id,
+    logData: @[
+      LogEntry(title: "Analyzing the codebase structure and understanding the project requirements", output: "", status: ""),
+      LogEntry(title: "Running cargo check to validate current code", output: "Finished dev [unoptimized + debuginfo] target(s) in 2.34s", status: "success"),
+      LogEntry(title: "Modified src/main.rs {+5 -2}", output: "", status: "modified"),
+      LogEntry(title: "Considering how to implement the new feature based on the existing patterns", output: "", status: ""),
+      LogEntry(title: "Running tests to ensure no regressions", output: "running 5 tests... 5 passed, 0 failed", status: "info"),
+      LogEntry(title: "Modified src/lib.rs {+12 -0}", output: "", status: "modified"),
+      LogEntry(title: "Formatting code with rustfmt", output: "Format successful", status: "success"),
+    ],
+    inExtension: inExtension
+  )
+  data.registerComponent(result, Content.AgentActivity)
+
 proc makeDebugComponent*(data: Data): DebugComponent =
   result = DebugComponent(
     id: data.generateId(Content.Debug),
@@ -576,6 +592,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.Shell:           data.makeShellComponent(id)
   of Content.StepList:        data.makeStepListComponent(id)
   of Content.LowLevelCode:    data.makeLowLevelCodeComponent(id)
+  of Content.AgentActivity:   data.makeAgentActivityComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")
