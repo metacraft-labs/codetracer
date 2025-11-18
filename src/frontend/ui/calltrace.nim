@@ -903,6 +903,7 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool) =
       autoCollapsing: not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse
     )
 
+    echo "LOAD CALLTRACE SECTION"
     self.api.emit(CtLoadCalltraceSection, calltraceLoadArgs)
 
     self.loadedCallKeys = JsAssoc[cstring, int]{}
@@ -1152,16 +1153,27 @@ method onFindOrFilter*(self: CalltraceComponent) {.async.} =
 
 method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} =
   self.location = response.location
-  if self.loadedCallKeys.hasKey(response.location.key):
+
+  #TODO: pass explicitly in trace as trace kind/in init/other way?
+  let lang = toLangFromFilename(self.location.path)
+  if not self.isDbBasedTraceSet:
+    self.isDbBasedTrace = lang != LangUnknown and lang.isDbBased
+    self.isDbBasedTraceSet = true
+
+  # for rr traces: try to always load lines again!
+  #   eventually when we have a reliable key, maybe check again
+  echo "ON COMPLETE MOVE; is db?: ", self.isDbBasedTrace
+  if self.isDbBasedTrace and self.loadedCallKeys.hasKey(response.location.key):
     let buffer = self.getStartBufferLen()
 
     self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key] - buffer
 
     if self.loadedCallKeys[response.location.key] >= self.panelHeight() - 1 + buffer:
       self.calltraceScroll((self.activeCallIndex - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
-  elif not self.loadedCallKeys.hasKey(response.location.key):
+  elif not self.isDbBasedTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true
+    echo "LOAD LINES"
     self.loadLines(fromScroll=false)
   self.redraw()
 

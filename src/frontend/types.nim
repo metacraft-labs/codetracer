@@ -734,6 +734,7 @@ type
     width*: cstring
     resizeObserver*: ResizeObserver
     isCalltrace*: bool
+    isDbBasedTraceSet*: bool
 
     debugger*:       DebuggerService
     service*:        CalltraceService
