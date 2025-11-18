@@ -122,6 +122,14 @@ proc parseArgs* =
         else:
           errorPrint "expected --backend-socket-port <backend-socket-port>"
           break
+      elif arg == cstring"--idle-timeout-ms":
+        if i + 1 < args.len:
+          data.startOptions.idleTimeoutMs = args[i + 1].parseJsInt
+          i += 2
+          continue
+        else:
+          errorPrint "expected --idle-timeout-ms <milliseconds>"
+          break
       elif arg == cstring"--caller-pid":
         if i + 1 < args.len:
           callerProcessPid = args[i + 1].parseJsInt

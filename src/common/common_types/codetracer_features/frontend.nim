@@ -203,6 +203,7 @@ type
     port*: int
     frontendSocket*: SocketAddressInfo
     backendSocket*: SocketAddressInfo
+    idleTimeoutMs*: int
     rawTestStrategy*: langstring
     diff*: Diff
     withDiff*: bool
