@@ -21,8 +21,9 @@
 - Introduced shared idle-timeout helpers (`idle_timeout.nim`) and unit tests covering duration parsing, interval clamping, and idle-exit decisions (`src/ct/trace/host_idle_timeout_test.nim`, `src/frontend/tests/idle_timeout_test.nim`).
 - Added integration coverage that launches `server_index.js` with short/disabled timeouts to assert exit-on-no-connection and persistence when disabled (`src/frontend/tests/idle_timeout_integration_test.nim`).
 - Expanded integration suite to cover silent-connection idle exit, normal IPC traffic keeping the host alive, reconnect resetting the idle timer, and disconnect-driven idle windows (`idle_timeout_integration_test.nim`).
+- Added connection-state UX: server emits disconnect reasons for superseded clients and idle shutdown, the browser listens for socket disconnects, surfaces a persistent `NotificationWarning` with a reconnect action, guards IPC sends with the warning, and shows a status-bar “Disconnected” badge while detached.
 
 ## Next steps
 - Stabilize the updated integration suite in CI (JS backend build currently required for coverage) and keep `onAny` activity resets guarded by tests.
-- Implement disconnected UX: persistent warning via `NotificationWarning`, status-bar “Disconnected” badge, block/guard IPC sends; verify accessibility.
-- Land TDD coverage: unit/integration for the watchdog and idle exits plus a browser/Playwright scenario asserting warning/banner and exit behavior with short timeouts.
+- Harden disconnected handling: disable/short-circuit dangerous IPC interactions while detached and verify accessibility for the warning + badge.
+- Land TDD coverage for the new UX: unit/integration for disconnect reasons plus a browser/Playwright scenario asserting the warning/banner and exit behavior with short timeouts.
