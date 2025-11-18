@@ -26,6 +26,7 @@ type
     logRecorder*: proc(message: cstring)
 
 proc on*(socket: WebSocket, name: cstring, handler: proc) {.importcpp: "#.on(#, #)".}
+proc onAny*(socket: WebSocket, handler: proc) {.importcpp: "#.onAny(#)".}
 
 # TODO: error on unhandled: is it easy with electron
 macro indexIpcHandlers*(namespace: static[string], messages: untyped): untyped =

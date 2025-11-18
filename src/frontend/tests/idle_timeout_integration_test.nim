@@ -84,7 +84,7 @@ suite "ct host idle timeout integration":
     finally:
       ensureProcessStopped(p)
 
-  test "active connection activity prevents timeout":
+  test "silent connection exits after inactivity window":
     if not available:
       skip()
     var host: Process
@@ -99,6 +99,50 @@ suite "ct host idle timeout integration":
         "--frontend-socket-parameters", "",
         "--backend-socket-port", "5002",
         "--caller-pid", "0",
+        "--idle-timeout-ms", "1200"
+      ]
+      host = startProcess(
+        node,
+        workingDir = codetracerInstallDir,
+        args = hostArgs,
+        options = {poStdErrToStdOut})
+
+      # allow the host to start before connecting
+      sleep(300)
+
+      let clientScript = """
+const io = require('socket.io-client');
+const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true});
+setTimeout(() => process.exit(0), 4000);
+"""
+      client = startProcess(
+        node,
+        args = @["-e", clientScript],
+        options = {poStdErrToStdOut})
+
+      # Host should exit due to inactivity despite the connected socket.
+      let (exited, code) = waitForExitWithin(host, 4_000)
+      check exited
+      check code == 0
+    finally:
+      ensureProcessStopped(client)
+      ensureProcessStopped(host)
+
+  test "active connection activity prevents timeout":
+    if not available:
+      skip()
+    var host: Process
+    var client: Process
+    try:
+      let hostArgs = @[
+        serverIndex,
+        "-1",
+        "--welcome-screen",
+        "--port", "12349",
+        "--frontend-socket-port", "5004",
+        "--frontend-socket-parameters", "",
+        "--backend-socket-port", "5004",
+        "--caller-pid", "0",
         "--idle-timeout-ms", "3000"
       ]
       host = startProcess(
@@ -112,11 +156,10 @@ suite "ct host idle timeout integration":
 
       let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
   let sent = 0;
   const interval = setInterval(() => {
-    socket.emit('__activity__');
     socket.emit('test-event', { n: ++sent });
     if (sent >= 5) {
       clearInterval(interval);
@@ -169,7 +212,7 @@ socket.on('connect', () => {
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
-  socket.emit('__activity__');
+  socket.emit('test-event', { source: 'first' });
   setTimeout(() => process.exit(0), 200);
 });
 """
@@ -187,7 +230,7 @@ socket.on('connect', () => {
 const io = require('socket.io-client');
 const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
 socket.on('connect', () => {
-  socket.emit('__activity__');
+  socket.emit('test-event', { source: 'second' });
   setTimeout(() => process.exit(0), 200);
 });
 """
@@ -204,4 +247,61 @@ socket.on('connect', () => {
     finally:
       ensureProcessStopped(client1)
       ensureProcessStopped(client2)
+      ensureProcessStopped(host)
+
+  test "disconnect starts no-connection timer (no early exit)":
+    if not available:
+      skip()
+    var host: Process
+    var client: Process
+    try:
+      let hostArgs = @[
+        serverIndex,
+        "-1",
+        "--welcome-screen",
+        "--port", "12350",
+        "--frontend-socket-port", "5005",
+        "--frontend-socket-parameters", "",
+        "--backend-socket-port", "5005",
+        "--caller-pid", "0",
+        "--idle-timeout-ms", "1500"
+      ]
+      host = startProcess(
+        node,
+        workingDir = codetracerInstallDir,
+        args = hostArgs,
+        options = {poStdErrToStdOut})
+
+      # wait for the host to start listening
+      sleep(400)
+
+      let clientScript = """
+const io = require('socket.io-client');
+const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true});
+socket.on('connect', () => {
+  const interval = setInterval(() => socket.emit('test-event', { tick: Date.now() }), 200);
+  setTimeout(() => {
+    clearInterval(interval);
+    socket.disconnect();
+    setTimeout(() => process.exit(0), 200);
+  }, 2000);
+});
+"""
+      client = startProcess(
+        node,
+        args = @["-e", clientScript],
+        options = {poStdErrToStdOut})
+
+      discard waitForExitWithin(client, 3_000)
+
+      # Host should not exit immediately after the long-lived connection closes.
+      let (exitedEarly, _) = waitForExitWithin(host, 900)
+      check exitedEarly == false
+
+      # It should exit cleanly once the no-connection window elapses.
+      let (exited, code) = waitForExitWithin(host, 3_000)
+      check exited
+      check code == 0
+    finally:
+      ensureProcessStopped(client)
       ensureProcessStopped(host)

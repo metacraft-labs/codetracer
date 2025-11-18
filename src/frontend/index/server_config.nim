@@ -123,6 +123,10 @@ when defined(server):
       socketAttached = true
       resetConnection()
 
+      client.onAny(proc() =
+        resetActivity()
+      )
+
       # Fallback activity hook until full heartbeats land: listen for generic activity ping.
       client.on(cstring"__activity__") do ():
         resetActivity()
@@ -132,6 +136,8 @@ when defined(server):
         debugPrint "socket disconnect"
         ipc.detachSocket()
         socketAttached = false
+        lastConnectionMs = nowMs()
+        lastActivityMs = lastConnectionMs
 
       if not readyVar.isNil:
         debugPrint "call ready"
