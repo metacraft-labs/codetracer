@@ -785,6 +785,11 @@ pub enum EndOfProgram {
 
 #[derive(Debug)]
 pub struct DbReplay {
+    // to optimize and prevents problems with too many `.clone()`
+    //   currently mostly in flow;
+    //   we can try to share a readonly version: `Rc`? `RefCell`?
+    //   or we can leave it like this for now and expect that the new format
+    //   will deal with that?
     pub db: Box<Db>,
     pub step_id: StepId,
     pub call_key: CallKey,
