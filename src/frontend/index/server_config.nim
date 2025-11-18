@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, macros, jsconsole, strformat ],
-  electron_vars, base_handlers, config,
+  electron_vars, base_handlers, config, idle_timeout,
   ../lib/[ jslib, electron_lib, misc_lib ],
   ../[ types ],
   ../../common/[ paths, ct_logging ]
@@ -52,6 +52,8 @@ when defined(server):
 
   let express* = cast[ExpressLib](require("express"))
   var readyVar*: js
+  proc nowMs(): int {.importjs: "Date.now()".}
+  proc setInterval*(cb: proc(): void, delay: int): JsObject {.importjs: "setInterval(#, #)".}
 
   proc setupServer* =
     # we create a server
@@ -90,13 +92,52 @@ when defined(server):
         credentials: false
       }
     })
+    var lastConnectionMs = nowMs()
+    var lastActivityMs = lastConnectionMs
+    var socketAttached = false
+    var idleTimer: JsObject
+
+    proc resetActivity() =
+      lastActivityMs = nowMs()
+
+    proc resetConnection() =
+      lastConnectionMs = nowMs()
+      resetActivity()
+
+    proc startIdleTimer(timeoutMs: int) =
+      let interval = idleCheckInterval(timeoutMs)
+      if interval < 0:
+        return
+      idleTimer = setInterval(proc =
+        let now = nowMs()
+        if shouldExitIdle(socketAttached, lastConnectionMs, lastActivityMs, now, timeoutMs):
+          let reason = if socketAttached: "no activity" else: "no connection"
+          infoPrint fmt"ct host idle timeout reached ({reason}); exiting."
+          nodeProcess.exit(0)
+      , interval)
+
+    startIdleTimer(data.startOptions.idleTimeoutMs)
+
     socketIOServer.on(cstring"connection") do (client: base_handlers.WebSocket):
       debugPrint "connection"
+      socketAttached = true
+      resetConnection()
+
+      let onAny = client.toJs[cstring"onAny"]
+      if not onAny.isNil and not onAny.isUndefined and onAny != jsNull:
+        try:
+          let onAnyBind = jsAsFunction[proc(callback: proc(event: js, args: varargs[js])): void](onAny)
+          onAnyBind(proc(event: js, args: varargs[js]) =
+            resetActivity()
+          )
+        except:
+          discard
       ipc.attachSocket(client)
 
       client.on(cstring"disconnect") do ():
         debugPrint "socket disconnect"
         ipc.detachSocket()
+        socketAttached = false
 
       if not readyVar.isNil:
         debugPrint "call ready"

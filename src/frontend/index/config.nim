@@ -53,6 +53,7 @@ var data* = ServerData(
     name: cstring"",
     frontendSocket: SocketAddressInfo(),
     backendSocket: SocketAddressInfo(),
+    idleTimeoutMs: 10 * 60 * 1_000,
     rawTestStrategy: cstring""
   ),
   pluginCommands: JsAssoc[cstring, SearchSource]{},

@@ -1624,7 +1624,8 @@ when defined(ctRenderer):
       edit: false,
       name: cstring"",
       frontendSocket: SocketAddressInfo(),
-      backendSocket: SocketAddressInfo()),
+      backendSocket: SocketAddressInfo(),
+      idleTimeoutMs: 10 * 60 * 1_000),
     pointList: PointListData(
       tracepoints: JsAssoc[int, Tracepoint]{}),
     ui: Components(

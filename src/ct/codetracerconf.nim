@@ -211,6 +211,12 @@ type
         desc: "Parameters to forward to frontend socket"
       .} : string
 
+      hostIdleTimeout* {.
+        name: "idle-timeout"
+        defaultValue: ""
+        desc: "Host idle timeout (e.g., 30s, 5m, 1h). Default 10m. Use 0/never to disable."
+      .} : string
+
       hostTraceArg* {.
         argument
         desc: "Trace id to run. If not a valid trace id, treats it as a trace folder"
