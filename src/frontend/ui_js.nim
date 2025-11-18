@@ -1,7 +1,7 @@
 import
   async, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   karax, karaxdsl, kdom, vstyles,
-  ui/[layout, editor, trace, events, event_log,
+  ui/[agent_activity, layout, editor, trace, events, event_log,
       state, calltrace, loading, start, menu,
       debug, flow, filesystem, value, repl,
       build, welcome_screen, point_list, scratchpad,

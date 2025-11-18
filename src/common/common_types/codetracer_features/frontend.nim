@@ -245,7 +245,8 @@ type
     Status = 31,
     CommandPalette = 32,
     StepList = 33,
-    NoInfo = 34
+    NoInfo = 34,
+    AgentActivity = 35
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

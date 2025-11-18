@@ -741,6 +741,14 @@ type
     modalValueComponent*: JsAssoc[cstring, ValueComponent]
     forceRerender*: JsAssoc[cstring, bool]
 
+  LogEntry* = ref object
+    title*: cstring
+    status*: cstring
+    output*: cstring
+
+  AgentActivityComponent* = ref object of Component
+    logData*: seq[LogEntry]
+
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
     # startStepLineIndex*: int
