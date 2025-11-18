@@ -8,7 +8,7 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code],
   lib/[ jslib ],
-  types, lang, renderer, config, dap,
+  types, lang, renderer, config, dap, utils,
   property_test / test,
   event_helpers
 
@@ -28,6 +28,60 @@ const TAB_LIMIT = 20
 const MIN_FONTSIZE = 10
 const MAX_FONTSIZE = 18
 const EDITOR_GUTTER_PADDING = 2 #px
+
+var disconnectedNotification: Notification
+
+proc connectionDetailMessage(reason: ConnectionLossReason, detail: cstring): cstring =
+  if detail.len > 0:
+    return detail
+  connectionLossMessage(reason)
+
+proc showDisconnectedWarning(data: Data, reason: ConnectionLossReason, detail: cstring) =
+  let message = $connectionDetailMessage(reason, detail)
+  let reconnectAction = newNotificationButtonAction(cstring"Reconnect", proc = domwindow.location.reload())
+
+  if disconnectedNotification.isNil:
+    disconnectedNotification = newNotification(
+      NotificationKind.NotificationWarning,
+      message,
+      actions = @[reconnectAction]
+    )
+    data.viewsApi.showNotification(disconnectedNotification)
+  else:
+    disconnectedNotification.text = message
+    disconnectedNotification.active = true
+    disconnectedNotification.seen = false
+    if not data.ui.isNil and not data.ui.status.isNil:
+      data.ui.status.redraw()
+
+proc clearDisconnectedWarning(data: Data) =
+  if disconnectedNotification.isNil:
+    return
+  disconnectedNotification.active = false
+  disconnectedNotification.seen = false
+  if not data.ui.isNil and not data.ui.status.isNil:
+    data.ui.status.redraw()
+
+proc updateConnectionState(data: Data, connected: bool, reason: ConnectionLossReason, detail: cstring = cstring"") =
+  data.connection.connected = connected
+  data.connection.reason = reason
+  data.connection.detail = detail
+
+  if connected:
+    clearDisconnectedWarning(data)
+    if not data.ui.isNil and not data.ui.status.isNil:
+      data.ui.status.redraw()
+  else:
+    showDisconnectedWarning(data, reason, detail)
+
+proc connectionReasonFromPayload(reason: cstring): ConnectionLossReason =
+  case $reason
+  of "idle-timeout":
+    ConnectionLossIdleTimeout
+  of "superseded":
+    ConnectionLossSuperseded
+  else:
+    ConnectionLossUnknown
 
 when defined(ctmacos):
   proc registerMenu*(menu: MenuNode) =
@@ -1819,9 +1873,26 @@ when not defined(ctInExtension):
         address,
         js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}")})
       socketdebug = socket
+      socket.on(cstring"disconnect") do (reason: cstring):
+        updateConnectionState(data, false, ConnectionLossUnknown, reason)
+      socket.on(cstring"CODETRACER::connection-disconnected") do (payload: cstring):
+        var parsedReason = ConnectionLossUnknown
+        var detail = cstring""
+        try:
+          let parsed = JSON.parse(payload)
+          if not parsed.isNil and not parsed[cstring"reason"].isUndefined:
+            parsedReason = connectionReasonFromPayload(cast[cstring](parsed[cstring"reason"]))
+          if not parsed.isNil and not parsed[cstring"message"].isUndefined:
+            detail = cast[cstring](parsed[cstring"message"])
+        except:
+          discard
+        updateConnectionState(data, false, parsedReason, detail)
       socket.on(cstring"connect") do ():
+        updateConnectionState(data, true, ConnectionLossNone, cstring"")
         ipc = js{
           send: proc(id: cstring, response: js) =
+            if not data.connection.connected:
+              showDisconnectedWarning(data, data.connection.reason, data.connection.detail)
             console.log cstring"=> ", id, response
             socket.emit(id, response),
           on: proc(id: cstring, code: js) = socket.on(id, proc(response: cstring) =

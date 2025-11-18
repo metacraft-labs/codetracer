@@ -1418,6 +1418,7 @@ type
     minRRTicks*:            int
     maxRRTicks*:            int
     breakpointMenu*:        JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]
+    connection*:            ConnectionState
 
     # FrontendTestRunner, but i(alexander) don't want
     # to depend on the frontend test code here
@@ -1558,6 +1559,11 @@ when defined(ctRenderer):
   var data* = Data(
     dapApi: DapApi(),
     viewsApi: setupSinglePageViewsApi(cstring"single-page-frontend-to-views"),
+    connection: ConnectionState(
+      connected: true,
+      reason: ConnectionLossNone,
+      detail: cstring""
+    ),
     status: StatusState(
       lastDirection: DebForward,
       currentOperation: cstring"",

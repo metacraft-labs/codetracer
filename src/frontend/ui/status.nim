@@ -43,6 +43,25 @@ proc locationView(self: StatusComponent): VNode =
         tdiv(class = fmt"custom-tooltip {activeClass}"):
           text "Path copied to clipboard"
 
+proc disconnectedBadge(self: StatusComponent): VNode =
+  if self.data.connection.connected:
+    return nil
+
+  let detail = if self.data.connection.detail.len > 0:
+      self.data.connection.detail
+    else:
+      connectionLossMessage(self.data.connection.reason)
+
+  buildHtml(
+    span(
+      class = "status-inline disconnected-status",
+      role = "status",
+      `aria-live` = "polite",
+      title = detail
+    )
+  ):
+    text "Disconnected"
+
 method onCompleteMove*(self: StatusComponent, response: MoveState) {.async.} =
   self.stopSignal = response.stopSignal
   self.location = response.location
@@ -547,6 +566,7 @@ method render*(self: StatusComponent): VNode =
         span(class = "test-movement"):
           text $self.completeMoveId
       span(class = "status-right"):
+        disconnectedBadge(self)
         locationView(self)
     if self.showNotifications:
       tdiv(id = "notifications-container"):

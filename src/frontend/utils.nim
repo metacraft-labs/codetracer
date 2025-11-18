@@ -9,6 +9,16 @@ const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
 
+proc connectionLossMessage*(reason: ConnectionLossReason): cstring =
+  ## Human-readable message describing why the connection is inactive.
+  case reason:
+  of ConnectionLossIdleTimeout:
+    cstring"Host timed out after inactivity."
+  of ConnectionLossSuperseded:
+    cstring"Another browser tab took over the connection."
+  else:
+    cstring"Lost connection to the host."
+
 proc openLayoutTab*(
   data: Data,
   content: Content,
@@ -1045,4 +1055,3 @@ proc refreshEditorLine*(self: EditorViewComponent, line: int) =
   editor.changeViewZones do (view: js):
     view.removeZone(zone)
   # refresh editor
-

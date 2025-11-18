@@ -96,6 +96,7 @@ when defined(server):
     var lastActivityMs = lastConnectionMs
     var socketAttached = false
     var idleTimer: JsObject
+    var activeSocket: base_handlers.WebSocket
 
     proc resetActivity() =
       lastActivityMs = nowMs()
@@ -103,6 +104,17 @@ when defined(server):
     proc resetConnection() =
       lastConnectionMs = nowMs()
       resetActivity()
+
+    proc emitConnectionDisconnection(target: base_handlers.WebSocket, reason: cstring, message: cstring) =
+      if target.isNil:
+        return
+      let payload = block:
+        let reasonPart = cstring("""{"reason":""" & "\"" & $reason & "\"")
+        if message.len > 0:
+          reasonPart & cstring(""","message":""" & "\"" & $message & "\"" & "}")
+        else:
+          reasonPart & cstring("}")
+      target.emit(cstring"CODETRACER::connection-disconnected", payload)
 
     proc startIdleTimer(timeoutMs: int) =
       let interval = idleCheckInterval(timeoutMs)
@@ -113,6 +125,8 @@ when defined(server):
         if shouldExitIdle(socketAttached, lastConnectionMs, lastActivityMs, now, timeoutMs):
           let reason = if socketAttached: "no activity" else: "no connection"
           infoPrint fmt"ct host idle timeout reached ({reason}); exiting."
+          if socketAttached and not activeSocket.isNil:
+            emitConnectionDisconnection(activeSocket, cstring"idle-timeout", cstring"Host timed out after inactivity.")
           nodeProcess.exit(0)
       , interval)
 
@@ -120,6 +134,9 @@ when defined(server):
 
     socketIOServer.on(cstring"connection") do (client: base_handlers.WebSocket):
       debugPrint "connection"
+      if not activeSocket.isNil and activeSocket != client:
+        emitConnectionDisconnection(activeSocket, cstring"superseded", cstring"Another browser tab took over the connection.")
+      activeSocket = client
       socketAttached = true
       resetConnection()
 
@@ -136,6 +153,8 @@ when defined(server):
         debugPrint "socket disconnect"
         ipc.detachSocket()
         socketAttached = false
+        if client == activeSocket:
+          activeSocket = nil
         lastConnectionMs = nowMs()
         lastActivityMs = lastConnectionMs
 

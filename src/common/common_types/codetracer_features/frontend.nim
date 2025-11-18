@@ -247,6 +247,17 @@ type
     StepList = 33,
     NoInfo = 34
 
+  ConnectionLossReason* = enum
+    ConnectionLossNone,
+    ConnectionLossIdleTimeout,
+    ConnectionLossSuperseded,
+    ConnectionLossUnknown
+
+  ConnectionState* = object
+    connected*:        bool
+    reason*:           ConnectionLossReason
+    detail*:           cstring
+
   StatusState* = ref object
     lastDirection*:         DebuggerDirection
     currentOperation*:      langstring
