@@ -746,6 +746,7 @@ proc onTraceLoaded(
     diff=Diff,
     withDiff=bool,
     rawDiffIndex=cstring,
+    # traceKind=cstring,
     dontAskAgain=bool)) {.async.} =
 
   clog "trace loaded"

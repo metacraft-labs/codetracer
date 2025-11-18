@@ -525,6 +525,7 @@ impl ExprLoader {
                 (_, start, end) = file_info.functions[position][0].clone();
             }
         }
+        info!("  result {} {}", start.0, end.0);
         (start.0, end.0)
     }
 
