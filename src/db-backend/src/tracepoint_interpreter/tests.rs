@@ -14,6 +14,7 @@ use runtime_tracing::{StepId, TypeKind};
 use crate::{
     db::{Db, DbReplay},
     lang::Lang,
+    replay::Replay,
     task::StringAndValueTuple,
     trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor},
     value::Value,
@@ -102,6 +103,7 @@ fn check_tracepoint_evaluate(
     let mut db_replay = DbReplay::new(Box::new(db.clone()));
     for step in db.step_from(StepId(0), true) {
         let curr_line = step.line.0 as usize;
+        db_replay.jump_to(step.step_id)?;
 
         if line == curr_line {
             let actual = interpreter.evaluate(0, step.step_id, &mut db_replay, lang);
