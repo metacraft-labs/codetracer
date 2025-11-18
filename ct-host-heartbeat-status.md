@@ -17,6 +17,8 @@
 - Added CLI/config plumbing for `ct host --idle-timeout` (env override `CODETRACER_HOST_IDLE_TIMEOUT`) with human-friendly parsing (ms/s/m/h), default 10m, and `0/never` disabling auto-exit.
 - Server mode now receives `--idle-timeout-ms`, tracks connection/activity timestamps, and schedules an idle watchdog that exits with code 0 on “no connection” or “no activity” expiration.
 - Introduced shared idle-timeout helpers (`idle_timeout.nim`) and unit tests covering duration parsing, interval clamping, and idle-exit decisions (`src/ct/trace/host_idle_timeout_test.nim`, `src/frontend/tests/idle_timeout_test.nim`).
+- Added integration coverage that launches `server_index.js` with short/disabled timeouts to assert exit-on-no-connection and persistence when disabled (`src/frontend/tests/idle_timeout_integration_test.nim`).
+- Completed Part 1 tests: integration suite now also covers active connection activity preventing timeout and reconnect resetting the idle timer (`idle_timeout_integration_test.nim`).
 
 ## Next steps
 - Emit frontend heartbeats on a timer and update backend activity timestamps on any inbound IPC.

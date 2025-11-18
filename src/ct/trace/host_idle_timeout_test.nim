@@ -14,6 +14,7 @@ suite "ct host idle timeout parsing":
     check parseIdleTimeoutMs("1h").value == 1 * 60 * 60 * 1_000
     check parseIdleTimeoutMs("0").value == -1
     check parseIdleTimeoutMs("never").value == -1
+    check parseIdleTimeoutMs("off").value == -1
 
   test "rejects invalid inputs":
     check not parseIdleTimeoutMs("abc").ok
