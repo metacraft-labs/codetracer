@@ -28,11 +28,11 @@ use crate::task;
 use crate::task::{
     Action, Breakpoint, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs,
     CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
-    FrameInfo, FunctionLocation, HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
-    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
-    ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
-    StepArg, Stop, StopType, StringAndValueTuple, Task, TraceKind, TraceUpdate, TracepointId, TracepointResults,
-    UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
+    FrameInfo, FunctionLocation, GlobalCallLineIndex, HistoryResult, HistoryUpdate, Instruction, Instructions,
+    LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification,
+    NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg,
+    SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, StringAndValueTuple, Task, TraceKind, TraceUpdate,
+    TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
@@ -433,24 +433,39 @@ impl Handler {
         args: CalltraceLoadArgs,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
-            warn!("load_calltrace_section not implemented for rr");
-            return Ok(());
-        }
+            // TODO: calltrace? eventually in the future
+            // for now callstack!
 
-        let start_call_line_index = args.start_call_line_index;
-        let call_lines = self.load_local_calltrace(args)?;
-        let total_count = self.calc_total_calls();
-        let position = self.calltrace.calc_scroll_position();
-        let update = CallArgsUpdateResults::finished_update_call_lines(
-            call_lines,
-            start_call_line_index,
-            total_count,
-            position,
-            self.calltrace.depth_offset,
-        );
-        // self.return_task((task, VOID_RESULT.to_string()))?;
-        let raw_event = self.dap_client.updated_calltrace_event(&update)?;
-        self.send_dap(&raw_event)?;
+            let start_call_line_index = GlobalCallLineIndex(0);
+            let callstack_lines = self.replay.load_callstack()?;
+            let total_count = callstack_lines.len();
+            let position = 0;
+            let update = CallArgsUpdateResults::finished_update_call_lines(
+                callstack_lines,
+                start_call_line_index,
+                total_count,
+                position,
+                self.calltrace.depth_offset,
+            );
+            let raw_event = self.dap_client.updated_calltrace_event(&update)?;
+            self.send_dap(&raw_event)?;
+            // warn!("load_calltrace_section not implemented for rr");
+        } else {
+            let start_call_line_index = args.start_call_line_index;
+            let call_lines = self.load_local_calltrace(args)?;
+            let total_count = self.calc_total_calls();
+            let position = self.calltrace.calc_scroll_position();
+            let update = CallArgsUpdateResults::finished_update_call_lines(
+                call_lines,
+                start_call_line_index,
+                total_count,
+                position,
+                self.calltrace.depth_offset,
+            );
+            // self.return_task((task, VOID_RESULT.to_string()))?;
+            let raw_event = self.dap_client.updated_calltrace_event(&update)?;
+            self.send_dap(&raw_event)?;
+        }
         Ok(())
     }
 
@@ -662,10 +677,18 @@ impl Handler {
     }
 
     pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
-        let step_id = StepId(location.rr_ticks.0); // using this field
-                                                   // for compat with rr/gdb core support
-        self.replay.jump_to(step_id)?;
-        self.step_id = self.replay.current_step_id();
+        if self.trace_kind == TraceKind::DB {
+            let step_id = StepId(location.rr_ticks.0); // using this field
+                                                       // for compat with rr/gdb core support
+            self.replay.jump_to(step_id)?;
+            self.step_id = self.replay.current_step_id();
+        } else {
+            // TODO: eventually calltrace in the future
+            // for now support only callstack-mode
+            self.replay.callstack_jump(location.callstack_depth)?;
+            let _ = self.replay.load_location(&mut self.expr_loader)?;
+            self.step_id = self.replay.current_step_id();
+        }
         self.complete_move(false)?;
 
         Ok(())
