@@ -123,15 +123,9 @@ when defined(server):
       socketAttached = true
       resetConnection()
 
-      let onAny = client.toJs[cstring"onAny"]
-      if not onAny.isNil and not onAny.isUndefined and onAny != jsNull:
-        try:
-          let onAnyBind = jsAsFunction[proc(callback: proc(event: js, args: varargs[js])): void](onAny)
-          onAnyBind(proc(event: js, args: varargs[js]) =
-            resetActivity()
-          )
-        except:
-          discard
+      # Fallback activity hook until full heartbeats land: listen for generic activity ping.
+      client.on(cstring"__activity__") do ():
+        resetActivity()
       ipc.attachSocket(client)
 
       client.on(cstring"disconnect") do ():

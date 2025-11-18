@@ -16,3 +16,7 @@ suite "idle timeout helpers":
   test "active connection uses activity timer":
     check not shouldExitIdle(true, 0, 900, 1_000, 200)
     check shouldExitIdle(true, 0, 0, 1_000, 900)
+
+  test "disabled timeout never exits":
+    check not shouldExitIdle(false, 0, 0, 10_000, -1)
+    check not shouldExitIdle(true, 0, 0, 10_000, -1)
