@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use log::{error, info};
+use log::{error, info, warn};
 use runtime_tracing::StepId;
 
 use crate::db::DbRecordEvent;
@@ -17,7 +17,9 @@ use crate::lang::Lang;
 use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::Replay;
-use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord};
+use crate::task::{
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord,
+};
 use crate::value::ValueRecordWithType;
 
 #[derive(Debug)]
@@ -243,7 +245,14 @@ impl Replay for RRDispatcher {
     fn load_step_events(&mut self, _step_id: StepId, _exact: bool) -> Vec<DbRecordEvent> {
         // TODO: maybe cache events directly in replay for now, and use the same logic for them as in Db?
         // or directly embed Db? or separate events in a separate EventList?
+        warn!("load_step_events not implemented for rr traces");
         vec![]
+    }
+
+    fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let res = serde_json::from_str::<Vec<CallLine>>(&self.stable.run_query(CtRRQuery::LoadCallstack)?)?;
+        Ok(res)
     }
 
     fn jump_to(&mut self, _step_id: StepId) -> Result<bool, Box<dyn Error>> {
@@ -316,6 +325,12 @@ impl Replay for RRDispatcher {
                 program_event: event.clone(),
             },
         )?)?)
+    }
+
+    fn callstack_jump(&mut self, depth: usize) -> Result<(), Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        self.stable.run_query(CtRRQuery::CallstackJump { depth })?;
+        Ok(())
     }
 
     fn current_step_id(&mut self) -> StepId {

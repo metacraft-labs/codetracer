@@ -4,7 +4,9 @@ use std::error::Error;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
-use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord};
+use crate::task::{
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord,
+};
 use crate::value::ValueRecordWithType;
 
 pub trait Replay: std::fmt::Debug {
@@ -20,6 +22,8 @@ pub trait Replay: std::fmt::Debug {
     fn load_return_value(&mut self, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
+    fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
+
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>>;
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>>;
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>>;
@@ -29,5 +33,7 @@ pub trait Replay: std::fmt::Debug {
     fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>>;
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>>;
     fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>>;
+    fn callstack_jump(&mut self, depth: usize) -> Result<(), Box<dyn Error>>;
+
     fn current_step_id(&mut self) -> StepId;
 }

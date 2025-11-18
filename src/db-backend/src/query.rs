@@ -20,5 +20,7 @@ pub enum CtRRQuery {
     DisableBreakpoints,
     JumpToCall { location: Location },
     LoadAllEvents,
+    LoadCallstack,
     EventJump { program_event: ProgramEvent },
+    CallstackJump { depth: usize },
 }

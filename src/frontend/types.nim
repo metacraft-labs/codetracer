@@ -733,6 +733,7 @@ type
     callValuePosition*: JsAssoc[cstring, float]
     width*: cstring
     resizeObserver*: ResizeObserver
+    isCalltrace*: bool
 
     debugger*:       DebuggerService
     service*:        CalltraceService

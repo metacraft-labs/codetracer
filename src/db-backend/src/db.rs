@@ -16,8 +16,8 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, Call, CallArg, CoreTrace, CtLoadLocalsArguments, Events, Location, ProgramEvent, RRTicks,
-    VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
+    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, Location, ProgramEvent,
+    RRTicks, VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
 };
 use crate::value::{Type, Value, ValueRecordWithType};
 
@@ -1215,6 +1215,11 @@ impl Replay for DbReplay {
         self.db.load_step_events(step_id, exact)
     }
 
+    fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
+        warn!("load_callstack not implemented for db traces currently");
+        Ok(vec![])
+    }
+
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
         self.step_id = step_id;
         Ok(true)
@@ -1299,6 +1304,12 @@ impl Replay for DbReplay {
                                                               // for compat with rr/gdb core support
         self.jump_to(step_id)?;
         Ok(true)
+    }
+
+    fn callstack_jump(&mut self, _depth: usize) -> Result<(), Box<dyn Error>> {
+        // TODO? for now used only for rr
+        warn!("callstack_jump not implemented for db replay currently");
+        Ok(())
     }
 
     fn current_step_id(&mut self) -> StepId {

@@ -28,8 +28,15 @@ when defined(ctInExtension):
     result = calltraceComponentForExtension
 
 proc calltraceJump(self: CalltraceComponent, location: types.Location) =
+  # if not self.supportCallstackOnly:
   self.api.emit(CtCalltraceJump, location)
   self.api.emit(InternalNewOperation, NewOperation(stableBusy: true, name: "calltrace-jump"))
+  # else:
+    # self.callstackJump(location.depth)
+
+# proc callstackJump(self: CalltraceComponent, depth: int) =
+#   self.api.emit(CtCallstackJump, location)
+#   self.api.emit(InternalNewOperation, NewOperation(stableBusy: true, name: "calltrace-jump"))
 
 proc isAtStart(self: CalltraceComponent): bool =
   self.startCallLineIndex < START_BUFFER
@@ -848,8 +855,22 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
 
   self.redraw()
 
+# proc processStackFrame*(self: CalltraceComponent, index: int, frame: DapStackFrame) =
+#   # TODO
+#   discard
+
+# method onUpdatedStackTrace(self: CalltraceComponent, frames: seq[DapStackFrame]) =
+#   self.callLines = @[]
+#   self.args = JsAssoc[cstring, seq[CallKey]]()
+#   self.returnValues = JsAssoc[cstring, Value]()
+#   for i, frame in self.stackFrameToCallLine:
+#     self.processStackFrame(i, frame)
+#   self.redrawCallLines()
+#   self.redraw()
+
 func supportCallstackOnly(self: CalltraceComponent): bool =
-  not self.config.calltrace or self.locationLang() == LangRust
+  not self.config.calltrace or self.locationLang() == LangRust or not self.isDbBasedTrace
+
 
 method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   self.api = api
@@ -868,7 +889,7 @@ proc registerCalltraceComponent*(component: CalltraceComponent, api: MediatorWit
   component.register(api)
 
 proc loadLines(self: CalltraceComponent, fromScroll: bool) =
-  if not (not self.isDbBasedTrace and fromScroll) or not self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
+  if not self.isDbBasedTrace or not (not self.isDbBasedTrace and fromScroll) or not self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
     let depth = self.panelDepth()
     let height = self.panelHeight()
     let startBuffer = self.getStartBufferLen()
