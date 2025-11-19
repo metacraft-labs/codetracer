@@ -318,7 +318,9 @@ impl<'a> CallFlowPreloader<'a> {
                 // db.next_step_id_relative_to(from_step_id, true, step_to_different_line),
                 replay.step(Action::Next, true).unwrap(); // TODO: handle error
                 let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                let location = replay.load_location(&mut expr_loader).unwrap(); // TODO: handle error
+                // TODO: handle error: for DbReplay; actually not calling failing functions; but this might be unreliable
+                // and for RR they can also surely fail
+                let location = replay.load_location(&mut expr_loader).unwrap();
                 let new_step_id = StepId(location.rr_ticks.0);
                 let progressing = new_step_id != from_step_id;
                 (new_step_id, progressing)
@@ -336,9 +338,12 @@ impl<'a> CallFlowPreloader<'a> {
         // db.calls[call_key].step_id;
         // let mut path_buf = &PathBuf::from(&self.location.path);
         let mut iter_step_id = StepId(self.location.rr_ticks.0);
+
+        // later location updated after move to first step!
         let mut flow_view_update = FlowViewUpdate::new(self.location.clone());
+
         let mut step_count = 0;
-        let mut first = true;
+        let mut before_first_move = true;
         let tracked_call_key_result = self.call_key_from(&self.location);
         let tracked_call_key; // = CallKey(0);
         match tracked_call_key_result {
@@ -359,8 +364,8 @@ impl<'a> CallFlowPreloader<'a> {
             // } else {
             //     self.find_next_step(iter_step_id, replay)
             // };
-            let (step_id, progressing) = if first {
-                first = false;
+            let (step_id, progressing) = if before_first_move {
+                before_first_move = false;
                 self.move_to_first_step(iter_step_id, replay)?
             } else {
                 self.move_to_next_step(iter_step_id, replay)
@@ -368,8 +373,13 @@ impl<'a> CallFlowPreloader<'a> {
 
             iter_step_id = step_id;
             let mut expr_loader = ExprLoader::new(CoreTrace::default());
-            self.location = replay.load_location(&mut expr_loader)?;
-            let new_call_key = match self.call_key_from(&self.location) {
+            let new_location = replay.load_location(&mut expr_loader)?;
+            if step_count == 0 {
+                self.location = new_location.clone();
+                flow_view_update.location = self.location.clone();
+            }
+
+            let new_call_key = match self.call_key_from(&new_location) {
                 Ok(call_key) => call_key,
                 Err(e) => {
                     error!("error when parsing call key: stopping flow preload: {e:?}");
@@ -400,7 +410,7 @@ impl<'a> CallFlowPreloader<'a> {
             // but this flow step object *can* contain info about several actual steps
             // e.g. events from some of the next steps on the same line visit
             // one can analyze the step id of the next step, or we can add this info to the object
-            let line = self.location.line;
+            let line = new_location.line;
             flow_view_update.steps.push(FlowStep::new(
                 line,
                 step_count,
@@ -412,16 +422,21 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update.relevant_step_count.push(line as usize);
             flow_view_update.add_step_count(line, step_count);
             info!("process loops");
-            let path_buf = &PathBuf::from(&self.location.path);
+            let path_buf = &PathBuf::from(&new_location.path);
             flow_view_update = self.process_loops(
                 flow_view_update.clone(),
-                Position(self.location.line),
+                Position(new_location.line),
                 replay.current_step_id(),
                 path_buf,
                 step_count,
             );
-            flow_view_update =
-                self.log_expressions(flow_view_update.clone(), Position(self.location.line), replay, step_id);
+            flow_view_update = self.log_expressions(
+                flow_view_update.clone(),
+                Position(new_location.line),
+                replay,
+                step_id,
+                &new_location,
+            );
             step_count += 1;
         }
         let path_buf = &PathBuf::from(&self.location.path);
@@ -554,6 +569,7 @@ impl<'a> CallFlowPreloader<'a> {
         line: Position,
         replay: &mut dyn Replay,
         step_id: StepId,
+        location: &Location,
     ) -> FlowViewUpdate {
         let mut expr_order: Vec<String> = vec![];
         let mut variable_map: HashMap<String, Value> = HashMap::default();
@@ -575,7 +591,7 @@ impl<'a> CallFlowPreloader<'a> {
         //     variable_map.insert(name.clone(), full_value_record);
         // }
 
-        if let Some(var_list) = self.flow_preloader.get_var_list(line, &self.location) {
+        if let Some(var_list) = self.flow_preloader.get_var_list(line, location) {
             info!("var_list {:?}", var_list.clone());
             for value_name in &var_list {
                 if let Ok(value) = replay.load_value(value_name, self.lang) {
