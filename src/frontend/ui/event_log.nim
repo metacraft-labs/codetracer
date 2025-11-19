@@ -296,7 +296,6 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
     event.eventIndex = 0
     event.stdout = true
     event.maxRRTicks = 0
-    cdebug fmt"event_log: ->index from datatable event element(datatable row data): {event.eventIndex}, kind: {event.kind}"
   else:
     cerror "event_log: datatable row data undefined"
     return
@@ -357,7 +356,6 @@ proc events(self: EventLogComponent) =
 
     if data.toJs != jsUndefined:
       event = cast[ProgramEvent](data)
-      cdebug fmt"event_log: ->index from datatable event element(datatable row data): {event.eventIndex}, kind: {event.kind}"
     else:
       cerror "event_log: datatable row data undefined"
       return
@@ -1020,6 +1018,7 @@ proc eventLogHeaderView*(self: EventLogComponent): VNode =
       eventLogCategoryButtonView(self, EventDropDownBox.Filter)
 
 proc loadEvents*(self: EventLogComponent, update: TableData) =
+  console.log(cstring(fmt"event_log: loadEvents records={update.data.len} draw={update.draw}"))
   self.programEvents = @[]
   for i, row in update.data:
     self.programEvents.add(
@@ -1073,22 +1072,51 @@ method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.}
     dt.rowsCount = response.totalCount
     self.redraw()
 
+method clear*(self: EventLogComponent) =
+  if not self.denseTable.isNil and not self.denseTable.context.isNil:
+    try:
+      self.denseTable.context.clear().draw()
+    except:
+      cerror "event_log: clear dense: " & getCurrentExceptionMsg()
+
+  if not self.detailedTable.isNil and not self.detailedTable.context.isNil:
+    try:
+      self.detailedTable.context.clear().draw()
+    except:
+      cerror "event_log: clear detailed: " & getCurrentExceptionMsg()
+
+  self.programEvents = @[]
+  self.eventsIndex = 0
+  self.rowSelected = 0
+  self.activeRowTicks = 0
+  self.hiddenRows = 0
+
 method restart*(self: EventLogComponent) =
-  if not self.denseTable.isNil:
+  self.clear()
+  if not self.denseTable.isNil and not self.denseTable.context.isNil:
     try:
       self.denseTable.context.rows().remove()
       self.denseTable.context.rows().draw()
     except:
       cerror "event_log: remove: " & getCurrentExceptionMsg()
+    self.denseTable.context = nil
 
-  if not self.detailedTable.isNil:
+  if not self.detailedTable.isNil and not self.detailedTable.context.isNil:
     try:
       self.detailedTable.context.rows().remove()
       self.detailedTable.context.rows().draw()
     except:
       cerror "event_log: remove: " & getCurrentExceptionMsg()
+    self.detailedTable.context = nil
 
-  self.eventsIndex = 0
+  self.drawId = 0
+  self.tableCallback = nil
+  self.autoScrollUpdate = false
+  self.started = false
+  self.isFlowUpdate = false
+  self.init = false
+  self.redrawColumns = true
+  self.redraw()
 
 proc eventLogAfterRedraws(self: EventLogComponent) =
   self.events()
@@ -1225,7 +1253,8 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
       # think again about html/xml in content escaping/pre tags
 
     console.timeEnd(cstring"new events service")
-    self.denseTable.context.ajax.reload()
+    if not self.denseTable.isNil and not self.denseTable.context.isNil:
+      self.denseTable.context.ajax.reload()
     self.redraw()
   )
   api.subscribe(CtUpdatedEventsContent, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =

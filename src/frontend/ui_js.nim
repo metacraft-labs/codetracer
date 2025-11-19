@@ -25,6 +25,8 @@ proc configureIPC(data: Data)
 # IPC HANDLERS
 
 var vex* {.importc.}: js
+var middlewareConfigured = false
+var dapReplayHandlerRegistered = false
 const TAB_LIMIT = 20
 const MIN_FONTSIZE = 10
 const MAX_FONTSIZE = 18
@@ -913,35 +915,50 @@ proc onTraceLoaded(
     data.startOptions.loading = false
   CURRENT_LANG = data.trace.lang
 
+  if not data.services.eventLog.isNil:
+    data.services.eventLog.restart()
+  for id, component in data.ui.componentMapping[Content.EventLog]:
+    if not component.isNil:
+      component.restart()
+  for id, component in data.ui.componentMapping[Content.TerminalOutput]:
+    if not component.isNil:
+      component.restart()
+
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
-    data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
-      let trace = response["trace"].to(Trace)
-      infoPrint "ui: reinitializing dap for trace ", $trace.id
-      configureMiddleware()
-      data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-      data.dapApi.sendCtRequest(DapLaunch, js{
-        traceFolder: trace.outputFolder,
-        rawDiffIndex: data.startOptions.rawDiffIndex,
-      })
+    if not dapReplayHandlerRegistered:
+      data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
+        let trace = response["trace"].to(Trace)
+        infoPrint "ui: reinitializing dap for trace ", $trace.id
+        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+        data.dapApi.sendCtRequest(DapLaunch, js{
+          traceFolder: trace.outputFolder,
+          rawDiffIndex: data.startOptions.rawDiffIndex,
+        })
+      dapReplayHandlerRegistered = true
 
   when not defined(ctInExtension):
-    configureMiddleware()
-    data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
-      let trace = response["trace"].to(Trace)
-      infoPrint "ui: reinitializing dap for trace ", $trace.id
-      data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
-        clientName: "codetracer"
-      )))
-      data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-      data.dapApi.sendCtRequest(DapLaunch, js{
-        traceFolder: trace.outputFolder,
-        rawDiffIndex: data.startOptions.rawDiffIndex,
-      })
+    if not middlewareConfigured:
+      configureMiddleware()
+      middlewareConfigured = true
+
+    if not dapReplayHandlerRegistered:
+      data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
+        let trace = response["trace"].to(Trace)
+        infoPrint "ui: reinitializing dap for trace ", $trace.id
+        data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+          clientName: "codetracer"
+        )))
+        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+        data.dapApi.sendCtRequest(DapLaunch, js{
+          traceFolder: trace.outputFolder,
+          rawDiffIndex: data.startOptions.rawDiffIndex,
+        })
+      dapReplayHandlerRegistered = true
 
   data.switchToDebug()
   renderer.requestInitialPanelData(data)
