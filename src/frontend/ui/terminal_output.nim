@@ -43,6 +43,9 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
   let regExPattern = regex("(<span[^>]*>)(.*?)(<\\/span>)")
   var nextLineStart: cstring = ""
   self.cachedEvents = eventList
+  self.cachedLines = JsAssoc[int, seq[TerminalEvent]]{}
+  self.lineEventIndices = JsAssoc[int, int]{}
+  self.currentLine = 0
 
   for eventIndex, event in eventList:
     var content =
@@ -136,6 +139,16 @@ method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.
     let eventElement = self.cachedEvents[self.cachedLines[response][0].eventIndex]
 
     self.onTerminalEventClick(eventElement)
+
+method restart*(self: TerminalOutputComponent) =
+  self.cachedLines = JsAssoc[int, seq[TerminalEvent]]{}
+  self.cachedEvents = @[]
+  self.lineEventIndices = JsAssoc[int, int]{}
+  self.currentLine = 0
+  self.initialUpdate = true
+  self.renderedEventIndex = 0
+  self.location = types.Location()
+  self.redraw()
 
 proc terminalEventView(self: TerminalOutputComponent, lineEvent: TerminalEvent): VNode =
   let eventElement = self.cachedEvents[lineEvent.eventIndex]

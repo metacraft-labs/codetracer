@@ -1249,6 +1249,27 @@ proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false) =
       else: #elif tab.changed or saveAs:
         ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
 
+proc buildRecordEnv(envDump: cstring): JsObject =
+  ## Convert the serialized environment captured in trace metadata back into
+  ## a JS object so we can replay `codetracer record` under the same env vars.
+  if envDump.isNil or envDump.len == 0:
+    return nil
+
+  var envObject = JsObject{}
+  let dump = $envDump
+  for line in dump.splitLines():
+    if line.len == 0:
+      continue
+    let sep = line.find('=')
+    if sep <= 0:
+      continue
+
+    let name = line[0 ..< sep]
+    let value = line[sep + 1 .. ^1]
+    envObject[name.cstring] = value.cstring
+
+  envObject
+
 proc reRecordCurrentTrace*(data: Data) =
   ## Save edits and restart the recorder using the currently loaded trace metadata.
   if data.trace.isNil:
@@ -1269,17 +1290,20 @@ proc reRecordCurrentTrace*(data: Data) =
   for arg in data.trace.args:
     args.add(arg)
 
-  let workDir = if data.trace.workdir.len == 0:
-      jsUndefined
-    else:
-      cast[JsObject](data.trace.workdir)
+  var options = JsObject{}
+  if not data.trace.workdir.isNil and data.trace.workdir.len > 0:
+    options["cwd".cstring] = cast[JsObject](data.trace.workdir)
+
+  let envObject = buildRecordEnv(data.trace.env)
+  if not envObject.isNil:
+    options["env".cstring] = envObject
 
   data.viewsApi.infoMessage(cstring"Recording a new trace…")
   data.ipc.send(
     "CODETRACER::new-record",
     js{
       args: args,
-      options: js{ cwd: workDir }
+      options: options
     }
   )
 
