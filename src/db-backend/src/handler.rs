@@ -43,7 +43,7 @@ const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 pub struct Handler {
     pub db: Box<Db>,
     pub step_id: StepId,
-    pub last_call_key: CallKey,
+    pub last_location: Location,
     // pub sender_tx: mpsc::Sender<Response>,
     pub indirect_send: bool,
     // pub sender: sender::Sender,
@@ -103,7 +103,10 @@ impl Handler {
             trace_kind,
             db: db.clone(),
             step_id: StepId(0),
-            last_call_key: CallKey(0),
+            last_location: Location {
+                key: format!("{}", NO_KEY.0),
+                ..Location::default()
+            },
             indirect_send,
             // sender,
             event_db: EventDb::new(),
@@ -289,6 +292,19 @@ impl Handler {
         Ok(())
     }
 
+    fn should_reset_flow(&mut self, is_main: bool, location: &Location) -> bool {
+        let result = if self.trace_kind == TraceKind::DB {
+            is_main || location.key != self.last_location.key
+        } else {
+            is_main
+                || (location.function_name != self.last_location.function_name
+                    || location.callstack_depth != self.last_location.callstack_depth
+                    || location.key != self.last_location.key)
+        };
+        self.last_location = location.clone();
+        result
+    }
+
     fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
         info!("complete_move");
 
@@ -300,9 +316,7 @@ impl Handler {
             .expr_loader
             .find_function_location(&location, &Line(location.line));
         // TODO: change if we need to support non-int keys
-        let call_key = CallKey(location.key.parse::<i64>()?);
-        let reset_flow = is_main || call_key != self.last_call_key;
-        self.last_call_key = call_key;
+        let reset_flow = self.should_reset_flow(is_main, &location);
         info!("  location: {location:?}");
 
         let move_state = MoveState {
