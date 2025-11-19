@@ -2928,6 +2928,14 @@ proc positionRRTicksToStepCount*(self: FlowComponent, position: int, rrTicks: in
   var flow = self.flow
 
   try:
+    if not flow.positionStepCounts.hasKey(position):
+      console.log(flow.positionStepCounts[position])
+      cerror cstring(fmt"PROBLEM with flow.positionStepCounts: can't find position {position}")
+      return NO_STEP_COUNT
+    if flow.positionStepCounts[position].len < 1:
+      cerror cstring(fmt"PROBLEM with flow.positionStepCounts: no stepCount for position {position}")
+      return NO_STEP_COUNT
+
     let firstStepCount = flow.positionStepCounts[position][0]
     let lastStepCount = flow.positionStepCounts[position][^1]
 
@@ -3268,7 +3276,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
         update.location.highLevelPath & cstring":" & update.location.functionName
 
     if self.editorUI.name != updateLocationName:
-      cdebug "flow: editor name not equal to update location name: stopping"
+      cwarn "flow: editor name not equal to update location name: stopping"
       return
 
     self.status = update.status

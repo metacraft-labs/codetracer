@@ -294,7 +294,8 @@ impl ExprLoader {
         // extract function names and positions
         } else if NODE_NAMES[&lang].functions.contains(&node.kind().to_string()) {
             if let Some(name) = self.get_method_name(node, path, row) {
-                for i in start.0..end.0 {
+                info!("register functions from {} to {}", start.0, end.0);
+                for i in start.0..end.0 + 1 {
                     self.processed_files
                         .get_mut(path)
                         .unwrap()
@@ -512,15 +513,16 @@ impl ExprLoader {
         }
     }
 
-    pub fn get_first_last_fn_lines(&self, location: &Location, line: &Line) -> (i64, i64) {
-        info!("functions {:?}", self.processed_files);
-        info!("get_first_last_fn_lines {:?}:{}", location.path, line.0);
+    // line: &Line
+    pub fn get_first_last_fn_lines(&self, location: &Location) -> (i64, i64) {
+        info!("get_first_last_fn_lines {:?}:{}", location.path, location.line);
         let (_, mut start, mut end): (String, Position, Position) =
             (String::default(), Position(NO_POSITION), Position(NO_POSITION));
         let path_buf = &PathBuf::from(&location.path);
         if self.processed_files.contains_key(path_buf) {
             let file_info = &self.processed_files[path_buf];
-            let position = &Position(line.0);
+            let position = &Position(location.line);
+            // info!("  check for position {:?} in {:?}", position, file_info.functions);
             if file_info.functions.contains_key(position) {
                 (_, start, end) = file_info.functions[position][0].clone();
             }

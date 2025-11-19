@@ -142,14 +142,14 @@ impl Db {
         if function_name != "<top-level>" {
             match expr_loader.load_file(&PathBuf::from(&self.paths[self.steps[step_id].path_id])) {
                 Ok(_) => {
-                    let function_record = &self.functions[self.calls[CallKey(call_key_int)].function_id];
-                    let lang = expr_loader.get_current_language(&PathBuf::from(path));
-                    let fn_line: Line = if lang == Lang::Noir {
-                        Line(function_record.line.0 - 1)
-                    } else {
-                        function_record.line
-                    };
-                    let (fn_start, fn_last) = expr_loader.get_first_last_fn_lines(&location, &fn_line);
+                    // let function_record = &self.functions[self.calls[CallKey(call_key_int)].function_id];
+                    // let lang = expr_loader.get_current_language(&PathBuf::from(path));
+                    // let fn_line: Line = if lang == Lang::Noir {
+                    //     Line(function_record.line.0 - 1)
+                    // } else {
+                    //     function_record.line
+                    // };
+                    let (fn_start, fn_last) = expr_loader.get_first_last_fn_lines(&location);
                     location.function_first = fn_start;
                     location.function_last = fn_last;
                 }
@@ -532,7 +532,7 @@ impl Db {
                     is_slice: false,
                 }
             } else {
-                compound_value.clone() // register or assign?
+                compound_value.clone() // or assign?
             }
         } else if let Some(_index) = cell_change.index {
             if let Some(type_id) = cell_change.type_id {
@@ -1122,7 +1122,9 @@ impl Replay for DbReplay {
         info!("load_location: db replay");
         let call_key = self.db.call_key_for_step(self.step_id);
         self.call_key = call_key;
-        Ok(self.db.load_location(self.step_id, call_key, expr_loader))
+        let location = self.db.load_location(self.step_id, call_key, expr_loader);
+        info!("  location: {location:?}");
+        Ok(location)
     }
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
