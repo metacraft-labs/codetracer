@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser, Tree}; // Language,
+use tree_sitter_pascal;
 use tree_sitter_traversal2::{traverse_tree, Order};
 
 #[derive(Debug, Clone)]
@@ -53,6 +54,30 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         comments: vec!["//".to_string()],
     };
     m.insert(Lang::C, c_node_names);
+
+    let cpp_node_names = NodeNames {
+        if_conditions: vec!["if_statement".to_string()],
+        else_conditions: vec!["else_clause".to_string()],
+        loops: vec!["for_statement".to_string()],
+        branches_body: vec!["compound_statement".to_string()],
+        branches: vec!["compound_statement".to_string()],
+        functions: vec!["function_definition".to_string()],
+        values: vec!["identifier".to_string()],
+        comments: vec!["//".to_string()],
+    };
+    m.insert(Lang::Cpp, cpp_node_names);
+
+    let pascal_node_names = NodeNames {
+        if_conditions: vec!["ifElse".to_string()],
+        else_conditions: vec!["else".to_string()],
+        loops: vec!["for".to_string()],
+        branches_body: vec!["block".to_string()],
+        branches: vec!["block".to_string()],
+        functions: vec!["defProc".to_string()],
+        values: vec!["identifier".to_string()],
+        comments: vec!["comment".to_string()],
+    };
+    m.insert(Lang::Pascal, pascal_node_names);
 
     let rust_node_names = NodeNames {
         if_conditions: vec!["if_expression".to_string()],
@@ -172,6 +197,10 @@ impl ExprLoader {
                 Lang::Small
             } else if extension == "c" {
                 Lang::C
+            } else if extension == "cpp" {
+                Lang::Cpp
+            } else if extension == "pas" {
+                Lang::Pascal
             } else if extension == "rs" {
                 Lang::RustWasm // TODO RustWasm?
             } else if extension == "py" {
@@ -193,6 +222,10 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
         } else if lang == Lang::C {
             parser.set_language(&tree_sitter_c::LANGUAGE.into())?;
+        } else if lang == Lang::Cpp {
+            parser.set_language(&tree_sitter_cpp::LANGUAGE.into())?;
+        } else if lang == Lang::Pascal {
+            parser.set_language(&tree_sitter_pascal::LANGUAGE.into())?;
         } else if lang == Lang::Ruby {
             parser.set_language(&tree_sitter_ruby::LANGUAGE.into())?;
         } else if lang == Lang::PythonDb {
@@ -472,7 +505,7 @@ impl ExprLoader {
         let lang = self.get_current_language(path);
         let postorder: Vec<Node<'_>> = traverse_tree(tree, Order::Post).collect::<Vec<_>>();
         for node in postorder {
-            debug!("node {:?}", node.to_sexp());
+            info!("node {:?}", node.to_sexp());
             if NODE_NAMES.contains_key(&lang) && !NODE_NAMES[&lang].else_conditions.contains(&node.kind().to_string()) {
                 self.process_node(&node, path)?;
             }
