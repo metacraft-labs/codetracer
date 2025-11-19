@@ -1205,8 +1205,9 @@ method render*(self: CalltraceComponent): VNode =
   ):
     tdiv():
       searchCalltraceView(self)
-      if not self.inExtension and not self.isDbBasedTrace:
-        filterCalltraceView(self)
+      # TODO: not ready for rr traces too: for now just comment out!
+      # if not self.inExtension and not self.isDbBasedTrace:
+      #  filterCalltraceView(self)
     if self.service.isCalltrace:
       tdiv(
         id = fmt"calltraceScroll-{self.id}",
