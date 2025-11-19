@@ -3,7 +3,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use log::{error, info, warn};
-use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
+use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo, NO_KEY};
 
 use crate::{
     db::{Db, DbRecordEvent},
@@ -36,7 +36,7 @@ impl FlowPreloader {
         let path_buf = PathBuf::from(&location.path);
         match self.expr_loader.load_file(&path_buf) {
             Ok(_) => {
-                info!("Expression loader complete!");
+                info!("  expression loader complete!");
                 let mut call_flow_preloader: CallFlowPreloader =
                     CallFlowPreloader::new(self, location.clone(), HashSet::new(), HashSet::new(), mode, kind);
                 call_flow_preloader.load_flow(location, replay)
@@ -322,7 +322,11 @@ impl<'a> CallFlowPreloader<'a> {
                 // and for RR they can also surely fail
                 let location = replay.load_location(&mut expr_loader).unwrap();
                 let new_step_id = StepId(location.rr_ticks.0);
-                let progressing = new_step_id != from_step_id;
+                let progressing = true;
+                // for now hard to detect; assume true
+                //   we tried `new_step_id != from_step_id;`, but this is incorrect:
+                //   often rr ticks can be the same for many different lines.. maybe detect signal or
+                //   hope that difference in call key/other aspects will be enough!
                 (new_step_id, progressing)
             }
             FlowMode::Diff => self.next_diff_flow_step(from_step_id, false, replay),
@@ -344,19 +348,19 @@ impl<'a> CallFlowPreloader<'a> {
 
         let mut step_count = 0;
         let mut before_first_move = true;
-        let tracked_call_key_result = self.call_key_from(&self.location);
-        let tracked_call_key; // = CallKey(0);
-        match tracked_call_key_result {
-            Ok(call_key) => {
-                tracked_call_key = call_key;
-            }
-            Err(e) => {
-                error!("call key parse error: {e:?}");
-                return Err(e);
-            }
-        }
+        // let tracked_call_key_result = self.call_key_from(&self.location);
+        let mut tracked_call_key = NO_KEY;
+        // match tracked_call_key_result {
+        //     Ok(call_key) => {
+        //         tracked_call_key = call_key;
+        //     }
+        //     Err(e) => {
+        //         error!("call key parse error: {e:?}");
+        //         return Err(e);
+        //     }
+        // }
 
-        info!("loop");
+        info!("flow loop:");
         loop {
             // let (step_id, progressing) = if first {
             //     first = false;
@@ -376,8 +380,14 @@ impl<'a> CallFlowPreloader<'a> {
             let new_location = replay.load_location(&mut expr_loader)?;
             if step_count == 0 {
                 self.location = new_location.clone();
+                tracked_call_key = self.call_key_from(&new_location)?;
                 flow_view_update.location = self.location.clone();
             }
+
+            info!(
+                "  location for step count {}: {}:{}",
+                step_count, new_location.path, new_location.line
+            );
 
             let new_call_key = match self.call_key_from(&new_location) {
                 Ok(call_key) => call_key,
@@ -401,7 +411,16 @@ impl<'a> CallFlowPreloader<'a> {
                 if !load_return_value {
                     warn!("we can't load return value");
                 }
-                info!("break flow");
+                if tracked_call_key != new_call_key {
+                    info!(
+                        "  a different call key now: tracked is: {:?} new is: {:?}",
+                        tracked_call_key, new_call_key
+                    );
+                }
+                if !progressing {
+                    info!("  not progressing in stepping anymore");
+                }
+                info!("  break flow!");
                 break;
             }
 
@@ -421,7 +440,7 @@ impl<'a> CallFlowPreloader<'a> {
             ));
             flow_view_update.relevant_step_count.push(line as usize);
             flow_view_update.add_step_count(line, step_count);
-            info!("process loops");
+            info!("  process loops");
             let path_buf = &PathBuf::from(&new_location.path);
             flow_view_update = self.process_loops(
                 flow_view_update.clone(),
@@ -461,7 +480,7 @@ impl<'a> CallFlowPreloader<'a> {
         step_count: i64,
     ) -> FlowViewUpdate {
         if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(line, path_buf) {
-            info!("loop shape {:?}", loop_shape);
+            info!("  loop shape {:?}", loop_shape);
             if loop_shape.first.0 == line.0 && !self.active_loops.contains(&loop_shape.first) {
                 flow_view_update.loops.push(Loop {
                     base: LoopId(loop_shape.loop_id.0),
@@ -479,7 +498,7 @@ impl<'a> CallFlowPreloader<'a> {
                     .loop_iteration_steps
                     .push(vec![LoopIterationSteps::default()]);
                 flow_view_update.branches_taken.push(vec![BranchesTaken::default()]);
-                info!("add active loop");
+                info!("    add an active loop");
             } else if (flow_view_update.loops.last().unwrap().first.0) == line.0 {
                 flow_view_update.loops.last_mut().unwrap().iteration.inc();
                 flow_view_update
@@ -498,7 +517,7 @@ impl<'a> CallFlowPreloader<'a> {
                     .unwrap()
                     .rr_ticks_for_iterations
                     .push(RRTicks(step_id.0));
-                info!("add iteration");
+                info!("    add iteration");
             }
         }
 
@@ -525,7 +544,7 @@ impl<'a> CallFlowPreloader<'a> {
                     flow_view_update.loops.clone().last_mut().unwrap().base.0,
                     self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
                 );
-                info!("add branch for position {:?} {:?}", path_buf.display(), line);
+                info!("    add branch for position {:?} {:?}", path_buf.display(), line);
             }
         } else {
             flow_view_update.loop_iteration_steps[0][0]
@@ -535,9 +554,9 @@ impl<'a> CallFlowPreloader<'a> {
                 0,
                 self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
             );
-            info!("add branch for position {:?} {:?}", path_buf.display(), line);
+            info!("    add branch for position {:?} {:?}", path_buf.display(), line);
         }
-        info!("branches taken {:?}", flow_view_update.branches_taken);
+        info!("    branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
     }
 
@@ -592,7 +611,7 @@ impl<'a> CallFlowPreloader<'a> {
         // }
 
         if let Some(var_list) = self.flow_preloader.get_var_list(line, location) {
-            info!("var_list {:?}", var_list.clone());
+            info!("  log expressions: {:?}", var_list.clone());
             for value_name in &var_list {
                 if let Ok(value) = replay.load_value(value_name, self.lang) {
                     // if variable_map.contains_key(value_name) {
@@ -603,6 +622,7 @@ impl<'a> CallFlowPreloader<'a> {
                         .unwrap()
                         .before_values
                         .insert(value_name.clone(), ct_value.clone());
+                    info!("    insert in variables_map {}", value_name);
                     variable_map.insert(value_name.clone(), ct_value);
                 }
                 expr_order.push(value_name.clone());

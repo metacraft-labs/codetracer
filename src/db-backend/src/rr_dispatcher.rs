@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use runtime_tracing::StepId;
 
 use crate::db::DbRecordEvent;
@@ -130,7 +130,7 @@ impl CtRRWorker {
     pub fn run_query(&mut self, query: CtRRQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
-        info!("send to worker {raw_json}\n");
+        debug!("send to worker {raw_json}\n");
         self.stream
             .as_mut()
             .expect("valid sending stream")
@@ -138,14 +138,14 @@ impl CtRRWorker {
         // `clippy::unused_io_amount` catched we need write_all, not write
 
         let mut res = "".to_string();
-        info!("wait to read");
+        debug!("wait to read");
 
         let mut reader = BufReader::new(self.stream.as_mut().expect("valid receiving stream"));
         reader.read_line(&mut res)?; // TODO: more robust reading/read all
 
         res = String::from(res.trim()); // trim newlines/whitespace!
 
-        info!("res: `{res}`");
+        debug!("res: `{res}`");
 
         if !res.starts_with("error:") {
             Ok(res)
