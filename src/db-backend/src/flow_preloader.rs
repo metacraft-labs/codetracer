@@ -322,11 +322,15 @@ impl<'a> CallFlowPreloader<'a> {
                 // and for RR they can also surely fail
                 let location = replay.load_location(&mut expr_loader).unwrap();
                 let new_step_id = StepId(location.rr_ticks.0);
-                let progressing = true;
-                // for now hard to detect; assume true
-                //   we tried `new_step_id != from_step_id;`, but this is incorrect:
-                //   often rr ticks can be the same for many different lines.. maybe detect signal or
-                //   hope that difference in call key/other aspects will be enough!
+                let progressing = if self.trace_kind == TraceKind::DB {
+                    new_step_id != from_step_id
+                } else {
+                    // for now hard to detect; assume true
+                    //   we tried `new_step_id != from_step_id;`, but this is incorrect:
+                    //   often rr ticks can be the same for many different lines.. maybe detect signal or
+                    //   hope that difference in call key/other aspects will be enough!
+                    true
+                };
                 (new_step_id, progressing)
             }
             FlowMode::Diff => self.next_diff_flow_step(from_step_id, false, replay),
