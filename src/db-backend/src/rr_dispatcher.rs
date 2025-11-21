@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::thread;
 use std::time::Duration;
 
@@ -83,8 +83,6 @@ impl CtRRWorker {
                 .arg("--index")
                 .arg(self.index.to_string())
                 .arg(&self.rr_trace_folder)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
                 .spawn()?
         } else {
             Command::new("appimage-run")
@@ -95,8 +93,6 @@ impl CtRRWorker {
                 .arg("--index")
                 .arg(self.index.to_string())
                 .arg(&self.rr_trace_folder)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
                 .spawn()?
         };
 
