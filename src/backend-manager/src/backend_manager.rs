@@ -97,6 +97,8 @@ impl BackendManager {
                     }
                 }
 
+                #[allow(clippy::collapsible_if)]
+                // alexander: i think it's ok like that: not mixing matching and other `if`
                 if let Some(manager_rx) = res.manager_receiver.as_mut() {
                     if !manager_rx.is_empty()
                         && let Some(message) = manager_rx.recv().await
@@ -158,10 +160,10 @@ impl BackendManager {
     }
 
     fn send_manager_message(&self, message: Value) {
-        if let Some(sender) = &self.manager_sender {
-            if let Err(err) = sender.send(message) {
-                error!("Can't enqueue manager message. Error: {err}");
-            }
+        if let Some(sender) = &self.manager_sender
+            && let Err(err) = sender.send(message)
+        {
+            error!("Can't enqueue manager message. Error: {err}");
         }
     }
 
