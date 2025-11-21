@@ -743,6 +743,16 @@ impl Handler {
     }
 
     pub fn load_history(&mut self, _req: dap::Request, load_history_arg: LoadHistoryArg) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            warn!("history not implemented yet for rr traces");
+            self.send_notification(
+                NotificationKind::Warning,
+                "history not implemented yet for rr traces",
+                false,
+            )?;
+
+            return Ok(());
+        }
         let mut history_results: Vec<HistoryResult> = vec![];
         // from start to end:
         //  find all steps with such a variable name: for them:
