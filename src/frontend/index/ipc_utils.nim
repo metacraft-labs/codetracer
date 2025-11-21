@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
-  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge
+  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
   ipc_subsystems/[ dap, socket ],
   results,
   ../lib/[ jslib, misc_lib ],
