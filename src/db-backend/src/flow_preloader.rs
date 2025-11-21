@@ -18,6 +18,8 @@ use crate::{
     value::{to_ct_value, Value, ValueRecordWithType},
 };
 
+const STEP_COUNT_LIMIT: usize = 10;
+
 #[derive(Debug)]
 pub struct FlowPreloader {
     pub expr_loader: ExprLoader,
@@ -425,6 +427,11 @@ impl<'a> CallFlowPreloader<'a> {
                     info!("  not progressing in stepping anymore");
                 }
                 info!("  break flow!");
+                break;
+            }
+
+            if step_count >= STEP_COUNT_LIMIT as i64 {
+                info!("  break flow because of step count limit");
                 break;
             }
 
