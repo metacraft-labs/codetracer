@@ -185,12 +185,36 @@ log-file pid_or_current_or_last kind process="default" instance_index="0":
     echo "$TTMP/run-${pid}/{{kind}}_${actual_process}_{{instance_index}}.${ext}"; \
   fi;
 
-log pid_or_current_or_last kind process="default" instance_index="0":
-  export log_file_path=$(just log-file {{pid_or_current_or_last}} {{kind}} {{process}} {{instance_index}}); \
-  vim \
-    -c ":term ++open cat ${log_file_path}" \
-    -c "wincmd j" -c "q"
-  # (move to non-terminal pane down and close it)
+# expected `run_name_or_last` as `run-<run-pid>` or `last`
+log name="ct-rr-support" worker_kind="stable" index="0" codetracer_tmp_dir="" run_name_or_last="last":
+  #!/usr/bin/env bash
+  if [ "{{codetracer_tmp_dir}}" == "" ]; then
+    tmpdir=$(just findtmp)
+  else
+    tmpdir={{codetracer_tmp_dir}}
+  fi
+
+  cat $tmpdir/{{run_name_or_last}}/{{name}}-{{worker_kind}}-{{index}}.log
+
+# expected `run_name_or_last` as `run-<run-pid>` or `last`
+log-db-backend codetracer_tmp_dir="" run_name_or_last="last":
+  #!/usr/bin/env bash
+  if [ "{{codetracer_tmp_dir}}" == "" ]; then
+    tmpdir=$(just findtmp)
+  else
+    tmpdir={{codetracer_tmp_dir}}
+  fi
+
+  cat $tmpdir/{{run_name_or_last}}/db-backend.log
+
+# old version in vim:
+#
+# log pid_or_current_or_last kind process="default" instance_index="0":
+#   export log_file_path=$(just log-file {{pid_or_current_or_last}} {{kind}} {{process}} {{instance_index}}); \
+#   vim \
+#     -c ":term ++open cat ${log_file_path}" \
+#     -c "wincmd j" -c "q"
+#   # (move to non-terminal pane down and close it)
 
 tail pid_or_current_or_last kind process="default" instance_index="0":
   export log_file_path=$(just log-file {{pid_or_current_or_last}} {{kind}} {{process}} {{instance_index}}); \

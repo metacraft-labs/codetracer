@@ -56,3 +56,14 @@ pub fn ct_rr_worker_socket_path(
     // let _ = std::fs::remove_file(&receiving_socket_path); // try to remove if existing: ignore error
     // }
 }
+
+pub fn log_path_for(
+    name: &str,
+    worker_kind: &str,
+    worker_index_for_kind: usize,
+    run_id: usize,
+) -> Result<PathBuf, Box<dyn Error>> {
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+    let run_dir = run_dir_for(&tmp_path, run_id)?;
+    Ok(run_dir.join(format!("{name}-{worker_kind}-{worker_index_for_kind}.log")))
+}

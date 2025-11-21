@@ -16,7 +16,7 @@ use chrono::Local;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use log::{error, info};
-use std::fs::File;
+use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::panic::PanicHookInfo;
 use std::path::PathBuf;
@@ -47,6 +47,8 @@ mod trace_processor;
 mod tracepoint_interpreter;
 mod transport;
 mod value;
+
+use crate::paths::run_dir_for;
 
 /// a custom backend for ruby (maybe others) support
 /// based on db-like approach based on trace instead of rr/gdb
@@ -92,16 +94,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     // env_logger setup based and adapted from
     //   https://github.com/rust-cli/env_logger/issues/125#issuecomment-1406333500
     //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
-    // TODO: restore old version or make it compatible with our logging format again
-
-    // let run_dir = core.run_dir()?;
-    // fs::create_dir_all(&run_dir)?;
-    // let log_path = run_dir.join("db-backend_db-backend_0.log");
-    // eprintln!("{}", log_path.display());
 
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+    let run_id = std::process::id() as usize;
+    let run_dir = run_dir_for(&tmp_path, run_id)?;
+    create_dir_all(&run_dir)?;
 
-    let target = Box::new(File::create(tmp_path.join("db-backend.log"))?);
+    let log_path = run_dir.join("db-backend.log");
+
+    let target = Box::new(File::create(&log_path)?);
 
     env_logger::Builder::new()
         .format(|buf, record| {
