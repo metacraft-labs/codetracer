@@ -197,7 +197,7 @@ impl ExprLoader {
                 Lang::Small
             } else if extension == "c" {
                 Lang::C
-            } else if extension == "cpp" {
+            } else if extension == "cpp" || extension == "cc" || extension == "cpp" {
                 Lang::Cpp
             } else if extension == "pas" {
                 Lang::Pascal
@@ -505,7 +505,7 @@ impl ExprLoader {
         let lang = self.get_current_language(path);
         let postorder: Vec<Node<'_>> = traverse_tree(tree, Order::Post).collect::<Vec<_>>();
         for node in postorder {
-            info!("node {:?}", node.to_sexp());
+            debug!("node {:?}", node.to_sexp());
             if NODE_NAMES.contains_key(&lang) && !NODE_NAMES[&lang].else_conditions.contains(&node.kind().to_string()) {
                 self.process_node(&node, path)?;
             }
