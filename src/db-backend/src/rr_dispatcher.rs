@@ -1,8 +1,6 @@
 use std::error::Error;
-use std::fs::{create_dir_all, remove_file};
 use std::io::Write;
 use std::io::{BufRead, BufReader};
-use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -16,7 +14,6 @@ use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::paths::ct_rr_worker_socket_path;
-use crate::paths::{run_dir_for, CODETRACER_PATHS};
 use crate::query::CtRRQuery;
 use crate::replay::Replay;
 use crate::task::{
@@ -94,17 +91,11 @@ impl CtRRWorker {
 
         let run_id = std::process::id() as usize;
 
-        let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
-        let run_dir = run_dir_for(&tmp_path, run_id)?;
-        // remove_dir_all(&run_dir)?;
-        create_dir_all(&run_dir)?;
-        let last_link = tmp_path.join("last");
-        let _ = remove_file(&last_link); // it's ok if it doesn't exist, ignore other errors
-        if let Err(e) = symlink(run_dir, &last_link) {
-            // ignore if it can't happen: it's just a help for debugging
-            println!("error symlink {e:?}");
-        }
-
+        // let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+        // let run_dir = run_dir_for(&tmp_path, run_id)?;
+        // // remove_dir_all(&run_dir)?;
+        // create_dir_all(&run_dir)?;
+        
         let socket_path = ct_rr_worker_socket_path("", &self.name, self.index, run_id)?;
 
         info!("try to connect to worker with socket in {}", socket_path.display());

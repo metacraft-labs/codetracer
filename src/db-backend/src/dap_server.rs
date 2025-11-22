@@ -1,3 +1,17 @@
+use serde_json::json;
+// use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use std::fmt;
+#[cfg(feature = "io-transport")]
+use std::io::BufReader;
+#[cfg(feature = "io-transport")]
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender, Receiver};
+use std::thread;
+
+use log::{info, warn, error};
+
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
 use crate::dap_types;
 
@@ -18,19 +32,6 @@ use crate::transport::DapTransport;
 #[cfg(feature = "browser-transport")]
 use crate::transport::{DapResult, WorkerTransport};
 
-use log::{info, warn};
-use serde_json::json;
-// use std::collections::{HashMap, HashSet};
-use std::error::Error;
-use std::fmt;
-
-#[cfg(feature = "io-transport")]
-use std::io::BufReader;
-
-#[cfg(feature = "io-transport")]
-use std::os::unix::net::UnixStream;
-
-use std::path::{Path, PathBuf};
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
@@ -137,19 +138,41 @@ fn launch(
     }
 }
 
-fn write_dap_messages<T: DapTransport>(
-    transport: &mut T,
+fn write_dap_messages_from_thread(
+    sender: Sender<DapMessage>,
     handler: &mut Handler,
     seq: &mut i64,
 ) -> Result<(), Box<dyn Error>> {
     for message in &handler.resulting_dap_messages {
-        transport.send(message)?;
+        sender.send(message.clone())?;
     }
 
     handler.reset_dap();
     *seq = handler.dap_client.seq;
+    info!("messages sent from thread");
     Ok(())
 }
+
+fn patch_message_seq(message: &DapMessage, seq: i64) -> DapMessage {
+    match message {
+        DapMessage::Request(r) => {
+            let mut r_with_seq = r.clone();
+            r_with_seq.base.seq = seq;
+            DapMessage::Request(r_with_seq)
+        }
+        DapMessage::Response(r) => {
+            let mut r_with_seq = r.clone();
+            r_with_seq.base.seq = seq;
+            DapMessage::Response(r_with_seq)
+        }
+        DapMessage::Event(e) => {
+            let mut e_with_seq = e.clone();
+            e_with_seq.base.seq = seq;
+            DapMessage::Event(e_with_seq)
+        }
+    }
+}
+
 
 #[derive(Debug, Clone)]
 struct CtDapError {
@@ -187,11 +210,11 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
     }
 }
 
-fn handle_request<T: DapTransport>(
+fn handle_request(
     handler: &mut Handler,
     req: dap::Request,
     seq: &mut i64,
-    transport: &mut T,
+    sender: Sender<DapMessage>
 ) -> Result<(), Box<dyn Error>> {
     handler.dap_client.seq = *seq;
     match req.command.as_str() {
@@ -248,7 +271,7 @@ fn handle_request<T: DapTransport>(
             }
         }
     }
-    write_dap_messages(transport, handler, seq)
+    write_dap_messages_from_thread(sender, handler, seq)
 }
 
 pub struct Ctx {
@@ -260,10 +283,29 @@ pub struct Ctx {
     pub launch_raw_diff_index: Option<String>,
     pub ct_rr_worker_exe: PathBuf,
     pub received_configuration_done: bool,
+
+    pub stable_sender: Sender<dap::Request>,
+    pub flow_sender: Sender<dap::Request>,
+    pub tracepoint_sender: Sender<dap::Request>,
+
+    pub stable_receiver: Receiver<dap::Request>,
+    pub flow_receiver: Receiver<dap::Request>,
+    pub tracepoint_receiver: Receiver<dap::Request>,
+
+    pub from_thread_sender: Sender<DapMessage>,
+    pub from_thread_receiver: Receiver<DapMessage>,
+
+    pub stable_active: bool,
 }
 
 impl Default for Ctx {
     fn default() -> Self {
+        let (stable_sender, stable_receiver) = mpsc::channel();
+        let (flow_sender, flow_receiver) = mpsc::channel();
+        let (tracepoint_sender, tracepoint_receiver) = mpsc::channel();
+
+        let (from_thread_sender, from_thread_receiver) = mpsc::channel();
+
         Self {
             seq: 1i64,
             handler: None,
@@ -273,8 +315,37 @@ impl Default for Ctx {
             launch_raw_diff_index: None,
             ct_rr_worker_exe: PathBuf::from(""),
             received_configuration_done: false,
+
+            stable_sender,
+            flow_sender,
+            tracepoint_sender,
+
+            stable_receiver,
+            flow_receiver,
+            tracepoint_receiver,
+
+            from_thread_sender,
+            from_thread_receiver,
+
+            stable_active: false,
         }
     }
+}
+
+impl Ctx {
+    fn write_dap_messages<T: DapTransport>(
+        &mut self,
+        transport: &mut T,
+        messages: &[DapMessage],
+    ) -> Result<(), Box<dyn Error>> {
+        for message in messages {
+            let message_with_seq = patch_message_seq(&message, self.seq);
+            self.seq += 1;
+            transport.send(&message_with_seq)?;
+        }
+        Ok(())
+    }
+
 }
 
 pub fn handle_message<T: DapTransport>(
@@ -308,9 +379,7 @@ pub fn handle_message<T: DapTransport>(
                 message: None,
                 body: serde_json::to_value(capabilities)?,
             });
-            ctx.seq += 1;
-
-            transport.send(&resp)?;
+            ctx.write_dap_messages(transport, &[resp])?;
 
             let event = DapMessage::Event(Event {
                 base: ProtocolMessage {
@@ -320,8 +389,7 @@ pub fn handle_message<T: DapTransport>(
                 event: "initialized".to_string(),
                 body: json!({}),
             });
-            ctx.seq += 1;
-            transport.send(&event)?;
+            ctx.write_dap_messages(transport, &[event])?;
         }
         DapMessage::Request(req) if req.command == "launch" => {
             ctx.received_launch = true;
@@ -341,16 +409,59 @@ pub fn handle_message<T: DapTransport>(
                 ctx.ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
 
                 if ctx.received_configuration_done {
-                    ctx.handler = Some(launch(
-                        &ctx.launch_trace_folder,
-                        &ctx.launch_trace_file,
-                        ctx.launch_raw_diff_index.clone(),
-                        &ctx.ct_rr_worker_exe,
-                        ctx.seq,
-                    )?);
-                    if let Some(h) = ctx.handler.as_mut() {
-                        write_dap_messages(transport, h, &mut ctx.seq)?;
-                    }
+                    let stable_thread_sender = ctx.from_thread_sender.clone();
+                    let (new_stable_sender, stable_receiver) = mpsc::channel();
+                    ctx.stable_sender = new_stable_sender;
+                    let launch_trace_folder = ctx.launch_trace_folder.clone();
+                    let launch_raw_diff_index = ctx.launch_raw_diff_index.clone();
+                    let launch_trace_file = ctx.launch_trace_file.clone();
+                    let ct_rr_worker_exe = ctx.ct_rr_worker_exe.clone();
+
+                    info!("create stable thread");
+                    let _thread_handle = thread::spawn(move || -> Result<(), String> {
+                        let mut seq = 0;
+                        let mut handler = launch(
+                            &launch_trace_folder,
+                            &launch_trace_file,
+                            launch_raw_diff_index.clone(),
+                            &ct_rr_worker_exe,
+                            seq,
+                        ).map_err(|e| {
+                            error!("launch error: {e:?}");
+                            format!("launch error: {e:?}")
+                        })?;
+
+                        info!("ok: launch ok in stable thread");
+                        write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq)
+                            .map_err(|e| {
+                                error!("write dap message error: {e:?}");
+                                format!("write dap message error: {e:?}")
+                            })?;
+
+                        loop {
+                            let request = stable_receiver.recv().map_err(|e| {
+                                error!("stable thread recv error: {e:?}");
+                                format!("stable thread recv error: {e:?}")
+                            })?;
+
+                            info!("stable thread recv");
+
+                            let res = handle_request(&mut handler, request, &mut seq, stable_thread_sender.clone());
+                            if let Err(e) = res {
+                                warn!("handle_request error in thread: {e:?}");
+                                // continue with other request; trying to be more robust
+                                // assuming it's for individual requests to fail
+                                //   TODO: is it possible for some to leave bad state ?
+                            }
+                            write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq).map_err(|e| {
+                                error!("write dap message error: {e:?}");
+                                format!("write dap message error: {e:?}")
+                            })?;
+                        }
+                        // Ok(())
+                    });
+
+                    ctx.stable_active = true;
                 }
             }
             // TODO: log this when logging logic is properly abstracted
@@ -396,44 +507,62 @@ pub fn handle_message<T: DapTransport>(
             //     ctx.received_launch
             // );
             if ctx.received_launch {
-                ctx.handler = Some(launch(
-                    &ctx.launch_trace_folder,
-                    &ctx.launch_trace_file,
-                    ctx.launch_raw_diff_index.clone(),
-                    &ctx.ct_rr_worker_exe,
-                    ctx.seq,
-                )?);
-                if let Some(h) = ctx.handler.as_mut() {
-                    write_dap_messages(transport, h, &mut ctx.seq)?;
-                }
+                // TODO: same as `launch`
+                // ctx.handler = Some(launch(
+                //     &ctx.launch_trace_folder,
+                //     &ctx.launch_trace_file,
+                //     ctx.launch_raw_diff_index.clone(),
+                //     &ctx.ct_rr_worker_exe,
+                //     ctx.seq,
+                // )?);
+                // if let Some(h) = ctx.handler.as_mut() {
+                //     write_dap_messages(transport, h, &mut ctx.seq)?;
+                // }
+                error!("reimplement launch after (configurationDone after launch)");
             }
         }
         DapMessage::Request(req) if req.command == "disconnect" => {
-            if let Some(h) = ctx.handler.as_mut() {
-                let args: dap_types::DisconnectArguments = req.load_args()?;
-                h.dap_client.seq = ctx.seq;
-                h.respond_to_disconnect(req.clone(), args)?;
-                write_dap_messages(transport, h, &mut ctx.seq)?;
+            // let args: dap_types::DisconnectArguments = req.load_args()?;
+            // h.dap_client.seq = ctx.seq;
+            // h.respond_to_disconnect(req.clone(), args)?;
+            let response_body = dap::DisconnectResponseBody {};
+            // copied from `respond_dap` from handler.rs
+            let response = DapMessage::Response(dap::Response {
+                base: dap::ProtocolMessage {
+                    seq: ctx.seq,
+                    type_: "response".to_string(),
+                },
+                request_seq: req.base.seq,
+                success: true,
+                command: req.command.clone(),
+                message: None,
+                body: serde_json::to_value(response_body)?,
+            });
+            ctx.write_dap_messages(transport, &[response])?;
 
-                // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
-                // > and then to shut down itself (the debug adapter).
-                // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
-                // we don't have a debuggee process, just a db, so we just stop db-backend for now
-                // (and before that, we respond to the request, acknowledging it)
-                //
-                // we allow it for now here, but if additional cleanup is needed, maybe we'd need
-                // to return to upper functions
-                #[allow(clippy::exit)]
-                std::process::exit(0);
-            }
+            // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
+            // > and then to shut down itself (the debug adapter).
+            // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
+            // we don't have a debuggee process, just a db, so we just stop db-backend for now
+            // (and before that, we respond to the request, acknowledging it)
+            //
+            // we allow it for now here, but if additional cleanup is needed, maybe we'd need
+            // to return to upper functions
+            #[allow(clippy::exit)]
+            std::process::exit(0);
         }
         DapMessage::Request(req) => {
-            if let Some(h) = ctx.handler.as_mut() {
-                let res = handle_request(h, req.clone(), &mut ctx.seq, transport);
-                if let Err(_e) = res {
-                    // warn!("handle_request error: {e:?}");
-                }
+            if ctx.stable_active {
+                // TODO: send to thread
+                ctx.stable_sender.send(req.clone())?;
+                
             }
+            // if let Some(h) = ctx.handler.as_mut() {
+            //     let res = handle_request(h, req.clone(), &mut ctx.seq, transport);
+            //     if let Err(_e) = res {
+            //         // warn!("handle_request error: {e:?}");
+            //     }
+            // }
         }
         _ => {}
     }
@@ -450,12 +579,26 @@ fn handle_client<R: std::io::BufRead, T: DapTransport>(
 
     let mut ctx = Ctx::default();
 
+    // let receiving_thread = thread::spawn
     loop {
         match dap::read_dap_message_from_reader(reader) {
             Ok(msg) => {
                 let res = handle_message(&msg, transport, &mut ctx);
                 if let Err(e) = res {
                     error!("handle_message error: {e:?}");
+                }
+                // TODO: maybe directly send without this wrapper!
+                loop {
+                    info!("check for new thread message: try_recv");
+                    match ctx.from_thread_receiver.try_recv() {
+                        Ok(stable_message) => {
+                            ctx.write_dap_messages(transport, &[stable_message])?;
+                        },
+                        Err(_) => {
+                            info!("no new message");
+                            break;
+                        }
+                    }
                 }
             }
             Err(e) => {
