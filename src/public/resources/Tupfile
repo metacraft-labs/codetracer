@@ -1,5 +1,6 @@
 : foreach *.* |> !tup_preserve |>
 : foreach welcome/*.svg |> !tup_preserve |> %f
+: foreach agent/*.svg |> !tup_preserve |> %f
 : foreach jstree/*.png |> !tup_preserve |> %f
 : foreach jstree/*.gif |> !tup_preserve |> %f
 
