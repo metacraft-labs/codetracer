@@ -11,16 +11,16 @@
 // dead code usage/add only
 // specific allows
 // #![deny(dead_code)]
-use crate::paths::CODETRACER_PATHS;
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use log::{error, info};
-use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::{error::Error, panic};
+use std::fs::{create_dir_all, remove_file, File};
+use std::os::unix::fs::symlink;
 
 mod calltrace;
 mod core;
@@ -48,7 +48,7 @@ mod tracepoint_interpreter;
 mod transport;
 mod value;
 
-use crate::paths::run_dir_for;
+use crate::paths::{run_dir_for, CODETRACER_PATHS};
 
 /// a custom backend for ruby (maybe others) support
 /// based on db-like approach based on trace instead of rr/gdb
@@ -124,6 +124,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
+    
+    let run_id = std::process::id() as usize;
+
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+    let run_dir = run_dir_for(&tmp_path, run_id)?;
+    // remove_dir_all(&run_dir)?;
+    create_dir_all(&run_dir)?;
+    let last_link = tmp_path.join("last");
+    println!("last {:?}", last_link.display());
+    let _ = remove_file(&last_link); // it's ok if it doesn't exist, ignore other errors
+    if let Err(e) = symlink(run_dir, &last_link) {
+        // ignore if it can't happen: it's just a help for debugging
+        println!("error symlink {e:?}");
+    }
 
     match cli.cmd {
         Commands::DapServer { socket_path, stdio } => {
