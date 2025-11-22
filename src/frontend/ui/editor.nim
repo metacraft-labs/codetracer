@@ -1289,8 +1289,6 @@ proc makeDiffViewZones(self: EditorViewComponent) =
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
 
-  console.log("DOING SHIT")
-
   if tabInfo.isNil:
     return buildHtml(
       tdiv()

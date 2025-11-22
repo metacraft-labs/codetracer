@@ -515,6 +515,7 @@ impl Handler {
                 return Err(message.into());
             }
         };
+        info!("  flow ready");
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
         self.send_dap(&raw_event)?;
 

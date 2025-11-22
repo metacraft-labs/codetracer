@@ -204,7 +204,10 @@ impl<'a> CallFlowPreloader<'a> {
                 };
                 flow_update
             }
-            Err(e) => FlowUpdate::error(&format!("{:?}", e)),
+            Err(e) => {
+                error!("flow error: {e:?}");
+                FlowUpdate::error(&format!("{:?}", e))
+            },
         }
     }
 
@@ -313,27 +316,44 @@ impl<'a> CallFlowPreloader<'a> {
         Ok((step_id, progressing))
     }
 
+    // returns new step_id/rr ticks(?) and `progressing`(if false, the flow loop should stop)
+    //   for RR: rr ticks might stay the same, but we still return progressing `true` unless we have an error for 
+    //      stepping/location
     fn move_to_next_step(&mut self, from_step_id: StepId, replay: &mut dyn Replay) -> (StepId, bool) {
+        info!("  move_to_next_step:");
         match self.mode {
             FlowMode::Call => {
                 // let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
-                // db.next_step_id_relative_to(from_step_id, true, step_to_different_line),
-                replay.step(Action::Next, true).unwrap(); // TODO: handle error
+                if let Err(e) = replay.step(Action::Next, true) {
+                    // this might not really be a problem: we just need to stop the flow after this:
+                    warn!("    `next` error: {e:}");
+                    return (from_step_id, false); // assume we will break the flow loop if `progressing` is false
+                }
+
                 let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                // TODO: handle error: for DbReplay; actually not calling failing functions; but this might be unreliable
-                // and for RR they can also surely fail
-                let location = replay.load_location(&mut expr_loader).unwrap();
-                let new_step_id = StepId(location.rr_ticks.0);
-                let progressing = if self.trace_kind == TraceKind::DB {
-                    new_step_id != from_step_id
-                } else {
-                    // for now hard to detect; assume true
-                    //   we tried `new_step_id != from_step_id;`, but this is incorrect:
-                    //   often rr ticks can be the same for many different lines.. maybe detect signal or
-                    //   hope that difference in call key/other aspects will be enough!
-                    true
-                };
-                (new_step_id, progressing)
+                // for DbReplay actually those replay methods shouldn't fail; 
+                //   but this might be unreliable/change in the future
+                //   and for RR they can also surely fail
+                match replay.load_location(&mut expr_loader) {
+                    Ok(location) => {
+                        let new_step_id = StepId(location.rr_ticks.0);
+                        let progressing = if self.trace_kind == TraceKind::DB {
+                            new_step_id != from_step_id
+                        } else {
+                            // for now hard to detect; assume true
+                            //   we tried `new_step_id != from_step_id;`, but this is incorrect:
+                            //   often rr ticks can be the same for many different lines.. maybe detect signal or
+                            //   hope that difference in call key/other aspects will be enough!
+                            true
+                        };
+                        (new_step_id, progressing)
+                    }
+                    Err(e) => {
+                        warn!("    `load_location` error: {e:}");
+                        // assume we will break the flow loop if `progressing` is false
+                        (from_step_id, false)
+                    }
+                }
             }
             FlowMode::Diff => self.next_diff_flow_step(from_step_id, false, replay),
         }
