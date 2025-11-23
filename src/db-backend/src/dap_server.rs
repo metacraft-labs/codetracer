@@ -35,27 +35,27 @@ use crate::transport::{DapResult, WorkerTransport};
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
-#[cfg(feature = "io-transport")]
-pub fn make_io_transport() -> Result<(BufReader<std::io::StdinLock<'static>>, std::io::Stdout), Box<dyn Error>> {
-    use std::io::BufReader;
+// #[cfg(feature = "io-transport")]
+// pub fn make_io_transport() -> Result<(BufReader<std::io::StdinLock<'static>>, std::io::Stdout), Box<dyn Error>> {
+//     use std::io::BufReader;
 
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let reader = BufReader::new(stdin.lock());
-    Ok((reader, stdout))
-}
+//     let stdin = std::io::stdin();
+//     let stdout = std::io::stdout();
+//     let reader = BufReader::new(stdin.lock());
+//     Ok((reader, stdout))
+// }
 
-#[cfg(feature = "io-transport")]
-pub fn make_socket_transport(
-    socket_path: &PathBuf,
-) -> Result<(std::io::BufReader<UnixStream>, UnixStream), Box<dyn Error>> {
-    use std::io::BufReader;
+// #[cfg(feature = "io-transport")]
+// pub fn make_socket_transport(
+//     socket_path: &PathBuf,
+// ) -> Result<(std::io::BufReader<UnixStream>, UnixStream), Box<dyn Error>> {
+//     use std::io::BufReader;
 
-    let stream = UnixStream::connect(socket_path)?;
-    let reader = BufReader::new(stream.try_clone()?);
-    let writer = stream;
-    Ok((reader, writer))
-}
+//     let stream = UnixStream::connect(socket_path)?;
+//     let reader = BufReader::new(stream.try_clone()?);
+//     let writer = stream;
+//     Ok((reader, writer))
+// }
 
 #[cfg(feature = "browser-transport")]
 pub fn make_transport() -> DapResult<WorkerTransport> {
@@ -72,20 +72,79 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
 
 #[cfg(feature = "io-transport")]
 pub fn run_stdio() -> Result<(), Box<dyn Error>> {
+    use std::io::BufReader;
+
     // let mut transport = make_io_transport().unwrap();
 
-    let (mut reader, mut writer) = make_io_transport().unwrap();
+    let (receiving_sender, receiving_receiver) = mpsc::channel();
+    let receiving_thread = thread::spawn(move || -> Result<(), String> {
+        info!("receiving thread");
+        let stdin = std::io::stdin();
+        let mut reader = BufReader::new(stdin.lock());
+    
+        loop {
+            match dap::read_dap_message_from_reader(&mut reader) {
+                Ok(msg) => {
+                    receiving_sender.send(msg).map_err(|e| {
+                        error!("send error: {e:?}");
+                        format!("send error: {e:?}")
+                    })?;
+                }
+                Err(e) => {
+                    error!("error from read_dap_message_from_reader: {e:?}");
+                    break;
+                }
+            }
+        }
+        Ok(())
+    });
 
-    handle_client(&mut reader, &mut writer)
+    let mut writer = std::io::stdout();
+
+    handle_client(receiving_receiver, true, &PathBuf::from(""), &receiving_thread)
 }
 
 #[cfg(feature = "io-transport")]
 pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    // let mut transport = make_io_transport().unwrap();
+    use std::io::BufReader;
 
-    let (mut reader, mut writer) = make_socket_transport(socket_path)?;
+    let (receiving_sender, receiving_receiver) = mpsc::channel();
 
-    handle_client(&mut reader, &mut writer)
+    let socket_path_owned = socket_path.clone();
+
+    let stream = UnixStream::connect(&socket_path_owned)?;
+    let mut writer = stream.try_clone()?;
+    info!("stream ok out of thread");
+
+    let receiving_thread = thread::spawn(move || -> Result<(), String> {
+        info!("receiving thread");
+        // let stream = UnixStream::connect(&socket_path_owned).map_err(|e| {
+        //     error!("can't connect socket for {}: {:?}", socket_path_owned.display(), e);
+        //     format!("can't connect socket for {}: {:?}", socket_path_owned.display(), e)
+        // })?;
+        let mut reader = BufReader::new(stream.try_clone().map_err(|e| {
+            error!("buf reader try_clone error: {e:?}");
+            format!("buf reader try_clone error: {e:?}")
+        })?);
+
+        loop {
+            match dap::read_dap_message_from_reader(&mut reader) {
+                Ok(msg) => {
+                    receiving_sender.send(msg).map_err(|e| {
+                        error!("send error: {e:?}");
+                        format!("send error: {e:?}")
+                    })?;
+                }
+                Err(e) => {
+                    error!("error from read_dap_message_from_reader: {e:?}");
+                    break;
+                }
+            }
+        }
+        Ok(())
+    });
+
+    handle_client(receiving_receiver, false, socket_path, &receiving_thread)
 }
 
 fn launch(
@@ -333,24 +392,25 @@ impl Default for Ctx {
 }
 
 impl Ctx {
-    fn write_dap_messages<T: DapTransport>(
+    fn write_dap_messages( // <T: DapTransport>(
         &mut self,
-        transport: &mut T,
+        sender: Sender<DapMessage>, // transport: &mut T,
         messages: &[DapMessage],
     ) -> Result<(), Box<dyn Error>> {
         for message in messages {
             let message_with_seq = patch_message_seq(&message, self.seq);
             self.seq += 1;
-            transport.send(&message_with_seq)?;
+            sender.send(message_with_seq)?;
         }
         Ok(())
     }
 
 }
 
-pub fn handle_message<T: DapTransport>(
+pub fn handle_message( // <T: DapTransport>(
     msg: &DapMessage,
-    transport: &mut T,
+    // transport: &mut T,
+    sender: Sender<DapMessage>,
     ctx: &mut Ctx,
 ) -> Result<(), Box<dyn Error>> {
     info!("Handling message: {:?}", msg);
@@ -379,7 +439,7 @@ pub fn handle_message<T: DapTransport>(
                 message: None,
                 body: serde_json::to_value(capabilities)?,
             });
-            ctx.write_dap_messages(transport, &[resp])?;
+            ctx.write_dap_messages(sender.clone(), &[resp])?;
 
             let event = DapMessage::Event(Event {
                 base: ProtocolMessage {
@@ -389,7 +449,7 @@ pub fn handle_message<T: DapTransport>(
                 event: "initialized".to_string(),
                 body: json!({}),
             });
-            ctx.write_dap_messages(transport, &[event])?;
+            ctx.write_dap_messages(sender, &[event])?;
         }
         DapMessage::Request(req) if req.command == "launch" => {
             ctx.received_launch = true;
@@ -482,7 +542,7 @@ pub fn handle_message<T: DapTransport>(
                 body: json!({}),
             });
             ctx.seq += 1;
-            transport.send(&resp)?;
+            sender.send(resp)?;
         }
         DapMessage::Request(req) if req.command == "configurationDone" => {
             // TODO: run to entry/continue here, after setting the `launch` field
@@ -499,7 +559,7 @@ pub fn handle_message<T: DapTransport>(
                 body: json!({}),
             });
             ctx.seq += 1;
-            transport.send(&resp)?;
+            sender.send(resp)?;
 
             // TODO: log this when logging logic is properly abstracted
             // info!(
@@ -538,7 +598,7 @@ pub fn handle_message<T: DapTransport>(
                 message: None,
                 body: serde_json::to_value(response_body)?,
             });
-            ctx.write_dap_messages(transport, &[response])?;
+            ctx.write_dap_messages(sender, &[response])?;
 
             // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
             // > and then to shut down itself (the debug adapter).
@@ -571,42 +631,69 @@ pub fn handle_message<T: DapTransport>(
 }
 
 #[cfg(feature = "io-transport")]
-fn handle_client<R: std::io::BufRead, T: DapTransport>(
-    reader: &mut R,
-    transport: &mut T,
+fn handle_client( //  <R: std::io::BufRead,
+    // reader: &mut R,
+    receiver: Receiver<DapMessage>,
+    is_stdio: bool,
+    socket_path: &PathBuf,
+    // transport: &mut T,
+    _receiving_thread: &thread::JoinHandle<Result<(), String>>,
 ) -> Result<(), Box<dyn Error>> {
     use log::error;
 
     let mut ctx = Ctx::default();
 
-    // let receiving_thread = thread::spawn
-    loop {
-        match dap::read_dap_message_from_reader(reader) {
-            Ok(msg) => {
-                let res = handle_message(&msg, transport, &mut ctx);
-                if let Err(e) = res {
-                    error!("handle_message error: {e:?}");
-                }
-                // TODO: maybe directly send without this wrapper!
-                loop {
-                    info!("check for new thread message: try_recv");
-                    match ctx.from_thread_receiver.try_recv() {
-                        Ok(stable_message) => {
-                            ctx.write_dap_messages(transport, &[stable_message])?;
-                        },
-                        Err(_) => {
-                            info!("no new message");
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                error!("error from read_dap_message_from_reader: {e:?}");
-                break;
-            }
+    // TODO: start stable/other threads
+    
+    // TODO: problem, how to share writer socket stream
+    //   recereating might lead to connection error(:?)
+    // if we want easy support
+    //   we can also start both writer and 
+    // nvm:
+    //   we probably can start both threads from the same object..
+    //   maybe we just need for now to be careful with mut/add `Send` correctly
+    let (sending_sender, sending_receiver) = mpsc::channel();
+    let socket_path_owned = socket_path.clone();
+    let _sending_thread = thread::spawn(move || -> Result<(), String>{
+        let mut send_seq = 0;
+        let mut transport: Box<dyn DapTransport> = if is_stdio {
+            Box::new(std::io::stdout())
+        } else {
+            Box::new(UnixStream::connect(&socket_path_owner).expect("can open socket"))
+        };
+        loop {
+            let msg: DapMessage = sending_receiver.recv().map_err(|e| {
+                error!("sending thread: recv error: {e:?}");
+                format!("sending thread: recv error: {e:?}")
+            })?;
+            transport.send(&msg).map_err(|e| {
+                error!("transport send error: {e:}");
+                format!("transport send error: {e:}")
+            })?;
         }
+    });
+
+    loop {
+        info!("handle_client thread: recv");
+        let msg = receiver.recv()?;
+        let res = handle_message(&msg, sending_sender.clone(), &mut ctx);
+        if let Err(e) = res {
+            error!("handle_message error: {e:?}");
+        }
+        // TODO: maybe directly send without this wrapper!
+        // loop {
+        //     info!("check for new thread message: try_recv");
+        //     match ctx.from_thread_receiver.try_recv() {
+        //         Ok(stable_message) => {
+        //             ctx.write_dap_messages(transport, &[stable_message])?;
+        //         },
+        //         Err(_) => {
+        //             info!("no new message");
+        //             break;
+        //         }
+        //     }
+        // }
     }
 
-    Ok(())
+    // Ok(())
 }
