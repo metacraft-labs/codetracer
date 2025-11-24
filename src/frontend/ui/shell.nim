@@ -114,8 +114,6 @@ proc createShell*(self: ShellComponent) =
       cols: 60,
       theme: self.themes["default_dark"],
 
-      scrollSensitivity: 0,
-      fastScrollSensitivity: 0,
       scrollback: 0,
       scrollOnUserInput: false
     }
