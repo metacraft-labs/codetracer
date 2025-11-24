@@ -746,6 +746,9 @@ type
 
   AgentActivityComponent* = ref object of Component
     logData*: seq[LogEntry]
+    shell*:   ShellComponent
+    inputField*: dom.Node
+    commandPalette*: CommandPaletteComponent
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
@@ -1248,7 +1251,7 @@ type
     inputValue*: cstring
     inputPlaceholder*: cstring
     inAgentMode*: bool
-    shell*: ShellComponent
+    agent*: AgentActivityComponent
 
   NoSourceComponent* = ref object of Component
     message*: cstring
