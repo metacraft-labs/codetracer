@@ -683,10 +683,13 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
   var tabInfo = self.tabInfo
 
+  if ev.isNil or ev.target.isNil or ev.target.position.isNil:
+    return contextMenu
+
   var line = cast[int](ev.target.position.lineNumber)
   let path = tabInfo.name
 
-  if ev.target.detail.afterLineNumber.isNil:
+  if ev.target.detail.isNil or ev.target.detail.afterLineNumber.isNil:
     # Source Line Jump Menu Item
     let sourceLine = ContextMenuItem(
       name: "Jump to line",
@@ -1210,7 +1213,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
           renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
           lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
           lineDecorationsWidth: 20,
-          contextmenu: false,
+          contextmenu: true,
           mouseWheelScrollSensitivity: 0,
           fastScrollSensitivity: 0,
           scrollBeyondLastLine: false,
@@ -1366,7 +1369,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
             lineNumbers: proc(line: int): cstring = self.editorLineNumber(path, line),
             lineDecorationsWidth: 20,
             scrollBeyondLastColumn: 0,
-            contextmenu: false,
+            contextmenu: true,
             scrollbar: js{
               horizontalScrollbarSize: 14,
               horizontalSliderSize: 8,
@@ -1448,9 +1451,18 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         self.data.ui.activeFocus = self)
 
       tabInfo.monacoEditor.onContextMenu(proc(ev: js) =
+        if ev.isNil or ev.event.isNil:
+          return
+        let evt = ev.event
+        if not evt.preventDefault.isNil:
+          evt.preventDefault()
+        if not evt.stopPropagation.isNil:
+          evt.stopPropagation()
         let contextMenu = createContextMenuItems(self, ev)
-        if contextMenu != @[]:
-          showContextMenu(contextMenu, cast[int](ev.event.posx), cast[int](ev.event.posy)))
+        if contextMenu.len > 0:
+          let x = if not evt.clientX.isNil: cast[int](evt.clientX) else: cast[int](evt.posx)
+          let y = if not evt.clientY.isNil: cast[int](evt.clientY) else: cast[int](evt.posy)
+          showContextMenu(contextMenu, x, y))
 
       tabInfo.monacoEditor.onMouseMove(proc(event: js) =
         let position = event.target.position
@@ -1486,17 +1498,13 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
             self.lineActionClick(tabInfo, ev.target.toJs)
       )
 
-      document.addEventListener(cstring"mouseup", proc(ev: Event) =
-        ev.preventDefault()
-        ev.stopPropagation()
-      )
-
       document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
-        ev.preventDefault()
-        ev.stopPropagation()
         for element in cast[seq[cstring]](ev.toJs.target.classList):
           if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
+            ev.preventDefault()
+            ev.stopPropagation()
             self.lineActionContextMenu(tabInfo, ev.target.toJs)
+            return
       )
     )
 

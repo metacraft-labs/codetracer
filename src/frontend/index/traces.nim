@@ -336,11 +336,12 @@ proc onNewRecord*(sender: js, response: jsobject(args=seq[cstring], options=JsOb
     response.options)
 
   if processResult.isOk:
+    infoPrint "index: record process started with pid " & $processResult.value.pid
     data.recordProcess = processResult.value
     let error = await waitProcessResult(processResult.value)
 
     if error.isNil:
-      debugPrint "recorded successfully"
+      infoPrint "index: recorded successfully"
       mainWindow.webContents.send "CODETRACER::successful-record"
       await onLoadTraceByRecordProcessId(nil, processResult.value.pid)
     else:
