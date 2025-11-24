@@ -3,7 +3,7 @@
 import
   std / [
     jsffi, strformat, strutils, sequtils, sugar,
-    async, jsconsole
+    async, jsconsole, os
   ],
   # third party
   karax, karaxdsl, kdom, vdom, results,
@@ -1286,7 +1286,22 @@ proc reRecordCurrentTrace*(data: Data) =
     data.viewsApi.errorMessage(cstring"Current trace does not define a program to run.")
     return
 
-  var args: seq[cstring] = @[data.trace.program]
+  var programArg = data.trace.program
+  if data.trace.lang == LangNoir and data.trace.workdir.len > 0:
+    # Noir metadata stores the project name; re-record requires the project root.
+    programArg = data.trace.workdir
+
+  # Some recorders (e.g. Noir) persist only the project name in metadata.
+  # When re-recording, prefer an absolute path under the original workdir so
+  # language detection can find project markers like Nargo.toml.
+  let workdirStr = $data.trace.workdir
+  let programStr = $programArg
+  if workdirStr.len > 0 and programStr.len > 0:
+    if not programStr.startsWith("/") and not programStr.contains("/"):
+      let candidate = workdirStr / programStr
+      programArg = candidate.cstring
+
+  var args: seq[cstring] = @[programArg]
   for arg in data.trace.args:
     args.add(arg)
 
