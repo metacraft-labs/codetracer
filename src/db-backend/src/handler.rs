@@ -223,7 +223,7 @@ impl Handler {
     // will be sent after completion of query
     fn prepare_stopped_event(&mut self, is_main: bool) -> Result<DapMessage, Box<dyn Error>> {
         let reason = if is_main { "entry" } else { "step" };
-        info!("generate stopped event");
+        // info!("generate stopped event");
         let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
         Ok(raw_event)
@@ -327,7 +327,9 @@ impl Handler {
         let complete_move_event = self.prepare_complete_move_event(&move_state)?;
         let output_events = self.prepare_output_events()?;
 
+        info!("send stopped_event {:?}", stopped_event);
         sender.send(stopped_event)?;
+        info!("send complete move event {:?}", complete_move_event);
         sender.send(complete_move_event)?;
         for output_event in output_events {
             sender.send(output_event)?;
@@ -346,6 +348,7 @@ impl Handler {
             )?;
         }
 
+        info!("ready complete move");
         Ok(())
     }
 
@@ -1652,6 +1655,7 @@ impl Handler {
     ) -> Result<(), Box<dyn Error>> {
         let notification = Notification::new(kind, msg, is_operation_status);
         let raw_event = self.dap_client.notification_event(notification)?;
+        info!("send notification {:?}", raw_event);
         sender.send(raw_event)?;
         Ok(())
     }
