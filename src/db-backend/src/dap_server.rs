@@ -3,14 +3,12 @@ use serde_json::json;
 use std::error::Error;
 use std::fmt;
 #[cfg(feature = "io-transport")]
-use std::io::BufReader;
-#[cfg(feature = "io-transport")]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread;
 
-use log::{info, warn, error};
+use log::{info, warn, error, debug};
 
 use crate::dap::{self, Capabilities, DapMessage, Event, ProtocolMessage, Response};
 use crate::dap_types;
@@ -77,12 +75,14 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     // let mut transport = make_io_transport().unwrap();
 
     let (receiving_sender, receiving_receiver) = mpsc::channel();
-    let receiving_thread = thread::spawn(move || -> Result<(), String> {
+    let builder = thread::Builder::new().name("receiving".to_string());
+    let receiving_thread =  builder.spawn(move || -> Result<(), String> {
         info!("receiving thread");
         let stdin = std::io::stdin();
         let mut reader = BufReader::new(stdin.lock());
     
         loop {
+            info!("waiting for new stdio DAP message");
             match dap::read_dap_message_from_reader(&mut reader) {
                 Ok(msg) => {
                     receiving_sender.send(msg).map_err(|e| {
@@ -97,11 +97,12 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
             }
         }
         Ok(())
-    });
+    })?;
 
-    let mut writer = std::io::stdout();
+    // let mut writer = std::io::stdout();
 
-    handle_client(receiving_receiver, true, &PathBuf::from(""), &receiving_thread)
+    let stream = UnixStream::connect("/tmp/test")?; // TODO: not correct, just testing
+    handle_client(receiving_receiver, true, &receiving_thread, stream)
 }
 
 #[cfg(feature = "io-transport")]
@@ -113,10 +114,11 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let socket_path_owned = socket_path.clone();
 
     let stream = UnixStream::connect(&socket_path_owned)?;
-    let mut writer = stream.try_clone()?;
+    let writer = stream.try_clone()?;
     info!("stream ok out of thread");
 
-    let receiving_thread = thread::spawn(move || -> Result<(), String> {
+    let builder = thread::Builder::new().name("receiving".to_string());
+    let receiving_thread = builder.spawn(move || -> Result<(), String> {
         info!("receiving thread");
         // let stream = UnixStream::connect(&socket_path_owned).map_err(|e| {
         //     error!("can't connect socket for {}: {:?}", socket_path_owned.display(), e);
@@ -128,6 +130,7 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
         })?);
 
         loop {
+            info!("waiting for new socket DAP message");
             match dap::read_dap_message_from_reader(&mut reader) {
                 Ok(msg) => {
                     receiving_sender.send(msg).map_err(|e| {
@@ -142,9 +145,9 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
             }
         }
         Ok(())
-    });
+    })?;
 
-    handle_client(receiving_receiver, false, socket_path, &receiving_thread)
+    handle_client(receiving_receiver, false, &receiving_thread, writer)
 }
 
 fn launch(
@@ -153,6 +156,7 @@ fn launch(
     raw_diff_index: Option<String>,
     ct_rr_worker_exe: &Path,
     seq: i64,
+    sender: Sender<DapMessage>,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -175,10 +179,10 @@ fn launch(
         let mut handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         handler.dap_client.seq = seq;
         handler.raw_diff_index = raw_diff_index;
-        handler.run_to_entry(dap::Request::default())?;
+        handler.run_to_entry(dap::Request::default(), sender)?;
         Ok(handler)
     } else {
-        warn!("problem with reading metadata or path trace files: try rr?");
+        info!("can't read db metadata or path trace files: try to read as rr trace");
         let path = trace_folder.join("rr");
         if path.exists() {
             let db = Db::new(&PathBuf::from(""));
@@ -189,7 +193,7 @@ fn launch(
             let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
             handler.dap_client.seq = seq;
             handler.raw_diff_index = raw_diff_index;
-            handler.run_to_entry(dap::Request::default())?;
+            handler.run_to_entry(dap::Request::default(), sender)?;
             Ok(handler)
         } else {
             Err("problem with reading metadata or path trace files".into())
@@ -197,20 +201,20 @@ fn launch(
     }
 }
 
-fn write_dap_messages_from_thread(
-    sender: Sender<DapMessage>,
-    handler: &mut Handler,
-    seq: &mut i64,
-) -> Result<(), Box<dyn Error>> {
-    for message in &handler.resulting_dap_messages {
-        sender.send(message.clone())?;
-    }
+// fn write_dap_messages_from_thread(
+//     sender: Sender<DapMessage>,
+//     handler: &mut Handler,
+//     seq: &mut i64,
+// ) -> Result<(), Box<dyn Error>> {
+//     for message in &handler.resulting_dap_messages {
+//         sender.send(message.clone())?;
+//     }
 
-    handler.reset_dap();
-    *seq = handler.dap_client.seq;
-    info!("messages sent from thread");
-    Ok(())
-}
+//     handler.reset_dap();
+//     *seq = handler.dap_client.seq;
+//     info!("messages sent from thread");
+//     Ok(())
+// }
 
 fn patch_message_seq(message: &DapMessage, seq: i64) -> DapMessage {
     match message {
@@ -277,48 +281,55 @@ fn handle_request(
 ) -> Result<(), Box<dyn Error>> {
     handler.dap_client.seq = *seq;
     match req.command.as_str() {
-        "scopes" => handler.scopes(req.clone(), req.load_args::<dap_types::ScopesArguments>()?)?,
-        "threads" => handler.threads(req.clone())?,
-        "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap_types::StackTraceArguments>()?)?,
-        "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?)?,
-        "restart" => handler.run_to_entry(req.clone())?,
+        "scopes" => handler.scopes(req.clone(), req.load_args::<dap_types::ScopesArguments>()?, sender.clone())?,
+        "threads" => handler.threads(req.clone(), sender.clone())?,
+        "stackTrace" => handler.stack_trace(req.clone(), req.load_args::<dap_types::StackTraceArguments>()?, sender.clone())?,
+        "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?, sender.clone())?,
+        "restart" => handler.run_to_entry(req.clone(), sender.clone())?,
         "setBreakpoints" => {
-            handler.set_breakpoints(req.clone(), req.load_args::<dap_types::SetBreakpointsArguments>()?)?
+            handler.set_breakpoints(req.clone(), req.load_args::<dap_types::SetBreakpointsArguments>()?, sender.clone())?
         }
-        "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?)?,
-        "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
-        "ct/event-load" => handler.event_load(req.clone())?,
-        "ct/load-terminal" => handler.load_terminal(req.clone())?,
+        "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?, sender.clone())?,
+        "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?, sender.clone())?,
+        "ct/event-load" => handler.event_load(req.clone(), sender.clone())?,
+        "ct/load-terminal" => handler.load_terminal(req.clone(), sender.clone())?,
         "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
-        "ct/calltrace-jump" => handler.calltrace_jump(req.clone(), req.load_args::<Location>()?)?,
-        "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
-        "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?)?,
-        "ct/history-jump" => handler.history_jump(req.clone(), req.load_args::<Location>()?)?,
-        "ct/search-calltrace" => handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?)?,
-        "ct/source-line-jump" => handler.source_line_jump(req.clone(), req.load_args::<SourceLocation>()?)?,
-        "ct/source-call-jump" => handler.source_call_jump(req.clone(), req.load_args::<SourceCallJumpTarget>()?)?,
-        "ct/local-step-jump" => handler.local_step_jump(req.clone(), req.load_args::<LocalStepJump>()?)?,
-        "ct/tracepoint-toggle" => handler.tracepoint_toggle(req.clone(), req.load_args::<TracepointId>()?)?,
-        "ct/tracepoint-delete" => handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?)?,
-        "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?)?,
-        "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?)?,
-        "ct/run-to-entry" => handler.run_to_entry(req.clone())?,
-        "ct/run-tracepoints" => handler.run_tracepoints(req.clone(), req.load_args::<RunTracepointsArg>()?)?,
-        "ct/setup-trace-session" => handler.setup_trace_session(req.clone(), req.load_args::<RunTracepointsArg>()?)?,
+        "ct/calltrace-jump" => handler.calltrace_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
+        "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
+        "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?, sender.clone())?,
+        "ct/history-jump" => handler.history_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
+        "ct/search-calltrace" => handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?, sender.clone())?,
+        "ct/source-line-jump" => handler.source_line_jump(req.clone(), req.load_args::<SourceLocation>()?, sender.clone())?,
+        "ct/source-call-jump" => handler.source_call_jump(req.clone(), req.load_args::<SourceCallJumpTarget>()?, sender.clone())?,
+        "ct/local-step-jump" => handler.local_step_jump(req.clone(), req.load_args::<LocalStepJump>()?, sender.clone())?,
+        "ct/tracepoint-toggle" => handler.tracepoint_toggle(req.clone(), req.load_args::<TracepointId>()?, sender.clone())?,
+        "ct/tracepoint-delete" => handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?, sender.clone())?,
+        "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
+        "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?, sender.clone())?,
+        "ct/run-to-entry" => handler.run_to_entry(req.clone(), sender.clone())?,
+        "ct/run-tracepoints" => handler.run_tracepoints(req.clone(), req.load_args::<RunTracepointsArg>()?, sender.clone())?,
+        "ct/setup-trace-session" => handler.setup_trace_session(req.clone(), req.load_args::<RunTracepointsArg>()?, sender.clone())?,
         "ct/load-calltrace-section" => {
             // TODO: log this when logging logic is properly abstracted
             // info!("load_calltrace_section");
-            handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?)?
+            
+            // it's ok for this to fail with serialization null errors for example
+            //   when there are `null` fields in `location`. this can happen when
+            //   there is no high level file open/debuginfo for the current location
+            //   in this case, the code calling `handle_request` should handle the error
+            //   and usually for the client to just not receive a new callstack/calltrace
+            //   (maybe to receive a clear error in the future?)
+            handler.load_calltrace_section(req.clone(), req.load_args::<CalltraceLoadArgs>()?, sender.clone())?
         }
-        "ct/load-asm-function" => handler.load_asm_function(req.clone(), req.load_args::<FunctionLocation>()?)?,
+        "ct/load-asm-function" => handler.load_asm_function(req.clone(), req.load_args::<FunctionLocation>()?, sender.clone())?,
         _ => {
             match dap_command_to_step_action(&req.command) {
                 Ok((action, is_reverse)) => {
                     // for now ignoring arguments: they contain threadId, but
                     // we assume we have a single thread here for now
                     // we also don't use the other args currently
-                    handler.step(req, StepArg::new(action, is_reverse))?;
+                    handler.step(req, StepArg::new(action, is_reverse), sender.clone())?;
                 }
                 Err(_e) => {
                     // TODO: eventually support? or if this is the last  branch
@@ -330,7 +341,8 @@ fn handle_request(
             }
         }
     }
-    write_dap_messages_from_thread(sender, handler, seq)
+    Ok(())
+    // write_dap_messages_from_thread(sender, handler, seq)
 }
 
 pub struct Ctx {
@@ -413,9 +425,11 @@ pub fn handle_message( // <T: DapTransport>(
     sender: Sender<DapMessage>,
     ctx: &mut Ctx,
 ) -> Result<(), Box<dyn Error>> {
-    info!("Handling message: {:?}", msg);
+    debug!("Handling message: {:?}", msg);
     if let DapMessage::Request(req) = msg {
-        info!("  request {}", req.command);
+        info!("handle request {}", req.command);
+    } else {
+        warn!("handle other kind of message: unexpected; expected a request, but handles: {:?}", msg);
     }
 
     match msg {
@@ -476,9 +490,11 @@ pub fn handle_message( // <T: DapTransport>(
                     let launch_raw_diff_index = ctx.launch_raw_diff_index.clone();
                     let launch_trace_file = ctx.launch_trace_file.clone();
                     let ct_rr_worker_exe = ctx.ct_rr_worker_exe.clone();
+                    let sender_for_thread = sender.clone();
 
                     info!("create stable thread");
-                    let _thread_handle = thread::spawn(move || -> Result<(), String> {
+                    let builder = thread::Builder::new().name("stable".to_string());
+                    let _thread_handle = builder.spawn(move || -> Result<(), String> {
                         let mut seq = 0;
                         let mut handler = launch(
                             &launch_trace_folder,
@@ -486,40 +502,43 @@ pub fn handle_message( // <T: DapTransport>(
                             launch_raw_diff_index.clone(),
                             &ct_rr_worker_exe,
                             seq,
+                            sender_for_thread.clone(),
                         ).map_err(|e| {
                             error!("launch error: {e:?}");
                             format!("launch error: {e:?}")
                         })?;
 
-                        info!("ok: launch ok in stable thread");
-                        write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq)
-                            .map_err(|e| {
-                                error!("write dap message error: {e:?}");
-                                format!("write dap message error: {e:?}")
-                            })?;
+                        info!("ok: launched ok in stable thread");
+                        // write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq)
+                        //     .map_err(|e| {
+                        //         error!("write dap message error: {e:?}");
+                        //         format!("write dap message error: {e:?}")
+                        //     })?;
 
                         loop {
+                            info!("waiting for new message from DAP server");
                             let request = stable_receiver.recv().map_err(|e| {
                                 error!("stable thread recv error: {e:?}");
                                 format!("stable thread recv error: {e:?}")
                             })?;
 
-                            info!("stable thread recv");
+                            info!("  stable thread: new message received");
 
+                            info!("  try to handle {:?}", request);
                             let res = handle_request(&mut handler, request, &mut seq, stable_thread_sender.clone());
                             if let Err(e) = res {
-                                warn!("handle_request error in thread: {e:?}");
+                                warn!("  handle_request error in thread: {e:?}");
                                 // continue with other request; trying to be more robust
                                 // assuming it's for individual requests to fail
                                 //   TODO: is it possible for some to leave bad state ?
                             }
-                            write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq).map_err(|e| {
-                                error!("write dap message error: {e:?}");
-                                format!("write dap message error: {e:?}")
-                            })?;
+                            // write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq).map_err(|e| {
+                            //     error!("  write dap message error: {e:?}");
+                            //     format!("write dap message error: {e:?}")
+                            // })?;
                         }
                         // Ok(())
-                    });
+                    })?;
 
                     ctx.stable_active = true;
                 }
@@ -635,9 +654,9 @@ fn handle_client( //  <R: std::io::BufRead,
     // reader: &mut R,
     receiver: Receiver<DapMessage>,
     is_stdio: bool,
-    socket_path: &PathBuf,
     // transport: &mut T,
     _receiving_thread: &thread::JoinHandle<Result<(), String>>,
+    stream: UnixStream,
 ) -> Result<(), Box<dyn Error>> {
     use log::error;
 
@@ -653,46 +672,38 @@ fn handle_client( //  <R: std::io::BufRead,
     //   we probably can start both threads from the same object..
     //   maybe we just need for now to be careful with mut/add `Send` correctly
     let (sending_sender, sending_receiver) = mpsc::channel();
-    let socket_path_owned = socket_path.clone();
-    let _sending_thread = thread::spawn(move || -> Result<(), String>{
-        let mut send_seq = 0;
+    // let socket_path_owned = socket_path.clone();
+
+    let builder = thread::Builder::new().name("sending".to_string());
+    let _sending_thread = builder.spawn(move || -> Result<(), String>{
+        let mut send_seq = 0i64;
         let mut transport: Box<dyn DapTransport> = if is_stdio {
             Box::new(std::io::stdout())
         } else {
-            Box::new(UnixStream::connect(&socket_path_owner).expect("can open socket"))
+            Box::new(stream)
         };
         loop {
+            info!("wait for next message from dap server/task threads");
             let msg: DapMessage = sending_receiver.recv().map_err(|e| {
                 error!("sending thread: recv error: {e:?}");
                 format!("sending thread: recv error: {e:?}")
             })?;
-            transport.send(&msg).map_err(|e| {
+            let msg_with_seq = patch_message_seq(&msg, send_seq);
+            send_seq += 1;
+            transport.send(&msg_with_seq).map_err(|e| {
                 error!("transport send error: {e:}");
                 format!("transport send error: {e:}")
             })?;
         }
-    });
+    })?;
 
     loop {
-        info!("handle_client thread: recv");
+        info!("waiting for new message from receiver");
         let msg = receiver.recv()?;
         let res = handle_message(&msg, sending_sender.clone(), &mut ctx);
         if let Err(e) = res {
             error!("handle_message error: {e:?}");
         }
-        // TODO: maybe directly send without this wrapper!
-        // loop {
-        //     info!("check for new thread message: try_recv");
-        //     match ctx.from_thread_receiver.try_recv() {
-        //         Ok(stable_message) => {
-        //             ctx.write_dap_messages(transport, &[stable_message])?;
-        //         },
-        //         Err(_) => {
-        //             info!("no new message");
-        //             break;
-        //         }
-        //     }
-        // }
     }
 
     // Ok(())
