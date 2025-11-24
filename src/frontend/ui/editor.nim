@@ -1422,6 +1422,13 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       )
 
       tabInfo.monacoEditor.onMouseDown(proc(e: js) =
+        # Show our custom context menu on right click even if Monaco suppresses its own handler.
+        if not e.event.isNil and cast[int](e.event.button) == 2:
+          let contextMenu = createContextMenuItems(self, e)
+          if contextMenu.len > 0:
+            showContextMenu(contextMenu, cast[int](e.event.posx), cast[int](e.event.posy))
+          return
+
         if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
           try:
             let targetToken = self.getTokenFromPosition(e.target.position)
@@ -1451,18 +1458,11 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
         self.data.ui.activeFocus = self)
 
       tabInfo.monacoEditor.onContextMenu(proc(ev: js) =
-        if ev.isNil or ev.event.isNil:
-          return
-        let evt = ev.event
-        if not evt.preventDefault.isNil:
-          evt.preventDefault()
-        if not evt.stopPropagation.isNil:
-          evt.stopPropagation()
+        console.log(cstring"editor: onContextMenu fired")
         let contextMenu = createContextMenuItems(self, ev)
+        console.log(cstring"editor: context menu items count = " & $contextMenu.len)
         if contextMenu.len > 0:
-          let x = if not evt.clientX.isNil: cast[int](evt.clientX) else: cast[int](evt.posx)
-          let y = if not evt.clientY.isNil: cast[int](evt.clientY) else: cast[int](evt.posy)
-          showContextMenu(contextMenu, x, y))
+          showContextMenu(contextMenu, cast[int](ev.event.posx), cast[int](ev.event.posy)))
 
       tabInfo.monacoEditor.onMouseMove(proc(event: js) =
         let position = event.target.position
@@ -1494,7 +1494,10 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
         ev.stopPropagation()
         for element in cast[seq[cstring]](ev.toJs.target.classList):
-          if ($element).contains("gutter") and element != cstring"gutter-line":
+          if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
+            self.lineActionClick(tabInfo, ev.target.toJs)
+            return
+          if ($element).contains("gutter"):
             self.lineActionClick(tabInfo, ev.target.toJs)
       )
 
