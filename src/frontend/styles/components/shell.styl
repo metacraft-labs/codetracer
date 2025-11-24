@@ -138,12 +138,22 @@
 
 .terminal.xterm
   width: 100%
-  padding-left: 5px
+  overflow: auto
+  background-color: black
+  border-radius: 8px
+
+  &::-webkit-scrollbar-corner
+    background-color: black
+
+  &::-webkit-scrollbar-thumb:vertical,
+  &::-webkit-scrollbar-thumb:horizontal
+    border: 3px solid black
+
 
 .xterm-screen
   height: 100% !important
-  position: absolute !important
-  left: 40px !important
+  // position: absolute !important
+  padding: 8px
 
   .xterm-rows
     position: relative
@@ -167,3 +177,9 @@
 
   .xterm-decoration
     visibility: visible
+
+.xterm-helpers
+  opacity: 0 !important
+  width: 0 !important
+  height: 0 !important
+  overflow: hidden !important

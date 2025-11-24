@@ -1,4 +1,4 @@
-import ui_imports, kdom, ../renderer, command_interpreter
+import ui_imports, kdom, ../renderer, command_interpreter, shell
 
 proc clear(self: CommandPaletteComponent) =
   self.selected = 0
@@ -240,7 +240,15 @@ proc onTab(self: CommandPaletteComponent) =
     self.onInput(self.inputPlaceholder)
 
 proc agentHWindow(self: CommandPaletteComponent): VNode =
-  buildHtml(
+  if not self.kxi.isNil and not self.shell.initialized:
+    self.kxi.afterRedraws.add(proc() =
+      self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
+      self.shell.initialized = true
+      self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
+      self.shell.shell.write("Another line here.\r\n")
+    )
+
+  result = buildHtml(
     tdiv(class="agent-ha-container")
   ):
     tdiv(class="agent-com"):
@@ -267,6 +275,7 @@ proc agentHWindow(self: CommandPaletteComponent): VNode =
             tdiv(class="command-palette-redo-button")
         tdiv(class="msg-content"):
           text "Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem. Nulla consequat massa quis enim. Donec pede justo, fringilla vel, aliquet nec, vulputate eget, arcu. In enim justo, rhoncus ut, imperdiet a, venenatis vitae, justo. Nullam dictum felis eu pede mollis pretium. Integer tincidunt. Cras dapibus. Vivamus elementum semper nisi. Aenean vulputate eleifend tellus. Aenean leo ligula, porttitor eu, consequat vitae, eleifend ac, enim. Aliquam lorem ante, dapibus in, viverra quis, feugiat a, tellus. Phasellus viverra nulla ut metus varius laoreet. Quisque rutrum. Aenean imperdiet. Etiam ultricies nisi vel augue. Curabitur ullamcorper ultricies nisi. Nam eget dui. Etiam rhoncus. Maecenas tempus, tellus eget condimentum rhoncus, sem quam semper libero, sit amet adipiscing sem neque sed ipsum. Nam quam nunc, blandit vel, luctus pulvinar, hendrerit id, lorem. Maecenas nec odio et ante tincidunt tempus. Donec vitae sapien ut libero venenatis faucibus. Nullam quis ante. Etiam sit amet orci eget eros faucibus tincidunt. Duis leo. Sed fringilla mauris sit amet nibh. Donec sodales sagittis magna. Sed consequat, leo eget bibendum sodales, augue velit cursus nunc, "
+          tdiv(id="shellComponent-0", class="shell-container")
         # TODO: Integrate it
     tdiv(class="agent-interaction"):
       input(
@@ -318,6 +327,8 @@ method onProgramSearchResults*(self: CommandPaletteComponent, results: seq[Comma
   clog "onProgramSearchResults commands"
   self.results = results
   self.data.redraw()
+
+var initStart = true
 
 method render*(self: CommandPaletteComponent): VNode =
   let (padClass, inputClass, activeClass) = if self.active: ("ct-p-8", "ct-input-cp-background", "ct-active") else: ("", "", "")

@@ -95,6 +95,7 @@ proc configureShortcuts* =
       else:
         data.ui.commandPalette.active = false
         data.ui.commandPalette.inAgentMode = false
+        data.ui.commandPalette.shell.initialized = false
 
     if cast[int](e.toJs.button) == BROWSER_FORWARD:
       cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = true)
