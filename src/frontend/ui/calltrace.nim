@@ -900,7 +900,8 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool) =
       height: height + CALL_BUFFER + startBuffer,
       rawIgnorePatterns: self.rawIgnorePatterns,
       optimizeCollapse: true,
-      autoCollapsing: not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse
+      autoCollapsing: not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse,
+      renderCallLineIndex: 0,
     )
 
     echo "LOAD CALLTRACE SECTION"

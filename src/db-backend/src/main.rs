@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::{error::Error, panic};
 use std::fs::{create_dir_all, remove_file, File};
 use std::os::unix::fs::symlink;
+use std::thread;
 
 mod calltrace;
 mod core;
@@ -106,12 +107,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     env_logger::Builder::new()
         .format(|buf, record| {
+            let thread = thread::current();
+            let thread_id_as_string = &format!("{:?}", thread.id());
+            let thread_name_or_id = thread.name().unwrap_or(&thread_id_as_string);
+            // format explanation: `:<char><alignment-where><width>`
+            //   based on https://stackoverflow.com/a/41496138/438099
+            let thread_column = format!("[{: <18}]", format!("{} thread", thread_name_or_id));
             writeln!(
                 buf,
-                "{}:{} {} [{}] - {}",
+                "{} {}:{} {} [{}] - {}",
+                thread_column,
                 record.file().unwrap_or("unknown"),
                 record.line().unwrap_or(0),
-                Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
+                Local::now().format("%H:%M:%S%.3f"),
+                // too long? Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
                 record.level(),
                 record.args()
             )

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 use std::path::Path;
-
+use std::sync::mpsc::Sender;
 use log::{error, info, warn};
 use regex::Regex;
 use serde::Serialize;
@@ -199,15 +199,15 @@ impl Handler {
         self.resulting_dap_messages = vec![];
     }
 
-    fn send_dap(&mut self, dap_message: &DapMessage) -> Result<(), Box<dyn Error>> {
-        self.resulting_dap_messages.push(dap_message.clone());
-        Ok(())
-    }
+    // fn send_dap(&mut self, dap_message: &DapMessage) -> Result<(), Box<dyn Error>> {
+    //     self.resulting_dap_messages.push(dap_message.clone());
+    //     Ok(())
+    // }
 
-    fn respond_dap<T: Serialize>(&mut self, request: dap::Request, value: T) -> Result<(), Box<dyn Error>> {
+    fn respond_dap<T: Serialize>(&mut self, request: dap::Request, value: T, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let response = DapMessage::Response(dap::Response {
             base: dap::ProtocolMessage {
-                seq: self.dap_client.seq,
+                seq: self.dap_client.seq, // actually patched by `patch_message_seq` in the sending thread in `src/dap_server.rs`!
                 type_: "response".to_string(),
             },
             request_seq: request.base.seq,
@@ -217,29 +217,27 @@ impl Handler {
             body: serde_json::to_value(value)?,
         });
         self.dap_client.seq += 1;
-        self.send_dap(&response)
+        Ok(sender.send(response)?)
     }
 
     // will be sent after completion of query
-    fn prepare_stopped_event(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
+    fn prepare_stopped_event(&mut self, is_main: bool) -> Result<DapMessage, Box<dyn Error>> {
         let reason = if is_main { "entry" } else { "step" };
         info!("generate stopped event");
         let raw_event = self.dap_client.stopped_event(reason)?;
         info!("raw stopped event: {:?}", raw_event);
-        self.send_dap(&raw_event)?;
-        Ok(())
+        Ok(raw_event)
     }
 
-    fn prepare_complete_move_event(&mut self, move_state: &MoveState) -> Result<(), Box<dyn Error>> {
+    fn prepare_complete_move_event(&mut self, move_state: &MoveState) -> Result<DapMessage, Box<dyn Error>> {
         let raw_complete_move_event = self.dap_client.complete_move_event(move_state)?;
-        self.send_dap(&raw_complete_move_event)?;
-        Ok(())
+        Ok(raw_complete_move_event)
     }
 
-    fn prepare_output_events(&mut self) -> Result<(), Box<dyn Error>> {
+    fn prepare_output_events(&mut self) -> Result<Vec<DapMessage>, Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
             warn!("prepare_output_events not implemented for rr");
-            return Ok(()); // TODO
+            return Ok(vec![]); // TODO
         }
 
         if self.step_id.0 > self.previous_step_id.0 {
@@ -264,17 +262,16 @@ impl Handler {
                     }
                 }
             }
-            for raw_output_event in raw_output_events.iter() {
-                self.send_dap(raw_output_event)?;
-            }
+            Ok(raw_output_events)
+        } else {
+            Ok(vec![])
         }
-        Ok(())
     }
 
-    fn prepare_eventual_error_event(&mut self) -> Result<(), Box<dyn Error>> {
+    fn prepare_eventual_error_event_message(&mut self) -> Option<String> {
         if self.trace_kind == TraceKind::RR {
-            warn!("prepare_eventual_error_event not implemented for rr");
-            return Ok(()); // TODO
+            warn!("prepare_eventual_error_event_message not implemented for rr");
+            return None; // TODO
         }
 
         let exact = false; // or for now try as flow // true just for this exact step
@@ -283,13 +280,10 @@ impl Handler {
         if !step_events.is_empty() && step_events[0].kind == EventLogKind::Error {
             let error_text = &step_events[0].content;
             let error_step_id = step_events[0].step_id;
-            self.send_notification(
-                NotificationKind::Error,
-                &format!("recorded error on step #{}: {}", error_step_id.0, error_text),
-                false,
-            )?;
+            Some(format!("recorded error on step #{}: {}", error_step_id.0, error_text))
+        } else {
+            None
         }
-        Ok(())
     }
 
     fn should_reset_flow(&mut self, is_main: bool, location: &Location) -> bool {
@@ -305,7 +299,7 @@ impl Handler {
         result
     }
 
-    fn complete_move(&mut self, is_main: bool) -> Result<(), Box<dyn Error>> {
+    fn complete_move(&mut self, is_main: bool, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         info!("complete_move");
 
         // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
@@ -329,27 +323,40 @@ impl Handler {
             frame_info: FrameInfo::default(),
         };
 
-        self.prepare_stopped_event(is_main)?;
-        self.prepare_complete_move_event(&move_state)?;
-        self.prepare_output_events()?;
+        let stopped_event = self.prepare_stopped_event(is_main)?;
+        let complete_move_event = self.prepare_complete_move_event(&move_state)?;
+        let output_events = self.prepare_output_events()?;
+
+        sender.send(stopped_event)?;
+        sender.send(complete_move_event)?;
+        for output_event in output_events {
+            sender.send(output_event)?;
+        }
 
         self.previous_step_id = self.step_id;
 
         // self.send_notification(NotificationKind::Success, "Complete move!", true)?;
 
-        self.prepare_eventual_error_event()?;
+        if let Some(error_message) = self.prepare_eventual_error_event_message() {
+            self.send_notification(
+                NotificationKind::Error,
+                &error_message,
+                false,
+                sender,
+            )?;
+        }
 
         Ok(())
     }
 
-    pub fn run_to_entry(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
+    pub fn run_to_entry(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         self.replay.run_to_entry()?;
         self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
-        self.complete_move(true)?;
+        self.complete_move(true, sender)?;
         Ok(())
     }
 
-    pub fn load_locals(&mut self, req: dap::Request, args: task::CtLoadLocalsArguments) -> Result<(), Box<dyn Error>> {
+    pub fn load_locals(&mut self, req: dap::Request, args: task::CtLoadLocalsArguments, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         // if self.trace_kind == TraceKind::RR {
         // let locals: Vec<Variable> = vec![];
         // warn!("load_locals not implemented for rr yet");
@@ -361,7 +368,7 @@ impl Handler {
                 value: to_ct_value(&l.value),
             })
             .collect();
-        self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
+        self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
         Ok(())
         // }
 
@@ -445,6 +452,7 @@ impl Handler {
         &mut self,
         _req: dap::Request,
         args: CalltraceLoadArgs,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
             // TODO: calltrace? eventually in the future
@@ -462,7 +470,7 @@ impl Handler {
                 self.calltrace.depth_offset,
             );
             let raw_event = self.dap_client.updated_calltrace_event(&update)?;
-            self.send_dap(&raw_event)?;
+            sender.send(raw_event)?;
             // warn!("load_calltrace_section not implemented for rr");
         } else {
             let start_call_line_index = args.start_call_line_index;
@@ -478,12 +486,12 @@ impl Handler {
             );
             // self.return_task((task, VOID_RESULT.to_string()))?;
             let raw_event = self.dap_client.updated_calltrace_event(&update)?;
-            self.send_dap(&raw_event)?;
+            sender.send(raw_event)?;
         }
         Ok(())
     }
 
-    pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments) -> Result<(), Box<dyn Error>> {
+    pub fn load_flow(&mut self, _req: dap::Request, arg: CtLoadFlowArguments, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let mut flow_replay: Box<dyn Replay> = if self.trace_kind == TraceKind::DB {
             Box::new(DbReplay::new(self.db.clone()))
         } else {
@@ -517,7 +525,7 @@ impl Handler {
         };
         info!("  flow ready");
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
 
         Ok(())
     }
@@ -613,16 +621,15 @@ impl Handler {
         Ok(())
     }
 
-    #[allow(clippy::expect_used)]
-    pub fn step_continue(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
+    pub fn step_continue(&mut self, forward: bool, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         if !self.replay.step(Action::Continue, forward)? {
-            self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false)?;
+            self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false, sender)?;
         }
         self.step_id = self.replay.current_step_id();
         Ok(())
     }
 
-    pub fn step(&mut self, request: dap::Request, arg: StepArg) -> Result<(), Box<dyn Error>> {
+    pub fn step(&mut self, request: dap::Request, arg: StepArg, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         // for now not supporting repeat/skip_internal: TODO
         // TODO: reverse
         let original_step_id = self.step_id;
@@ -632,12 +639,12 @@ impl Handler {
             Action::StepIn => self.step_in(!arg.reverse)?,
             Action::Next => self.next(!arg.reverse)?,
             Action::StepOut => self.step_out(!arg.reverse)?,
-            Action::Continue => self.step_continue(!arg.reverse)?,
+            Action::Continue => self.step_continue(!arg.reverse, sender.clone())?,
             _ => error!("action {:?} not implemented", arg.action),
         }
         if arg.complete {
             // && arg.action != Action::Continue {
-            self.complete_move(false)?;
+            self.complete_move(false, sender.clone())?;
         }
 
         if self.trace_kind == TraceKind::DB {
@@ -647,11 +654,12 @@ impl Handler {
                     NotificationKind::Warning,
                     &format!("Limit of record at the {location} already reached!"),
                     false,
+                    sender.clone(),
                 )?;
             } else if self.step_id == StepId(0) {
-                self.send_notification(NotificationKind::Info, "Beginning of record reached", false)?;
+                self.send_notification(NotificationKind::Info, "Beginning of record reached", false, sender.clone(),)?;
             } else if self.step_id.0 as usize == self.db.steps.len() - 1 {
-                self.send_notification(NotificationKind::Info, "End of record reached", false)?;
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone(),)?;
             }
         }
         // } else if arg.action == Action::Next {
@@ -667,11 +675,11 @@ impl Handler {
         //     }
         // }
 
-        self.respond_dap(request, 0)?;
+        self.respond_dap(request, 0, sender)?;
         Ok(())
     }
 
-    pub fn event_load(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
+    pub fn event_load(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let events_data = self.replay.load_events()?;
 
         let events = events_data.events;
@@ -682,23 +690,23 @@ impl Handler {
         self.event_db.refresh_global();
 
         let raw_event = self.dap_client.updated_events(first_events)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
 
         let raw_event_content = self.dap_client.updated_events_content(contents)?;
-        self.send_dap(&raw_event_content)?;
+        sender.send(raw_event_content)?;
 
         Ok(())
     }
 
-    pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
+    pub fn event_jump(&mut self, _req: dap::Request, event: ProgramEvent, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let _ = self.replay.event_jump(&event)?;
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false)?;
+        self.complete_move(false, sender)?;
 
         Ok(())
     }
 
-    pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location) -> Result<(), Box<dyn Error>> {
+    pub fn calltrace_jump(&mut self, _req: dap::Request, location: Location, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::DB {
             let step_id = StepId(location.rr_ticks.0); // using this field
                                                        // for compat with rr/gdb core support
@@ -711,12 +719,12 @@ impl Handler {
             let _ = self.replay.load_location(&mut self.expr_loader)?;
             self.step_id = self.replay.current_step_id();
         }
-        self.complete_move(false)?;
+        self.complete_move(false, sender)?;
 
         Ok(())
     }
 
-    pub fn calltrace_search(&mut self, _req: dap::Request, arg: CallSearchArg) -> Result<(), Box<dyn Error>> {
+    pub fn calltrace_search(&mut self, _req: dap::Request, arg: CallSearchArg, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let mut calls: Vec<Call> = vec![];
         let mut list: Vec<usize> = vec![];
         let re = Regex::new(&arg.value.clone())?;
@@ -735,7 +743,7 @@ impl Handler {
         }
 
         let raw_event = self.dap_client.calltrace_search_event(calls)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
         Ok(())
     }
 
@@ -743,13 +751,14 @@ impl Handler {
         &self.db.variable_names[variable_id]
     }
 
-    pub fn load_history(&mut self, _req: dap::Request, load_history_arg: LoadHistoryArg) -> Result<(), Box<dyn Error>> {
+    pub fn load_history(&mut self, _req: dap::Request, load_history_arg: LoadHistoryArg, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
             warn!("history not implemented yet for rr traces");
             self.send_notification(
                 NotificationKind::Warning,
                 "history not implemented yet for rr traces",
                 false,
+                sender.clone(),
             )?;
 
             return Ok(());
@@ -805,7 +814,7 @@ impl Handler {
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
         let raw_event = self.dap_client.updated_history_event(history_update)?;
 
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
         // self.send_event((
         //     EventKind::UpdatedHistory,
         //     gen_event_id(EventKind::UpdatedHistory),
@@ -816,10 +825,10 @@ impl Handler {
         Ok(())
     }
 
-    pub fn history_jump(&mut self, _req: dap::Request, loc: Location) -> Result<(), Box<dyn Error>> {
+    pub fn history_jump(&mut self, _req: dap::Request, loc: Location, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         self.replay.jump_to(StepId(loc.rr_ticks.0))?;
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false)?;
+        self.complete_move(false, sender)?;
         Ok(())
     }
 
@@ -871,12 +880,13 @@ impl Handler {
         &mut self,
         _req: dap::Request,
         source_location: SourceLocation,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::DB {
             if let Some(step_id) = self.get_closest_step_id(&source_location) {
                 self.replay.jump_to(step_id)?;
                 self.step_id = self.replay.current_step_id();
-                self.complete_move(false)?;
+                self.complete_move(false, sender)?;
                 Ok(())
             } else {
                 let err: String = format!("unknown location: {}", &source_location);
@@ -911,7 +921,7 @@ impl Handler {
             }
 
             self.step_id = self.replay.current_step_id();
-            self.complete_move(false)?;
+            self.complete_move(false, sender)?;
             Ok(())
         }
     }
@@ -965,6 +975,7 @@ impl Handler {
         &mut self,
         _req: dap::Request,
         call_target: SourceCallJumpTarget,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
@@ -977,15 +988,16 @@ impl Handler {
         if let Some(call_step_id) = self.get_call_target(&call_target) {
             self.replay.jump_to(call_step_id)?;
             self.step_id = self.replay.current_step_id();
-            self.complete_move(false)?;
+            self.complete_move(false, sender.clone())?;
             Ok(())
         } else {
             let err: String = format!("unknown call location: {}", &call_target);
-            self.complete_move(false)?;
+            self.complete_move(false, sender.clone())?;
             self.send_notification(
                 NotificationKind::Error,
                 "Line reached but couldn't find the function!",
                 false,
+                sender.clone(),
             )?;
             Err(err.into())
         }
@@ -995,6 +1007,7 @@ impl Handler {
         &mut self,
         request: dap::Request,
         args: dap_types::SetBreakpointsArguments,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let mut results = Vec::new();
         // for now simples to redo them every time: TODO possible optimizations
@@ -1057,7 +1070,7 @@ impl Handler {
                 });
             }
         }
-        self.respond_dap(request, dap_types::SetBreakpointsResponseBody { breakpoints: results })?;
+        self.respond_dap(request, dap_types::SetBreakpointsResponseBody { breakpoints: results }, sender)?;
         Ok(())
     }
 
@@ -1364,9 +1377,9 @@ impl Handler {
         interpreter.evaluate(tracepoint_index, step_id, &mut *self.replay, lang)
     }
 
-    pub fn run_tracepoints(&mut self, req: dap::Request, args: RunTracepointsArg) -> Result<(), Box<dyn Error>> {
+    pub fn run_tracepoints(&mut self, req: dap::Request, args: RunTracepointsArg, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         // Sort steps in StepId Ord
-        self.setup_trace_session(req, args.clone())?;
+        self.setup_trace_session(req, args.clone(), sender.clone())?;
 
         let tracepoints = &args.session.tracepoints;
         let is_empty = false; // TODO: check if there is at least one enabled non-empty log?
@@ -1385,29 +1398,29 @@ impl Handler {
                 self.event_db.tracepoint_errors.clone(),
             );
             let raw_event = self.dap_client.updated_trace_event(trace_update)?;
-            self.send_dap(&raw_event)?;
+            sender.send(raw_event)?;
         }
         Ok(())
     }
 
-    pub fn trace_jump(&mut self, _req: dap::Request, event: ProgramEvent) -> Result<(), Box<dyn Error>> {
+    pub fn trace_jump(&mut self, _req: dap::Request, event: ProgramEvent, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false)?;
+        self.complete_move(false, sender)?;
         Ok(())
     }
 
-    pub fn tracepoint_delete(&mut self, _req: dap::Request, tracepoint_id: TracepointId) -> Result<(), Box<dyn Error>> {
+    pub fn tracepoint_delete(&mut self, _req: dap::Request, tracepoint_id: TracepointId, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         self.event_db.clear_single_table(SingleTableId(tracepoint_id.id + 1));
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
         let raw_event = self.dap_client.updated_trace_event(t_update)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
         Ok(())
     }
 
-    pub fn tracepoint_toggle(&mut self, _req: dap::Request, tracepoint_id: TracepointId) -> Result<(), Box<dyn Error>> {
+    pub fn tracepoint_toggle(&mut self, _req: dap::Request, tracepoint_id: TracepointId, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let table_id = self.event_db.make_single_table_id(tracepoint_id.id);
         if self.event_db.disabled_tables.contains(&table_id) {
             self.event_db.enable_table(table_id);
@@ -1418,7 +1431,7 @@ impl Handler {
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
         let raw_event = self.dap_client.updated_trace_event(t_update)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
         Ok(())
     }
 
@@ -1461,10 +1474,10 @@ impl Handler {
         Ok(())
     }
 
-    pub fn local_step_jump(&mut self, _req: dap::Request, arg: LocalStepJump) -> Result<(), Box<dyn Error>> {
+    pub fn local_step_jump(&mut self, _req: dap::Request, arg: LocalStepJump, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         self.replay.jump_to(StepId(arg.rr_ticks))?;
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false)?;
+        self.complete_move(false, sender)?;
         Ok(())
     }
 
@@ -1475,7 +1488,7 @@ impl Handler {
         Ok(())
     }
 
-    pub fn setup_trace_session(&mut self, _req: dap::Request, arg: RunTracepointsArg) -> Result<(), Box<dyn Error>> {
+    pub fn setup_trace_session(&mut self, _req: dap::Request, arg: RunTracepointsArg, _sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         for trace in arg.session.tracepoints {
             while trace.tracepoint_id + 1 >= self.event_db.single_tables.len() {
                 self.event_db.add_new_table(DbEventKind::Trace, &[]);
@@ -1515,7 +1528,7 @@ impl Handler {
         Ok(())
     }
 
-    pub fn update_table(&mut self, _req: dap::Request, args: UpdateTableArgs) -> Result<(), Box<dyn Error>> {
+    pub fn update_table(&mut self, _req: dap::Request, args: UpdateTableArgs, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let (table_update, _trace_values_option) = self.event_db.update_table(args)?;
         // TODO: For now no trace values are available
         // if let Some(trace_values) = trace_values_option {
@@ -1530,7 +1543,7 @@ impl Handler {
         let raw_event = self
             .dap_client
             .updated_table_event(&task::CtUpdatedTableResponseBody { table_update })?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
         Ok(())
     }
 
@@ -1567,7 +1580,7 @@ impl Handler {
         list
     }
 
-    pub fn load_asm_function(&mut self, request: dap::Request, args: FunctionLocation) -> Result<(), Box<dyn Error>> {
+    pub fn load_asm_function(&mut self, request: dap::Request, args: FunctionLocation, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let mut instructions: Vec<Instruction> = vec![];
         match args.key.parse::<i64>() {
             Ok(number) => {
@@ -1609,14 +1622,14 @@ impl Handler {
                     instructions,
                     error: "".to_string(),
                 };
-                self.respond_dap(request, instructions)?;
+                self.respond_dap(request, instructions, sender)?;
                 Ok(())
             }
             Err(e) => Err(Box::new(e)),
         }
     }
 
-    pub fn load_terminal(&mut self, _req: dap::Request) -> Result<(), Box<dyn Error>> {
+    pub fn load_terminal(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let mut events_list: Vec<ProgramEvent> = vec![];
         for (i, event_record) in self.db.events.iter().enumerate() {
             if event_record.kind == EventLogKind::Write {
@@ -1625,7 +1638,7 @@ impl Handler {
         }
 
         let raw_event = self.dap_client.loaded_terminal_event(events_list)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
 
         Ok(())
     }
@@ -1635,10 +1648,11 @@ impl Handler {
         kind: NotificationKind,
         msg: &str,
         is_operation_status: bool,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let notification = Notification::new(kind, msg, is_operation_status);
         let raw_event = self.dap_client.notification_event(notification)?;
-        self.send_dap(&raw_event)?;
+        sender.send(raw_event)?;
         Ok(())
     }
 
@@ -1737,7 +1751,7 @@ impl Handler {
             can_restart: None,
         }
     }
-    pub fn threads(&mut self, request: dap::Request) -> Result<(), Box<dyn Error>> {
+    pub fn threads(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         self.respond_dap(
             request,
             dap_types::ThreadsResponseBody {
@@ -1746,6 +1760,7 @@ impl Handler {
                     name: "<thread 1>".to_string(),
                 }],
             },
+            sender,
         )?;
         Ok(())
     }
@@ -1754,6 +1769,7 @@ impl Handler {
         &mut self,
         request: dap::Request,
         args: dap_types::StackTraceArguments,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
             self.calltrace
@@ -1774,11 +1790,12 @@ impl Handler {
                 stack_frames,
                 total_frames,
             },
+            sender,
         )?;
         Ok(())
     }
 
-    pub fn scopes(&mut self, request: dap::Request, arg: dap_types::ScopesArguments) -> Result<(), Box<dyn Error>> {
+    pub fn scopes(&mut self, request: dap::Request, arg: dap_types::ScopesArguments, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let call = &self.db.calls[CallKey(arg.frame_id)];
         let function = &self.db.functions[call.function_id];
         let scope = dap_types::Scope {
@@ -1794,7 +1811,7 @@ impl Handler {
             end_line: None,
             end_column: None,
         };
-        self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![scope] })?;
+        self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![scope] }, sender)?;
 
         Ok(())
     }
@@ -1808,6 +1825,7 @@ impl Handler {
         &mut self,
         request: dap::Request,
         _arg: dap_types::VariablesArguments,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
@@ -1824,6 +1842,7 @@ impl Handler {
             dap_types::VariablesResponseBody {
                 variables: dap_variables,
             },
+            sender,
         )?;
 
         Ok(())
@@ -1833,8 +1852,9 @@ impl Handler {
         &mut self,
         request: dap::Request,
         _arg: dap_types::DisconnectArguments,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        self.respond_dap(request, dap::DisconnectResponseBody {})?;
+        self.respond_dap(request, dap::DisconnectResponseBody {}, sender)?;
 
         Ok(())
     }
