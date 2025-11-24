@@ -487,6 +487,20 @@ proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false
 proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
   result = CommandPaletteComponent(
     id: data.generateId(Content.CommandPalette),
+    shell: ShellComponent(
+      id: 0,
+      events: JsAssoc[int, JsAssoc[int, SessionEvent]]{},
+      eventContainers: JsAssoc[int, kdom.Node]{},
+      eventsDoms: JsAssoc[int, kdom.Node]{},
+      lineHeight: 18,
+      buffer: ShellBuffer(),
+      themes: JsAssoc[cstring, ShellTheme]{
+        "mac_classic": ShellTheme( background: "white", foreground: "black"),
+        "default_white": ShellTheme( background: "#F5F5F5", foreground: "#6e6e6e"),
+        "default_black": ShellTheme( background: "#black", foreground: "white"),
+        "default_dark": ShellTheme( background: "#1e1f26", foreground: "#8e8f92"),
+      }
+    ),
     interpreter: CommandInterpreter(
       data: data,
       commands: JsAssoc[cstring, Command]{},

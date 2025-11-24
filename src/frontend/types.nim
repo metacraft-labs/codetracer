@@ -1118,6 +1118,7 @@ type
     theme*: ShellTheme
 
   ShellComponent* = ref object of Component
+    initialized*: bool
     lineHeight*: int
     shell*: Terminal
     gutterDom*: kdom.Node
@@ -1247,6 +1248,7 @@ type
     inputValue*: cstring
     inputPlaceholder*: cstring
     inAgentMode*: bool
+    shell*: ShellComponent
 
   NoSourceComponent* = ref object of Component
     message*: cstring

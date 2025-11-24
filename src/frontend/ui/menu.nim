@@ -482,6 +482,8 @@ method render*(self: MenuComponent): VNode =
       navigationMenuView(self)
 
     if not self.data.startOptions.shellUi:
+      self.debug.kxi = self.kxi
+      data.ui.commandPalette.kxi = self.kxi
       let debug = self.debug.render()
       debug
 
