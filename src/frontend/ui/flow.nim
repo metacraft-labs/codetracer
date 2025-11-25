@@ -3238,7 +3238,7 @@ proc setLoopFamilyLegendWidth(self: FlowComponent, loopIndex: int, legendWidth: 
       self.setLoopFamilyLegendWidth(loopId, legendWidth)
 
 proc calculateLineHeight(self: FlowComponent) =
-  let option = self.editorUI.monacoEditor.getOption(50)
+  let option = self.editorUI.monacoEditor.getOption(FONT_INFO)
 
   self.lineHeight = option.lineHeight - 4
   self.fontSize = option.fontSize - 2
