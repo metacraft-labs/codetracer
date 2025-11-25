@@ -1,5 +1,5 @@
 .shell-container
-  background-color: BACKGROUND_COLOR
+  // background-color: BACKGROUND_COLOR
   display: flex
   height: 100%
   width: 100%
@@ -140,16 +140,20 @@
   margin-top: 8px
   width: 100%
   overflow: auto
-  background-color: black
+  background-color: transparent
   border-radius: 8px
   font-family: 'FiraCode'
 
   &::-webkit-scrollbar-corner
-    background-color: black
+    background-color: DROPDOWN_BASE !important
+
+  &::-webkit-scrollbar
+    width: 10px !important
+    height: 10px !important
 
   &::-webkit-scrollbar-thumb:vertical,
   &::-webkit-scrollbar-thumb:horizontal
-    border: 3px solid black
+    border: 2px solid DROPDOWN_BASE !important
 
 
 .xterm-screen

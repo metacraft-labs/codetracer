@@ -37,12 +37,33 @@
   justify-content: space-between
   padding: 8px
 
-  input
-    width: 100% !important
+  textarea
+    width: -webkit-fill-available !important
     margin-left: 0px !important
     margin-bottom: 0px !important
     background: #484848 !important
     padding-left: 8px !important
+    max-height: 12rem !important
+    resize: none
+    font-size: 14px
+    font-family: inherit !important
+    overflow-y: auto !important
+    overflow-x: hidden !important
+    white-space: pre-wrap !important
+    border-radius: 8px !important
+    padding: 4px
+
+
+    &::-webkit-scrollbar-corner
+      background-color: #484848 !important
+
+    &::-webkit-scrollbar
+      width: 10px !important
+      height: 10px !important
+
+    &::-webkit-scrollbar-thumb:vertical,
+    &::-webkit-scrollbar-thumb:horizontal
+      border: 2px solid #484848 !important
 
   .agent-command-input
     color: #A5F3FC !important
@@ -52,3 +73,157 @@
 
     &:focus
       border: 1px solid #0E7490 !important
+      outline: 0px !important
+
+.agent-buttons-container
+  display: flex
+  justify-content: space-between
+  align-items: center
+
+  .agent-button
+    display: flex
+    cursor: pointer
+    border: 1px solid DEBUG_BUTTON_ACTIVE_BACKGROUND
+    padding: 4px
+    align-items: center
+    border-radius: 6px
+    padding-right: 8px
+    white-space: nowrap
+    height: 28px
+    margin-right: 6px
+
+    .add-file-img
+      background-image: COMMAND_PALETTE_ADD_FILE_IMG
+      background-size: 10px, 16px
+      background-position: center
+      background-repeat: no-repeat
+      width: 24px
+      height: 24px
+      margin-right: 4px
+
+  .agent-model-select
+    width: -webkit-fill-available
+    display: flex
+    justify-content: space-between
+    padding-right: 0px !important
+
+  .agent-enter
+    height: 24px
+    min-width: 24px
+    border-radius: 6px
+    background: #0E7490
+    background-image: COMMAND_PALETTE_ENTER_MSG_IMG
+    background-repeat: no-repeat
+    background-size: 14px
+    background-position: center
+    cursor: pointer
+
+.agent-model-img
+  height: 24px
+  min-width: 24px
+  background-image: COMMAND_PALETTE_ARROW_IMG
+  background-repeat: no-repeat
+  background-size: 9px, 6px
+  background-position: center
+
+.agent-com
+  height: -webkit-fill-available
+  overflow-y: auto
+  margin-bottom: 8px
+
+.user-img
+  height: 24px
+  width: 24px
+  background-image: COMMAND_PALETTE_USER_IMG
+  background-size: 16px, 16px
+  background-position: center
+  background-repeat: no-repeat
+
+.header-wrapper
+  display: flex
+  justify-content: space-between
+
+.content-header
+  display: flex
+  align-items: center
+
+.user-msg
+  border-radius: 6px
+  background: #3A3A3A
+  padding: 8px
+  margin-bottom: 8px
+
+.user-name
+  margin-left: 4px
+  margin-right: 4px
+
+.ai-msg
+  padding: 8px
+  margin-bottom: 8px
+
+.msg-content
+  padding: 8px
+  display: flex
+  flex-direction: column
+
+.ai-img
+  height: 24px
+  width: 24px
+  background-image: COMMAND_PALETTE_AI_IMG
+  background-size: 24px, 24px
+  background-position: center
+  background-repeat: no-repeat
+
+.ai-name
+  margin-left: 4px
+  margin-right: 4px
+
+.command-palette-copy-button
+  height: 24px
+  width: 24px
+  cursor: pointer
+  background-image: COMMAND_PALETTE_COPY_IMG
+  background-size: 17px, 17px
+  background-position: center
+  background-repeat: no-repeat
+
+.command-palette-upload-button
+  height: 24px
+  width: 24px
+  cursor: pointer
+  background-image: COMMAND_PALETTE_UPLOAD_IMG
+  background-size: 17px, 16px
+  background-position: center
+  background-repeat: no-repeat
+
+.command-palette-redo-button
+  height: 24px
+  width: 24px
+  cursor: pointer
+  background-image: COMMAND_PALETTE_REDO_IMG
+  background-size: 17px, 15px
+  background-position: center
+  background-repeat: no-repeat
+
+.command-palette-edit-button
+  height: 24px
+  width: 24px
+  cursor: pointer
+  background-image: COMMAND_PALETTE_EDIT_IMG
+  background-size: 17px, 17px
+  background-position: center
+  background-repeat: no-repeat
+
+.msg-controls
+  display: flex
+
+.terminal-wrapper
+  background: DROPDOWN_BASE
+  border-radius: 6px
+  margin-top: 4px
+
+  .header-wrapper
+    border-bottom: 1px solid #3A3A3A
+    padding: 8px
+    padding-top: 6px
+    padding-bottom: 6px
