@@ -18,7 +18,7 @@ use crate::{
     value::{to_ct_value, Value, ValueRecordWithType},
 };
 
-const STEP_COUNT_LIMIT: usize = 10;
+const STEP_COUNT_LIMIT: usize = 100;
 
 #[derive(Debug)]
 pub struct FlowPreloader {
@@ -271,7 +271,7 @@ impl<'a> CallFlowPreloader<'a> {
         _from_step_id: StepId,
         _including_from: bool,
         _replay: &mut dyn Replay,
-    ) -> (StepId, bool) {
+    ) -> (StepId, bool, bool) {
         // TODO: maybe combination of replay.next, diff_call_keys check, different for cases?s
         //
         // if from_step_id.0 >= db.steps.len() as i64 {
@@ -301,25 +301,30 @@ impl<'a> CallFlowPreloader<'a> {
         &self,
         from_step_id: StepId,
         replay: &mut dyn Replay,
-    ) -> Result<(StepId, bool), Box<dyn Error>> {
-        let (mut step_id, mut progressing) = match self.mode {
-            FlowMode::Call => (from_step_id, true),
+    ) -> Result<(StepId, bool, bool), Box<dyn Error>> {
+        let (mut step_id, mut progressing, mut move_error) = match self.mode {
+            FlowMode::Call => (from_step_id, true, false),
             FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
         };
+        let mut move_error = false;
         if self.trace_kind == TraceKind::DB {
+            // for now assume it can't fail: `?` only because of more general api
             replay.jump_to(step_id)?;
         } else {
-            let location = replay.jump_to_call(&self.location)?;
-            step_id = StepId(location.rr_ticks.0);
-            progressing = true;
+            if let Ok(location) = replay.jump_to_call(&self.location) {
+                step_id = StepId(location.rr_ticks.0);
+                progressing = true;
+            } else {
+                move_error = true;
+            }
         }
-        Ok((step_id, progressing))
+        Ok((step_id, progressing, move_error))
     }
 
     // returns new step_id/rr ticks(?) and `progressing`(if false, the flow loop should stop)
     //   for RR: rr ticks might stay the same, but we still return progressing `true` unless we have an error for 
     //      stepping/location
-    fn move_to_next_step(&mut self, from_step_id: StepId, replay: &mut dyn Replay) -> (StepId, bool) {
+    fn move_to_next_step(&mut self, from_step_id: StepId, replay: &mut dyn Replay) -> (StepId, bool, bool) {
         info!("  move_to_next_step:");
         match self.mode {
             FlowMode::Call => {
@@ -327,7 +332,7 @@ impl<'a> CallFlowPreloader<'a> {
                 if let Err(e) = replay.step(Action::Next, true) {
                     // this might not really be a problem: we just need to stop the flow after this:
                     warn!("    `next` error: {e:}");
-                    return (from_step_id, false); // assume we will break the flow loop if `progressing` is false
+                    return (from_step_id, false, true); // assume we will break the flow loop if `progressing` is false
                 }
 
                 let mut expr_loader = ExprLoader::new(CoreTrace::default());
@@ -346,12 +351,12 @@ impl<'a> CallFlowPreloader<'a> {
                             //   hope that difference in call key/other aspects will be enough!
                             true
                         };
-                        (new_step_id, progressing)
+                        (new_step_id, progressing, false)
                     }
                     Err(e) => {
                         warn!("    `load_location` error: {e:}");
                         // assume we will break the flow loop if `progressing` is false
-                        (from_step_id, false)
+                        (from_step_id, false, true)
                     }
                 }
             }
@@ -394,12 +399,17 @@ impl<'a> CallFlowPreloader<'a> {
             // } else {
             //     self.find_next_step(iter_step_id, replay)
             // };
-            let (step_id, progressing) = if before_first_move {
+            let (step_id, progressing, move_error) = if before_first_move {
                 before_first_move = false;
                 self.move_to_first_step(iter_step_id, replay)?
             } else {
                 self.move_to_next_step(iter_step_id, replay)
             };
+
+            if move_error {
+                info!("move error: break flow");
+                break;
+            }
 
             iter_step_id = step_id;
             let mut expr_loader = ExprLoader::new(CoreTrace::default());
