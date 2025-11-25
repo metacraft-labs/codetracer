@@ -178,7 +178,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
   if data.startOptions.welcomeScreen and data.trace.isNil:
     kxiMap["welcome-screen"] =
       setRenderer(
-        proc: VNode = data.ui.welcomeScreen.render(),
+        proc: VNode =
+          if not data.ui.welcomeScreen.isNil:
+            data.ui.welcomeScreen.render()
+          else:
+            buildHtml(tdiv()),
         "welcomeScreen",
         proc = discard)
     data.ui.welcomeScreen.kxi = kxiMap["welcome-screen"]
