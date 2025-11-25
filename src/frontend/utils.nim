@@ -384,7 +384,8 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
       LogEntry(title: "Modified src/lib.rs {+12 -0}", output: "", status: "modified"),
       LogEntry(title: "Formatting code with rustfmt", output: "Format successful", status: "success"),
     ],
-    inExtension: inExtension
+    inExtension: inExtension,
+    expandControl: @[]
   )
   data.registerComponent(result, Content.AgentActivity)
 

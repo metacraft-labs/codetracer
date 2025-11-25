@@ -573,7 +573,7 @@ func ensureTokens(self: FlowComponent, line: int) =
 
     for (token, left) in tokens:
       if not self.editorUI.tokens[line].hasKey(token):
-        if line != self.data.services.debugger.location.functionFirst:
+        if line != self.location.functionFirst:
           self.editorUI.tokens[line][token] = left
         else:
           self.editorUI.tokens[line][token] = left - 1
@@ -1145,7 +1145,7 @@ proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: 
 
 proc afterJump(self: FlowComponent, stepCount: int) =
   let step = self.flow.steps[stepCount]
-  let location = self.data.services.debugger.location
+  let location = self.location
   let currentStep = self.positionRRTicksToStepCount(location.highLevelLine, location.rrTicks)
   let reverse = if stepCount >= currentStep: false else: true
 
@@ -2224,7 +2224,7 @@ proc addLoopStep(self: FlowComponent, step: FlowStep, container: Node) =
 
 
 proc setFlowLineActiveIteration(self: FlowComponent, position: int) =
-  let debuggerLocation = self.data.services.debugger.location.rrTicks
+  let debuggerLocation = self.location.rrTicks
   let line = self.flowLines[position]
 
   for loopIndex in line.loopIds:
@@ -3129,14 +3129,14 @@ proc updateIterationStepCount*(self: FlowComponent, line: int, stepCount: int, l
 
 proc getCurrentStepCount*(self: FlowComponent, line: int): int =
   var stepCount: int
-  stepCount = self.positionRRTicksToStepCount(line, self.data.services.debugger.location.rrTicks)
+  stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
   let step = self.flow.steps[stepCount]
 
   if self.flowLoops.hasKey(self.flow.loops[step.loop].first):
     let loopStep = self.flowLoops[self.flow.loops[step.loop].first].loopStep
     stepCount = self.updateIterationStepCount(line, stepCount, loopStep.loop, loopStep.iteration)
   elif self.activeStep.rrTicks == NO_TICKS:
-    stepCount = self.positionRRTicksToStepCount(line, self.data.services.debugger.location.rrTicks)
+    stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
   else:
     stepCount = self.positionRRTicksToStepCount(line, self.activeStep.rrTicks)
     let activeStep = self.flow.steps[stepCount]

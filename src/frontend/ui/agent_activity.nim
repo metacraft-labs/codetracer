@@ -57,8 +57,11 @@ method render*(self: AgentActivityComponent): VNode =
                 text "Running task..."
               tdiv(class="msg-controls"):
                 tdiv(class="command-palette-copy-button", style=style(StyleAttr.marginRight, "6px".cstring))
-                tdiv(class="agent-model-img")
-            tdiv(id="shellComponent-0", class="shell-container")
+                tdiv(
+                  class="agent-model-img"
+                )
+            # if self.expandControl[self.shell.id]:
+            tdiv(id=fmt"shellComponent-{self.shell.id}", class="shell-container")
         # TODO: Integrate it
     tdiv(class="agent-interaction"):
       textarea(

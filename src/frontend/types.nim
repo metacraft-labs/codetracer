@@ -752,6 +752,7 @@ type
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
+    expandControl*: seq[bool]
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
