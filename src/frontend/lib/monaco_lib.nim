@@ -161,8 +161,8 @@ type
 const
   # monaco option const
   # https://microsoft.github.io/monaco-editor/typedoc/enums/editor.EditorOption.html#layoutInfo
-  LAYOUT_INFO* = 144
+  LAYOUT_INFO* = 165
   # https://microsoft.github.io/monaco-editor/typedoc/enums/editor.EditorOption.html#lineHeight
-  LINE_HEIGHT* = 67
+  LINE_HEIGHT* = 75
 
 proc newMonacoRange*(startLineNumber: int, startColumn: int, endLineNumber: int, endColumn: int): MonacoRange {.importcpp: "new monaco.Range(#, #, #, #)".}
