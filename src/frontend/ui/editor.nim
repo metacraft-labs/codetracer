@@ -1213,7 +1213,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
           renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
           lineNumbers: proc(line: int): cstring = self.editorLineNumber(self.path, line, true, lineNumber),
           lineDecorationsWidth: 20,
-          contextmenu: true,
+          contextmenu: false,
           mouseWheelScrollSensitivity: 0,
           fastScrollSensitivity: 0,
           scrollBeyondLastLine: false,
@@ -1312,11 +1312,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
     result = buildHtml(tdiv())
     return
 
-  if not tabInfo.monacoEditor.isNil:
-    console.log("MONACO EDITOR IS NOT NIL")
-
   if tabInfo.monacoEditor.isNil:
-    console.log("MONACO EDITOR IS NIL")
     self.renderer.afterRedraws.add(proc: void =
       let trace = not self.data.trace.isNil
       var readOnly: bool
@@ -1369,7 +1365,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
             lineNumbers: proc(line: int): cstring = self.editorLineNumber(path, line),
             lineDecorationsWidth: 20,
             scrollBeyondLastColumn: 0,
-            contextmenu: true,
+            contextmenu: false,
             scrollbar: js{
               horizontalScrollbarSize: 14,
               horizontalSliderSize: 8,
@@ -1422,12 +1418,6 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       )
 
       tabInfo.monacoEditor.onMouseDown(proc(e: js) =
-        # Show our custom context menu on right click even if Monaco suppresses its own handler.
-        if not e.event.isNil and cast[int](e.event.button) == 2:
-          let contextMenu = createContextMenuItems(self, e)
-          if contextMenu.len > 0:
-            showContextMenu(contextMenu, cast[int](e.event.posx), cast[int](e.event.posy))
-          return
 
         if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
           try:
