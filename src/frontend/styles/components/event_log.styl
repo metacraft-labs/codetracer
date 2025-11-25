@@ -35,13 +35,13 @@
   &:hover
     background-color: SECONDARY_BASE
     color: DROPDOWN_TEXT_FOCUSED_COLOR
-  
+
   &:active
     background-color: ACTIVE_ROW
-  
+
   &.active
     background-color: ACTIVE_ROW
-  
+
   .custom-tooltip
     width: 200px
     text-align: start
@@ -64,40 +64,30 @@
   justify-content: start
   align-items: center
   user-select: none
-  border-radius: 6px
+  border-radius: 4px
   color: DROPDOWN_TEXT_COLOR
   cursor: pointer
   height: 28px
+  width: 28px
   margin-bottom: 10px
   margin-left: 10px
-  background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
-  padding-left: 28px
-  padding-right: 30px
+  background-color: CT_PRIMARY_DEFAULT
+  background-image: EVENT_LOG_FA_DOWN_ICON
+  background-position: center
+  background-repeat: no-repeat
   transform: translate(0px, 2px)
-  if IS_EXTENSION
-    width: 80px
-  else
-    width: 150px
   position: relative
   z-index: 1
   font-weight: bold
 
-
   &:focus
     color: DROPDOWN_TEXT_FOCUSED_COLOR
-    background-color: ACTIVE_MENU_BACKGROUND !important
+    background-color: CT_PRIMARY_DEFAULT_FOCUSED !important
+    background-image: EVENT_LOG_FA_UP_ICON !important
     outline: 0px
 
-    &::after
-      transform: rotate(180deg)
-
-  &::after
-    content: SHARED_CLOSE_FA_ICON
-    position: absolute
-    left: 10px
-
   &:hover
-    background-color: DEBUG_BUTTON_HOVER_BACKGROUND
+    background-color: CT_PRIMARY_DEFAULT_FOCUSED
     color: DROPDOWN_TEXT_FOCUSED_COLOR
 
 .hamburger-dropdown-container

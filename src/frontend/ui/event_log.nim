@@ -973,8 +973,7 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
           self.dropDowns[category] = false
           hideDropdown(e, et),
     )
-  ):
-    text(text)
+  )
 
 proc eventLogHeaderView*(self: EventLogComponent): VNode =
   var search = proc =

@@ -21,7 +21,7 @@
 
       &:hover
         background-color: DEBUG_BUTTON_HOVER_BACKGROUND
-      
+
       &:active
         background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
 
@@ -47,7 +47,7 @@
 
         &:focus
           outline: 0px !important
-      
+
       #history-back-debug, #history-forward-debug,
       #continue-debug, #reverse-continue-debug,
       #next-debug, #reverse-next-debug
@@ -55,10 +55,10 @@
 
       #run-to-entry-debug
         padding-bottom: 4px
-      
+
       #reverse-step-out-debug, #step-in-debug
         padding-top: 2px
-      
+
       #step-out-debug, #reverse-step-in-debug
         padding-bottom: 4px
 
@@ -138,15 +138,18 @@
   cursor: pointer
 
   .menu-button-svg
-    width: 28px
-    height: 28px
+    width: 24px
+    height: 24px
+    background-color: #484848
+    border-radius: 100px
     background-position: center
     background-repeat: no-repeat
+    margin-left: 4px
 
     &.minimize
       background-image: WINDOW_MINIMIZE_ICON_PATH
       opacity: 1
-      margin-top: auto
+      background-position-y: 65%
 
     &.restore
       background-image: WINDOW_RESTORE_ICON_PATH
@@ -513,7 +516,7 @@
 
     .menu-node
       background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR
-    
+
     .menu-node-icon
       opacity: 1
 
