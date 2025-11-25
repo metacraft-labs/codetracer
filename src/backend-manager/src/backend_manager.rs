@@ -192,7 +192,16 @@ impl BackendManager {
         let socket_path = socket_dir.join(self.children.len().to_string() + ".sock");
         _ = remove_file(&socket_path).await;
 
-        let mut cmd = Command::new(cmd);
+        let cmd_text = cmd;
+        // make it easier for dogfooding
+        let mut cmd = if let Ok(_record_backend) = std::env::var("CODETRACER_RECORD_BACKEND") {
+            let mut ct_cmd = Command::new("ct");
+            ct_cmd.arg("record");
+            ct_cmd.arg(&cmd_text);
+            ct_cmd
+        } else {
+            Command::new(cmd_text)
+        };
         cmd.args(args);
 
         match socket_path.to_str() {
