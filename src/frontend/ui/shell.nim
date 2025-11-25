@@ -119,12 +119,12 @@ proc createShell*(self: ShellComponent) =
     }
   )
 
-  # let shellprompt = "$ "
+  let shellprompt = "$ "
 
-  # terminal.prompt = proc =
-  #   terminal.write("\r\n" & shellprompt)
+  terminal.prompt = proc =
+    terminal.write("\r\n" & shellprompt)
 
-  # terminal.prompt()
+  terminal.prompt()
 
   # open xterm terminal
   terminal.open(container)
@@ -143,72 +143,72 @@ proc createShell*(self: ShellComponent) =
 
   # resizeObserver.observe(container)
 
-  # terminal.write("Welcome to CodeTracer shell!")
+  terminal.write("Welcome to CodeTracer shell!")
 
-  # # add listener to termnal rows
-  # let rowsDom = cast[Node](jq(&"#shellComponent-{self.id} .xterm-rows"))
+  # add listener to termnal rows
+  let rowsDom = cast[Node](jq(&"#shellComponent-{self.id} .xterm-rows"))
 
-  # try:
-  #   rowsDom.addEventListener(cstring"mousedown", proc(ev: Event) =
-  #     if ev.target.nodeName == "SPAN":
-  #       self.rowIsClicked = true
-  #       self.clickedRow = self.determineClickedShellRow(ev.target.parentNode))
-  #   rowsDom.addEventListener(cstring"mouseup", proc(ev: Event) =
-  #     let target = ev.target
-  #     if target.nodeName == "SPAN" and
-  #       self.rowIsClicked and
-  #       self.clickedRow == self.determineClickedShellRow(ev.target.parentNode):
-  #         var lastPreviousEventLine: int = 0
-  #         for line, events in self.events:
-  #           if line <= self.clickedRow and line > lastPreviousEventLine:
-  #             lastPreviousEventLine = line
-  #         if lastPreviousEventLine > 0:
-  #           let lastRecordEvents = toSeq(self.events[lastPreviousEventLine].items()).filterIt(
-  #             it.kind == RecordingCommand)
-  #           if lastRecordEvents.len > 0:
-  #             let lastRecordEvent = lastRecordEvents[lastRecordEvents.len - 1]
-  #             let firstLine = lastRecordEvent.firstLine + self.progressOffset
-  #             let lastLine = firstLine + (lastRecordEvent.lastLine - lastRecordEvent.firstLine)
-  #             if firstLine <= self.clickedRow and self.clickedRow <= lastLine:
-  #               # echo "will open trace with id: ", lastRecordEvent.traceId
-  #               self.showOutputInDebugInstance(lastRecordEvents[lastRecordEvents.len - 1], self.clickedRow - lastPreviousEventLine - 4)
-  #     self.rowIsClicked = false
-  #     self.clickedRow = -1
-  #   )
-  # except:
-  #   cerror "shell: " & getCurrentExceptionMsg()
+  try:
+    rowsDom.addEventListener(cstring"mousedown", proc(ev: Event) =
+      if ev.target.nodeName == "SPAN":
+        self.rowIsClicked = true
+        self.clickedRow = self.determineClickedShellRow(ev.target.parentNode))
+    rowsDom.addEventListener(cstring"mouseup", proc(ev: Event) =
+      let target = ev.target
+      if target.nodeName == "SPAN" and
+        self.rowIsClicked and
+        self.clickedRow == self.determineClickedShellRow(ev.target.parentNode):
+          var lastPreviousEventLine: int = 0
+          for line, events in self.events:
+            if line <= self.clickedRow and line > lastPreviousEventLine:
+              lastPreviousEventLine = line
+          if lastPreviousEventLine > 0:
+            let lastRecordEvents = toSeq(self.events[lastPreviousEventLine].items()).filterIt(
+              it.kind == RecordingCommand)
+            if lastRecordEvents.len > 0:
+              let lastRecordEvent = lastRecordEvents[lastRecordEvents.len - 1]
+              let firstLine = lastRecordEvent.firstLine + self.progressOffset
+              let lastLine = firstLine + (lastRecordEvent.lastLine - lastRecordEvent.firstLine)
+              if firstLine <= self.clickedRow and self.clickedRow <= lastLine:
+                # echo "will open trace with id: ", lastRecordEvent.traceId
+                self.showOutputInDebugInstance(lastRecordEvents[lastRecordEvents.len - 1], self.clickedRow - lastPreviousEventLine - 4)
+      self.rowIsClicked = false
+      self.clickedRow = -1
+    )
+  except:
+    cerror "shell: " & getCurrentExceptionMsg()
 
   # create gutter
-  # let gutter = document.createElement("div")
-  # gutter.classList.add("shell-gutter")
-  # let scrollableArea = cast[Node](jq(&"#shellComponent-{self.id} .xterm-scroll-area"))
-  # scrollableArea.appendChild(gutter)
-  # self.gutterDom = gutter
+  let gutter = document.createElement("div")
+  gutter.classList.add("shell-gutter")
+  let scrollableArea = cast[Node](jq(&"#shellComponent-{self.id} .xterm-scroll-area"))
+  scrollableArea.appendChild(gutter)
+  self.gutterDom = gutter
 
-  # self.shell.onRender do (event: RenderEvent):
-  #   discard
+  self.shell.onRender do (event: RenderEvent):
+    discard
 
-  # self.shell.onScroll do (viewportY: int):
-  #   self.buffer.viewportY = viewportY
+  self.shell.onScroll do (viewportY: int):
+    self.buffer.viewportY = viewportY
 
-  # self.shell.onResize do (event: TerminalIEvent):
-  #   discard
+  self.shell.onResize do (event: TerminalIEvent):
+    discard
 
-  # self.shell.onData do (data: cstring):
-  #   self.send(data)
+  self.shell.onData do (data: cstring):
+    self.send(data)
 
-  # self.shell.onKey do (e: TerminalIEvent):
-  #   clog "shell: key " & $e.key
-  #   var raw = ""
+  self.shell.onKey do (e: TerminalIEvent):
+    clog "shell: key " & $e.key
+    var raw = ""
 
-  #   if e.domEvent.keyCode == ENTER_KEY_CODE:
-  #     raw = "\n"
-  #   elif e.domEvent.keyCode == TAB_KEY_CODE:
-  #     raw = "\t"
-  #   elif e.domEvent.keyCode == BACKSPACE_KEY_CODE:
-  #     raw = "\b"
-  #   if raw.len > 0:
-  #     self.send(cstring(raw))
+    if e.domEvent.keyCode == ENTER_KEY_CODE:
+      raw = "\n"
+    elif e.domEvent.keyCode == TAB_KEY_CODE:
+      raw = "\t"
+    elif e.domEvent.keyCode == BACKSPACE_KEY_CODE:
+      raw = "\b"
+    if raw.len > 0:
+      self.send(cstring(raw))
 
 proc openShellTab*(data: Data) =
   data.openLayoutTab(Content.Shell)

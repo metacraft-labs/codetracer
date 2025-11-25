@@ -750,6 +750,7 @@ type
     logData*: seq[LogEntry]
     shell*:   ShellComponent
     inputField*: dom.Node
+    inputValue*: cstring
     commandPalette*: CommandPaletteComponent
 
   StepListComponent* = ref object of Component
