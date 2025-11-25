@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -44,7 +45,18 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
     public async Task ExecuteAsync(TestPlanEntry entry, CancellationToken cancellationToken)
     {
         var traceOverride = Environment.GetEnvironmentVariable("CODETRACER_TRACE_PATH");
-        var tracePath = _launcher.ResolveTracePath(traceOverride);
+        string tracePath;
+        if (!string.IsNullOrWhiteSpace(traceOverride))
+        {
+            tracePath = _launcher.ResolveTracePath(traceOverride);
+        }
+        else
+        {
+            var programToRecord = entry.Scenario.TraceProgram ?? _settings.Electron.TraceProgram;
+            var recording = await _launcher.RecordProgramAsync(programToRecord, cancellationToken);
+            tracePath = recording.TracePath;
+        }
+
         if (!Directory.Exists(tracePath))
         {
             throw new DirectoryNotFoundException($"Trace directory not found: {tracePath}. Set CODETRACER_TRACE_PATH to a valid trace.");
@@ -59,27 +71,55 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         var verboseConsole = ShouldEmitVerboseConsole(entry);
         var hostProcess = _hostLauncher.StartHostProcess(httpPort, backendPort, frontendPort, tracePath, label, verboseConsole);
         _processLifecycle.RegisterProcess(hostProcess, $"ct-host:{label}");
-        await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, label, verboseConsole, cancellationToken);
+        var isStability = entry.Test.Id.StartsWith("Stability.", StringComparison.OrdinalIgnoreCase);
+        var videoMode = _settings.Stability.Artifacts.VideoMode;
+        var screenshotMode = _settings.Stability.Artifacts.ScreenshotMode;
+        var mediaRunId = DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+        string? mediaRoot = isStability && videoMode != StabilityRecordingMode.Off
+            ? Path.GetFullPath(Path.Combine(_settings.Stability.Artifacts.Root, "media", entry.Scenario.Id, mediaRunId))
+            : null;
+
+        await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, label, verboseConsole, cancellationToken, mediaRoot, videoMode);
+        var failed = false;
         try
         {
-
             if (entry.Scenario.DelaySeconds > 0)
             {
                 await Task.Delay(TimeSpan.FromSeconds(entry.Scenario.DelaySeconds), cancellationToken);
             }
 
-            var context = new TestExecutionContext(entry.Scenario, entry.Mode, session.Page, cancellationToken);
+            var context = new TestExecutionContext(entry.Scenario, entry.Mode, session.Page, cancellationToken, _settings);
             var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
             using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
-            await entry.Test.Handler(context);
+            try
+            {
+                await entry.Test.Handler(context);
+                if (isStability && screenshotMode == StabilityRecordingMode.On)
+                {
+                    await CaptureScreenshotAsync(session.Page, entry, mediaRunId, "success");
+                }
+            }
+            catch
+            {
+                failed = true;
+                if (isStability && screenshotMode != StabilityRecordingMode.Off)
+                {
+                    await CaptureScreenshotAsync(session.Page, entry, mediaRunId, "failure");
+                }
+                throw;
+            }
         }
         finally
         {
             _processLifecycle.UnregisterProcess(hostProcess.Id);
+            if (isStability && videoMode == StabilityRecordingMode.FailOnly && mediaRoot is not null && !failed)
+            {
+                TryDeleteMedia(mediaRoot);
+            }
         }
     }
 
-    private async Task<WebTestSession> CreateWebSessionAsync(Process hostProcess, int port, TestPlanEntry entry, string label, bool verboseConsole, CancellationToken cancellationToken)
+    private async Task<WebTestSession> CreateWebSessionAsync(Process hostProcess, int port, TestPlanEntry entry, string label, bool verboseConsole, CancellationToken cancellationToken, string? mediaRoot, StabilityRecordingMode videoMode)
     {
         await _hostLauncher.WaitForServerAsync(port, TimeSpan.FromSeconds(_settings.Web.HostStartupTimeoutSeconds), entry.Scenario.Id, cancellationToken);
 
@@ -114,6 +154,12 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             };
         }
 
+        if (mediaRoot is not null && videoMode != StabilityRecordingMode.Off)
+        {
+            Directory.CreateDirectory(mediaRoot);
+            contextOptions.RecordVideoDir = mediaRoot;
+        }
+
         var context = await browser.NewContextAsync(contextOptions);
         var page = await context.NewPageAsync();
         page.SetDefaultTimeout(20_000);
@@ -135,4 +181,34 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
 
     private bool ShouldEmitVerboseConsole(TestPlanEntry entry)
         => _settings.Runner.VerboseConsole || entry.Scenario.VerboseLogging;
+
+    private async Task CaptureScreenshotAsync(IPage page, TestPlanEntry entry, string runId, string label)
+    {
+        var root = Path.GetFullPath(Path.Combine(_settings.Stability.Artifacts.Root, "media", entry.Scenario.Id, runId, "screenshots"));
+        Directory.CreateDirectory(root);
+        var name = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{Sanitize(label)}.png";
+        var path = Path.Combine(root, name);
+        await page.ScreenshotAsync(new() { Path = path, FullPage = true });
+    }
+
+    private static void TryDeleteMedia(string mediaRoot)
+    {
+        try
+        {
+            if (Directory.Exists(mediaRoot))
+            {
+                Directory.Delete(mediaRoot, recursive: true);
+            }
+        }
+        catch
+        {
+            // best effort
+        }
+    }
+
+    private static string Sanitize(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+    }
 }

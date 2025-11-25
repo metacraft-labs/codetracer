@@ -28,6 +28,12 @@ public sealed class AppSettings
     public WebSettings Web { get; set; } = new();
 
     /// <summary>
+    /// Settings specific to stability test orchestration, logging, and artifacts.
+    /// </summary>
+    [Required]
+    public StabilitySettings Stability { get; set; } = new();
+
+    /// <summary>
     /// Declarative catalogue describing which scenarios to execute.
     /// </summary>
     public IReadOnlyList<ScenarioSettings> Scenarios { get; set; } = Array.Empty<ScenarioSettings>();
@@ -136,6 +142,32 @@ public sealed class ScenarioSettings
     /// </summary>
     [Range(1, 500)]
     public int EventIndex { get; set; } = 1;
+
+    /// <summary>
+    /// Optional program override for this scenario. Falls back to Electron/Web defaults when omitted.
+    /// </summary>
+    public string? TraceProgram { get; set; }
+        = null;
+
+    /// <summary>
+    /// Optional stability duration override in minutes (time-bound runs).
+    /// </summary>
+    [Range(1, 1440)]
+    public int? StabilityDurationMinutes { get; set; }
+        = null;
+
+    /// <summary>
+    /// Optional stability iteration limit override (repeat-count-bound runs).
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int? StabilityIterationLimit { get; set; }
+        = null;
+
+    /// <summary>
+    /// When true, use the configured overnight duration for this scenario.
+    /// </summary>
+    public bool StabilityOvernight { get; set; }
+        = false;
 
     /// <summary>
     /// Delay (in seconds) to wait before activating the event. Defaults to 0.

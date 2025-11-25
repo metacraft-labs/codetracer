@@ -12,7 +12,7 @@ internal interface ICodetracerLauncher
     string CtPath { get; }
     string CtInstallDirectory { get; }
     bool IsCtAvailable { get; }
-    Task<int> RecordProgramAsync(string relativePath, CancellationToken cancellationToken);
+    Task<CodetracerRecording> RecordProgramAsync(string relativePath, CancellationToken cancellationToken);
     string ResolveTracePath(string? overridePath);
 }
 
@@ -52,7 +52,7 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
 
     public bool IsCtAvailable => File.Exists(CtPath);
 
-    public async Task<int> RecordProgramAsync(string relativePath, CancellationToken cancellationToken)
+    public async Task<CodetracerRecording> RecordProgramAsync(string relativePath, CancellationToken cancellationToken)
     {
         if (!IsCtAvailable)
         {
@@ -90,7 +90,8 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
         var traceId = ParseTraceId(stdout);
         var logLevel = _settings.Runner.VerboseConsole ? LogLevel.Information : LogLevel.Debug;
         _logger.Log(logLevel, "Recorded trace {TraceId} for program {Program}.", traceId, relativePath);
-        return traceId;
+        var tracePath = ResolveTracePath(null);
+        return new CodetracerRecording(traceId, tracePath);
     }
 
     public string ResolveTracePath(string? overridePath)
@@ -153,3 +154,5 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
         return int.TryParse(suffix, out var value) ? value : (int?)null;
     }
 }
+
+internal sealed record CodetracerRecording(int TraceId, string TracePath);

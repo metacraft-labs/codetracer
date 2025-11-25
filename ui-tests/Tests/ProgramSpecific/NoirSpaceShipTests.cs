@@ -10,6 +10,8 @@ using UiTests.PageObjects.Panes.Editor;
 using UiTests.PageObjects.Panes.EventLog;
 using UiTests.PageObjects.Panes.Scratchpad;
 using UiTests.PageObjects.Panes.VariableState;
+using UiTests.Execution;
+using UiTests.Stability;
 using UiTests.Utils;
 using UiTests.Tests;
 
@@ -315,11 +317,47 @@ public static class NoirSpaceShipTests
         Trace("LoopIterationSliderTracksRemainingShield completed");
     }
 
-    public static async Task SimpleLoopIterationJump(IPage page)
+    public static async Task SimpleLoopIterationJump(TestExecutionContext context)
     {
+        var page = context.Page;
+        var stabilitySettings = context.Settings.Stability;
+        var runId = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}";
+        var runDirectory = Path.Combine(
+            stabilitySettings.Artifacts.Root,
+            "logs",
+            "stable-intents",
+            nameof(SimpleLoopIterationJump),
+            runId);
+
+        var model = StabilityModel.Create(
+            programId: context.Scenario.TraceProgram ?? context.Settings.Electron.TraceProgram,
+            startedAt: DateTimeOffset.UtcNow,
+            duration: TimeSpan.FromMinutes(2),
+            targetIterations: 1,
+            seed: stabilitySettings.DefaultSeed);
+
+        // Intent script: jump forward and reverse within event log to drive timing, then reopen shield editor and check line 5 on regeneration jump.
+        var script = new EventLogStabilityScript(TimeSpan.FromMinutes(2), iterationLimit: 1);
         var layout = new LayoutPage(page);
         await layout.WaitForAllComponentsLoadedAsync();
+        var handler = new UiTests.Stability.PlaywrightStabilityCommandHandler(
+            layout,
+            page,
+            Path.Combine(runDirectory, "screenshots"));
 
+        await using var logWriter = new StabilityLogWriter(runDirectory, nameof(SimpleLoopIterationJump), runId);
+        logWriter.LogStart(model);
+        var store = new StabilityStore(
+            model,
+            script,
+            handler,
+            onIntent: (intent, state) => logWriter.LogIntent(intent, state),
+            onCommand: (command, state) => logWriter.LogCommand(command, state));
+
+        await store.RunAsync(context.CancellationToken);
+        logWriter.LogCompletion(store.State, DateTimeOffset.UtcNow);
+
+        // Additional domain-specific assertion after intent loop:
         var callTrace = (await layout.CallTraceTabsAsync()).First();
         await callTrace.TabButton().ClickAsync();
         callTrace.InvalidateEntries();
@@ -328,7 +366,6 @@ public static class NoirSpaceShipTests
         await iterateEntry.ActivateAsync();
 
         var shieldEditor = await RequireShieldEditorAsync(layout);
-
         var iterationValueBoxLocator = shieldEditor.FlowValueElementById("flow-parallel-value-box-0-6-regeneration");
         if (await iterationValueBoxLocator.CountAsync() == 0)
         {
@@ -338,8 +375,6 @@ public static class NoirSpaceShipTests
 
         var iterationValueBox = iterationValueBoxLocator.First;
         await iterationValueBox.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
-        // await iterationValueBox.ClickAsync();
-        // await iterationValueBox.DblClickAsync();
         var iterationEditor = shieldEditor.Root.Locator(".flow-loop-textarea").First;
         await iterationEditor.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
 
@@ -348,41 +383,51 @@ public static class NoirSpaceShipTests
         await iterationEditor.TypeAsync(iterationTarget, new() { Delay = 20 });
         await iterationEditor.PressAsync("Enter");
 
-        try
+        await RetryHelpers.RetryAsync(async () =>
         {
-            await RetryHelpers.RetryAsync(async () =>
-            {
-                var activeLine = await shieldEditor.ActiveLineNumberAsync();
-                return activeLine == 5;
-            }, maxAttempts: 30, delayMs: 200);
-        }
-        catch (TimeoutException ex)
-        {
-            throw new TimeoutException("CodeTracer was expected to jump to line 5 after jimping to a new loop iterration.", ex);
-        }
+            var activeLine = await shieldEditor.ActiveLineNumberAsync();
+            return activeLine == 5;
+        }, maxAttempts: 30, delayMs: 200);
     }
 
-    public static async Task EventLogJumpHighlightsActiveRow(IPage page)
+    public static async Task EventLogJumpHighlightsActiveRow(TestExecutionContext context)
     {
+        var page = context.Page;
+        var stabilitySettings = context.Settings.Stability;
+        var runId = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}";
+        var runDirectory = Path.Combine(
+            stabilitySettings.Artifacts.Root,
+            "logs",
+            "stable-intents",
+            nameof(EventLogJumpHighlightsActiveRow),
+            runId);
+
+        var model = StabilityModel.Create(
+            programId: context.Scenario.TraceProgram ?? context.Settings.Electron.TraceProgram,
+            startedAt: DateTimeOffset.UtcNow,
+            duration: TimeSpan.FromMinutes(2),
+            targetIterations: 1,
+            seed: stabilitySettings.DefaultSeed);
+
+        var script = new EventLogStabilityScript(TimeSpan.FromMinutes(2), iterationLimit: 1);
         var layout = new LayoutPage(page);
-        //await layout.WaitForAllComponentsLoadedAsync();
+        await layout.WaitForAllComponentsLoadedAsync();
+        var handler = new UiTests.Stability.PlaywrightStabilityCommandHandler(
+            layout,
+            page,
+            Path.Combine(runDirectory, "screenshots"));
 
-        var eventLog = (await layout.EventLogTabsAsync()).First();
-        await eventLog.TabButton().ClickAsync();
+        await using var logWriter = new StabilityLogWriter(runDirectory, nameof(EventLogJumpHighlightsActiveRow), runId);
+        logWriter.LogStart(model);
+        var store = new StabilityStore(
+            model,
+            script,
+            handler,
+            onIntent: (intent, state) => logWriter.LogIntent(intent, state),
+            onCommand: (command, state) => logWriter.LogCommand(command, state));
 
-        var rows = (await eventLog.EventElementsAsync(true)).ToList();
-        if (rows.Count < 2)
-        {
-            throw new Exception("Event log did not render enough rows for the navigation test.");
-        }
-
-        var firstRow = rows[0];
-        var firstIndex = await firstRow.IndexAsync();
-
-        await firstRow._root.ClickAsync();
-
-        await Task.Delay(1000);
-        await RetryHelpers.RetryAsync(firstRow.IsHighlightedAsync);
+        await store.RunAsync(context.CancellationToken);
+        logWriter.LogCompletion(store.State, DateTimeOffset.UtcNow);
     }
 
     public static async Task TraceLogRecordsDamageRegeneration(IPage page)

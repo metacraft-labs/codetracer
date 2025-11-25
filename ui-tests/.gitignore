@@ -5,3 +5,6 @@ playwright-report/
 test-results/
 .direnv/
 *.patch
+artifacts/
+!artifacts/baseline/
+!artifacts/baseline/**

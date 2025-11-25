@@ -29,7 +29,16 @@ internal static class Program
             ["--exclude"] = "Runner:ExcludeTests",
             ["--mode"] = "Runner:ExecutionModes:0",
             ["--default-mode"] = "Runner:DefaultMode",
-            ["--verbose-console"] = "Runner:VerboseConsole"
+            ["--verbose-console"] = "Runner:VerboseConsole",
+            ["--stability-duration"] = "Stability:Runtime:OverrideDurationMinutes",
+            ["--stability-max-runtime"] = "Stability:Runtime:OverrideMaxRuntimeMinutes",
+            ["--stability-overnight"] = "Stability:Runtime:Overnight",
+            ["--stability-video"] = "Stability:Artifacts:VideoMode",
+            ["--stability-screenshots"] = "Stability:Artifacts:ScreenshotMode",
+            ["--stability-clear-logs"] = "Stability:Artifacts:ClearLogs",
+            ["--stability-clear-artifacts"] = "Stability:Artifacts:ClearArtifacts",
+            ["--stability-seed"] = "Stability:DefaultSeed",
+            ["--stability-artifacts-root"] = "Stability:Artifacts:Root"
         }.ToImmutableDictionary(StringComparer.OrdinalIgnoreCase);
 
     public static async Task<int> Main(string[] args)
@@ -111,6 +120,7 @@ internal static class Program
                 services.AddSingleton<ITestSessionExecutor, ElectronTestSessionExecutor>();
                 services.AddSingleton<ITestSessionExecutor, WebTestSessionExecutor>();
                 services.AddSingleton<IProcessLifecycleManager, ProcessLifecycleManager>();
+                services.AddSingleton<IStabilityArtifactManager, StabilityArtifactManager>();
 
                 services.AddLogging(builder =>
                 {

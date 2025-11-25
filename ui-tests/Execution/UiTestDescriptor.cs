@@ -20,4 +20,5 @@ public sealed record TestExecutionContext(
     ScenarioSettings Scenario,
     TestMode Mode,
     Microsoft.Playwright.IPage Page,
-    CancellationToken CancellationToken);
+    CancellationToken CancellationToken,
+    UiTests.Configuration.AppSettings Settings);

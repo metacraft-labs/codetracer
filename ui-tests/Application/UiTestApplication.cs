@@ -12,6 +12,7 @@ internal sealed class UiTestApplication
     private readonly IUiTestExecutionPipeline _pipeline;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly IProcessLifecycleManager _processLifecycle;
+    private readonly IStabilityArtifactManager _stabilityArtifacts;
     private readonly AppSettings _settings;
 
     public UiTestApplication(
@@ -19,12 +20,14 @@ internal sealed class UiTestApplication
         IUiTestExecutionPipeline pipeline,
         IHostApplicationLifetime lifetime,
         IProcessLifecycleManager processLifecycle,
+        IStabilityArtifactManager stabilityArtifacts,
         IOptions<AppSettings> settings)
     {
         _logger = logger;
         _pipeline = pipeline;
         _lifetime = lifetime;
         _processLifecycle = processLifecycle;
+        _stabilityArtifacts = stabilityArtifacts;
         _settings = settings.Value;
     }
 
@@ -33,6 +36,7 @@ internal sealed class UiTestApplication
         try
         {
             using var scope = _logger.BeginScope("ui-tests");
+            _stabilityArtifacts.PrepareArtifacts(_settings.Stability);
             var emitLifecycleTelemetry = _settings.Runner.VerboseConsole;
             if (emitLifecycleTelemetry)
             {

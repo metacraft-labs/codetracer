@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using UiTests.Tests;
 using UiTests.Tests.ProgramAgnostic;
+using UiTests.Tests.Stability;
 using UiTests.Utils;
 
 namespace UiTests.Execution;
@@ -48,13 +49,13 @@ internal sealed class TestRegistry : ITestRegistry
             new UiTestDescriptor(
                 "NoirSpaceShip.SimpleLoopIterationJump",
                 "Noir Space Ship / Simple Loop Iteration Jump",
-                async context => await NoirSpaceShipTests.SimpleLoopIterationJump(context.Page)));
+                async context => await NoirSpaceShipTests.SimpleLoopIterationJump(context)));
 
         Register(
             new UiTestDescriptor(
                 "NoirSpaceShip.EventLogJumpHighlightsActiveRow",
                 "Noir Space Ship / Event Log Jump Highlights Active Row",
-                async context => await NoirSpaceShipTests.EventLogJumpHighlightsActiveRow(context.Page)));
+                async context => await NoirSpaceShipTests.EventLogJumpHighlightsActiveRow(context)));
 
         Register(
             new UiTestDescriptor(
@@ -170,6 +171,36 @@ internal sealed class TestRegistry : ITestRegistry
                 "NoirSpaceShip.ValueHistoryContextMenuOptions",
                 "Noir Space Ship / Value History Context Menu Options",
                 async context => await NoirSpaceShipTests.ValueHistoryContextMenuOptions(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "Stability.EventLogForwardReverse",
+                "Stability / Event Log Forward Reverse Loop",
+                async context => await StabilityEventLogTests.EventLogForwardReverse(context)));
+
+        Register(
+            new UiTestDescriptor(
+                "Stability.DebuggerContinueRunToEntry",
+                "Stability / Continue To End then Run To Entry Loop",
+                async context => await StabilityAdditionalTests.DebuggerContinueRunToEntry(context)));
+
+        Register(
+            new UiTestDescriptor(
+                "Stability.SteppingForwardReverse",
+                "Stability / Step Into then Reverse Step Into Loop",
+                async context => await StabilityAdditionalTests.SteppingForwardReverse(context)));
+
+        Register(
+            new UiTestDescriptor(
+                "Stability.PaneToggleCycle",
+                "Stability / Pane Toggle Cycle via Menu",
+                async context => await StabilityAdditionalTests.PaneToggleCycle(context)));
+
+        Register(
+            new UiTestDescriptor(
+                "Stability.FilesystemOpenCloseSweep",
+                "Stability / Filesystem Open All and Close Editors Sweep",
+                async context => await StabilityAdditionalTests.FilesystemOpenCloseSweep(context)));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();

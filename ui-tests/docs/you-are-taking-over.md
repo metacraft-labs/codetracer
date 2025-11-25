@@ -29,3 +29,8 @@ Review `docs/debugging.md` and `docs/test-debug-temp/*` for per-test notes befor
 - Scenarios now accept `\"verboseLogging\": true` to opt into DebugLogger/console chatter when you need deep traces.
 - Pass `--verbose-console` to enable verbose runner output (process counts, trace recordings, start/stop messages) for every test.
 - Successful runs stay quiet and end with a colorized summary that lists total executions plus Electron/Web pass/fail counts; failures still print the same summary after error details.
+
+## Recent Branch Status (last run)
+- Stable suite (full parallel) failed on `NoirSpaceShip.SimpleLoopIterationJump` in both modes: timeout waiting for the “regeneration” flow value box (line 340) to become visible.
+- `NoirSpaceShip.EventLogJumpHighlightsActiveRow` failed in both Electron/Web: event log did not render enough rows for navigation (line 376).
+- Re-running only `SimpleLoopIterationJump` still hit the same timeout in both modes; see `/tmp/ui-simple-loop.log` for the call log if needed.

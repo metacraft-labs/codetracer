@@ -23,6 +23,9 @@ internal sealed class AppSettingsPostConfigure : IPostConfigureOptions<AppSettin
         options.Electron ??= new ElectronSettings();
         options.Web ??= new WebSettings();
         options.Web.Ports ??= new HostPortSettings();
+        options.Stability ??= new StabilitySettings();
+        options.Stability.Artifacts ??= new StabilityArtifactSettings();
+        options.Stability.Runtime ??= new StabilityRuntimeSettings();
         options.Suites = EnsureDictionary(options.Suites);
         options.Profiles = EnsureDictionary(options.Profiles);
 
@@ -123,6 +126,18 @@ internal sealed class AppSettingsPostConfigure : IPostConfigureOptions<AppSettin
                 nameof(WebSettings),
                 typeof(WebSettings),
                 new[] { "Web:Ports:FixedPort must be specified when PortStrategy is 'Fixed'." });
+        }
+
+        var stabilityRuntime = options.Stability.Runtime ?? new StabilityRuntimeSettings();
+        if (stabilityRuntime.DefaultMaxRuntimeMinutes < stabilityRuntime.DefaultDurationMinutes)
+        {
+            stabilityRuntime.DefaultMaxRuntimeMinutes = stabilityRuntime.DefaultDurationMinutes;
+        }
+
+        if (stabilityRuntime.Overnight)
+        {
+            stabilityRuntime.OverrideDurationMinutes ??= stabilityRuntime.OvernightDurationMinutes;
+            stabilityRuntime.OverrideMaxRuntimeMinutes ??= stabilityRuntime.OvernightDurationMinutes;
         }
     }
 

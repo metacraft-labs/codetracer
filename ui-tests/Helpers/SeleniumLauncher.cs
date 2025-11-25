@@ -19,7 +19,7 @@ public static class SeleniumLauncher
         if (!launcher.IsCtAvailable)
             throw new FileNotFoundException($"ct executable not found at {launcher.CtPath}");
 
-        int traceId = launcher.RecordProgramAsync(programRelativePath, CancellationToken.None).GetAwaiter().GetResult();
+        var recording = launcher.RecordProgramAsync(programRelativePath, CancellationToken.None).GetAwaiter().GetResult();
         // CodetracerLauncher.StartCore(traceId, 1);
 
         var psi = new ProcessStartInfo(launcher.CtPath, "--remote-debugging-port=9222")
@@ -28,7 +28,7 @@ public static class SeleniumLauncher
             UseShellExecute = false
         };
         psi.Environment["CODETRACER_CALLER_PID"] = "1";
-        psi.Environment["CODETRACER_TRACE_ID"] = traceId.ToString();
+        psi.Environment["CODETRACER_TRACE_ID"] = recording.TraceId.ToString();
         psi.Environment["CODETRACER_IN_UI_TEST"] = "1";
         psi.Environment["CODETRACER_TEST"] = "1";
         psi.Environment["CODETRACER_WRAP_ELECTRON"] = "1";

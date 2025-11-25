@@ -1,4 +1,6 @@
+using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using Microsoft.Extensions.Logging;
@@ -42,12 +44,13 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
             throw new InvalidOperationException($"ct executable not found at {_launcher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
         }
 
-        var traceId = await _launcher.RecordProgramAsync(_settings.Electron.TraceProgram, cancellationToken);
+        var programToRecord = entry.Scenario.TraceProgram ?? _settings.Electron.TraceProgram;
+        var recording = await _launcher.RecordProgramAsync(programToRecord, cancellationToken);
         var port = await GetFreeTcpPortAsync();
         var verboseConsole = ShouldEmitVerboseConsole(entry);
-        _logger.Log(verboseConsole ? LogLevel.Information : LogLevel.Debug, "[{Scenario}] Launching Electron trace {TraceId} on port {Port}.", entry.Scenario.Id, traceId, port);
+        _logger.Log(verboseConsole ? LogLevel.Information : LogLevel.Debug, "[{Scenario}] Launching Electron trace {TraceId} on port {Port}.", entry.Scenario.Id, recording.TraceId, port);
 
-        await using var session = await LaunchElectronAsync(traceId, port, cancellationToken);
+        await using var session = await LaunchElectronAsync(recording.TraceId, port, cancellationToken);
         var monitors = _monitorLayoutService.DetectMonitors();
         var selectedMonitor = MonitorSelectionHelper.SelectPreferredMonitor(
             monitors,
@@ -71,10 +74,28 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
             await Task.Delay(TimeSpan.FromSeconds(entry.Scenario.DelaySeconds), cancellationToken);
         }
 
-        var context = new TestExecutionContext(entry.Scenario, entry.Mode, page, cancellationToken);
+        var isStability = entry.Test.Id.StartsWith("Stability.", StringComparison.OrdinalIgnoreCase);
+        var screenshotMode = _settings.Stability.Artifacts.ScreenshotMode;
+        var mediaRunId = DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+        var context = new TestExecutionContext(entry.Scenario, entry.Mode, page, cancellationToken, _settings);
         var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
         using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
-        await entry.Test.Handler(context);
+        try
+        {
+            await entry.Test.Handler(context);
+            if (isStability && screenshotMode == StabilityRecordingMode.On)
+            {
+                await CaptureScreenshotAsync(page, entry, mediaRunId, "success");
+            }
+        }
+        catch
+        {
+            if (isStability && screenshotMode != StabilityRecordingMode.Off)
+            {
+                await CaptureScreenshotAsync(page, entry, mediaRunId, "failure");
+            }
+            throw;
+        }
     }
 
     private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int port, CancellationToken cancellationToken)
@@ -128,6 +149,21 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
 
             throw;
         }
+    }
+
+    private async Task CaptureScreenshotAsync(IPage page, TestPlanEntry entry, string runId, string label)
+    {
+        var root = Path.GetFullPath(Path.Combine(_settings.Stability.Artifacts.Root, "media", entry.Scenario.Id, runId, "screenshots"));
+        Directory.CreateDirectory(root);
+        var name = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{Sanitize(label)}.png";
+        var path = Path.Combine(root, name);
+        await page.ScreenshotAsync(new() { Path = path, FullPage = true });
+    }
+
+    private static string Sanitize(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
     }
 
     private static async Task WaitForCdpAsync(int port, TimeSpan timeout, CancellationToken cancellationToken)
@@ -209,6 +245,7 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
 
         return null;
     }
+
     private bool ShouldEmitVerboseConsole(TestPlanEntry entry)
         => _settings.Runner.VerboseConsole || entry.Scenario.VerboseLogging;
 }
