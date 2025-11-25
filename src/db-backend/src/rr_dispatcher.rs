@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::ffi::OsStr;
 use std::fs::{create_dir_all, remove_file};
 use std::io::Write;
 use std::io::{BufRead, BufReader};
@@ -65,36 +64,22 @@ impl CtRRWorker {
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
-        let is_appimage = self.ct_rr_worker_exe.extension() == Some(OsStr::new("AppImage"));
         info!(
-            "start: {}{} replay-worker --name {} --index {} {}",
-            if !is_appimage { "" } else { "appimage-run " },
+            "start: {} replay-worker --name {} --index {} {}",
             self.ct_rr_worker_exe.display(),
             self.name,
             self.index,
             self.rr_trace_folder.display()
         );
 
-        let ct_worker = if !is_appimage {
-            Command::new(&self.ct_rr_worker_exe)
+        let ct_worker = Command::new(&self.ct_rr_worker_exe)
                 .arg("replay-worker")
                 .arg("--name")
                 .arg(&self.name)
                 .arg("--index")
                 .arg(self.index.to_string())
                 .arg(&self.rr_trace_folder)
-                .spawn()?
-        } else {
-            Command::new("appimage-run")
-                .arg(&self.ct_rr_worker_exe)
-                .arg("replay-worker")
-                .arg("--name")
-                .arg(&self.name)
-                .arg("--index")
-                .arg(self.index.to_string())
-                .arg(&self.rr_trace_folder)
-                .spawn()?
-        };
+                .spawn()?;
 
         self.process = Some(ct_worker);
         self.setup_worker_sockets()?;
