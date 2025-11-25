@@ -1418,7 +1418,6 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       )
 
       tabInfo.monacoEditor.onMouseDown(proc(e: js) =
-
         if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
           try:
             let targetToken = self.getTokenFromPosition(e.target.position)
