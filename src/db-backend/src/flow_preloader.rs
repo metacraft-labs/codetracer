@@ -18,7 +18,7 @@ use crate::{
     value::{to_ct_value, Value, ValueRecordWithType},
 };
 
-const STEP_COUNT_LIMIT: usize = 100;
+const STEP_COUNT_LIMIT: usize = 1000;
 
 #[derive(Debug)]
 pub struct FlowPreloader {
@@ -306,7 +306,6 @@ impl<'a> CallFlowPreloader<'a> {
             FlowMode::Call => (from_step_id, true, false),
             FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
         };
-        let mut move_error = false;
         if self.trace_kind == TraceKind::DB {
             // for now assume it can't fail: `?` only because of more general api
             replay.jump_to(step_id)?;
