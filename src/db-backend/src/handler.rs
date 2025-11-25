@@ -63,6 +63,8 @@ pub struct Handler {
     pub replay: Box<dyn Replay>,
     pub ct_rr_args: CtRRArgs,
     pub load_flow_index: usize,
+
+    pub initialized: bool,
 }
 
 // two choices:
@@ -123,6 +125,7 @@ impl Handler {
             load_flow_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
+            initialized: false,
         };
         handler.initialize_breakpoint_cache();
         handler

@@ -149,15 +149,15 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     handle_client(receiving_receiver, false, &receiving_thread, writer)
 }
 
-fn launch(
+fn setup(
     trace_folder: &Path,
     trace_file: &Path,
     raw_diff_index: Option<String>,
     ct_rr_worker_exe: &Path,
-    seq: i64,
     sender: Sender<DapMessage>,
+    for_launch: bool,
 ) -> Result<Handler, Box<dyn Error>> {
-    info!("run launch() for {:?}", trace_folder);
+    info!("run setup() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
     } else {
@@ -176,9 +176,11 @@ fn launch(
         proc.postprocess(&trace)?;
 
         let mut handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
-        handler.dap_client.seq = seq;
         handler.raw_diff_index = raw_diff_index;
-        handler.run_to_entry(dap::Request::default(), sender)?;
+        if for_launch {
+            handler.run_to_entry(dap::Request::default(), sender)?;
+        }
+        handler.initialized = true;
         Ok(handler)
     } else {
         info!("can't read db metadata or path trace files: try to read as rr trace");
@@ -190,9 +192,11 @@ fn launch(
                 rr_trace_folder: path,
             };
             let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
-            handler.dap_client.seq = seq;
             handler.raw_diff_index = raw_diff_index;
-            handler.run_to_entry(dap::Request::default(), sender)?;
+            if for_launch {
+                handler.run_to_entry(dap::Request::default(), sender)?;
+            }
+            handler.initialized = true;
             Ok(handler)
         } else {
             Err("problem with reading metadata or path trace files".into())
@@ -200,20 +204,6 @@ fn launch(
     }
 }
 
-// fn write_dap_messages_from_thread(
-//     sender: Sender<DapMessage>,
-//     handler: &mut Handler,
-//     seq: &mut i64,
-// ) -> Result<(), Box<dyn Error>> {
-//     for message in &handler.resulting_dap_messages {
-//         sender.send(message.clone())?;
-//     }
-
-//     handler.reset_dap();
-//     *seq = handler.dap_client.seq;
-//     info!("messages sent from thread");
-//     Ok(())
-// }
 
 fn patch_message_seq(message: &DapMessage, seq: i64) -> DapMessage {
     match message {
@@ -274,10 +264,8 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
 fn handle_request(
     handler: &mut Handler,
     req: dap::Request,
-    seq: &mut i64,
     sender: Sender<DapMessage>,
 ) -> Result<(), Box<dyn Error>> {
-    handler.dap_client.seq = *seq;
     match req.command.as_str() {
         "scopes" => handler.scopes(
             req.clone(),
@@ -377,9 +365,10 @@ fn handle_request(
     // write_dap_messages_from_thread(sender, handler, seq)
 }
 
+#[derive(Debug, Clone)]
 pub struct Ctx {
     pub seq: i64,
-    pub handler: Option<Handler>,
+    // pub handler: Option<Handler>,
     pub received_launch: bool,
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
@@ -396,7 +385,7 @@ impl Default for Ctx {
     fn default() -> Self {
         Self {
             seq: 1i64,
-            handler: None,
+            // handler: None,
             received_launch: false,
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
@@ -489,62 +478,9 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
 
                 if ctx.received_configuration_done {
-                    let (to_stable_sender, from_stable_receiver) = mpsc::channel();
-                    ctx.to_stable_sender = Some(to_stable_sender);
-                    let launch_trace_folder = ctx.launch_trace_folder.clone();
-                    let launch_raw_diff_index = ctx.launch_raw_diff_index.clone();
-                    let launch_trace_file = ctx.launch_trace_file.clone();
-                    let ct_rr_worker_exe = ctx.ct_rr_worker_exe.clone();
-                    let sender_to_sending = sender.clone();
-
-                    info!("create stable thread");
-                    let builder = thread::Builder::new().name("stable".to_string());
-                    let _thread_handle = builder.spawn(move || -> Result<(), String> {
-                        let mut seq = 0;
-                        let mut handler = launch(
-                            &launch_trace_folder,
-                            &launch_trace_file,
-                            launch_raw_diff_index.clone(),
-                            &ct_rr_worker_exe,
-                            seq,
-                            sender_to_sending.clone(),
-                        )
-                        .map_err(|e| {
-                            error!("launch error: {e:?}");
-                            format!("launch error: {e:?}")
-                        })?;
-
-                        info!("ok: launched ok in stable thread");
-                        // write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq)
-                        //     .map_err(|e| {
-                        //         error!("write dap message error: {e:?}");
-                        //         format!("write dap message error: {e:?}")
-                        //     })?;
-
-                        loop {
-                            info!("waiting for new message from DAP server");
-                            let request = from_stable_receiver.recv().map_err(|e| {
-                                error!("stable thread recv error: {e:?}");
-                                format!("stable thread recv error: {e:?}")
-                            })?;
-
-                            info!("  stable thread: new message received");
-
-                            info!("  try to handle {:?}", request);
-                            let res = handle_request(&mut handler, request, &mut seq, sender_to_sending.clone());
-                            if let Err(e) = res {
-                                warn!("  handle_request error in thread: {e:?}");
-                                // continue with other request; trying to be more robust
-                                // assuming it's for individual requests to fail
-                                //   TODO: is it possible for some to leave bad state ?
-                            }
-                            // write_dap_messages_from_thread(stable_thread_sender.clone(), &mut handler, &mut seq).map_err(|e| {
-                            //     error!("  write dap message error: {e:?}");
-                            //     format!("write dap message error: {e:?}")
-                            // })?;
-                        }
-                        // Ok(())
-                    })?;
+                    if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
+                        to_stable_sender.send(req.clone())?;
+                    }
                 }
             }
             // TODO: log this when logging logic is properly abstracted
@@ -652,6 +588,78 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
     Ok(())
 }
 
+fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender: Sender<DapMessage>, ctx: &Ctx, cached_launch: bool) -> Result<(), Box<dyn Error>> {
+    let mut handler = if cached_launch {
+        let for_launch = false;
+        setup(
+            &ctx.launch_trace_folder,
+            &ctx.launch_trace_file,
+            ctx.launch_raw_diff_index.clone(),
+            &ctx.ct_rr_worker_exe,
+            sender.clone(),
+            for_launch,
+        )
+        .map_err(|e| {
+            error!("launch error: {e:?}");
+            format!("launch error: {e:?}")
+        })?
+    } else {
+        // `.initialized` is false
+        Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(Db::new(&PathBuf::from(""))))
+    };
+
+    loop {
+        info!("waiting for new message from DAP server");
+        let request = from_thread_receiver.recv().map_err(|e| {
+            error!("{name} thread recv error: {e:?}");
+            format!("{name} thread recv error: {e:?}")
+        })?;
+
+        info!("  try to handle {:?}", request.command);
+        if request.command == "launch" {
+            let args = request.load_args::<dap::LaunchRequestArguments>()?;
+            if let Some(folder) = &args.trace_folder {
+                let launch_trace_folder = folder.clone();
+                let launch_trace_file = if let Some(trace_file) = &args.trace_file {
+                    trace_file.clone()
+                } else {
+                    "trace.json".into()
+                };
+
+                info!("stored launch trace folder: {0:?}", launch_trace_folder);
+
+                let launch_raw_diff_index = args.raw_diff_index.clone();
+                let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
+
+                let for_launch = true;
+                handler = setup(
+                    &launch_trace_folder,
+                    &launch_trace_file,
+                    launch_raw_diff_index.clone(),
+                    &ct_rr_worker_exe,
+                    sender.clone(),
+                    for_launch,
+                )
+                .map_err(|e| {
+                    error!("launch error: {e:?}");
+                    format!("launch error: {e:?}")
+                })?;
+            } 
+        } else {
+            if handler.initialized {
+                let res = handle_request(&mut handler, request, sender.clone());
+                if let Err(e) = res {
+                    warn!("  handle_request error in thread: {e:?}");
+                    // continue with other request; trying to be more robust
+                    // assuming it's for individual requests to fail
+                    //   TODO: is it possible for some to leave bad state ?
+                }
+            }
+        }
+    }                    
+    // Ok(())
+}
+
 #[cfg(feature = "io-transport")]
 fn handle_client(
     receiver: Receiver<DapMessage>,
@@ -688,6 +696,23 @@ fn handle_client(
                 format!("transport send error: {e:}")
             })?;
         }
+    })?;
+
+
+    let (to_stable_sender, from_stable_receiver) = mpsc::channel::<dap::Request>();
+    ctx.to_stable_sender = Some(to_stable_sender);
+    let stable_sending_sender = sending_sender.clone();
+    let stable_ctx = ctx.clone();
+
+    info!("create stable thread");
+    let cached_launch = false;
+    let builder = thread::Builder::new().name("stable".to_string());
+    let _thread_handle = builder.spawn(move || -> Result<(), String> {
+        task_thread("stable", from_stable_receiver, stable_sending_sender, &stable_ctx, cached_launch).map_err(|e| {
+            error!("task_thread error: {e:?}");
+            format!("task_thread error: {e:?}")
+        })?;
+        Ok(())
     })?;
 
     loop {
