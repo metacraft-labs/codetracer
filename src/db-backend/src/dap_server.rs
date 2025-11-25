@@ -416,8 +416,10 @@ impl Ctx {
     }
 }
 
+
 pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ctx) -> Result<(), Box<dyn Error>> {
     debug!("Handling message: {:?}", msg);
+
     if let DapMessage::Request(req) = msg {
         info!("handle request {}", req.command);
     } else {
