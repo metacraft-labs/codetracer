@@ -155,6 +155,7 @@ fn setup(
     ct_rr_worker_exe: &Path,
     sender: Sender<DapMessage>,
     for_launch: bool,
+    thread_name: &str,    
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -174,7 +175,7 @@ fn setup(
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
 
-        let mut handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
+        let mut handler = Handler::new(TraceKind::DB, CtRRArgs { name: thread_name.to_string(), ..CtRRArgs::default() }, Box::new(db));
         handler.raw_diff_index = raw_diff_index;
         if for_launch {
             handler.run_to_entry(dap::Request::default(), sender)?;
@@ -189,6 +190,7 @@ fn setup(
             let ct_rr_args = CtRRArgs {
                 worker_exe: PathBuf::from(ct_rr_worker_exe),
                 rr_trace_folder: path,
+                name: thread_name.to_string(),
             };
             let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
             handler.raw_diff_index = raw_diff_index;
@@ -586,6 +588,7 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
             &ctx_with_cached_launch.ct_rr_worker_exe,
             sender.clone(),
             for_launch,
+            name,
         )
         .map_err(|e| {
             error!("launch error: {e:?}");
@@ -593,7 +596,7 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
         })?
     } else {
         // `.initialized` is false
-        Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(Db::new(&PathBuf::from(""))))
+        Handler::new(TraceKind::DB, CtRRArgs { name: name.to_string(), ..CtRRArgs::default() }, Box::new(Db::new(&PathBuf::from(""))))
     };
 
     loop {
@@ -627,6 +630,7 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
                     &ct_rr_worker_exe,
                     sender.clone(),
                     for_launch,
+                    name,
                 )
                 .map_err(|e| {
                     error!("launch error: {e:?}");
@@ -770,13 +774,14 @@ fn handle_client(
                         }
                     }
                 }
-                // "ct/event-load" | "ct/run-tracepoints" | "ct/setup-trace-session" | "ct/update-table" | "ct/load-terminal" => {
-                //     if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
-                //         if let Err(e) = to_tracepoint_sender.send(request.clone()) {
-                //             error!("tracepoint send request error: {e:?}");
-                //         }
-                //     }
-                // }
+                "ct/event-load" | "ct/run-tracepoints" | "ct/setup-trace-session" | "ct/update-table" | "ct/load-terminal" |
+                    "ct/tracepoint-toggle" | "ct/tracepoint-delete" => {
+                    if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
+                        if let Err(e) = to_tracepoint_sender.send(request.clone()) {
+                            error!("tracepoint send request error: {e:?}");
+                        }
+                    }
+                }
                 _ => {
                     // processes or sends to stable
                     // including `launch` again
