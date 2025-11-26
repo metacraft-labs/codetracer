@@ -15,14 +15,15 @@ proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) 
 
 
 data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveState) {.async.} =
-  if response.location.highLevelPath.len > 0 and not response.location.isExpanded: # TODO: exists path
+  if response.location.path.len > 0 and not response.location.isExpanded: # TODO: exists path
     if not response.location.missingPath:
-      self.data.openTab(response.location.highLevelPath)
+      self.data.openTab(response.location.path)
     else:
       # eventually TODO(alexander: I wrote this: a more elegant way to pass
       # to the component)
       let noInfoMessage = cstring(
-        fmt"We were not able to open the given location path: maybe a missing/internal file: {response.location.highLevelPath}")
+        fmt"We were not able to open the given location path: maybe a missing/internal file: {response.location.path}")
+      echo "no source!"
       self.data.openTab("NO SOURCE", ViewNoSource, noInfoMessage = noInfoMessage)
   else:
     discard
