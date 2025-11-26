@@ -793,20 +793,26 @@ proc expandedCompoundView*(
           except:
             block: path.add(SubPath{kind: Field, name: name, typeKind: value.kind})
 
-        if value.kind == Variant and value.activeFields.len != 0:
-          block: path.add(
-            SubPath{
-              kind: VariantKind,
-              kindNumber: parseInt($value.activeVariant),
-              variantName: name,
-              typeKind: value.kind
-            }
-          )
+        # TODO: when fixing expansion of values/fields:
+        #   rework with activeVariantValue fields or elements
+        #   no `activeFields` anymore!
+        #
+        # if value.kind == Variant and value.activeFields.len != 0:
+        #   block: path.add(
+        #     SubPath{
+        #       kind: VariantKind,
+        #       kindNumber: parseInt($value.activeVariant),
+        #       variantName: name,
+        #       typeKind: value.kind
+        #     }
+        #   )
 
-          if name in value.activeFields:
-            view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
-        else:
-          view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
+        #   if name in value.activeFields:
+        #     view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
+        # else:
+
+        echo "view expandCompoundView ", expression, " ", name
+        view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
 
         if depth + 1 < path.len:
           discard path.pop()
@@ -916,11 +922,9 @@ proc view(
         var children: seq[(cstring, Value)] = @[]
 
         if not value.activeVariantValue.isNil:
-          children.add((value.activeVariantValue.typ.langType, value.activeVariantValue))
-        else:
           for label, fieldValue in unionChildren(value):
             children.add((label, fieldValue))
-
+        
         let left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
         let right = TOKEN_TEXTS[lang][InstanceClose]
 

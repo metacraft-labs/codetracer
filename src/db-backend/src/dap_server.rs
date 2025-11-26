@@ -32,6 +32,9 @@ use crate::transport::{DapResult, WorkerTransport};
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
+// in the future: maybe refactor in a more thread-aware way? 
+//   or if not: delete
+
 // #[cfg(feature = "io-transport")]
 // pub fn make_io_transport() -> Result<(BufReader<std::io::StdinLock<'static>>, std::io::Stdout), Box<dyn Error>> {
 //     use std::io::BufReader;
@@ -119,10 +122,6 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let builder = thread::Builder::new().name("receiving".to_string());
     let receiving_thread = builder.spawn(move || -> Result<(), String> {
         info!("receiving thread");
-        // let stream = UnixStream::connect(&socket_path_owned).map_err(|e| {
-        //     error!("can't connect socket for {}: {:?}", socket_path_owned.display(), e);
-        //     format!("can't connect socket for {}: {:?}", socket_path_owned.display(), e)
-        // })?;
         let mut reader = BufReader::new(stream.try_clone().map_err(|e| {
             error!("buf reader try_clone error: {e:?}");
             format!("buf reader try_clone error: {e:?}")
@@ -576,13 +575,6 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
                 to_stable_sender.send(req.clone())?;
             }
-
-            // if let Some(h) = ctx.handler.as_mut() {
-            //     let res = handle_request(h, req.clone(), &mut ctx.seq, transport);
-            //     if let Err(_e) = res {
-            //         // warn!("handle_request error: {e:?}");
-            //     }
-            // }
         }
         _ => {}
     }
