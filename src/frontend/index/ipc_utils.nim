@@ -91,11 +91,13 @@ proc ready*(): Future[void] {.async.} =
 
   setupProxyForDap(backendManagerSocket)
 
-  for kind in [rustLspKind, rubyLspKind]:
-    try:
-      await startLspBridge(kind)
-    except CatchableError:
-      warnPrint fmt"index:lsp unable to start {kind} bridge: {getCurrentExceptionMsg()}"
+  when not defined(server):
+    # for now not supported on server
+    for kind in [rustLspKind, rubyLspKind]:
+      try:
+        await startLspBridge(kind)
+      except CatchableError:
+        warnPrint fmt"index:lsp unable to start {kind} bridge: {getCurrentExceptionMsg()}"
 
   # console.log("Started lspManager")
 
