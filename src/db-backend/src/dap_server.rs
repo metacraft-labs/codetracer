@@ -368,7 +368,8 @@ fn handle_request(
 pub struct Ctx {
     pub seq: i64,
     // pub handler: Option<Handler>,
-    pub received_launch: bool,
+    // pub received_launch: bool,
+    pub launch_request: Option<dap::Request>,
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
     pub launch_raw_diff_index: Option<String>,
@@ -385,7 +386,8 @@ impl Default for Ctx {
         Self {
             seq: 1i64,
             // handler: None,
-            received_launch: false,
+            // received_launch: false,
+            launch_request: None,
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
@@ -462,7 +464,8 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             ctx.write_dap_messages(sender, &[event])?;
         }
         DapMessage::Request(req) if req.command == "launch" => {
-            ctx.received_launch = true;
+            // ctx.received_launch = true;
+            ctx.launch_request = Some(req.clone());
             let args = req.load_args::<dap::LaunchRequestArguments>()?;
             if let Some(folder) = &args.trace_folder {
                 ctx.launch_trace_folder = folder.clone();
@@ -484,11 +487,10 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                     }
                 }
             }
-            // TODO: log this when logging logic is properly abstracted
-            // info!(
-            //     "received launch; configuration done? {0:?}; req: {1:?}",
-            //     ctx.received_configuration_done, req
-            // );
+            info!(
+                "received launch; configuration done? {0:?}; req: {1:?}",
+                ctx.received_configuration_done, req
+            );
 
             let resp = DapMessage::Response(Response {
                 base: ProtocolMessage {
@@ -522,22 +524,14 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             sender.send(resp)?;
 
             // TODO: log this when logging logic is properly abstracted
-            // info!(
-            //     "configuration done sent response; received_launch: {0:?}",
-            //     ctx.received_launch
-            // );
-            if ctx.received_launch {
-                // TODO: same as `launch`
-                // ctx.handler = Some(launch(
-                //     &ctx.launch_trace_folder,
-                //     &ctx.launch_trace_file,
-                //     ctx.launch_raw_diff_index.clone(),
-                //     &ctx.ct_rr_worker_exe,
-                //     ctx.seq,
-                // )?);
-                // if let Some(h) = ctx.handler.as_mut() {
-                //     write_dap_messages(transport, h, &mut ctx.seq)?;
-                // }
+            info!(
+                "configuration done sent response; launch_request: {:?}",
+                ctx.launch_request,
+            );
+            if let Some(launch_request) = ctx.launch_request.clone() {
+                if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
+                    to_stable_sender.send(launch_request)?;
+                }
                 error!("reimplement launch after (configurationDone after launch)");
             }
         }
@@ -776,7 +770,7 @@ fn handle_client(
                         }
                     }
                 }
-                // "ct/event-load" | "ct/run-tracepoints" | "ct/update-table" | "ct/load-terminal" => {
+                // "ct/event-load" | "ct/run-tracepoints" | "ct/setup-trace-session" | "ct/update-table" | "ct/load-terminal" => {
                 //     if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
                 //         if let Err(e) = to_tracepoint_sender.send(request.clone()) {
                 //             error!("tracepoint send request error: {e:?}");

@@ -1871,6 +1871,7 @@ impl Handler {
 mod tests {
     use std::env;
     use std::path::{Path, PathBuf};
+    use std::sync::mpsc;
 
     use super::*;
     // use crate::event_db;
@@ -1918,8 +1919,9 @@ mod tests {
     fn test_run_single_tracepoint() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
-        handler.event_load(dap::Request::default())?;
-        handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0))?;
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(1, 0), sender)?;
         assert_eq!(handler.event_db.single_tables.len(), 2);
         Ok(())
     }
@@ -1928,8 +1930,9 @@ mod tests {
     #[test]
     fn test_multiple_tracepoints() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
-        handler.event_load(dap::Request::default())?;
+        handler.event_load(dap::Request::default(), sender)?;
         // TODO
         // this way we are resetting them after reforms
         // needs to pass multiple tracepoints at once now
@@ -1963,11 +1966,13 @@ mod tests {
     fn test_multile_tracepoints_with_multiline_logs() -> Result<(), Box<dyn Error>> {
         let size: usize = 10000;
         let db: Db = setup_db();
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
-        handler.event_load(dap::Request::default())?;
+        handler.event_load(dap::Request::default(), sender.clone())?;
         handler.run_tracepoints(
             dap::Request::default(),
             make_multiple_tracepoints_with_multiline_logs(3, size),
+            sender,
         )?;
         assert_eq!(handler.event_db.single_tables.len(), 4);
         // TODO(alexander): debug what's happening here
@@ -1990,9 +1995,10 @@ mod tests {
     fn test_tracepoint_in_loop() -> Result<(), Box<dyn Error>> {
         let size = 10000;
         let db: Db = setup_db_loop(size);
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
-        handler.event_load(dap::Request::default())?;
-        handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0))?;
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0), sender)?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
         Ok(())
     }
@@ -2004,9 +2010,10 @@ mod tests {
         // Number of tracepoints and steps
         let count: usize = 10000;
         let db: Db = setup_db_with_step_count(count);
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
-        handler.event_load(dap::Request::default())?;
-        handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count))?;
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        handler.run_tracepoints(dap::Request::default(), make_tracepoints_with_count(count), sender)?;
 
         assert_eq!(handler.event_db.single_tables.len(), count + 1);
         Ok(())
@@ -2015,11 +2022,11 @@ mod tests {
     #[test]
     fn test_step_in() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
 
-        // Act: Create a new Handler instance
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let request = dap::Request::default();
-        handler.step(request, make_step_in())?;
+        handler.step(request, make_step_in(), sender)?;
         assert_eq!(handler.step_id, StepId(1_i64));
         Ok(())
     }
@@ -2027,13 +2034,14 @@ mod tests {
     #[test]
     fn test_source_jumps() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
         let path = "/test/workdir";
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
             line: 3,
         };
-        handler.source_line_jump(dap::Request::default(), source_location)?;
+        handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
         handler.source_line_jump(
             dap::Request::default(),
@@ -2041,6 +2049,7 @@ mod tests {
                 path: path.to_string(),
                 line: 2,
             },
+            sender.clone(),
         )?;
         assert_eq!(handler.step_id, StepId(1));
         handler.source_call_jump(
@@ -2050,6 +2059,7 @@ mod tests {
                 line: 1,
                 token: "<top-level>".to_string(),
             },
+            sender,
         )?;
         assert_eq!(handler.step_id, StepId(0));
         Ok(())
@@ -2058,6 +2068,7 @@ mod tests {
     #[test]
     fn test_local_calltrace() -> Result<(), Box<dyn Error>> {
         let db = setup_db_with_calls();
+
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         let calltrace_load_args = CalltraceLoadArgs {
@@ -2100,6 +2111,8 @@ mod tests {
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/alexander92/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);
+        let (sender, _r) = mpsc::channel(); // for now just artificial sender; not received
+
         let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
 
         // step-in from 1 to end(maybe also a parameter?)
@@ -2107,10 +2120,10 @@ mod tests {
         // eventually: loading local calltrace? or at least for first real call?
         // eventually: loading flow for new calls?
         // first version loading locals/callstack
-        test_step_in_scenario(&mut handler, path);
+        test_step_in_scenario(&mut handler, path, sender);
     }
 
-    fn test_load_flow(handler: &mut Handler, _path: &PathBuf) {
+    fn test_load_flow(handler: &mut Handler, _path: &PathBuf, sender: Sender<DapMessage>) {
         handler
             .load_flow(
                 dap::Request::default(),
@@ -2118,24 +2131,25 @@ mod tests {
                     flow_mode: FlowMode::Call,
                     location: handler.load_location(handler.step_id),
                 },
+                sender,
             )
             .unwrap();
     }
 
-    fn test_step_in_scenario(handler: &mut Handler, path: &PathBuf) {
+    fn test_step_in_scenario(handler: &mut Handler, path: &PathBuf, sender: Sender<DapMessage>) {
         for i in 0..handler.db.steps.len() - 1 {
             // eprintln!("doing step-in {i}");
             handler.step_in(true).unwrap();
             assert_eq!(handler.step_id, StepId(i as i64 + 1));
-            test_load_locals(handler);
+            test_load_locals(handler, sender.clone());
             // test_load_callstack(handler);
-            test_load_flow(handler, path);
+            test_load_flow(handler, path, sender.clone());
         }
     }
 
-    fn test_load_locals(handler: &mut Handler) {
+    fn test_load_locals(handler: &mut Handler, sender: Sender<DapMessage>) {
         handler
-            .load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default())
+            .load_locals(dap::Request::default(), task::CtLoadLocalsArguments::default(), sender)
             .unwrap();
     }
 
