@@ -21,6 +21,8 @@ pub struct Value {
     pub address: String,
     pub ref_value: Option<Box<Value>>,
     pub is_mutable: bool,
+    pub active_variant: String,
+    pub active_variant_value: Option<Box<Value>>,
     pub typ: Type,
 }
 
@@ -251,16 +253,14 @@ pub fn to_ct_value(v: &ValueRecordWithType) -> Value {
             res
         }
         ValueRecordWithType::Variant {
-            discriminator: _,
-            contents: _,
-            typ: _,
+            discriminator,
+            contents,
+            typ,
         } => {
-            // variant-like enums not generated yet from noir tracer:
-            //   we should support variants in general, but we'll think a bit first how
-            //   to more cleanly/generally represent them in the codetracer code, as the current
-            //   `Value` mapping doesn't seem great imo
-            //   we can improve it, or we can add a new variant case (something more similar to the runtime_tracing repr?)
-            todo!("a more suitable codetracer value/type for variants")
+            let mut res = Value::new(TypeKind::Variant, Type::new(TypeKind::Variant, &typ.lang_type));
+            res.active_variant = discriminator.to_string();
+            res.active_variant_value = Some(Box::new(to_ct_value(contents)));
+            res
         }
         ValueRecordWithType::Reference {
             dereferenced,

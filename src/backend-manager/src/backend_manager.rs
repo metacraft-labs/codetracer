@@ -197,7 +197,7 @@ impl BackendManager {
         let mut cmd = if let Ok(_record_backend) = std::env::var("CODETRACER_RECORD_BACKEND") {
             let mut ct_cmd = Command::new("ct");
             ct_cmd.arg("record");
-            ct_cmd.arg(&cmd_text);
+            ct_cmd.arg(cmd_text);
             ct_cmd
         } else {
             Command::new(cmd_text)

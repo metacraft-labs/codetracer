@@ -215,8 +215,23 @@ func `$`*(location: Location): string =
 
 iterator unionChildren*(value: Value): (defaultstring, Value) =
   ## Yield name and value for each value field
-  for name, field in value.fields:
-    yield (name, field)
+  case value.kind:
+  of Instance:
+    for i, field in value.elements:
+      if not value.typ.isNil and value.typ.kind == Instance and value.typ.labels.len >= i + 1:
+        yield (value.typ.labels[i], field)
+  of Variant:
+    let variantValue = value.activeVariantValue
+    debugecho "unionChildren variant"
+    if variantValue.kind == Instance:
+      for i, field in variantValue.elements:
+        if not variantValue.typ.isNil and variantValue.typ.kind == Instance and variantValue.typ.labels.len >= i + 1:
+          yield (variantValue.typ.labels[i], field)
+    elif variantValue.kind == Tuple:
+      for i, element in variantValue.elements:
+        yield (defaultstring($i), element)
+  else:
+    discard
 
 func textReprDefault(value: Value, depth: int = 10): string =
   # a repr of a language value, we probably have to do this for each lang:
@@ -395,14 +410,19 @@ func textReprRust(value: Value, depth: int = 10, compact: bool = false): string 
           record.add(",")
         else:
           record.add(&"{value.activeVariantValue.typ.labels[i]}:..")
-      if record.len > 0:
+      if record.len > 1: # has at least something else than `{`
         record.setLen(record.len - 1)
         record.add("}")
+      else:
+        record = "" # e.g. Node Nil, with Nil having no fields => Node::Nil, not Node::Nil{}
       fmt"""{value.activeVariant}{record}"""
     elif value.activeVariantValue.kind == Variant and value.activeVariantValue.activeVariantValue.kind == Instance:
       fmt"""{textReprRust(value.activeVariantValue, depth, compact)}"""
     elif value.activeVariantValue.kind == None:
       fmt"""{langType}::{value.activeVariant}"""
+    elif value.activeVariantValue.kind == Tuple:
+      # tuples already have ()
+      fmt"""{value.activeVariant}{textReprRust(value.activeVariantValue, depth, compact)}"""
     else:
       fmt"""{value.activeVariant}({textReprRust(value.activeVariantValue, depth, compact)})"""
   else:
