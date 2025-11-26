@@ -738,6 +738,23 @@ fn handle_client(
         Ok(())
     })?;
 
+    let (to_tracepoint_sender, from_tracepoint_receiver) = mpsc::channel::<dap::Request>();
+    ctx.to_tracepoint_sender = Some(to_tracepoint_sender);
+    let tracepoint_sending_sender = sending_sender.clone();
+    let tracepoint_ctx = ctx.clone();
+
+    info!("create tracepoint thread");
+    let cached_launch = false;
+    let run_to_entry = false;
+    let builder = thread::Builder::new().name("tracepoint".to_string());
+    let _tracepoint_thread_handle = builder.spawn(move || -> Result<(), String> {
+        task_thread("tracepoint", from_tracepoint_receiver, tracepoint_sending_sender, &tracepoint_ctx, cached_launch, run_to_entry).map_err(|e| {
+            error!("task_thread error: {e:?}");
+            format!("task_thread error: {e:?}")
+        })?;
+        Ok(())
+    })?;
+
     loop {
         info!("waiting for new message from receiver");
         let msg = receiver.recv()?;
@@ -750,21 +767,37 @@ fn handle_client(
                         error!("flow send launch error: {e:?}");
                     }
                 }
+
+                if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
+                    if let Err(e) = to_tracepoint_sender.send(request.clone()) {
+                        error!("tracepoint send launch error: {e:?}");
+                    }
+                }
             } 
             
             // handle all requests here: including `launch` from actually stable thread
-            if request.command == "ct/load-flow" {
-                if let Some(to_flow_sender) = ctx.to_flow_sender.clone() {
-                    if let Err(e) = to_flow_sender.send(request.clone()) {
-                        error!("flow send request error: {e:?}");
+            match request.command.as_str() {
+                "ct/load-flow" => {
+                    if let Some(to_flow_sender) = ctx.to_flow_sender.clone() {
+                        if let Err(e) = to_flow_sender.send(request.clone()) {
+                            error!("flow send request error: {e:?}");
+                        }
                     }
                 }
-            } else {
-                // processes or sends to stable
-                // including `launch` again
-                let res = handle_message(&msg, sending_sender.clone(), &mut ctx);
-                if let Err(e) = res {
-                    error!("handle_message error: {e:?}");
+                // "ct/event-load" | "ct/run-tracepoints" | "ct/update-table" | "ct/load-terminal" => {
+                //     if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
+                //         if let Err(e) = to_tracepoint_sender.send(request.clone()) {
+                //             error!("tracepoint send request error: {e:?}");
+                //         }
+                //     }
+                // }
+                _ => {
+                    // processes or sends to stable
+                    // including `launch` again
+                    let res = handle_message(&msg, sending_sender.clone(), &mut ctx);
+                    if let Err(e) = res {
+                        error!("handle_message error: {e:?}");
+                    }
                 }
             }
         }
