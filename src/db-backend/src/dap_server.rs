@@ -377,8 +377,8 @@ pub struct Ctx {
     pub received_configuration_done: bool,
 
     pub to_stable_sender: Option<Sender<dap::Request>>,
-    pub flow_sender: Option<Sender<dap::Request>>,
-    pub tracepoint_sender: Option<Sender<dap::Request>>,
+    pub to_flow_sender: Option<Sender<dap::Request>>,
+    pub to_tracepoint_sender: Option<Sender<dap::Request>>,
 }
 
 impl Default for Ctx {
@@ -394,8 +394,8 @@ impl Default for Ctx {
             received_configuration_done: false,
 
             to_stable_sender: None,
-            flow_sender: None,
-            tracepoint_sender: None,
+            to_flow_sender: None,
+            to_tracepoint_sender: None,
         }
     }
 }
@@ -590,14 +590,14 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
     Ok(())
 }
 
-fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender: Sender<DapMessage>, ctx: &Ctx, cached_launch: bool) -> Result<(), Box<dyn Error>> {
+fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender: Sender<DapMessage>, ctx_with_cached_launch: &Ctx, cached_launch: bool, run_to_entry: bool) -> Result<(), Box<dyn Error>> {
     let mut handler = if cached_launch {
         let for_launch = false;
         setup(
-            &ctx.launch_trace_folder,
-            &ctx.launch_trace_file,
-            ctx.launch_raw_diff_index.clone(),
-            &ctx.ct_rr_worker_exe,
+            &ctx_with_cached_launch.launch_trace_folder,
+            &ctx_with_cached_launch.launch_trace_file,
+            ctx_with_cached_launch.launch_raw_diff_index.clone(),
+            &ctx_with_cached_launch.ct_rr_worker_exe,
             sender.clone(),
             for_launch,
         )
@@ -633,7 +633,7 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
                 let launch_raw_diff_index = args.raw_diff_index.clone();
                 let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
 
-                let for_launch = true;
+                let for_launch = run_to_entry;
                 handler = setup(
                     &launch_trace_folder,
                     &launch_trace_file,
@@ -708,9 +708,30 @@ fn handle_client(
 
     info!("create stable thread");
     let cached_launch = false;
+    let run_to_entry = true;
     let builder = thread::Builder::new().name("stable".to_string());
-    let _thread_handle = builder.spawn(move || -> Result<(), String> {
-        task_thread("stable", from_stable_receiver, stable_sending_sender, &stable_ctx, cached_launch).map_err(|e| {
+    let _stable_thread_handle = builder.spawn(move || -> Result<(), String> {
+        task_thread("stable", from_stable_receiver, stable_sending_sender, &stable_ctx, cached_launch, run_to_entry).map_err(|e| {
+            error!("task_thread error: {e:?}");
+            format!("task_thread error: {e:?}")
+        })?;
+        Ok(())
+    })?;
+
+    // start flow here; send to it
+    // or start new each time; send to it?
+    
+    let (to_flow_sender, from_flow_receiver) = mpsc::channel::<dap::Request>();
+    ctx.to_flow_sender = Some(to_flow_sender);
+    let flow_sending_sender = sending_sender.clone();
+    let flow_ctx = ctx.clone();
+
+    info!("create flow thread");
+    let cached_launch = false;
+    let run_to_entry = false;
+    let builder = thread::Builder::new().name("flow".to_string());
+    let _flow_thread_handle = builder.spawn(move || -> Result<(), String> {
+        task_thread("flow", from_flow_receiver, flow_sending_sender, &flow_ctx, cached_launch, run_to_entry).map_err(|e| {
             error!("task_thread error: {e:?}");
             format!("task_thread error: {e:?}")
         })?;
@@ -720,10 +741,34 @@ fn handle_client(
     loop {
         info!("waiting for new message from receiver");
         let msg = receiver.recv()?;
-        let res = handle_message(&msg, sending_sender.clone(), &mut ctx);
-        if let Err(e) = res {
-            error!("handle_message error: {e:?}");
+        // for now only handle requests here
+        if let DapMessage::Request(request) = msg.clone() {
+            // setups other worker threads
+            if request.command == "launch" {
+                if let Some(to_flow_sender) = ctx.to_flow_sender.clone() {
+                    if let Err(e) = to_flow_sender.send(request.clone()) {
+                        error!("flow send launch error: {e:?}");
+                    }
+                }
+            } 
+            
+            // handle all requests here: including `launch` from actually stable thread
+            if request.command == "ct/load-flow" {
+                if let Some(to_flow_sender) = ctx.to_flow_sender.clone() {
+                    if let Err(e) = to_flow_sender.send(request.clone()) {
+                        error!("flow send request error: {e:?}");
+                    }
+                }
+            } else {
+                // processes or sends to stable
+                // including `launch` again
+                let res = handle_message(&msg, sending_sender.clone(), &mut ctx);
+                if let Err(e) = res {
+                    error!("handle_message error: {e:?}");
+                }
+            }
         }
+        
     }
 
     // for now, we're just looping so this place is unreachable anyway:
