@@ -760,7 +760,8 @@ proc callLineView*(self: CalltraceComponent, callLine: CallLine, index: int): VN
   result = buildHtml(
     tdiv(class = fmt"calltrace-call-line calltrace-row {selected}")
   ):
-    span(style = callOffset(callLine.depth - self.depthStart))
+    if self.isDbBasedTrace:
+      span(style = callOffset(callLine.depth - self.depthStart))
     callLineContentView(self, callLine.content, index, callLine.depth)
 
 proc renderLine(self: CalltraceComponent, x1, y1, x2, y2: float): VNode =
@@ -788,8 +789,12 @@ proc calltraceLines*(self: CalltraceComponent): VNode =
     tdiv(class="calltrace-lines", style=calltraceLinesStyle(self))
   ):
     ensureSvgContainer(self)
-    for i, callLine in self.callLines:
-      callLineView(self, callLine, i)
+    if self.isDbBasedTrace:
+      for i, callLine in self.callLines:
+        callLineView(self, callLine, i)
+    else:
+      for i in countdown(self.callLines.len - 1, 0):
+        callLineView(self, self.callLines[i], i)
 
 proc localCalltraceView*(self: CalltraceComponent): VNode =
   buildHtml(tdiv(class= &"local-calltrace")):
@@ -1024,7 +1029,8 @@ proc redrawCallLines(self: CalltraceComponent) =
     localCalltraceElement.replaceChild(
       calltraceLinesDom,
       calltraceLinesElement)
-    self.redrawTraceLine()
+    if self.isDbBasedTrace:
+      self.redrawTraceLine()
 
   if not self.inExtension and self.resizeObserver.isNil:
     self.setCalltraceMutationObserver()
