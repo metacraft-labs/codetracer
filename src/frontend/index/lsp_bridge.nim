@@ -121,6 +121,9 @@ proc buildStatusPayload(kind: string; running: bool): JsObject =
     setField(result, "notifications", notifArray)
 
 proc sendLspStatusToRenderer*(kind: string = "") =
+  when defined(server):
+    # for now not supported on server
+    return
   if kind.len == 0:
     for cfg in configuredBridges:
       sendLspStatusToRenderer(cfg.kind)
