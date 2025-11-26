@@ -83,16 +83,16 @@ proc startBridge*(port: cint = 3000; pathName: string = "/lsp"; lsCommand: strin
           spawnNoArgs(childProcess, commandToRun.cstring)
         else:
           spawnNoArgsCwd(childProcess, commandToRun.cstring, commandCwd.cstring)
-    onEvent(field(ls, "stdout"), "data", proc (chunk: JsObject) {.closure.} =
-      logInfo(toUtf8String(chunk))
-    )
-    onEvent(field(ls, "stderr"), "data", proc (chunk: JsObject) {.closure.} =
-      logError(toUtf8String(chunk))
-    )
-    onExit(ls, proc (codeObj: JsObject; signalObj: JsObject) {.closure.} =
-      logWarn2(toJs("Language server exited with code"), codeObj)
-      logWarn2(toJs("Language server exit signal"), signalObj)
-    )
+    # onEvent(field(ls, "stdout"), "data", proc (chunk: JsObject) {.closure.} =
+    #   logInfo(toUtf8String(chunk))
+    # )
+    # onEvent(field(ls, "stderr"), "data", proc (chunk: JsObject) {.closure.} =
+    #   logError(toUtf8String(chunk))
+    # )
+    # onExit(ls, proc (codeObj: JsObject; signalObj: JsObject) {.closure.} =
+    #   logWarn2(toJs("Language server exited with code"), codeObj)
+    #   logWarn2(toJs("Language server exit signal"), signalObj)
+    # )
     let lsReader = construct1(field(rpcStreams, "StreamMessageReader"), field(ls, "stdout"))
     let lsWriter = construct1(field(rpcStreams, "StreamMessageWriter"), field(ls, "stdin"))
 
