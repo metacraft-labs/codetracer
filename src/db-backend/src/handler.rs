@@ -98,7 +98,7 @@ impl Handler {
         let replay: Box<dyn Replay> = if trace_kind == TraceKind::DB {
             Box::new(DbReplay::new(db.clone()))
         } else {
-            Box::new(RRDispatcher::new("stable", 0, ct_rr_args.clone()))
+            Box::new(RRDispatcher::new(&ct_rr_args.name, 0, ct_rr_args.clone()))
         };
         // let sender = sender::Sender::new();
         let mut handler = Handler {

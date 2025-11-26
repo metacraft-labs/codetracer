@@ -45,6 +45,7 @@ pub struct CtRRWorker {
 pub struct CtRRArgs {
     pub worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
+    pub name: String,
 }
 
 impl CtRRWorker {
