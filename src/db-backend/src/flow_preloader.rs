@@ -18,7 +18,7 @@ use crate::{
     value::{to_ct_value, Value, ValueRecordWithType},
 };
 
-const STEP_COUNT_LIMIT: usize = 1000;
+const STEP_COUNT_LIMIT: usize = 10000;
 
 #[derive(Debug)]
 pub struct FlowPreloader {
