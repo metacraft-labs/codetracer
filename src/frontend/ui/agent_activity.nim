@@ -1,4 +1,4 @@
-import ../utils, ../../common/ct_event, value, ui_imports, shell, command
+import ../utils, ../../common/ct_event, value, ui_imports, shell, command, editor
 from dom import Node
 
 const HEIGHT_OFFSET = 2
@@ -10,15 +10,76 @@ proc autoResizeTextarea(id: cstring) =
   el.style.height = $(el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET) & "px"
   el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
 
+proc editorLineNumber(self: AgentActivityComponent, line: int, lineNumber: int): cstring =
+  let trueLineNumber = toCString(line + lineNumber - 1)
+  let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
+  result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
+
 method render*(self: AgentActivityComponent): VNode =
   let inputId = "agent-query-text"
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
+  # let source =
   if not self.kxi.isNil and not self.shell.initialized:
     self.kxi.afterRedraws.add(proc() =
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
       self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
       self.shell.initialized = true
+      let source = """mod foo;
+        mod bar;
+
+        use crate::foo::foo;
+
+        fn main(x: Field, y: pub Field, z: Field) {
+            let w = looper(x, y);
+            assert(w == z, "expected w to equal z!");
+        }
+
+        fn looper(x: Field, y: Field) -> Field {
+            let mut result = x;
+            for i in 0..10 {
+                println(i + 1);
+                println(i + 1);
+                if i % 3 == 0 {
+                    result = result + y + 2;
+                }
+
+
+            }
+            result
+        }
+
+        """
+      var lang = fromPath(self.data.services.debugger.location.path)
+      let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
+      self.monacoEditor = createMonacoEditor(
+        "#agentEditor-0".cstring,
+        MonacoEditorOptions(
+          value: source,
+          language: lang.toCLang(),
+          readOnly: true,
+          theme: theme,
+          automaticLayout: true,
+          folding: true,
+          fontSize: self.data.ui.fontSize,
+          minimap: js{ enabled: false },
+          find: js{ addExtraSpaceOnTop: false },
+          renderLineHighlight: "".cstring,
+          lineNumbers: proc(line: int): cstring = self.editorLineNumber(line, 100),
+          lineDecorationsWidth: 20,
+          mouseWheelScrollSensitivity: 0,
+          fastScrollSensitivity: 0,
+          scrollBeyondLastLine: false,
+          smoothScrolling: false,
+          contextmenu: false,
+          scrollbar: js{
+            horizontalScrollbarSize: 14,
+            horizontalSliderSize: 8,
+            verticalScrollbarSize: 14,
+            verticalSliderSize: 8
+          },
+        )
+      )
       # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
       # self.shell.shell.write("Another line here.\r\n")
     )
@@ -62,6 +123,8 @@ method render*(self: AgentActivityComponent): VNode =
                 )
             # if self.expandControl[self.shell.id]:
             tdiv(id=fmt"shellComponent-{self.shell.id}", class="shell-container")
+          tdiv(class="editor-wrapper"):
+            tdiv(id="agentEditor-0", class="agent-editor")
         # TODO: Integrate it
     tdiv(class="agent-interaction"):
       textarea(

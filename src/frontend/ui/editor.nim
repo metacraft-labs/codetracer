@@ -1176,6 +1176,9 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
   self.api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: flowMode, location: self.location))
   cdebug "start load-flow", taskId
 
+proc createMonacoEditor*(selector: cstring, options: MonacoEditorOptions): MonacoEditor =
+  result = monaco.editor.create(jq(selector), options)
+
 proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, lineNumber: int): Node =
   var zoneDom = document.createElement("div")
   zoneDom.id = fmt"diff-view-zone-{self.id}-{id}"
@@ -1198,8 +1201,8 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
   let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
   if not self.diffEditors.hasKey(lineNumber):
     discard setTimeout(proc () =
-      self.diffEditors[lineNumber] = monaco.editor.create(
-        jq("#" & editorDom.id),
+      self.diffEditors[lineNumber] = createMonacoEditor(
+        "#" & editorDom.id.cstring,
         MonacoEditorOptions(
           value: source,
           language: lang.toCLang(),
@@ -1349,8 +1352,8 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
 
         cdebug lang
 
-        tabInfo.monacoEditor = monaco.editor.create(
-          jq(selector),
+        tabInfo.monacoEditor = createMonacoEditor(
+          selector,
           MonacoEditorOptions(
             value: tabInfo.source,
             language: lang.toCLang(),
@@ -1376,8 +1379,6 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
             fixedOverflowWidgets: true
           )
         )
-
-        cdebug "HEHE XD AFTER"
 
         tabInfo.monacoEditor.config = getConfiguration(tabInfo.monacoEditor)
         editorReady = true
@@ -1743,7 +1744,6 @@ method onEnter*(self: EditorViewComponent) {.async.} =
 
   else:
     let line = editor.getLine()
-    let lineHeight = cast[MonacoEditorOptions](editor.getOptions())
     let code = self.traces[line].monacoEditor.getValue()
     let lineCount = code.split("\n").len() + 1
 
