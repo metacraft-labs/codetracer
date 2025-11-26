@@ -33,7 +33,7 @@ fn accept_with_timeout(
 }
 
 #[test]
-fn test_backend_dap_server() {
+fn test_backend_dap_server_socket() {
     let bin = env!("CARGO_BIN_EXE_db-backend");
     let pid = std::process::id() as usize;
     let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
@@ -76,6 +76,7 @@ fn test_backend_dap_server() {
     writer
         .send(&init)
         .unwrap_or_else(|err| panic!("failed to send initialize request: {err}"));
+
     let launch_args = LaunchRequestArguments {
         program: Some("main".to_string()),
         trace_folder: Some(trace_dir),
@@ -96,10 +97,6 @@ fn test_backend_dap_server() {
     writer
         .send(&launch)
         .unwrap_or_else(|err| panic!("failed to send launch request: {err}"));
-
-    // let mut buf = String::new();
-    // let x = reader.read_to_string(&mut buf).unwrap();
-    // println!("Read: {}", x);
 
     let msg1 = dap::read_dap_message_from_reader(&mut reader)
         .unwrap_or_else(|err| panic!("failed to read initialize response: {err}"));
