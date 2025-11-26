@@ -747,12 +747,12 @@ type
     output*: cstring
 
   AgentActivityComponent* = ref object of Component
-    logData*: seq[LogEntry]
     shell*:   ShellComponent
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
     expandControl*: seq[bool]
+    monacoEditor*: MonacoEditor
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]

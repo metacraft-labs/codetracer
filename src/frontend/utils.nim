@@ -375,15 +375,6 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
         "default_dark": ShellTheme( background: "#1e1f26", foreground: "#8e8f92"),
       }
     ),
-    logData: @[
-      LogEntry(title: "Analyzing the codebase structure and understanding the project requirements", output: "", status: ""),
-      LogEntry(title: "Running cargo check to validate current code", output: "Finished dev [unoptimized + debuginfo] target(s) in 2.34s", status: "success"),
-      LogEntry(title: "Modified src/main.rs {+5 -2}", output: "", status: "modified"),
-      LogEntry(title: "Considering how to implement the new feature based on the existing patterns", output: "", status: ""),
-      LogEntry(title: "Running tests to ensure no regressions", output: "running 5 tests... 5 passed, 0 failed", status: "info"),
-      LogEntry(title: "Modified src/lib.rs {+12 -0}", output: "", status: "modified"),
-      LogEntry(title: "Formatting code with rustfmt", output: "Format successful", status: "success"),
-    ],
     inExtension: inExtension,
     expandControl: @[]
   )
