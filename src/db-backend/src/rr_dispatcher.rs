@@ -71,13 +71,13 @@ impl CtRRWorker {
         );
 
         let ct_worker = Command::new(&self.ct_rr_worker_exe)
-                .arg("replay-worker")
-                .arg("--name")
-                .arg(&self.name)
-                .arg("--index")
-                .arg(self.index.to_string())
-                .arg(&self.rr_trace_folder)
-                .spawn()?;
+            .arg("replay-worker")
+            .arg("--name")
+            .arg(&self.name)
+            .arg("--index")
+            .arg(self.index.to_string())
+            .arg(&self.rr_trace_folder)
+            .spawn()?;
 
         self.process = Some(ct_worker);
         self.setup_worker_sockets()?;
@@ -96,7 +96,7 @@ impl CtRRWorker {
         // let run_dir = run_dir_for(&tmp_path, run_id)?;
         // // remove_dir_all(&run_dir)?;
         // create_dir_all(&run_dir)?;
-        
+
         let socket_path = ct_rr_worker_socket_path("", &self.name, self.index, run_id)?;
 
         info!("try to connect to worker with socket in {}", socket_path.display());
