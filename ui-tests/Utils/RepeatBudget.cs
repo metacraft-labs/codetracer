@@ -27,7 +27,7 @@ internal sealed class RepeatBudget
         return DateTimeOffset.UtcNow < _deadline;
     }
 
-    public static RepeatBudget FromSettings(AppSettings? settings, int defaultMinutes = 1, int minIterations = 10)
+    public static RepeatBudget FromSettings(AppSettings? settings, int defaultMinutes = 1, int minIterations = 1)
     {
         var minutes = settings?.Runner.RepeatDurationMinutes ?? defaultMinutes;
         minutes = Math.Max(1, minutes);
