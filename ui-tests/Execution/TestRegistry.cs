@@ -58,6 +58,30 @@ internal sealed class TestRegistry : ITestRegistry
 
         Register(
             new UiTestDescriptor(
+                "NoirSpaceShip.EventLogStabilitySequential",
+                "Noir Space Ship / Event Log Stability Sequential",
+                async context => await NoirSpaceShipTests.EventLogStabilitySequential(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "NoirSpaceShip.EventLogStabilityRandom",
+                "Noir Space Ship / Event Log Stability Random",
+                async context => await NoirSpaceShipTests.EventLogStabilityRandom(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "NoirSpaceShip.CallTraceStabilitySequential",
+                "Noir Space Ship / Call Trace Stability Sequential",
+                async context => await NoirSpaceShipTests.CallTraceStabilitySequential(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "NoirSpaceShip.CallTraceStabilityRandom",
+                "Noir Space Ship / Call Trace Stability Random",
+                async context => await NoirSpaceShipTests.CallTraceStabilityRandom(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
                 "NoirSpaceShip.TraceLogRecordsDamageRegeneration",
                 "Noir Space Ship / Trace Log Records Damage And Regeneration",
                 async context => await NoirSpaceShipTests.TraceLogRecordsDamageRegeneration(context.Page)));

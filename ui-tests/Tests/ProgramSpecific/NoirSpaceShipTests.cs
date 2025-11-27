@@ -11,6 +11,7 @@ using UiTests.PageObjects.Panes.EventLog;
 using UiTests.PageObjects.Panes.Scratchpad;
 using UiTests.PageObjects.Panes.VariableState;
 using UiTests.Utils;
+using UiTests.Configuration;
 using UiTests.Tests;
 
 public static class NoirSpaceShipTests
@@ -898,6 +899,7 @@ public static class NoirSpaceShipTests
             for (var i = 0; i < events.Count; i++)
             {
                 var row = events[i];
+                await row._root.ScrollIntoViewIfNeededAsync();
                 await row.ClickAsync();
 
                 var capturedIndex = i;
@@ -913,6 +915,214 @@ public static class NoirSpaceShipTests
                 }, maxAttempts: 15, delayMs: 200);
             }
         }
+    }
+
+    public static async Task EventLogStabilitySequential(IPage page)
+    {
+        var layout = new LayoutPage(page);
+        await layout.WaitForAllComponentsLoadedAsync();
+
+        var settings = AppSettingsAccessor.TryGetCurrent();
+        var budget = RepeatBudget.FromSettings(settings, defaultMinutes: 1, minIterations: 10);
+
+        var eventLogs = await layout.EventLogTabsAsync();
+        var tab = eventLogs.FirstOrDefault();
+        if (tab is null)
+        {
+            throw new FailedTestException("No event log tabs found for stability run.");
+        }
+
+        await tab.TabButton().ClickAsync();
+        var iteration = 0;
+
+        do
+        {
+            iteration++;
+            var events = (await tab.EventElementsAsync(true)).ToList();
+            if (events.Count == 0)
+            {
+                throw new FailedTestException("Event log did not render any events during stability loop.");
+            }
+
+            for (var i = 0; i < events.Count; i++)
+            {
+                var row = events[i];
+                await row.ClickAsync();
+
+                var capturedIndex = i;
+                await RetryHelpers.RetryAsync(async () =>
+                {
+                    var highlighted = await events[capturedIndex].IsHighlightedAsync();
+                    if (!highlighted)
+                    {
+                        var classes = await events[capturedIndex]._root.GetAttributeAsync("class") ?? string.Empty;
+                        DebugLogger.Log($"EventLogStabilitySequential: row {capturedIndex} classes '{classes}' not highlighted yet.");
+                    }
+                    return highlighted;
+                }, maxAttempts: 15, delayMs: 200);
+            }
+        }
+        while (budget.ShouldContinue(iteration));
+    }
+
+    public static async Task EventLogStabilityRandom(IPage page)
+    {
+        var layout = new LayoutPage(page);
+        await layout.WaitForAllComponentsLoadedAsync();
+
+        var settings = AppSettingsAccessor.TryGetCurrent();
+        var budget = RepeatBudget.FromSettings(settings, defaultMinutes: 1, minIterations: 10);
+        var rng = new Random(299792458);
+
+        var eventLogs = await layout.EventLogTabsAsync();
+        var tab = eventLogs.FirstOrDefault();
+        if (tab is null)
+        {
+            throw new FailedTestException("No event log tabs found for random stability run.");
+        }
+
+        await tab.TabButton().ClickAsync();
+        var iteration = 0;
+
+        do
+        {
+            iteration++;
+            var events = (await tab.EventElementsAsync(true)).ToList();
+            if (events.Count == 0)
+            {
+                throw new FailedTestException("Event log did not render any events during random stability loop.");
+            }
+
+            var indices = Enumerable.Range(0, events.Count).ToList();
+            // Fisher-Yates shuffle with deterministic seed
+            for (var i = indices.Count - 1; i > 0; i--)
+            {
+                var swapIndex = rng.Next(i + 1);
+                (indices[i], indices[swapIndex]) = (indices[swapIndex], indices[i]);
+            }
+
+            foreach (var idx in indices)
+            {
+                var row = events[idx];
+                await row._root.ScrollIntoViewIfNeededAsync();
+                await row.ClickAsync();
+
+                var capturedIndex = idx;
+                await RetryHelpers.RetryAsync(async () =>
+                {
+                    var highlighted = await events[capturedIndex].IsHighlightedAsync();
+                    if (!highlighted)
+                    {
+                        var classes = await events[capturedIndex]._root.GetAttributeAsync("class") ?? string.Empty;
+                        DebugLogger.Log($"EventLogStabilityRandom: row {capturedIndex} classes '{classes}' not highlighted yet.");
+                    }
+                    return highlighted;
+                }, maxAttempts: 15, delayMs: 200);
+            }
+        }
+        while (budget.ShouldContinue(iteration));
+    }
+
+    public static async Task CallTraceStabilitySequential(IPage page)
+    {
+        var layout = new LayoutPage(page);
+        await layout.WaitForAllComponentsLoadedAsync();
+
+        var settings = AppSettingsAccessor.TryGetCurrent();
+        var budget = RepeatBudget.FromSettings(settings, defaultMinutes: 1, minIterations: 10);
+
+        var callTraces = await layout.CallTraceTabsAsync();
+        var tab = callTraces.FirstOrDefault();
+        if (tab is null)
+        {
+            throw new FailedTestException("No call trace tabs found for stability run.");
+        }
+
+        await tab.TabButton().ClickAsync();
+        var iteration = 0;
+
+        do
+        {
+            iteration++;
+            var items = (await tab.EntriesAsync(true)).ToList();
+            if (items.Count == 0)
+            {
+                throw new FailedTestException("Call trace did not render any entries during stability loop.");
+            }
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                var capturedIndex = i;
+                try
+                {
+                    await items[capturedIndex].ActivateAsync();
+                    await RetryHelpers.RetryAsync(async () => await items[capturedIndex].IsSelectedAsync(), maxAttempts: 15, delayMs: 200);
+                }
+                catch (PlaywrightException ex)
+                {
+                    DebugLogger.Log($"CallTraceStabilitySequential: entry {capturedIndex} activation failed with {ex.Message}, refreshing entries.");
+                    items = (await tab.EntriesAsync(true)).ToList();
+                    if (capturedIndex < items.Count)
+                    {
+                        await items[capturedIndex].ActivateAsync();
+                    }
+                }
+            }
+        }
+        while (budget.ShouldContinue(iteration));
+    }
+
+    public static async Task CallTraceStabilityRandom(IPage page)
+    {
+        var layout = new LayoutPage(page);
+        await layout.WaitForAllComponentsLoadedAsync();
+
+        var settings = AppSettingsAccessor.TryGetCurrent();
+        var budget = RepeatBudget.FromSettings(settings, defaultMinutes: 1, minIterations: 10);
+        var rng = new Random(299792458);
+
+        var callTraces = await layout.CallTraceTabsAsync();
+        var tab = callTraces.FirstOrDefault();
+        if (tab is null)
+        {
+            throw new FailedTestException("No call trace tabs found for random stability run.");
+        }
+
+        await tab.TabButton().ClickAsync();
+        var iteration = 0;
+
+        do
+        {
+            iteration++;
+            var items = (await tab.EntriesAsync(true)).ToList();
+            if (items.Count == 0)
+            {
+                throw new FailedTestException("Call trace did not render any entries during random stability loop.");
+            }
+
+            var indices = Enumerable.Range(0, items.Count).ToList();
+            for (var i = indices.Count - 1; i > 0; i--)
+            {
+                var swapIndex = rng.Next(i + 1);
+                (indices[i], indices[swapIndex]) = (indices[swapIndex], indices[i]);
+            }
+
+            foreach (var idx in indices)
+            {
+                var capturedIndex = idx;
+                try
+                {
+                    await items[capturedIndex].ActivateAsync();
+                    await RetryHelpers.RetryAsync(async () => await items[capturedIndex].IsSelectedAsync(), maxAttempts: 15, delayMs: 200);
+                }
+                catch (PlaywrightException ex)
+                {
+                    DebugLogger.Log($"CallTraceStabilityRandom: entry {capturedIndex} activation failed with {ex.Message}, refreshing entries.");
+                    items = (await tab.EntriesAsync(true)).ToList();
+                }
+            }
+        }
+        while (budget.ShouldContinue(iteration));
     }
 
     /// <summary>

@@ -100,6 +100,13 @@ public sealed class RunnerSettings
         = false;
 
     /// <summary>
+    /// Optional duration (in minutes) for long-running stability loops; null means use the test defaults.
+    /// </summary>
+    [Range(1, 480)]
+    public int? RepeatDurationMinutes { get; set; }
+        = 1;
+
+    /// <summary>
     /// Optional grace periods and overrides for slow-loading UI components.
     /// </summary>
     [Required]
