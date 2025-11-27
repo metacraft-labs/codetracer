@@ -32,7 +32,7 @@ use crate::transport::{DapResult, WorkerTransport};
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
-// in the future: maybe refactor in a more thread-aware way? 
+// in the future: maybe refactor in a more thread-aware way?
 //   or if not: delete
 
 // #[cfg(feature = "io-transport")]
@@ -155,7 +155,7 @@ fn setup(
     ct_rr_worker_exe: &Path,
     sender: Sender<DapMessage>,
     for_launch: bool,
-    thread_name: &str,    
+    thread_name: &str,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
@@ -175,7 +175,14 @@ fn setup(
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;
 
-        let mut handler = Handler::new(TraceKind::DB, CtRRArgs { name: thread_name.to_string(), ..CtRRArgs::default() }, Box::new(db));
+        let mut handler = Handler::new(
+            TraceKind::DB,
+            CtRRArgs {
+                name: thread_name.to_string(),
+                ..CtRRArgs::default()
+            },
+            Box::new(db),
+        );
         handler.raw_diff_index = raw_diff_index;
         if for_launch {
             handler.run_to_entry(dap::Request::default(), sender)?;
@@ -204,7 +211,6 @@ fn setup(
         }
     }
 }
-
 
 fn patch_message_seq(message: &DapMessage, seq: i64) -> DapMessage {
     match message {
@@ -262,11 +268,7 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
     }
 }
 
-fn handle_request(
-    handler: &mut Handler,
-    req: dap::Request,
-    sender: Sender<DapMessage>,
-) -> Result<(), Box<dyn Error>> {
+fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
     match req.command.as_str() {
         "scopes" => handler.scopes(
             req.clone(),
@@ -418,7 +420,6 @@ impl Ctx {
         Ok(())
     }
 }
-
 
 pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ctx) -> Result<(), Box<dyn Error>> {
     debug!("Handling message: {:?}", msg);
@@ -578,7 +579,14 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
     Ok(())
 }
 
-fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender: Sender<DapMessage>, ctx_with_cached_launch: &Ctx, cached_launch: bool, run_to_entry: bool) -> Result<(), Box<dyn Error>> {
+fn task_thread(
+    name: &str,
+    from_thread_receiver: Receiver<dap::Request>,
+    sender: Sender<DapMessage>,
+    ctx_with_cached_launch: &Ctx,
+    cached_launch: bool,
+    run_to_entry: bool,
+) -> Result<(), Box<dyn Error>> {
     let mut handler = if cached_launch {
         let for_launch = false;
         setup(
@@ -596,7 +604,14 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
         })?
     } else {
         // `.initialized` is false
-        Handler::new(TraceKind::DB, CtRRArgs { name: name.to_string(), ..CtRRArgs::default() }, Box::new(Db::new(&PathBuf::from(""))))
+        Handler::new(
+            TraceKind::DB,
+            CtRRArgs {
+                name: name.to_string(),
+                ..CtRRArgs::default()
+            },
+            Box::new(Db::new(&PathBuf::from(""))),
+        )
     };
 
     loop {
@@ -636,7 +651,7 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
                     error!("launch error: {e:?}");
                     format!("launch error: {e:?}")
                 })?;
-            } 
+            }
         } else {
             if handler.initialized {
                 let res = handle_request(&mut handler, request, sender.clone());
@@ -648,7 +663,7 @@ fn task_thread(name: &str, from_thread_receiver: Receiver<dap::Request>, sender:
                 }
             }
         }
-    }                    
+    }
     // Ok(())
 }
 
@@ -690,7 +705,6 @@ fn handle_client(
         }
     })?;
 
-
     let (to_stable_sender, from_stable_receiver) = mpsc::channel::<dap::Request>();
     ctx.to_stable_sender = Some(to_stable_sender);
     let stable_sending_sender = sending_sender.clone();
@@ -701,7 +715,15 @@ fn handle_client(
     let run_to_entry = true;
     let builder = thread::Builder::new().name("stable".to_string());
     let _stable_thread_handle = builder.spawn(move || -> Result<(), String> {
-        task_thread("stable", from_stable_receiver, stable_sending_sender, &stable_ctx, cached_launch, run_to_entry).map_err(|e| {
+        task_thread(
+            "stable",
+            from_stable_receiver,
+            stable_sending_sender,
+            &stable_ctx,
+            cached_launch,
+            run_to_entry,
+        )
+        .map_err(|e| {
             error!("task_thread error: {e:?}");
             format!("task_thread error: {e:?}")
         })?;
@@ -710,7 +732,7 @@ fn handle_client(
 
     // start flow here; send to it
     // or start new each time; send to it?
-    
+
     let (to_flow_sender, from_flow_receiver) = mpsc::channel::<dap::Request>();
     ctx.to_flow_sender = Some(to_flow_sender);
     let flow_sending_sender = sending_sender.clone();
@@ -721,7 +743,15 @@ fn handle_client(
     let run_to_entry = false;
     let builder = thread::Builder::new().name("flow".to_string());
     let _flow_thread_handle = builder.spawn(move || -> Result<(), String> {
-        task_thread("flow", from_flow_receiver, flow_sending_sender, &flow_ctx, cached_launch, run_to_entry).map_err(|e| {
+        task_thread(
+            "flow",
+            from_flow_receiver,
+            flow_sending_sender,
+            &flow_ctx,
+            cached_launch,
+            run_to_entry,
+        )
+        .map_err(|e| {
             error!("task_thread error: {e:?}");
             format!("task_thread error: {e:?}")
         })?;
@@ -738,7 +768,15 @@ fn handle_client(
     let run_to_entry = false;
     let builder = thread::Builder::new().name("tracepoint".to_string());
     let _tracepoint_thread_handle = builder.spawn(move || -> Result<(), String> {
-        task_thread("tracepoint", from_tracepoint_receiver, tracepoint_sending_sender, &tracepoint_ctx, cached_launch, run_to_entry).map_err(|e| {
+        task_thread(
+            "tracepoint",
+            from_tracepoint_receiver,
+            tracepoint_sending_sender,
+            &tracepoint_ctx,
+            cached_launch,
+            run_to_entry,
+        )
+        .map_err(|e| {
             error!("task_thread error: {e:?}");
             format!("task_thread error: {e:?}")
         })?;
@@ -763,8 +801,8 @@ fn handle_client(
                         error!("tracepoint send launch error: {e:?}");
                     }
                 }
-            } 
-            
+            }
+
             // handle all requests here: including `launch` from actually stable thread
             match request.command.as_str() {
                 "ct/load-flow" => {
@@ -774,8 +812,13 @@ fn handle_client(
                         }
                     }
                 }
-                "ct/event-load" | "ct/run-tracepoints" | "ct/setup-trace-session" | "ct/update-table" | "ct/load-terminal" |
-                    "ct/tracepoint-toggle" | "ct/tracepoint-delete" => {
+                "ct/event-load"
+                | "ct/run-tracepoints"
+                | "ct/setup-trace-session"
+                | "ct/update-table"
+                | "ct/load-terminal"
+                | "ct/tracepoint-toggle"
+                | "ct/tracepoint-delete" => {
                     if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
                         if let Err(e) = to_tracepoint_sender.send(request.clone()) {
                             error!("tracepoint send request error: {e:?}");
@@ -792,7 +835,6 @@ fn handle_client(
                 }
             }
         }
-        
     }
 
     // for now, we're just looping so this place is unreachable anyway:

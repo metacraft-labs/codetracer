@@ -207,7 +207,7 @@ impl<'a> CallFlowPreloader<'a> {
             Err(e) => {
                 error!("flow error: {e:?}");
                 FlowUpdate::error(&format!("{:?}", e))
-            },
+            }
         }
     }
 
@@ -321,7 +321,7 @@ impl<'a> CallFlowPreloader<'a> {
     }
 
     // returns new step_id/rr ticks(?) and `progressing`(if false, the flow loop should stop)
-    //   for RR: rr ticks might stay the same, but we still return progressing `true` unless we have an error for 
+    //   for RR: rr ticks might stay the same, but we still return progressing `true` unless we have an error for
     //      stepping/location
     fn move_to_next_step(&mut self, from_step_id: StepId, replay: &mut dyn Replay) -> (StepId, bool, bool) {
         info!("  move_to_next_step:");
@@ -335,7 +335,7 @@ impl<'a> CallFlowPreloader<'a> {
                 }
 
                 let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                // for DbReplay actually those replay methods shouldn't fail; 
+                // for DbReplay actually those replay methods shouldn't fail;
                 //   but this might be unreliable/change in the future
                 //   and for RR they can also surely fail
                 match replay.load_location(&mut expr_loader) {
