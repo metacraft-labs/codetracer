@@ -5,7 +5,8 @@ import
   ipc_subsystems/[ dap, socket ],
   ../lib/[ jslib, electron_lib ],
   ../[ trace_metadata, config, types ],
-  ../../common/[ ct_logging, paths ],
+  ../../common/[ ct_logging, paths, ],
+  # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
   ../lang
 
@@ -332,6 +333,10 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     else:
       errorPrint "There is no record at given path."
 
+proc sendNewNotification*(kind: NotificationKind, message: string) =
+  let notification = newNotification(kind, message)
+  mainWindow.webContents.send "new-notification", notification
+
 proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject)) {.async.}=
   infoPrint "index: new record for", response.args
   # TODO fix replay
@@ -354,6 +359,10 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
 
     if buildFilename.len == 0:
       errorPrint "index: build: can't find a filename to build: stopping"
+      # should be working, but there was a problem: TODO maybe debug more
+      # but ther other `failed-record` also works here for errors indeed, i noticed it later 
+      # sendNewNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
+      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"index: build: can't find a filename to build: stopping"}
       return
 
 
@@ -368,6 +377,10 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
       infoPrint "index: build ok: ", output
     else:
       errorPrint "index: build error: ", buildProcessResult.error
+      # sendNewNotification(NotificationKind.NotificationError, "index: build error: " & $JSON.stringify(buildProcessResult.error))
+      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring("index: build error: " & $JSON.stringify(buildProcessResult.error))}
+
+
       return
 
   let processResult = await startProcess(
