@@ -10,6 +10,7 @@ using UiTests.PageObjects.Panes.Editor;
 using UiTests.PageObjects.Panes.Scratchpad;
 using UiTests.PageObjects.Panes.Filesystem;
 using UiTests.PageObjects.Panes.Terminal;
+using UiTests.Configuration;
 using UiTests.Utils;
 
 namespace UiTests.PageObjects;
@@ -65,8 +66,40 @@ public class LayoutPage : BasePage
     public Task WaitForCallTraceLoadedAsync() =>
         WaitForComponentAsync("calltrace", "div[id^='calltraceComponent']");
 
-    public Task WaitForEventLogLoadedAsync() =>
-        WaitForComponentAsync("event-log", "div[id^='eventLogComponent']");
+    public async Task WaitForEventLogLoadedAsync()
+    {
+        await WaitForComponentAsync("event-log", "div[id^='eventLogComponent']");
+
+        var settings = AppSettingsAccessor.TryGetCurrent();
+        var graceMs = settings?.Runner.ComponentLoad.EventLogGracePeriodMs ?? 0;
+        if (graceMs > 0)
+        {
+            DebugLogger.Log($"LayoutPage: applying event-log grace delay of {graceMs}ms");
+            await Task.Delay(graceMs);
+        }
+
+        var loadingCell = Page.Locator("div[id^='eventLogComponent'] td.dt-empty").Filter(new() { HasTextString = "Loading..." });
+        try
+        {
+            await RetryHelpers.RetryAsync(async () =>
+            {
+                var count = await loadingCell.CountAsync();
+                if (count == 0)
+                {
+                    DebugLogger.Log("LayoutPage: event-log data loaded (no loading placeholders present).");
+                    return true;
+                }
+
+                DebugLogger.Log($"LayoutPage: event-log still loading (placeholder count={count}); waiting.");
+                return false;
+            });
+        }
+        catch (TimeoutException ex)
+        {
+            var remaining = await loadingCell.CountAsync();
+            throw new TimeoutException($"Event log did not finish loading; {remaining} placeholder row(s) remained.", ex);
+        }
+    }
 
     public Task WaitForEditorLoadedAsync() =>
         WaitForComponentAsync("editor", "div[id^='editorComponent']");

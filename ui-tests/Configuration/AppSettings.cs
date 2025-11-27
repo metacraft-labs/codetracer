@@ -98,6 +98,22 @@ public sealed class RunnerSettings
     /// </summary>
     public bool VerboseConsole { get; set; }
         = false;
+
+    /// <summary>
+    /// Optional grace periods and overrides for slow-loading UI components.
+    /// </summary>
+    [Required]
+    public ComponentLoadSettings ComponentLoad { get; set; } = new();
+}
+
+public sealed class ComponentLoadSettings
+{
+    /// <summary>
+    /// Extra delay (in milliseconds) to allow the event log to populate after its tab appears.
+    /// </summary>
+    [Range(0, 120_000)]
+    public int EventLogGracePeriodMs { get; set; }
+        = 10_000;
 }
 
 public sealed class ScenarioSettings
