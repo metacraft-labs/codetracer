@@ -23,6 +23,7 @@ internal sealed class AppSettingsPostConfigure : IPostConfigureOptions<AppSettin
         options.Electron ??= new ElectronSettings();
         options.Web ??= new WebSettings();
         options.Web.Ports ??= new HostPortSettings();
+        options.Runner.ComponentLoad ??= new ComponentLoadSettings();
         options.Suites = EnsureDictionary(options.Suites);
         options.Profiles = EnsureDictionary(options.Profiles);
 

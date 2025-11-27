@@ -24,6 +24,7 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
         _planner = planner;
         _executors = executors.ToDictionary(executor => executor.Mode);
         _settings = settings.Value;
+        AppSettingsAccessor.Initialize(_settings);
         _logger = logger;
     }
 

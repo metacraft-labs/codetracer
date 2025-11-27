@@ -15,6 +15,7 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
 {
     private readonly ICodetracerLauncher _launcher;
     private readonly IMonitorLayoutService _monitorLayoutService;
+    private readonly IPortAllocator _portAllocator;
     private readonly AppSettings _settings;
     private readonly IProcessLifecycleManager _processLifecycle;
     private readonly ILogger<ElectronTestSessionExecutor> _logger;
@@ -22,12 +23,14 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
     public ElectronTestSessionExecutor(
         ICodetracerLauncher launcher,
         IMonitorLayoutService monitorLayoutService,
+        IPortAllocator portAllocator,
         IOptions<AppSettings> settings,
         ILogger<ElectronTestSessionExecutor> logger,
         IProcessLifecycleManager processLifecycle)
     {
         _launcher = launcher;
         _monitorLayoutService = monitorLayoutService;
+        _portAllocator = portAllocator;
         _settings = settings.Value;
         _logger = logger;
         _processLifecycle = processLifecycle;
@@ -43,11 +46,25 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         }
 
         var traceId = await _launcher.RecordProgramAsync(_settings.Electron.TraceProgram, cancellationToken);
-        var port = await GetFreeTcpPortAsync();
-        var verboseConsole = ShouldEmitVerboseConsole(entry);
-        _logger.Log(verboseConsole ? LogLevel.Information : LogLevel.Debug, "[{Scenario}] Launching Electron trace {TraceId} on port {Port}.", entry.Scenario.Id, traceId, port);
+        var cdpPort = _portAllocator.GetFreeTcpPort();
+        var rustLspPort = _portAllocator.GetFreeTcpPort();
+        var rubyLspPort = _portAllocator.GetFreeTcpPort();
+        // best-effort de-duplication to avoid binding clashes in parallel runs
+        while (rustLspPort == cdpPort)
+        {
+            rustLspPort = _portAllocator.GetFreeTcpPort();
+        }
+        while (rubyLspPort == cdpPort || rubyLspPort == rustLspPort)
+        {
+            rubyLspPort = _portAllocator.GetFreeTcpPort();
+        }
 
-        await using var session = await LaunchElectronAsync(traceId, port, cancellationToken);
+        var verboseConsole = ShouldEmitVerboseConsole(entry);
+        _logger.Log(verboseConsole ? LogLevel.Information : LogLevel.Debug,
+            "[{Scenario}] Launching Electron trace {TraceId} (CDP {CdpPort}, LSP {RustLspPort}, Ruby LSP {RubyLspPort}).",
+            entry.Scenario.Id, traceId, cdpPort, rustLspPort, rubyLspPort);
+
+        await using var session = await LaunchElectronAsync(traceId, cdpPort, rustLspPort, rubyLspPort, cancellationToken);
         var monitors = _monitorLayoutService.DetectMonitors();
         var selectedMonitor = MonitorSelectionHelper.SelectPreferredMonitor(
             monitors,
@@ -77,14 +94,14 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         await entry.Test.Handler(context);
     }
 
-    private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int port, CancellationToken cancellationToken)
+    private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int cdpPort, int rustLspPort, int rubyLspPort, CancellationToken cancellationToken)
     {
         var info = new ProcessStartInfo(_launcher.CtPath)
         {
             WorkingDirectory = _launcher.CtInstallDirectory,
             UseShellExecute = false
         };
-        info.ArgumentList.Add($"--remote-debugging-port={port}");
+        info.ArgumentList.Add($"--remote-debugging-port={cdpPort}");
         info.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
         info.EnvironmentVariables.Remove("ELECTRON_NO_ATTACH_CONSOLE");
         info.EnvironmentVariables.Add("CODETRACER_CALLER_PID", "1");
@@ -93,16 +110,18 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         info.EnvironmentVariables.Add("CODETRACER_TEST", "1");
         info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
         info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
+        info.EnvironmentVariables["CODETRACER_LSP_PORT"] = rustLspPort.ToString();
+        info.EnvironmentVariables["CODETRACER_RUBY_LSP_PORT"] = rubyLspPort.ToString();
 
         var process = Process.Start(info) ?? throw new InvalidOperationException("Failed to start CodeTracer Electron process.");
         var label = $"electron:{traceId}";
         _processLifecycle.RegisterProcess(process, label);
         try
         {
-            await WaitForCdpAsync(port, TimeSpan.FromSeconds(_settings.Electron.CdpStartupTimeoutSeconds), cancellationToken);
+            await WaitForCdpAsync(cdpPort, TimeSpan.FromSeconds(_settings.Electron.CdpStartupTimeoutSeconds), cancellationToken);
 
             var playwright = await Playwright.CreateAsync();
-            var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new() { Timeout = _settings.Electron.CdpStartupTimeoutSeconds * 1000 });
+            var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{cdpPort}", new() { Timeout = _settings.Electron.CdpStartupTimeoutSeconds * 1000 });
 
             return new CodeTracerSession(process, browser, playwright, _processLifecycle, label);
         }
@@ -155,15 +174,6 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         }
 
         throw new TimeoutException("CDP endpoint did not become ready within the allotted time.");
-    }
-
-    private static Task<int> GetFreeTcpPortAsync()
-    {
-        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return Task.FromResult(port);
     }
 
     private static async Task<IPage> GetAppPageAsync(IBrowser browser, string? titleContains, CancellationToken cancellationToken)

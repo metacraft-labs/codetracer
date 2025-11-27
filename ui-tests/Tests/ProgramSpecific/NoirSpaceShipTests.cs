@@ -365,7 +365,7 @@ public static class NoirSpaceShipTests
     public static async Task EventLogJumpHighlightsActiveRow(IPage page)
     {
         var layout = new LayoutPage(page);
-        //await layout.WaitForAllComponentsLoadedAsync();
+        await layout.WaitForAllComponentsLoadedAsync();
 
         var eventLog = (await layout.EventLogTabsAsync()).First();
         await eventLog.TabButton().ClickAsync();
