@@ -1269,7 +1269,7 @@ proc buildRecordEnv(envDump: cstring): JsObject =
 
   envObject
 
-proc reRecordCurrentTrace*(data: Data) =
+proc reRecordCurrentProgram*(data: Data) =
   ## Save edits and restart the recorder using the currently loaded trace metadata.
   if data.trace.isNil:
     data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
@@ -1312,10 +1312,11 @@ proc reRecordCurrentTrace*(data: Data) =
   if not envObject.isNil:
     options["env".cstring] = envObject
 
-  data.viewsApi.infoMessage(cstring"Recording a new trace…")
+  data.viewsApi.infoMessage(cstring"Building/recording a new trace…")
   data.ipc.send(
     "CODETRACER::new-record",
     js{
+      filename: data.services.debugger.location.path,
       args: args,
       options: options
     }

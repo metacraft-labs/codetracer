@@ -6,7 +6,8 @@ import
   ../lib/[ jslib, electron_lib ],
   ../[ trace_metadata, config, types ],
   ../../common/[ ct_logging, paths ],
-  ./js_helpers
+  ./js_helpers,
+  ../lang
 
 var
   selectedReplayId = -1
@@ -167,6 +168,7 @@ proc loadExistingRecord*(traceId: int) {.async.} =
   debugPrint "[info]: load existing record with ID: ", $traceId
   if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
     if not await assignTrace(traceId):
+      warnPrint "couldn't assign trace"
       return
   let trace = prefetchedTrace
   prefetchedTrace = nil
@@ -296,6 +298,7 @@ proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.
 
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await electron_vars.app.findTraceByRecordProcessId(pid)
+  infoPrint "index: trace by record process id has trace id ", trace.id
   prefetchedTrace = trace
   data.trace = trace
   data.pluginClient.trace = trace
@@ -329,7 +332,44 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     else:
       errorPrint "There is no record at given path."
 
-proc onNewRecord*(sender: js, response: jsobject(args=seq[cstring], options=JsObject)) {.async.}=
+proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject)) {.async.}=
+  infoPrint "index: new record for", response.args
+  # TODO fix replay
+  if not data.trace.lang.isDbBased:
+    let buildFilename = if response.filename.len > 0:
+        response.filename
+      else:
+        let (rawTracePaths, err) = await fsReadFileWithErr(nodePath.join(data.trace.outputFolder, cstring"trace_paths.json"))
+        if not err.isNil:
+          cstring""
+        else:
+          let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
+          if tracePaths.len > 0:
+            # TODO: add either entry/special source file, or current file as argument
+            # and do that in trace_db_metadata/sqlite OR in trace_paths being more special(first?)
+            # for now just assuming trace paths first file is useful for this goal
+            tracePaths[0]
+          else:
+            cstring""
+
+    if buildFilename.len == 0:
+      errorPrint "index: build: can't find a filename to build: stopping"
+      return
+
+
+    let args = @[buildFilename]
+    infoPrint "index: build: ", args
+    let buildProcessResult = await readProcessOutput(
+      codetracerExe,
+      @[cstring"build"].concat(args)
+    )
+    if buildProcessResult.isOk:
+      let output = buildProcessResult.value
+      infoPrint "index: build ok: ", output
+    else:
+      errorPrint "index: build error: ", buildProcessResult.error
+      return
+
   let processResult = await startProcess(
     codetracerExe,
     @[cstring"record"].concat(response.args),
