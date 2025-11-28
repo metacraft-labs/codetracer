@@ -780,6 +780,7 @@ type
     isLoading*: bool
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]
+    diffEditor*: DiffEditor
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]

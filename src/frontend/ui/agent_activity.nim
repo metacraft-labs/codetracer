@@ -193,6 +193,47 @@ proc clear(self: AgentActivityComponent) =
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
     autoResizeTextarea(INPUT_ID)
+proc parseUnifiedDiff(patch: string): (string, string) =
+  ## Very simple unified diff parser:
+  ## - skips headers: diff/index/---/+++/@@
+  ## - '+' lines -> only in modified
+  ## - '-' lines -> only in original
+  ## - ' ' lines -> in both
+  ## - others -> in both verbatim
+  var origLines: seq[string] = @[]
+  var modLines: seq[string] = @[]
+
+  for line in patch.splitLines():
+    if line.len == 0:
+      origLines.add("")
+      modLines.add("")
+      continue
+
+    if line.startsWith("diff ") or
+       line.startsWith("index ") or
+       line.startsWith("--- ") or
+       line.startsWith("+++ ") or
+       line.startsWith("@@"):
+      continue
+
+    let first = line[0]
+    case first
+    of '+':
+      # added line in modified
+      modLines.add(line.substr(1))
+    of '-':
+      # removed line in original
+      origLines.add(line.substr(1))
+    of ' ':
+      let t = line.substr(1)
+      origLines.add(t)
+      modLines.add(t)
+    else:
+      # unknown prefix: mirror into both
+      origLines.add(line)
+      modLines.add(line)
+
+  (origLines.join("\n"), modLines.join("\n"))
 
 proc passwordPrompt(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
