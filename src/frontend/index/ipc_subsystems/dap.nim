@@ -23,6 +23,7 @@ proc wrapJsonForSending*(obj: JsObject): cstring =
     let len = len(stringified_packet)
     let header = &"Content-Length: {len}\r\n\r\n"
     let res = header.cstring & stringified_packet
+    # echo cstring"dap: ", res.cstring
     return res.cstring
 
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =

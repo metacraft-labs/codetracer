@@ -10,6 +10,7 @@ use std::error::Error;
 
 use clap::Parser;
 use tokio::{signal, sync::mpsc};
+// use flexi_logger::{Logger, FileSpec, Duplicate};
 
 use crate::backend_manager::BackendManager;
 
@@ -22,6 +23,10 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // let _logger = Logger::try_with_str("info")?
+    //     .log_to_file(FileSpec::default())         // write logs to file
+    //     .duplicate_to_stderr(Duplicate::Warn)     // print warnings and errors also to the console
+    //     .start()?;
     flexi_logger::init();
 
     let cli = Cli::parse();

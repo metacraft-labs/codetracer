@@ -166,7 +166,7 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
   }
 
 proc loadExistingRecord*(traceId: int) {.async.} =
-  debugPrint "[info]: load existing record with ID: ", $traceId
+  infoPrint "[info]: load existing record with ID: ", $traceId
   if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
     if not await assignTrace(traceId):
       warnPrint "couldn't assign trace"
@@ -226,14 +226,14 @@ proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
     let stopPacket = wrapJsonForSending js{
       "type": cstring"request",
       "command": cstring"ct/stop-replay",
-      "arguments": [selectedReplayId]
+      "arguments": selectedReplayId
     }
     backendManagerSocket.write(stopPacket)
 
   let packet = wrapJsonForSending js{
     "type": cstring"request",
     "command": cstring"ct/start-replay",
-    "arguments": [cstring(dbBackendExe), cstring"dap-server"],
+    "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
   }
   backendManagerSocket.write(packet)
 
@@ -248,7 +248,7 @@ proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
   let selectPacket = wrapJsonForSending js{
     "type": cstring"request",
     "command": cstring"ct/select-replay",
-    "arguments": [replayId]
+    "arguments": replayId
   }
   backendManagerSocket.write(selectPacket)
   mainWindow.webContents.send(
