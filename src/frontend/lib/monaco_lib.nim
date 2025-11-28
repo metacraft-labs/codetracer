@@ -38,6 +38,7 @@ type
 
     # Diff editor options:
     renderSideBySide*:       bool
+    renderOverviewRuler*:    bool
 
   MonacoScrollType* = enum Smooth, Immediate
 
