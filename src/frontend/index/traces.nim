@@ -337,11 +337,12 @@ proc sendNewNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "new-notification", notification
 
-proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject)) {.async.}=
-  infoPrint "index: new record for", response.args
+proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject, projectOnly=bool)) {.async.}=
+  infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly
   # TODO fix replay
+  var recordArgs = response.args
   if not data.trace.lang.isDbBased:
-    let buildFilename = if response.filename.len > 0:
+    var buildArg = if response.filename.len > 0:
         response.filename
       else:
         let (rawTracePaths, err) = await fsReadFileWithErr(nodePath.join(data.trace.outputFolder, cstring"trace_paths.json"))
@@ -357,35 +358,48 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
           else:
             cstring""
 
-    if buildFilename.len == 0:
-      errorPrint "index: build: can't find a filename to build: stopping"
+    if buildArg.len == 0:
+      errorPrint "index: build: can't find a filename or project to build: stopping"
       # should be working, but there was a problem: TODO maybe debug more
       # but ther other `failed-record` also works here for errors indeed, i noticed it later 
       # sendNewNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
-      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"index: build: can't find a filename to build: stopping"}
+      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"index: build: can't find a filename or project to build: stopping"}
       return
 
+    if response.projectOnly:
+      buildArg = cstring(($buildArg).parentDir)
+      # for now `ct build` => `ct-rr-support build` tries just use project logic when passed a folder and 
+      #   simpler file-based compile logic when passed a file
+      #   e.g. project logic is look up for a folder with Cargo.toml for rust
+      # we do this for now instead of having an explicit `--project` argument
 
-    let args = @[buildFilename]
-    infoPrint "index: build: ", args
+    let buildArgs = @[buildArg]
+    infoPrint "index: build: ", buildArgs
     let buildProcessResult = await readProcessOutput(
       codetracerExe,
-      @[cstring"build"].concat(args)
+      @[cstring"build"].concat(buildArgs)
     )
+
+    
     if buildProcessResult.isOk:
       let output = buildProcessResult.value
       infoPrint "index: build ok: ", output
+      let lines = ($output).splitLines()
+      if lines[^1].startsWith("binary: "):
+        let tokens = lines[^1].split(": ", 1)
+        let binary = cstring(tokens[1].strip)
+        if recordArgs[0] != binary:
+          recordArgs = @[binary] # assume other args from original trace might be unrelated
     else:
       errorPrint "index: build error: ", buildProcessResult.error
       # sendNewNotification(NotificationKind.NotificationError, "index: build error: " & $JSON.stringify(buildProcessResult.error))
       mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring("index: build error: " & $JSON.stringify(buildProcessResult.error))}
-
-
       return
 
+  infoPrint "index: record with args: ", recordArgs
   let processResult = await startProcess(
     codetracerExe,
-    @[cstring"record"].concat(response.args),
+    @[cstring"record"].concat(recordArgs),
     response.options)
 
   if processResult.isOk:

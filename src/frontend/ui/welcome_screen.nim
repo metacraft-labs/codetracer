@@ -594,7 +594,8 @@ proc newRecordFormView(self: WelcomeScreenComponent): VNode =
             self.data.ipc.send(
                 "CODETRACER::new-record", js{
                   args: prepareArgs(self),
-                  options: js{ cwd: workDir }
+                  options: js{ cwd: workDir },
+                  projectOnly: false,
                 }
             )
         ):

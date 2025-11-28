@@ -1269,15 +1269,19 @@ proc buildRecordEnv(envDump: cstring): JsObject =
 
   envObject
 
-proc reRecordCurrentProgram*(data: Data) =
-  ## Save edits and restart the recorder using the currently loaded trace metadata.
+proc reRecordCurrent*(data: Data, projectOnly: bool) =
+  ## Save edits and restart the recorder for the current file or project
+  ##   base args on current trace for now, but we might start a different target
+  ##   TODO: maybe rethink this more?
+
   if data.trace.isNil:
     data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
     return
 
-  if data.ui.mode != EditMode:
-    data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
-    return
+  # maybe it's ok to also rebuild/re-record directly
+  # if data.ui.mode != EditMode:
+  #   data.viewsApi.warnMessage(cstring"Switch to edit mode before re-recording.")
+  #   return
 
   data.saveFiles()
 
@@ -1318,7 +1322,8 @@ proc reRecordCurrentProgram*(data: Data) =
     js{
       filename: data.services.debugger.location.path,
       args: args,
-      options: options
+      options: options,
+      projectOnly: projectOnly,
     }
   )
 
