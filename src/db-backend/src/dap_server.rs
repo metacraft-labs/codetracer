@@ -199,6 +199,7 @@ fn setup(
                 rr_trace_folder: path,
                 name: thread_name.to_string(),
             };
+            info!("ct_rr_args {:?}", ct_rr_args);
             let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
             handler.raw_diff_index = raw_diff_index;
             if for_launch {
@@ -634,7 +635,7 @@ fn task_thread(
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
                 let launch_raw_diff_index = args.raw_diff_index.clone();
-                let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
+                let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap(); // unwrap_or(PathBuf::from(""));
 
                 let for_launch = run_to_entry;
                 handler = setup(

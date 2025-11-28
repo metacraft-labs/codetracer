@@ -189,7 +189,13 @@ impl BackendManager {
 
         create_dir_all(&socket_dir).await?;
 
-        let socket_path = socket_dir.join(self.children.len().to_string() + ".sock");
+        
+        // reserve place
+        self.children.push(None);
+        // must be > 0 here!
+        let id = self.children.len() - 1;
+
+        let socket_path = socket_dir.join(id.to_string() + ".sock");
         _ = remove_file(&socket_path).await;
 
         let cmd_text = cmd;
@@ -211,12 +217,6 @@ impl BackendManager {
             None => return Err(Box::new(SocketPathError)),
         }
 
-        info!(
-            "Starting replay with id {}. Command: {:?}",
-            self.children.len(),
-            cmd
-        );
-
         let listener = UnixListener::bind(socket_path)?;
 
         let child = cmd.spawn();
@@ -228,19 +228,23 @@ impl BackendManager {
             }
         };
 
-        self.children.push(Some(child));
+        self.children[id] = Some(child);
+
+        info!(
+            "Starting replay with id {id}. Command: {cmd:?}",
+        );
 
         let mut socket_read;
         let mut socket_write;
 
-        debug!("Awaiting connection!");
+        info!("Awaiting connection!");
 
         match listener.accept().await {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
         }
 
-        debug!("Accepted connection!");
+        info!("Accepted connection!");
 
         let (child_tx, child_rx) = mpsc::unbounded_channel();
         self.children_receivers.push(Some(child_rx));
@@ -252,7 +256,9 @@ impl BackendManager {
             while let Some(message) = parent_rx.recv().await {
                 let write_res = socket_write.write_all(&DapParser::to_bytes(&message)).await;
                 match write_res {
-                    Ok(()) => {}
+                    Ok(()) => {
+                        debug!("Sent message {message:?} to replay socket with id {id}");
+                    }
                     Err(err) => {
                         error!("Can't send message to replay socket! Error: {err}");
                     }
@@ -296,15 +302,20 @@ impl BackendManager {
             }
         });
 
-        Ok(self.children.len() - 1)
+        Ok(id)
     }
 
     pub async fn stop_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
+        info!("Stopping replay with id {id}");
+        
         self.check_id(id)?;
 
         if let Some(child_opt) = self.children.get_mut(id) {
-            if let Some(child) = child_opt.as_mut() {
-                child.kill().await?;
+            if let Some(subprocess) = child_opt.as_mut() {
+                let _ = subprocess.kill().await.map_err(|e| {
+                    warn!("can't stop subprocess: {e:?}");
+                    e
+                });
             }
             *child_opt = None;
         }
@@ -319,6 +330,9 @@ impl BackendManager {
         if let Some(tx_opt) = self.parent_senders.get_mut(id) {
             *tx_opt = None;
         }
+        self.selected = usize::MAX;
+
+        info!("Stopped replay {id}");
 
         Ok(())
     }
@@ -326,6 +340,7 @@ impl BackendManager {
     pub fn select_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
         self.check_id(id)?;
 
+        info!("Selecting replay {id}");
         self.selected = id;
 
         Ok(())
@@ -375,6 +390,8 @@ impl BackendManager {
                                 }
                             }));
                             return Ok(());
+                        } else {
+                            error!("problem with start-replay: can't process {args:?}");
                         }
                         // TODO: return error
                         Ok(())
@@ -385,6 +402,8 @@ impl BackendManager {
                         {
                             self.stop_replay(id as usize).await?;
                             return Ok(());
+                        } else {
+                            error!("problem with stop-replay: can't process {args:?}");
                         }
                         // TODO: return error
                         Ok(())
@@ -395,6 +414,8 @@ impl BackendManager {
                         {
                             self.select_replay(id as usize)?;
                             return Ok(());
+                        } else {
+                            error!("problem with select-replay: can't process {args:?}");
                         }
                         // TODO: return error
                         Ok(())

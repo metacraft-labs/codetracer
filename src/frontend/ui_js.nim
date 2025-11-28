@@ -372,9 +372,10 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         #   element "Run Static Analysis (drnim)", aRunStatic, false
         #   # element "Build tasks (nimble)", nil, false
 
-        folder "Reset":
-          element "Restart db-backend", aRestartDbBackend, true
-          element "Restart backend-manager", aRestartBackendManager, true
+        # TODO:
+        # folder "Reset":
+        #   element "Restart db-backend", aRestartDbBackend, true
+        #   element "Restart backend-manager", aRestartBackendManager, true
 
         folder "Debug":
           # element "Trace Existing Program...", aTrace, false
@@ -944,6 +945,7 @@ proc onTraceLoaded(
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
           rawDiffIndex: data.startOptions.rawDiffIndex,
+          ctRRWorkerExe: data.config.rrBackend.path,
         })
       dapReplayHandlerRegistered = true
 
@@ -963,6 +965,7 @@ proc onTraceLoaded(
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
           rawDiffIndex: data.startOptions.rawDiffIndex,
+          ctRRWorkerExe: data.config.rrBackend.path,
         })
       dapReplayHandlerRegistered = true
 
