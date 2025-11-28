@@ -19,6 +19,8 @@ use crate::{
 };
 
 const STEP_COUNT_LIMIT: usize = 10000;
+const RETURN_VALUE_RR_DEPTH_LIMIT: usize = 7;
+const LOAD_FLOW_VALUE_RR_DEPTH_LIMIT: usize = 2;
 
 #[derive(Debug)]
 pub struct FlowPreloader {
@@ -219,8 +221,9 @@ impl<'a> CallFlowPreloader<'a> {
         // The if condition ensures, that the Options on which .unwrap() is called
         // are never None, so it is safe to unwrap them.
         if !flow_view_update.steps.is_empty() {
+            info!("  try to load return value");
             let return_value_record = replay
-                .load_return_value(self.lang)
+                .load_return_value(Some(RETURN_VALUE_RR_DEPTH_LIMIT), self.lang)
                 .unwrap_or(ValueRecordWithType::Error {
                     msg: "<return value error>".to_string(),
                     typ: TypeRecord {
@@ -230,6 +233,7 @@ impl<'a> CallFlowPreloader<'a> {
                     },
                 });
             let return_value = to_ct_value(&return_value_record);
+            info!("  return value: {:?}", return_value);
 
             #[allow(clippy::unwrap_used)]
             flow_view_update
@@ -653,7 +657,7 @@ impl<'a> CallFlowPreloader<'a> {
         if let Some(var_list) = self.flow_preloader.get_var_list(line, location) {
             info!("  log expressions: {:?}", var_list.clone());
             for value_name in &var_list {
-                if let Ok(value) = replay.load_value(value_name, self.lang) {
+                if let Ok(value) = replay.load_value(value_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang) {
                     // if variable_map.contains_key(value_name) {
                     let ct_value = to_ct_value(&value);
                     flow_view_update

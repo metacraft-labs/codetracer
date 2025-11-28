@@ -216,19 +216,32 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
-    fn load_value(&mut self, expression: &str, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
+    fn load_value(
+        &mut self,
+        expression: &str,
+        depth_limit: Option<usize>,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
         let res = serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadValue {
             expression: expression.to_string(),
+            depth_limit,
             lang,
         })?)?;
         Ok(res)
     }
 
-    fn load_return_value(&mut self, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>> {
+    fn load_return_value(
+        &mut self,
+        depth_limit: Option<usize>,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res =
-            serde_json::from_str::<ValueRecordWithType>(&self.stable.run_query(CtRRQuery::LoadReturnValue { lang })?)?;
+        let res = serde_json::from_str::<ValueRecordWithType>(
+            &self
+                .stable
+                .run_query(CtRRQuery::LoadReturnValue { depth_limit, lang })?,
+        )?;
         Ok(res)
     }
 

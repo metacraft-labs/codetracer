@@ -8,19 +8,44 @@ use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Location, ProgramEv
 pub enum CtRRQuery {
     RunToEntry,
     LoadLocation,
-    Step { action: Action, forward: bool },
-    LoadLocals { arg: CtLoadLocalsArguments },
-    LoadReturnValue { lang: Lang },
-    LoadValue { expression: String, lang: Lang },
-    AddBreakpoint { path: String, line: i64 },
-    DeleteBreakpoint { breakpoint: Breakpoint },
+    Step {
+        action: Action,
+        forward: bool,
+    },
+    LoadLocals {
+        arg: CtLoadLocalsArguments,
+    },
+    LoadReturnValue {
+        lang: Lang,
+        depth_limit: Option<usize>,
+    },
+    LoadValue {
+        expression: String,
+        lang: Lang,
+        depth_limit: Option<usize>,
+    },
+    AddBreakpoint {
+        path: String,
+        line: i64,
+    },
+    DeleteBreakpoint {
+        breakpoint: Breakpoint,
+    },
     DeleteBreakpoints,
-    ToggleBreakpoint { breakpoint: Breakpoint },
+    ToggleBreakpoint {
+        breakpoint: Breakpoint,
+    },
     EnableBreakpoints,
     DisableBreakpoints,
-    JumpToCall { location: Location },
+    JumpToCall {
+        location: Location,
+    },
     LoadAllEvents,
     LoadCallstack,
-    EventJump { program_event: ProgramEvent },
-    CallstackJump { depth: usize },
+    EventJump {
+        program_event: ProgramEvent,
+    },
+    CallstackJump {
+        depth: usize,
+    },
 }
