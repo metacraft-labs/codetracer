@@ -54,6 +54,9 @@ proc createInstallSubwindow*(): js =
 proc onInstallCt*(sender: js, response: js) {.async.} =
   installDialogWindow = createInstallSubwindow()
 
+proc onAcpResponse*(sender: js, response: js) {.async.} =
+  let resp = cast[cstring](response)
+
 proc onDismissCtFrontend*(sender: js, dontAskAgain: bool) {.async.} =
   # very important, otherwise we might try to send a message to it
   # and we get a object is destroyed error or something similar

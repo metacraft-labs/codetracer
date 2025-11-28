@@ -1,7 +1,7 @@
 import
   std / [ async, jsffi, strutils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
-  ipc_subsystems/[ dap, socket ],
+  ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib ],
   ../[ types, config, trace_metadata ],
@@ -41,7 +41,11 @@ proc configureIpcMain* =
     "tab-load"
     "load-low-level-tab"
 
+    # Dap
     "dap-raw-message"
+
+    # Acp
+    "acp-prompt"
 
     "save-config"
     "exit-error"
@@ -84,6 +88,7 @@ proc ready*(): Future[void] {.async.} =
   let backendManagerSocketPath = codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".sock"
 
   await asyncSleep(100)
+
   while true:
     backendManagerSocket = await startSocket(backendManagerSocketPath)
     if not backendManagerSocket.isNil:
@@ -100,9 +105,6 @@ proc ready*(): Future[void] {.async.} =
       except CatchableError:
         warnPrint fmt"index:lsp unable to start {kind} bridge: {getCurrentExceptionMsg()}"
 
-  # console.log("Started lspManager")
-
-  # we configure the listeners
   configureIpcMain()
 
   # we load the config file
@@ -142,6 +144,7 @@ proc ready*(): Future[void] {.async.} =
   when not defined(server):
     # we hook output code in send for debug
     var internalSend = mainWindow.webContents.send
+
     mainWindow.webContents.send = proc(id: cstring, data: js) =
       # debug "send", _ = $id
       # too much content sometimes here, just log we did it
@@ -151,6 +154,7 @@ proc ready*(): Future[void] {.async.} =
         debugPrint cstring"frontend ... <=== index: ", id
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {Json.stringify(data, nil, 2.toJs)}"
       debugSend(mainWindow.webContents, internalSend, id, data)
+
   else:
     proc replacer(key: cstring, value: js): js =
       if key == cstring"m_type":

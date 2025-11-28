@@ -74,6 +74,21 @@ proc ensureShellContainer(self: ShellComponent): Node =
 
   return container
 
+proc shellReady(self: ShellComponent): bool =
+  ## Defensive helper so callers can check if the xterm instance exists before writing.
+  not self.shell.isNil
+
+proc writeShellRaw*(self: ShellComponent, chunk: cstring) =
+  ## Write raw data into the shell; drops writes if the terminal is not initialized yet.
+  if not self.shellReady():
+    cwarn "shell: writeShellRaw dropped because terminal is not initialized"
+    return
+  self.shell.write(chunk)
+
+proc writeShellLine*(self: ShellComponent, line: cstring) =
+  ## Convenience for writing a single line with the proper newline sequence.
+  self.writeShellRaw(line & "\r\n")
+
 proc openTrace*(self: ShellComponent, event: SessionEvent) {.exportc.} =
   if event.kind == RecordingCommand:
     self.data.ipc.send "CODETRACER::show-in-debug-instance", js{traceId: event.trace.id, outputLine: -1}
