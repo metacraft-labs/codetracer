@@ -72,6 +72,9 @@ type
     rrTicks*: int
     countBudget*: int
     minCountLimit*: int
+    # for easier compat between nim and rust code: 
+    # NO_DEPTH_LIMIT = -1 for None for now
+    depthLimit*: int 
     lang*: Lang
     
   CtLoadLocalsResponseBody* = ref object

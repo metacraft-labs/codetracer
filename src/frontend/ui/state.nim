@@ -62,6 +62,8 @@ method redrawForSinglePage*(self: StateComponent) =
   # if not self.kxi.isNil:
   #   self.kxi.redraw()
 
+const LOCALS_RR_DEPTH_LIMIT: int = 7
+
 method onMove(self: StateComponent) {.async.} =
   # TODO: fixing rr ticks
   # self.rrTicks = response.location.rrTicks
@@ -71,6 +73,7 @@ method onMove(self: StateComponent) {.async.} =
     rrTicks: self.rrTicks,
     countBudget: countBudget,
     minCountLimit: minCountLimit,
+    depthLimit: LOCALS_RR_DEPTH_LIMIT,
     lang: toLangFromFilename(self.location.path),
   )
   self.api.emit(CtLoadLocals, arguments)
