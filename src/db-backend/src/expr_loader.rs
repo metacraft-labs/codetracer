@@ -216,6 +216,12 @@ impl ExprLoader {
     pub fn parse_file(&self, path: &PathBuf) -> Result<Tree, Box<dyn Error>> {
         let raw = &self.processed_files[path].source_code;
         let lang = self.get_current_language(path);
+        info!(
+            "parse_file: path={} lang={:?} bytes={}",
+            path.display(),
+            lang,
+            raw.len()
+        );
 
         let mut parser = Parser::new();
         if lang == Lang::Noir || lang == Lang::RustWasm {

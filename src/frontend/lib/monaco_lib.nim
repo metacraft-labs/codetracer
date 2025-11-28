@@ -7,6 +7,7 @@ type
 
   MonacoEditorLib* = ref object
     create*: proc(element: dom.Element, options: MonacoEditorOptions): MonacoEditor
+    createDiffEditor*: proc(element: dom.Element, options: MonacoEditorOptions): DiffEditor
     # based on monaco signature
     defineTheme*: proc(themeName: cstring, themeData: js)
 
@@ -34,6 +35,9 @@ type
     scrollBeyondLastLine*:   bool
     smoothScrolling*:        bool
     mouseWheelScrollSensitivity*: int
+
+    # Diff editor options:
+    renderSideBySide*:       bool
 
   MonacoScrollType* = enum Smooth, Immediate
 
@@ -104,6 +108,14 @@ type
     forceMoveMarkers*: bool
     `range`*:          MonacoRange
     text*:             cstring
+
+  DiffEditor* = ref object
+    config*: MonacoEditorConfig
+    layout*: proc(layout: js)
+    hasTextFocus*: proc: bool
+    domElement*: kdom.Node
+    updateOptions*: proc(options: MonacoEditorOptions)
+    viewModel*: MonacoViewModel
 
   MonacoEditor* = ref object
     config*:               MonacoEditorConfig

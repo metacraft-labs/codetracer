@@ -758,7 +758,7 @@ type
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
     expandControl*: seq[bool]
-    monacoEditor*: MonacoEditor
+    diffEditor*: DiffEditor
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
