@@ -15,11 +15,25 @@ pub trait Replay: std::fmt::Debug {
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>>;
-    fn load_value(&mut self, expression: &str, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>>;
+
+    // currently depth_limit, lang only used for rr!
+    // for db returning full values in their existing form
+    fn load_value(
+        &mut self,
+        expression: &str,
+        depth_limit: Option<usize>,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
     // assuming currently the replay is stopped in the right `call`(frame) for both trace kinds;
     //   and if rr: possibly near the return value
-    fn load_return_value(&mut self, lang: Lang) -> Result<ValueRecordWithType, Box<dyn Error>>;
+    // currently depth_limit, lang only used for rr!
+    // for db returning full values in their existing form
+    fn load_return_value(
+        &mut self,
+        depth_limit: Option<usize>,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;

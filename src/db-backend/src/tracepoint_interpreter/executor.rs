@@ -244,7 +244,9 @@ pub fn execute_bytecode(
                 }
             }
 
-            Instruction::PushVariable(var_name) => match replay.load_value(var_name, lang) {
+            // TODO: what kind of depth limit to put here for RR:
+            //   for now we pass `None`
+            Instruction::PushVariable(var_name) => match replay.load_value(var_name, None, lang) {
                 Ok(x) => stack.push(
                     DbReplay::new(Box::new(Db::new(&PathBuf::from(""))))
                         .to_value_record(x)
