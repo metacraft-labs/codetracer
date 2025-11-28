@@ -58,6 +58,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
         stringify(rawText)
 
   echo fmt"[acp_ipc] got text: {text}"
+  let messageId = cstring($msgId)
 
   let procHandle = spawnProcess(defaultCmd, defaultArgs)
 
@@ -83,7 +84,12 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
           if updateKind == cstring"agent_message_chunk" and
              jsHasKey(updateObj, cstring"content") and
              jsHasKey(updateObj[cstring"content"], cstring"text"):
-            aggregatedContent &= updateObj[cstring"content"][cstring"text"].to(cstring)
+            let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
+            aggregatedContent &= chunk
+            mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+              "id": messageId,
+              "content": chunk
+            })
     except:
       errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
 
@@ -104,12 +110,9 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   let promptResp = await clientConn.prompt(promptRequest(sessionId, text))
   let stopReason = stopReasonFrom(promptResp)
 
-  echo "[acp_ipc] aggregated content"
-  echo aggregatedContent
-
+  # Final notification with stop reason only (no aggregated content to avoid duplication)
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-    "id": cstring($msgId),
-    "content": aggregatedContent,
+    "id": messageId,
     "stopReason": stopReason,
     "updates": collectedUpdates
   })
