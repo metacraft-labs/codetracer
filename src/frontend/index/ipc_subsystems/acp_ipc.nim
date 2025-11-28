@@ -179,6 +179,51 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
 
   await ensureAcpConnection()
 
+  let procHandle = spawnProcess(defaultCmd, defaultArgs)
+
+  echo "[acp_ipc] started the acp server"
+
+  let stream = ndJsonStream(
+    toWebWritable(stdinOf(procHandle)),
+    toWebReadable(stdoutOf(procHandle)))
+
+  echo "[acp_ipc] set up the pipes"
+
+  var aggregatedContent = cstring""
+  var collectedUpdates: seq[JsObject] = @[]
+
+  let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
+    collectedUpdates.add(params)
+
+    try:
+      if jsHasKey(params, cstring"update"):
+        let updateObj = params[cstring"update"]
+        if jsHasKey(updateObj, cstring"sessionUpdate"):
+          let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
+          if updateKind == cstring"agent_message_chunk" and
+             jsHasKey(updateObj, cstring"content") and
+             jsHasKey(updateObj[cstring"content"], cstring"text"):
+            let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
+            aggregatedContent &= chunk
+            mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+              "id": messageId,
+              "content": chunk
+            })
+    except:
+      errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
+
+  # ClientSideConnection expects a factory function, not a plain object
+  let clientConn = newClientSideConnection(asFactory(makeClient(handleSessionUpdate)), stream)
+
+  echo "[acp_ipc] established a client-side connection"
+
+  let initResp = await clientConn.initialize(initRequest())
+  echo "[acp_ipc] initialized response raw=", stringify(initResp)
+
+  let sessionResp = await clientConn.newSession(newSessionRequest())
+
+  let sessionId = sessionIdFrom(sessionResp)
+
   echo "[acp_ipc] sending prompt: ", text
   activeAggregatedContent = cstring""
   activeCollectedUpdates = @[]

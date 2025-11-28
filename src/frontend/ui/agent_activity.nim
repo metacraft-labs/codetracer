@@ -139,7 +139,6 @@ proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialCo
 proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent) =
   console.log cstring("[agent-activity] update: begin")
   var message = self.addAgentMessage(messageId, content, role)
-
   if append and message.content.len > 0:
     message.content = message.content & content
   else:
