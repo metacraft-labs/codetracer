@@ -58,6 +58,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
         stringify(rawText)
 
   echo fmt"[acp_ipc] got text: {text}"
+  let messageId = cstring($msgId)
 
   let procHandle = spawnProcess(defaultCmd, defaultArgs)
 
@@ -83,7 +84,13 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
           if updateKind == cstring"agent_message_chunk" and
              jsHasKey(updateObj, cstring"content") and
              jsHasKey(updateObj[cstring"content"], cstring"text"):
-            aggregatedContent &= updateObj[cstring"content"][cstring"text"].to(cstring)
+            let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
+            aggregatedContent &= chunk
+            mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+              "id": messageId,
+              "content": chunk,
+              "append": true
+            })
     except:
       errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
 
@@ -107,11 +114,15 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   echo "[acp_ipc] aggregated content"
   echo aggregatedContent
 
+  if aggregatedContent.len == 0:
+    aggregatedContent = text
+
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-    "id": cstring($msgId),
+    "id": messageId,
     "content": aggregatedContent,
     "stopReason": stopReason,
-    "updates": collectedUpdates
+    "updates": collectedUpdates,
+    "append": false
   })
 
   msgId += 1

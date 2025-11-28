@@ -55,10 +55,13 @@ proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialCo
       console.log cstring(fmt"[agent-activity] addAgentMessage failed: {getCurrentExceptionMsg()}")
   result = self.messages[messageId]
 
-proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring) =
+proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool) =
   console.log cstring("[agent-activity] update: begin")
   var message = self.addAgentMessage(messageId, content)
-  message.content = content
+  if append and message.content.len > 0:
+    message.content = message.content & content
+  else:
+    message.content = content
   self.messages[messageId] = message
   self.redraw()
 
@@ -67,6 +70,7 @@ proc sendAcpPrompt(prompt: cstring) =
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "text": prompt
   }
+
 proc clear(self: AgentActivityComponent) =
   self.inputValue = cstring""
   self.inputField.toJs.value = cstring""
@@ -264,12 +268,20 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     else:
       cstring($response)
 
+  let appendFlag =
+    if jsHasKey(response, cstring"append"):
+      try:
+        response[cstring"append"].to(bool)
+      except:
+        false
+    else:
+      false
+
   console.log cstring"[agent-activity] got content"
   console.log content
 
   try:
-    self.updateAgentMessageContent(messageId, content)
-    # self.redraw()
+    self.updateAgentMessageContent(messageId, content, appendFlag)
     console.log cstring"[agent-activity] update + redraw complete"
     console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
   except:
