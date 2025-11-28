@@ -18,7 +18,7 @@ proc editorLineNumber(self: AgentActivityComponent, line: int, lineNumber: int):
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
   result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
 
-proc createUserMessageContent(): VNode =
+proc createUserMessageContent(msg: AgentMessage): VNode =
   buildHtml(tdiv(class="user-msg")):
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
@@ -28,7 +28,7 @@ proc createUserMessageContent(): VNode =
         tdiv(class="command-palette-copy-button")
         tdiv(class="command-palette-edit-button")
     tdiv(class="msg-content"):
-      text "test"
+      text msg.content
 
 proc createMessageContent(msg: AgentMessage): VNode =
   result = buildHtml(tdiv(class="ai-msg")):
@@ -44,35 +44,61 @@ proc createMessageContent(msg: AgentMessage): VNode =
     tdiv(class="msg-content", id = fmt"{AGENT_MSG_DIV}-{msg.id}"):
       text msg.content
 
-proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring""): AgentMessage =
+proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent): AgentMessage =
   console.log cstring"Adding agent message"
   if not self.messages.hasKey(messageId):
     try:
-      let message = AgentMessage(id: messageId, content: initialContent)
+      let message = AgentMessage(id: messageId, content: initialContent, role: role)
       self.messages[messageId] = message
       self.messageOrder.add(messageId)
     except:
       console.log cstring(fmt"[agent-activity] addAgentMessage failed: {getCurrentExceptionMsg()}")
   result = self.messages[messageId]
 
-proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring) =
+proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent) =
   console.log cstring("[agent-activity] update: begin")
-  var message = self.addAgentMessage(messageId, content)
-  message.content = content
+  var message = self.addAgentMessage(messageId, content, role)
+  if append and message.content.len > 0:
+    message.content = message.content & content
+  else:
+    message.content = content
   self.messages[messageId] = message
   self.redraw()
 
-proc sendAcpPrompt(prompt: cstring) =
+const INPUT_ID = cstring"agent-query-text"
 
+proc sendAcpPrompt(prompt: cstring) =
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "text": prompt
   }
+
+proc submitPrompt(self: AgentActivityComponent) =
+  # Use the latest input value to avoid stale data.
+  let inputEl = document.getElementById(INPUT_ID)
+  let promptText =
+    if not inputEl.isNil:
+      inputEl.toJs.value.to(cstring)
+    else:
+      self.inputValue
+
+  if promptText.len == 0:
+    return
+
+  self.inputValue = promptText
+  let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
+  self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
+  sendAcpPrompt(promptText)
+  self.clear()
+
 proc clear(self: AgentActivityComponent) =
   self.inputValue = cstring""
-  self.inputField.toJs.value = cstring""
+  let inputEl = document.getElementById(INPUT_ID)
+  if not inputEl.isNil:
+    inputEl.toJs.value = cstring""
+    autoResizeTextarea(INPUT_ID)
 
 method render*(self: AgentActivityComponent): VNode =
-  let inputId = "agent-query-text"
+  let inputId = INPUT_ID
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
   # let source =
@@ -145,11 +171,12 @@ method render*(self: AgentActivityComponent): VNode =
     tdiv(class="agent-ha-container")
   ):
     tdiv(class="agent-com"):
-      # TODO: loop
-      createUserMessageContent()
       for msgId in self.messageOrder:
         let message = self.messages[msgId]
-        createMessageContent(message)
+        if message.role == AgentMessageUser:
+          createUserMessageContent(message)
+        else:
+          createMessageContent(message)
           # TODO: For now hardcoded id - should be shellComponent-{custom-id}
           # tdiv(class="terminal-wrapper"):
           #   tdiv(class="header-wrapper"):
@@ -187,11 +214,8 @@ method render*(self: AgentActivityComponent): VNode =
               return
             else:
               e.preventDefault()
-              echo "sending: "
-              echo self.inputValue
-              sendAcpPrompt(self.inputValue)
+              self.submitPrompt()
 
-              self.clear()
         ,
         oninput = proc (e: Event; n: VNode) =
           self.inputValue = self.inputField.toJs.value.to(cstring)
@@ -217,11 +241,7 @@ method render*(self: AgentActivityComponent): VNode =
           onclick = proc =
             echo "#TODO: Upload me master!"
 
-            echo "You just clickitty clicked the button"
-
-            echo self.inputValue
-            sendAcpPrompt(self.inputValue)
-            self.clear()
+            self.submitPrompt()
         )
 
 proc asyncSleep(ms: int): Future[void] =
@@ -258,19 +278,25 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
 
   console.log cstring"[agent-activity] got messageId"
 
+  let hasContent = jsHasKey(response, cstring"content")
   let content =
-    if jsHasKey(response, cstring"content"):
+    if hasContent:
       cast[cstring](response[cstring"content"])
     else:
-      cstring($response)
+      cstring""
+
+  let isFinal = jsHasKey(response, cstring"stopReason")
+  let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
 
   console.log cstring"[agent-activity] got content"
   console.log content
 
-  try:
-    self.updateAgentMessageContent(messageId, content)
-    # self.redraw()
-    console.log cstring"[agent-activity] update + redraw complete"
-    console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
-  except:
-    console.log cstring(fmt"[agent-activity] update failed: {getCurrentExceptionMsg()}")
+  if hasContent or not self.messages.hasKey(messageId):
+    try:
+      self.updateAgentMessageContent(messageId, content, appendFlag)
+      console.log cstring"[agent-activity] update + redraw complete"
+      console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
+    except:
+      console.log cstring(fmt"[agent-activity] update failed: {getCurrentExceptionMsg()}")
+  else:
+    console.log cstring"[agent-activity] no content; skipping update"
