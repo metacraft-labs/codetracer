@@ -200,10 +200,6 @@ when not defined(ctInExtension):
 
   proc stringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
-  # TODO: Construct DAP message (re-use types from initial DAP client)
-  # proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
-  #   dap.ipc.send "CODETRACER::dap-raw-message",
-
   proc asyncSendCtRequest(dap: DapApi,
                         kind: CtEventKind,
                         rawValue: JsObject) {.async.} =
@@ -218,6 +214,7 @@ when not defined(ctInExtension):
     dap.seq += 1
 
     dap.ipc.send("CODETRACER::dap-raw-message", packet)
+
 
 else:
   import .. / .. / libs / karax / karax / kdom

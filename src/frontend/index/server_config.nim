@@ -51,6 +51,7 @@ when defined(server):
   proc newSocketIoServer*(serverClass: JsObject, httpServer: JsObject, options: JsObject): JsObject {.importcpp: "new #(#, #)" .}
 
   let express* = cast[ExpressLib](require("express"))
+
   var readyVar*: js
   proc nowMs(): int {.importjs: "Date.now()".}
   proc setInterval*(cb: proc(): void, delay: int): JsObject {.importjs: "setInterval(#, #)".}

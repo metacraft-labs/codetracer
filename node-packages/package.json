@@ -8,6 +8,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@agentclientprotocol/sdk": "0.5.1",
     "@exuanbo/file-icons-js": "^3.3.0",
     "@playwright/test": "1.56.1",
     "@types/node": "^24.10.1",

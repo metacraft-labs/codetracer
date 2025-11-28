@@ -758,10 +758,6 @@ proc tryInitLayout*(data: Data) =
     initLayout(data.ui.resolvedConfig)
     redrawAll()
 
-
-# "dap-receive-response"
-# "dap-receive-event"
-
 # In both these `on` functions, we must communicate them to the ui
 
 # We receive a DAP "Response" from the index process
@@ -1549,9 +1545,12 @@ proc configureIPC(data: Data) =
     "delete-online-trace-file-received"
     "menu-action"
 
-    # "dap-raw-response-or-event"
+    # Dap communication
     "dap-receive-response"
     "dap-receive-event"
+
+    # Acp communication
+    "acp-receive-response"
 
   duration("configureIPCRun")
 
