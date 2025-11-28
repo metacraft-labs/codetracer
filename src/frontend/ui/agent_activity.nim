@@ -120,6 +120,9 @@ proc sendAcpPrompt(prompt: cstring) =
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "text": prompt
   }
+proc clear(self: AgentActivityComponent) =
+  self.inputValue = cstring""
+  self.inputField.toJs.value = cstring""
 
 method render*(self: AgentActivityComponent): VNode =
   let inputId = "agent-query-text"
@@ -237,7 +240,11 @@ index 71d1dec8..f8499310 100644
               return
             else:
               e.preventDefault()
+              echo "sending: "
+              echo self.inputValue
               sendAcpPrompt(self.inputValue)
+
+              self.clear()
         ,
         oninput = proc (e: Event; n: VNode) =
           self.inputValue = self.inputField.toJs.value.to(cstring)
@@ -267,6 +274,7 @@ index 71d1dec8..f8499310 100644
 
             echo self.inputValue
             sendAcpPrompt(self.inputValue)
+            self.clear()
         )
 
 proc asyncSleep(ms: int): Future[void] =
