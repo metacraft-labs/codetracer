@@ -16,6 +16,7 @@ use schemars::JsonSchema;
 
 // IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
 pub const EVENT_KINDS_COUNT: usize = 14;
+const NO_DEPTH_LIMIT: i64 = -1;
 
 /// args for `ct/load-locals`
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
@@ -25,6 +26,7 @@ pub struct CtLoadLocalsArguments {
     pub count_budget: i64,
     pub min_count_limit: i64,
     pub lang: Lang,
+    pub depth_limit: i64, // for easier compat with our nim code: NO_DEPTH_LIMIT = -1 for None for now
 }
 
 /// response for `ct/load-locals`
