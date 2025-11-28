@@ -88,8 +88,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
             aggregatedContent &= chunk
             mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
               "id": messageId,
-              "content": chunk,
-              "append": true
+              "content": chunk
             })
     except:
       errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
@@ -111,18 +110,11 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   let promptResp = await clientConn.prompt(promptRequest(sessionId, text))
   let stopReason = stopReasonFrom(promptResp)
 
-  echo "[acp_ipc] aggregated content"
-  echo aggregatedContent
-
-  if aggregatedContent.len == 0:
-    aggregatedContent = text
-
+  # Final notification with stop reason only (no aggregated content to avoid duplication)
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
     "id": messageId,
-    "content": aggregatedContent,
     "stopReason": stopReason,
-    "updates": collectedUpdates,
-    "append": false
+    "updates": collectedUpdates
   })
 
   msgId += 1

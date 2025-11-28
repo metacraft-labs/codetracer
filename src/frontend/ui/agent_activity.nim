@@ -18,7 +18,7 @@ proc editorLineNumber(self: AgentActivityComponent, line: int, lineNumber: int):
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
   result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
 
-proc createUserMessageContent(): VNode =
+proc createUserMessageContent(prompt: cstring): VNode =
   buildHtml(tdiv(class="user-msg")):
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
@@ -28,7 +28,7 @@ proc createUserMessageContent(): VNode =
         tdiv(class="command-palette-copy-button")
         tdiv(class="command-palette-edit-button")
     tdiv(class="msg-content"):
-      text "test"
+      text prompt
 
 proc createMessageContent(msg: AgentMessage): VNode =
   result = buildHtml(tdiv(class="ai-msg")):
@@ -150,7 +150,6 @@ method render*(self: AgentActivityComponent): VNode =
   ):
     tdiv(class="agent-com"):
       # TODO: loop
-      createUserMessageContent()
       for msgId in self.messageOrder:
         let message = self.messages[msgId]
         createMessageContent(message)
@@ -191,11 +190,15 @@ method render*(self: AgentActivityComponent): VNode =
               return
             else:
               e.preventDefault()
+
+              createUserMessageContent(self.inputValue)
+
               echo "sending: "
               echo self.inputValue
               sendAcpPrompt(self.inputValue)
 
               self.clear()
+
         ,
         oninput = proc (e: Event; n: VNode) =
           self.inputValue = self.inputField.toJs.value.to(cstring)
@@ -221,7 +224,7 @@ method render*(self: AgentActivityComponent): VNode =
           onclick = proc =
             echo "#TODO: Upload me master!"
 
-            echo "You just clickitty clicked the button"
+            createUserMessageContent(self.inputValue)
 
             echo self.inputValue
             sendAcpPrompt(self.inputValue)
@@ -262,27 +265,25 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
 
   console.log cstring"[agent-activity] got messageId"
 
+  let hasContent = jsHasKey(response, cstring"content")
   let content =
-    if jsHasKey(response, cstring"content"):
+    if hasContent:
       cast[cstring](response[cstring"content"])
     else:
-      cstring($response)
+      cstring""
 
-  let appendFlag =
-    if jsHasKey(response, cstring"append"):
-      try:
-        response[cstring"append"].to(bool)
-      except:
-        false
-    else:
-      false
+  let isFinal = jsHasKey(response, cstring"stopReason")
+  let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
 
   console.log cstring"[agent-activity] got content"
   console.log content
 
-  try:
-    self.updateAgentMessageContent(messageId, content, appendFlag)
-    console.log cstring"[agent-activity] update + redraw complete"
-    console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
-  except:
-    console.log cstring(fmt"[agent-activity] update failed: {getCurrentExceptionMsg()}")
+  if hasContent or not self.messages.hasKey(messageId):
+    try:
+      self.updateAgentMessageContent(messageId, content, appendFlag)
+      console.log cstring"[agent-activity] update + redraw complete"
+      console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
+    except:
+      console.log cstring(fmt"[agent-activity] update failed: {getCurrentExceptionMsg()}")
+  else:
+    console.log cstring"[agent-activity] no content; skipping update"
