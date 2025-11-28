@@ -172,7 +172,9 @@ type
     setFlowTypeToParallel,
     setFlowTypeToInline,
     aRestart,
-    findSymbol
+    findSymbol,
+    aReRecord,
+    aReRecordProject
 
   InputShortcutMap* = TableLike[langstring, langstring]
 
