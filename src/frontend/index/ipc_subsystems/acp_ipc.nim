@@ -20,14 +20,17 @@ proc toWebReadable(nodeReadable: JsObject): WebReadableStream {.
 proc toWebWritable(nodeWritable: JsObject): WebWritableStream {.
   importjs: "require('node:stream').Writable.toWeb(#)".}
 
+proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
+proc jsTypeof(obj: JsObject): cstring {.importjs: "typeof #".}
+
 proc initRequest(): JsObject {.importjs: "({ protocolVersion: __acpSdk.PROTOCOL_VERSION, clientCapabilities: {} })".}
 proc newSessionRequest(): JsObject {.importjs: "({ cwd: process.cwd(), mcpServers: [] })".}
 
-proc promptRequest(sessionId: cstring, message: cstring): JsObject {.importjs: "({ sessionId: #, prompt: [{ type: 'text', text: '#' }] })".}
+proc promptRequest(sessionId: cstring, message: cstring): JsObject {.importjs: "({ sessionId: #, prompt: [{ type: 'text', text: # }] })".}
 
 proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
-proc makeClient(): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { console.log('[client] sessionUpdate', params); }, writeTextFile: async () => ({}), readTextFile: async () => ({ content: '' }), createTerminal: async () => ({ id: 'term-1' }), extMethod: async () => ({}), extNotification: async () => {} }))()".}
+proc makeClient(onSessionUpdate: js): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { await #(params); }, writeTextFile: async () => ({}), readTextFile: async () => ({ content: '' }), createTerminal: async () => ({ id: 'term-1' }), extMethod: async () => ({}), extNotification: async () => {} }))()".}
 proc asFactory(obj: JsObject): js {.importjs: "(function(v){ return function(){ return v; }; })(#)".}
 
 proc sessionIdFrom(response: JsObject): cstring {.importjs: "((resp) => (resp && resp.sessionId) || 'session-1')(#)".}
@@ -42,8 +45,17 @@ const
 var msgId = 100
 
 proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
-
-  let text = response["text"]
+  let rawText = response[cstring"text"]
+  let text =
+    block:
+      let tType = jsTypeof(rawText)
+      if tType == cstring"string":
+        rawText.to(cstring)
+      elif tType == cstring"object" and jsHasKey(rawText, cstring"text"):
+        rawText[cstring"text"].to(cstring)
+      else:
+        # Last resort: stringify the payload so the agent sees the data, not an internal symbol.
+        stringify(rawText)
 
   echo fmt"[acp_ipc] got text: {text}"
 
@@ -57,8 +69,26 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
 
   echo "[acp_ipc] set up the pipes"
 
+  var aggregatedContent = cstring""
+  var collectedUpdates: seq[JsObject] = @[]
+
+  let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
+    collectedUpdates.add(params)
+
+    try:
+      if jsHasKey(params, cstring"update"):
+        let updateObj = params[cstring"update"]
+        if jsHasKey(updateObj, cstring"sessionUpdate"):
+          let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
+          if updateKind == cstring"agent_message_chunk" and
+             jsHasKey(updateObj, cstring"content") and
+             jsHasKey(updateObj[cstring"content"], cstring"text"):
+            aggregatedContent &= updateObj[cstring"content"][cstring"text"].to(cstring)
+    except:
+      errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
+
   # ClientSideConnection expects a factory function, not a plain object
-  let clientConn = newClientSideConnection(asFactory(makeClient()), stream)
+  let clientConn = newClientSideConnection(asFactory(makeClient(handleSessionUpdate)), stream)
 
   echo "[acp_ipc] established a client-side connection"
 
@@ -69,11 +99,19 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
 
   let sessionId = sessionIdFrom(sessionResp)
 
-  var promptResp = await clientConn.prompt(promptRequest(sessionId, cstring"Hello, how are you"));
+  echo "[acp_ipc] sending prompt: ", text
+
+  let promptResp = await clientConn.prompt(promptRequest(sessionId, text))
+  let stopReason = stopReasonFrom(promptResp)
+
+  echo "[acp_ipc] aggregated content"
+  echo aggregatedContent
 
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
     "id": cstring($msgId),
-    "content": "wassup"
+    "content": aggregatedContent,
+    "stopReason": stopReason,
+    "updates": collectedUpdates
   })
 
   msgId += 1
