@@ -1327,6 +1327,12 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
     }
   )
 
+proc restartSubsystem*(data: Data, name: cstring) =
+  data.ipc.send(
+    "CODETRACER::restart-subsystem",
+    name
+  )
+
 proc commandSelectPrevious* =
   if data.ui.commandPalette.selected > 0:
     data.ui.commandPalette.selected -= 1

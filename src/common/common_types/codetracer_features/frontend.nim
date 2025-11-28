@@ -174,7 +174,9 @@ type
     aRestart,
     findSymbol,
     aReRecord,
-    aReRecordProject
+    aReRecordProject,
+    aRestartDbBackend,
+    aRestartBackendManager
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

@@ -364,11 +364,17 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         #   element "Go to Next Search Result", aGotoNextSearchResult, false
         #   element "Go to Previous Search Result", aGotoPreviousSearchResult, false
 
-        # folder "Build":
+        folder "Build":
+          element "Rebuild/Re-record file", aReRecord, true
+          element "Rebuild/Re-record project", aReRecordProject, true
         #   element "Build Project", aBuild, false
         #   element "Compile Current File (Nim Check)", aCompile, false
         #   element "Run Static Analysis (drnim)", aRunStatic, false
         #   # element "Build tasks (nimble)", nil, false
+
+        folder "Reset":
+          element "Restart db-backend", aRestartDbBackend, true
+          element "Restart backend-manager", aRestartBackendManager, true
 
         folder "Debug":
           # element "Trace Existing Program...", aTrace, false
@@ -2029,7 +2035,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc = data.setFlowTypeToParallel(),
   proc = data.setFlowTypeToInline(),
   proc = data.restartCodetracer(),
-  proc = data.findSymbol()
+  proc = data.findSymbol(),
+  proc = data.reRecordCurrent(projectOnly=false),
+  proc = data.reRecordCurrent(projectOnly=true),
+  proc = data.restartSubsystem(name="db-backend"),
+  proc = data.restartSubsystem(name="backend-manager"),
 ]
 
 data.actions = actions
