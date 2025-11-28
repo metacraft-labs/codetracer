@@ -117,6 +117,12 @@ type
     stopSignal*: RRGDBStopSignal
     frameInfo*: FrameInfo
 
+  RunTestOptions* = ref object
+    testName*: cstring
+    path*: cstring
+    line*: int
+    column*: int
+
   ValueWithExpression* = ref object
     expression*: cstring
     value*: Value

@@ -660,6 +660,15 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
     cerror getCurrentExceptionMsg()
     result = ""
 
+
+proc runTest(self: EditorViewComponent, testName: cstring, path: cstring, line: int, column: int) =
+  self.data.ipc.send "CODETRACER::run-test", RunTestOptions(
+    testName: testName,
+    path: path,
+    line: line,
+    column: column,
+  )
+
 # Fill contextMenu with ContextMenuItem variables and return it to be used in the context menu
 proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuItem] =
   # Editor context menu items
@@ -715,6 +724,32 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
     try:
       targetToken = self.getTokenFromPosition(ev.target.position)
+      # copied/adapted from getTokenFromPosition
+      let model = self.monacoEditor.toJs.getModel()
+      let lineContent = $cast[cstring](model.getLineContent(line))
+      if lineContent.strip == "#[test]":
+        # for now trying to guess where the function name for rust is
+        # e.g. 
+        # ```
+        # #[test]
+        # fn test_1() {
+        # ..
+        # }
+        let column = 8 
+        let position = JsObject{
+          lineNumber: line + 1,
+          column: column,
+        }
+        let path = self.name
+        let testName = self.getTokenFromPosition(position)
+        clog cstring"test name: " & testName
+        let runTest = ContextMenuItem(
+          name: "Re-record and replay this test",
+          hint: "try to rebuild/re-record and replay this test",
+          handler: proc(e: Event) =
+            self.runTest(testName, path, line, column)
+        )
+        contextMenu &= runTest
       # Call Line Jump Menu Item
       if targetToken != "":
         callLine = ContextMenuItem(

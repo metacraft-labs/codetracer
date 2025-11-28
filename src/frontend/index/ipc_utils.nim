@@ -30,6 +30,7 @@ proc configureIpcMain* =
     "path-validation"
     "save-file"
     "save-untitled"
+    "run-test"
 
     # welcome screen options
     "load-codetracer-shell"

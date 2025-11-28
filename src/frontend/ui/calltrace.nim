@@ -643,7 +643,8 @@ proc callView*(
         childlessCallView(self, call, active)
       elif not hiddenChildren or call.children.len > 0:
         isExpanded = true
-        collapseCallView(self, call, CalltraceNonExpandedKind.Children, count, active)
+        if self.isDbBasedTrace:
+          collapseCallView(self, call, CalltraceNonExpandedKind.Children, count, active)
       elif not isExpanded:
         expandCallView(self, call, count, active)
 
@@ -743,7 +744,10 @@ proc callLineContentView*(
       content.kind != CallLineContentKind.StartCallstackCount:
     callView(self, content, index, depth)
   else:
-    hiddenCallstackView(self, content, index, depth)
+    if self.isDbBasedTrace:
+      hiddenCallstackView(self, content, index, depth)
+    else:
+      buildHtml(tdiv())
 
 proc callLineView*(self: CalltraceComponent, callLine: CallLine, index: int): VNode =
   let buffer = self.getStartBufferLen()

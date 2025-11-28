@@ -425,3 +425,19 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
     let errorText = cstring"record start process error: " & errorSpecificText
     mainWindow.webContents.send "CODETRACER::failed-record",
       js{errorMessage: errorText}
+
+proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
+  infoPrint "index: run test: ", response[]
+  let processResult = await readProcessOutput(
+    codetracerExe,
+    @[cstring"record-test"].concat(@[response.testName, response.path, cstring($response.line), cstring($response.column)])
+  )
+  if processResult.isOk: # true
+    let output = processResult.value
+    let lines = ($output).splitLines()
+    let traceId = parseInt(lines[^1]) #  1063 
+    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+    await loadExistingRecord(traceId)
+  else:
+    errorPrint "index: ct record-test error: ", JSON.stringify(processResult.error)
+    mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"ct record-test error: " & JSON.stringify(processResult.error)}
