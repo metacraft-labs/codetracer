@@ -45,7 +45,6 @@ const WASM_LANGS = {
 
 proc detectLangFromPath*(path: string, isWasm: bool): Lang =
   let filename = path.extractFilename
-  echo filename
   let tokens = rsplit(filename[1..^1], ".", 1)
   if tokens.len > 1:
     let extension = tokens[1].toLowerAscii()

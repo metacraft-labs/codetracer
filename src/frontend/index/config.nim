@@ -62,7 +62,7 @@ var data* = ServerData(
 
 let helpers* {.exportc: "helpers".} = require("./helpers")
 var
-  fsWriteFileWithErr   {.  importcpp: "helpers.fsWriteFileWithErr(#, #)"                   .}:  proc(f: cstring, s: cstring):                    Future[js]
+  fsWriteFileWithErr*  {.  importcpp: "helpers.fsWriteFileWithErr(#, #)"                   .}:  proc(f: cstring, s: cstring):                    Future[js]
   fsCopyFileWithErr    {.  importcpp: "helpers.fsCopyFileWithErr(#, #)"                    .}:  proc(a: cstring, b: cstring):                    Future[js]
   fsMkdirWithErr       {.  importcpp: "helpers.fsMkdirWithErr(#, #)"                       .}:  proc(a: cstring, options: JsObject):             Future[JsObject]
   fsReadFileWithErr*   {.  importcpp: "helpers.fsReadFileWithErr(#)"                       .}:  proc(f: cstring):                                Future[(cstring, js)]
