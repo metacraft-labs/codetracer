@@ -535,7 +535,6 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
                     to_stable_sender.send(launch_request)?;
                 }
-                error!("reimplement launch after (configurationDone after launch)");
             }
         }
         DapMessage::Request(req) if req.command == "disconnect" => {

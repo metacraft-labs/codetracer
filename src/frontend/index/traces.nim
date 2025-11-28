@@ -193,15 +193,17 @@ proc loadExistingRecord*(traceId: int) {.async.} =
     infoPrint "index: loading trace in mainWindow"
     await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
-  try:
-    let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid))
-    instanceClient.on(cstring"data") do (data: cstring):
-      let outputLine = data.trim.parseJsInt
-      debugPrint "index: ===> output line ", outputLine
-      mainWindow.webContents.send cstring"CODETRACER::output-jump-from-shell-ui", outputLine
-  except:
-    debugPrint "warning: exception when starting instance client:"
-    debugPrint "  that's ok, if this was not started from shell-ui!"
+  # (alexander: i think this is not really used anymore: as it's expected to really work only
+  #    for ct shell, but that's not currently maintained a lot)
+  # try:
+  #   let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid))
+  #   instanceClient.on(cstring"data") do (data: cstring):
+  #     let outputLine = data.trim.parseJsInt
+  #     debugPrint "index: ===> output line ", outputLine
+  #     mainWindow.webContents.send cstring"CODETRACER::output-jump-from-shell-ui", outputLine
+  # except:
+  #   debugPrint "warning: exception when starting instance client:"
+  #   debugPrint "  that's ok, if this was not started from shell-ui!"
 
 proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
   callerProcessPid = pid

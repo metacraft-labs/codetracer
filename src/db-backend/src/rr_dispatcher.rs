@@ -99,6 +99,8 @@ impl CtRRWorker {
 
         let socket_path = ct_rr_worker_socket_path("", &self.name, self.index, run_id)?;
 
+        thread::sleep(Duration::from_millis(800));
+
         info!("try to connect to worker with socket in {}", socket_path.display());
         loop {
             if let Ok(stream) = UnixStream::connect(&socket_path) {
