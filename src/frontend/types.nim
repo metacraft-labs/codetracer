@@ -752,6 +752,10 @@ type
     status*: cstring
     output*: cstring
 
+  AgentMessage* = object
+    id*: cstring
+    content*: cstring
+
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
     inputField*: dom.Node
@@ -759,6 +763,9 @@ type
     commandPalette*: CommandPaletteComponent
     expandControl*: seq[bool]
     diffEditor*: DiffEditor
+    monacoEditor*: MonacoEditor
+    messages*: JsAssoc[cstring, AgentMessage]
+    messageOrder*: seq[cstring]
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]

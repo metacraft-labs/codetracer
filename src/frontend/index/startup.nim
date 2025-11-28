@@ -29,6 +29,12 @@ proc onStarted*(sender: js, response: js) {.async.} =
     startedReceived = true
     startedFuture()
 
+    echo "Trying to send acp msg"
+
+    mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+      "test": cstring("hello from index"),
+    })
+
 proc started*: Future[void] =
   var future = newPromise() do (resolve: (proc: void)):
     if startedFuture.isNil:
@@ -93,6 +99,18 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
         helpers: helpers,
         startOptions: data.startOptions,
         bypass: bypass})
+
+    # echo "Trying to send acp msg"
+    #
+    # mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+    #   "id": cstring("1"),
+    #   "content": cstring("hello from index")
+    # })
+    #
+    # mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+    #   "id": cstring("2"),
+    #   "content": cstring("hello from index again")
+    # })
 
     if bypass:
       if not data.trace.isNil:

@@ -1,13 +1,9 @@
-import std/[asyncjs, jsffi, strformat]
-
-import acp
-
-## Demo: connect as an ACP client to an external agent (e.g., OpenCode) via stdio.
-## Adjust OPENCODE_ACP_CMD / OPENCODE_ACP_ARGS to match your agent binary and flags.
-
-const
-  defaultCmd = cstring"opencode"
-  defaultArgs: seq[cstring] = @[cstring"acp"]
+import
+  std / [ async, jsffi, strutils, asyncjs, strformat],
+  ../../lib/[ jslib ],
+  ../../../common/ct_logging,
+  ../../../ct/acp/acp,
+  ../../../frontend/index/electron_vars
 
 proc getEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.split(' ').filter(Boolean) : [])(#)".}
@@ -39,49 +35,45 @@ proc stopReasonFrom(response: JsObject): cstring {.importjs: "((resp) => (resp &
 
 proc log(obj: JsObject) {.importjs: "console.log(#)"}
 
-proc main() {.async.} =
-  let cmd = block:
-    let envCmd = getEnv(cstring"OPENCODE_ACP_CMD")
-    if envCmd.len > 0: envCmd else: defaultCmd
+const
+  defaultCmd = cstring"opencode"
+  defaultArgs: seq[cstring] = @[cstring"acp"]
 
-  let args = block:
-    let envArgs = getEnv(cstring"OPENCODE_ACP_ARGS")
-    if envArgs.len > 0: parseArgs(envArgs) else: defaultArgs
+var msgId = 100
 
-  echo fmt"[demo] launching {cmd} {args}"
-  let procHandle = spawnProcess(cmd, args)
+proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
+
+  let text = response["text"]
+
+  echo fmt"[acp_ipc] got text: {text}"
+
+  let procHandle = spawnProcess(defaultCmd, defaultArgs)
+
+  echo "[acp_ipc] started the acp server"
 
   let stream = ndJsonStream(
     toWebWritable(stdinOf(procHandle)),
     toWebReadable(stdoutOf(procHandle)))
 
+  echo "[acp_ipc] set up the pipes"
+
   # ClientSideConnection expects a factory function, not a plain object
   let clientConn = newClientSideConnection(asFactory(makeClient()), stream)
 
+  echo "[acp_ipc] established a client-side connection"
+
   let initResp = await clientConn.initialize(initRequest())
-  echo "[demo] initialized response raw=", stringify(initResp)
+  echo "[acp_ipc] initialized response raw=", stringify(initResp)
 
-  let session1Resp = await clientConn.newSession(newSessionRequest())
+  let sessionResp = await clientConn.newSession(newSessionRequest())
 
-  let session2Resp = await clientConn.newSession(newSessionRequest())
+  let sessionId = sessionIdFrom(sessionResp)
 
-  let session1Id = sessionIdFrom(session1Resp)
-  let session2Id = sessionIdFrom(session2Resp)
+  var promptResp = await clientConn.prompt(promptRequest(sessionId, cstring"Hello, how are you"));
 
-  echo fmt"[demo] sessionId={session1Id}"
-  echo fmt"[demo] sessionId={session2Id}"
+  mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+    "id": cstring($msgId),
+    "content": "wassup"
+  })
 
-  var promptResp = await clientConn.prompt(promptRequest(session1Id, cstring"Hello, how are you"));
-  echo fmt"[demo] stopReason={stopReasonFrom(promptResp)}"
-
-  promptResp = await clientConn.prompt(promptRequest(session2Id, cstring"When was Osama bin laden born"))
-  echo fmt"[demo] stopReason={stopReasonFrom(promptResp)}"
-
-  promptResp = await clientConn.prompt(promptRequest(session1Id, cstring"When was barack obama born"));
-  echo fmt"[demo] stopReason={stopReasonFrom(promptResp)}"
-
-  promptResp = await clientConn.prompt(promptRequest(session2Id, cstring"Who won the 2022 world football cup"))
-  echo fmt"[demo] stopReason={stopReasonFrom(promptResp)}"
-
-when isMainModule:
-  discard main()
+  msgId += 1
