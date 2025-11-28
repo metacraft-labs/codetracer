@@ -752,9 +752,14 @@ type
     status*: cstring
     output*: cstring
 
+  AgentMessageRole* = enum
+    AgentMessageAgent
+    AgentMessageUser
+
   AgentMessage* = object
     id*: cstring
     content*: cstring
+    role*: AgentMessageRole
 
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
