@@ -771,6 +771,7 @@ type
     monacoEditor*: MonacoEditor
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
+    diffEditor*: DiffEditor
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
