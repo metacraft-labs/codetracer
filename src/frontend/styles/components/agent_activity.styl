@@ -41,7 +41,6 @@
     width: -webkit-fill-available !important
     margin-left: 0px !important
     margin-bottom: 0px !important
-    background: #484848 !important
     padding-left: 8px !important
     max-height: 12rem !important
     resize: none
@@ -52,18 +51,20 @@
     white-space: pre-wrap !important
     border-radius: 8px !important
     padding: 4px
+    border: 0px !important
+    background: SECONDARY_BASE !important
 
 
     &::-webkit-scrollbar-corner
-      background-color: #484848 !important
+      background-color: SECONDARY_BASE !important
 
     &::-webkit-scrollbar
-      width: 10px !important
-      height: 10px !important
+      width: 8px !important
+      height: 8px !important
 
     &::-webkit-scrollbar-thumb:vertical,
     &::-webkit-scrollbar-thumb:horizontal
-      border: 2px solid #484848 !important
+      border: 2px solid SECONDARY_BASE !important
 
   .agent-command-input
     color: #A5F3FC !important
@@ -72,7 +73,7 @@
       color: #a5f3fc
 
     &:focus
-      border: 1px solid #0E7490 !important
+      // border: 1px solid #0E7490 !important
       outline: 0px !important
 
 .agent-buttons-container
@@ -83,7 +84,7 @@
   .agent-button
     display: flex
     cursor: pointer
-    border: 1px solid DEBUG_BUTTON_ACTIVE_BACKGROUND
+    background: ACTIVE_ROW
     padding: 4px
     align-items: center
     border-radius: 6px
@@ -97,8 +98,8 @@
       background-size: 10px, 16px
       background-position: center
       background-repeat: no-repeat
-      width: 24px
-      height: 24px
+      width: 28px
+      height: 28px
       margin-right: 4px
 
   .agent-model-select
@@ -108,13 +109,13 @@
     padding-right: 0px !important
 
   .agent-enter
-    height: 24px
-    min-width: 24px
+    height: 28px
+    min-width: 28px
     border-radius: 6px
     background: #0E7490
     background-image: COMMAND_PALETTE_ENTER_MSG_IMG
     background-repeat: no-repeat
-    background-size: 14px
+    background-size: 16px
     background-position: center
     cursor: pointer
 
@@ -142,15 +143,20 @@
 .header-wrapper
   display: flex
   justify-content: space-between
+  border-bottom: 2px solid #484848
+  padding: 8px
+  padding-top: 6px
+  padding-bottom: 6px
+  align-items: center
 
 .content-header
   display: flex
   align-items: center
 
-.user-msg
-  border-radius: 6px
-  background: #3A3A3A
-  padding: 8px
+.agent-msg-wrapper
+  border: 2px solid #484848
+  border-radius: 4px
+  background: ACTIVE_MENU_BACKGROUND
   margin-bottom: 8px
 
 .user-name
@@ -162,7 +168,7 @@
   margin-bottom: 8px
 
 .msg-content
-  padding: 8px
+  padding: 12px
   display: flex
   flex-direction: column
 
@@ -217,16 +223,17 @@
 .msg-controls
   display: flex
 
-.terminal-wrapper
-  background: DROPDOWN_BASE
-  border-radius: 6px
-  margin-top: 4px
+.component-wrapper
+  background: SECONDARY_BASE
+  border-radius: 4px
+  margin-top: 8px
+  color: DROPDOWN_TEXT_COLOR
 
   .header-wrapper
-    border-bottom: 1px solid #3A3A3A
-    padding: 8px
-    padding-top: 6px
-    padding-bottom: 6px
+    background: TOOLTIP_BACKGROUND
+    border-top-right-radius: 6px
+    border-top-left-radius: 6px
+    border-bottom: 0px !important
 
 .editor-wrapper
   height: 100%
@@ -239,3 +246,73 @@
 
   .line-numbers
     height: -webkit-fill-available
+
+.agent-interaction
+  border: 1px solid #0E7490
+  background: SECONDARY_BASE
+  border-radius: 8px
+  padding: 8px
+
+.prompt-wrapper
+  background: TOOLTIP_BACKGROUND
+  border-radius: 6px
+  display: flex
+  flex-direction: column
+  margin-top: 8px
+  margin-bottom: 8px
+  padding: 12px
+
+  .password-wrapper
+    display: flex
+
+    .password-prompt-input
+      margin-right: 8px
+      background-image: none !important
+      margin-left: 0px !important
+      margin-bottom: 0px !important
+      padding-left: 8px !important
+      background: #2C2C2C
+
+    .password-continue-button
+      padding-left: 16px
+      padding-right: 16px
+      background: CT_PRIMARY_DEFAULT
+      border-radius: 6px
+      height: 28px
+      display: flex
+      align-items: center
+      cursor: pointer
+
+      &:hover
+        opacity: 0.7
+
+  .header-wrapper
+    border-bottom: 0px !important
+    padding: 0px !important
+    padding-bottom: 16px !important
+
+  .user-options-wrapper
+    display: flex
+    flex-direction: row
+
+    .user-option
+      padding: 16px
+      padding-top: 4px
+      padding-bottom: 4px
+      border-radius: 6px
+      width: fit-content
+      background: DEBUG_BUTTON_ACTIVE_BACKGROUND
+      margin-right: 8px
+      cursor: pointer
+
+      &:hover
+        opacity: 0.7
+
+.ai-status
+  background-image: AI_LOADING_ANIMATION
+  background-position-y: 70%
+  background-size: 12px, 12px
+  width: 28px
+  height: 28px
+  background-repeat: no-repeat
+

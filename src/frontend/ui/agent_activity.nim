@@ -22,7 +22,7 @@ proc autoResizeTextarea(id: cstring) =
   let el = document.getElementById(id)
   if el.isNil: return
 
-  el.style.height = $(el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET) & "px"
+  el.style.height = $el.toJs.scrollHeight & "px"
   el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
 
 proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
@@ -150,6 +150,25 @@ proc clear(self: AgentActivityComponent) =
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
     autoResizeTextarea(INPUT_ID)
+proc passwordPromp(self: AgentActivityComponent): VNode =
+  result = buildHtml(tdiv(class="prompt-wrapper")):
+    tdiv(class="password-wrapper"):
+      input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
+      tdiv(class="password-continue-button"):
+        text "Continue"
+
+proc userPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
+  result = buildHtml(tdiv(class="prompt-wrapper")):
+    tdiv(class="header-wrapper"):
+      text prompt
+    tdiv(class="user-options-wrapper"):
+      for option in options:
+        tdiv(class="user-option"):
+          text option
+
+proc loadingState(self: AgentActivityComponent): VNode =
+  result = buildHtml(tdiv(class="loading-animation"))
+
 proc parseUnifiedDiff(patch: string): (string, string) =
   ## Very simple unified diff parser:
   ## - skips headers: diff/index/---/+++/@@
@@ -242,6 +261,7 @@ index 71d1dec8..f8499310 100644
           scrollBeyondLastLine: false,
           smoothScrolling: false,
           contextmenu: false,
+          renderOverviewRuler: false,
           renderSideBySide: false,
           scrollbar: js{
             horizontalScrollbarSize: 14,
