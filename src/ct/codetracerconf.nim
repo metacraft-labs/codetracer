@@ -28,6 +28,7 @@ type
     # cmdDelete,
     build,
     record,
+    `record-test`,
     console,
     host,
     `import`,
@@ -314,6 +315,24 @@ type
         desc: "Arguments for record",
         longDesc: "longer description for record"
       .} : seq[string]
+
+    of StartupCommand.`record-test`:
+      recordTestTestName* {.
+        argument,
+        desc: "Test name",
+      .}: string
+      recordTestPath* {.
+        argument,
+        desc: "path to the test section"
+      .}: string
+      recordTestLine* {.
+        argument,
+        desc: "line number for the test section"
+      .}: int
+      recordTestColumn* {.
+        argument,
+        desc: "column number(can be 1 if nothing applicable) for test section"
+      .}: int
 
     of StartupCommand.replay:
      replayTraceId* {.

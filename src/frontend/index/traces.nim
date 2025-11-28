@@ -430,14 +430,36 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
   let processResult = await readProcessOutput(
     codetracerExe,
-    @[cstring"record-test"].concat(@[response.testName, response.path, cstring($response.line), cstring($response.column)])
+    @[cstring"record-test"].concat(
+        @[
+          response.testName,
+          response.path,
+          cstring($response.line),
+          cstring($response.column)])
   )
   if processResult.isOk: # true
     let output = processResult.value
     let lines = ($output).splitLines()
-    let traceId = parseInt(lines[^1]) #  1063 
-    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-    await loadExistingRecord(traceId)
+    # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
+    echo lines
+    if lines.len > 1:
+      let traceIdLine = lines[^2]
+      if traceIdLine.startsWith("traceId:"):
+        let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+        infoPrint "index: traceId for test: ", traceId
+        let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
+        if trace.isNil:
+          errorPrint "index: run-test: can't find trace"
+          return
+        infoPrint "trace is in ", trace.outputFolder
+        infoPrint "trying to write test name ", response.testName, " in trace custom-entrypoint.txt"
+        let res = await fsWriteFileWithErr(
+          nodePath.join(trace.outputFolder, cstring"custom-entrypoint.txt"),
+          response.testName & jsNl)
+        await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+        await loadExistingRecord(traceId)
+        return
+    warnPrint "index: run-test: traced ok, but couldn't extract traceId"
   else:
     errorPrint "index: ct record-test error: ", JSON.stringify(processResult.error)
     mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"ct record-test error: " & JSON.stringify(processResult.error)}

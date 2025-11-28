@@ -305,4 +305,30 @@ proc record*(lang: string,
       # let configPath = ctConfig.rrBackend.ctPaths
       return recordInternal(dbBackendRecordExe, pargs.concat(@["--trace-kind", "rr", "--rr-support-path", ctConfig.rrBackend.path]), withDiff, upload)
     else:
-      echo "This functionality requires a codetracer-rr-backend installation"
+      echo fmt"Assuming recording language {detectedLang}: "
+      echo "  this functionality requires a codetracer-rr-backend installation"
+      quit(1)
+
+proc recordTest*(testName: string, path: string, line: int, column: int) =
+  # TODO: not sure about wasm, for now not supported for tests
+  let fullPath = expandFileName(expandTilde(path))
+  let lang = detectLangFromPath(fullPath, isWasm=false)
+  if not lang.isDBBased:
+    let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
+    if ctConfig.rrBackend.enabled:
+      # assume `Lang<Name/Label>'
+      let langAsText = if ($lang).len > 4: ($lang)[4..^1] else: "Unknown"
+      # pass our own `ct` path as well, so the recorder can use `ct` to record the test after building it
+      let process = startProcess(
+        ctConfig.rrBackend.path,
+        args = @["record-test", testName, fullPath, $line, $column, langAsText, getAppFilename()],
+        options = {poEchoCmd, poParentStreams})
+      let exitCode = waitForExit(process)
+      quit(exitCode)
+    else:
+      echo fmt"Assuming recording language {lang}: "
+      echo "  this functionality requires a codetracer-rr-backend installation"
+      quit(1)
+  else:
+    echo fmt"Assuming recording language {lang}: currently `ct record-test` not supported for db traces"
+    # quit(1)

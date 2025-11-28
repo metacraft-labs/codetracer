@@ -152,6 +152,8 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordAddress, conf.recordSocket,
         conf.recordWithDiff, conf.recordUpload,
         conf.recordProgram, conf.recordArgs)
+    of StartupCommand.`record-test`:
+      recordTest(conf.recordTestTestName, conf.recordTestPath, conf.recordTestLine, conf.recordTestColumn)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
     of StartupCommand.remote:
