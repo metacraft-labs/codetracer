@@ -30,7 +30,9 @@ proc promptRequest(sessionId: cstring, message: cstring): JsObject {.importjs: "
 
 proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
-proc makeClient(onSessionUpdate: js): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { await #(params); }, writeTextFile: async () => ({}), readTextFile: async () => ({ content: '' }), createTerminal: async () => ({ id: 'term-1' }), extMethod: async () => ({}), extNotification: async () => {} }))()".}
+proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
+
+proc makeClient(onSessionUpdate: js, onReadTextFile: js): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { await #(params); }, writeTextFile: async () => ({}), readTextFile: async (params) => await #(params), createTerminal: async () => ({ id: 'term-1' }), extMethod: async () => ({}), extNotification: async () => {} }))()".}
 proc asFactory(obj: JsObject): js {.importjs: "(function(v){ return function(){ return v; }; })(#)".}
 
 proc sessionIdFrom(response: JsObject): cstring {.importjs: "((resp) => (resp && resp.sessionId) || 'session-1')(#)".}
@@ -73,6 +75,23 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   var aggregatedContent = cstring""
   var collectedUpdates: seq[JsObject] = @[]
 
+  let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+    let path =
+      if jsHasKey(params, cstring"path"):
+        params[cstring"path"].to(cstring)
+      else:
+        cstring""
+
+    if path.len == 0:
+      return js{ "error": "missing path" }
+
+    try:
+      let content = await readFileUtf8(path)
+      return js{ "content": content }
+    except:
+      return js{ "error": cstring(fmt"[acp_ipc] readTextFile failed: {getCurrentExceptionMsg()}") }
+  )
+
   let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
     collectedUpdates.add(params)
 
@@ -94,7 +113,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
       errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
 
   # ClientSideConnection expects a factory function, not a plain object
-  let clientConn = newClientSideConnection(asFactory(makeClient(handleSessionUpdate)), stream)
+  let clientConn = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile)), stream)
 
   echo "[acp_ipc] established a client-side connection"
 
