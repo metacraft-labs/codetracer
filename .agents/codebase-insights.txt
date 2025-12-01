@@ -64,3 +64,9 @@
 - `initLspController` now delegates to `registerKindController`, ensuring each language kind registers its observer with an independent closure so the correct LSP client starts when its URL is received.
 - LSP startup only begins once a Monaco editor of that kind is registered; document observers fire when the first tab opens, allowing the client to start with real context instead of empty workspaces.
 - Only the Ruby LSP supports pull diagnostics (`textDocument/diagnostic`); other languages rely on `publishDiagnostics`, so guard `requestDiagnostics` by kind to avoid crashing rust-analyzer.
+- ACP IPC streams `agent_message_chunk` updates with a stable message id (append=true) and then sends the aggregated content when the prompt stops; `agent_activity` appends content for existing ids or creates a new message when a fresh id arrives.
+- In `acp_ipc`, prompt text may arrive as either a plain string or `{text: ...}`; normalize the input to a cstring before sending the prompt to avoid `[object Object]` propagation.
+- The ACP prompt request must pass the message value directly (`text: #`) rather than embedding the parameter name as a literal (`text: '#'`), otherwise the agent receives a generated identifier like `text_2684354635` instead of the user’s input.
+- `agent_activity` now appends when a message id already exists, without relying on an explicit `append` flag; new ids create new message entries automatically.
+- ACP streaming now sends only chunks plus a final stop-reason notification (no aggregated content), and the UI renders the user’s prompt immediately as a user message before the agent replies.
+- Agent activity messages only render after `updateAgentMessageContent` stores the content and triggers a redraw; missing that step leaves the UI unchanged even though responses arrive.
