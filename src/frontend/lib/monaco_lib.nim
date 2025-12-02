@@ -111,12 +111,15 @@ type
     text*:             cstring
 
   DiffEditor* = ref object
-    config*: MonacoEditorConfig
-    layout*: proc(layout: js)
-    hasTextFocus*: proc: bool
-    domElement*: kdom.Node
-    updateOptions*: proc(options: MonacoEditorOptions)
-    viewModel*: MonacoViewModel
+    config*:              MonacoEditorConfig
+    layout*:              proc(layout: js)
+    hasTextFocus*:        proc: bool
+    domElement*:          kdom.Node
+    updateOptions*:       proc(options: MonacoEditorOptions)
+    getModifiedEditor*:   proc: MonacoEditor
+    getOriginalEditor*:   proc: MonacoEditor
+    viewModel*:           MonacoViewModel
+    getOptions*:          proc: JsObject
 
   MonacoEditor* = ref object
     config*:               MonacoEditorConfig
