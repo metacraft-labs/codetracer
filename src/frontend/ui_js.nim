@@ -1586,6 +1586,16 @@ proc zoomInEditors*(data: Data) =
         let options = cast[MonacoEditorOptions](diffEditor.getOptions())
         options.fontSize = data.ui.fontSize
         diffEditor.updateOptions(options)
+    # Agent diff Editors
+    for a in data.ui.componentMapping[Content.AgentActivity]:
+      # for now only one TODO: Make more than one diff editor active at a time
+      let agent = cast[AgentActivityComponent](a)
+      let modEditor = agent.diffEditor.getModifiedEditor()
+      let orgEditor = agent.diffEditor.getOriginalEditor()
+
+      let options = orgEditor.getOptions()
+      options.fontSize = data.ui.fontSize
+      agent.diffEditor.updateOptions(cast[MonacoEditorOptions](options))
     redrawAll()
     clog "editor: zoom in!"
 
@@ -1612,6 +1622,16 @@ proc zoomOutEditors*(data: Data) =
         let options = cast[MonacoEditorOptions](diffEditor.getOptions())
         options.fontSize = data.ui.fontSize
         diffEditor.updateOptions(options)
+    # Agent diff Editors
+    for a in data.ui.componentMapping[Content.AgentActivity]:
+      # for now only one TODO: Make more than one diff editor active at a time
+      let agent = cast[AgentActivityComponent](a)
+      let modEditor = agent.diffEditor.getModifiedEditor()
+      let orgEditor = agent.diffEditor.getOriginalEditor()
+
+      let options = orgEditor.getOptions()
+      options.fontSize = data.ui.fontSize
+      agent.diffEditor.updateOptions(cast[MonacoEditorOptions](options))
     redrawAll()
     clog "editor: zoom out!"
 
