@@ -150,10 +150,13 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordLang, conf.recordOutputFolder,
         conf.recordExportFile, conf.recordStylusTrace,
         conf.recordAddress, conf.recordSocket,
-        conf.recordWithDiff, conf.recordUpload,
+        conf.recordWithDiff, conf.recordStoreTraceFolderForPid, conf.recordUpload,
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.`record-test`:
-      recordTest(conf.recordTestTestName, conf.recordTestPath, conf.recordTestLine, conf.recordTestColumn)
+      recordTest(
+        conf.recordTestTestName, conf.recordTestPath,
+        conf.recordTestLine, conf.recordTestColumn,
+        conf.recordTestWithDiff, conf.recordTestStoreTraceFolderForPid)
     of StartupCommand.run:
       run(conf.runTracePathOrId, conf.runArgs)
     of StartupCommand.remote:

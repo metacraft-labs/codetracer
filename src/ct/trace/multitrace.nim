@@ -8,7 +8,7 @@ import .. / utilities / [git, zip]
 proc findDiff(diffSpecification: string): string =
   if diffSpecification.len > 0:
     if diffSpecification == "last-commit":
-      execProcess(findExe("git"), args = @["diff", "HEAD~..HEAD"], options = {poEchoCmd})
+      execProcess(findExe("git"), args = @["diff", "HEAD~..HEAD"], options = {})
     else:
       var path = diffSpecification
       try:
@@ -23,7 +23,7 @@ proc findDiff(diffSpecification: string): string =
         readFile(path)
       else:
         # for now assume git range syntax
-        execProcess(findExe("git"), args = @["diff", diffSpecification], options = {poEchoCmd})
+        execProcess(findExe("git"), args = @["diff", diffSpecification], options = {})
   else:
     ""
 

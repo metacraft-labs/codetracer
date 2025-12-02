@@ -60,6 +60,7 @@ proc runWithRestart(
                              address="",
                              socketPath="",
                              withDiff="",
+                             storeTraceFolderForPid = -1,
                              upload=false,
                              program=program,
                              args=recordArgs[1..^1])

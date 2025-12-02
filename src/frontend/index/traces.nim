@@ -441,9 +441,9 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
     let output = processResult.value
     let lines = ($output).splitLines()
     # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
-    echo lines
+    echo output
     if lines.len > 1:
-      let traceIdLine = lines[^2]
+      let traceIdLine = lines[^3]
       if traceIdLine.startsWith("traceId:"):
         let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
         infoPrint "index: traceId for test: ", traceId
@@ -452,10 +452,6 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
           errorPrint "index: run-test: can't find trace"
           return
         infoPrint "trace is in ", trace.outputFolder
-        infoPrint "trying to write test name ", response.testName, " in trace custom-entrypoint.txt"
-        let res = await fsWriteFileWithErr(
-          nodePath.join(trace.outputFolder, cstring"custom-entrypoint.txt"),
-          response.testName & jsNl)
         await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
         await loadExistingRecord(traceId)
         return

@@ -173,7 +173,12 @@ else:
     let combined = if diagnostics.len > 0: diagnostics else: lines.join("\n")
     return (recorderError, version, combined)
 
-proc recordInternal(exe: string, args: seq[string], withDiff: string, upload: bool): Trace =
+proc storeTraceFolderInfoForPid(traceId: int, traceFolder: string, pid: int) =
+  let pidFolder = codetracerTmpPath / fmt"source-folders-{pid}"
+  createDir(pidFolder)
+  writeFile(pidFolder / fmt"trace-{traceId}", traceFolder)
+
+proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTraceFolderForPid: int, upload: bool): Trace =
   # let env = if configPath.len > 0:
   #     setupEnv(configPath)
   #   else:
@@ -203,6 +208,9 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, upload: bo
         # makeMultitrace(@[traceId], withDiff, fmt"multitrace-with-diff-for-trace-{traceId}.zip")
         addDiffToTrace(result, withDiff)
 
+      if storeTraceFolderForPid > 0:
+        storeTraceFolderInfoForPid(traceId, result.outputFolder, storeTraceFolderForPid)
+
       if upload:
         # ct-remote must add its default organization if it exists
         # if not, for now there is not an org arg for ct record yet
@@ -223,6 +231,7 @@ proc record*(lang: string,
              address: string,
              socketPath: string,
              withDiff: string,
+             storeTraceFolderForPid: int,
              upload: bool,
              program: string,
              args: seq[string]): Trace =
@@ -298,18 +307,27 @@ proc record*(lang: string,
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
   if detectedLang in @[LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall, LangPythonDb]:
-    return recordInternal(dbBackendRecordExe, pargs.concat(@["--trace-kind", "db"]), withDiff, upload)
+    return recordInternal(
+      dbBackendRecordExe,
+      pargs.concat(@["--trace-kind", "db"]),
+      withDiff,
+      storeTraceFolderForPid,
+      upload)
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
-      # let configPath = ctConfig.rrBackend.ctPaths
-      return recordInternal(dbBackendRecordExe, pargs.concat(@["--trace-kind", "rr", "--rr-support-path", ctConfig.rrBackend.path]), withDiff, upload)
+      return recordInternal(
+        dbBackendRecordExe,
+        pargs.concat(@["--trace-kind", "rr", "--rr-support-path", ctConfig.rrBackend.path]),
+        withDiff,
+        storeTraceFolderForPid,
+        upload)
     else:
       echo fmt"Assuming recording language {detectedLang}: "
       echo "  this functionality requires a codetracer-rr-backend installation"
       quit(1)
 
-proc recordTest*(testName: string, path: string, line: int, column: int) =
+proc recordTest*(testName: string, path: string, line: int, column: int, withDiff: string, storeTraceFolderForPid: int) =
   # TODO: not sure about wasm, for now not supported for tests
   let fullPath = expandFileName(expandTilde(path))
   let lang = detectLangFromPath(fullPath, isWasm=false)
@@ -319,12 +337,37 @@ proc recordTest*(testName: string, path: string, line: int, column: int) =
       # assume `Lang<Name/Label>'
       let langAsText = if ($lang).len > 4: ($lang)[4..^1] else: "Unknown"
       # pass our own `ct` path as well, so the recorder can use `ct` to record the test after building it
-      let process = startProcess(
+      var args = @[
+        "record-test",
+        testName, fullPath, $line, $column,
+        langAsText, getAppFilename()
+      ]
+      if withDiff.len > 0:
+        args.add("--with-diff")
+        args.add(withDiff)
+      args.add("--store-trace-folder-for-pid")
+      args.add($storeTraceFolderForPid)
+
+      let output = execProcess(
         ctConfig.rrBackend.path,
-        args = @["record-test", testName, fullPath, $line, $column, langAsText, getAppFilename()],
-        options = {poEchoCmd, poParentStreams})
-      let exitCode = waitForExit(process)
-      quit(exitCode)
+        args = args,
+        options = {poEchoCmd})
+      # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
+      let lines = output.splitLines()
+      if lines.len > 0:
+        let traceIdLine = lines[^2]
+        if traceIdLine.startsWith("traceId:"):
+          let traceId = traceIdLine[("traceId:").len..^1].parseInt
+          let trace = trace_index.find(traceId, test=false)
+          writeFile(trace.outputFolder / "custom-entrypoint.txt", testName)
+
+          echo output
+          quit(0)
+      
+      echo output
+      quit(1)
+      #let exitCode = waitForExit(process)
+      #quit(exitCode)
     else:
       echo fmt"Assuming recording language {lang}: "
       echo "  this functionality requires a codetracer-rr-backend installation"

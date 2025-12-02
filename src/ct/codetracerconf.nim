@@ -299,6 +299,13 @@ type
           "Arg can be `last-commit`, path to a diff file (must be from the current repo!) or a valid `git diff <arg>` arg"
       .}: string
 
+      recordStoreTraceFolderForPid* {.
+        name: "store-trace-folder-for-pid",
+        defaultValue: 0,
+        desc: "sets a pid, if we should store the resulting trace folder in a special tmp file, grouping info " &
+          "  for a certain originating codetracer pid. 0 is interpreteded as 'do not store in such a file'"
+      .}: int
+
       recordUpload* {.
         name: "upload",
         desc: "upload the trace directly after recording and processing it"
@@ -333,7 +340,18 @@ type
         argument,
         desc: "column number(can be 1 if nothing applicable) for test section"
       .}: int
-
+      recordTestWithDiff* {.
+        name: "with-diff",
+        defaultValue: "",
+        desc: "Record a diff related to this trace and produce a multitrace. " &
+          "Arg can be `last-commit`, path to a diff file (must be from the current repo!) or a valid `git diff <arg>` arg"
+      .}: string
+      recordTestStoreTraceFolderForPid* {.
+        name: "store-trace-folder-for-pid",
+        defaultValue: 0,
+        desc: "sets a pid, if we should store the resulting trace folder in a special tmp file, grouping info " &
+          "  for a certain originating codetracer pid. 0 is interpreteded as 'do not store in such a file'"
+      .}: int
     of StartupCommand.replay:
      replayTraceId* {.
         name: "id",
