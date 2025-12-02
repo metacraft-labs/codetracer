@@ -760,6 +760,10 @@ type
     id*: cstring
     content*: cstring
     role*: AgentMessageRole
+  
+  AgentTerminal* = object
+    id*: cstring
+    shell*: ShellComponent
 
   AgentComponent* = enum AgentTerminal, AgentDiffEditor
 
@@ -774,6 +778,8 @@ type
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
     isLoading*: bool
+    terminals*: JsAssoc[cstring, AgentTerminal]
+    terminalOrder*: seq[cstring]
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]

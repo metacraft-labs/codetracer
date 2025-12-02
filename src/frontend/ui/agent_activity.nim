@@ -4,6 +4,8 @@ from dom import Node
 const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
 const PLACEHOLDER_MSG = "placeholder-msg"
+const TERMINAL_PREFIX = "acp-term-"
+var acpInitRequested = false
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -105,6 +107,24 @@ proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNod
     tdiv(class="msg-content", id = fmt"{AGENT_MSG_DIV}-{msg.id}"):
       text msg.content
 
+proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): VNode =
+  # Ensure the terminal is created after the VNode mounts so the container exists.
+  let shellRef = term.shell
+  if not shellRef.initialized:
+    self.kxi.afterRedraws.add(proc() =
+      if not shellRef.initialized:
+        discard shellRef.createShell()
+        shellRef.initialized = true
+    )
+
+  result = buildHtml(tdiv(class="terminal-wrapper")):
+    tdiv(class="header-wrapper"):
+      tdiv(class="task-name"): text fmt"Terminal {term.id}"
+      tdiv(class="msg-controls"):
+        tdiv(class="command-palette-copy-button", style=style(StyleAttr.marginRight, "6px".cstring))
+        tdiv(class="agent-model-img")
+    tdiv(id=fmt"shellComponent-{term.shell.id}", class="shell-container")
+
 proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent): AgentMessage =
   console.log cstring"Adding agent message"
   if not self.messages.hasKey(messageId):
@@ -119,12 +139,27 @@ proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialCo
 proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent) =
   console.log cstring("[agent-activity] update: begin")
   var message = self.addAgentMessage(messageId, content, role)
+
   if append and message.content.len > 0:
     message.content = message.content & content
   else:
     message.content = content
+
   self.messages[messageId] = message
   self.redraw()
+
+proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTerminal =
+  if not self.terminals.hasKey(terminalId):
+    try:
+      let shellId = self.data.generateId(Content.Shell)
+      let shellComp = ShellComponent(self.data.makeComponent(Content.Shell, shellId))
+      shellComp.initialized = false
+      let term = AgentTerminal(id: terminalId, shell: shellComp)
+      self.terminals[terminalId] = term
+      self.terminalOrder.add(terminalId)
+    except:
+      console.log cstring(fmt"[agent-activity] addTerminal failed: {getCurrentExceptionMsg()}")
+  result = self.terminals[terminalId]
 
 const INPUT_ID = cstring"agent-query-text"
 
@@ -183,11 +218,14 @@ method render*(self: AgentActivityComponent): VNode =
   let inputId = INPUT_ID
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
+  if not acpInitRequested:
+    data.ipc.send("CODETRACER::acp-init-session", js{})
+    acpInitRequested = true
   # let source =
   self.kxi.afterRedraws.add(proc() =
     if not self.kxi.isNil and not self.shell.initialized and self.diffEditor.isNil:
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
-      self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
+      # self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
       self.shell.initialized = true
       let source ="""
 diff --git a/src/db-backend/src/expr_loader.rs b/src/db-backend/src/expr_loader.rs
@@ -259,7 +297,11 @@ index 71d1dec8..f8499310 100644
         if message.role == AgentMessageUser:
           createUserMessageContent(message)
         else:
-          createMessageContent(self, message)
+          createMessageContent(message)
+
+      for termId in self.terminalOrder:
+        let terminal = self.terminals[termId]
+        createTerminalContent(self, terminal)
           # TODO: For now hardcoded id - should be shellComponent-{custom-id}
           # tdiv(class="terminal-wrapper"):
           #   tdiv(class="header-wrapper"):
@@ -377,6 +419,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   let content =
     if hasContent:
       cast[cstring](response[cstring"content"])
+    # TODO: Proper error handling
     else:
       cstring""
 
@@ -395,3 +438,28 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       console.log cstring(fmt"[agent-activity] update failed: {getCurrentExceptionMsg()}")
   else:
     console.log cstring"[agent-activity] no content; skipping update"
+
+proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
+  console.log cstring"[agent-activity] onAcpCreateTerminal"
+  console.log response
+
+  var self: AgentActivityComponent = nil
+  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
+    self = AgentActivityComponent(comp)
+    break
+
+  if self.isNil:
+    console.log cstring"[agent-activity] no AgentActivity component to receive ACP terminal yet"
+    return
+
+  let terminalId =
+    if jsHasKey(response, cstring"id"):
+      cast[cstring](response[cstring"id"])
+    else:
+      cstring(fmt"{TERMINAL_PREFIX}{self.terminalOrder.len}")
+
+  discard self.addTerminal(terminalId)
+  self.redraw()
+
+  discard self.addTerminal(terminalId)
+  self.redraw()

@@ -984,7 +984,7 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
     shellComponent =
       cast[ShellComponent](data.makeComponent(
         Content.Shell, data.generateId(Content.Shell)))
-  shellComponent.createShell()
+  discard shellComponent.createShell()
 
   if not data.ui.welcomeScreen.isNil:
     data.ui.welcomeScreen.welcomeScreen = false
@@ -1559,7 +1559,9 @@ proc configureIPC(data: Data) =
     "dap-receive-event"
 
     # Acp communication
+    # TODO: Rename to "acp-session-update"
     "acp-receive-response"
+    "acp-create-terminal"
 
   duration("configureIPCRun")
 

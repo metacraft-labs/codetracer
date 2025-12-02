@@ -31,8 +31,9 @@ proc promptRequest(sessionId: cstring, message: cstring): JsObject {.importjs: "
 proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 
 proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
+proc writeFileUtf8(path: cstring, content: cstring): Future[void] {.importjs: "require('fs').promises.writeFile(#, #, 'utf8')".}
 
-proc makeClient(onSessionUpdate: js, onReadTextFile: js): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { await #(params); }, writeTextFile: async () => ({}), readTextFile: async (params) => await #(params), createTerminal: async () => ({ id: 'term-1' }), extMethod: async () => ({}), extNotification: async () => {} }))()".}
+proc makeClient(onSessionUpdate: js, onReadTextFile: js, onWriteTextFile: js, onCreateTerminal: js): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { await #(params); }, writeTextFile: async (params) => await #(params), readTextFile: async (params) => await #(params), createTerminal: async (params) => await #(params), extMethod: async () => ({}), extNotification: async () => {} }))()".}
 proc asFactory(obj: JsObject): js {.importjs: "(function(v){ return function(){ return v; }; })(#)".}
 
 proc sessionIdFrom(response: JsObject): cstring {.importjs: "((resp) => (resp && resp.sessionId) || 'session-1')(#)".}
@@ -45,6 +46,120 @@ const
   defaultArgs: seq[cstring] = @[cstring"acp"]
 
 var msgId = 100
+var terminalCounter = 0
+var acpProcess: JsObject
+var acpStream: AcpStream
+var acpClient: ClientSideConnection
+var acpSessionId: cstring
+var acpInitialized = false
+var activeAggregatedContent = cstring""
+var activeCollectedUpdates: seq[JsObject] = @[]
+var currentMessageId = cstring""
+var currentSessionId: cstring
+
+let handleCreateTerminal = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  terminalCounter += 1
+  let terminalId =
+    if jsHasKey(params, cstring"id"):
+      params[cstring"id"].to(cstring)
+    else:
+      cstring(fmt"acp-term-{terminalCounter}")
+  echo fmt"[acp_ipc] createTerminal requested id={terminalId}"
+
+  # Notify renderer so it can open/attach a terminal UI when we eventually wire it.
+  mainWindow.webContents.send("CODETRACER::acp-create-terminal", js{
+    "id": terminalId,
+    "params": params
+  })
+
+  return js{ "id": terminalId }
+)
+
+let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  let path =
+    if jsHasKey(params, cstring"path"):
+      params[cstring"path"].to(cstring)
+    else:
+      cstring""
+
+  if path.len == 0:
+    return js{ "error": "missing path" }
+
+  try:
+    let content = await readFileUtf8(path)
+    return js{ "content": content }
+  except:
+    return js{ "error": cstring(fmt"[acp_ipc] readTextFile failed: {getCurrentExceptionMsg()}") }
+)
+
+let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  let path =
+    if jsHasKey(params, cstring"path"):
+      params[cstring"path"].to(cstring)
+    else:
+      cstring""
+  let content =
+    if jsHasKey(params, cstring"content"):
+      params[cstring"content"].to(cstring)
+    else:
+      cstring""
+
+  if path.len == 0:
+    return js{ "error": "missing path" }
+  try:
+    await writeFileUtf8(path, content)
+    return js{ "ok": true }
+  except:
+    return js{ "error": cstring(fmt"[acp_ipc] writeTextFile failed: {getCurrentExceptionMsg()}") }
+)
+
+let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
+  if currentMessageId.len == 0:
+    return
+
+  activeCollectedUpdates.add(params)
+
+  try:
+    if jsHasKey(params, cstring"update"):
+      let updateObj = params[cstring"update"]
+      if jsHasKey(updateObj, cstring"sessionUpdate"):
+        let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
+        if updateKind == cstring"agent_message_chunk" and
+           jsHasKey(updateObj, cstring"content") and
+           jsHasKey(updateObj[cstring"content"], cstring"text"):
+          let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
+          activeAggregatedContent &= chunk
+          mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+            "id": currentMessageId,
+            "content": chunk
+          })
+  except:
+    errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
+
+proc ensureAcpConnection(): Future[void] {.async.} =
+  if acpInitialized and not acpClient.isNil:
+    return
+
+  acpProcess = spawnProcess(defaultCmd, defaultArgs)
+  echo "[acp_ipc] started the acp server"
+
+  acpStream = ndJsonStream(
+    toWebWritable(stdinOf(acpProcess)),
+    toWebReadable(stdoutOf(acpProcess)))
+
+  echo "[acp_ipc] set up the pipes"
+
+  acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
+
+  echo "[acp_ipc] established a client-side connection"
+
+  let initResp = await acpClient.initialize(initRequest())
+  echo "[acp_ipc] initialized response raw=", stringify(initResp)
+
+  let sessionResp = await acpClient.newSession(newSessionRequest())
+  acpSessionId = sessionIdFrom(sessionResp)
+  currentSessionId = acpSessionId
+  acpInitialized = true
 
 proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   let rawText = response[cstring"text"]
@@ -62,78 +177,43 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   echo fmt"[acp_ipc] got text: {text}"
   let messageId = cstring($msgId)
 
-  let procHandle = spawnProcess(defaultCmd, defaultArgs)
-
-  echo "[acp_ipc] started the acp server"
-
-  let stream = ndJsonStream(
-    toWebWritable(stdinOf(procHandle)),
-    toWebReadable(stdoutOf(procHandle)))
-
-  echo "[acp_ipc] set up the pipes"
-
-  var aggregatedContent = cstring""
-  var collectedUpdates: seq[JsObject] = @[]
-
-  let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
-    let path =
-      if jsHasKey(params, cstring"path"):
-        params[cstring"path"].to(cstring)
-      else:
-        cstring""
-
-    if path.len == 0:
-      return js{ "error": "missing path" }
-
-    try:
-      let content = await readFileUtf8(path)
-      return js{ "content": content }
-    except:
-      return js{ "error": cstring(fmt"[acp_ipc] readTextFile failed: {getCurrentExceptionMsg()}") }
-  )
-
-  let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
-    collectedUpdates.add(params)
-
-    try:
-      if jsHasKey(params, cstring"update"):
-        let updateObj = params[cstring"update"]
-        if jsHasKey(updateObj, cstring"sessionUpdate"):
-          let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
-          if updateKind == cstring"agent_message_chunk" and
-             jsHasKey(updateObj, cstring"content") and
-             jsHasKey(updateObj[cstring"content"], cstring"text"):
-            let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
-            aggregatedContent &= chunk
-            mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-              "id": messageId,
-              "content": chunk
-            })
-    except:
-      errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
-
-  # ClientSideConnection expects a factory function, not a plain object
-  let clientConn = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile)), stream)
-
-  echo "[acp_ipc] established a client-side connection"
-
-  let initResp = await clientConn.initialize(initRequest())
-  echo "[acp_ipc] initialized response raw=", stringify(initResp)
-
-  let sessionResp = await clientConn.newSession(newSessionRequest())
-
-  let sessionId = sessionIdFrom(sessionResp)
+  await ensureAcpConnection()
 
   echo "[acp_ipc] sending prompt: ", text
+  activeAggregatedContent = cstring""
+  activeCollectedUpdates = @[]
+  currentMessageId = messageId
 
-  let promptResp = await clientConn.prompt(promptRequest(sessionId, text))
+  let promptResp = await acpClient.prompt(promptRequest(acpSessionId, text))
   let stopReason = stopReasonFrom(promptResp)
 
   # Final notification with stop reason only (no aggregated content to avoid duplication)
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
     "id": messageId,
     "stopReason": stopReason,
-    "updates": collectedUpdates
+    "updates": activeCollectedUpdates
   })
 
+  currentMessageId = cstring""
   msgId += 1
+
+proc onAcpInitSession*(sender: js, response: JsObject) {.async.} =
+  await ensureAcpConnection()
+
+proc onAcpStop*(sender: js, response: JsObject) {.async.} =
+  if not acpInitialized or acpClient.isNil:
+    echo "[acp_ipc] stop requested but ACP not initialized"
+    return
+
+  try:
+    await acpClient.cancel(js{ "sessionId": currentSessionId })
+    if currentMessageId.len > 0:
+      mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+        "id": currentMessageId,
+        "stopReason": "cancelled"
+      })
+    currentMessageId = cstring""
+    activeAggregatedContent = cstring""
+    activeCollectedUpdates = @[]
+  except:
+    errorPrint cstring(fmt"[acp_ipc] stop failed: {getCurrentExceptionMsg()}"))
