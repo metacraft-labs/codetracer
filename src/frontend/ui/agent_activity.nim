@@ -3,6 +3,7 @@ from dom import Node
 
 const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
+const PLACEHOLDER_MSG = "placeholder-msg"
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -73,28 +74,29 @@ proc parseUnifiedDiff(patch: string): (string, string) =
   (origLines.join("\n"), modLines.join("\n"))
 
 proc createUserMessageContent(msg: AgentMessage): VNode =
-  buildHtml(tdiv(class="user-msg")):
+  buildHtml(tdiv(class="agent-msg-wrapper")):
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
         tdiv(class="user-img")
         span(class="user-name"): text "author"
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button")
-        tdiv(class="command-palette-edit-button")
+        # tdiv(class="command-palette-edit-button")
     tdiv(class="msg-content"):
       text msg.content
 
-proc createMessageContent(msg: AgentMessage): VNode =
-  result = buildHtml(tdiv(class="ai-msg")):
+proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNode =
+  result = buildHtml(tdiv(class="agent-msg-wrapper")):
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
         tdiv(class="ai-img")
         span(class="ai-name"): text "agent"
-        span(class="ai-status"): text "working..."
+        if self.isLoading:
+          span(class="ai-status")
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button")
-        tdiv(class="command-palette-upload-button")
-        tdiv(class="command-palette-redo-button")
+        # tdiv(class="command-palette-upload-button")
+        # tdiv(class="command-palette-redo-button")
     tdiv(class="msg-content", id = fmt"{AGENT_MSG_DIV}-{msg.id}"):
       text msg.content
 
@@ -141,6 +143,7 @@ proc submitPrompt(self: AgentActivityComponent) =
   self.inputValue = promptText
   let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
+  self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
   sendAcpPrompt(promptText)
   self.clear()
 
@@ -150,6 +153,7 @@ proc clear(self: AgentActivityComponent) =
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
     autoResizeTextarea(INPUT_ID)
+
 proc passwordPromp(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
     tdiv(class="password-wrapper"):
@@ -291,7 +295,7 @@ index 71d1dec8..f8499310 100644
         if message.role == AgentMessageUser:
           createUserMessageContent(message)
         else:
-          createMessageContent(message)
+          createMessageContent(self, message)
           # TODO: For now hardcoded id - should be shellComponent-{custom-id}
           # tdiv(class="terminal-wrapper"):
           #   tdiv(class="header-wrapper"):
@@ -319,19 +323,17 @@ index 71d1dec8..f8499310 100644
         autocapitalize="off",
         rows="1",
         spellcheck="false",
-        onmousedown = proc =
-          echo "#### SEARCH"
-          discard,
         onkeydown = proc (e: Event; n: VNode) =
           let ke = cast[KeyboardEvent](e)
           if ke.key == "Enter":
             if ke.shiftKey:
               return
             else:
-              e.preventDefault()
-              self.submitPrompt()
-
-        ,
+              if not self.isLoading:
+                e.preventDefault()
+                self.submitPrompt()
+                self.inputField.toJs.value = "".cstring
+                self.isLoading = true,
         oninput = proc (e: Event; n: VNode) =
           self.inputValue = self.inputField.toJs.value.to(cstring)
           autoResizeTextarea(inputId)
@@ -351,13 +353,20 @@ index 71d1dec8..f8499310 100644
         ):
           tdiv(): text "#TODO: name"
           tdiv(class="agent-model-img")
-        tdiv(
-          class="agent-enter",
-          onclick = proc =
-            echo "#TODO: Upload me master!"
-
-            self.submitPrompt()
-        )
+        if not self.isLoading:
+          tdiv(
+            class="agent-start-button",
+            onclick = proc =
+              self.submitPrompt()
+              self.inputField.toJs.value = "".cstring
+              self.isLoading = true
+          )
+        else:
+          tdiv(
+            class="agent-stop-button",
+            onclick = proc =
+              echo "END PROCESS NOW!" # TODO: Maybe state for disabled when we are stopping the action?
+          )
 
 proc asyncSleep(ms: int): Future[void] =
   newPromise(proc(resolve: proc(): void) =
@@ -373,6 +382,11 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   var self: AgentActivityComponent = nil
   for _, comp in data.ui.componentMapping[Content.AgentActivity]:
     self = AgentActivityComponent(comp)
+    # Filter the placeholder msg for the agent:
+    self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+    self.messages.del(PLACEHOLDER_MSG)
+    # TODO: Make a end-process for the isLoading state
+    self.isLoading = false
     break
 
   if self.isNil:

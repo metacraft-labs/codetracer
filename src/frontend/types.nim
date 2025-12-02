@@ -760,6 +760,7 @@ type
     id*: cstring
     content*: cstring
     role*: AgentMessageRole
+
   AgentComponent* = enum AgentTerminal, AgentDiffEditor
 
   AgentActivityComponent* = ref object of Component
