@@ -19,10 +19,15 @@ proc setValue*(model: js, value: cstring)
 var originalModel = createModel("".cstring, "plaintext".cstring)
 var modifiedModel = createModel("".cstring, "plaintext".cstring)
 
+proc scrollAgentCom() =
+  let el = document.getElementsByClassName("agent-com")
+  for e in el:
+    e.toJs.scrollTop = e.toJs.scrollHeight
+
 proc autoResizeTextarea(id: cstring) =
   let el = document.getElementById(id)
   if el.isNil: return
-
+  el.style.height = "auto"
   el.style.height = $el.toJs.scrollHeight & "px"
   el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
 
@@ -144,6 +149,7 @@ proc submitPrompt(self: AgentActivityComponent) =
   let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
+  discard setTimeout(proc() = scrollAgentCom(), 0)
   sendAcpPrompt(promptText)
   self.clear()
 
@@ -154,7 +160,7 @@ proc clear(self: AgentActivityComponent) =
     inputEl.toJs.value = cstring""
     autoResizeTextarea(INPUT_ID)
 
-proc passwordPromp(self: AgentActivityComponent): VNode =
+proc passwordPrompt(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
     tdiv(class="password-wrapper"):
       input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
@@ -388,6 +394,8 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     # TODO: Make a end-process for the isLoading state
     self.isLoading = false
     break
+
+  scrollAgentCom()
 
   if self.isNil:
     console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
