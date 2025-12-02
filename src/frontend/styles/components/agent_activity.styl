@@ -108,16 +108,33 @@
     justify-content: space-between
     padding-right: 0px !important
 
-  .agent-enter
+  .agent-start-button
     height: 28px
     min-width: 28px
     border-radius: 6px
-    background: #0E7490
-    background-image: COMMAND_PALETTE_ENTER_MSG_IMG
+    background-color: #0E7490
+    background-image: COMMAND_PALETTE_START_MSG_IMG
     background-repeat: no-repeat
     background-size: 16px
     background-position: center
     cursor: pointer
+
+    &:hover
+      background-color: #0891b2 !important
+
+  .agent-stop-button
+    height: 28px
+    min-width: 28px
+    border-radius: 6px
+    background-color:#b91c1c
+    background-image: COMMAND_PALETTE_STOP_MSG_IMG
+    background-repeat: no-repeat
+    background-size: 16px
+    background-position: center
+    cursor: pointer
+
+    &:hover
+      background-color: #dc2626 !important
 
 .agent-model-img
   height: 24px
