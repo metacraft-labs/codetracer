@@ -764,6 +764,7 @@ type
   AgentTerminal* = object
     id*: cstring
     shell*: ShellComponent
+  AgentComponent* = enum AgentTerminal, AgentDiffEditor
 
   AgentComponent* = enum AgentTerminal, AgentDiffEditor
 
@@ -781,6 +782,7 @@ type
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]
     diffEditor*: DiffEditor
+    isLoading*: bool
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
