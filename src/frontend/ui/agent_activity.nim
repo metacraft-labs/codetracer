@@ -216,8 +216,8 @@ method render*(self: AgentActivityComponent): VNode =
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
   # let source =
-  if not self.kxi.isNil and not self.shell.initialized:
-    self.kxi.afterRedraws.add(proc() =
+  self.kxi.afterRedraws.add(proc() =
+    if not self.kxi.isNil and not self.shell.initialized and self.diffEditor.isNil:
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
       self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
       self.shell.initialized = true
@@ -280,7 +280,7 @@ index 71d1dec8..f8499310 100644
       setDiffModel(self.diffEditor, originalModel, modifiedModel)
       # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
       # self.shell.shell.write("Another line here.\r\n")
-    )
+  )
 
   result = buildHtml(
     tdiv(class="agent-ha-container")
