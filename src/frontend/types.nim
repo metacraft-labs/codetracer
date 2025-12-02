@@ -754,6 +754,10 @@ type
     id*: cstring
     content*: cstring
     role*: AgentMessageRole
+  
+  AgentTerminal* = object
+    id*: cstring
+    shell*: ShellComponent
 
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
@@ -764,6 +768,8 @@ type
     monacoEditor*: MonacoEditor
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
+    terminals*: JsAssoc[cstring, AgentTerminal]
+    terminalOrder*: seq[cstring]
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]

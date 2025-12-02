@@ -45,6 +45,8 @@ proc configureIpcMain* =
 
     # Acp
     "acp-prompt"
+    "acp-init-session"
+    "acp-stop"
 
     "save-config"
     "exit-error"

@@ -389,7 +389,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
         if state.content == Content.Shell:
           let shellComponent = ShellComponent(component)
           if shellComponent.shell.isNil:
-            shellComponent.createShell()
+            discard shellComponent.createShell()
 
         discard component.afterInit()
       discard windowSetTimeout((proc = redrawAll()), 200)), 200)

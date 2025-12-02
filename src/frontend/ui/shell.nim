@@ -115,7 +115,7 @@ proc resizeTerminal(terminal: Terminal, fitAddon: XtermFitAddon) =
   let proposedDimensions = fitAddon.proposeDimensions()
   terminal.resize(proposedDimensions.cols - 5, proposedDimensions.rows)
 
-proc createShell*(self: ShellComponent) =
+proc createShell*(self: ShellComponent): Terminal =
   # self.createShellLayoutContainer()
   let container = self.ensureShellContainer()
   # create terminal object
@@ -144,6 +144,11 @@ proc createShell*(self: ShellComponent) =
   # open xterm terminal
   terminal.open(container)
   self.shell = terminal
+
+  # self.shell.onKey do (e: TerminalIEvent):
+  #   self.shell.write(e.key)
+
+  result = terminal
 
   # # load xterm-addon-fit
   # let fitAddon = createFitAddon(fitAddonLib.FitAddon)
@@ -212,8 +217,6 @@ proc createShell*(self: ShellComponent) =
   # self.shell.onData do (data: cstring):
   #   self.send(data)
 
-  self.shell.onKey do (e: TerminalIEvent):
-    self.shell.write(e.key)
     # clog "shell: key " & $e.key
     # var raw = ""
 
@@ -234,7 +237,7 @@ proc openShellTab*(data: Data) =
     cast[ShellComponent](
       data.ui.componentMapping[Content.Shell][componentId])
 
-  shellComponent.createShell()
+  discard shellComponent.createShell()
 
 proc eventSummary(event: SessionEvent): string =
   let explanation = case event.kind:
