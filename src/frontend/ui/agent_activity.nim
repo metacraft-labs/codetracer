@@ -6,6 +6,7 @@ const AGENT_MSG_DIV = "msg-content"
 const PLACEHOLDER_MSG = "placeholder-msg"
 const TERMINAL_PREFIX = "acp-term-"
 var acpInitRequested = false
+const PLACEHOLDER_MSG = "placeholder-msg"
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -193,6 +194,26 @@ proc clear(self: AgentActivityComponent) =
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
     autoResizeTextarea(INPUT_ID)
+
+proc passwordPromp(self: AgentActivityComponent): VNode =
+  result = buildHtml(tdiv(class="prompt-wrapper")):
+    tdiv(class="password-wrapper"):
+      input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
+      tdiv(class="password-continue-button"):
+        text "Continue"
+
+proc userPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
+  result = buildHtml(tdiv(class="prompt-wrapper")):
+    tdiv(class="header-wrapper"):
+      text prompt
+    tdiv(class="user-options-wrapper"):
+      for option in options:
+        tdiv(class="user-option"):
+          text option
+
+proc loadingState(self: AgentActivityComponent): VNode =
+  result = buildHtml(tdiv(class="loading-animation"))
+
 proc parseUnifiedDiff(patch: string): (string, string) =
   ## Very simple unified diff parser:
   ## - skips headers: diff/index/---/+++/@@
