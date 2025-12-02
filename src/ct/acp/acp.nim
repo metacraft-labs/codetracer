@@ -2,7 +2,26 @@ import std/[jsffi, asyncjs]
 
 # Lightweight Nim bindings for @agentclientprotocol/sdk (To be used as part of the main index process)
 
-{.emit: "const __acpSdk = require('@agentclientprotocol/sdk');".}
+# Try to require from several common locations so dev/prod builds both work.
+{.emit: """
+let __acpSdk;
+try {
+  __acpSdk = require('@agentclientprotocol/sdk');
+} catch (e) {
+  const path = require('path');
+  const candidates = [
+    path.join(process.cwd(), 'node_modules', '@agentclientprotocol', 'sdk'),
+    path.join(process.cwd(), 'node-packages', 'node_modules', '@agentclientprotocol', 'sdk')
+  ];
+  for (const c of candidates) {
+    try {
+      __acpSdk = require(c);
+      break;
+    } catch {}
+  }
+  if (!__acpSdk) throw e;
+}
+""".}
 
 type
   AcpStream* = JsObject

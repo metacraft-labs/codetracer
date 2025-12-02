@@ -378,7 +378,9 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     inExtension: inExtension,
     expandControl: @[],
     messages: JsAssoc[cstring, AgentMessage]{},
-    messageOrder: @[]
+    messageOrder: @[],
+    terminals: JsAssoc[cstring, AgentTerminal]{},
+    terminalOrder: @[]
   )
   data.registerComponent(result, Content.AgentActivity)
 
