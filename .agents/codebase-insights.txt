@@ -70,3 +70,9 @@
 - `agent_activity` now appends when a message id already exists, without relying on an explicit `append` flag; new ids create new message entries automatically.
 - ACP streaming now sends only chunks plus a final stop-reason notification (no aggregated content), and the UI renders the user’s prompt immediately as a user message before the agent replies.
 - Agent activity messages only render after `updateAgentMessageContent` stores the content and triggers a redraw; missing that step leaves the UI unchanged even though responses arrive.
+- ACP client now implements `readTextFile` via Node fs (UTF-8) and `createTerminal` (returns `acp-term-N` or provided id). The terminal creation is still a stub (no UI terminal), but agents get a stable id and real file contents on request.
+- `createTerminal` now also notifies the renderer (`CODETRACER::acp-create-terminal`) with the requested id/params so the UI can hook up a terminal when implemented.
+- Agent activity persists terminal entries (order + id) and renders a terminal placeholder per `createTerminal` event, mirroring how messages are stored and rendered.
+- Agent activity now spins up a real ShellComponent for each ACP terminal, rendering a container and lazily calling `createShell` after mount so xterm attaches to the correct DOM node.
+- ACP IPC keeps a single long-lived agent process/connection/session; `acp-init-session` primes it, and prompts reuse that session instead of spawning a new process each time.
+- ACP client now implements `writeTextFile` via Node fs (UTF-8); missing paths return errors and successful writes return `{ok: true}`, enabling agent-applied edits to be diffed locally.
