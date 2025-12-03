@@ -12,6 +12,10 @@ var
   startedFuture: proc: void
   startedReceived = false
 
+nodeProcess.on(cstring"uncaughtException", proc(err: JsObject) =
+  # handle the error safely
+  console.log cstring"[index]: uncaught exception: ", err)
+
 proc asyncSleep*(ms: int): Future[void] =
   let future = newPromise() do (resolve: (proc: void)):
     discard windowSetTimeout(resolve, ms)

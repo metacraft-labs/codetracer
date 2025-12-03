@@ -140,26 +140,31 @@ proc ensureAcpConnection(): Future[void] {.async.} =
   if acpInitialized and not acpClient.isNil:
     return
 
-  acpProcess = spawnProcess(defaultCmd, defaultArgs)
-  echo "[acp_ipc] started the acp server"
+  try:
+    acpProcess = spawnProcess(defaultCmd, defaultArgs)
+    echo "[acp_ipc] started the acp server"
+  
+    acpStream = ndJsonStream(
+      toWebWritable(stdinOf(acpProcess)),
+      toWebReadable(stdoutOf(acpProcess)))
 
-  acpStream = ndJsonStream(
-    toWebWritable(stdinOf(acpProcess)),
-    toWebReadable(stdoutOf(acpProcess)))
+    echo "[acp_ipc] set up the pipes"
 
-  echo "[acp_ipc] set up the pipes"
+    acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
 
-  acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
+    echo "[acp_ipc] established a client-side connection"
 
-  echo "[acp_ipc] established a client-side connection"
+    let initResp = await acpClient.initialize(initRequest())
+    echo "[acp_ipc] initialized response raw=", stringify(initResp)
 
-  let initResp = await acpClient.initialize(initRequest())
-  echo "[acp_ipc] initialized response raw=", stringify(initResp)
-
-  let sessionResp = await acpClient.newSession(newSessionRequest())
-  acpSessionId = sessionIdFrom(sessionResp)
-  currentSessionId = acpSessionId
-  acpInitialized = true
+    let sessionResp = await acpClient.newSession(newSessionRequest())
+    acpSessionId = sessionIdFrom(sessionResp)
+    currentSessionId = acpSessionId
+    acpInitialized = true
+  except:
+    # assuming acp server cmd not in PATH, or other error
+    errorPrint "[acp_ipc]: error: ", getCurrentExceptionMsg()
+    return
 
 proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   let rawText = response[cstring"text"]
