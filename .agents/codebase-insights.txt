@@ -4,6 +4,7 @@
 - Added a regression test ensuring `ExprLoader` detects Ruby `each` loops correctly.
 - The `tui` crate contains a sample trace under `src/tui/trace/` used for basic testing.
 - The Debug Adapter Protocol client communicates over a Unix domain socket using the same framing protocol, implemented in `src/tui/src/dap_client.rs`.
+- Pointer address formatting relies on JS `BigInt` via `importjs` for renderer builds, while native builds use standard parsing (`formatPointerAddress` in `src/common/common_types/utils/text_representation.nim`), avoiding Nim-to-JS uint64 quirks.
 - Added initial SetBreakpoints handling in db-backend DAP server.
 - When using the DAP stdio transport, all diagnostic output must go to stderr
   to avoid corrupting the message stream.

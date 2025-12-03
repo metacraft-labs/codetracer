@@ -2,6 +2,29 @@ proc asmName*(location: Location): langstring =
   ## Convert location object to string
   langstring(fmt"{location.path}:{location.functionName}")
 
+when defined(js):
+  proc jsParseUint64ToHex*(text: cstring): cstring {.importjs: "(function(s){try{const v=BigInt(s); if(v<0n) return \"\"; return v.toString(16);}catch(_){return \"\";}})(#)", nodecl.}
+    ## Parse decimal text to hex using JS BigInt; returns empty string on invalid input.
+
+func formatPointerAddress(address: langstring): string =
+  ## Render pointer addresses as 0x-prefixed hex; fall back when the text is not a decimal number.
+  let addressStr = $address
+  if addressStr.len == 0:
+    return addressStr
+  if addressStr.startsWith("0x") or addressStr.startsWith("0X"):
+    return addressStr
+  when defined(js):
+    let hex = $jsParseUint64ToHex(addressStr.cstring)
+    if hex.len > 0:
+      return "0x" & hex
+  else:
+    try:
+      let parsed = parseBiggestUInt(addressStr)
+      return "0x" & parsed.toHex
+    except CatchableError:
+      discard
+  addressStr
+
 proc text(value: Value, depth: int): string = #{.exportc: "textValue".}=
   ## Textual representation of a Value object
   var offset = repeat("  ", depth)
@@ -53,7 +76,8 @@ proc text(value: Value, depth: int): string = #{.exportc: "textValue".}=
   of Union:
     "Union($1)" % $value.typ.langType
   of Pointer:
-    var res = "Pointer($1)" % $value.address
+    let address = formatPointerAddress(value.address)
+    var res = "Pointer($1)" % address
     if not value.refValue.isNil:
       res.add(":\n$1" % text(value.refValue, depth + 1))
     res
@@ -297,7 +321,8 @@ func textReprDefault(value: Value, depth: int = 10): string =
   of Ref:
     textReprDefault(value.refValue, depth)
   of Pointer:
-    if not value.refValue.isNil: &"{value.address} -> ({textReprDefault(value.refValue)})" else: "NULL"
+    let address = formatPointerAddress(value.address)
+    if not value.refValue.isNil: &"{address} -> ({textReprDefault(value.refValue)})" else: "NULL"
   of Recursion:
     "this"
   of Raw:
@@ -395,7 +420,8 @@ func textReprRust(value: Value, depth: int = 10, compact: bool = false): string 
   of Ref:
      &"ref {langType}: {textReprRust(value.refValue, depth, compact)}"
   of Pointer:
-    if not value.refValue.isNil: &"{value.address} -> *{langType}({textReprRust(value.refValue, depth, compact)})" else: "NULL"
+    let address = formatPointerAddress(value.address)
+    if not value.refValue.isNil: &"{address} -> {textReprRust(value.refValue, depth, compact)}" else: "NULL"
   of FunctionKind:
     &"fn {value.functionLabel}: {value.signature}" # $value.signature
   of Tuple:
