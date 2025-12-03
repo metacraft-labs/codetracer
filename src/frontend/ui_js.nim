@@ -1561,6 +1561,7 @@ proc configureIPC(data: Data) =
     # Acp communication
     # TODO: Rename to "acp-session-update"
     "acp-receive-response"
+    "acp-prompt-start"
     "acp-create-terminal"
 
   duration("configureIPCRun")
