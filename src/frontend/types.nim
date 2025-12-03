@@ -773,7 +773,6 @@ type
     monacoEditor*: MonacoEditor
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
-    diffEditor*: DiffEditor
     isLoading*: bool
 
   StepListComponent* = ref object of Component
