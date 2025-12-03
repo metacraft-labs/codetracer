@@ -5,7 +5,6 @@ const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
 const PLACEHOLDER_MSG = "placeholder-msg"
 const TERMINAL_PREFIX = "acp-term-"
-const PLACEHOLDER_MSG = "placeholder-msg"
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -37,48 +36,6 @@ proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
   let trueLineNumber = toCString(line - 1)
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
   result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
-
-proc parseUnifiedDiff(patch: string): (string, string) =
-  ## Very simple unified diff parser:
-  ## - skips headers: diff/index/---/+++/@@
-  ## - '+' lines -> only in modified
-  ## - '-' lines -> only in original
-  ## - ' ' lines -> in both
-  ## - others -> in both verbatim
-  var origLines: seq[string] = @[]
-  var modLines: seq[string] = @[]
-
-  for line in patch.splitLines():
-    if line.len == 0:
-      origLines.add("")
-      modLines.add("")
-      continue
-
-    if line.startsWith("diff ") or
-       line.startsWith("index ") or
-       line.startsWith("--- ") or
-       line.startsWith("+++ ") or
-       line.startsWith("@@"):
-      continue
-
-    let first = line[0]
-    case first
-    of '+':
-      # added line in modified
-      modLines.add(line.substr(1))
-    of '-':
-      # removed line in original
-      origLines.add(line.substr(1))
-    of ' ':
-      let t = line.substr(1)
-      origLines.add(t)
-      modLines.add(t)
-    else:
-      # unknown prefix: mirror into both
-      origLines.add(line)
-      modLines.add(line)
-
-  (origLines.join("\n"), modLines.join("\n"))
 
 proc createUserMessageContent(msg: AgentMessage): VNode =
   buildHtml(tdiv(class="agent-msg-wrapper")):
@@ -201,18 +158,6 @@ proc passwordPromp(self: AgentActivityComponent): VNode =
       input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
       tdiv(class="password-continue-button"):
         text "Continue"
-
-proc userPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
-  result = buildHtml(tdiv(class="prompt-wrapper")):
-    tdiv(class="header-wrapper"):
-      text prompt
-    tdiv(class="user-options-wrapper"):
-      for option in options:
-        tdiv(class="user-option"):
-          text option
-
-proc loadingState(self: AgentActivityComponent): VNode =
-  result = buildHtml(tdiv(class="loading-animation"))
 
 proc parseUnifiedDiff(patch: string): (string, string) =
   ## Very simple unified diff parser:
