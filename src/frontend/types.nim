@@ -764,11 +764,6 @@ type
   AgentTerminal* = object
     id*: cstring
     shell*: ShellComponent
-  AgentComponent* = enum
-    AgentComponentTerminal
-    AgentComponentDiffEditor
-
-  AgentComponent* = enum AgentTerminal, AgentDiffEditor
 
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
@@ -785,7 +780,6 @@ type
     terminalOrder*: seq[cstring]
     acpInitSent*: bool
     activeAgentMessageId*: cstring
-    isLoading*: bool
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
