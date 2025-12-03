@@ -179,55 +179,15 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
 
   await ensureAcpConnection()
 
-  let procHandle = spawnProcess(defaultCmd, defaultArgs)
-
-  echo "[acp_ipc] started the acp server"
-
-  let stream = ndJsonStream(
-    toWebWritable(stdinOf(procHandle)),
-    toWebReadable(stdoutOf(procHandle)))
-
-  echo "[acp_ipc] set up the pipes"
-
-  var aggregatedContent = cstring""
-  var collectedUpdates: seq[JsObject] = @[]
-
-  let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
-    collectedUpdates.add(params)
-
-    try:
-      if jsHasKey(params, cstring"update"):
-        let updateObj = params[cstring"update"]
-        if jsHasKey(updateObj, cstring"sessionUpdate"):
-          let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
-          if updateKind == cstring"agent_message_chunk" and
-             jsHasKey(updateObj, cstring"content") and
-             jsHasKey(updateObj[cstring"content"], cstring"text"):
-            let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
-            aggregatedContent &= chunk
-            mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-              "id": messageId,
-              "content": chunk
-            })
-    except:
-      errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
-
-  # ClientSideConnection expects a factory function, not a plain object
-  let clientConn = newClientSideConnection(asFactory(makeClient(handleSessionUpdate)), stream)
-
-  echo "[acp_ipc] established a client-side connection"
-
-  let initResp = await clientConn.initialize(initRequest())
-  echo "[acp_ipc] initialized response raw=", stringify(initResp)
-
-  let sessionResp = await clientConn.newSession(newSessionRequest())
-
-  let sessionId = sessionIdFrom(sessionResp)
-
   echo "[acp_ipc] sending prompt: ", text
   activeAggregatedContent = cstring""
   activeCollectedUpdates = @[]
   currentMessageId = messageId
+  # Notify UI of the in-flight message id up front so cancel can target it.
+  mainWindow.webContents.send("CODETRACER::acp-prompt-start", js{
+    "id": messageId,
+    "sessionId": currentSessionId
+  })
 
   let promptResp = await acpClient.prompt(promptRequest(acpSessionId, text))
   let stopReason = stopReasonFrom(promptResp)
@@ -250,6 +210,7 @@ proc onAcpStop*(sender: js, response: JsObject) {.async.} =
     echo "[acp_ipc] stop requested but ACP not initialized"
     return
 
+  echo fmt"[acp_ipc] stopping session: {currentSessionId}"
   try:
     await acpClient.cancel(js{ "sessionId": currentSessionId })
     if currentMessageId.len > 0:
@@ -261,4 +222,32 @@ proc onAcpStop*(sender: js, response: JsObject) {.async.} =
     activeAggregatedContent = cstring""
     activeCollectedUpdates = @[]
   except:
-    errorPrint cstring(fmt"[acp_ipc] stop failed: {getCurrentExceptionMsg()}"))
+    errorPrint cstring(fmt"[acp_ipc] stop failed: {getCurrentExceptionMsg()}")
+
+proc onAcpCancelPrompt*(sender: js, response: JsObject) {.async.} =
+  if not acpInitialized or acpClient.isNil:
+    echo "[acp_ipc] cancel requested but ACP not initialized"
+    return
+
+  let requestMessageId =
+    if jsHasKey(response, cstring"messageId"):
+      let mid = cast[cstring](response[cstring"messageId"])
+      if mid.len > 0: mid else: currentMessageId
+    else:
+      currentMessageId
+
+  echo fmt"[acp_ipc] cancelling prompt for session={currentSessionId} messageId={requestMessageId}"
+
+  try:
+    await acpClient.cancel(js{ "sessionId": currentSessionId })
+    if requestMessageId.len > 0:
+      mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+        "id": requestMessageId,
+        "stopReason": "cancelled"
+      })
+    if requestMessageId == currentMessageId:
+      currentMessageId = cstring""
+      activeAggregatedContent = cstring""
+      activeCollectedUpdates = @[]
+  except:
+    errorPrint cstring(fmt"[acp_ipc] cancel prompt failed: {getCurrentExceptionMsg()}")

@@ -5,7 +5,6 @@ const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
 const PLACEHOLDER_MSG = "placeholder-msg"
 const TERMINAL_PREFIX = "acp-term-"
-var acpInitRequested = false
 const PLACEHOLDER_MSG = "placeholder-msg"
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
@@ -181,6 +180,7 @@ proc submitPrompt(self: AgentActivityComponent) =
     return
 
   self.inputValue = promptText
+  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
   let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
@@ -279,9 +279,9 @@ method render*(self: AgentActivityComponent): VNode =
   let inputId = INPUT_ID
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
-  if not acpInitRequested:
+  if not self.acpInitSent:
     data.ipc.send("CODETRACER::acp-init-session", js{})
-    acpInitRequested = true
+    self.acpInitSent = true
   # let source =
   self.kxi.afterRedraws.add(proc() =
     if not self.kxi.isNil and not self.shell.initialized and self.diffEditor.isNil:
@@ -358,7 +358,7 @@ index 71d1dec8..f8499310 100644
         if message.role == AgentMessageUser:
           createUserMessageContent(message)
         else:
-          createMessageContent(message)
+          createMessageContent(self, message)
 
       for termId in self.terminalOrder:
         let terminal = self.terminals[termId]
@@ -432,7 +432,14 @@ index 71d1dec8..f8499310 100644
           tdiv(
             class="agent-stop-button",
             onclick = proc =
-              echo "END PROCESS NOW!" # TODO: Maybe state for disabled when we are stopping the action?
+              echo fmt"[agent-activity] stopping session: {self.data.services.debugger.location.path}"
+              if self.activeAgentMessageId.len > 0:
+                data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+                  "messageId": self.activeAgentMessageId
+                })
+              else:
+                data.ipc.send("CODETRACER::acp-cancel-prompt", js{})
+              self.isLoading = false
           )
 
 proc asyncSleep(ms: int): Future[void] =
@@ -454,6 +461,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     self.messages.del(PLACEHOLDER_MSG)
     # TODO: Make a end-process for the isLoading state
     self.isLoading = false
+    self.activeAgentMessageId = cstring""
     break
 
   scrollAgentCom()
@@ -470,9 +478,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     elif jsHasKey(response, cstring"id"):
       cast[cstring](response[cstring"id"])
     else:
-      block:
-        let orderLen = if self.messageOrder.len == 0: 0 else: self.messageOrder.len
-        cstring(fmt"acp-{orderLen}")
+      PLACEHOLDER_MSG
 
   console.log cstring"[agent-activity] got messageId"
 
@@ -493,6 +499,8 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   if hasContent or not self.messages.hasKey(messageId):
     try:
       self.updateAgentMessageContent(messageId, content, appendFlag)
+      console.log cstring(fmt"[agent-activity] updated active messageId={messageId} append={appendFlag}")
+      self.activeAgentMessageId = messageId
       console.log cstring"[agent-activity] update + redraw complete"
       console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
     except:
@@ -522,5 +530,19 @@ proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
   discard self.addTerminal(terminalId)
   self.redraw()
 
-  discard self.addTerminal(terminalId)
-  self.redraw()
+proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
+  console.log cstring"[agent-activity] onAcpPromptStart"
+  console.log response
+
+  var self: AgentActivityComponent = nil
+  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
+    self = AgentActivityComponent(comp)
+    break
+
+  if self.isNil:
+    console.log cstring"[agent-activity] no AgentActivity component to receive prompt start"
+    return
+
+  if jsHasKey(response, cstring"id"):
+    self.activeAgentMessageId = cast[cstring](response[cstring"id"])
+    console.log cstring(fmt"[agent-activity] set activeAgentMessageId from prompt-start: {self.activeAgentMessageId}")
