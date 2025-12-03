@@ -1555,9 +1555,14 @@ impl Handler {
         arg: LocalStepJump,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        self.replay.jump_to(StepId(arg.rr_ticks))?;
-        self.step_id = self.replay.current_step_id();
-        self.complete_move(false, sender)?;
+        if self.trace_kind == TraceKind::DB {
+            self.replay.jump_to(StepId(arg.rr_ticks))?;
+            self.step_id = self.replay.current_step_id();
+
+            self.complete_move(false, sender)?;
+        } else {
+            warn!("local_step_jump not implemented for RR traces");
+        }
         Ok(())
     }
 
