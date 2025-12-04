@@ -1391,13 +1391,30 @@ proc ensureTestLineContainer(self: EditorViewComponent, line: int) =
   if not self.testDom.hasKey(line) and self.testLines[line].contentWidget.isNil:
     self.makeTestLineContainer(line)
 
+proc getLineFunctionName(self: EditorViewComponent, line: int): cstring =
+  let model = self.monacoEditor.getModel()
+  let lineContent = $cast[cstring](model.getLineContent(line))
+
+  let tokens = lineContent.split("fn ")
+  var name = "".cstring
+  if tokens.len() > 1:
+    name = tokens[^1].split("(")[0]
+  
+  return name
+
 proc testVNode(self: EditorViewComponent, line: int): VNode =
+  let testName = self.getLineFunctionName(line + 1)
+
   buildHtml(
     tdiv(
       id = &"ct-test-action-{self.id}-{line}",
       class = "flow-parallel flow-parallel-value-single editor-test-action",
       onclick = proc() =
-        echo "###### TODO: ADD FUNCTIONALITY"
+        if testName.len() > 0:
+          self.runTest(testName, self.name, line, 1)
+          self.api.infoMessage(&"\"{testName}\" started")
+        else:
+          self.api.errorMessage("Coudln't extract test name.")
     )
   ):
     text "Run test >"
