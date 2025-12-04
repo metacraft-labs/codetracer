@@ -312,6 +312,7 @@ impl Handler {
 
         // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
         let mut location = self.replay.load_location(&mut self.expr_loader)?;
+        self.step_id = self.replay.current_step_id();
         // let call_key = location.call_key; // self.db.call_key_for_step(self.step_id);
         location = self
             .flow_preloader
@@ -730,7 +731,11 @@ impl Handler {
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let _ = self.replay.event_jump(&event)?;
+        if event.kind != EventLogKind::TraceLogEvent {
+            let _ = self.replay.event_jump(&event)?;
+        } else {
+            let _ = self.replay.tracepoint_jump(&event)?;
+        }
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
 
@@ -1472,7 +1477,6 @@ impl Handler {
         self.replay.tracepoint_jump(&event)?;
         // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         _ = self.replay.load_location(&mut self.expr_loader)?;
-        self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
         Ok(())
     }
