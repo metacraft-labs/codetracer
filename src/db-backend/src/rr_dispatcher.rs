@@ -343,4 +343,10 @@ impl Replay for RRDispatcher {
         let location = self.load_location_directly().expect("access to step_id");
         StepId(location.rr_ticks.0)
     }
+
+    fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        self.stable.run_query(CtRRQuery::TracepointJump { event: event.clone() })?;
+        Ok(())
+    }
 }

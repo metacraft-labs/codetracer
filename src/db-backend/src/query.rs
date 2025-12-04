@@ -48,4 +48,7 @@ pub enum CtRRQuery {
     CallstackJump {
         depth: usize,
     },
+    TracepointJump {
+        event: ProgramEvent,
+    }
 }
