@@ -30,6 +30,7 @@ const MONACO_SHORTCUTS_WHITELIST: seq[cstring] =
 const EDITOR_GUTTER_PADDING = 2 #px
 
 method render*(self: EditorViewComponent): VNode
+proc getLineFunctionName(self: EditorViewComponent, line: int): cstring
 proc removeClasses(index: int, class: cstring, name: string)
 proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
@@ -735,13 +736,9 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         # fn test_1() {
         # ..
         # }
-        let column = 8 
-        let position = JsObject{
-          lineNumber: line + 1,
-          column: column,
-        }
+        let column = 1
         let path = self.name
-        let testName = self.getTokenFromPosition(position)
+        let testName = self.getLineFunctionName(line + 1)
         clog cstring"test name: " & testName
         let runTest = ContextMenuItem(
           name: "Re-record and replay this test",

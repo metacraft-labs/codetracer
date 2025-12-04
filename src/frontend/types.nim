@@ -521,6 +521,7 @@ type
   Component* = ref object of RootObj
     data*: Data
     isDbBasedTrace*: bool
+    isDbBasedTraceSet*: bool
     config*: Config
     id*: int
     rendered*: bool
@@ -740,7 +741,6 @@ type
     width*: cstring
     resizeObserver*: ResizeObserver
     isCalltrace*: bool
-    isDbBasedTraceSet*: bool
 
     debugger*:       DebuggerService
     service*:        CalltraceService
