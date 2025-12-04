@@ -1325,6 +1325,8 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
   if not envObject.isNil:
     options["env".cstring] = envObject
 
+  options[cstring"stdio"] = cstring"ignore"
+
   data.viewsApi.infoMessage(cstring"Building/recording a new trace…")
   data.ipc.send(
     "CODETRACER::new-record",
