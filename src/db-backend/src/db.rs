@@ -16,8 +16,8 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, Location, ProgramEvent,
-    RRTicks, VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
+    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResult,
+    LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
 };
 use crate::value::{Type, Value, ValueRecordWithType};
 
@@ -1113,6 +1113,10 @@ impl DbReplay {
     fn load_path_id(&self, path: &str) -> Option<PathId> {
         self.db.path_map.get(path).copied()
     }
+
+    fn id_to_name(&self, variable_id: VariableId) -> &String {
+        &self.db.variable_names[variable_id]
+    }
 }
 
 impl Replay for DbReplay {
@@ -1236,6 +1240,58 @@ impl Replay for DbReplay {
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
         warn!("load_callstack not implemented for db traces currently");
         Ok(vec![])
+    }
+
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResult>, Box<dyn Error>> {
+        let mut history_results: Vec<HistoryResult> = vec![];
+        // from start to end:
+        //  find all steps with such a variable name: for them:
+        //    detect if the value is the same as the previous value
+        //    if not: add to the history
+
+        let current_call_key = self.db.steps[self.step_id].call_key;
+
+        for (step_id, var_list) in self.db.variables.iter().enumerate() {
+            let step = self.db.steps[StepId(step_id as i64)];
+            // for now limit to current call: seems most correct
+            // TODO: hopefully a more reliable value history for global search
+            if step.call_key == current_call_key {
+                if let Some(var) = var_list
+                    .iter()
+                    .find(|v| *self.id_to_name(v.variable_id) == arg.expression)
+                {
+                    let step_location = Location::new(
+                        &arg.location.path,
+                        arg.location.line,
+                        // assuming usize is always safely
+                        // castable as i64 on 64bit arch?
+                        RRTicks(step_id as i64),
+                        &arg.location.function_name,
+                        &arg.location.key,
+                        &arg.location.global_call_key,
+                        arg.location.callstack_depth,
+                    );
+                    let ct_value = self.db.to_ct_value(&var.value);
+                    if history_results.len() > 1 {
+                        if history_results[history_results.len() - 1].value != ct_value {
+                            history_results.push(HistoryResult::new(
+                                step_location.clone(),
+                                ct_value,
+                                self.id_to_name(var.variable_id).to_string(),
+                            ));
+                        }
+                    } else {
+                        history_results.push(HistoryResult::new(
+                            step_location.clone(),
+                            ct_value,
+                            self.id_to_name(var.variable_id).to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(history_results)
     }
 
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {

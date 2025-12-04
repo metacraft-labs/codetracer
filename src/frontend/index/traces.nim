@@ -1,5 +1,5 @@
 import
-  std / [ async, jsffi, strutils, sequtils, strformat, os, json ],
+  std / [ async, jsffi, strutils, sequtils, strformat, os, json, jsconsole ],
   electron_vars, files, config, debugger,
   results,
   ipc_subsystems/[ dap, socket ],
@@ -72,6 +72,11 @@ proc assignTrace(traceId: int): Future[bool] {.async.} =
   return true
 
 when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
+  # IMPORTANT: don't use this if you need to read/process the output
+  #   use `readProcessOutput` or custom handling for that
+  #   we here try to ignore or let the user inherit the stdio on purpose!
+  #   to not hang the internal process with unhandled buffers/events
+  #   which has happened several times
   proc startProcess*(
     path: cstring,
     args: seq[cstring],
@@ -79,7 +84,16 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
     # important to ignore stderr, as otherwise too much of it can lead to
     # the spawned process hanging: this is a bugfix for such a situation
 
+    var processOptions = options
+    if processOptions.stdio.isNil: # nil or undefined
+      processOptions.stdio = cstring"ignore" 
+      # make sure we don't let it be the default/not set
+      # as this seems to lead to pass it to internal buffer/events
+      # and as we might not handle that, this leads to hanging?
+      # would be problem for reading, but there is `readProcessOutput` for it
+      # and it doesn't use this `startProcess` !
     let futureHandler = proc(resolve: proc(res: Result[NodeSubProcess, JsObject])) =
+      console.log options
       let process = nodeStartProcess.spawn(path, args, options)
       process.toJs.on("spawn", proc() =
         resolve(Result[NodeSubProcess, JsObject].ok(process)))
@@ -335,7 +349,7 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     else:
       errorPrint "There is no record at given path."
 
-proc sendNewNotification*(kind: NotificationKind, message: string) =
+proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "new-notification", notification
 
@@ -364,7 +378,7 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
       errorPrint "index: build: can't find a filename or project to build: stopping"
       # should be working, but there was a problem: TODO maybe debug more
       # but ther other `failed-record` also works here for errors indeed, i noticed it later 
-      # sendNewNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
+      # sendNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
       mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"index: build: can't find a filename or project to build: stopping"}
       return
 
@@ -406,6 +420,7 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
 
   if processResult.isOk:
     infoPrint "index: record process started with pid " & $processResult.value.pid
+    sendNotification(NotificationKind.NotificationInfo, "ct record process started")
     data.recordProcess = processResult.value
     let error = await waitProcessResult(processResult.value)
 
