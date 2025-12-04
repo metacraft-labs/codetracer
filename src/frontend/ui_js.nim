@@ -1580,6 +1580,13 @@ proc zoomInEditors*(data: Data) =
     for path, editor in data.ui.editors:
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
+      for id, zone in editor.testDom:
+        let textModel = editor.monacoEditor.getModel()
+        let lineContent = textModel.getLineContent(id)
+        let editorConfiguration = editor.monacoEditor.config
+        let lineHeight = editorConfiguration.lineHeight
+        zone.toJs.firstChild.style.left = fmt"calc({lineContent.len()}ch + 1ch)"
+        zone.toJs.firstChild.style.lineHeight = fmt"{lineHeight}px"
       for line, zone in editor.diffViewZones:
         zone.dom.style.fontSize = cstring($data.ui.fontSize) & cstring"px"
         let editorContentLeft = editor.monacoEditor
@@ -1590,15 +1597,15 @@ proc zoomInEditors*(data: Data) =
         options.fontSize = data.ui.fontSize
         diffEditor.updateOptions(options)
     # Agent diff Editors
-    for a in data.ui.componentMapping[Content.AgentActivity]:
-      # for now only one TODO: Make more than one diff editor active at a time
-      let agent = cast[AgentActivityComponent](a)
-      let modEditor = agent.diffEditor.getModifiedEditor()
-      let orgEditor = agent.diffEditor.getOriginalEditor()
+    # for a in data.ui.componentMapping[Content.AgentActivity]:
+    #   # for now only one TODO: Make more than one diff editor active at a time
+    #   let agent = cast[AgentActivityComponent](a)
+    #   let modEditor = agent.diffEditor.getModifiedEditor()
+    #   let orgEditor = agent.diffEditor.getOriginalEditor()
 
-      let options = orgEditor.getOptions()
-      options.fontSize = data.ui.fontSize
-      agent.diffEditor.updateOptions(cast[MonacoEditorOptions](options))
+    #   let options = orgEditor.getOptions()
+    #   options.fontSize = data.ui.fontSize
+    #   agent.diffEditor.updateOptions(cast[MonacoEditorOptions](options))
     redrawAll()
     clog "editor: zoom in!"
 
@@ -1616,6 +1623,13 @@ proc zoomOutEditors*(data: Data) =
     for path, editor in data.ui.editors:
       if not editor.flow.isNil and not editor.flow.flow.isNil:
         editor.flow.redrawFlow()
+      for id, zone in editor.testDom:
+        let textModel = editor.monacoEditor.getModel()
+        let lineContent = textModel.getLineContent(id)
+        let editorConfiguration = editor.monacoEditor.config
+        let lineHeight = editorConfiguration.lineHeight
+        zone.toJs.firstChild.style.left = fmt"calc({lineContent.len()}ch + 1ch)"
+        zone.toJs.firstChild.style.lineHeight = fmt"{lineHeight}px"
       for line, zone in editor.diffViewZones:
         zone.dom.style.fontSize = cstring($(data.ui.fontSize)) & cstring"px"
         let editorContentLeft = editor.monacoEditor
@@ -1625,16 +1639,16 @@ proc zoomOutEditors*(data: Data) =
         let options = cast[MonacoEditorOptions](diffEditor.getOptions())
         options.fontSize = data.ui.fontSize
         diffEditor.updateOptions(options)
-    # Agent diff Editors
-    for a in data.ui.componentMapping[Content.AgentActivity]:
-      # for now only one TODO: Make more than one diff editor active at a time
-      let agent = cast[AgentActivityComponent](a)
-      let modEditor = agent.diffEditor.getModifiedEditor()
-      let orgEditor = agent.diffEditor.getOriginalEditor()
+    # # Agent diff Editors
+    # for a in data.ui.componentMapping[Content.AgentActivity]:
+    #   # for now only one TODO: Make more than one diff editor active at a time
+    #   let agent = cast[AgentActivityComponent](a)
+    #   let modEditor = agent.diffEditor.getModifiedEditor()
+    #   let orgEditor = agent.diffEditor.getOriginalEditor()
 
-      let options = orgEditor.getOptions()
-      options.fontSize = data.ui.fontSize
-      agent.diffEditor.updateOptions(cast[MonacoEditorOptions](options))
+    #   let options = orgEditor.getOptions()
+    #   options.fontSize = data.ui.fontSize
+    #   agent.diffEditor.updateOptions(cast[MonacoEditorOptions](options))
     redrawAll()
     clog "editor: zoom out!"
 
