@@ -1469,7 +1469,9 @@ impl Handler {
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
+        self.replay.tracepoint_jump(&event)?;
+        // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
+        _ = self.replay.load_location(&mut self.expr_loader)?;
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
         Ok(())

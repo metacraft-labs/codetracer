@@ -49,5 +49,7 @@ pub trait Replay: std::fmt::Debug {
     fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>>;
     fn callstack_jump(&mut self, depth: usize) -> Result<(), Box<dyn Error>>;
 
+    fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>>;
+
     fn current_step_id(&mut self) -> StepId;
 }

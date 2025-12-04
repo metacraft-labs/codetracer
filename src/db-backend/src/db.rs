@@ -337,16 +337,14 @@ impl Db {
                 res
             }
             ValueRecord::Variant {
-                discriminator: _,
-                contents: _,
-                type_id: _,
+                discriminator,
+                contents,
+                type_id,
             } => {
-                // variant-like enums not generated yet from noir tracer:
-                //   we should support variants in general, but we'll think a bit first how
-                //   to more cleanly/generally represent them in the codetracer code, as the current
-                //   `Value` mapping doesn't seem great imo
-                //   we can improve it, or we can add a new variant case (something more similar to the runtime_tracing repr?)
-                todo!("a more suitable codetracer value/type for variants")
+                let mut res = Value::new(TypeKind::Variant, self.to_ct_type(type_id));
+                res.active_variant = discriminator.to_string();
+                res.active_variant_value = Some(Box::new(self.to_ct_value(contents)));
+                res
             }
             ValueRecord::Reference {
                 dereferenced,
@@ -1334,5 +1332,10 @@ impl Replay for DbReplay {
 
     fn current_step_id(&mut self) -> StepId {
         self.step_id
+    }
+
+    fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>> {
+        _ = self.event_jump(event)?;
+        Ok(())
     }
 }
