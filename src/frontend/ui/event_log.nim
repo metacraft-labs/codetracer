@@ -1180,7 +1180,17 @@ proc afterMove(self: EventLogComponent) =
     self.isFlowUpdate = false
 
 method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
+  self.location = response.location
+  let lang = toLangFromFilename(self.location.path)
   # if self.data.ui.activeFocus != self:
+  if not self.isDbBasedTraceSet:
+    self.isDbBasedTrace = lang != LangUnknown and lang.isDbBased
+    self.isDbBasedTraceSet = true
+    try:
+      self.denseTable.context.column(2).visible(false)
+    except:
+      cwarn "Complete move came before initializing the event log component"
+  
   let currentTime: int64 = now()
   self.location = response.location
 
