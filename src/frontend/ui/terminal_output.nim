@@ -128,7 +128,9 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
             self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
 
 method onLoadedTerminal*(self: TerminalOutputComponent, eventList: seq[ProgramEvent]) {.async.} =
+  self.initialUpdate = false
   self.cacheAnsiToHtmlLines(eventList)
+  
 
 proc onTerminalEventClick(self: TerminalOutputComponent, eventElement: ProgramEvent) =
   self.api.emit(CtEventJump, eventElement)
@@ -183,7 +185,7 @@ proc terminalLineView(self: TerminalOutputComponent, i: int, lineEvents: seq[Ter
 method render*(self: TerminalOutputComponent): VNode  =
   if self.initialUpdate:
     self.getLines()
-    self.initialUpdate = false
+    # self.initialUpdate = false
 
   buildHtml(
     tdiv(class=componentContainerClass("terminal"))
@@ -194,7 +196,10 @@ method render*(self: TerminalOutputComponent): VNode  =
           terminalLineView(self, i, lineEvents)
       else:
         tdiv(class="empty-overlay"):
-          text "The current record does not print anything to the terminal."
+          if not self.initialUpdate:
+            text "The current record does not print anything to the terminal."
+          else:
+            text "Loading record output..."
 
 method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
   self.api = api

@@ -315,8 +315,8 @@ proc createUIComponents*(data: Data) =
 
 proc requestInitialPanelData*(data: Data) =
   ## Ask backend to resend panel data that isn't automatically replayed.
-  data.viewsApi.emit(CtLoadTerminal, EmptyArg())
   data.viewsApi.emit(CtEventLoad, EmptyArg())
+  data.viewsApi.emit(CtLoadTerminal, EmptyArg())
 
 # proc saveNew(data: Data, file: SaveFile) =
 #   ipc.send "CODETRACER::save-new", file

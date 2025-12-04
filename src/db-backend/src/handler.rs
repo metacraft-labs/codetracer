@@ -1731,14 +1731,16 @@ impl Handler {
 
     pub fn load_terminal(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let mut events_list: Vec<ProgramEvent> = vec![];
-        for (i, event_record) in self.db.events.iter().enumerate() {
-            if event_record.kind == EventLogKind::Write {
-                events_list.push(self.to_program_event(event_record, i));
+        if self.event_db.single_tables.len() > 0 {
+            for (_i, event_record) in self.event_db.single_tables[0].events.iter().enumerate() {
+                if event_record.kind == EventLogKind::Write {
+                    events_list.push(event_record.clone());
+                }
             }
-        }
 
-        let raw_event = self.dap_client.loaded_terminal_event(events_list)?;
-        sender.send(raw_event)?;
+            let raw_event = self.dap_client.loaded_terminal_event(events_list)?;
+            sender.send(raw_event)?;
+        }
 
         Ok(())
     }
