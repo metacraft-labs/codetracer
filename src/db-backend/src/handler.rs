@@ -28,11 +28,10 @@ use crate::task::{self, Breakpoint, GlobalCallLineIndex, StringAndValueTuple, Tr
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
     CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation,
-    HistoryResult, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate,
-    LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks,
-    RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task,
-    TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION,
-    NO_STEP_ID,
+    HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump,
+    Location, MoveState, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg,
+    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId,
+    TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
@@ -803,64 +802,16 @@ impl Handler {
         load_history_arg: LoadHistoryArg,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        if self.trace_kind == TraceKind::RR {
-            warn!("history not implemented yet for rr traces");
-            self.send_notification(
-                NotificationKind::Warning,
-                "history not implemented yet for rr traces",
-                false,
-                sender.clone(),
-            )?;
+        let history_results = self.replay.load_history(&load_history_arg)?;
+        // warn!("history not implemented yet for rr traces");
+        // self.send_notification(
+        //     NotificationKind::Warning,
+        //     "history not implemented yet for rr traces",
+        //     false,
+        //     sender.clone(),
+        // )?;
 
-            return Ok(());
-        }
-        let mut history_results: Vec<HistoryResult> = vec![];
-        // from start to end:
-        //  find all steps with such a variable name: for them:
-        //    detect if the value is the same as the previous value
-        //    if not: add to the history
-
-        let current_call_key = self.db.steps[self.step_id].call_key;
-
-        for (step_id, var_list) in self.db.variables.iter().enumerate() {
-            let step = self.db.steps[StepId(step_id as i64)];
-            // for now limit to current call: seems most correct
-            // TODO: hopefully a more reliable value history for global search
-            if step.call_key == current_call_key {
-                if let Some(var) = var_list
-                    .iter()
-                    .find(|v| *self.id_to_name(v.variable_id) == load_history_arg.expression)
-                {
-                    let step_location = Location::new(
-                        &load_history_arg.location.path,
-                        load_history_arg.location.line,
-                        // assuming usize is always safely
-                        // castable as i64 on 64bit arch?
-                        RRTicks(step_id as i64),
-                        &load_history_arg.location.function_name,
-                        &load_history_arg.location.key,
-                        &load_history_arg.location.global_call_key,
-                        load_history_arg.location.callstack_depth,
-                    );
-                    let ct_value = self.db.to_ct_value(&var.value);
-                    if history_results.len() > 1 {
-                        if history_results[history_results.len() - 1].value != ct_value {
-                            history_results.push(HistoryResult::new(
-                                step_location.clone(),
-                                ct_value,
-                                self.id_to_name(var.variable_id).to_string(),
-                            ));
-                        }
-                    } else {
-                        history_results.push(HistoryResult::new(
-                            step_location.clone(),
-                            ct_value,
-                            self.id_to_name(var.variable_id).to_string(),
-                        ));
-                    }
-                }
-            }
-        }
+        // return Ok(());
 
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
         let raw_event = self.dap_client.updated_history_event(history_update)?;

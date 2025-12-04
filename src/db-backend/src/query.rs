@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::lang::Lang;
-use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, Location, ProgramEvent};
+use crate::task::{Action, Breakpoint, CtLoadLocalsArguments, LoadHistoryArg, Location, ProgramEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
@@ -42,6 +42,9 @@ pub enum CtRRQuery {
     },
     LoadAllEvents,
     LoadCallstack,
+    LoadHistory {
+        arg: LoadHistoryArg,
+    },
     EventJump {
         program_event: ProgramEvent,
     },
@@ -50,5 +53,5 @@ pub enum CtRRQuery {
     },
     TracepointJump {
         event: ProgramEvent,
-    }
+    },
 }

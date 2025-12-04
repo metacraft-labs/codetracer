@@ -17,7 +17,8 @@ use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, Location, ProgramEvent, VariableWithRecord,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResult, LoadHistoryArg, Location, ProgramEvent,
+    VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -258,6 +259,14 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResult>, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let res = serde_json::from_str::<Vec<HistoryResult>>(
+            &self.stable.run_query(CtRRQuery::LoadHistory { arg: arg.clone() })?,
+        )?;
+        Ok(res)
+    }
+
     fn jump_to(&mut self, _step_id: StepId) -> Result<bool, Box<dyn Error>> {
         // TODO
         error!("TODO rr jump_to: for now run to entry");
@@ -346,7 +355,8 @@ impl Replay for RRDispatcher {
 
     fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>> {
         self.ensure_active_stable()?;
-        self.stable.run_query(CtRRQuery::TracepointJump { event: event.clone() })?;
+        self.stable
+            .run_query(CtRRQuery::TracepointJump { event: event.clone() })?;
         Ok(())
     }
 }
