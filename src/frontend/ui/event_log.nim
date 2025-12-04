@@ -542,9 +542,13 @@ proc events(self: EventLogComponent) =
           bInfo: false,
           createdRow: rowTimestamp,
           language: js{
-            emptyTable: """The current record appears to not have any system events like std read/write,
+            emptyTable: proc: cstring = 
+              # TODO if self.receivedUpdates:
+              """The current record appears to not have any system events like std read/write,
               network or disc operations.</br>You can add trace point events to your code by selecting any
               line of code and pressing "Enter"""".cstring
+              # else:
+              #   "Loading record events...".cstring
           },
           ajax: proc(
             data: TableArgs,
@@ -1019,6 +1023,8 @@ proc eventLogHeaderView*(self: EventLogComponent): VNode =
 proc loadEvents*(self: EventLogComponent, update: TableData) =
   console.log(cstring(fmt"event_log: loadEvents records={update.data.len} draw={update.draw}"))
   self.programEvents = @[]
+  if update.data.len() > 0:
+    self.receivedUpdates = true
   for i, row in update.data:
     self.programEvents.add(
       ProgramEvent(
@@ -1035,6 +1041,7 @@ proc loadEvents*(self: EventLogComponent, update: TableData) =
         stdout: row.stdout
       )
     )
+
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
   let response = res.tableUpdate
@@ -1070,6 +1077,28 @@ method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.}
 
     dt.rowsCount = response.totalCount
     self.redraw()
+
+method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.async.} =
+  echo "ON UPDATED EVENTS"
+  self.receivedUpdates = true
+  self.data.maxRRTicks = response[0].maxRRTicks
+  if self.ignoreOutput:
+    return
+
+  # console.time(cstring"new events loaded")
+
+  for element in response:
+    self.programEvents.add(element)
+    # TODO: use ansi_up or the escape function?
+    # eventually have a flag/shortcut or menu option to
+    # toggle between non-escaped and escaped content
+    # think again about html/xml in content escaping/pre tags
+
+  # console.timeEnd(cstring"new events loaded")
+  if not self.denseTable.isNil and not self.denseTable.context.isNil:
+    self.denseTable.context.ajax.reload()
+  self.redraw()
+  
 
 method clear*(self: EventLogComponent) =
   if not self.denseTable.isNil and not self.denseTable.context.isNil:
@@ -1247,25 +1276,11 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
       self.started = true
       self.api.emit(CtEventLoad, EmptyArg())
   )
+
   api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
-    data.maxRRTicks = response[0].maxRRTicks
-    if self.ignoreOutput:
-      return
-
-    console.time(cstring"new events service")
-
-    for element in response:
-      self.programEvents.add(element)
-      # TODO: use ansi_up or the escape function?
-      # eventually have a flag/shortcut or menu option to
-      # toggle between non-escaped and escaped content
-      # think again about html/xml in content escaping/pre tags
-
-    console.timeEnd(cstring"new events service")
-    if not self.denseTable.isNil and not self.denseTable.context.isNil:
-      self.denseTable.context.ajax.reload()
-    self.redraw()
+    discard self.onUpdatedEvents(response)
   )
+
   api.subscribe(CtUpdatedEventsContent, proc(kind: CtEventKind, response: cstring, sub: Subscriber) =
     if self.ignoreOutput:
       return
@@ -1289,9 +1304,9 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
     discard self.onUpdatedTable(response)
   )
-  api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
-    discard self.onUpdatedTrace(response)
-  )
+  # api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
+  #   discard self.onUpdatedTrace(response)
+  # )
 
   api.emit(InternalLastCompleteMove, EmptyArg())
 

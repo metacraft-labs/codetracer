@@ -580,6 +580,7 @@ type
     started*: bool
     ignoreOutput*: bool
     programEvents*: seq[ProgramEvent]
+    receivedUpdates*: bool
 
 
   DebugComponent* = ref object of Component
@@ -1893,6 +1894,9 @@ method onUpdatedTable*(self: Component, update: TableUpdate) {.base, async.} =
   discard
 
 method onUpdatedTrace*(self: Component, response: TraceUpdate) {.base, async.} =
+  discard
+
+method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.base, async.} =
   discard
 
 method onLoadedTerminal*(self: Component, response: seq[ProgramEvent]) {.base, async.} =
