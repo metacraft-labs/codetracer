@@ -1304,9 +1304,9 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =
     discard self.onUpdatedTable(response)
   )
-  # api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
-  #   discard self.onUpdatedTrace(response)
-  # )
+  api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
+    discard self.onUpdatedTrace(response)
+  )
 
   api.emit(InternalLastCompleteMove, EmptyArg())
 
