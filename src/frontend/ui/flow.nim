@@ -3247,7 +3247,7 @@ proc recalculateAndRedrawFlow*(self: FlowComponent) =
   if not self.flow.isNil:
     self.createFlowLines()
     self.calculateLineHeight()
-    self.renderFlowLines()
+    self.reloadFlow()
 
     if self.mutationObserver.isNil:
       setEditorMutationObserver(self)

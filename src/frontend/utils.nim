@@ -310,6 +310,8 @@ proc makeEditorViewComponent*(
     name: editorName,
     # lowLevel: lowLevel,
     editorView: editorView,
+    testDom: JsAssoc[int, kdom.Node]{},
+    testLines: JsAssoc[int, FlowLine]{},
     tokens: JsAssoc[int, JsAssoc[cstring, int]]{},
     decorations: @[],
     whitespace: Whitespace(character: WhitespaceSpaces, width: 2),

@@ -835,6 +835,8 @@ type
     diffViewZones*: JsAssoc[int, MultilineZone]
     diffAddedLines*: seq[int]
     diffEditors*: JsAssoc[int, MonacoEditor]
+    testDom*: JsAssoc[int, kdom.Node]
+    testLines*: JsAssoc[int, FlowLine]
 
   # LowLevelComponent* = ref object of Component
     # levels*:        array[LowLevelView, LLViewComponent]

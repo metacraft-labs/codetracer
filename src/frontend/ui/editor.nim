@@ -1327,6 +1327,127 @@ proc makeDiffViewZones(self: EditorViewComponent) =
         if isInDeleteChunk:
           self.addDiffView(source, removedLinesNumber, startLineNumber, firstDeletedLineNumber)
 
+proc addContentWidget*(
+  self: EditorViewComponent,
+  dom: Node,
+  line: int,
+  column: int,
+  id: cstring,
+  isStatusWidget: bool = false,
+  isSliderWidget: bool = false
+): JsObject =
+  dom.class = "flow-content-widget"
+  var editor = self.monacoEditor
+
+  let widget = js{
+    domNode: cast[Node](nil),
+    getId: proc: cstring = id,
+    getDomNode: (proc: Node =
+      if cast[Node](jsthis.domNode).isNil:
+        jsthis.domNode = dom
+      cast[Node](jsthis.domNode)),
+    getPosition: (proc: js =
+      js{position: js{lineNumber: parseJSInt(line), column: column}, preference: cast[seq[MonacoContent]](@[EXACT])})
+  }
+
+  self.testLines[line].contentWidget = cast[Node](widget)
+
+  editor.addContentWidget(widget)
+
+  return widget
+
+proc makeTestContainer(self: EditorViewComponent, line: int): Node =
+  let textModel = self.monacoEditor.getModel()
+  let lineContent = textModel.getLineContent(line)
+  let editorConfiguration = self.monacoEditor.config
+  let lineHeight = editorConfiguration.lineHeight
+
+  var style = style(
+    (StyleAttr.left, cstring(fmt"calc({lineContent.len()}ch + 1ch)")),
+    (StyleAttr.fontSize, cstring($(data.ui.fontSize) & "px")),
+    (StyleAttr.lineHeight, cstring($lineHeight & "px")),
+    (StyleAttr.height, cstring($lineHeight & "px")),
+    (StyleAttr.backgroundSize, cstring($(data.ui.fontSize + 2) & "px"))
+  )
+  let vNode = buildHtml(
+    tdiv(
+      id = &"editor-test-container-{self.id}-{line}",
+      class = "flow-loop-step-container",
+      style = style
+    )
+  )
+
+  return vnodeToDom(vNode, KaraxInstance())
+
+proc makeTestLineContainer(self: EditorViewComponent, line: int) =
+  var dom = cast[Node](document.createElement(cstring"div"))
+  let id = cstring(&"ct-test-{self.id}-{line}")
+
+  self.testDom[line] = dom
+
+  discard self.addContentWidget(dom, line, 0, id)
+
+proc ensureTestLineContainer(self: EditorViewComponent, line: int) =
+  if not self.testDom.hasKey(line) and self.testLines[line].contentWidget.isNil:
+    self.makeTestLineContainer(line)
+
+proc testVNode(self: EditorViewComponent, line: int): VNode =
+  buildHtml(
+    tdiv(
+      id = &"ct-test-action-{self.id}-{line}",
+      class = "flow-parallel flow-parallel-value-single editor-test-action",
+      onclick = proc() =
+        echo "###### TODO: ADD FUNCTIONALITY"
+    )
+  ):
+    text "Run test >"
+
+proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
+  cdebug fmt"makeFlowLine position {position}"
+  FlowLine(
+    startBuffer: FlowBuffer(
+      kind: FlowLineBuffer,
+      position: position,
+      loopIds: @[]
+    ),
+    number: position,
+    variablesPositions: JsAssoc[cstring, int]{},
+    sortedVariables: JsAssoc[cstring, Value]{},
+    decorationsIds: @[],
+    decorationsDoms: JsAssoc[cstring, Node]{},
+    stepLoopCells: JsAssoc[int, JsAssoc[int, Node]]{},
+    loopContainers: JsAssoc[int, Node]{},
+    iterationContainers: JsAssoc[int, Node]{},
+    loopIds: @[],
+    sliderPositions: @[],
+    activeLoopIteration: (-1,-1),
+    loopStepCounts: JsAssoc[int, seq[int]]{}
+  )
+
+proc addTestActions(self: EditorViewComponent) =
+  for i, line in self.tabInfo.sourceLines:
+    let rLine = i + 1
+    if ($line).strip() == "#[test]".cstring and not self.testDom.hasKey(rLine):
+      self.testLines[rLine] = self.makeFlowLine(rLine)
+
+      self.ensureTestLineContainer(rLine)
+
+      let widget = self.testDom[rLine]
+      let testContainer = self.makeTestContainer(rLine)
+      let parentContainer = self.testDom[rLine]
+      let testVNode = testVNode(self, rLine)
+      let testNode = vnodeToDom(testVNode, KaraxInstance())
+
+      testContainer.appendChild(testNode)
+      parentContainer.appendChild(testContainer)
+
+proc clearTest(self: EditorViewComponent) =
+  for testLine in self.testLines:
+    if not testLine.contentWidget.isNil:
+      self.monacoEditor.removeContentWidget(testLine.contentWidget.toJs)
+      testLine.contentWidget = nil
+  self.testDom = JsAssoc[int, Node]{}
+
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
 
@@ -1560,6 +1681,8 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           self.makeDiffViewZones()
           self.loadFlow(FlowMode.Diff, types.Location())
 
+      self.clearTest()
+      self.addTestActions()
       self.applyEventualStylesLines()
 
     except Exception as e:
