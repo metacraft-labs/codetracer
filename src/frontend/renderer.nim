@@ -968,6 +968,14 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
     data.ui.commandPalette.results = @[]
     # TODO command component
     # data.activeFocus = Content.EditorView
+    data.ui.commandPalette.active = true
+    let name = cstring"menu"
+    kxiMap[name].afterRedraws.add(proc =
+      discard windowSetTimeout(proc =
+        let input = cstring"#command-query-text"
+        data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
+        cast[kdom.Node](data.ui.commandPalette.inputField).focus(), 200))
+
   else:
     data.ui.commandPalette.selected = 0
     let name = cstring"menu"
@@ -977,7 +985,7 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
         discard windowSetTimeout(
           proc =
             data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
-            data.ui.commandPalette.inputField.toJs.focus()
+            cast[kdom.Node](data.ui.commandPalette.inputField).focus()
             case mode
             of SearchCommandRealTime:
               data.ui.commandPalette.inputField.toJs.value = cstring(commandPrefix)
@@ -1001,7 +1009,8 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
          event.keyCode = ENTER_KEY_CODE # enter
          # TODO do we need event.which
          element.toJs.dispatchEvent(event), 50))
-    # data.activeFocus = Content.CommandView
+      
+    data.ui.activeFocus = data.ui.commandPalette
   data.redraw()
 
 
