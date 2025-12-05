@@ -9,9 +9,8 @@ mod tests;
 use std::collections::HashMap;
 
 pub use interpreter::TracepointInterpreter;
-use runtime_tracing::ValueRecord;
 
-use crate::value::{Type, Value};
+use crate::value::{Type, Value, ValueRecordWithType};
 
 #[derive(Debug, Clone)]
 enum Instruction {
@@ -46,9 +45,10 @@ struct Bytecode {
 }
 
 // op(operand, error_value_type)
-type UnaryOperatorFunction = fn(ValueRecord, &Type) -> Result<ValueRecord, Value>;
+type UnaryOperatorFunction = fn(ValueRecordWithType, &Type) -> Result<ValueRecordWithType, Value>;
 type UnaryOperatorFunctions = HashMap<String, UnaryOperatorFunction>;
 
 // op(left_operand, right_operand, error_value_type)
-type BinaryOperatorFunction = fn(ValueRecord, ValueRecord, &Type) -> Result<ValueRecord, Value>;
+type BinaryOperatorFunction =
+    fn(ValueRecordWithType, ValueRecordWithType, &Type) -> Result<ValueRecordWithType, Value>;
 type BinaryOperatorFunctions = HashMap<String, BinaryOperatorFunction>;

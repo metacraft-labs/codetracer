@@ -77,3 +77,4 @@
 - Agent activity now spins up a real ShellComponent for each ACP terminal, rendering a container and lazily calling `createShell` after mount so xterm attaches to the correct DOM node.
 - ACP IPC keeps a single long-lived agent process/connection/session; `acp-init-session` primes it, and prompts reuse that session instead of spawning a new process each time.
 - ACP client now implements `writeTextFile` via Node fs (UTF-8); missing paths return errors and successful writes return `{ok: true}`, enabling agent-applied edits to be diffed locally.
+- Tracepoint interpreter stack now operates on `ValueRecordWithType`; literal pushes carry `TypeRecord`s, operator functions propagate those types, and logging converts via `value::to_ct_value` without `Db`.

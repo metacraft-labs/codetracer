@@ -1,18 +1,23 @@
-use std::{any::Any, path::PathBuf};
-
 use log::info;
-use runtime_tracing::{TypeKind, ValueRecord, NONE_TYPE_ID};
+use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
 
 use crate::{
-    db::{Db, DbReplay},
     lang::Lang,
     replay::Replay,
     task::StringAndValueTuple,
     tracepoint_interpreter::Instruction,
-    value::{Type, Value},
+    value::{to_ct_value, Type, Value, ValueRecordWithType},
 };
 
 use super::{BinaryOperatorFunctions, Bytecode, UnaryOperatorFunctions};
+
+fn simple_type_record(kind: TypeKind, lang_type: &str) -> TypeRecord {
+    TypeRecord {
+        kind,
+        lang_type: lang_type.to_string(),
+        specific_info: TypeSpecificInfo::None,
+    }
+}
 
 pub fn execute_bytecode(
     bytecode: &Bytecode,
@@ -26,9 +31,13 @@ pub fn execute_bytecode(
 
     let mut locals: Vec<StringAndValueTuple> = Default::default();
 
-    let mut stack: Vec<ValueRecord> = vec![];
+    let mut stack: Vec<ValueRecordWithType> = vec![];
 
     let eval_error_type = Type::new(TypeKind::Error, "TracepointEvaluationError");
+    let int_type = simple_type_record(TypeKind::Int, "int");
+    let float_type = simple_type_record(TypeKind::Float, "float");
+    let bool_type = simple_type_record(TypeKind::Bool, "bool");
+    let string_type = simple_type_record(TypeKind::String, "string");
 
     let mut program_counter: i64 = 0;
     while program_counter < opcodes.len() as i64 {
@@ -52,7 +61,7 @@ pub fn execute_bytecode(
                 if let Some(x) = stack.pop() {
                     locals.push(StringAndValueTuple {
                         field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
-                        field1: Db::new(&PathBuf::from("")).to_ct_value(&x),
+                        field1: to_ct_value(&x),
                     });
                 } else {
                     let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -66,34 +75,30 @@ pub fn execute_bytecode(
             }
 
             Instruction::PushInt(i) => {
-                // TODO: what type_id
-                stack.push(ValueRecord::Int {
+                stack.push(ValueRecordWithType::Int {
                     i: *i,
-                    type_id: NONE_TYPE_ID,
+                    typ: int_type.clone(),
                 });
             }
 
             Instruction::PushFloat(f) => {
-                // TODO: what type_id
-                stack.push(ValueRecord::Float {
+                stack.push(ValueRecordWithType::Float {
                     f: *f,
-                    type_id: NONE_TYPE_ID,
+                    typ: float_type.clone(),
                 });
             }
 
             Instruction::PushBool(b) => {
-                // TODO: what type_id
-                stack.push(ValueRecord::Bool {
+                stack.push(ValueRecordWithType::Bool {
                     b: *b,
-                    type_id: NONE_TYPE_ID,
+                    typ: bool_type.clone(),
                 });
             }
 
             Instruction::PushString(s) => {
-                // TODO: what type_id
-                stack.push(ValueRecord::String {
+                stack.push(ValueRecordWithType::String {
                     text: s.clone(),
-                    type_id: NONE_TYPE_ID,
+                    typ: string_type.clone(),
                 });
             }
 
@@ -192,9 +197,9 @@ pub fn execute_bytecode(
                     #[allow(clippy::unwrap_used)]
                     let array = stack.pop().unwrap();
 
-                    if let ValueRecord::Sequence {
+                    if let ValueRecordWithType::Sequence {
                         elements,
-                        type_id: _,
+                        typ: _,
                         is_slice,
                     } = array
                     {
@@ -208,7 +213,7 @@ pub fn execute_bytecode(
                             return locals;
                         }
 
-                        if let ValueRecord::Int { i, type_id: _ } = index {
+                        if let ValueRecordWithType::Int { i, typ: _ } = index {
                             if i < 0 || i >= elements.len() as i64 {
                                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                                 err_value.msg = format!("Index {i} out of range 0..{}.", elements.len());
@@ -247,11 +252,7 @@ pub fn execute_bytecode(
             // TODO: what kind of depth limit to put here for RR:
             //   for now we pass `None`
             Instruction::PushVariable(var_name) => match replay.load_value(var_name, None, lang) {
-                Ok(x) => stack.push(
-                    DbReplay::new(Box::new(Db::new(&PathBuf::from(""))))
-                        .to_value_record(x)
-                        .clone(),
-                ),
+                Ok(x) => stack.push(x),
 
                 Err(e) => {
                     let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -267,7 +268,7 @@ pub fn execute_bytecode(
 
             Instruction::JumpIfFalse(pc_add) => {
                 if let Some(x) = stack.pop() {
-                    if let ValueRecord::Bool { b, type_id: _ } = x {
+                    if let ValueRecordWithType::Bool { b, typ: _ } = x {
                         if !b {
                             program_counter += pc_add;
                             continue;
@@ -294,19 +295,38 @@ pub fn execute_bytecode(
 
             Instruction::Field(field) => {
                 if let Some(x) = stack.pop() {
-                    if let ValueRecord::Struct {
-                        field_values,
-                        type_id: _,
-                    } = x
-                    {
-                        let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-                        err_value.msg = "Field access not yet implemented!".to_string();
-                        locals.push(StringAndValueTuple {
-                            field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
-                            field1: err_value,
-                        });
-                        return locals;
-                        todo!()
+                    if let ValueRecordWithType::Struct { field_values, typ } = x {
+                        let fields = match &typ.specific_info {
+                            TypeSpecificInfo::Struct { fields } => fields,
+                            _ => {
+                                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                                err_value.msg =
+                                    format!("Encountered struct without type specific info! {}!", typ.lang_type);
+                                locals.push(StringAndValueTuple {
+                                    field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                                    field1: err_value,
+                                });
+                                return locals;
+                            }
+                        };
+
+                        let mut found = false;
+                        for (i, curr_field) in fields.iter().enumerate() {
+                            if &curr_field.name == field {
+                                stack.push(field_values[i].clone());
+                                found = true;
+                            }
+                        }
+
+                        if !found {
+                            let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                            err_value.msg = format!("No field \"{field}\" for type \"{}\"!", typ.lang_type);
+                            locals.push(StringAndValueTuple {
+                                field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                                field1: err_value,
+                            });
+                            return locals;
+                        }
                     } else {
                         let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                         err_value.msg = "Accessing field of a non-struct value!".to_string();
