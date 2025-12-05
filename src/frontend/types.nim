@@ -122,6 +122,7 @@ type
     path*: cstring
     line*: int
     column*: int
+    newWindow*: bool
 
   ValueWithExpression* = ref object
     expression*: cstring

@@ -136,11 +136,15 @@ proc configureShortcuts* =
   Mousetrap.`bind`("ctrl+r") do ():
     data.reRecordCurrent(projectOnly=false)
 
+  Mousetrap.`bind`("alt+l") do ():
+    let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+    data.runTests(options)
+
   Mousetrap.`bind`("ctrl+b") do ():
     data.reRecordCurrent(projectOnly=true)
 
-  Mousetrap.`bind`("alt+t") do ():
-    runTracepoints(data)
+  # Mousetrap.`bind`("alt+t") do ():
+  #   runTracepoints(data)
 
   Mousetrap.`bind`("ctrl+pageup") do ():
     switchTab(change = -1)
