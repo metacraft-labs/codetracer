@@ -22,6 +22,7 @@ enum Instruction {
     PushBool(bool),          // adds its arg to top of stack
     PushString(String),      // adds its arg to top of stack
     Index,                   // pops ^2, ^1 before pushing ^2[^1]
+    Field(String),           // pops ^1 brefore pushing ^1.<arg>
     UnaryOperation(String),  // pops ^1 before pushing <op> ^1
     BinaryOperation(String), // pops ^2, ^1 before pushing ^2 <op> ^1
     JumpIfFalse(i64),        // pops ^1 and if ^1 is false, adds its arg to the program counter

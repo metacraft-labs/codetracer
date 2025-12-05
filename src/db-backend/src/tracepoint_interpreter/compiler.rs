@@ -249,6 +249,28 @@ pub fn compile_expression(node: Node, source: &str) -> Result<Vec<Opcode>, Box<d
             Ok(opcodes)
         }
 
+        "fieldExpression" => {
+            let mut opcodes = vec![];
+
+            if let Some(struct_node) = node.named_child(0) {
+                let mut struct_opcodes = compile_expression(struct_node, source)?;
+                opcodes.append(&mut struct_opcodes);
+            } else {
+                return Err("expected struct expression for field".to_string().into());
+            }
+
+            let field = if let Some(field_node) = node.named_child(1) {
+                let range = field_node.range();
+                source[range.start_byte..range.end_byte].to_string()
+            } else {
+                return Err("expected field expression".to_string().into());
+            };
+
+            opcodes.push(Opcode::new(Instruction::Field(field), node.range()));
+
+            Ok(opcodes)
+        }
+
         "\n" => Ok(vec![]),
 
         // if -> the block for if and then counting how many opcodes are there and using this

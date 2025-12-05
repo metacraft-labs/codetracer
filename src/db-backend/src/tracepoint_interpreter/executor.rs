@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{any::Any, path::PathBuf};
 
 use log::info;
 use runtime_tracing::{TypeKind, ValueRecord, NONE_TYPE_ID};
@@ -275,6 +275,41 @@ pub fn execute_bytecode(
                     } else {
                         let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                         err_value.msg = "Non-boolean value on conditional jump (probably the condition doesn't evaluate to a boolean value)!".to_string();
+                        locals.push(StringAndValueTuple {
+                            field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                            field1: err_value,
+                        });
+                        return locals;
+                    }
+                } else {
+                    let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                    err_value.msg = "Empty stack during evaluation! Please report this!".to_string();
+                    locals.push(StringAndValueTuple {
+                        field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                        field1: err_value,
+                    });
+                    return locals;
+                }
+            }
+
+            Instruction::Field(field) => {
+                if let Some(x) = stack.pop() {
+                    if let ValueRecord::Struct {
+                        field_values,
+                        type_id: _,
+                    } = x
+                    {
+                        let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                        err_value.msg = "Field access not yet implemented!".to_string();
+                        locals.push(StringAndValueTuple {
+                            field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                            field1: err_value,
+                        });
+                        return locals;
+                        todo!()
+                    } else {
+                        let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                        err_value.msg = "Accessing field of a non-struct value!".to_string();
                         locals.push(StringAndValueTuple {
                             field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
                             field1: err_value,

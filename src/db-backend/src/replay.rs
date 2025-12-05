@@ -1,4 +1,4 @@
-use runtime_tracing::StepId;
+use runtime_tracing::{StepId, TypeId};
 use std::error::Error;
 
 use crate::db::DbRecordEvent;
