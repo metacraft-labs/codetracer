@@ -1,65 +1,61 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
-use runtime_tracing::{TypeKind, ValueRecord, NONE_TYPE_ID};
+use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
 
-fn bigint_from_valuerecord(record: &ValueRecord) -> BigInt {
-    if let ValueRecord::BigInt { b, negative, .. } = record {
-        let sign = if *negative { Sign::Minus } else { Sign::Plus };
-        BigInt::from_bytes_be(sign, b)
-    } else {
-        unreachable!("Expected BigInt value record")
+use crate::value::{Type, Value, ValueRecordWithType};
+
+fn simple_type_record(kind: TypeKind, lang_type: &str) -> TypeRecord {
+    TypeRecord {
+        kind,
+        lang_type: lang_type.to_string(),
+        specific_info: TypeSpecificInfo::None,
     }
 }
 
-fn valuerecord_from_bigint(value: BigInt) -> ValueRecord {
+fn bool_type_record() -> TypeRecord {
+    simple_type_record(TypeKind::Bool, "bool")
+}
+
+fn bigint_from_parts(bytes: &[u8], negative: bool) -> BigInt {
+    let sign = if negative { Sign::Minus } else { Sign::Plus };
+    BigInt::from_bytes_be(sign, bytes)
+}
+
+fn valuerecord_from_bigint(value: BigInt, typ: &TypeRecord) -> ValueRecordWithType {
     let (sign, bytes) = value.to_bytes_be();
     let negative = sign == Sign::Minus;
-    ValueRecord::BigInt {
+    ValueRecordWithType::BigInt {
         b: bytes,
         negative,
-        type_id: NONE_TYPE_ID,
+        typ: typ.clone(),
     }
 }
-
-use crate::value::{Type, Value};
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_not(v: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
-    let res = match v {
-        ValueRecord::Bool { b, type_id: _ } => !b,
+pub fn operator_not(v: ValueRecordWithType, eval_error_type: &Type) -> Result<ValueRecordWithType, Value> {
+    match v {
+        ValueRecordWithType::Bool { b, typ } => Ok(ValueRecordWithType::Bool { b: !b, typ }),
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
             err_value.msg = "Not received non-boolean value!".to_string();
-            return Err(err_value);
+            Err(err_value)
         }
-    };
-
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
-        b: res,
-        type_id: NONE_TYPE_ID,
-    })
+    }
 }
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_negation(v: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_negation(v: ValueRecordWithType, eval_error_type: &Type) -> Result<ValueRecordWithType, Value> {
     match v {
-        ValueRecord::Int { i, type_id: _ } => Ok(ValueRecord::Int {
-            i: -i,
-            type_id: NONE_TYPE_ID,
-        }),
+        ValueRecordWithType::Int { i, typ } => Ok(ValueRecordWithType::Int { i: -i, typ }),
 
-        ValueRecord::Float { f, type_id: _ } => Ok(ValueRecord::Float {
-            f: -f,
-            type_id: NONE_TYPE_ID,
-        }),
+        ValueRecordWithType::Float { f, typ } => Ok(ValueRecordWithType::Float { f: -f, typ }),
 
-        bi @ ValueRecord::BigInt { .. } => {
-            let res = -bigint_from_valuerecord(&bi);
-            Ok(valuerecord_from_bigint(res))
+        ValueRecordWithType::BigInt { b, negative, typ } => {
+            let res = -bigint_from_parts(&b, negative);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
         _ => {
@@ -72,100 +68,110 @@ pub fn operator_negation(v: ValueRecord, eval_error_type: &Type) -> Result<Value
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_and(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
-    let res = match (v1, v2) {
-        (ValueRecord::Bool { b: b1, type_id: _ }, ValueRecord::Bool { b: b2, type_id: _ }) => b1 && b2,
-
-        _ => {
-            let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-            err_value.msg = "Logic operator received non-boolean argument!".to_string();
-            return Err(err_value);
-        }
-    };
-
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
-        b: res,
-        type_id: NONE_TYPE_ID,
-    })
-}
-
-// TODO: eventually reuse Error case in ValueRecord
-#[allow(clippy::result_large_err)]
-pub fn operator_or(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
-    let res = match (v1, v2) {
-        (ValueRecord::Bool { b: b1, type_id: _ }, ValueRecord::Bool { b: b2, type_id: _ }) => b1 || b2,
-
-        _ => {
-            let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-            err_value.msg = "Logic operator received non-boolean argument!".to_string();
-            return Err(err_value);
-        }
-    };
-
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
-        b: res,
-        type_id: NONE_TYPE_ID,
-    })
-}
-
-// TODO: eventually reuse Error case in ValueRecord
-#[allow(clippy::result_large_err)]
-pub fn operator_plus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_and(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => Ok(ValueRecord::Int {
-            i: i1 + i2,
-            type_id: NONE_TYPE_ID,
-        }),
+        (ValueRecordWithType::Bool { b: b1, typ }, ValueRecordWithType::Bool { b: b2, .. }) => Ok(
+            ValueRecordWithType::Bool {
+                b: b1 && b2,
+                typ,
+            },
+        ),
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => {
-            Ok(ValueRecord::Float {
-                f: f1 + f2,
-                type_id: NONE_TYPE_ID,
+        _ => {
+            let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+            err_value.msg = "Logic operator received non-boolean argument!".to_string();
+            Err(err_value)
+        }
+    }
+}
+
+// TODO: eventually reuse Error case in ValueRecord
+#[allow(clippy::result_large_err)]
+pub fn operator_or(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
+    match (v1, v2) {
+        (ValueRecordWithType::Bool { b: b1, typ }, ValueRecordWithType::Bool { b: b2, .. }) => Ok(
+            ValueRecordWithType::Bool {
+                b: b1 || b2,
+                typ,
+            },
+        ),
+
+        _ => {
+            let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+            err_value.msg = "Logic operator received non-boolean argument!".to_string();
+            Err(err_value)
+        }
+    }
+}
+
+// TODO: eventually reuse Error case in ValueRecord
+#[allow(clippy::result_large_err)]
+pub fn operator_plus(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
+    match (v1, v2) {
+        (ValueRecordWithType::Int { i: i1, typ }, ValueRecordWithType::Int { i: i2, .. }) => {
+            Ok(ValueRecordWithType::Int { i: i1 + i2, typ })
+        }
+
+        (ValueRecordWithType::Float { f: f1, typ }, ValueRecordWithType::Float { f: f2, .. }) => {
+            Ok(ValueRecordWithType::Float { f: f1 + f2, typ })
+        }
+
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ })
+        | (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
+            Ok(ValueRecordWithType::Float {
+                f: i as f64 + f,
+                typ,
             })
         }
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ })
-        | (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => Ok(ValueRecord::Float {
-            f: i as f64 + f,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            let res = bigint_from_valuerecord(&bi1) + bigint_from_valuerecord(&bi2);
-            Ok(valuerecord_from_bigint(res))
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                typ,
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => {
+            let res = bigint_from_parts(&b1, n1) + bigint_from_parts(&b2, n2);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            let res = bigint_from_valuerecord(&bi) + BigInt::from(i);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::BigInt { b, negative, typ }, ValueRecordWithType::Int { i, .. }) => {
+            let res = bigint_from_parts(&b, negative) + BigInt::from(i);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            let res = BigInt::from(i) + bigint_from_valuerecord(&bi);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, typ }) => {
+            let res = BigInt::from(i) + bigint_from_parts(&b, negative);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: b + f,
-                    type_id: NONE_TYPE_ID,
-                })
-            } else {
-                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-                err_value.msg = "+ not defined for these values".to_string();
-                Err(err_value)
-            }
-        }
-
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: f + b,
-                    type_id: NONE_TYPE_ID,
-                })
+        (
+            ValueRecordWithType::BigInt { b, negative, .. },
+            ValueRecordWithType::Float { f, typ },
+        )
+        | (
+            ValueRecordWithType::Float { f, typ },
+            ValueRecordWithType::BigInt { b, negative, .. },
+        ) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: b + f, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "+ not defined for these values".to_string();
@@ -183,51 +189,63 @@ pub fn operator_plus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_minus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_minus(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => Ok(ValueRecord::Int {
-            i: i1 - i2,
-            type_id: NONE_TYPE_ID,
-        }),
+        (ValueRecordWithType::Int { i: i1, typ }, ValueRecordWithType::Int { i: i2, .. }) => {
+            Ok(ValueRecordWithType::Int { i: i1 - i2, typ })
+        }
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => {
-            Ok(ValueRecord::Float {
-                f: f1 - f2,
-                type_id: NONE_TYPE_ID,
+        (ValueRecordWithType::Float { f: f1, typ }, ValueRecordWithType::Float { f: f2, .. }) => {
+            Ok(ValueRecordWithType::Float { f: f1 - f2, typ })
+        }
+
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ }) => {
+            Ok(ValueRecordWithType::Float {
+                f: i as f64 - f,
+                typ,
             })
         }
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => Ok(ValueRecord::Float {
-            f: i as f64 - f,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => Ok(ValueRecord::Float {
-            f: f - i as f64,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            let res = bigint_from_valuerecord(&bi1) - bigint_from_valuerecord(&bi2);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
+            Ok(ValueRecordWithType::Float {
+                f: f - i as f64,
+                typ,
+            })
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            let res = bigint_from_valuerecord(&bi) - BigInt::from(i);
-            Ok(valuerecord_from_bigint(res))
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                typ,
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => {
+            let res = bigint_from_parts(&b1, n1) - bigint_from_parts(&b2, n2);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            let res = BigInt::from(i) - bigint_from_valuerecord(&bi);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::BigInt { b, negative, typ }, ValueRecordWithType::Int { i, .. }) => {
+            let res = bigint_from_parts(&b, negative) - BigInt::from(i);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: b - f,
-                    type_id: NONE_TYPE_ID,
-                })
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, typ }) => {
+            let res = BigInt::from(i) - bigint_from_parts(&b, negative);
+            Ok(valuerecord_from_bigint(res, &typ))
+        }
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, typ }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: b - f, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "- not defined for these values".to_string();
@@ -235,12 +253,9 @@ pub fn operator_minus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) 
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: f - b,
-                    type_id: NONE_TYPE_ID,
-                })
+        (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: f - b, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "- not defined for these values".to_string();
@@ -258,60 +273,64 @@ pub fn operator_minus(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) 
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_mult(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_mult(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => Ok(ValueRecord::Int {
-            i: i1 * i2,
-            type_id: NONE_TYPE_ID,
-        }),
+        (ValueRecordWithType::Int { i: i1, typ }, ValueRecordWithType::Int { i: i2, .. }) => {
+            Ok(ValueRecordWithType::Int { i: i1 * i2, typ })
+        }
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => {
-            Ok(ValueRecord::Float {
-                f: f1 * f2,
-                type_id: NONE_TYPE_ID,
+        (ValueRecordWithType::Float { f: f1, typ }, ValueRecordWithType::Float { f: f2, .. }) => {
+            Ok(ValueRecordWithType::Float { f: f1 * f2, typ })
+        }
+
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ })
+        | (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
+            Ok(ValueRecordWithType::Float {
+                f: i as f64 * f,
+                typ,
             })
         }
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ })
-        | (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => Ok(ValueRecord::Float {
-            f: i as f64 * f,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            let res = bigint_from_valuerecord(&bi1) * bigint_from_valuerecord(&bi2);
-            Ok(valuerecord_from_bigint(res))
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                typ,
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => {
+            let res = bigint_from_parts(&b1, n1) * bigint_from_parts(&b2, n2);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            let res = bigint_from_valuerecord(&bi) * BigInt::from(i);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::BigInt { b, negative, typ }, ValueRecordWithType::Int { i, .. }) => {
+            let res = bigint_from_parts(&b, negative) * BigInt::from(i);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            let res = BigInt::from(i) * bigint_from_valuerecord(&bi);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, typ }) => {
+            let res = BigInt::from(i) * bigint_from_parts(&b, negative);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: b * f,
-                    type_id: NONE_TYPE_ID,
-                })
-            } else {
-                let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-                err_value.msg = "* not defined for these values".to_string();
-                Err(err_value)
-            }
-        }
-
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: f * b,
-                    type_id: NONE_TYPE_ID,
-                })
+        (
+            ValueRecordWithType::BigInt { b, negative, .. },
+            ValueRecordWithType::Float { f, typ },
+        )
+        | (
+            ValueRecordWithType::Float { f, typ },
+            ValueRecordWithType::BigInt { b, negative, .. },
+        ) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: b * f, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "* not defined for these values".to_string();
@@ -329,51 +348,63 @@ pub fn operator_mult(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_div(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_div(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => Ok(ValueRecord::Int {
-            i: i1 / i2,
-            type_id: NONE_TYPE_ID,
-        }),
+        (ValueRecordWithType::Int { i: i1, typ }, ValueRecordWithType::Int { i: i2, .. }) => {
+            Ok(ValueRecordWithType::Int { i: i1 / i2, typ })
+        }
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => {
-            Ok(ValueRecord::Float {
-                f: f1 / f2,
-                type_id: NONE_TYPE_ID,
+        (ValueRecordWithType::Float { f: f1, typ }, ValueRecordWithType::Float { f: f2, .. }) => {
+            Ok(ValueRecordWithType::Float { f: f1 / f2, typ })
+        }
+
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ }) => {
+            Ok(ValueRecordWithType::Float {
+                f: i as f64 / f,
+                typ,
             })
         }
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => Ok(ValueRecord::Float {
-            f: i as f64 / f,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => Ok(ValueRecord::Float {
-            f: f / i as f64,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            let res = bigint_from_valuerecord(&bi1) / bigint_from_valuerecord(&bi2);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
+            Ok(ValueRecordWithType::Float {
+                f: f / i as f64,
+                typ,
+            })
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            let res = bigint_from_valuerecord(&bi) / BigInt::from(i);
-            Ok(valuerecord_from_bigint(res))
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                typ,
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => {
+            let res = bigint_from_parts(&b1, n1) / bigint_from_parts(&b2, n2);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            let res = BigInt::from(i) / bigint_from_valuerecord(&bi);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::BigInt { b, negative, typ }, ValueRecordWithType::Int { i, .. }) => {
+            let res = bigint_from_parts(&b, negative) / BigInt::from(i);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: b / f,
-                    type_id: NONE_TYPE_ID,
-                })
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, typ }) => {
+            let res = BigInt::from(i) / bigint_from_parts(&b, negative);
+            Ok(valuerecord_from_bigint(res, &typ))
+        }
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, typ }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: b / f, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "/ not defined for these values".to_string();
@@ -381,12 +412,9 @@ pub fn operator_div(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: f / b,
-                    type_id: NONE_TYPE_ID,
-                })
+        (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: f / b, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "/ not defined for these values".to_string();
@@ -404,51 +432,63 @@ pub fn operator_div(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_rem(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_rem(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => Ok(ValueRecord::Int {
-            i: i1 % i2,
-            type_id: NONE_TYPE_ID,
-        }),
+        (ValueRecordWithType::Int { i: i1, typ }, ValueRecordWithType::Int { i: i2, .. }) => {
+            Ok(ValueRecordWithType::Int { i: i1 % i2, typ })
+        }
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => {
-            Ok(ValueRecord::Float {
-                f: f1 % f2,
-                type_id: NONE_TYPE_ID,
+        (ValueRecordWithType::Float { f: f1, typ }, ValueRecordWithType::Float { f: f2, .. }) => {
+            Ok(ValueRecordWithType::Float { f: f1 % f2, typ })
+        }
+
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ }) => {
+            Ok(ValueRecordWithType::Float {
+                f: i as f64 % f,
+                typ,
             })
         }
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => Ok(ValueRecord::Float {
-            f: i as f64 % f,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => Ok(ValueRecord::Float {
-            f: f % i as f64,
-            type_id: NONE_TYPE_ID,
-        }),
-
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            let res = bigint_from_valuerecord(&bi1) % bigint_from_valuerecord(&bi2);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
+            Ok(ValueRecordWithType::Float {
+                f: f % i as f64,
+                typ,
+            })
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            let res = bigint_from_valuerecord(&bi) % BigInt::from(i);
-            Ok(valuerecord_from_bigint(res))
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                typ,
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => {
+            let res = bigint_from_parts(&b1, n1) % bigint_from_parts(&b2, n2);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            let res = BigInt::from(i) % bigint_from_valuerecord(&bi);
-            Ok(valuerecord_from_bigint(res))
+        (ValueRecordWithType::BigInt { b, negative, typ }, ValueRecordWithType::Int { i, .. }) => {
+            let res = bigint_from_parts(&b, negative) % BigInt::from(i);
+            Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: b % f,
-                    type_id: NONE_TYPE_ID,
-                })
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, typ }) => {
+            let res = BigInt::from(i) % bigint_from_parts(&b, negative);
+            Ok(valuerecord_from_bigint(res, &typ))
+        }
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, typ }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: b % f, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "% not defined for these values".to_string();
@@ -456,12 +496,9 @@ pub fn operator_rem(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                Ok(ValueRecord::Float {
-                    f: f % b,
-                    type_id: NONE_TYPE_ID,
-                })
+        (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
+                Ok(ValueRecordWithType::Float { f: f % b, typ })
             } else {
                 let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
                 err_value.msg = "% not defined for these values".to_string();
@@ -479,74 +516,80 @@ pub fn operator_rem(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) ->
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_equal(v1: ValueRecord, v2: ValueRecord, _eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_equal(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    _eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     let res = match (v1, v2) {
-        (ValueRecord::Bool { b: b1, type_id: _ }, ValueRecord::Bool { b: b2, type_id: _ }) => b1 == b2,
+        (ValueRecordWithType::Bool { b: b1, .. }, ValueRecordWithType::Bool { b: b2, .. }) => b1 == b2,
 
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => i1 == i2,
+        (ValueRecordWithType::Int { i: i1, .. }, ValueRecordWithType::Int { i: i2, .. }) => i1 == i2,
 
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            bigint_from_valuerecord(&bi1) == bigint_from_valuerecord(&bi2)
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                ..
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => bigint_from_parts(&b1, n1) == bigint_from_parts(&b2, n2),
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Int { i, .. }) => {
+            bigint_from_parts(&b, negative) == BigInt::from(i)
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            bigint_from_valuerecord(&bi) == BigInt::from(i)
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            BigInt::from(i) == bigint_from_parts(&b, negative)
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            BigInt::from(i) == bigint_from_valuerecord(&bi)
+        (ValueRecordWithType::String { text: s1, .. }, ValueRecordWithType::String { text: s2, .. }) => {
+            s1 == s2
         }
 
-        (ValueRecord::String { text: s1, type_id: _ }, ValueRecord::String { text: s2, type_id: _ }) => s1 == s2,
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, .. }) => (i as f64) == f,
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) == f,
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::Int { i, .. }) => f == i as f64,
 
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f == i as f64,
-
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, .. })
+        | (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 b == f
             } else {
                 false
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
-                f == b
-            } else {
-                false
-            }
-        }
-
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => f1 == f2,
+        (ValueRecordWithType::Float { f: f1, .. }, ValueRecordWithType::Float { f: f2, .. }) => f1 == f2,
 
         _ => {
             // TODO: discuss if error or false on different types. Maybe change the behaviour based on the targeted language?
-
             false
-
-            // let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
-            // err_value.msg = "These values cannot be compared!".to_string();
-            // return Err(err_value);
         }
     };
 
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
+    Ok(ValueRecordWithType::Bool {
         b: res,
-        type_id: NONE_TYPE_ID,
+        typ: bool_type_record(),
     })
 }
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_not_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_not_equal(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     let equal_check = operator_equal(v1, v2, eval_error_type);
-    if let Ok(ValueRecord::Bool { b: res, type_id: _ }) = equal_check {
-        Ok(ValueRecord::Bool {
+    if let Ok(ValueRecordWithType::Bool { b: res, .. }) = equal_check {
+        Ok(ValueRecordWithType::Bool {
             b: !res,
-            type_id: NONE_TYPE_ID,
+            typ: bool_type_record(),
         })
     } else {
         equal_check
@@ -555,38 +598,51 @@ pub fn operator_not_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Ty
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_less(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_less(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     let res = match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => i1 < i2,
+        (ValueRecordWithType::Int { i: i1, .. }, ValueRecordWithType::Int { i: i2, .. }) => i1 < i2,
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => f1 < f2,
+        (ValueRecordWithType::Float { f: f1, .. }, ValueRecordWithType::Float { f: f2, .. }) => f1 < f2,
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) < f,
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, .. }) => (i as f64) < f,
 
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f < i as f64,
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::Int { i, .. }) => f < i as f64,
 
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            bigint_from_valuerecord(&bi1) < bigint_from_valuerecord(&bi2)
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                ..
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => bigint_from_parts(&b1, n1) < bigint_from_parts(&b2, n2),
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Int { i, .. }) => {
+            bigint_from_parts(&b, negative) < BigInt::from(i)
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            bigint_from_valuerecord(&bi) < BigInt::from(i)
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            BigInt::from(i) < bigint_from_parts(&b, negative)
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            BigInt::from(i) < bigint_from_valuerecord(&bi)
-        }
-
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 b < f
             } else {
                 false
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 f < b
             } else {
                 false
@@ -600,47 +656,59 @@ pub fn operator_less(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -
         }
     };
 
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
+    Ok(ValueRecordWithType::Bool {
         b: res,
-        type_id: NONE_TYPE_ID,
+        typ: bool_type_record(),
     })
 }
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_less_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_less_equal(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     let res = match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => i1 <= i2,
+        (ValueRecordWithType::Int { i: i1, .. }, ValueRecordWithType::Int { i: i2, .. }) => i1 <= i2,
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => f1 <= f2,
+        (ValueRecordWithType::Float { f: f1, .. }, ValueRecordWithType::Float { f: f2, .. }) => f1 <= f2,
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) <= f,
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, .. }) => (i as f64) <= f,
 
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f <= i as f64,
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::Int { i, .. }) => f <= i as f64,
 
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            bigint_from_valuerecord(&bi1) <= bigint_from_valuerecord(&bi2)
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                ..
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => bigint_from_parts(&b1, n1) <= bigint_from_parts(&b2, n2),
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Int { i, .. }) => {
+            bigint_from_parts(&b, negative) <= BigInt::from(i)
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            bigint_from_valuerecord(&bi) <= BigInt::from(i)
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            BigInt::from(i) <= bigint_from_parts(&b, negative)
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            BigInt::from(i) <= bigint_from_valuerecord(&bi)
-        }
-
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 b <= f
             } else {
                 false
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 f <= b
             } else {
                 false
@@ -654,47 +722,59 @@ pub fn operator_less_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type: &T
         }
     };
 
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
+    Ok(ValueRecordWithType::Bool {
         b: res,
-        type_id: NONE_TYPE_ID,
+        typ: bool_type_record(),
     })
 }
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_greater(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_greater(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     let res = match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => i1 > i2,
+        (ValueRecordWithType::Int { i: i1, .. }, ValueRecordWithType::Int { i: i2, .. }) => i1 > i2,
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => f1 > f2,
+        (ValueRecordWithType::Float { f: f1, .. }, ValueRecordWithType::Float { f: f2, .. }) => f1 > f2,
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) > f,
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, .. }) => (i as f64) > f,
 
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f > i as f64,
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::Int { i, .. }) => f > i as f64,
 
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            bigint_from_valuerecord(&bi1) > bigint_from_valuerecord(&bi2)
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                ..
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => bigint_from_parts(&b1, n1) > bigint_from_parts(&b2, n2),
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Int { i, .. }) => {
+            bigint_from_parts(&b, negative) > BigInt::from(i)
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            bigint_from_valuerecord(&bi) > BigInt::from(i)
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            BigInt::from(i) > bigint_from_parts(&b, negative)
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            BigInt::from(i) > bigint_from_valuerecord(&bi)
-        }
-
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 b > f
             } else {
                 false
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 f > b
             } else {
                 false
@@ -708,47 +788,59 @@ pub fn operator_greater(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type
         }
     };
 
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
+    Ok(ValueRecordWithType::Bool {
         b: res,
-        type_id: NONE_TYPE_ID,
+        typ: bool_type_record(),
     })
 }
 
 // TODO: eventually reuse Error case in ValueRecord
 #[allow(clippy::result_large_err)]
-pub fn operator_greater_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type: &Type) -> Result<ValueRecord, Value> {
+pub fn operator_greater_equal(
+    v1: ValueRecordWithType,
+    v2: ValueRecordWithType,
+    eval_error_type: &Type,
+) -> Result<ValueRecordWithType, Value> {
     let res = match (v1, v2) {
-        (ValueRecord::Int { i: i1, type_id: _ }, ValueRecord::Int { i: i2, type_id: _ }) => i1 >= i2,
+        (ValueRecordWithType::Int { i: i1, .. }, ValueRecordWithType::Int { i: i2, .. }) => i1 >= i2,
 
-        (ValueRecord::Float { f: f1, type_id: _ }, ValueRecord::Float { f: f2, type_id: _ }) => f1 >= f2,
+        (ValueRecordWithType::Float { f: f1, .. }, ValueRecordWithType::Float { f: f2, .. }) => f1 >= f2,
 
-        (ValueRecord::Int { i, type_id: _ }, ValueRecord::Float { f, type_id: _ }) => (i as f64) >= f,
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, .. }) => (i as f64) >= f,
 
-        (ValueRecord::Float { f, type_id: _ }, ValueRecord::Int { i, type_id: _ }) => f >= i as f64,
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::Int { i, .. }) => f >= i as f64,
 
-        (bi1 @ ValueRecord::BigInt { .. }, bi2 @ ValueRecord::BigInt { .. }) => {
-            bigint_from_valuerecord(&bi1) >= bigint_from_valuerecord(&bi2)
+        (
+            ValueRecordWithType::BigInt {
+                b: b1,
+                negative: n1,
+                ..
+            },
+            ValueRecordWithType::BigInt {
+                b: b2,
+                negative: n2,
+                ..
+            },
+        ) => bigint_from_parts(&b1, n1) >= bigint_from_parts(&b2, n2),
+
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Int { i, .. }) => {
+            bigint_from_parts(&b, negative) >= BigInt::from(i)
         }
 
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Int { i, type_id: _ }) => {
-            bigint_from_valuerecord(&bi) >= BigInt::from(i)
+        (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            BigInt::from(i) >= bigint_from_parts(&b, negative)
         }
 
-        (ValueRecord::Int { i, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            BigInt::from(i) >= bigint_from_valuerecord(&bi)
-        }
-
-        (bi @ ValueRecord::BigInt { .. }, ValueRecord::Float { f, type_id: _ }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 b >= f
             } else {
                 false
             }
         }
 
-        (ValueRecord::Float { f, type_id: _ }, bi @ ValueRecord::BigInt { .. }) => {
-            if let Some(b) = bigint_from_valuerecord(&bi).to_f64() {
+        (ValueRecordWithType::Float { f, .. }, ValueRecordWithType::BigInt { b, negative, .. }) => {
+            if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 f >= b
             } else {
                 false
@@ -762,9 +854,8 @@ pub fn operator_greater_equal(v1: ValueRecord, v2: ValueRecord, eval_error_type:
         }
     };
 
-    // TODO: what type_id
-    Ok(ValueRecord::Bool {
+    Ok(ValueRecordWithType::Bool {
         b: res,
-        type_id: NONE_TYPE_ID,
+        typ: bool_type_record(),
     })
 }
