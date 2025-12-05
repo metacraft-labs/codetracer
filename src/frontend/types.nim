@@ -761,6 +761,7 @@ type
     id*: cstring
     content*: cstring
     role*: AgentMessageRole
+    canceled*: bool
 
   AgentTerminal* = object
     id*: cstring
@@ -777,6 +778,9 @@ type
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
     isLoading*: bool
+    wantsPassword*: bool
+    wantsPermission*: bool
+    wasCancelled*: bool
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]
     acpInitSent*: bool

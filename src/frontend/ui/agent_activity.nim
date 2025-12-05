@@ -54,8 +54,12 @@ proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNod
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
         tdiv(class="ai-img")
-        span(class="ai-name"): text "agent"
-        if self.isLoading:
+        span(class="ai-name"):
+          text "agent"
+          if msg.canceled:
+            span(style=style((StyleAttr.color, cstring"red"))):
+              text " (canceled)"
+        if self.isLoading and not msg.canceled:
           span(class="ai-status")
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button")
@@ -82,24 +86,26 @@ proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): V
         tdiv(class="agent-model-img")
     tdiv(id=fmt"shellComponent-{term.shell.id}", class="shell-container")
 
-proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent): AgentMessage =
+proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false): AgentMessage =
   console.log cstring"Adding agent message"
   if not self.messages.hasKey(messageId):
     try:
-      let message = AgentMessage(id: messageId, content: initialContent, role: role)
+      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled)
       self.messages[messageId] = message
       self.messageOrder.add(messageId)
     except:
       console.log cstring(fmt"[agent-activity] addAgentMessage failed: {getCurrentExceptionMsg()}")
   result = self.messages[messageId]
 
-proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent) =
+proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
   console.log cstring("[agent-activity] update: begin")
-  var message = self.addAgentMessage(messageId, content, role)
+  var message = self.addAgentMessage(messageId, content, role, canceled)
   if append and message.content.len > 0:
     message.content = message.content & content
   else:
     message.content = content
+  if canceled:
+    message.canceled = true
 
   self.messages[messageId] = message
   self.redraw()
@@ -137,7 +143,7 @@ proc submitPrompt(self: AgentActivityComponent) =
     return
 
   self.inputValue = promptText
-  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
+  self.activeAgentMessageId = cstring""
   let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
@@ -201,14 +207,14 @@ proc parseUnifiedDiff(patch: string): (string, string) =
 
   (origLines.join("\n"), modLines.join("\n"))
 
-proc passwordPrompt(self: AgentActivityComponent): VNode =
+proc createPasswordPrompt(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
     tdiv(class="password-wrapper"):
       input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
       tdiv(class="password-continue-button"):
         text "Continue"
 
-proc userPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
+proc createUserPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
     tdiv(class="header-wrapper"):
       text prompt
@@ -323,6 +329,11 @@ index 71d1dec8..f8499310 100644
           # tdiv(class="editor-wrapper"):
           #   tdiv(id="agentEditor-0", class="agent-editor")
         # TODO: Integrate it
+      if self.wantsPassword:
+        createPasswordPrompt(self)
+      if self.wantsPermission:
+        createUserPrompt(self, cstring"How are you", @[cstring"well", cstring"bad"])
+
     tdiv(class="agent-interaction"):
       textarea(
         `type` = "text",
@@ -378,6 +389,18 @@ index 71d1dec8..f8499310 100644
             class="agent-stop-button",
             onclick = proc =
               echo fmt"[agent-activity] stopping session: {self.data.services.debugger.location.path}"
+
+              var cancelId = cstring""
+              if self.activeAgentMessageId.len > 0:
+                cancelId = self.activeAgentMessageId
+              elif self.messageOrder.len > 0:
+                cancelId = self.messageOrder[^1]
+
+              if cancelId.len > 0:
+                var msg = self.addAgentMessage(cancelId, cstring"", AgentMessageAgent)
+                msg.canceled = true
+                self.messages[cancelId] = msg
+
               if self.activeAgentMessageId.len > 0:
                 data.ipc.send("CODETRACER::acp-cancel-prompt", js{
                   "messageId": self.activeAgentMessageId
@@ -385,6 +408,7 @@ index 71d1dec8..f8499310 100644
               else:
                 data.ipc.send("CODETRACER::acp-cancel-prompt", js{})
               self.isLoading = false
+              self.redraw()
           )
 
 proc asyncSleep(ms: int): Future[void] =
@@ -405,7 +429,6 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
     self.messages.del(PLACEHOLDER_MSG)
     # TODO: Make a end-process for the isLoading state
-    self.isLoading = false
     self.activeAgentMessageId = cstring""
     break
 
@@ -423,7 +446,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     elif jsHasKey(response, cstring"id"):
       cast[cstring](response[cstring"id"])
     else:
-      PLACEHOLDER_MSG
+      cstring("")
 
   console.log cstring"[agent-activity] got messageId"
 
@@ -436,14 +459,26 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       cstring""
 
   let isFinal = jsHasKey(response, cstring"stopReason")
+  let stopReason =
+    if isFinal:
+      cast[cstring](response[cstring"stopReason"])
+    else:
+      cstring""
+
+  if isFinal:
+    console.log cstring"[agent-activity] got stopReason"
+    self.isLoading = false
+    redrawAll()
+
   let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
+  let canceledFlag = isFinal and stopReason == cstring"cancelled"
 
   console.log cstring"[agent-activity] got content"
   console.log content
 
   if hasContent or not self.messages.hasKey(messageId):
     try:
-      self.updateAgentMessageContent(messageId, content, appendFlag)
+      self.updateAgentMessageContent(messageId, content, appendFlag, AgentMessageAgent, canceledFlag)
       console.log cstring(fmt"[agent-activity] updated active messageId={messageId} append={appendFlag}")
       self.activeAgentMessageId = messageId
       console.log cstring"[agent-activity] update + redraw complete"
@@ -491,3 +526,6 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   if jsHasKey(response, cstring"id"):
     self.activeAgentMessageId = cast[cstring](response[cstring"id"])
     console.log cstring(fmt"[agent-activity] set activeAgentMessageId from prompt-start: {self.activeAgentMessageId}")
+
+proc onAcpRequestPermission*(sender: js, response: JsObject) {.async.} =
+  console.log cstring(fmt"[agent-activity] onAcpRequestPermission")

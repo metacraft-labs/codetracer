@@ -33,7 +33,7 @@ proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
 proc writeFileUtf8(path: cstring, content: cstring): Future[void] {.importjs: "require('fs').promises.writeFile(#, #, 'utf8')".}
 
-proc makeClient(onSessionUpdate: js, onReadTextFile: js, onWriteTextFile: js, onCreateTerminal: js): JsObject {.importjs: "(() => ({ requestPermission: async () => ({ outcome: { outcome: 'denied', optionId: '' } }), sessionUpdate: async (params) => { await #(params); }, writeTextFile: async (params) => await #(params), readTextFile: async (params) => await #(params), createTerminal: async (params) => await #(params), extMethod: async () => ({}), extNotification: async () => {} }))()".}
+proc makeClient(onRequestPermission: js, onSessionUpdate: js, onWriteTextFile: js, onReadTextFile: js, onCreateTerminal: js): JsObject {.importjs: "(() => ({ requestPermission: async (params) => await #(params), sessionUpdate: async (params) => await #(params), writeTextFile: async (params) => await #(params), readTextFile: async (params) => await #(params), createTerminal: async (params) => await #(params), extMethod: async () => ({}), extNotification: async () => {} }))()".}
 proc asFactory(obj: JsObject): js {.importjs: "(function(v){ return function(){ return v; }; })(#)".}
 
 proc sessionIdFrom(response: JsObject): cstring {.importjs: "((resp) => (resp && resp.sessionId) || 'session-1')(#)".}
@@ -58,6 +58,7 @@ var currentMessageId = cstring""
 var currentSessionId: cstring
 
 let handleCreateTerminal = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  echo fmt"[acp_ipc] createTerminal request: {stringify(params)}"
   terminalCounter += 1
   let terminalId =
     if jsHasKey(params, cstring"id"):
@@ -76,6 +77,7 @@ let handleCreateTerminal = functionAsJS(proc(params: JsObject): Future[JsObject]
 )
 
 let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  echo fmt"[acp_ipc] fs.readTextFile request: {stringify(params)}"
   let path =
     if jsHasKey(params, cstring"path"):
       params[cstring"path"].to(cstring)
@@ -93,6 +95,7 @@ let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {
 )
 
 let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  echo fmt"[acp_ipc] fs.writeTextFile request: {stringify(params)}"
   let path =
     if jsHasKey(params, cstring"path"):
       params[cstring"path"].to(cstring)
@@ -108,14 +111,46 @@ let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] 
     return js{ "error": "missing path" }
   try:
     await writeFileUtf8(path, content)
+    # Notify renderer so open Monaco tabs can reload updated content.
+    mainWindow.webContents.send("CODETRACER::reload-file", js{ "path": path })
     return js{ "ok": true }
   except:
     return js{ "error": cstring(fmt"[acp_ipc] writeTextFile failed: {getCurrentExceptionMsg()}") }
 )
 
+let handleRequestPermission = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
+  echo fmt"[acp_ipc] requestPermission received: {stringify(params)}"
+  # Default: allow the "allow_always" option if present, else first option.
+  let options =
+    if jsHasKey(params, cstring"options"):
+      params[cstring"options"]
+    else:
+      jsUndefined
+
+  var optionId = cstring""
+  if not options.isUndefined:
+    try:
+      let opts = options.to(seq[JsObject])
+      for opt in opts:
+        if jsHasKey(opt, cstring"kind") and opt[cstring"kind"].to(cstring) == cstring"allow_always" and jsHasKey(opt, cstring"optionId"):
+          optionId = opt[cstring"optionId"].to(cstring)
+          break
+      if optionId.len == 0 and opts.len > 0 and jsHasKey(opts[0], cstring"optionId"):
+        optionId = opts[0][cstring"optionId"].to(cstring)
+    except:
+      discard
+
+  return js{
+    "outcome": js{
+      "outcome": cstring"selected",
+      "optionId": optionId
+    },
+    "options": options
+  }
+)
+
 let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
-  if currentMessageId.len == 0:
-    return
+  echo fmt"[acp_ipc] sessionUpdate: {stringify(params)}"
 
   activeCollectedUpdates.add(params)
 
@@ -124,7 +159,37 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
       let updateObj = params[cstring"update"]
       if jsHasKey(updateObj, cstring"sessionUpdate"):
         let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
-        if updateKind == cstring"agent_message_chunk" and
+        if updateKind == cstring"tool_call" and jsHasKey(updateObj, cstring"options"):
+          # Permission-like tool call: auto-allow the allow_always option when present.
+          try:
+            let opts = updateObj[cstring"options"].to(seq[JsObject])
+            var optionId = cstring""
+            for opt in opts:
+              if jsHasKey(opt, cstring"kind") and opt[cstring"kind"].to(cstring) == cstring"allow_always" and jsHasKey(opt, cstring"optionId"):
+                optionId = opt[cstring"optionId"].to(cstring)
+                break
+            if optionId.len == 0 and opts.len > 0 and jsHasKey(opts[0], cstring"optionId"):
+              optionId = opts[0][cstring"optionId"].to(cstring)
+
+            if optionId.len > 0:
+              let toolCallId =
+                if jsHasKey(updateObj, cstring"toolCallId"):
+                  updateObj[cstring"toolCallId"].to(cstring)
+                else:
+                  cstring""
+              echo fmt"[acp_ipc] auto-allow tool_call permission toolCallId={toolCallId} optionId={optionId}"
+              # Respond by issuing a tool_call_update with status=approved to mirror agent expectations.
+              discard acpClient.extNotification(cstring"tool_permission", js{
+                "sessionId": currentSessionId,
+                "toolCallId": toolCallId,
+                "outcome": js{
+                  "outcome": cstring"selected",
+                  "optionId": optionId
+                }
+              })
+          except:
+            errorPrint cstring(fmt"[acp_ipc] auto-allow tool permission failed: {getCurrentExceptionMsg()}")
+        if updateKind == cstring"agent_message_chunk" and currentMessageId.len > 0 and
            jsHasKey(updateObj, cstring"content") and
            jsHasKey(updateObj[cstring"content"], cstring"text"):
           let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
@@ -133,6 +198,40 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
             "id": currentMessageId,
             "content": chunk
           })
+        if updateKind == cstring"tool_call_update":
+          echo "[acp_ipc] tool_call_update received; inspecting for filepath"
+          try:
+            var path = cstring""
+            if jsHasKey(updateObj, cstring"rawInput"):
+              let rawIn = updateObj[cstring"rawInput"]
+              if jsHasKey(rawIn, cstring"filepath"):
+                path = rawIn[cstring"filepath"].to(cstring)
+
+            if path.len == 0 and jsHasKey(updateObj, cstring"content"):
+              try:
+                let contentItems = updateObj[cstring"content"].to(seq[JsObject])
+                for item in contentItems:
+                  if jsHasKey(item, cstring"type") and item[cstring"type"].to(cstring) == cstring"diff" and
+                     jsHasKey(item, cstring"path"):
+                    path = item[cstring"path"].to(cstring)
+                    break
+              except:
+                echo fmt"[acp_ipc] tool_call_update content parsing failed: {getCurrentExceptionMsg()}"
+                let contentObj = updateObj[cstring"content"]
+                if jsHasKey(contentObj, cstring"path"):
+                  path = contentObj[cstring"path"].to(cstring)
+
+            if path.len == 0 and jsHasKey(updateObj, cstring"rawOutput"):
+              let rawOut = updateObj[cstring"rawOutput"]
+              if jsHasKey(rawOut, cstring"filediff") and jsHasKey(rawOut[cstring"filediff"], cstring"file"):
+                path = rawOut[cstring"filediff"][cstring"file"].to(cstring)
+
+            if path.len > 0:
+              echo fmt"[acp_ipc] tool_call_update with filepath; notifying reload + change-file for {path}"
+              mainWindow.webContents.send("CODETRACER::reload-file", js{ "path": path })
+              mainWindow.webContents.send("CODETRACER::change-file", js{ "path": path })
+          except:
+            errorPrint cstring(fmt"[acp_ipc] tool_call_update reload/change-file notify failed: {getCurrentExceptionMsg()}")
   except:
     errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}"))
 
@@ -150,10 +249,17 @@ proc ensureAcpConnection(): Future[void] {.async.} =
 
     echo "[acp_ipc] set up the pipes"
 
-    acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
+    # acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
 
+    acpClient = newClientSideConnection(asFactory(makeClient(
+      handleRequestPermission,
+      handleSessionUpdate,
+      handleWriteTextFile,
+      handleReadTextFile,
+      handleCreateTerminal
+    )), acpStream)
     echo "[acp_ipc] established a client-side connection"
-
+  
     let initResp = await acpClient.initialize(initRequest())
     echo "[acp_ipc] initialized response raw=", stringify(initResp)
 
