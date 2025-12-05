@@ -1,0 +1,14 @@
+[package]
+name = "rs_checklist"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace]
+members = ["macros"]
+resolver = "2"
+
+[dependencies]
+futures = "0.3"
+rs_checklist_macros = { path = "macros" }
