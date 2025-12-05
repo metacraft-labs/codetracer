@@ -31,6 +31,10 @@
 **/*.exe
 **/*.out
 
+# --- Rust checklist outputs ---
+rs_checklist/target/
+rs_checklist/macros/target/
+
 # --- C/C++ ---
 # (covered by generic *.o/*.so/*.a above)
 a.out
