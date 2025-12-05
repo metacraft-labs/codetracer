@@ -8,6 +8,7 @@ type
   MonacoEditorLib* = ref object
     create*: proc(element: dom.Element, options: MonacoEditorOptions): MonacoEditor
     createDiffEditor*: proc(element: dom.Element, options: MonacoEditorOptions): DiffEditor
+    createModel*: proc(value: cstring, language: cstring, uri: js = jsUndefined): MonacoTextModel
     # based on monaco signature
     defineTheme*: proc(themeName: cstring, themeData: js)
 
@@ -49,6 +50,7 @@ type
     options*:         js
 
   MonacoTextModel* = ref object
+    uri*:                 js
     getLineMaxColumn*:     proc(line: int): int
     getLineFirstNonWhitespaceColumn*: proc(line: int): int
     getLineContent*:       proc(line: int): cstring
@@ -151,6 +153,7 @@ type
     onKeyDown*:            js #proc(e: js)
     onDidChangeModelContent*:    proc(handler: proc(event: JsObject) {.closure.}): void
     hasTextFocus*:         proc: bool
+    setModel*:             proc(model: MonacoTextModel)
     updateOptions*:        proc(options: MonacoEditorOptions)
     dispose*:              proc: void
     # cursor*:               MonacoCursor
