@@ -1,0 +1,15 @@
+[package]
+name = "rust_sample_project"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "rust_sample_project"
+path = "src/main.rs"
+
+[lib]
+name = "rust_sample_project_lib"
+path = "src/lib.rs"
+crate-type   = ["rlib", "cdylib"]
+
+[dependencies]

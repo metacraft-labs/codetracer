@@ -377,14 +377,14 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
     if buildArg.len == 0:
       errorPrint "index: build: can't find a filename or project to build: stopping"
       # should be working, but there was a problem: TODO maybe debug more
-      # but ther other `failed-record` also works here for errors indeed, i noticed it later 
-      # sendNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
+      # but ther other `failed-record` also works here for errors indeed, i noticed it later
+      # sendNewNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
       mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"index: build: can't find a filename or project to build: stopping"}
       return
 
     if response.projectOnly:
       buildArg = cstring(($buildArg).parentDir)
-      # for now `ct build` => `ct-rr-support build` tries just use project logic when passed a folder and 
+      # for now `ct build` => `ct-rr-support build` tries just use project logic when passed a folder and
       #   simpler file-based compile logic when passed a file
       #   e.g. project logic is look up for a folder with Cargo.toml for rust
       # we do this for now instead of having an explicit `--project` argument
@@ -396,7 +396,7 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
       @[cstring"build"].concat(buildArgs)
     )
 
-    
+
     if buildProcessResult.isOk:
       let output = buildProcessResult.value
       infoPrint "index: build ok: ", output
@@ -467,7 +467,14 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
           errorPrint "index: run-test: can't find trace"
           return
         infoPrint "trace is in ", trace.outputFolder
-        await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+
+        if response.newWindow:
+          discard startProcess(codetracerExe,
+          @[cstring"replay", cstring(fmt"--id={traceId}")]
+          )
+        else:
+          await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+
         await loadExistingRecord(traceId)
         return
     warnPrint "index: run-test: traced ok, but couldn't extract traceId"

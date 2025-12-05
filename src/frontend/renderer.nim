@@ -1322,6 +1322,9 @@ proc buildRecordEnv(envDump: cstring): JsObject =
 
   envObject
 
+proc runTests*(data: Data, options: RunTestOptions) =
+  data.ipc.send("CODETRACER::run-test", options)
+
 proc reRecordCurrent*(data: Data, projectOnly: bool) =
   ## Save edits and restart the recorder for the current file or project
   ##   base args on current trace for now, but we might start a different target
