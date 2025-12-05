@@ -223,7 +223,7 @@ proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
 
 
 # lowLevel: enum TODO
-proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorView, lang: Lang): Future[TabInfo] {.async.} =
+proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorView, lang: Lang, forceReload: bool = false): Future[TabInfo] {.async.} =
   var name = cstring""
   if not location.isExpanded:
     name = if editorView in {ViewSource, ViewTargetSource}:
@@ -233,7 +233,7 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
       else:
         # <path>:<functionName> for the most general case
         cstring(fmt"{location.path}:{location.functionName}")
-    if self.open.hasKey(name) and self.open[name].received:
+    if not forceReload and self.open.hasKey(name) and self.open[name].received:
       return self.open[name]
 
     # self.open[name].index = -2
@@ -248,7 +248,12 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
   cdebug "tabs: tab load " & $name & " " & $editorView & " " & $lang
 
   # TODO refactor out in smaller functions
-  var tabInfo = await self.data.asyncSend("tab-load", js{location: location, name: name, editorView: editorView, lang: lang}, $name, TabInfo)
+  var tabInfo = await self.data.asyncSend(
+    "tab-load",
+    js{location: location, name: name, editorView: editorView, lang: lang},
+    $name,
+    TabInfo,
+    noCache = forceReload)
   # TODO do we need location here
   tabInfo.viewLine = location.line # if tabInfo.fileInfo.isNil or tabInfo.fileInfo.line == -1: -1 else: tabInfo.fileInfo.line
   # if editorView != ViewCalltrace:

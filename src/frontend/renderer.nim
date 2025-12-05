@@ -40,6 +40,7 @@ var monaco* {.importc.}: Monaco
 var fuzzysort* {.importc.}: Fuzzysort
 var noUiSlider* {.importc.}: js
 proc wNumb*(options: js): js {.importc.}
+proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
 
 proc duration*(name: string) =
   echo &"TIME {name} {now() - start}"
@@ -1234,6 +1235,49 @@ proc onChangeFile*(sender: js, response: jsobject(path=cstring)) =
     data.updateDialog(response.path)
   else:
     ipc.send "CODETRACER::reload-file", response
+
+## Refresh any open Monaco editors that point at the changed path
+proc onReloadFile*(sender: js, response: jsobject(path=cstring)) {.async.} =
+  let targetPath = response.path
+  echo fmt"reload-file: received request for {targetPath}"
+  for name, tab in data.services.editor.open:
+    # Match either by the tab key (usual case) or the stored path in TabInfo
+    if targetPath.len > 0 and name != targetPath and tab.path != targetPath:
+      continue
+    if not data.ui.editors.hasKey(name):
+      continue
+
+    let editorView = data.ui.editors[name]
+    try:
+      var reloadLocation = tab.location
+      if targetPath.len > 0:
+        reloadLocation.highLevelPath = targetPath
+        reloadLocation.path = targetPath
+
+      var refreshed = await data.services.editor.tabLoad(reloadLocation, editorView.editorView, tab.lang, forceReload = true)
+      var newSource = refreshed.source
+
+      # Always prefer the actual file contents on disk to avoid stale cache issues.
+      try:
+        let diskContent = await readFileUtf8(targetPath)
+        if not diskContent.isNil and diskContent.len > 0:
+          newSource = diskContent
+      except:
+        cwarn fmt"reload-file: fs read failed for {targetPath}: {getCurrentExceptionMsg()}"
+
+      tab.source = newSource
+      tab.sourceLines = newSource.split(jsNl)
+      tab.changed = false
+      tab.reloadChange = true
+
+      if not editorView.monacoEditor.isNil:
+        # Keep the existing model to avoid Monaco "already exists" errors; just replace buffer contents.
+        let beforeValue = $editorView.monacoEditor.getValue()
+        let afterValue = $tab.source
+        clog fmt"reload-file: applying refreshed content to {name} ({tab.path}); len before={beforeValue.len}, len after={afterValue.len}, changed={beforeValue != afterValue}"
+        editorView.monacoEditor.setValue(tab.source)
+    except:
+      cerror fmt"reload-file: failed to refresh {name}: {getCurrentExceptionMsg()}"
 
 proc openNormalEditor* =
   # TODO

@@ -112,6 +112,10 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
     #   "content": cstring("hello from index again")
     # })
 
+    # mainWindow.webContents.send("CODETRACER::acp-create-terminal", js{
+    #   "id": cstring("2")
+    # })
+
     if bypass:
       if not data.trace.isNil:
         await data.loadTrace(mainWindow, data.trace, data.config, helpers)

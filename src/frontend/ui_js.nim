@@ -1527,6 +1527,7 @@ proc configureIPC(data: Data) =
     "build-command": BuildCommand => [ui]
     "started"
     "change-file"
+    "reload-file"
     "tab-reloaded"
     "opened-tab": OpenedTab => editor
     "close"
@@ -1563,6 +1564,9 @@ proc configureIPC(data: Data) =
     "acp-receive-response"
     "acp-prompt-start"
     "acp-create-terminal"
+    "acp-request-permission"
+
+    "reload-file"
 
   duration("configureIPCRun")
 
@@ -2143,7 +2147,3 @@ if inElectron:
   once:
     configureIPC(data)
     configure(data)
-
-
-# else:
-  # configureIPC = functionAsJs(configureIPCRun)
