@@ -8,6 +8,8 @@ from welcome_screen import resetView
 from event_log import findTRNode
 from dom import createElement
 
+include system/timers
+
 type langstring = cstring
 
 # for now applied to user config, but not to commands:
@@ -1399,22 +1401,43 @@ proc getLineFunctionName(self: EditorViewComponent, line: int): cstring =
   
   return name
 
+proc loadAnimation(self: EditorViewComponent, el: Element, i: var int) =
+  let frames = ["Running.  ", "Running.. ", "Running..."]
+
+  el.innerHTML = frames[i]
+  i = (i + 1) mod frames.len
+  discard setTimeout(proc() = loadAnimation(self, el, i), 300)
+
+proc redrawActiveTestButton(self: EditorViewComponent) =
+  let el = cast[Element](jq("#" & self.activeTestId))
+  var i = 0
+
+  el.classList.add("active-test-button")
+
+  discard setTimeout(proc() = loadAnimation(self, el, i), 0)
+
 proc testVNode(self: EditorViewComponent, line: int): VNode =
   let testName = self.getLineFunctionName(line + 1)
+  let testId = &"ct-test-action-{self.id}-{line}"
+  if self.activeTestId == testId:
+    discard setTimeout(proc() = redrawActiveTestButton(self), 0)
 
   buildHtml(
     tdiv(
-      id = &"ct-test-action-{self.id}-{line}",
+      id = testId,
       class = "flow-parallel flow-parallel-value-single editor-test-action",
       onclick = proc() =
         if testName.len() > 0:
+          capture testId:
+            self.activeTestId = testId
+            self.redrawActiveTestButton()
           self.runTest(testName, self.name, line, 1)
           self.api.infoMessage(&"\"{testName}\" started")
         else:
           self.api.errorMessage("Coudln't extract test name.")
     )
   ):
-    text "Run test >"
+    text "Run test"
 
 proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
   cdebug fmt"makeFlowLine position {position}"

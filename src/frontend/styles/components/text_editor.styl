@@ -898,11 +898,18 @@ else
   display: none
 
 .editor-test-action
-  color: white
-  background: gray
-  padding-left: 4px
-  padding-right: 4px
+  color: AGENT_WHITE
+  background: AGENT_BACKGROUND
+  padding-left: 12px
+  padding-right: 12px
   border-radius: 4px
   font-family: "SpaceGrotesk"
   transform: translate(0, 1ch) !important
   cursor: pointer
+
+  &:hover
+    background: AGENT_HOVER_BACKGROUND
+    outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+
+.active-test-button
+  background: TEST_ACTIVE_BACKGROUND !important
