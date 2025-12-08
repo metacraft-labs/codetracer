@@ -1362,11 +1362,11 @@ proc makeTestContainer(self: EditorViewComponent, line: int): Node =
   let lineHeight = editorConfiguration.lineHeight
 
   var style = style(
-    (StyleAttr.left, cstring(fmt"calc({lineContent.len()}ch + 1ch)")),
-    (StyleAttr.fontSize, cstring($(data.ui.fontSize) & "px")),
-    (StyleAttr.lineHeight, cstring($lineHeight & "px")),
-    (StyleAttr.height, cstring($lineHeight & "px")),
-    (StyleAttr.backgroundSize, cstring($(data.ui.fontSize + 2) & "px"))
+    (StyleAttr.left, cstring(fmt"calc({lineContent.len()}ch + 2ch)")),
+    (StyleAttr.fontSize, cstring($(data.ui.fontSize - 2) & "px")),
+    (StyleAttr.lineHeight, cstring($(lineHeight - 2) & "px")),
+    (StyleAttr.height, cstring($(lineHeight - 2) & "px")),
+    (StyleAttr.backgroundSize, cstring($(data.ui.fontSize) & "px"))
   )
   let vNode = buildHtml(
     tdiv(
