@@ -299,6 +299,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Event Log", aEventLog
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
+          element "Agent Activity", aAgentActivity
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -2048,6 +2049,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc = data.openLayoutTab(Content.TerminalOutput),
   proc = data.openLayoutTab(Content.StepList),
   proc = data.openLayoutTab(Content.Scratchpad),
+  proc = data.openLayoutTab(Content.AgentActivity),
   proc = data.openLayoutTab(Content.Filesystem),
   proc = data.openShellTab(),
   nil,

@@ -751,13 +751,15 @@ proc openLayoutTab*(
   isEditor: bool = false,
   path: cstring = "",
   editorView: EditorView = ViewSource,
-  noInfoMessage: cstring = "") =
+  noInfoMessage: cstring = ""
+) =
 
   var parent: GoldenContentItem
   let similarComponents = data.ui.componentMapping[content]
   let openSimilarComponentsTabs = data.ui.openComponentIds[content]
 
   if content != Content.EditorView and
+    content != Content.AgentActivity and
     data.ui.componentMapping[content].len() > 0 and
     not data.ui.componentMapping[content][0].layoutItem.isNil and
     not data.ui.componentMapping[content].toJs[0].isUndefined:

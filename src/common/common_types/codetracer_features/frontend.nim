@@ -140,6 +140,7 @@ type
     aTerminal,
     aStepList,
     aScratchpad,
+    aAgentActivity,
     aFilesystem,
     aShell,
     aOptions,

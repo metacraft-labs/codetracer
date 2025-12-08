@@ -142,7 +142,7 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
 
 proc submitPrompt(self: AgentActivityComponent) =
   # Use the latest input value to avoid stale data.
-  let inputEl = document.getElementById(INPUT_ID)
+  let inputEl = document.getElementById(INPUT_ID & fmt"-{self.id}")
   let promptText =
     if not inputEl.isNil:
       inputEl.toJs.value.to(cstring)
@@ -153,8 +153,8 @@ proc submitPrompt(self: AgentActivityComponent) =
     return
 
   self.inputValue = promptText
-  self.activeAgentMessageId = cstring""
-  let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
+  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
+  let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
   discard setTimeout(proc() = scrollAgentCom(), 0)
@@ -163,10 +163,10 @@ proc submitPrompt(self: AgentActivityComponent) =
 
 proc clear(self: AgentActivityComponent) =
   self.inputValue = cstring""
-  let inputEl = document.getElementById(INPUT_ID)
+  let inputEl = document.getElementById(INPUT_ID  & fmt"-{self.id}")
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
-    autoResizeTextarea(INPUT_ID)
+    autoResizeTextarea(INPUT_ID & fmt"-{self.id}")
 
 proc passwordPromp(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
@@ -237,7 +237,7 @@ proc loadingState(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="loading-animation"))
 
 method render*(self: AgentActivityComponent): VNode =
-  let inputId = INPUT_ID
+  let inputId = INPUT_ID & fmt"-{self.id}"
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
   if not self.acpInitSent:
@@ -450,31 +450,32 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     # TODO: Make a end-process for the isLoading state
     self.activeAgentMessageId = cstring""
 
-  scrollAgentCom()
+    scrollAgentCom()
 
-  if self.isNil:
-    console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
-    return
+    if self.isNil:
+      console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
+      return
 
-  console.log cstring(fmt"[agent-activity] handler using component id={self.id} messages={self.messages.len} orderLen={self.messageOrder.len}")
+    console.log cstring(fmt"[agent-activity] handler using component id={self.id} messages={self.messages.len} orderLen={self.messageOrder.len}")
 
-  let messageId =
-    if jsHasKey(response, cstring"messageId"):
-      cast[cstring](response[cstring"messageId"])
-    elif jsHasKey(response, cstring"id"):
-      cast[cstring](response[cstring"id"])
-    else:
-      cstring("")
+    let messageId =
+      if jsHasKey(response, cstring"messageId"):
+        cast[cstring](response[cstring"messageId"])
+      elif jsHasKey(response, cstring"id"):
+        cast[cstring](response[cstring"id"])
+      else:
+        PLACEHOLDER_MSG
 
-  console.log cstring"[agent-activity] got messageId"
+    if self.activeAgentMessageId == messageId:
+      console.log cstring"[agent-activity] got messageId"
 
-  let hasContent = jsHasKey(response, cstring"content")
-  let content =
-    if hasContent:
-      cast[cstring](response[cstring"content"])
-    # TODO: Proper error handling
-    else:
-      cstring""
+      let hasContent = jsHasKey(response, cstring"content")
+      let content =
+        if hasContent:
+          cast[cstring](response[cstring"content"])
+        # TODO: Proper error handling
+        else:
+          cstring""
 
   let isFinal = jsHasKey(response, cstring"stopReason")
   let stopReason =
@@ -491,8 +492,8 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
   let canceledFlag = isFinal and stopReason == cstring"cancelled"
 
-  console.log cstring"[agent-activity] got content"
-  console.log content
+      console.log cstring"[agent-activity] got content"
+      console.log content
 
   if hasContent or not self.messages.hasKey(messageId):
     try:
