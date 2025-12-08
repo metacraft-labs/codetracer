@@ -838,6 +838,7 @@ type
     diffEditors*: JsAssoc[int, MonacoEditor]
     testDom*: JsAssoc[int, kdom.Node]
     testLines*: JsAssoc[int, FlowLine]
+    activeTestId*: cstring
 
   # LowLevelComponent* = ref object of Component
     # levels*:        array[LowLevelView, LLViewComponent]
