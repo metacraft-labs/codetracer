@@ -62,6 +62,7 @@ pub struct Handler {
     pub replay: Box<dyn Replay>,
     pub ct_rr_args: CtRRArgs,
     pub load_flow_index: usize,
+    pub tracepoint_rr_worker_index: usize,
 
     pub initialized: bool,
 }
@@ -122,6 +123,7 @@ impl Handler {
             replay,
             ct_rr_args,
             load_flow_index: 0,
+            tracepoint_rr_worker_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
             initialized: false,
@@ -802,8 +804,15 @@ impl Handler {
         load_history_arg: LoadHistoryArg,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            self.replay = Box::new(RRDispatcher::new(
+                "tracepoint",
+                self.tracepoint_rr_worker_index,
+                self.ct_rr_args.clone(),
+            ));
+            self.tracepoint_rr_worker_index += 1;
+        };
         let history_results_with_records = self.replay.load_history(&load_history_arg)?;
-        // let db_replay = DbReplay::new(Box::new(Db::new(&PathBuf::from(""))));
         let history_results: Vec<HistoryResult> = history_results_with_records
             .iter()
             .map(|r| HistoryResult {
@@ -813,26 +822,11 @@ impl Handler {
                 description: r.description.clone(),
             })
             .collect();
-        // warn!("history not implemented yet for rr traces");
-        // self.send_notification(
-        //     NotificationKind::Warning,
-        //     "history not implemented yet for rr traces",
-        //     false,
-        //     sender.clone(),
-        // )?;
-
-        // return Ok(());
 
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
         let raw_event = self.dap_client.updated_history_event(history_update)?;
 
         sender.send(raw_event)?;
-        // self.send_event((
-        //     EventKind::UpdatedHistory,
-        //     gen_event_id(EventKind::UpdatedHistory),
-        //     serde_json::to_string(&history_update)?,
-        //     false,
-        // ))?;
 
         Ok(())
     }
@@ -843,7 +837,7 @@ impl Handler {
         loc: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        self.replay.jump_to(StepId(loc.rr_ticks.0))?;
+        self.replay.location_jump(&loc)?;
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
         Ok(())
