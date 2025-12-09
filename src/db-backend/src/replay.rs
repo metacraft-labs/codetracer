@@ -5,8 +5,8 @@ use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResult, LoadHistoryArg, Location, ProgramEvent,
-    VariableWithRecord,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
+    ProgramEvent, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -38,7 +38,7 @@ pub trait Replay: std::fmt::Debug {
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
-    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResult>, Box<dyn Error>>;
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResultWithRecord>, Box<dyn Error>>;
 
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>>;
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>>;

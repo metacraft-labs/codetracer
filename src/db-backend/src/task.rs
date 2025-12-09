@@ -1040,6 +1040,15 @@ pub struct RunTracepointsArg {
     pub stop_after: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct HistoryResultWithRecord {
+    pub location: Location,
+    pub value: ValueRecordWithType,
+    pub time: u64,
+    pub description: String, // copied from x; passed as arg from y; changed memory at addrs z;
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct HistoryResult {
