@@ -375,7 +375,8 @@ type
     FileQuery,
     ProgramQuery,
     TextSearchQuery,
-    SymbolQuery
+    SymbolQuery,
+    AgentQuery
 
   CommandPanelResult* = ref object
     value*: cstring
@@ -399,6 +400,8 @@ type
       file*: cstring
       line*: int
       symbolKind*: cstring
+    of AgentQuery:
+      discard
 
   CodeSnippet* = object
     line*: int
