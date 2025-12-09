@@ -93,7 +93,7 @@ proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): V
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button", style=style(StyleAttr.marginRight, "6px".cstring))
         tdiv(class="agent-model-img")
-    tdiv(id=fmt"shellComponent-{term.shell.id}", class="shell-container")
+    tdiv(id=fmt"shellComponent-{term.shell.id}{self.commandInputId}", class="shell-container")
 
 proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false): AgentMessage =
   console.log cstring"Adding agent message"
@@ -142,7 +142,7 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
 
 proc submitPrompt(self: AgentActivityComponent) =
   # Use the latest input value to avoid stale data.
-  let inputEl = document.getElementById(INPUT_ID & fmt"-{self.id}")
+  let inputEl = document.getElementById(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
   let promptText =
     if not inputEl.isNil:
       inputEl.toJs.value.to(cstring)
@@ -154,7 +154,7 @@ proc submitPrompt(self: AgentActivityComponent) =
 
   self.inputValue = promptText
   self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
-  let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}")
+  let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
   discard setTimeout(proc() = scrollAgentCom(), 0)
@@ -163,10 +163,10 @@ proc submitPrompt(self: AgentActivityComponent) =
 
 proc clear(self: AgentActivityComponent) =
   self.inputValue = cstring""
-  let inputEl = document.getElementById(INPUT_ID  & fmt"-{self.id}")
+  let inputEl = document.getElementById(INPUT_ID  & fmt"-{self.id}{self.commandInputId}")
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
-    autoResizeTextarea(INPUT_ID & fmt"-{self.id}")
+    autoResizeTextarea(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
 
 proc passwordPromp(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
@@ -237,8 +237,8 @@ proc loadingState(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="loading-animation"))
 
 method render*(self: AgentActivityComponent): VNode =
-  let inputId = INPUT_ID & fmt"-{self.id}"
-  self.commandPalette = data.ui.commandPalette
+  self.commandInputId = if self.inCommandPalette: "-command" else: ""
+  var inputId = INPUT_ID & fmt"-{self.id}{self.commandInputId}"
   data.ui.commandPalette.agent = self
   if not self.acpInitSent:
     data.ipc.send("CODETRACER::acp-session-init", js{
@@ -247,69 +247,17 @@ method render*(self: AgentActivityComponent): VNode =
     self.acpInitSent = true
   # let source =
   self.kxi.afterRedraws.add(proc() =
-    if not self.kxi.isNil and not self.shell.initialized and self.diffEditor.isNil:
+    if not self.kxi.isNil:
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
       # self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
-      self.shell.initialized = true
-      let source ="""
-diff --git a/src/db-backend/src/expr_loader.rs b/src/db-backend/src/expr_loader.rs
-index 71d1dec8..f8499310 100644
---- a/src/db-backend/src/expr_loader.rs
-+++ b/src/db-backend/src/expr_loader.rs
-@@ -216,6 +216,12 @@ impl ExprLoader {
-    pub fn parse_file(&self, path: &PathBuf) -> Result<Tree, Box<dyn Error>> {
-        let raw = &self.processed_files[path].source_code;
-        let lang = self.get_current_language(path);
-+        info!(
-+            "parse_file: path={} lang={:?} bytes={}",
-+            path.display(),
-+            lang,
-+            raw.len()
-+        );
+      
+      # # Use "rust" for syntax highlighting on both sides
+      # let originalModel = createModel(origText.cstring, "rust".cstring)
+      # let modifiedModel = createModel(modText.cstring, "rust".cstring)
 
-        let mut parser = Parser::new();
-        if lang == Lang::Noir || lang == Lang::RustWasm {
-"""
-      var lang = fromPath("/home/asd.nr")
-      let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
-      self.diffEditor = monaco.editor.createDiffEditor(
-        jq("#agentEditor-0".cstring),
-        MonacoEditorOptions(
-          language: lang.toCLang(),
-          readOnly: true,
-          theme: theme,
-          automaticLayout: true,
-          folding: true,
-          fontSize: self.data.ui.fontSize,
-          minimap: js{ enabled: false },
-          find: js{ addExtraSpaceOnTop: false },
-          renderLineHighlight: "".cstring,
-          lineNumbers: proc(line: int): cstring = self.editorLineNumber(line),
-          lineDecorationsWidth: 20,
-          mouseWheelScrollSensitivity: 0,
-          fastScrollSensitivity: 0,
-          scrollBeyondLastLine: false,
-          smoothScrolling: false,
-          contextmenu: false,
-          renderOverviewRuler: false,
-          renderSideBySide: false,
-          scrollbar: js{
-            horizontalScrollbarSize: 14,
-            horizontalSliderSize: 8,
-            verticalScrollbarSize: 14,
-            verticalSliderSize: 8
-          },
-        )
-      )
-      let (origText, modText) = parseUnifiedDiff($source)
-
-      # Use "rust" for syntax highlighting on both sides
-      let originalModel = createModel(origText.cstring, "rust".cstring)
-      let modifiedModel = createModel(modText.cstring, "rust".cstring)
-
-      setDiffModel(self.diffEditor, originalModel, modifiedModel)
-      # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
-      # self.shell.shell.write("Another line here.\r\n")
+      # setDiffModel(self.diffEditor, originalModel, modifiedModel)
+      # # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
+      # # self.shell.shell.write("Another line here.\r\n")
   )
 
   result = buildHtml(
@@ -352,7 +300,7 @@ index 71d1dec8..f8499310 100644
         id = inputId,
         name = "agent-query",
         placeholder = "Ask anything",
-        class = "mousetrap ct-input-cp-background agent-command-input",
+        class = "mousetrap agent-command-input",
         autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
         autocorrect="off",
         autocapitalize="off",
