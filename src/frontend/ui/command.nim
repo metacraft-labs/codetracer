@@ -237,8 +237,18 @@ proc runQuery(self: CommandPaletteComponent) =
 
   of AgentQuery:
     self.inAgentMode = true
-    self.agent.updateAgentUi(self.inputValue)
-    redrawAll()
+    data.lastAgentPrompt = self.inputValue
+    discard setTimeout(proc() =
+      let content = Content.AgentActivity
+      data.openLayoutTab(content)
+      discard setTimeout(proc() =
+        self.agent = cast[AgentActivityComponent](data.ui.componentMapping[content][data.ui.componentMapping[content].len() - 1])
+        self.agent.updateAgentUi(data.lastAgentPrompt)
+        redrawAll(),
+        500
+      ),
+      0
+    )
 
   self.prevCommandValue = self.inputValue
 

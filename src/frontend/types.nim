@@ -1493,6 +1493,7 @@ type
     # to depend on the frontend test code here
     # so we use casting in ui_js.nim/similar for it
     testRunner*:            JsObject
+    lastAgentPrompt*:       cstring
 
     save*:                  Save
     homedir*:               cstring
