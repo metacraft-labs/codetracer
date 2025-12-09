@@ -1,4 +1,4 @@
-import ../utils, ../../common/ct_event, value, ui_imports, shell, command, editor, times, std/[strformat, jsconsole]
+import ../utils, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
 from dom import Node
 
 const HEIGHT_OFFSET = 2
@@ -140,6 +140,16 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
     "text": prompt
   }
 
+proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
+  self.inputValue = promptText
+  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
+  let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
+  self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
+  self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
+  discard setTimeout(proc() = scrollAgentCom(), 0)
+  sendAcpPrompt(promptText)
+  self.clear()
+
 proc submitPrompt(self: AgentActivityComponent) =
   # Use the latest input value to avoid stale data.
   let inputEl = document.getElementById(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
@@ -152,14 +162,7 @@ proc submitPrompt(self: AgentActivityComponent) =
   if promptText.len == 0:
     return
 
-  self.inputValue = promptText
-  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
-  let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
-  self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
-  self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
-  discard setTimeout(proc() = scrollAgentCom(), 0)
-  sendAcpPrompt(self, promptText)
-  self.clear()
+  self.updateAgentUi(promptText)
 
 proc clear(self: AgentActivityComponent) =
   self.inputValue = cstring""
