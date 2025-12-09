@@ -1,4 +1,4 @@
-import ui_imports, kdom, ../renderer, command_interpreter, shell
+import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activity
 
 proc clear(self: CommandPaletteComponent) =
   self.selected = 0
@@ -153,6 +153,9 @@ proc changePlaceholder*(self: CommandPaletteComponent) =
     of SymbolQuery:
       discard # TODO
 
+    of AgentQuery:
+      discard
+
 proc eventuallyClearPlaceholder(self: CommandPaletteComponent, value: cstring) =
   if self.inputPlaceholder != cstring("") and not ($(self.inputPlaceholder)).startsWith($value):
     self.inputPlaceholder = cstring("")
@@ -231,6 +234,11 @@ proc runQuery(self: CommandPaletteComponent) =
     self.interpreter.runCommandPanelResult(selectedResult)
     self.close()
     self.resetCommandPalette()
+
+  of AgentQuery:
+    self.inAgentMode = true
+    self.agent.updateAgentUi(self.inputValue)
+    redrawAll()
 
   self.prevCommandValue = self.inputValue
 
