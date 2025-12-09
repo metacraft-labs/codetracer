@@ -818,7 +818,9 @@ fn handle_client(
                 | "ct/update-table"
                 | "ct/load-terminal"
                 | "ct/tracepoint-toggle"
-                | "ct/tracepoint-delete" => {
+                | "ct/tracepoint-delete"
+                | "ct/load-history" => {
+                    // TODO: separate load-history
                     if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
                         if let Err(e) = to_tracepoint_sender.send(request.clone()) {
                             error!("tracepoint send request error: {e:?}");
