@@ -24,7 +24,7 @@ use crate::rr_dispatcher::{CtRRArgs, RRDispatcher};
 use crate::dap_types;
 // use crate::dap_types::Source;
 use crate::step_lines_loader::StepLinesLoader;
-use crate::task::{self, Breakpoint, GlobalCallLineIndex, StringAndValueTuple, TraceKind};
+use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAndValueTuple, TraceKind};
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
     CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation,
@@ -802,7 +802,17 @@ impl Handler {
         load_history_arg: LoadHistoryArg,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let history_results = self.replay.load_history(&load_history_arg)?;
+        let history_results_with_records = self.replay.load_history(&load_history_arg)?;
+        // let db_replay = DbReplay::new(Box::new(Db::new(&PathBuf::from(""))));
+        let history_results: Vec<HistoryResult> = history_results_with_records
+            .iter()
+            .map(|r| HistoryResult {
+                location: r.location.clone(),
+                value: to_ct_value(&r.value),
+                time: r.time,
+                description: r.description.clone(),
+            })
+            .collect();
         // warn!("history not implemented yet for rr traces");
         // self.send_notification(
         //     NotificationKind::Warning,

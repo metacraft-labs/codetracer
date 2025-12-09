@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
 
 use log::{error, info, warn};
@@ -16,7 +17,7 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResult,
+    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
     LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
 };
 use crate::value::{Type, Value, ValueRecordWithType};
@@ -909,7 +910,7 @@ impl DbReplay {
         }
     }
 
-    pub fn to_value_record_with_type(&mut self, v: &ValueRecord) -> ValueRecordWithType {
+    pub fn to_value_record_with_type(&self, v: &ValueRecord) -> ValueRecordWithType {
         match v {
             ValueRecord::Int { i, type_id } => ValueRecordWithType::Int {
                 i: *i,
@@ -1242,8 +1243,8 @@ impl Replay for DbReplay {
         Ok(vec![])
     }
 
-    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResult>, Box<dyn Error>> {
-        let mut history_results: Vec<HistoryResult> = vec![];
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResultWithRecord>, Box<dyn Error>> {
+        let mut history_results: Vec<HistoryResultWithRecord> = vec![];
         // from start to end:
         //  find all steps with such a variable name: for them:
         //    detect if the value is the same as the previous value
@@ -1271,21 +1272,29 @@ impl Replay for DbReplay {
                         &arg.location.global_call_key,
                         arg.location.callstack_depth,
                     );
-                    let ct_value = self.db.to_ct_value(&var.value);
+                    // let ct_value = self.db.to_ct_value(&var.value);
+                    let now = SystemTime::now();
+                    let time = now
+                        .duration_since(UNIX_EPOCH)
+                        .expect("expect that always now >= UNIX_EPOCH");
+                    let value_with_record = self.to_value_record_with_type(&var.value);
                     if history_results.len() > 1 {
-                        if history_results[history_results.len() - 1].value != ct_value {
-                            history_results.push(HistoryResult::new(
-                                step_location.clone(),
-                                ct_value,
-                                self.id_to_name(var.variable_id).to_string(),
-                            ));
+                        if true {
+                            // TODO: partial eq or directly other way? history_results[history_results.len() - 1].value != ct_value {
+                            history_results.push(HistoryResultWithRecord {
+                                location: step_location.clone(),
+                                value: value_with_record,
+                                time: time.as_secs(),
+                                description: self.id_to_name(var.variable_id).to_string(),
+                            });
                         }
                     } else {
-                        history_results.push(HistoryResult::new(
-                            step_location.clone(),
-                            ct_value,
-                            self.id_to_name(var.variable_id).to_string(),
-                        ));
+                        history_results.push(HistoryResultWithRecord {
+                            location: step_location.clone(),
+                            value: value_with_record,
+                            time: time.as_secs(),
+                            description: self.id_to_name(var.variable_id).to_string(),
+                        });
                     }
                 }
             }

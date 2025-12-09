@@ -17,8 +17,8 @@ use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResult, LoadHistoryArg, Location, ProgramEvent,
-    VariableWithRecord,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
+    ProgramEvent, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -259,9 +259,9 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
-    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResult>, Box<dyn Error>> {
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResultWithRecord>, Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<Vec<HistoryResult>>(
+        let res = serde_json::from_str::<Vec<HistoryResultWithRecord>>(
             &self.stable.run_query(CtRRQuery::LoadHistory { arg: arg.clone() })?,
         )?;
         Ok(res)
