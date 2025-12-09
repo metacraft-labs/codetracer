@@ -1308,6 +1308,14 @@ impl Replay for DbReplay {
         Ok(true)
     }
 
+    fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
+        self.jump_to(StepId(location.rr_ticks.0))?;
+        let mut expr_loader = ExprLoader::new(CoreTrace::default());
+        let location = self.load_location(&mut expr_loader)?;
+        self.step_id = StepId(location.rr_ticks.0);
+        Ok(())
+    }
+
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(path)

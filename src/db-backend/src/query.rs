@@ -54,4 +54,7 @@ pub enum CtRRQuery {
     TracepointJump {
         event: ProgramEvent,
     },
+    LocationJump {
+        location: Location,
+    },
 }

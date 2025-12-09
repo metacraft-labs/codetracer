@@ -275,6 +275,14 @@ impl Replay for RRDispatcher {
         // todo!()
     }
 
+    fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let _ = self.stable.run_query(CtRRQuery::LocationJump {
+            location: location.clone(),
+        })?;
+        Ok(())
+    }
+
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
         self.ensure_active_stable()?;
         let breakpoint = serde_json::from_str::<Breakpoint>(&self.stable.run_query(CtRRQuery::AddBreakpoint {
