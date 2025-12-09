@@ -788,6 +788,8 @@ type
     terminalOrder*: seq[cstring]
     acpInitSent*: bool
     activeAgentMessageId*: cstring
+    commandInputId*: cstring
+    inCommandPalette*: bool
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]

@@ -247,7 +247,8 @@ method onProgramSearchResults*(self: CommandPaletteComponent, results: seq[Comma
 var initStart = true
 
 method render*(self: CommandPaletteComponent): VNode =
-  let (padClass, inputClass, activeClass) = if self.active: ("ct-p-8", "ct-input-cp-background", "ct-active") else: ("", "", "")
+  let (padClass, activeClass) = if self.active: ("ct-p-8", "ct-active") else: ("", "")
+  let inputClass = if self.active and not self.inAgentMode: "ct-input-cp-background-command-palette" else: ""
   result = buildHtml(
     tdiv(id = "command-data")
   ):
@@ -298,4 +299,7 @@ method render*(self: CommandPaletteComponent): VNode =
                 tdiv(class = "command-result empty"):
                   text "No matching result found."
       else:
-        render(self.agent)
+        let agent = cast[AgentActivityComponent](data.ui.componentMapping[Content.AgentActivity][data.ui.componentMapping[Content.AgentActivity].len() - 1])
+        agent.inCommandPalette = true
+        render(agent)
+        agent.inCommandPalette = false
