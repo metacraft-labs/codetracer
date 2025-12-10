@@ -709,8 +709,8 @@ method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = tr
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
   # TODO: detect if db-based or rr-based
-  # for now test for rr-based:
-  let key = if false: update.expression else: cstring($update.address)
+  # for now assume if NO_ADDRESS: db-based
+  let key = if update.address == NO_ADDRESS: update.expression else: cstring($update.address)
   var valueHistory = self.state.valueHistory
   echo "update history for ", key
 

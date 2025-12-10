@@ -1252,12 +1252,17 @@ impl Replay for DbReplay {
         //    detect if the value is the same as the previous value
         //    if not: add to the history
 
+        self.jump_to(StepId(arg.location.rr_ticks.0))?;
         let current_call_key = self.db.steps[self.step_id].call_key;
 
         for (step_id, var_list) in self.db.variables.iter().enumerate() {
             let step = self.db.steps[StepId(step_id as i64)];
             // for now limit to current call: seems most correct
             // TODO: hopefully a more reliable value history for global search
+            info!(
+                "step call key {:?} current call key {:?}",
+                step.call_key, current_call_key
+            );
             if step.call_key == current_call_key {
                 if let Some(var) = var_list
                     .iter()
