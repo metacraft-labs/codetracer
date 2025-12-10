@@ -204,7 +204,7 @@ jobs:
           #   plat_name: manylinux_2_17_aarch64
 
           - name: macos-amd64
-            runner: macos-13
+            runner: macos-15-intel
             target_os: macos
             arch: amd64
             plat_name: macosx_10_9_x86_64
