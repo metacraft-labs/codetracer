@@ -1913,6 +1913,10 @@ proc onSelectState*(data: Data) {.async.} =
   await data.ui.componentMapping[Content.State][0].select()
 
 method render*(self: EditorViewComponent): VNode =
+  if not self.data.lspStarted:
+    self.data.ipc.send("CODETRACER::start-lsp", js{})
+    self.data.lspStarted = true
+
   if self.editorView == ViewNoSource:
     result = self.noInfo.render()
   elif not self.isExpansion and (not self.service.open.hasKey(self.name) or not self.service.open[self.name].received):
@@ -1939,7 +1943,7 @@ method onEnter*(self: EditorViewComponent) {.async.} =
         self.toggleTrace(self.name, line)
 
 
-  else:
+  elif self.data.ui.readOnly:
     let line = editor.getLine()
     let code = self.traces[line].monacoEditor.getValue()
     let lineCount = code.split("\n").len() + 1

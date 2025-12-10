@@ -1491,6 +1491,7 @@ type
     save*:                  Save
     homedir*:               cstring
     status*:                StatusState
+    lspStarted*:            bool
 
 
   KeyPluginContext* = ref object
