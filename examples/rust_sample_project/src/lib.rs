@@ -12,4 +12,11 @@ mod tests {
         println!("hehe");
         assert_eq!(result, 4);
     }
+
+    #[test]
+    fn it_works_2() {
+        let result = add(2, 5);
+        println!("test 2");
+        assert_eq!(result, 7);
+    }
 }
