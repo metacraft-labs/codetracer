@@ -125,6 +125,9 @@ pub struct EmptyArg {}
 pub struct Variable {
     pub expression: String,
     pub value: Value,
+    // for db traces: usually NO_ADDRESS = -1
+    // used for now for rr traces
+    pub address: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +135,7 @@ pub struct Variable {
 pub struct VariableWithRecord {
     pub expression: String,
     pub value: ValueRecordWithType,
+    pub address: i64,
 }
 
 // pub struct ValueRecordAndType {
@@ -180,6 +184,7 @@ pub const NO_INDEX: i64 = -1;
 pub const NO_DEPTH: usize = 0;
 pub const NO_KEY: &str = "-1";
 pub const NO_STEP_ID: i64 = -1;
+pub const NO_ADDRESS: i64 = -1;
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
 #[repr(u8)]
@@ -1078,14 +1083,16 @@ impl HistoryResult {
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct HistoryUpdate {
     pub expression: String,
+    pub address: i64,
     pub results: Vec<HistoryResult>,
     pub finish: bool,
 }
 
 impl HistoryUpdate {
-    pub fn new(expression: String, results: &[HistoryResult]) -> HistoryUpdate {
+    pub fn new(expression: String, address: i64, results: &[HistoryResult]) -> HistoryUpdate {
         HistoryUpdate {
             expression,
+            address,
             results: results.to_vec(),
             finish: true,
         }

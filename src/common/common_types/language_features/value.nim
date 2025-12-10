@@ -86,3 +86,7 @@ type
   Variable* = ref object
     expression*: langstring
     value*: Value
+    # NO_ADDRESS = -1
+    # for db-backend for now NO_ADDRESS
+    # used mostly for RR
+    address*: int

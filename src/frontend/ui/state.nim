@@ -39,6 +39,11 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
 
       for chart in value.charts:
         chart.replaceAllValues(expression, localVariable.value.elements)
+
+      # to not leave history for expressions with older context
+      value.showInline = JsAssoc[cstring, bool]{}
+      value.charts = JsAssoc[cstring, ChartComponent]{}
+
   self.completeMoveIndex += 1
   self.redraw()
 
@@ -111,6 +116,7 @@ method render*(self: StateComponent): VNode =
         state: self,
         showInline: JsAssoc[cstring, bool]{},
         baseExpression: name,
+        baseAddress: localVariable.address,
         stateID: self.id,
         id: self.values.len,
         data: self.data,
@@ -123,6 +129,16 @@ method render*(self: StateComponent): VNode =
     elif self.valueHistory.hasKey(name):
       checkHistoryLocation(self.values[name], name)
 
+    # ensure it's updated so we show history for the right, maybe differrent expression
+    self.values[name].baseAddress = localVariable.address
+  
+    for key, history in self.valueHistory:
+      if cstring($self.values[name].baseAddress) == key:
+        # reload history chart for it: without reloading value history
+        #   as it's already loaded, just the chart
+        self.values[name].charts = JsAssoc[cstring, ChartComponent]{}
+        self.values[name].showInline = JsAssoc[cstring, bool]{}
+        discard self.values[name].showHistory(name, redraw=false)
   try:
     proc renderFunction(value: ValueComponent): VNode =
       value.nameWidth = self.nameWidth
