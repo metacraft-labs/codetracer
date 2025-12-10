@@ -38,7 +38,7 @@ pub trait Replay: std::fmt::Debug {
 
     fn load_step_events(&mut self, step_id: StepId, exact: bool) -> Vec<DbRecordEvent>;
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
-    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResultWithRecord>, Box<dyn Error>>;
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>>;
 
     fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>>;
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>>;

@@ -259,9 +259,9 @@ impl Replay for RRDispatcher {
         Ok(res)
     }
 
-    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResultWithRecord>, Box<dyn Error>> {
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
         self.ensure_active_stable()?;
-        let res = serde_json::from_str::<Vec<HistoryResultWithRecord>>(
+        let res = serde_json::from_str::<(Vec<HistoryResultWithRecord>, i64)>(
             &self.stable.run_query(CtRRQuery::LoadHistory { arg: arg.clone() })?,
         )?;
         Ok(res)

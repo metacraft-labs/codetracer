@@ -26,7 +26,8 @@ proc loadHistory(self: ValueComponent, expression: cstring) =
 method register*(self: ValueComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
-    if cast[cstring](response.expression) == self.baseExpression:
+    if self.baseAddress == NO_ADDRESS and response.expression == self.baseExpression or
+        self.baseAddress != NO_ADDRESS and response.address == self.baseAddress:
       discard self.onUpdatedHistory(response))
 
 proc registerValueComponent*(component: ValueComponent, api: MediatorWithSubscribers) {.exportc.} =
@@ -318,7 +319,12 @@ proc ensureBase(self: ChartComponent) =
     self.ensurePie()
 
 proc ensure*(self: ChartComponent) =
-  var label = if self.viewKind == ViewLine: "ensureLine" else: "ensurePie"
+  var label = if self.viewKind == ViewLine: 
+      "ensureLine"
+    elif self.viewKind == ViewTable:
+      "<not applicable>"
+    else:
+      "ensurePie"
 
   # if self.stateID != -1:
   #   # TODO: think how this would work in extension
@@ -328,8 +334,9 @@ proc ensure*(self: ChartComponent) =
   # else:
   if not self.trace.isNil:
     self.ensureBase()
-  else:
-    cerror "vaue: " & label & " cant be called"
+  elif self.viewKind != ViewTable:
+    # alexander: not sure if this problematic : now code is different..
+    cwarn "value: " & label & " cant be called"
     return
 
 proc renderLine*(self: ChartComponent): VNode =
@@ -637,6 +644,7 @@ method ensureCollectionElementsChart*(
       self.charts[expression].update(value.elements, replace=true)
 
 proc checkHistoryLocation*(self: ValueComponent, expression: cstring) =
+  # for now this applicable for db traces only
   let currentLocation = self.location
 
   if currentLocation.path != self.state.valueHistory[expression].location.path or
@@ -644,15 +652,26 @@ proc checkHistoryLocation*(self: ValueComponent, expression: cstring) =
       self.state.valueHistory.del(expression)
       self.showInline[expression] = false
 
-method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
-  if not self.state.valueHistory.hasKey(expression):
+method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = true) {.async.} =
+  let key = if self.baseAddress == NO_ADDRESS: 
+      expression
+    else:
+      cstring($self.baseAddress)
+  clog cstring(fmt"showHistory {key}")
+  console.log self.state.valueHistory
+
+  let hasValueHistory = self.state.valueHistory.hasKey(key)
+    
+  if not hasValueHistory or self.charts.len() == 0:
     let location = self.location
 
-    self.state.valueHistory[expression] =
-      ValueHistory(
-        location: location,
-        results: @[]
-      )
+    if not hasValueHistory:
+      self.state.valueHistory[key] =
+        ValueHistory(
+          location: location,
+          results: @[]
+        )
+
     self.showInline[expression] = true
 
     var tableView = proc: VNode =
@@ -665,10 +684,10 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
       buildHtml(tdiv(class = cstring(fmt"history-text {kl}"))):
         tdiv(class = "history-text-element"):
           tdiv(class = "history-location-element"):
-            for event in self.state.valueHistory[expression].results:
+            for event in self.state.valueHistory[key].results:
               historyLocationView(self, event)
           tdiv(class = "history-value-element"):
-            for event in self.state.valueHistory[expression].results:
+            for event in self.state.valueHistory[key].results:
               historyValueView(self, event)
 
     let chart = self.addChart(expression)
@@ -676,19 +695,27 @@ method showHistory*(self: ValueComponent, expression: cstring) {.async.} =
     chart.tableView = tableView
     # chart.ensure()
     # self.ensureValueComponent()
-    self.loadHistory(expression)
+    if not hasValueHistory:
+      echo "loadHistory for ", expression
+      self.loadHistory(expression)
   else:
-    self.showInline[expression] = not self.showInline[expression]
+    # TODO?
+    # self.showInline[expression] = not self.showInline[expression]
+    discard
 
-  self.state.redrawForExtension()
-  self.state.redraw()
+  if redraw:
+    self.state.redrawForExtension()
+    self.state.redraw()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
-  let expression = cast[cstring](update.expression)
+  # TODO: detect if db-based or rr-based
+  # for now test for rr-based:
+  let key = if false: update.expression else: cstring($update.address)
   var valueHistory = self.state.valueHistory
+  echo "update history for ", key
 
-  if valueHistory.hasKey(expression):
-    var unsortedHistory = valueHistory[expression].results.concat(update.results.filterIt(it notin valueHistory[expression].results))
+  if valueHistory.hasKey(key):
+    var unsortedHistory = valueHistory[key].results.concat(update.results.filterIt(it notin valueHistory[key].results))
     var sortedHistory = sorted(
       unsortedHistory,
       proc (a: HistoryResult, b: HistoryResult): int =
@@ -713,7 +740,7 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
         historyWithoutRepetitions.add(res)
         previousStoredValue = res.value
 
-    valueHistory[expression].results = historyWithoutRepetitions
+    valueHistory[key].results = historyWithoutRepetitions
 
     self.redraw()
 

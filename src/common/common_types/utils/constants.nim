@@ -14,6 +14,7 @@ const
   FLOW_ITERATION_START*: int = 0
   RESTART_EXIT_CODE*: int = 10
   NO_NAME* = langstring""
+  NO_ADDRESS*: int = -1
   VOID_RESULT*: langstring = langstring("{}")
   IN_DEBUG* = true
 

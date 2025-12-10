@@ -31,7 +31,7 @@ use crate::task::{
     HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump,
     Location, MoveState, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg,
     RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId,
-    TracepointResults, UpdateTableArgs, Variable, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
+    TracepointResults, UpdateTableArgs, Variable, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
@@ -379,6 +379,7 @@ impl Handler {
             .map(|l| Variable {
                 expression: l.expression.clone(),
                 value: to_ct_value(&l.value),
+                address: l.address,
             })
             .collect();
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
@@ -812,7 +813,7 @@ impl Handler {
             ));
             self.tracepoint_rr_worker_index += 1;
         };
-        let history_results_with_records = self.replay.load_history(&load_history_arg)?;
+        let (history_results_with_records, address) = self.replay.load_history(&load_history_arg)?;
         let history_results: Vec<HistoryResult> = history_results_with_records
             .iter()
             .map(|r| HistoryResult {
@@ -823,7 +824,7 @@ impl Handler {
             })
             .collect();
 
-        let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), &history_results);
+        let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), address, &history_results);
         let raw_event = self.dap_client.updated_history_event(history_update)?;
 
         sender.send(raw_event)?;
@@ -1901,6 +1902,7 @@ impl Handler {
             .map(|v| Variable {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.db.to_ct_value(&v.value),
+                address: NO_ADDRESS,
             })
             .collect();
 

@@ -631,6 +631,7 @@ type
     showInline*:         JsAssoc[cstring, bool]
     baseValue*:          Value
     baseExpression*:     cstring
+    baseAddress*:        int
     charts*:             JsAssoc[cstring, ChartComponent]
     i*:                  int
     fresh*:              bool

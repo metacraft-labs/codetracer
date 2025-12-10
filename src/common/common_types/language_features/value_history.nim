@@ -11,6 +11,7 @@ type
     results*: seq[HistoryResult]
 
   HistoryUpdate* = object
-    expression*: string
+    expression*: langstring
+    address*: int
     results*: seq[HistoryResult]
     finish*: bool

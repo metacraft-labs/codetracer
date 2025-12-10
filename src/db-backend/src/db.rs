@@ -18,7 +18,7 @@ use crate::lang::Lang;
 use crate::replay::Replay;
 use crate::task::{
     Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
-    LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_INDEX, NO_PATH, NO_POSITION,
+    LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION,
 };
 use crate::value::{Type, Value, ValueRecordWithType};
 
@@ -1176,6 +1176,7 @@ impl Replay for DbReplay {
             .map(|v| VariableWithRecord {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.to_value_record_with_type(&v.value),
+                address: NO_ADDRESS,
                 // &self.db.to_ct_value(&v.value),
             })
             .collect();
@@ -1191,6 +1192,7 @@ impl Replay for DbReplay {
                 VariableWithRecord {
                     expression: self.db.variable_name(*variable_id).to_string(),
                     value: self.to_value_record_with_type(&value),
+                    address: NO_ADDRESS,
                 }
             })
             .collect();
@@ -1243,7 +1245,7 @@ impl Replay for DbReplay {
         Ok(vec![])
     }
 
-    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<Vec<HistoryResultWithRecord>, Box<dyn Error>> {
+    fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
         let mut history_results: Vec<HistoryResultWithRecord> = vec![];
         // from start to end:
         //  find all steps with such a variable name: for them:
@@ -1300,7 +1302,7 @@ impl Replay for DbReplay {
             }
         }
 
-        Ok(history_results)
+        Ok((history_results, NO_ADDRESS))
     }
 
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
