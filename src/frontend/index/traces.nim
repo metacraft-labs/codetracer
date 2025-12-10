@@ -443,6 +443,7 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
 
 proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
+  let pid = nodeProcess.pid.to(int)
   let processResult = await readProcessOutput(
     codetracerExe,
     @[cstring"record-test"].concat(
@@ -450,7 +451,12 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
           response.testName,
           response.path,
           cstring($response.line),
-          cstring($response.column)])
+          cstring($response.column),
+          # TODO: maybe diff passed by frontend or constructed here?
+          cstring(fmt"--with-diff=HEAD"),
+          # TODO: maybe session id or other
+          cstring(fmt"--store-trace-folder-for-pid={pid}")
+          ])
   )
   if processResult.isOk: # true
     let output = processResult.value
@@ -459,6 +465,7 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
     echo output
     if lines.len > 1:
       let traceIdLine = lines[^3]
+      echo lines
       if traceIdLine.startsWith("traceId:"):
         let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
         infoPrint "index: traceId for test: ", traceId
@@ -469,13 +476,17 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
         infoPrint "trace is in ", trace.outputFolder
 
         if response.newWindow:
+          infoPrint "new window"
           discard startProcess(codetracerExe,
-          @[cstring"replay", cstring(fmt"--id={traceId}")]
+            @[cstring"replay", cstring(fmt"--id={traceId}")],
+            options=JsObject{stdio: cstring"inherit"}
           )
         else:
+          infoPrint "existing window"
           await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
 
-        await loadExistingRecord(traceId)
+          await loadExistingRecord(traceId)
+
         return
     warnPrint "index: run-test: traced ok, but couldn't extract traceId"
   else:

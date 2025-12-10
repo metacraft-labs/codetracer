@@ -308,3 +308,18 @@ proc onLspGetUrl*(sender: JsObject, response: JsObject) {.async.} =
     sendLspStatusToRenderer(kind)
   else:
     sendLspStatusToRenderer(rustLspKind)
+
+proc onStartLsp*(sender: JsObject, response: JsObject) {.async.} =
+  # we call it in a `onStartLsp` handler, because if we directly
+  # start it from `ready` it can raise an unhandled error
+  #   which breaks ready and new window record replay(or even maybe normal replay?) 
+  #   find a way to catch `.listen` callback error?
+  when not defined(server):
+    # for now not supported on server
+    for kind in [rustLspKind, rubyLspKind]:
+      try:
+        await startLspBridge(kind)
+      except: # CatchableError:
+        warnPrint fmt"index:lsp unable to start {kind} bridge" # : {getCurrentExceptionMsg()}"
+  else:
+    discard

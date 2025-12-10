@@ -44,6 +44,9 @@ proc configureIpcMain* =
     # Dap
     "dap-raw-message"
 
+    # LSP
+    "start-lsp"
+
     # Acp
     "acp-prompt"
     "acp-init-session"
@@ -99,14 +102,6 @@ proc ready*(): Future[void] {.async.} =
     await asyncSleep(1000)
 
   setupProxyForDap(backendManagerSocket)
-
-  when not defined(server):
-    # for now not supported on server
-    for kind in [rustLspKind, rubyLspKind]:
-      try:
-        await startLspBridge(kind)
-      except CatchableError:
-        warnPrint fmt"index:lsp unable to start {kind} bridge: {getCurrentExceptionMsg()}"
 
   configureIpcMain()
 
