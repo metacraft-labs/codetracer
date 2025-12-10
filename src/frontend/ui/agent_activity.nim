@@ -32,6 +32,15 @@ proc autoResizeTextarea(id: cstring) =
   el.style.height = $el.toJs.scrollHeight & "px"
   el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
 
+proc componentBySessionId(sessionId: cstring): AgentActivityComponent =
+  ## Locate the AgentActivity component for a given sessionId. If sessionId is
+  ## empty, return the first available component.
+  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
+    let candidate = AgentActivityComponent(comp)
+    if sessionId.len == 0 or candidate.sessionId == sessionId:
+      return candidate
+  nil
+
 proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
   let trueLineNumber = toCString(line - 1)
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
@@ -125,8 +134,9 @@ proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTermin
 
 const INPUT_ID = cstring"agent-query-text"
 
-proc sendAcpPrompt(prompt: cstring) =
+proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
   data.ipc.send ("CODETRACER::acp-prompt"), js{
+    "sessionId": self.sessionId,
     "text": prompt
   }
 
@@ -148,7 +158,7 @@ proc submitPrompt(self: AgentActivityComponent) =
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
   discard setTimeout(proc() = scrollAgentCom(), 0)
-  sendAcpPrompt(promptText)
+  sendAcpPrompt(self, promptText)
   self.clear()
 
 proc clear(self: AgentActivityComponent) =
@@ -231,7 +241,9 @@ method render*(self: AgentActivityComponent): VNode =
   self.commandPalette = data.ui.commandPalette
   data.ui.commandPalette.agent = self
   if not self.acpInitSent:
-    data.ipc.send("CODETRACER::acp-init-session", js{})
+    data.ipc.send("CODETRACER::acp-session-init", js{
+      "sessionId": self.sessionId
+    })
     self.acpInitSent = true
   # let source =
   self.kxi.afterRedraws.add(proc() =
@@ -403,10 +415,13 @@ index 71d1dec8..f8499310 100644
 
               if self.activeAgentMessageId.len > 0:
                 data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+                  "sessionId": self.sessionId,
                   "messageId": self.activeAgentMessageId
                 })
               else:
-                data.ipc.send("CODETRACER::acp-cancel-prompt", js{})
+                data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+                  "sessionId": self.sessionId
+                })
               self.isLoading = false
               self.redraw()
           )
@@ -420,17 +435,20 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   console.log cstring"[agent-activity] onAcpReceiveResponse"
   console.log response
 
-  # Find the first AgentActivity component via componentMapping.
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+
   console.log cstring(fmt"[agent-activity] componentMapping[AgentActivity].len={data.ui.componentMapping[Content.AgentActivity].len}")
-  var self: AgentActivityComponent = nil
-  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
-    self = AgentActivityComponent(comp)
+  var self = componentBySessionId(sessionId)
+  if not self.isNil:
     # Filter the placeholder msg for the agent:
     self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
     self.messages.del(PLACEHOLDER_MSG)
     # TODO: Make a end-process for the isLoading state
     self.activeAgentMessageId = cstring""
-    break
 
   scrollAgentCom()
 
@@ -492,10 +510,13 @@ proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
   console.log cstring"[agent-activity] onAcpCreateTerminal"
   console.log response
 
-  var self: AgentActivityComponent = nil
-  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
-    self = AgentActivityComponent(comp)
-    break
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+
+  let self = componentBySessionId(sessionId)
 
   if self.isNil:
     console.log cstring"[agent-activity] no AgentActivity component to receive ACP terminal yet"
@@ -514,10 +535,13 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   console.log cstring"[agent-activity] onAcpPromptStart"
   console.log response
 
-  var self: AgentActivityComponent = nil
-  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
-    self = AgentActivityComponent(comp)
-    break
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+
+  let self = componentBySessionId(sessionId)
 
   if self.isNil:
     console.log cstring"[agent-activity] no AgentActivity component to receive prompt start"
@@ -526,6 +550,28 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   if jsHasKey(response, cstring"id"):
     self.activeAgentMessageId = cast[cstring](response[cstring"id"])
     console.log cstring(fmt"[agent-activity] set activeAgentMessageId from prompt-start: {self.activeAgentMessageId}")
+
+proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let comp = componentBySessionId(sessionId)
+  if not comp.isNil:
+    comp.acpInitSent = true
+    console.log cstring(fmt"[agent-activity] session ready for {sessionId}")
+
+proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let comp = componentBySessionId(sessionId)
+  if not comp.isNil:
+    comp.acpInitSent = false
+  console.log cstring(fmt"[agent-activity] session load error for {sessionId}")
 
 proc onAcpRequestPermission*(sender: js, response: JsObject) {.async.} =
   console.log cstring(fmt"[agent-activity] onAcpRequestPermission")
