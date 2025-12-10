@@ -249,7 +249,18 @@ impl ExprLoader {
     }
 
     pub fn get_source_line(&self, path: &PathBuf, row: usize) -> String {
-        self.processed_files[path].file_lines[row].clone()
+        if row < self.processed_files[path].file_lines.len() {
+            self.processed_files[path].file_lines[row].clone()
+        } else {
+            warn!(
+                "problem with source file {}; row: {}; lines count: {}; info: {:?}",
+                path.display(),
+                row,
+                self.processed_files[path].file_lines.len(),
+                self.processed_files[path]
+            );
+            "".to_string()
+        }
     }
 
     fn extract_expr(&mut self, node: &Node, path: &PathBuf, row: usize) -> String {

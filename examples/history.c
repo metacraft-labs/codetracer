@@ -14,6 +14,8 @@ int bug(int* a) {
 int usage(int *value) {
     int my_result = *value + 10;
     printf("my result is %d", my_result);
+    my_result += 1;
+    my_result += 1;
 }
 
 void change(int* arg) {
