@@ -388,6 +388,7 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     messageOrder: @[],
     terminals: JsAssoc[cstring, AgentTerminal]{},
     terminalOrder: @[],
+    sessionId: cstring(fmt"acp-session-{id}"),
     acpInitSent: false,
     activeAgentMessageId: cstring""
   )

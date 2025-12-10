@@ -1,0 +1,18 @@
+# Copyright 2025 Schelling Point Labs Inc
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: acp_echo
+tags: [acp, demo]
+acp:
+  capabilities:
+    loadSession: true
+timeline:
+  - userInputs:
+      - relativeTime: 0
+        input: 'Hello from Scenario'
+  - sessionStart:
+      sessionId: 'acp-echo'
+  - llmResponse:
+      - assistant:
+          - relativeTime: 0
+            content: 'Echo: Hello from Scenario'

@@ -770,6 +770,7 @@ type
 
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
+    sessionId*: cstring
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
