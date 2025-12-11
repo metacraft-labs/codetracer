@@ -1720,7 +1720,6 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           self.makeDiffViewZones()
           self.loadFlow(FlowMode.Diff, types.Location())
 
-      self.clearTest()
       self.addTestActions()
       self.applyEventualStylesLines()
 
