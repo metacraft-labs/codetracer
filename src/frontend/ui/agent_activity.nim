@@ -147,7 +147,7 @@ proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
   discard setTimeout(proc() = scrollAgentCom(), 0)
-  sendAcpPrompt(promptText)
+  sendAcpPrompt(self, promptText)
   self.clear()
 
 proc submitPrompt(self: AgentActivityComponent) =
@@ -394,39 +394,38 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
 
   console.log cstring(fmt"[agent-activity] componentMapping[AgentActivity].len={data.ui.componentMapping[Content.AgentActivity].len}")
   var self = componentBySessionId(sessionId)
-  if not self.isNil:
-    # Filter the placeholder msg for the agent:
-    self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
-    self.messages.del(PLACEHOLDER_MSG)
-    # TODO: Make a end-process for the isLoading state
-    self.activeAgentMessageId = cstring""
+  if self.isNil:
+    console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
+    return
 
-    scrollAgentCom()
+  # Filter the placeholder msg for the agent:
+  self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+  self.messages.del(PLACEHOLDER_MSG)
+  # TODO: Make a end-process for the isLoading state
+  self.activeAgentMessageId = cstring""
 
-    if self.isNil:
-      console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
-      return
+  scrollAgentCom()
 
-    console.log cstring(fmt"[agent-activity] handler using component id={self.id} messages={self.messages.len} orderLen={self.messageOrder.len}")
+  console.log cstring(fmt"[agent-activity] handler using component id={self.id} messages={self.messages.len} orderLen={self.messageOrder.len}")
 
-    let messageId =
-      if jsHasKey(response, cstring"messageId"):
-        cast[cstring](response[cstring"messageId"])
-      elif jsHasKey(response, cstring"id"):
-        cast[cstring](response[cstring"id"])
-      else:
-        PLACEHOLDER_MSG
+  let messageId =
+    if jsHasKey(response, cstring"messageId"):
+      cast[cstring](response[cstring"messageId"])
+    elif jsHasKey(response, cstring"id"):
+      cast[cstring](response[cstring"id"])
+    else:
+      PLACEHOLDER_MSG
 
-    if self.activeAgentMessageId == messageId:
-      console.log cstring"[agent-activity] got messageId"
+  if self.activeAgentMessageId.len > 0 and self.activeAgentMessageId != messageId:
+    return
 
-      let hasContent = jsHasKey(response, cstring"content")
-      let content =
-        if hasContent:
-          cast[cstring](response[cstring"content"])
-        # TODO: Proper error handling
-        else:
-          cstring""
+  let hasContent = jsHasKey(response, cstring"content")
+  let content =
+    if hasContent:
+      cast[cstring](response[cstring"content"])
+    # TODO: Proper error handling
+    else:
+      cstring""
 
   let isFinal = jsHasKey(response, cstring"stopReason")
   let stopReason =
@@ -443,8 +442,8 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
   let canceledFlag = isFinal and stopReason == cstring"cancelled"
 
-      console.log cstring"[agent-activity] got content"
-      console.log content
+  console.log cstring"[agent-activity] got content"
+  console.log content
 
   if hasContent or not self.messages.hasKey(messageId):
     try:
