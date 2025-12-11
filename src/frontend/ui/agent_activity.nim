@@ -261,6 +261,11 @@ method render*(self: AgentActivityComponent): VNode =
       # setDiffModel(self.diffEditor, originalModel, modifiedModel)
       # # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
       # # self.shell.shell.write("Another line here.\r\n")
+    if data.lastAgentPrompt != "" and not data.lastAgentPrompt.isNil:
+      let agent = cast[AgentActivityComponent](data.ui.componentMapping[Content.AgentActivity][data.ui.componentMapping[Content.AgentActivity].len() - 1])
+      agent.updateAgentUi(data.lastAgentPrompt)
+      data.lastAgentPrompt = ""
+      redrawAll()
   )
 
   result = buildHtml(
