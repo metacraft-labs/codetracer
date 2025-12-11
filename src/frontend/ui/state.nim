@@ -3,6 +3,7 @@ import
   show_code,
   value,
   ../communication,
+  ../event_helpers,
   ../../common/ct_event
 
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
@@ -12,7 +13,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # let TOTAL_VALUE_COMPONENT_WIDTH: float = 95 #%
 
 proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - self.nameWidth
-# proc watchView(self: StateComponent): VNode
+proc watchView(self: StateComponent): VNode
 # proc headerView(self: StateComponent): VNode
 proc excerpt(self: StateComponent): VNode
 
@@ -69,9 +70,7 @@ method redrawForSinglePage*(self: StateComponent) =
 
 const LOCALS_RR_DEPTH_LIMIT: int = 7
 
-method onMove(self: StateComponent) {.async.} =
-  # TODO: fixing rr ticks
-  # self.rrTicks = response.location.rrTicks
+proc loadLocals*(self: StateComponent) =
   let countBudget = 3000
   let minCountLimit = 50
   let arguments = CtLoadLocalsArguments(
@@ -79,9 +78,15 @@ method onMove(self: StateComponent) {.async.} =
     countBudget: countBudget,
     minCountLimit: minCountLimit,
     depthLimit: LOCALS_RR_DEPTH_LIMIT,
+    watchExpressions: self.watchExpressions,
     lang: toLangFromFilename(self.location.path),
   )
   self.api.emit(CtLoadLocals, arguments)
+
+method onMove(self: StateComponent) {.async.} =
+  # TODO: fixing rr ticks
+  # self.rrTicks = response.location.rrTicks
+  self.loadLocals()
   self.redraw()
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
@@ -139,6 +144,8 @@ method render*(self: StateComponent): VNode =
         self.values[name].charts = JsAssoc[cstring, ChartComponent]{}
         self.values[name].showInline = JsAssoc[cstring, bool]{}
         discard self.values[name].showHistory(name, redraw=false)
+    
+    
   try:
     proc renderFunction(value: ValueComponent): VNode =
       value.nameWidth = self.nameWidth
@@ -178,7 +185,7 @@ method render*(self: StateComponent): VNode =
     ):
       if not self.inExtension:
         excerpt(self)
-        # watchView(self) # TODO: Add later on
+      watchView(self) # TODO: Add later on
 
       tdiv(class = "value-components-container"):
         if (not self.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
@@ -247,32 +254,28 @@ proc excerpt(self: StateComponent): VNode =
 #       self.chevronClicked = false
 #     )
 
-# proc watchView(self: StateComponent): VNode =
-#   result = buildHtml(
-#     tdiv(id = "gdb-evaluate")
-#   ):
-#     form(
-#       onsubmit = proc(ev: Event, v: VNode) =
-#       ev.stopPropagation()
-#       ev.preventDefault()
+proc watchView(self: StateComponent): VNode =
+  result = buildHtml(
+    tdiv(id = "gdb-evaluate")
+  ):
+    form(
+      onsubmit = proc(ev: Event, v: VNode) =
+      ev.stopPropagation()
+      ev.preventDefault()
 
-#       if not self.service.stableBusy:
-#         var e = jq("#watch").toJs.value.to(cstring)
+      if not self.stableBusy:
+        var e = jq("#watch").toJs.value.to(cstring)
 
-#         if ($e).find("\n") != NO_INDEX:
-#           errorMessage(cstring"newlines forbidden in watch expressions: not registered")
-#         else:
-#           self.watchExpressions.add(e)
-#           self.data.services.debugger.watchExpressions.add(e)
-#           discard self.data.services.debugger.updateWatches(proc(service: DebuggerService, locals: seq[Variable]) =
-#             self.locals = locals
-#             service.locals = locals
-#             self.redraw())
-#           jq("#watch").toJs.value = cstring"",
-#       onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
-#       onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()
-#     ):
-#       input(`type`="text", placeholder="Enter a watch expression", id="watch")
+        if ($e).find("\n") != NO_INDEX:
+          self.api.errorMessage(cstring"newlines forbidden in watch expressions: not registered")
+        else:
+          self.watchExpressions.add(e)
+          self.loadLocals()
+          jq("#watch").toJs.value = cstring"",
+      onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
+      onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()
+    ):
+      input(`type`="text", placeholder="Enter a watch expression", id="watch")
 
   
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =

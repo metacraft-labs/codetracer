@@ -26,6 +26,7 @@ pub struct CtLoadLocalsArguments {
     pub count_budget: i64,
     pub min_count_limit: i64,
     pub lang: Lang,
+    pub watch_expressions: Vec<String>,
     pub depth_limit: i64, // for easier compat with our nim code: NO_DEPTH_LIMIT = -1 for None for now
 }
 
