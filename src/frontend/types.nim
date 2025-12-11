@@ -1636,6 +1636,7 @@ when defined(ctRenderer):
 
   var data* = Data(
     dapApi: DapApi(),
+    lastAgentPrompt: "",
     viewsApi: setupSinglePageViewsApi(cstring"single-page-frontend-to-views"),
     connection: ConnectionState(
       connected: true,
