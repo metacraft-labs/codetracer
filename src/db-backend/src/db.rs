@@ -1169,7 +1169,7 @@ impl Replay for DbReplay {
         }
     }
 
-    fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
+    fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
         let variables_for_step = self.db.variables[self.step_id].clone();
         let full_value_locals: Vec<VariableWithRecord> = variables_for_step
             .iter()
@@ -1196,6 +1196,13 @@ impl Replay for DbReplay {
                 }
             })
             .collect();
+
+        // TODO: watches require tracepoint-like evaluate_expression or would duplicate locals
+        // for now don't evaluate/support them for db traces: just ignoring
+        if arg.watch_expressions.len() > 0 {
+            warn!("watch expressions not supported for db traces currently");
+        }
+
         // based on https://stackoverflow.com/a/56490417/438099
         let mut locals: Vec<VariableWithRecord> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
 

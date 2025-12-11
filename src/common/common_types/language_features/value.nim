@@ -75,6 +75,7 @@ type
     # for easier compat between nim and rust code: 
     # NO_DEPTH_LIMIT = -1 for None for now
     depthLimit*: int 
+    watchExpressions*: seq[langstring]
     lang*: Lang
     
   CtLoadLocalsResponseBody* = ref object

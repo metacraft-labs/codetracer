@@ -2,8 +2,8 @@
 
 int bug(int* a) {
     int original = *a;
-    int* a_address = a;
-    int* a_1_address = &a[1];
+    // int* a_address = a;
+    // int* a_1_address = &a[1];
     // in the scenario the author here thinks he is changing
     // a[0]
     a[1] = -50000;

@@ -711,9 +711,23 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
   # TODO: detect if db-based or rr-based
   # for now assume if NO_ADDRESS: db-based
   let key = if update.address == NO_ADDRESS: update.expression else: cstring($update.address)
+  if update.address != NO_ADDRESS:
+    # assuming rr
+    #
+    # adding an artifficial watch variable for this address
+    # should be loaded on next load-locals update
+    #   if we jump to a call/frame, where no local variable matches the address of this history
+    #   we can show it at least for this artifficial watch variable:
+    # TODO: eventually adding `(typeName*)` ?
+    # toHex(update.address) seem to produce a smaller value? maybe because of JavaScript number 
+    #   something like ~2^53 limitation for nim ints? not sure
+    #   that's why we use baseAddress, assuming the history is for this value
+    let expression = cstring(fmt"({self.baseValue.typ.langType}){self.baseAddress}")
+    if expression notin self.state.watchExpressions:
+      self.state.watchExpressions.add(expression)
+
   var valueHistory = self.state.valueHistory
   echo "update history for ", key
-
   if valueHistory.hasKey(key):
     var unsortedHistory = valueHistory[key].results.concat(update.results.filterIt(it notin valueHistory[key].results))
     var sortedHistory = sorted(
@@ -743,7 +757,8 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
     valueHistory[key].results = historyWithoutRepetitions
 
     self.redraw()
-
+  
+  
 proc atomValueView(self: ValueComponent, valueText: string, expression: cstring, klass: string, value: Value): VNode =
   let klassNumber =
     if self.i mod 2 == 0:
