@@ -331,6 +331,12 @@ method render*(self: AgentActivityComponent): VNode =
       )
       tdiv(class="agent-buttons-container"):
         tdiv(
+          class="agent-button new-agent-instance",
+          onclick = proc = 
+            let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+            data.runTests(options)
+        )
+        tdiv(
           class="agent-button",
           onclick = proc =
             echo "#TODO: add a file"
