@@ -374,9 +374,9 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         #   # element "Build tasks (nimble)", nil, false
 
         # TODO:
-        # folder "Reset":
-        #   element "Restart db-backend", aRestartDbBackend, true
-        #   element "Restart backend-manager", aRestartBackendManager, true
+        folder "Reset":
+          element "Restart db-backend", aRestartDbBackend, true
+          element "Restart backend-manager", aRestartBackendManager, true
 
         folder "Debug":
           # element "Trace Existing Program...", aTrace, false
