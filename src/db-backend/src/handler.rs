@@ -1399,6 +1399,16 @@ impl Handler {
         args: RunTracepointsArg,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            self.replay = Box::new(RRDispatcher::new(
+                "tracepoint",
+                self.tracepoint_rr_worker_index,
+                self.ct_rr_args.clone(),
+            ));
+            self.tracepoint_rr_worker_index += 1;
+        };
+        info!("run_tracepoints trace_kind {:?}", self.trace_kind);
+
         // Sort steps in StepId Ord
         self.setup_trace_session(req, args.clone(), sender.clone())?;
 
