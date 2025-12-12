@@ -86,6 +86,8 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         branches_body: vec!["block".to_string()],
         branches: vec!["block".to_string()],
         functions: vec!["function_item".to_string()],
+        // NOTE: `.values` is used for other languages inside `is_variable_node` now.
+        // However there is custom logic for Rust there
         values: vec!["identifier".to_string()],
         comments: vec!["//".to_string()],
     };
@@ -153,6 +155,24 @@ impl FileInfo {
             comment_lines: vec![],
         }
     }
+}
+
+fn field_name_in_parent(node: &Node) -> Option<String> {
+    let parent = node.parent()?;
+    let mut cursor = parent.walk();
+    if !cursor.goto_first_child() {
+        return None;
+    }
+
+    loop {
+        if cursor.node() == *node {
+            return cursor.field_name().map(|name| name.to_string());
+        }
+        if !cursor.goto_next_sibling() {
+            break;
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +345,59 @@ impl ExprLoader {
         line.chars().take_while(|c| c.is_whitespace()).count()
     }
 
+    fn is_child_by_field_name(parent: &Node, node: &Node, field: &str) -> bool {
+        parent.child_by_field_name(field).map_or(false, |n| n == *node)
+    }
+
+    fn is_variable_node(&self, lang: Lang, node: &Node) -> bool {
+        match lang {
+            Lang::Rust | Lang::RustWasm => {
+                // NOTE: this is by no mean complete
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                match parent_kind {
+                    "macro_definition"
+                    | "macro_invocation"
+                    | "mod_item"
+                    | "enum_variant"
+                    | "extern_crate_declaration"
+                    | "static_item"
+                    | "function_item"
+                    | "function_signature_item"
+                    | "generic_function" => return false,
+                    _ => {}
+                }
+
+                let Some(node_name_in_parent) = field_name_in_parent(node) else {
+                    return true;
+                };
+
+                if parent_kind == "scoped_identifier" && node_name_in_parent == "path" {
+                    return false;
+                }
+
+                if parent_kind == "scoped_identifier" {
+                    if let Some(grandparent) = parent.parent() {
+                        if grandparent.kind() == "call_expression" {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }
+            _ => NODE_NAMES[&lang].values.contains(&node.kind().to_string()),
+        }
+    }
+
     fn process_node(&mut self, node: &Node, path: &PathBuf) -> Result<(), Box<dyn Error>> {
         let row = node.start_position().row + 1;
         let start = self.get_first_line(node);
@@ -337,7 +410,7 @@ impl ExprLoader {
         //    node.kind()
         //);
         // extract variable names
-        if NODE_NAMES[&lang].values.contains(&node.kind().to_string()) {
+        if self.is_variable_node(lang, node) {
             let value = self.extract_expr(node, path, row);
             self.processed_files
                 .get_mut(path)
