@@ -31,6 +31,7 @@ proc configureIpcMain* =
     "save-file"
     "save-untitled"
     "run-test"
+    "restart-subsystem"
 
     # welcome screen options
     "load-codetracer-shell"
@@ -63,6 +64,7 @@ proc configureIpcMain* =
     "download-trace-file"
     "delete-online-trace-file"
     "lsp-get-url"
+
 
   when defined(ctmacos):
     indexIpcHandlers("CODETRACER::"):

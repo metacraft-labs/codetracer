@@ -234,7 +234,7 @@ proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
   let replayStartFuture = newReplayStartFuture()
   infoPrint "index: requesting new replay for trace ", $traceId
   if not data.trace.isNil:
-    infoPrint "index: ct/start-replay for trace folder ", $data.trace.outputFolder
+    infoPrint "index: ct/stop-replay and then ct/start-replay for trace folder ", $data.trace.outputFolder
 
   if selectedReplayId >= 0:
     let stopPacket = wrapJsonForSending js{
@@ -440,6 +440,56 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
     let errorText = cstring"record start process error: " & errorSpecificText
     mainWindow.webContents.send "CODETRACER::failed-record",
       js{errorMessage: errorText}
+
+proc restartDbBackend {.async.} =
+  # copied and adapted from Petar's code for re-recording + re-replaying up in this file
+  #  in prepareLoadingTrace
+
+  # let stopPacket = wrapJsonForSending js{
+  #   "type": cstring"request",
+  #   "command": cstring"ct/stop-replay",
+  #   "arguments": selectedReplayId
+  # }
+  # backendManagerSocket.write(stopPacket)
+
+  # let replayStartFuture = newReplayStartFuture()
+
+  # let startPacket = wrapJsonForSending js{
+  #   "type": cstring"request",
+  #   "command": cstring"ct/start-replay",
+  #   "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
+  # }
+  # backendManagerSocket.write(startPacket)
+
+  # let replayId = await replayStartFuture
+  # if replayId < 0:
+  #   errorPrint "Unable to start replay for new trace"
+  #   return
+
+  # selectedReplayId = replayId
+  # infoPrint "index: selecting replayId ", $replayId
+
+  # let selectPacket = wrapJsonForSending js{
+  #   "type": cstring"request",
+  #   "command": cstring"ct/select-replay",
+  #   "arguments": replayId
+  # }
+  # backendManagerSocket.write(selectPacket)
+  # mainWindow.webContents.send(
+  #   "CODETRACER::dap-replay-selected",
+  #   js{trace: data.trace})
+
+  # data.trace = prefetchedTrace
+  # await loadExistingRecord(data.trace.id)
+
+  await prepareForLoadingTrace(data.trace.id, nodeProcess.pid.to(int))
+  await loadExistingRecord(data.trace.id)
+
+proc onRestartSubsystem*(sender: JsObject, name: cstring) {.async.} =
+  if name == "db-backend":
+    # sends notice to frontend client, when available
+    #   and it sends back ct/restore, with the last location and breakpoints?
+    await restartDbBackend()
 
 proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
