@@ -18,7 +18,7 @@ use crate::query::CtRRQuery;
 use crate::replay::Replay;
 use crate::task::{
     Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
-    ProgramEvent, VariableWithRecord,
+    ProgramEvent, VariableWithRecord, NO_STEP_ID,
 };
 use crate::value::ValueRecordWithType;
 
@@ -51,6 +51,7 @@ pub struct CtRRArgs {
 
 impl CtRRWorker {
     pub fn new(name: &str, index: usize, ct_rr_worker_exe: &Path, rr_trace_folder: &Path) -> CtRRWorker {
+        info!("new replay {name} {index}");
         CtRRWorker {
             name: name.to_string(),
             index,
@@ -100,12 +101,17 @@ impl CtRRWorker {
 
         let socket_path = ct_rr_worker_socket_path("", &self.name, self.index, run_id)?;
 
-        thread::sleep(Duration::from_millis(800));
+        // for a while it was enabled because of some problems with socket setup
+        //   but i think we resolved them with fixing another deadlock sender bug
+        //   and maybe it wasn't connected to waiting here
+        // i might be wrong, so leaving this for a reminder; sleeping is flakey in most cases though
+        // thread::sleep(Duration::from_millis(800));
 
         info!("try to connect to worker with socket in {}", socket_path.display());
         loop {
             if let Ok(stream) = UnixStream::connect(&socket_path) {
                 self.stream = Some(stream);
+                info!("stream is now setup");
                 break;
             }
             thread::sleep(Duration::from_millis(1));
@@ -357,8 +363,20 @@ impl Replay for RRDispatcher {
         // cache location or step_id and return
         // OR always load from worker
         // TODO: return result or do something else or cache ?
-        let location = self.load_location_directly().expect("access to step_id");
-        StepId(location.rr_ticks.0)
+        match self.ensure_active_stable() {
+            Ok(_) => {
+                let location = self.load_location_directly().expect("access to step_id");
+                StepId(location.rr_ticks.0)
+            }
+            Err(e) => {
+                error!("current_step_id: can't ensure active worker: error: {e:?}");
+                // hard to change all callsites to handle result for now
+                //   but not sure if NO_STEP_ID is much better: however this is only for rr cases
+                //   so we *should* try to not directly index into db.steps with it even if not NO_STEP_ID?
+                error!("  for now returning NO_STEP_ID");
+                StepId(NO_STEP_ID)
+            }
+        }
     }
 
     fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>> {
