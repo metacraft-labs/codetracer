@@ -60,6 +60,12 @@ proc parseFileQuery(self: CommandInterpreter, query: cstring): SearchQuery =
     kind: FileQuery,
     value: query)
 
+proc parseAgentQuery(self: CommandInterpreter, query: cstring): SearchQuery =
+  SearchQuery(
+    kind: AgentQuery,
+    value: query
+  )
+
 func queryMatchesCommand(query: cstring, command: cstring): bool =
   return query.toLowerCase().startsWith(commandPrefix & command)
 
@@ -75,7 +81,8 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
   elif isSymbolSearch and query.len > 1:
     SearchQuery(kind: SymbolQuery, value: cstring(($query).substr(1)))
   else:
-    self.parseFileQuery(cstring($query))
+    self.parseAgentQuery(cstring($query))
+    # self.parseFileQuery(cstring($query))
 
 proc searchProgram*(self: CommandInterpreter, query: cstring) =
   self.data.services.search.searchProgram(query)
@@ -164,6 +171,9 @@ proc prepareCommandPanelResults(self: CommandInterpreter, kind: QueryKind, resul
   of TextSearchQuery:
     discard # should be unreachable: we should directly send results from backend?
 
+  of AgentQuery:
+    discard
+
   return queryResults
 
 proc autocompleteQuery*(self: CommandInterpreter, query: SearchQuery): seq[CommandPanelResult] =
@@ -219,6 +229,9 @@ proc autocompleteQuery*(self: CommandInterpreter, query: SearchQuery): seq[Comma
     # and wait for its results/autocomplete event
     discard
 
+  of AgentQuery:
+    discard
+
   self.prepareCommandPanelResults(query.kind, fuzzyResults)
 
 proc runQueryCommand*(self: CommandInterpreter, res: CommandPanelResult) =
@@ -247,3 +260,6 @@ proc runCommandPanelResult*(self: CommandInterpreter, commandResult: CommandPane
 
   of SymbolQuery:
     self.data.openTab(self.files[commandResult.file], ViewSource, line=commandResult.line)
+
+  of AgentQuery:
+    self.data.ui.commandPalette.inAgentMode = true

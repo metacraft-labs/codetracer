@@ -959,7 +959,7 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
   if not activeCalltrace.isNil:
     self.resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
       for entry in entries:
-        let timeout = setTimeout(proc =
+        let timeout = setTimeout((proc =
           let scrollPosition = jq(fmt"#calltraceScroll-{self.id}")
           self.startPositionX = -1
           self.scrollLeftOffset =
@@ -967,9 +967,12 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
               cast[float](scrollPosition.toJs.scrollLeft)
             else:
               0
-          let index = self.scrollLineIndex()
-          self.startCallLineIndex = index
-          self.loadLines(fromScroll=false),
+          try:
+            let index = self.scrollLineIndex()
+            self.startCallLineIndex = index
+            self.loadLines(fromScroll=false)
+          except:
+            cwarn "scroll or load lines exception in mutation observer: ok if in editor mode"),
           100
         )
       )

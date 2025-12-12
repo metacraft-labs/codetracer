@@ -299,6 +299,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Event Log", aEventLog
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
+          element "Agent Activity", aAgentActivity
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -1527,6 +1528,7 @@ proc configureIPC(data: Data) =
     "build-command": BuildCommand => [ui]
     "started"
     "change-file"
+    "reload-file"
     "tab-reloaded"
     "opened-tab": OpenedTab => editor
     "close"
@@ -1560,9 +1562,14 @@ proc configureIPC(data: Data) =
 
     # Acp communication
     # TODO: Rename to "acp-session-update"
+    "acp-session-ready"
+    "acp-session-load-error"
     "acp-receive-response"
     "acp-prompt-start"
     "acp-create-terminal"
+    "acp-request-permission"
+
+    "reload-file"
 
   duration("configureIPCRun")
 
@@ -2042,6 +2049,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc = data.openLayoutTab(Content.TerminalOutput),
   proc = data.openLayoutTab(Content.StepList),
   proc = data.openLayoutTab(Content.Scratchpad),
+  proc = data.openLayoutTab(Content.AgentActivity),
   proc = data.openLayoutTab(Content.Filesystem),
   proc = data.openShellTab(),
   nil,
@@ -2157,7 +2165,3 @@ if inElectron:
   once:
     configureIPC(data)
     configure(data)
-
-
-# else:
-  # configureIPC = functionAsJs(configureIPCRun)

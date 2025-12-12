@@ -95,7 +95,8 @@ proc configureShortcuts* =
       else:
         data.ui.commandPalette.active = false
         data.ui.commandPalette.inAgentMode = false
-        data.ui.commandPalette.agent.shell.initialized = false
+        if not data.ui.commandPalette.agent.isNil and not data.ui.commandPalette.agent.shell.isNil:
+          data.ui.commandPalette.agent.shell.initialized = false
 
     if cast[int](e.toJs.button) == BROWSER_FORWARD:
       cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = true)
@@ -136,11 +137,15 @@ proc configureShortcuts* =
   Mousetrap.`bind`("ctrl+r") do ():
     data.reRecordCurrent(projectOnly=false)
 
+  Mousetrap.`bind`("alt+l") do ():
+    let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+    data.runTests(options)
+
   Mousetrap.`bind`("ctrl+b") do ():
     data.reRecordCurrent(projectOnly=true)
 
-  Mousetrap.`bind`("alt+t") do ():
-    runTracepoints(data)
+  # Mousetrap.`bind`("alt+t") do ():
+  #   runTracepoints(data)
 
   Mousetrap.`bind`("ctrl+pageup") do ():
     switchTab(change = -1)

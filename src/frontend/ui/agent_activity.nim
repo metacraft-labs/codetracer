@@ -1,4 +1,4 @@
-import ../utils, ../../common/ct_event, value, ui_imports, shell, command, editor, times, std/[strformat, jsconsole]
+import ../utils, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
 from dom import Node
 
 const HEIGHT_OFFSET = 2
@@ -32,6 +32,15 @@ proc autoResizeTextarea(id: cstring) =
   el.style.height = $el.toJs.scrollHeight & "px"
   el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
 
+proc componentBySessionId(sessionId: cstring): AgentActivityComponent =
+  ## Locate the AgentActivity component for a given sessionId. If sessionId is
+  ## empty, return the first available component.
+  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
+    let candidate = AgentActivityComponent(comp)
+    if sessionId.len == 0 or candidate.sessionId == sessionId:
+      return candidate
+  nil
+
 proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
   let trueLineNumber = toCString(line - 1)
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
@@ -54,8 +63,12 @@ proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNod
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
         tdiv(class="ai-img")
-        span(class="ai-name"): text "agent"
-        if self.isLoading:
+        span(class="ai-name"):
+          text "agent"
+          if msg.canceled:
+            span(style=style((StyleAttr.color, cstring"red"))):
+              text " (canceled)"
+        if self.isLoading and not msg.canceled:
           span(class="ai-status")
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button")
@@ -80,26 +93,28 @@ proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): V
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button", style=style(StyleAttr.marginRight, "6px".cstring))
         tdiv(class="agent-model-img")
-    tdiv(id=fmt"shellComponent-{term.shell.id}", class="shell-container")
+    tdiv(id=fmt"shellComponent-{term.shell.id}{self.commandInputId}", class="shell-container")
 
-proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent): AgentMessage =
+proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false): AgentMessage =
   console.log cstring"Adding agent message"
   if not self.messages.hasKey(messageId):
     try:
-      let message = AgentMessage(id: messageId, content: initialContent, role: role)
+      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled)
       self.messages[messageId] = message
       self.messageOrder.add(messageId)
     except:
       console.log cstring(fmt"[agent-activity] addAgentMessage failed: {getCurrentExceptionMsg()}")
   result = self.messages[messageId]
 
-proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent) =
+proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
   console.log cstring("[agent-activity] update: begin")
-  var message = self.addAgentMessage(messageId, content, role)
+  var message = self.addAgentMessage(messageId, content, role, canceled)
   if append and message.content.len > 0:
     message.content = message.content & content
   else:
     message.content = content
+  if canceled:
+    message.canceled = true
 
   self.messages[messageId] = message
   self.redraw()
@@ -119,14 +134,25 @@ proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTermin
 
 const INPUT_ID = cstring"agent-query-text"
 
-proc sendAcpPrompt(prompt: cstring) =
+proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
   data.ipc.send ("CODETRACER::acp-prompt"), js{
+    "sessionId": self.sessionId,
     "text": prompt
   }
 
+proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
+  self.inputValue = promptText
+  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
+  let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
+  self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
+  self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
+  discard setTimeout(proc() = scrollAgentCom(), 0)
+  sendAcpPrompt(self, promptText)
+  self.clear()
+
 proc submitPrompt(self: AgentActivityComponent) =
   # Use the latest input value to avoid stale data.
-  let inputEl = document.getElementById(INPUT_ID)
+  let inputEl = document.getElementById(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
   let promptText =
     if not inputEl.isNil:
       inputEl.toJs.value.to(cstring)
@@ -136,21 +162,14 @@ proc submitPrompt(self: AgentActivityComponent) =
   if promptText.len == 0:
     return
 
-  self.inputValue = promptText
-  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
-  let userMessageId = cstring(fmt"user-{self.messageOrder.len}")
-  self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
-  self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
-  discard setTimeout(proc() = scrollAgentCom(), 0)
-  sendAcpPrompt(promptText)
-  self.clear()
+  self.updateAgentUi(promptText)
 
 proc clear(self: AgentActivityComponent) =
   self.inputValue = cstring""
-  let inputEl = document.getElementById(INPUT_ID)
+  let inputEl = document.getElementById(INPUT_ID  & fmt"-{self.id}{self.commandInputId}")
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
-    autoResizeTextarea(INPUT_ID)
+    autoResizeTextarea(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
 
 proc passwordPromp(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
@@ -201,14 +220,14 @@ proc parseUnifiedDiff(patch: string): (string, string) =
 
   (origLines.join("\n"), modLines.join("\n"))
 
-proc passwordPrompt(self: AgentActivityComponent): VNode =
+proc createPasswordPrompt(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
     tdiv(class="password-wrapper"):
       input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
       tdiv(class="password-continue-button"):
         text "Continue"
 
-proc userPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
+proc createUserPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
     tdiv(class="header-wrapper"):
       text prompt
@@ -221,77 +240,32 @@ proc loadingState(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="loading-animation"))
 
 method render*(self: AgentActivityComponent): VNode =
-  let inputId = INPUT_ID
-  self.commandPalette = data.ui.commandPalette
+  self.commandInputId = if self.inCommandPalette: "-command" else: ""
+  var inputId = INPUT_ID & fmt"-{self.id}{self.commandInputId}"
   data.ui.commandPalette.agent = self
   if not self.acpInitSent:
-    data.ipc.send("CODETRACER::acp-init-session", js{})
+    data.ipc.send("CODETRACER::acp-session-init", js{
+      "sessionId": self.sessionId
+    })
     self.acpInitSent = true
   # let source =
   self.kxi.afterRedraws.add(proc() =
-    if not self.kxi.isNil and not self.shell.initialized and self.diffEditor.isNil:
+    if not self.kxi.isNil:
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
       # self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
-      self.shell.initialized = true
-      let source ="""
-diff --git a/src/db-backend/src/expr_loader.rs b/src/db-backend/src/expr_loader.rs
-index 71d1dec8..f8499310 100644
---- a/src/db-backend/src/expr_loader.rs
-+++ b/src/db-backend/src/expr_loader.rs
-@@ -216,6 +216,12 @@ impl ExprLoader {
-    pub fn parse_file(&self, path: &PathBuf) -> Result<Tree, Box<dyn Error>> {
-        let raw = &self.processed_files[path].source_code;
-        let lang = self.get_current_language(path);
-+        info!(
-+            "parse_file: path={} lang={:?} bytes={}",
-+            path.display(),
-+            lang,
-+            raw.len()
-+        );
+      
+      # # Use "rust" for syntax highlighting on both sides
+      # let originalModel = createModel(origText.cstring, "rust".cstring)
+      # let modifiedModel = createModel(modText.cstring, "rust".cstring)
 
-        let mut parser = Parser::new();
-        if lang == Lang::Noir || lang == Lang::RustWasm {
-"""
-      var lang = fromPath("/home/asd.nr")
-      let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
-      self.diffEditor = monaco.editor.createDiffEditor(
-        jq("#agentEditor-0".cstring),
-        MonacoEditorOptions(
-          language: lang.toCLang(),
-          readOnly: true,
-          theme: theme,
-          automaticLayout: true,
-          folding: true,
-          fontSize: self.data.ui.fontSize,
-          minimap: js{ enabled: false },
-          find: js{ addExtraSpaceOnTop: false },
-          renderLineHighlight: "".cstring,
-          lineNumbers: proc(line: int): cstring = self.editorLineNumber(line),
-          lineDecorationsWidth: 20,
-          mouseWheelScrollSensitivity: 0,
-          fastScrollSensitivity: 0,
-          scrollBeyondLastLine: false,
-          smoothScrolling: false,
-          contextmenu: false,
-          renderOverviewRuler: false,
-          renderSideBySide: false,
-          scrollbar: js{
-            horizontalScrollbarSize: 14,
-            horizontalSliderSize: 8,
-            verticalScrollbarSize: 14,
-            verticalSliderSize: 8
-          },
-        )
-      )
-      let (origText, modText) = parseUnifiedDiff($source)
-
-      # Use "rust" for syntax highlighting on both sides
-      let originalModel = createModel(origText.cstring, "rust".cstring)
-      let modifiedModel = createModel(modText.cstring, "rust".cstring)
-
-      setDiffModel(self.diffEditor, originalModel, modifiedModel)
-      # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
-      # self.shell.shell.write("Another line here.\r\n")
+      # setDiffModel(self.diffEditor, originalModel, modifiedModel)
+      # # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
+      # # self.shell.shell.write("Another line here.\r\n")
+    if data.lastAgentPrompt != "" and not data.lastAgentPrompt.isNil:
+      let agent = cast[AgentActivityComponent](data.ui.componentMapping[Content.AgentActivity][data.ui.componentMapping[Content.AgentActivity].len() - 1])
+      agent.updateAgentUi(data.lastAgentPrompt)
+      data.lastAgentPrompt = ""
+      redrawAll()
   )
 
   result = buildHtml(
@@ -323,13 +297,18 @@ index 71d1dec8..f8499310 100644
           # tdiv(class="editor-wrapper"):
           #   tdiv(id="agentEditor-0", class="agent-editor")
         # TODO: Integrate it
+      if self.wantsPassword:
+        createPasswordPrompt(self)
+      if self.wantsPermission:
+        createUserPrompt(self, cstring"How are you", @[cstring"well", cstring"bad"])
+
     tdiv(class="agent-interaction"):
       textarea(
         `type` = "text",
         id = inputId,
         name = "agent-query",
         placeholder = "Ask anything",
-        class = "mousetrap ct-input-cp-background agent-command-input",
+        class = "mousetrap agent-command-input",
         autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
         autocorrect="off",
         autocapitalize="off",
@@ -351,6 +330,12 @@ index 71d1dec8..f8499310 100644
           autoResizeTextarea(inputId)
       )
       tdiv(class="agent-buttons-container"):
+        tdiv(
+          class="agent-button new-agent-instance",
+          onclick = proc = 
+            let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+            data.runTests(options)
+        )
         tdiv(
           class="agent-button",
           onclick = proc =
@@ -378,13 +363,29 @@ index 71d1dec8..f8499310 100644
             class="agent-stop-button",
             onclick = proc =
               echo fmt"[agent-activity] stopping session: {self.data.services.debugger.location.path}"
+
+              var cancelId = cstring""
+              if self.activeAgentMessageId.len > 0:
+                cancelId = self.activeAgentMessageId
+              elif self.messageOrder.len > 0:
+                cancelId = self.messageOrder[^1]
+
+              if cancelId.len > 0:
+                var msg = self.addAgentMessage(cancelId, cstring"", AgentMessageAgent)
+                msg.canceled = true
+                self.messages[cancelId] = msg
+
               if self.activeAgentMessageId.len > 0:
                 data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+                  "sessionId": self.sessionId,
                   "messageId": self.activeAgentMessageId
                 })
               else:
-                data.ipc.send("CODETRACER::acp-cancel-prompt", js{})
+                data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+                  "sessionId": self.sessionId
+                })
               self.isLoading = false
+              self.redraw()
           )
 
 proc asyncSleep(ms: int): Future[void] =
@@ -396,24 +397,25 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   console.log cstring"[agent-activity] onAcpReceiveResponse"
   console.log response
 
-  # Find the first AgentActivity component via componentMapping.
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+
   console.log cstring(fmt"[agent-activity] componentMapping[AgentActivity].len={data.ui.componentMapping[Content.AgentActivity].len}")
-  var self: AgentActivityComponent = nil
-  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
-    self = AgentActivityComponent(comp)
-    # Filter the placeholder msg for the agent:
-    self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
-    self.messages.del(PLACEHOLDER_MSG)
-    # TODO: Make a end-process for the isLoading state
-    self.isLoading = false
-    self.activeAgentMessageId = cstring""
-    break
-
-  scrollAgentCom()
-
+  var self = componentBySessionId(sessionId)
   if self.isNil:
     console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
     return
+
+  # Filter the placeholder msg for the agent:
+  self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+  self.messages.del(PLACEHOLDER_MSG)
+  # TODO: Make a end-process for the isLoading state
+  self.activeAgentMessageId = cstring""
+
+  scrollAgentCom()
 
   console.log cstring(fmt"[agent-activity] handler using component id={self.id} messages={self.messages.len} orderLen={self.messageOrder.len}")
 
@@ -425,7 +427,8 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     else:
       PLACEHOLDER_MSG
 
-  console.log cstring"[agent-activity] got messageId"
+  if self.activeAgentMessageId.len > 0 and self.activeAgentMessageId != messageId:
+    return
 
   let hasContent = jsHasKey(response, cstring"content")
   let content =
@@ -436,14 +439,26 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       cstring""
 
   let isFinal = jsHasKey(response, cstring"stopReason")
+  let stopReason =
+    if isFinal:
+      cast[cstring](response[cstring"stopReason"])
+    else:
+      cstring""
+
+  if isFinal:
+    console.log cstring"[agent-activity] got stopReason"
+    self.isLoading = false
+    redrawAll()
+
   let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
+  let canceledFlag = isFinal and stopReason == cstring"cancelled"
 
   console.log cstring"[agent-activity] got content"
   console.log content
 
   if hasContent or not self.messages.hasKey(messageId):
     try:
-      self.updateAgentMessageContent(messageId, content, appendFlag)
+      self.updateAgentMessageContent(messageId, content, appendFlag, AgentMessageAgent, canceledFlag)
       console.log cstring(fmt"[agent-activity] updated active messageId={messageId} append={appendFlag}")
       self.activeAgentMessageId = messageId
       console.log cstring"[agent-activity] update + redraw complete"
@@ -457,10 +472,13 @@ proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
   console.log cstring"[agent-activity] onAcpCreateTerminal"
   console.log response
 
-  var self: AgentActivityComponent = nil
-  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
-    self = AgentActivityComponent(comp)
-    break
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+
+  let self = componentBySessionId(sessionId)
 
   if self.isNil:
     console.log cstring"[agent-activity] no AgentActivity component to receive ACP terminal yet"
@@ -479,10 +497,13 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   console.log cstring"[agent-activity] onAcpPromptStart"
   console.log response
 
-  var self: AgentActivityComponent = nil
-  for _, comp in data.ui.componentMapping[Content.AgentActivity]:
-    self = AgentActivityComponent(comp)
-    break
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+
+  let self = componentBySessionId(sessionId)
 
   if self.isNil:
     console.log cstring"[agent-activity] no AgentActivity component to receive prompt start"
@@ -491,3 +512,28 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   if jsHasKey(response, cstring"id"):
     self.activeAgentMessageId = cast[cstring](response[cstring"id"])
     console.log cstring(fmt"[agent-activity] set activeAgentMessageId from prompt-start: {self.activeAgentMessageId}")
+
+proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let comp = componentBySessionId(sessionId)
+  if not comp.isNil:
+    comp.acpInitSent = true
+    console.log cstring(fmt"[agent-activity] session ready for {sessionId}")
+
+proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let comp = componentBySessionId(sessionId)
+  if not comp.isNil:
+    comp.acpInitSent = false
+  console.log cstring(fmt"[agent-activity] session load error for {sessionId}")
+
+proc onAcpRequestPermission*(sender: js, response: JsObject) {.async.} =
+  console.log cstring(fmt"[agent-activity] onAcpRequestPermission")

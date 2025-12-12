@@ -122,6 +122,7 @@ type
     path*: cstring
     line*: int
     column*: int
+    newWindow*: bool
 
   ValueWithExpression* = ref object
     expression*: cstring
@@ -374,7 +375,8 @@ type
     FileQuery,
     ProgramQuery,
     TextSearchQuery,
-    SymbolQuery
+    SymbolQuery,
+    AgentQuery
 
   CommandPanelResult* = ref object
     value*: cstring
@@ -398,6 +400,8 @@ type
       file*: cstring
       line*: int
       symbolKind*: cstring
+    of AgentQuery:
+      discard
 
   CodeSnippet* = object
     line*: int
@@ -762,6 +766,7 @@ type
     id*: cstring
     content*: cstring
     role*: AgentMessageRole
+    canceled*: bool
 
   AgentTerminal* = object
     id*: cstring
@@ -769,6 +774,7 @@ type
 
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
+    sessionId*: cstring
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
@@ -778,10 +784,15 @@ type
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
     isLoading*: bool
+    wantsPassword*: bool
+    wantsPermission*: bool
+    wasCancelled*: bool
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]
     acpInitSent*: bool
     activeAgentMessageId*: cstring
+    commandInputId*: cstring
+    inCommandPalette*: bool
 
   StepListComponent* = ref object of Component
     lineSteps*: seq[LineStep]
@@ -1483,10 +1494,12 @@ type
     # to depend on the frontend test code here
     # so we use casting in ui_js.nim/similar for it
     testRunner*:            JsObject
+    lastAgentPrompt*:       cstring
 
     save*:                  Save
     homedir*:               cstring
     status*:                StatusState
+    lspStarted*:            bool
 
 
   KeyPluginContext* = ref object
@@ -1623,6 +1636,7 @@ when defined(ctRenderer):
 
   var data* = Data(
     dapApi: DapApi(),
+    lastAgentPrompt: "",
     viewsApi: setupSinglePageViewsApi(cstring"single-page-frontend-to-views"),
     connection: ConnectionState(
       connected: true,

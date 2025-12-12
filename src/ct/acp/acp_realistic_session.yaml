@@ -1,0 +1,99 @@
+# Copyright 2025 Schelling Point Labs Inc
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: acp_realistic_session
+tags: [acp, demo, long-runtime]
+acp:
+  capabilities:
+    loadSession: true
+timeline:
+  - userInputs:
+      - relativeTime: 0
+        input: 'Please stabilize the flaky payments refund tests and summarize what changed.'
+
+  - llmResponse:
+      - think:
+          - relativeTime: 800
+            content: 'Scanning recent CI failures and local logs.'
+          - relativeTime: 2800
+            content: 'Hypothesis: retry backoff is too aggressive, causing occasional gateway 504 during refunds.'
+      - assistant:
+          - relativeTime: 3200
+            content:
+              type: text
+              text: "I'll repro locally, patch the backoff logic, and rerun the targeted payment suites."
+
+  - agentPlan:
+      entries:
+        - content: 'Run focused payment refund suite to repro flake'
+          priority: high
+          status: in_progress
+        - content: 'Add jittered exponential backoff in refund client'
+          priority: medium
+          status: pending
+        - content: 'Verify retry matrix and summarize for handoff'
+          priority: low
+          status: pending
+
+  - sessionStart:
+      sessionId: 'acp-realistic'
+
+  - agentToolUse:
+      toolName: runCmd
+      toolCallId: tests-run
+      args:
+        cmd: 'npm test payments -- --runInBand'
+        cwd: '/workspace/payments'
+      progress:
+        - relativeTime: 0
+          message: 'starting npm install (cached dependencies)'
+        - relativeTime: 5000
+          message: 'install complete, preparing test runner'
+        - relativeTime: 12000
+          message: 'running focused payment suites'
+      toolExecution:
+        startTimeMs: 0
+        events:
+          - type: stdout
+            timeMs: 1200
+            content: 'npm WARN deprecated left-pad@1.3.0'
+          - type: stdout
+            timeMs: 6000
+            content: 'added 421 packages from cache'
+          - type: stdout
+            timeMs: 15000
+            content: 'PASS tests/payment/charge.test.ts (38s)'
+          - type: stdout
+            timeMs: 45000
+            content: 'FAIL tests/payment/refund.test.ts'
+          - type: stderr
+            timeMs: 47000
+            content: 'AssertionError: expected status 200 but got 504'
+          - type: stdout
+            timeMs: 70000
+            content: 'Applying jittered backoff patch and re-running refund suite...'
+          - type: stdout
+            timeMs: 95000
+            content: 'PASS tests/payment/refund.test.ts (28s)'
+          - type: stdout
+            timeMs: 110000
+            content: 'PASS tests/payment/retry.test.ts (11s)'
+          - type: completion
+            timeMs: 118000
+            exitCode: 0
+      status: in_progress
+
+  - agentEdits:
+      path: 'services/payments/retry.ts'
+      linesAdded: 12
+      linesRemoved: 4
+
+  - baseTimeDelta: 4000
+
+  - llmResponse:
+      - assistant:
+          - relativeTime: 122000
+            content:
+              type: text
+              text: |
+                Wrapped refund client in jittered backoff (250-750ms, cap 5s), reran payment suites, and all targets now pass. Ready for CI rerun and rollout.

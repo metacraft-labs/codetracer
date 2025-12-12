@@ -665,12 +665,14 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
 
 
 proc runTest(self: EditorViewComponent, testName: cstring, path: cstring, line: int, column: int) =
-  self.data.ipc.send "CODETRACER::run-test", RunTestOptions(
+  let options = RunTestOptions(
     testName: testName,
     path: path,
     line: line,
     column: column,
+    newWindow: false,
   )
+  self.data.runTests(options)
 
 # Fill contextMenu with ContextMenuItem variables and return it to be used in the context menu
 proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuItem] =
@@ -732,7 +734,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       let lineContent = $cast[cstring](model.getLineContent(line))
       if lineContent.strip == "#[test]":
         # for now trying to guess where the function name for rust is
-        # e.g. 
+        # e.g.
         # ```
         # #[test]
         # fn test_1() {
@@ -1718,7 +1720,6 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
           self.makeDiffViewZones()
           self.loadFlow(FlowMode.Diff, types.Location())
 
-      self.clearTest()
       self.addTestActions()
       self.applyEventualStylesLines()
 
@@ -1911,6 +1912,10 @@ proc onSelectState*(data: Data) {.async.} =
   await data.ui.componentMapping[Content.State][0].select()
 
 method render*(self: EditorViewComponent): VNode =
+  if not self.data.lspStarted:
+    self.data.ipc.send("CODETRACER::start-lsp", js{})
+    self.data.lspStarted = true
+
   if self.editorView == ViewNoSource:
     result = self.noInfo.render()
   elif not self.isExpansion and (not self.service.open.hasKey(self.name) or not self.service.open[self.name].received):
@@ -1937,7 +1942,7 @@ method onEnter*(self: EditorViewComponent) {.async.} =
         self.toggleTrace(self.name, line)
 
 
-  else:
+  elif self.data.ui.readOnly:
     let line = editor.getLine()
     let code = self.traces[line].monacoEditor.getValue()
     let lineCount = code.split("\n").len() + 1
