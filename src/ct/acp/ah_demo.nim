@@ -75,7 +75,7 @@ proc main() {.async.} =
   except:
     echo fmt"[demo] loadSession failed for {sessionId}: {getCurrentExceptionMsg()}"
 
-  var promptResp = await clientConn.prompt(promptRequest(sessionId, cstring"Create a file named test in the current dir and write 123 in it"));
+  var promptResp = await clientConn.prompt(promptRequest(sessionId, cstring"In the current dir, change the CHANGELOG file to include a change that we now use absolute paths"));
   echo fmt"[demo] stopReason={stopReasonFrom(promptResp)}"
 
   # let session2Id = sessionIdFrom(session2Resp)

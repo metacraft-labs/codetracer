@@ -43,7 +43,7 @@ proc stopReasonFrom(response: JsObject): cstring {.importjs: "((resp) => (resp &
 proc log(obj: JsObject) {.importjs: "console.log(#)"}
 
 const
-  defaultCmd = cstring"opencode"
+  defaultCmd = cstring"ah"
   defaultArgs: seq[cstring] = @[cstring"acp"]
 
 type
@@ -440,6 +440,11 @@ proc onAcpSessionInit*(sender: js, response: JsObject) {.async.} =
     saveSessionState(acpSessionId, state)
     acpSessionIdsByClient[clientSessionId] = acpSessionId
     clientSessionIdsByAcp[acpSessionId] = clientSessionId
+
+    var workspace = cstring""
+    if jsHasKey(sessionResp, cstring"_ah") and jsHasKey(sessionResp[cstring"_ah"], cstring"workspaceDir"):
+      workspace = sessionResp[cstring"_ah"][cstring"workspaceDir"].to(cstring)
+    echo fmt"[acp_ipc] session-init clientSessionId={clientSessionId} acpSessionId={acpSessionId} workspace={workspace}"
 
     mainWindow.webContents.send("CODETRACER::acp-session-ready", js{
       "sessionId": acpSessionId,

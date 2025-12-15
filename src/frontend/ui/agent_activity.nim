@@ -135,6 +135,7 @@ proc flushMessageBuffer(self: AgentActivityComponent, messageId: cstring, role: 
   if self.messageBuffers.hasKey(messageId):
     content = self.messageBuffers[messageId]
   self.messageBuffers.del(messageId)
+  console.log cstring(fmt"[agent-activity] flush sessionKey={self.currentSessionKey()} componentId={self.id} messageId={messageId} len={content.len} canceled={canceled}")
   self.updateAgentMessageContent(messageId, content, false, role, canceled)
 
 proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTerminal =
@@ -526,10 +527,12 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     let previewStr = $content
     let preview =
       if previewStr.len > 200: previewStr[0..199].cstring else: previewStr.cstring
-    console.log cstring(fmt"[agent-activity] chunk sessionId={sessionId} messageId={messageId} len={content.len} content={preview}")
+    console.log cstring(fmt"[agent-activity] chunk sessionId={sessionId} componentId={self.id} messageId={messageId} len={content.len} content={preview}")
     self.bufferMessageChunk(messageId, content)
     self.activeAgentMessageId = messageId
     return
+
+  let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
 
   if isFinal:
     try:
@@ -544,6 +547,13 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     self.isLoading = false
     self.promptInFlight = false
     redrawAll()
+  elif hasContent or not self.messages.hasKey(messageId):
+    try:
+      console.log cstring(fmt"[agent-activity] render update sessionKey={self.currentSessionKey()} componentId={self.id} messageId={messageId} append={appendFlag} canceled={canceledFlag} len={content.len}")
+      self.updateAgentMessageContent(messageId, content, appendFlag, AgentMessageAgent, canceledFlag)
+      self.activeAgentMessageId = messageId
+    except:
+      discard
 
 proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
 
@@ -600,6 +610,12 @@ proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
     return
   if acpSessionId.len == 0:
     return
+  if jsHasKey(response, cstring"response"):
+    let resp = response[cstring"response"]
+    if jsHasKey(resp, cstring"_ah"):
+      let ahObj = resp[cstring"_ah"]
+      if jsHasKey(ahObj, cstring"workspaceDir"):
+        comp.workspaceDir = ahObj[cstring"workspaceDir"].to(cstring)
   # migrate any pending-session messages to the established acp session id
   if comp.sessionMessageIds.hasKey(clientSessionId):
     comp.sessionMessageIds[acpSessionId] = comp.sessionMessageIds[clientSessionId]
