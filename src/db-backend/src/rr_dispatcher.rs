@@ -105,7 +105,7 @@ impl CtRRWorker {
         //   but i think we resolved them with fixing another deadlock sender bug
         //   and maybe it wasn't connected to waiting here
         // i might be wrong, so leaving this for a reminder; sleeping is flakey in most cases though
-        // thread::sleep(Duration::from_millis(800));
+        thread::sleep(Duration::from_millis(800));
 
         info!("try to connect to worker with socket in {}", socket_path.display());
         loop {
