@@ -1333,7 +1333,7 @@ async function main_704643139() {
     lastJSError = prevJSError;
     } finally {
     }
-    var promptResp_704643254 = (await clientConn_704643223.prompt(({ sessionId: sessionId_704643234, prompt: [{ type: 'text', text: '"Create a file named test in the current dir and write 123 in it"' }] })));
+    var promptResp_704643254 = (await clientConn_704643223.prompt(({ sessionId: sessionId_704643234, prompt: [{ type: 'text', text: '"In the current dir, change the CHANGELOG file to include a change that we now use absolute paths"' }] })));
     Label9: do {
       var fmtRes_704643259 = [mnewString(0)];
       fmtRes_704643259[0].push.apply(fmtRes_704643259[0], makeNimstrLit("[demo] stopReason="));;

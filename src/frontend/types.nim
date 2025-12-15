@@ -780,6 +780,7 @@ type
     promptInFlight*: bool       ## Prevent duplicate prompt sends per component
     messageBuffers*: JsAssoc[cstring, cstring] ## Buffer streamed content by message id
     sessionMessageIds*: JsAssoc[cstring, seq[cstring]] ## sessionId -> ordered message ids
+    workspaceDir*: cstring      ## Workspace root returned by the ACP session init (agent-harbor)
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
