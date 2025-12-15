@@ -48,10 +48,10 @@ const
 
 type
   SessionState = object
-    acpSessionId: cstring
     currentMessageId: cstring
     aggregatedContent: cstring
     collectedUpdates: seq[JsObject]
+    activePrompt: bool
 
 var msgId = 100
 var terminalCounter = 0
@@ -59,45 +59,50 @@ var acpProcess: JsObject
 var acpStream: AcpStream
 var acpClient: ClientSideConnection
 var acpInitialized = false
-var sessionsByRenderer: Table[cstring, SessionState] = initTable[cstring, SessionState]()
-var rendererByAcp: Table[cstring, cstring] = initTable[cstring, cstring]()
+var sessionsById: Table[cstring, SessionState] = initTable[cstring, SessionState]()
+var acpSessionIdsByClient: Table[cstring, cstring] = initTable[cstring, cstring]()
+var clientSessionIdsByAcp: Table[cstring, cstring] = initTable[cstring, cstring]()
 
-proc rendererForSession(acpSessionId: cstring): cstring =
-  if rendererByAcp.hasKey(acpSessionId):
-    rendererByAcp[acpSessionId]
-  else:
-    cstring""
-
-proc getSessionState(rendererSessionId: cstring; state: var SessionState): bool =
-  if sessionsByRenderer.hasKey(rendererSessionId):
-    state = sessionsByRenderer[rendererSessionId]
+proc getSessionState(sessionId: cstring; state: var SessionState): bool =
+  if sessionsById.hasKey(sessionId):
+    state = sessionsById[sessionId]
     true
   else:
     false
 
-proc saveSessionState(rendererSessionId: cstring; state: SessionState) =
-  sessionsByRenderer[rendererSessionId] = state
+proc saveSessionState(sessionId: cstring; state: SessionState) =
+  sessionsById[sessionId] = state
+
+proc acpSessionForClient(clientSessionId: cstring): cstring =
+  if acpSessionIdsByClient.hasKey(clientSessionId):
+    acpSessionIdsByClient[clientSessionId]
+  else:
+    cstring""
+
+proc clientSessionForAcp(acpSessionId: cstring): cstring =
+  if clientSessionIdsByAcp.hasKey(acpSessionId):
+    clientSessionIdsByAcp[acpSessionId]
+  else:
+    cstring""
 
 let handleCreateTerminal = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
-  echo fmt"[acp_ipc] createTerminal request: {stringify(params)}"
   terminalCounter += 1
   let acpSessionId =
     if jsHasKey(params, cstring"sessionId"):
       params[cstring"sessionId"].to(cstring)
     else:
       cstring""
-  let rendererSessionId = rendererForSession(acpSessionId)
+  let clientSessionId = clientSessionForAcp(acpSessionId)
   let terminalId =
     if jsHasKey(params, cstring"id"):
       params[cstring"id"].to(cstring)
     else:
       cstring(fmt"acp-term-{terminalCounter}")
-  echo fmt"[acp_ipc] createTerminal requested id={terminalId}"
-
   # Notify renderer so it can open/attach a terminal UI when we eventually wire it.
   mainWindow.webContents.send("CODETRACER::acp-create-terminal", js{
     "id": terminalId,
-    "sessionId": rendererSessionId,
+    "sessionId": acpSessionId,
+    "clientSessionId": clientSessionId,
     "params": params
   })
 
@@ -105,7 +110,6 @@ let handleCreateTerminal = functionAsJS(proc(params: JsObject): Future[JsObject]
 )
 
 let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
-  echo fmt"[acp_ipc] fs.readTextFile request: {stringify(params)}"
   let path =
     if jsHasKey(params, cstring"path"):
       params[cstring"path"].to(cstring)
@@ -123,7 +127,6 @@ let handleReadTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {
 )
 
 let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
-  echo fmt"[acp_ipc] fs.writeTextFile request: {stringify(params)}"
   let path =
     if jsHasKey(params, cstring"path"):
       params[cstring"path"].to(cstring)
@@ -147,7 +150,6 @@ let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] 
 )
 
 let handleRequestPermission = functionAsJS(proc(params: JsObject): Future[JsObject] {.async.} =
-  echo fmt"[acp_ipc] requestPermission received: {stringify(params)}"
   # Default: allow the "allow_always" option if present, else first option.
   let options =
     if jsHasKey(params, cstring"options"):
@@ -178,19 +180,42 @@ let handleRequestPermission = functionAsJS(proc(params: JsObject): Future[JsObje
 )
 
 let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
-  echo fmt"[acp_ipc] sessionUpdate: {stringify(params)}"
-
   let acpSessionId =
     if jsHasKey(params, cstring"sessionId"):
       params[cstring"sessionId"].to(cstring)
     else:
       cstring""
-  let rendererSessionId = rendererForSession(acpSessionId)
+
+  let clientSessionId = clientSessionForAcp(acpSessionId)
+  if clientSessionId.len == 0:
+    return
 
   var state: SessionState
-  if rendererSessionId.len == 0 or not getSessionState(rendererSessionId, state):
-    echo fmt"[acp_ipc] sessionUpdate for unknown session acp={acpSessionId}"
+  if acpSessionId.len == 0 or not getSessionState(acpSessionId, state):
+    # unknown session; ignore
     return
+  if not state.activePrompt:
+    return
+
+  var updateKind = cstring""
+  if jsHasKey(params, cstring"update"):
+    let u = params[cstring"update"]
+    if jsHasKey(u, cstring"sessionUpdate"):
+      updateKind = u[cstring"sessionUpdate"].to(cstring)
+  let contentLen =
+    if jsHasKey(params, cstring"update") and jsHasKey(params[cstring"update"], cstring"content"):
+      stringify(params[cstring"update"][cstring"content"]).len
+    else:
+      0
+  var contentPreview = cstring""
+  if jsHasKey(params, cstring"update") and jsHasKey(params[cstring"update"], cstring"content"):
+    let contentStr = $stringify(params[cstring"update"][cstring"content"])
+    if contentStr.len > 200:
+      contentPreview = contentStr[0..199].cstring
+    else:
+      contentPreview = contentStr.cstring
+
+  echo fmt"[acp_ipc] update sessionId={acpSessionId} clientSessionId={clientSessionId} kind={updateKind} contentLen={contentLen} contentPreview={contentPreview}"
 
   state.collectedUpdates.add(params)
 
@@ -217,7 +242,7 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                   updateObj[cstring"toolCallId"].to(cstring)
                 else:
                   cstring""
-              echo fmt"[acp_ipc] auto-allow tool_call permission toolCallId={toolCallId} optionId={optionId}"
+              discard
               # Respond by issuing a tool_call_update with status=approved to mirror agent expectations.
               discard acpClient.extNotification(cstring"tool_permission", js{
                 "sessionId": acpSessionId,
@@ -235,12 +260,12 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
           let chunk = updateObj[cstring"content"][cstring"text"].to(cstring)
           state.aggregatedContent &= chunk
           mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-            "sessionId": rendererSessionId,
+            "sessionId": acpSessionId,
+            "clientSessionId": clientSessionId,
             "id": state.currentMessageId,
             "content": chunk
           })
         if updateKind == cstring"tool_call_update":
-          echo "[acp_ipc] tool_call_update received; inspecting for filepath"
           try:
             var path = cstring""
             if jsHasKey(updateObj, cstring"rawInput"):
@@ -257,7 +282,6 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                     path = item[cstring"path"].to(cstring)
                     break
               except:
-                echo fmt"[acp_ipc] tool_call_update content parsing failed: {getCurrentExceptionMsg()}"
                 let contentObj = updateObj[cstring"content"]
                 if jsHasKey(contentObj, cstring"path"):
                   path = contentObj[cstring"path"].to(cstring)
@@ -268,7 +292,6 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                 path = rawOut[cstring"filediff"][cstring"file"].to(cstring)
 
             if path.len > 0:
-              echo fmt"[acp_ipc] tool_call_update with filepath; notifying reload + change-file for {path}"
               mainWindow.webContents.send("CODETRACER::reload-file", js{ "path": path })
               mainWindow.webContents.send("CODETRACER::change-file", js{ "path": path })
           except:
@@ -276,7 +299,7 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
   except:
     errorPrint cstring(fmt"[acp_ipc] failed to process session update: {getCurrentExceptionMsg()}")
 
-  saveSessionState(rendererSessionId, state)
+  saveSessionState(acpSessionId, state)
 )
 
 proc ensureAcpConnection(): Future[void] {.async.} =
@@ -285,13 +308,10 @@ proc ensureAcpConnection(): Future[void] {.async.} =
 
   try:
     acpProcess = spawnProcess(defaultCmd, defaultArgs)
-    echo "[acp_ipc] started the acp server"
-  
+
     acpStream = ndJsonStream(
       toWebWritable(stdinOf(acpProcess)),
       toWebReadable(stdoutOf(acpProcess)))
-
-    echo "[acp_ipc] set up the pipes"
 
     # acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
 
@@ -302,10 +322,7 @@ proc ensureAcpConnection(): Future[void] {.async.} =
       handleReadTextFile,
       handleCreateTerminal
     )), acpStream)
-    echo "[acp_ipc] established a client-side connection"
-  
     let initResp = await acpClient.initialize(initRequest())
-    echo "[acp_ipc] initialized response raw=", stringify(initResp)
 
     acpInitialized = true
   except:
@@ -315,21 +332,40 @@ proc ensureAcpConnection(): Future[void] {.async.} =
 
 proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   if not acpInitialized or acpClient.isNil:
-    echo "[acp_ipc] prompt requested but ACP not initialized"
+    discard
     return
 
-  let rendererSessionId =
+  let clientSessionId =
+    if jsHasKey(response, cstring"clientSessionId"):
+      response[cstring"clientSessionId"].to(cstring)
+    else:
+      cstring""
+  let requestedSessionId =
     if jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
     else:
       cstring""
-  if rendererSessionId.len == 0:
-    errorPrint cstring"[acp_ipc] prompt missing sessionId"
+  let sessionId =
+    if clientSessionId.len > 0:
+      let mapped = acpSessionForClient(clientSessionId)
+      if mapped.len == 0:
+        errorPrint cstring(fmt"[acp_ipc] prompt for unknown clientSessionId={clientSessionId}")
+        return
+      mapped
+    else:
+      requestedSessionId
+
+  if clientSessionId.len == 0:
+    errorPrint cstring(fmt"[acp_ipc] prompt missing clientSessionId for sessionId={sessionId}")
+    return
+
+  if sessionId.len == 0:
+    errorPrint cstring"[acp_ipc] prompt missing sessionId/clientSessionId"
     return
 
   var state: SessionState
-  if not getSessionState(rendererSessionId, state):
-    errorPrint cstring(fmt"[acp_ipc] prompt for unknown sessionId={rendererSessionId}")
+  if not getSessionState(sessionId, state):
+    errorPrint cstring(fmt"[acp_ipc] prompt for unknown sessionId={sessionId}")
     return
 
   let rawText = response[cstring"text"]
@@ -343,7 +379,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
       else:
         stringify(rawText)
 
-  echo fmt"[acp_ipc] sending prompt for rendererSession={rendererSessionId}: {text}"
+  echo fmt"[acp_ipc] prompt received clientSessionId={clientSessionId} sessionId={sessionId} text={text}"
 
   let messageId = cstring($msgId)
   msgId += 1
@@ -351,18 +387,21 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   state.currentMessageId = messageId
   state.aggregatedContent = cstring""
   state.collectedUpdates = @[]
-  saveSessionState(rendererSessionId, state)
+  state.activePrompt = true
+  saveSessionState(sessionId, state)
 
   mainWindow.webContents.send("CODETRACER::acp-prompt-start", js{
-    "sessionId": rendererSessionId,
+    "sessionId": sessionId,
+    "clientSessionId": clientSessionId,
     "id": messageId
   })
 
-  let promptResp = await acpClient.prompt(promptRequest(state.acpSessionId, text))
+  let promptResp = await acpClient.prompt(promptRequest(sessionId, text))
   let stopReason = stopReasonFrom(promptResp)
 
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-    "sessionId": rendererSessionId,
+    "sessionId": sessionId,
+    "clientSessionId": clientSessionId,
     "id": messageId,
     "stopReason": stopReason,
     "updates": state.collectedUpdates
@@ -371,17 +410,20 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   state.currentMessageId = cstring""
   state.aggregatedContent = cstring""
   state.collectedUpdates = @[]
-  saveSessionState(rendererSessionId, state)
+  state.activePrompt = false
+  saveSessionState(sessionId, state)
 
 proc onAcpSessionInit*(sender: js, response: JsObject) {.async.} =
-  let rendererSessionId =
-    if jsHasKey(response, cstring"sessionId"):
+  let clientSessionId =
+    if jsHasKey(response, cstring"clientSessionId"):
+      response[cstring"clientSessionId"].to(cstring)
+    elif jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
     else:
       cstring""
 
-  if rendererSessionId.len == 0:
-    errorPrint cstring"[acp_ipc] session-init missing sessionId"
+  if clientSessionId.len == 0:
+    errorPrint cstring"[acp_ipc] session-init missing clientSessionId"
     return
 
   await ensureAcpConnection()
@@ -390,75 +432,98 @@ proc onAcpSessionInit*(sender: js, response: JsObject) {.async.} =
     let sessionResp = await acpClient.newSession(newSessionRequest())
     let acpSessionId = sessionIdFrom(sessionResp)
     let state = SessionState(
-      acpSessionId: acpSessionId,
       currentMessageId: cstring"",
       aggregatedContent: cstring"",
-      collectedUpdates: @[]
+      collectedUpdates: @[],
+      activePrompt: false
     )
-    saveSessionState(rendererSessionId, state)
-    rendererByAcp[acpSessionId] = rendererSessionId
+    saveSessionState(acpSessionId, state)
+    acpSessionIdsByClient[clientSessionId] = acpSessionId
+    clientSessionIdsByAcp[acpSessionId] = clientSessionId
 
     mainWindow.webContents.send("CODETRACER::acp-session-ready", js{
-      "sessionId": rendererSessionId,
-      "acpSessionId": acpSessionId,
+      "sessionId": acpSessionId,
+      "clientSessionId": clientSessionId,
       "response": sessionResp
     })
   except:
-    let errMsg = cstring(fmt"[acp_ipc] session-init failed for rendererSession={rendererSessionId}: {getCurrentExceptionMsg()}")
+    let errMsg = cstring(fmt"[acp_ipc] session-init failed for clientSession={clientSessionId}: {getCurrentExceptionMsg()}")
     errorPrint errMsg
     mainWindow.webContents.send("CODETRACER::acp-session-load-error", js{
-      "sessionId": rendererSessionId,
+      "sessionId": clientSessionId,
       "error": errMsg
     })
 
 proc onAcpStop*(sender: js, response: JsObject) {.async.} =
   if not acpInitialized or acpClient.isNil:
-    echo "[acp_ipc] stop requested but ACP not initialized"
+    discard
     return
 
-  let rendererSessionId =
+  let clientSessionId =
+    if jsHasKey(response, cstring"clientSessionId"):
+      response[cstring"clientSessionId"].to(cstring)
+    else:
+      cstring""
+  let requestedSessionId =
     if jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
     else:
       cstring""
-  if rendererSessionId.len == 0 or not sessionsByRenderer.hasKey(rendererSessionId):
-    echo fmt"[acp_ipc] stop requested for unknown sessionId={rendererSessionId}"
+  let sessionId =
+    if clientSessionId.len > 0:
+      acpSessionForClient(clientSessionId)
+    else:
+      requestedSessionId
+
+  if sessionId.len == 0 or not sessionsById.hasKey(sessionId):
+    discard
     return
 
-  var state = sessionsByRenderer[rendererSessionId]
+  var state = sessionsById[sessionId]
 
-  echo fmt"[acp_ipc] stopping session: {rendererSessionId}"
   try:
-    await acpClient.cancel(js{ "sessionId": state.acpSessionId })
+    await acpClient.cancel(js{ "sessionId": sessionId })
     if state.currentMessageId.len > 0:
       mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-        "sessionId": rendererSessionId,
+        "sessionId": sessionId,
         "id": state.currentMessageId,
         "stopReason": "cancelled"
       })
     state.currentMessageId = cstring""
     state.aggregatedContent = cstring""
     state.collectedUpdates = @[]
-    saveSessionState(rendererSessionId, state)
+    state.activePrompt = false
+    saveSessionState(sessionId, state)
   except:
     errorPrint cstring(fmt"[acp_ipc] stop failed: {getCurrentExceptionMsg()}")
 
 proc onAcpCancelPrompt*(sender: js, response: JsObject) {.async.} =
   if not acpInitialized or acpClient.isNil:
-    echo "[acp_ipc] cancel requested but ACP not initialized"
+    discard
     return
 
-  let rendererSessionId =
+  let clientSessionId =
+    if jsHasKey(response, cstring"clientSessionId"):
+      response[cstring"clientSessionId"].to(cstring)
+    else:
+      cstring""
+  let requestedSessionId =
     if jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
     else:
       cstring""
 
-  if rendererSessionId.len == 0 or not sessionsByRenderer.hasKey(rendererSessionId):
-    echo fmt"[acp_ipc] cancel requested for unknown sessionId={rendererSessionId}"
+  let sessionId =
+    if clientSessionId.len > 0:
+      acpSessionForClient(clientSessionId)
+    else:
+      requestedSessionId
+
+  if sessionId.len == 0 or not sessionsById.hasKey(sessionId):
+    discard
     return
 
-  var state = sessionsByRenderer[rendererSessionId]
+  var state = sessionsById[sessionId]
 
   let requestMessageId =
     if jsHasKey(response, cstring"messageId"):
@@ -467,13 +532,11 @@ proc onAcpCancelPrompt*(sender: js, response: JsObject) {.async.} =
     else:
       state.currentMessageId
 
-  echo fmt"[acp_ipc] cancelling prompt for session={rendererSessionId} messageId={requestMessageId}"
-
   try:
-    await acpClient.cancel(js{ "sessionId": state.acpSessionId })
+    await acpClient.cancel(js{ "sessionId": sessionId })
     if requestMessageId.len > 0:
       mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
-        "sessionId": rendererSessionId,
+        "sessionId": sessionId,
         "id": requestMessageId,
         "stopReason": "cancelled"
       })
@@ -481,6 +544,7 @@ proc onAcpCancelPrompt*(sender: js, response: JsObject) {.async.} =
       state.currentMessageId = cstring""
       state.aggregatedContent = cstring""
       state.collectedUpdates = @[]
-      saveSessionState(rendererSessionId, state)
+      state.activePrompt = false
+      saveSessionState(sessionId, state)
   except:
     errorPrint cstring(fmt"[acp_ipc] cancel prompt failed: {getCurrentExceptionMsg()}")

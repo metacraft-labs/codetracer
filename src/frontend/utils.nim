@@ -388,7 +388,12 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     messageOrder: @[],
     terminals: JsAssoc[cstring, AgentTerminal]{},
     terminalOrder: @[],
-    sessionId: cstring(fmt"acp-session-{id}"),
+    sessionId: cstring"",
+    pendingSessionId: cstring(fmt"agent-session-{id}"),
+    pendingPrompts: @[],
+    promptInFlight: false,
+    messageBuffers: JsAssoc[cstring, cstring]{},
+    sessionMessageIds: JsAssoc[cstring, seq[cstring]]{},
     acpInitSent: false,
     activeAgentMessageId: cstring""
   )
@@ -589,7 +594,8 @@ data.ui = Components(
   traceMonacoEditors: @[],
   fontSize: 15,
   editModeHiddenPanels: @[],
-  savedLayoutBeforeEdit: nil)
+  savedLayoutBeforeEdit: nil,
+  activeAgentSessionId: cstring"")
   # mode: CalltraceMode)
 
 for content in Content:
