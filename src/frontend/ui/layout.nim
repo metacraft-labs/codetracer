@@ -169,6 +169,8 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
 
 # Triage: rename to initGoldenLayout
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
+  echo "initLayout"
+  echo data.ui.layout.isNil
 
   if data.startOptions.shellUi:
     kxiMap["menu"] = setRenderer(proc: VNode = data.ui.menu.render(), "menu", proc = discard)

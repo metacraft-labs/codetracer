@@ -102,7 +102,8 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
         layout: layout,
         helpers: helpers,
         startOptions: data.startOptions,
-        bypass: bypass})
+        bypass: bypass
+    })
 
     # echo "Trying to send acp msg"
     #

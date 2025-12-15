@@ -763,7 +763,8 @@ proc followMouse(event: dom.Event) =
 
 proc tryInitLayout*(data: Data) =
   if data.ui.pageLoaded and data.ui.initEventReceived:
-    initLayout(data.ui.resolvedConfig)
+    if data.ui.layout.isNil:
+      initLayout(data.ui.resolvedConfig)
     redrawAll()
 
 # In both these `on` functions, we must communicate them to the ui
@@ -817,7 +818,16 @@ proc onInit*(
   data.homedir = response.home
   data.config = response.config
   if response.bypass:
-    renderer.resetLayoutState(data)
+    # if subsystem: DON'T reset the layout:
+    #   keep it, and expect that the event log/other global panels
+    #   are ok with the same info, as we use the same trace
+    #   and more local panels like state/calltrace would be updated
+    #   from the next complete move after resstart: probably entrypoint
+    #
+    #   the goal is for the interface to not change drastically and for this restart
+    #   to be not very visible/jarring
+    if data.lastRestartKind != RestartSubsystem:
+      renderer.resetLayoutState(data)
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.services.flow.enabledFlow = response.config.flow.enabled
