@@ -1477,6 +1477,11 @@ type
 
   ClientActionHandler* = proc: void {.nimcall.}
 
+  RestartKind* = enum
+    NoRestart,
+    RestartNewTrace,
+    RestartSubsystem
+
   Data* = ref object
     dapApi*:                DapApi
     viewsApi*:              MediatorWithSubscribers
@@ -1513,6 +1518,7 @@ type
     homedir*:               cstring
     status*:                StatusState
     lspStarted*:            bool
+    lastRestartKind*:       RestartKind
 
 
   KeyPluginContext* = ref object

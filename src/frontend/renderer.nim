@@ -1323,13 +1323,14 @@ proc buildRecordEnv(envDump: cstring): JsObject =
   envObject
 
 proc runTests*(data: Data, options: RunTestOptions) =
+  data.lastRestartKind = RestartNewTrace
   data.ipc.send("CODETRACER::run-test", options)
 
 proc reRecordCurrent*(data: Data, projectOnly: bool) =
   ## Save edits and restart the recorder for the current file or project
   ##   base args on current trace for now, but we might start a different target
   ##   TODO: maybe rethink this more?
-
+  data.lastRestartKind = RestartNewTrace
   if data.trace.isNil:
     data.viewsApi.warnMessage(cstring"No trace is loaded; nothing to re-record.")
     return
@@ -1386,6 +1387,7 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
   )
 
 proc restartSubsystem*(data: Data, name: cstring) =
+  data.lastRestartKind = RestartSubsystem
   data.ipc.send(
     "CODETRACER::restart-subsystem",
     name

@@ -443,44 +443,18 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
 
 proc restartDbBackend {.async.} =
   # copied and adapted from Petar's code for re-recording + re-replaying up in this file
-  #  in prepareLoadingTrace
-
-  # let stopPacket = wrapJsonForSending js{
-  #   "type": cstring"request",
-  #   "command": cstring"ct/stop-replay",
-  #   "arguments": selectedReplayId
-  # }
-  # backendManagerSocket.write(stopPacket)
-
-  # let replayStartFuture = newReplayStartFuture()
-
-  # let startPacket = wrapJsonForSending js{
-  #   "type": cstring"request",
-  #   "command": cstring"ct/start-replay",
-  #   "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
-  # }
-  # backendManagerSocket.write(startPacket)
-
-  # let replayId = await replayStartFuture
-  # if replayId < 0:
-  #   errorPrint "Unable to start replay for new trace"
-  #   return
-
-  # selectedReplayId = replayId
-  # infoPrint "index: selecting replayId ", $replayId
-
-  # let selectPacket = wrapJsonForSending js{
-  #   "type": cstring"request",
-  #   "command": cstring"ct/select-replay",
-  #   "arguments": replayId
-  # }
-  # backendManagerSocket.write(selectPacket)
-  # mainWindow.webContents.send(
-  #   "CODETRACER::dap-replay-selected",
-  #   js{trace: data.trace})
-
-  # data.trace = prefetchedTrace
-  # await loadExistingRecord(data.trace.id)
+  #   or at least based on it/reusing its helpers completely
+  #   it's almost the same, but we're not re-recording, 
+  #   just re-replaying the same trace and restarting
+  #   db-backend with it
+  #   and in the frontend we don't delete/reinit the layout in this case
+  #   based on `data.lastRestartKind`, so the update is more invisible
+  #   as it might happend automatically e.g. on problem/hanging in the future
+  #
+  #   we assume that run to entry complete move would lead to reloading the local panels:
+  #     editor/state/flow
+  #   and the global ones are ok staying the same as its the same trace:
+  #     calltrace/event log/tracpoints
 
   await prepareForLoadingTrace(data.trace.id, nodeProcess.pid.to(int))
   await loadExistingRecord(data.trace.id)
