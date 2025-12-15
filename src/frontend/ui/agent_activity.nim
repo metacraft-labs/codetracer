@@ -33,11 +33,13 @@ proc autoResizeTextarea(id: cstring) =
   el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
 
 proc componentBySessionId(sessionId: cstring): AgentActivityComponent =
-  ## Locate the AgentActivity component for a given sessionId. If sessionId is
-  ## empty, return the first available component.
+  ## Locate the AgentActivity component for a given sessionId. Match either the
+  ## pending client-side id (init handshake) or the established ACP session id.
+  if sessionId.len == 0:
+    return nil
   for _, comp in data.ui.componentMapping[Content.AgentActivity]:
     let candidate = AgentActivityComponent(comp)
-    if sessionId.len == 0 or candidate.sessionId == sessionId:
+    if candidate.sessionId == sessionId or candidate.pendingSessionId == sessionId:
       return candidate
   nil
 
@@ -95,19 +97,19 @@ proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): V
         tdiv(class="agent-model-img")
     tdiv(id=fmt"shellComponent-{term.shell.id}{self.commandInputId}", class="shell-container")
 
+proc currentSessionKey(self: AgentActivityComponent): cstring
+
 proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false): AgentMessage =
-  console.log cstring"Adding agent message"
   if not self.messages.hasKey(messageId):
     try:
       let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled)
       self.messages[messageId] = message
       self.messageOrder.add(messageId)
     except:
-      console.log cstring(fmt"[agent-activity] addAgentMessage failed: {getCurrentExceptionMsg()}")
+      discard
   result = self.messages[messageId]
 
 proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
-  console.log cstring("[agent-activity] update: begin")
   var message = self.addAgentMessage(messageId, content, role, canceled)
   if append and message.content.len > 0:
     message.content = message.content & content
@@ -117,7 +119,23 @@ proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring,
     message.canceled = true
 
   self.messages[messageId] = message
+  console.log cstring(fmt"[agent-activity] storing message sessionKey={self.currentSessionKey()} messageId={messageId} role={role} canceled={canceled} content={message.content} append={append}")
   self.redraw()
+
+proc bufferMessageChunk(self: AgentActivityComponent, messageId: cstring, content: cstring) =
+  ## Accumulate streamed content for a message id until the stop event.
+  var existing = cstring""
+  if self.messageBuffers.hasKey(messageId):
+    existing = self.messageBuffers[messageId]
+  self.messageBuffers[messageId] = existing & content
+
+proc flushMessageBuffer(self: AgentActivityComponent, messageId: cstring, role: AgentMessageRole, canceled: bool) =
+  ## Flush buffered content to the UI and clear the buffer.
+  var content = cstring""
+  if self.messageBuffers.hasKey(messageId):
+    content = self.messageBuffers[messageId]
+  self.messageBuffers.del(messageId)
+  self.updateAgentMessageContent(messageId, content, false, role, canceled)
 
 proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTerminal =
   if not self.terminals.hasKey(terminalId):
@@ -129,25 +147,81 @@ proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTermin
       self.terminals[terminalId] = term
       self.terminalOrder.add(terminalId)
     except:
-      console.log cstring(fmt"[agent-activity] addTerminal failed: {getCurrentExceptionMsg()}")
+      discard
   result = self.terminals[terminalId]
 
 const INPUT_ID = cstring"agent-query-text"
 
+proc setActiveAgent(self: AgentActivityComponent) =
+  ## Mark this component as the active agent prompt sender.
+  data.ui.activeAgentSessionId =
+    if self.sessionId.len > 0: self.sessionId else: self.pendingSessionId
+
+proc currentSessionKey(self: AgentActivityComponent): cstring =
+  if self.sessionId.len > 0:
+    self.sessionId
+  else:
+    self.pendingSessionId
+
+proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring) =
+  if not self.sessionMessageIds.hasKey(sessionKey):
+    self.sessionMessageIds[sessionKey] = @[]
+
+proc addMessageToSession(self: AgentActivityComponent, sessionKey, messageId: cstring) =
+  self.ensureSessionMessageList(sessionKey)
+  var list = self.sessionMessageIds[sessionKey]
+  if list.len == 0 or list[^1] != messageId:
+    list.add(messageId)
+  self.sessionMessageIds[sessionKey] = list
+
+proc isActiveAgent(self: AgentActivityComponent): bool =
+  let activeId = data.ui.activeAgentSessionId
+  if activeId.len == 0:
+    return true
+  activeId == self.sessionId or activeId == self.pendingSessionId
+
+proc flushPendingPrompts(self: AgentActivityComponent) =
+  ## Send any queued prompts once the component has a session id.
+  if self.sessionId.len == 0:
+    return
+
+  if self.pendingPrompts.len == 0:
+    return
+
+  for queuedPrompt in self.pendingPrompts:
+    data.ipc.send("CODETRACER::acp-prompt", js{
+      "sessionId": self.sessionId,
+      "clientSessionId": self.pendingSessionId,
+      "text": queuedPrompt
+    })
+  self.pendingPrompts.setLen(0)
+
 proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
+  if not self.isActiveAgent():
+    return
+  if self.sessionId.len == 0:
+    self.pendingPrompts.add(prompt)
+    return
+  self.flushPendingPrompts()
+  console.log cstring(fmt"[agent-activity] sending prompt sessionKey={self.currentSessionKey()} sessionId={self.sessionId} pending={self.pendingSessionId} prompt={prompt}")
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "sessionId": self.sessionId,
+    "clientSessionId": self.pendingSessionId,
     "text": prompt
   }
 
 proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
+  self.setActiveAgent()
+  if self.promptInFlight:
+    return
   self.inputValue = promptText
-  self.activeAgentMessageId = PLACEHOLDER_MSG.cstring
   let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
+  self.addMessageToSession(self.currentSessionKey(), userMessageId)
   discard setTimeout(proc() = scrollAgentCom(), 0)
   sendAcpPrompt(self, promptText)
+  self.promptInFlight = true
   self.clear()
 
 proc submitPrompt(self: AgentActivityComponent) =
@@ -245,7 +319,7 @@ method render*(self: AgentActivityComponent): VNode =
   data.ui.commandPalette.agent = self
   if not self.acpInitSent:
     data.ipc.send("CODETRACER::acp-session-init", js{
-      "sessionId": self.sessionId
+      "clientSessionId": self.pendingSessionId
     })
     self.acpInitSent = true
   # let source =
@@ -272,7 +346,13 @@ method render*(self: AgentActivityComponent): VNode =
     tdiv(class="agent-ha-container")
   ):
     tdiv(class="agent-com"):
-      for msgId in self.messageOrder:
+      let sessionKey = self.currentSessionKey()
+      let orderedMessages =
+        if self.sessionMessageIds.hasKey(sessionKey):
+          self.sessionMessageIds[sessionKey]
+        else:
+          @[]
+      for msgId in orderedMessages:
         let message = self.messages[msgId]
         if message.role == AgentMessageUser:
           createUserMessageContent(message)
@@ -314,6 +394,8 @@ method render*(self: AgentActivityComponent): VNode =
         autocapitalize="off",
         rows="1",
         spellcheck="false",
+        onfocus = proc (e: Event; n: VNode) =
+          self.setActiveAgent(),
         onkeydown = proc (e: Event; n: VNode) =
           let ke = cast[KeyboardEvent](e)
           if ke.key == "Enter":
@@ -354,6 +436,7 @@ method render*(self: AgentActivityComponent): VNode =
           tdiv(
             class="agent-start-button",
             onclick = proc =
+              self.setActiveAgent()
               self.submitPrompt()
               self.inputField.toJs.value = "".cstring
               self.isLoading = true
@@ -362,8 +445,6 @@ method render*(self: AgentActivityComponent): VNode =
           tdiv(
             class="agent-stop-button",
             onclick = proc =
-              echo fmt"[agent-activity] stopping session: {self.data.services.debugger.location.path}"
-
               var cancelId = cstring""
               if self.activeAgentMessageId.len > 0:
                 cancelId = self.activeAgentMessageId
@@ -385,6 +466,7 @@ method render*(self: AgentActivityComponent): VNode =
                   "sessionId": self.sessionId
                 })
               self.isLoading = false
+              self.promptInFlight = false
               self.redraw()
           )
 
@@ -394,8 +476,6 @@ proc asyncSleep(ms: int): Future[void] =
   )
 
 proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
-  console.log cstring"[agent-activity] onAcpReceiveResponse"
-  console.log response
 
   let sessionId =
     if jsHasKey(response, cstring"sessionId"):
@@ -403,21 +483,17 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     else:
       cstring""
 
-  console.log cstring(fmt"[agent-activity] componentMapping[AgentActivity].len={data.ui.componentMapping[Content.AgentActivity].len}")
+  if sessionId.len == 0:
+    return
   var self = componentBySessionId(sessionId)
   if self.isNil:
-    console.log cstring"[agent-activity] no AgentActivity component to receive ACP response yet"
     return
 
   # Filter the placeholder msg for the agent:
   self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
   self.messages.del(PLACEHOLDER_MSG)
-  # TODO: Make a end-process for the isLoading state
-  self.activeAgentMessageId = cstring""
 
   scrollAgentCom()
-
-  console.log cstring(fmt"[agent-activity] handler using component id={self.id} messages={self.messages.len} orderLen={self.messageOrder.len}")
 
   let messageId =
     if jsHasKey(response, cstring"messageId"):
@@ -426,8 +502,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       cast[cstring](response[cstring"id"])
     else:
       PLACEHOLDER_MSG
-
-  if self.activeAgentMessageId.len > 0 and self.activeAgentMessageId != messageId:
+  if messageId.len == 0 or messageId == PLACEHOLDER_MSG:
     return
 
   let hasContent = jsHasKey(response, cstring"content")
@@ -445,32 +520,32 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     else:
       cstring""
 
-  if isFinal:
-    console.log cstring"[agent-activity] got stopReason"
-    self.isLoading = false
-    redrawAll()
-
-  let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
   let canceledFlag = isFinal and stopReason == cstring"cancelled"
 
-  console.log cstring"[agent-activity] got content"
-  console.log content
+  if hasContent and not isFinal:
+    let previewStr = $content
+    let preview =
+      if previewStr.len > 200: previewStr[0..199].cstring else: previewStr.cstring
+    console.log cstring(fmt"[agent-activity] chunk sessionId={sessionId} messageId={messageId} len={content.len} content={preview}")
+    self.bufferMessageChunk(messageId, content)
+    self.activeAgentMessageId = messageId
+    return
 
-  if hasContent or not self.messages.hasKey(messageId):
+  if isFinal:
     try:
-      self.updateAgentMessageContent(messageId, content, appendFlag, AgentMessageAgent, canceledFlag)
-      console.log cstring(fmt"[agent-activity] updated active messageId={messageId} append={appendFlag}")
-      self.activeAgentMessageId = messageId
-      console.log cstring"[agent-activity] update + redraw complete"
-      console.log cstring(fmt"[agent-activity] stored messages now={self.messages.len} order={self.messageOrder.len}")
+      if self.messageBuffers.hasKey(messageId):
+        self.flushMessageBuffer(messageId, AgentMessageAgent, canceledFlag)
+      elif hasContent:
+        self.updateAgentMessageContent(messageId, content, false, AgentMessageAgent, canceledFlag)
+      self.addMessageToSession(sessionId, messageId)
+      self.activeAgentMessageId = cstring""
     except:
-      console.log cstring(fmt"[agent-activity] update failed: {getCurrentExceptionMsg()}")
-  else:
-    console.log cstring"[agent-activity] no content; skipping update"
+      discard
+    self.isLoading = false
+    self.promptInFlight = false
+    redrawAll()
 
 proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
-  console.log cstring"[agent-activity] onAcpCreateTerminal"
-  console.log response
 
   let sessionId =
     if jsHasKey(response, cstring"sessionId"):
@@ -481,7 +556,6 @@ proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
   let self = componentBySessionId(sessionId)
 
   if self.isNil:
-    console.log cstring"[agent-activity] no AgentActivity component to receive ACP terminal yet"
     return
 
   let terminalId =
@@ -494,8 +568,6 @@ proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
   self.redraw()
 
 proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
-  console.log cstring"[agent-activity] onAcpPromptStart"
-  console.log response
 
   let sessionId =
     if jsHasKey(response, cstring"sessionId"):
@@ -506,34 +578,52 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   let self = componentBySessionId(sessionId)
 
   if self.isNil:
-    console.log cstring"[agent-activity] no AgentActivity component to receive prompt start"
     return
 
   if jsHasKey(response, cstring"id"):
     self.activeAgentMessageId = cast[cstring](response[cstring"id"])
-    console.log cstring(fmt"[agent-activity] set activeAgentMessageId from prompt-start: {self.activeAgentMessageId}")
 
 proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
-  let sessionId =
+  let clientSessionId =
+    if jsHasKey(response, cstring"clientSessionId"):
+      response[cstring"clientSessionId"].to(cstring)
+    else:
+      cstring""
+  let acpSessionId =
     if jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
     else:
       cstring""
-  let comp = componentBySessionId(sessionId)
-  if not comp.isNil:
-    comp.acpInitSent = true
-    console.log cstring(fmt"[agent-activity] session ready for {sessionId}")
+
+  let comp = componentBySessionId(clientSessionId)
+  if comp.isNil:
+    return
+  if acpSessionId.len == 0:
+    return
+  # migrate any pending-session messages to the established acp session id
+  if comp.sessionMessageIds.hasKey(clientSessionId):
+    comp.sessionMessageIds[acpSessionId] = comp.sessionMessageIds[clientSessionId]
+    comp.sessionMessageIds.del(clientSessionId)
+  comp.sessionId = acpSessionId
+  comp.acpInitSent = true
+  # reset active message when binding a new session to avoid mixing prompts
+  comp.activeAgentMessageId = cstring""
+  comp.flushPendingPrompts()
 
 proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
-  let sessionId =
-    if jsHasKey(response, cstring"sessionId"):
+  let clientSessionId =
+    if jsHasKey(response, cstring"clientSessionId"):
+      response[cstring"clientSessionId"].to(cstring)
+    elif jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
     else:
       cstring""
-  let comp = componentBySessionId(sessionId)
+  let comp = componentBySessionId(clientSessionId)
   if not comp.isNil:
     comp.acpInitSent = false
-  console.log cstring(fmt"[agent-activity] session load error for {sessionId}")
+    comp.promptInFlight = false
+  # session load failed; keep component idle
+  discard
 
 proc onAcpRequestPermission*(sender: js, response: JsObject) {.async.} =
-  console.log cstring(fmt"[agent-activity] onAcpRequestPermission")
+  discard

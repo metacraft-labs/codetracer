@@ -774,7 +774,12 @@ type
 
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
-    sessionId*: cstring
+    sessionId*: cstring         ## ACP session id once established
+    pendingSessionId*: cstring  ## Local placeholder used during init until sessionId arrives
+    pendingPrompts*: seq[cstring] ## Queue prompts until the ACP session is ready
+    promptInFlight*: bool       ## Prevent duplicate prompt sends per component
+    messageBuffers*: JsAssoc[cstring, cstring] ## Buffer streamed content by message id
+    sessionMessageIds*: JsAssoc[cstring, seq[cstring]] ## sessionId -> ordered message ids
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
@@ -1430,6 +1435,7 @@ type
     status*:         StatusComponent
     searchResults*:  SearchResultsComponent
     menu*:           MenuComponent
+    activeAgentSessionId*: cstring
     commandPalette*: CommandPaletteComponent
     idMap*:          JsAssoc[cstring, int] # inside editor => traces, flows
     lastRedraw*:     int64
