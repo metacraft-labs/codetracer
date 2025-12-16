@@ -64,6 +64,35 @@ type
   # the following TODOs are for changes in confutils
   # TODO handle descriptions of commands
   CodetracerConf* = object
+    cwd* {.
+      name: "cwd"
+      desc: "Working directory for CodeTracer (useful when launched via macOS 'open' which starts with cwd=/)"
+    .} : Option[string]
+
+    envFiles* {.
+      name: "env-file"
+      desc: "Environment file(s) to load (newline-separated KEY=VALUE format). Can be specified multiple times; later files override earlier ones."
+      defaultValue: @[]
+    .} : seq[string]
+
+    env0Files* {.
+      name: "env0-file"
+      desc: "Environment file(s) to load (null-separated KEY=VALUE format from 'env -0'). Can be specified multiple times; later files override earlier ones."
+      defaultValue: @[]
+    .} : seq[string]
+
+    tmpEnvFiles* {.
+      name: "tmp-env-file"
+      desc: "Temporary environment file(s) to load (newline-separated KEY=VALUE format). Files are deleted after loading."
+      defaultValue: @[]
+    .} : seq[string]
+
+    tmpEnv0Files* {.
+      name: "tmp-env0-file"
+      desc: "Temporary environment file(s) to load (null-separated KEY=VALUE format from 'env -0'). Files are deleted after loading."
+      defaultValue: @[]
+    .} : seq[string]
+
     case cmd* {.
       command,
       defaultValue: StartUpCommand.noCommand

@@ -46,13 +46,13 @@ proc runWithRestart(
           getExtension(lang)
         else:
           "wasm"
-      
+
       let program = if lang.isDbBased:
           recordArgs[0]
         else:
           let binary = build(recordArgs[0], "")
           binary
-    
+
       recordedTrace = record(lang=extension,
                              outputFolder="",
                              exportFile="",
@@ -86,6 +86,7 @@ proc run*(programArg: string, args: seq[string]) =
   # run <program> <args>
   # optionally if env variable CODETRACER_RECORD_CORE=true
   # try to record core (dispatcher run) with codetracer
+
   let recordCore = envLoadRecordCore()
   var traceID = -1
   var program = programArg
