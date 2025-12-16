@@ -585,9 +585,9 @@ proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-location",
-      onmousedown = proc(ev: Event, tg: VNode) =
-        if cast[MouseEvent](ev).button == 0:
-          self.historyClick(event.location),
+      # onmousedown = proc(ev: Event, tg: VNode) =
+      #   if cast[MouseEvent](ev).button == 0:
+      #     self.historyClick(event.location),
       oncontextmenu = proc(ev: Event, tg: VNode) =
         ev.preventDefault()
         self.historyContextAction(event, ev)
