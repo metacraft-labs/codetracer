@@ -43,8 +43,10 @@ proc stopReasonFrom(response: JsObject): cstring {.importjs: "((resp) => (resp &
 proc log(obj: JsObject) {.importjs: "console.log(#)"}
 
 const
-  defaultCmd = cstring"ah"
-  defaultArgs: seq[cstring] = @[cstring"acp"]
+  defaultCmd = cstring"codex-acp"
+  defaultArgs: seq[cstring] = @[]
+  # defaultCmd = cstring"ah"
+  # defaultArgs: seq[cstring] = @[cstring"acp"]
 
 type
   SessionState = object
