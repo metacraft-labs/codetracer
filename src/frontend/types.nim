@@ -772,6 +772,11 @@ type
     id*: cstring
     shell*: ShellComponent
 
+  DiffPreview* = object
+    path*: cstring
+    original*: cstring
+    modified*: cstring
+
   AgentActivityComponent* = ref object of Component
     shell*:   ShellComponent
     sessionId*: cstring         ## ACP session id once established
@@ -781,6 +786,7 @@ type
     messageBuffers*: JsAssoc[cstring, cstring] ## Buffer streamed content by message id
     sessionMessageIds*: JsAssoc[cstring, seq[cstring]] ## sessionId -> ordered message ids
     workspaceDir*: cstring      ## Workspace root returned by the ACP session init (agent-harbor)
+    sessionDiffs*: JsAssoc[cstring, seq[DiffPreview]] ## sessionId -> diff previews
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent

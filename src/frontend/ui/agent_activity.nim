@@ -168,6 +168,16 @@ proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring)
   if not self.sessionMessageIds.hasKey(sessionKey):
     self.sessionMessageIds[sessionKey] = @[]
 
+proc ensureSessionDiffList(self: AgentActivityComponent, sessionKey: cstring) =
+  if not self.sessionDiffs.hasKey(sessionKey):
+    self.sessionDiffs[sessionKey] = @[]
+
+proc addDiffPreview(self: AgentActivityComponent, sessionKey, path, original, modified: cstring) =
+  self.ensureSessionDiffList(sessionKey)
+  var lst = self.sessionDiffs[sessionKey]
+  lst.add(DiffPreview(path: path, original: original, modified: modified))
+  self.sessionDiffs[sessionKey] = lst
+
 proc addMessageToSession(self: AgentActivityComponent, sessionKey, messageId: cstring) =
   self.ensureSessionMessageList(sessionKey)
   var list = self.sessionMessageIds[sessionKey]
@@ -359,6 +369,16 @@ method render*(self: AgentActivityComponent): VNode =
           createUserMessageContent(message)
         else:
           createMessageContent(self, message)
+      if self.sessionDiffs.hasKey(sessionKey):
+        for diff in self.sessionDiffs[sessionKey]:
+          tdiv(class="agent-diff-wrapper"):
+            tdiv(class="header-wrapper"):
+              tdiv(class="task-name"): text fmt"Diff: {diff.path}"
+            tdiv(class="agent-diff-content"):
+              tdiv(class="agent-diff-original"):
+                pre: text diff.original
+              tdiv(class="agent-diff-modified"):
+                pre: text diff.modified
 
       for termId in self.terminalOrder:
         let terminal = self.terminals[termId]
@@ -592,6 +612,35 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
 
   if jsHasKey(response, cstring"id"):
     self.activeAgentMessageId = cast[cstring](response[cstring"id"])
+
+proc onAcpRenderDiff*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let self = componentBySessionId(sessionId)
+  if self.isNil:
+    return
+  let path =
+    if jsHasKey(response, cstring"path"):
+      response[cstring"path"].to(cstring)
+    else:
+      cstring""
+  let original =
+    if jsHasKey(response, cstring"original"):
+      response[cstring"original"].to(cstring)
+    else:
+      cstring""
+  let modified =
+    if jsHasKey(response, cstring"modified"):
+      response[cstring"modified"].to(cstring)
+    else:
+      cstring""
+  if original.len == 0 and modified.len == 0:
+    return
+  self.addDiffPreview(sessionId, path, original, modified)
+  self.redraw()
 
 proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
   let clientSessionId =

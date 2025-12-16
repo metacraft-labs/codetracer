@@ -395,6 +395,7 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     messageBuffers: JsAssoc[cstring, cstring]{},
     sessionMessageIds: JsAssoc[cstring, seq[cstring]]{},
     workspaceDir: cstring"",
+    sessionDiffs: JsAssoc[cstring, seq[DiffPreview]]{},
     acpInitSent: false,
     activeAgentMessageId: cstring""
   )
