@@ -35,6 +35,16 @@ proc stopJump*(self: DebugComponent) =
   self.after = false
   self.data.redraw()
 
+proc resetOperation*(self: DebugComponent) =
+  clog "reset-operation: for now restarting db-backend"
+  self.data.restartSubsystem(name="db-backend")
+  if self.jumpHistory.len != 0:
+    self.jumpHistory[^1].lastOperation = cstring"reset-operation"
+
+  # previously called like that, outdated now:
+  #   this is specifically for the "full reset operation":
+  #   self.service.resetOperation(full=true, resetLastLocation=true, taskId=taskId)
+
 proc runToEntry*(self: DebugComponent) =
   self.api.emit(CtRunToEntry, EmptyArg())
   self.api.emit(InternalNewOperation, NewOperation(name: "run to entry", stableBusy: true))
@@ -58,19 +68,16 @@ proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
 
 proc action(self: DebugComponent, id: string) =
   case id:
-  of "reset-operation":
-    let taskId = genTaskId(ResetOperation)
-    clog "start reset-operation", taskId
-    self.service.resetOperation(full=false, taskId=taskId)
-    if self.jumpHistory.len != 0:
-      self.jumpHistory[^1].lastOperation = cstring"reset-operation"
+  of "reset-operation": self.resetOperation()
 
-  of "full-reset-operation":
-    let taskId = genTaskId(ResetOperation)
-    clog "start reset-operation", taskId
-    self.service.resetOperation(full=true, resetLastLocation=true, taskId=taskId)
-    if self.jumpHistory.len != 0:
-      self.jumpHistory[^1].lastOperation = cstring"full-reset-operation"
+  # TODO: a special case: or remove, as currently we
+  #   directly restart db-backend anyway?
+  #   or make several options for 
+  #     * ) again, restoring a more gradual/internal for db-backend restart
+  #     * ) db-backend restart
+  #     * ) backend-manager (+ db-backend) restart
+  # ?
+  of "full-reset-operation": self.resetOperation()
 
   of "stop": stopAction()
 
@@ -336,7 +343,7 @@ method render*(self: DebugComponent): VNode =
         separateBar()
         debugButton("run-to-entry")
         separateBar()
-        debugButton("reset-operation", not self.stableBusy)
+        debugButton("reset-operation", false) # not self.stableBusy)
         separateBar()
       else:
         debugStepButton("continue", Continue, false)
