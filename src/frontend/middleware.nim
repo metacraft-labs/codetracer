@@ -6,13 +6,36 @@ import
   communication, dap,
   event_helpers
 
+
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
 
 when not defined(ctInExtension):
   import utils
+  import services / debugger_service
 
   proc dapInitializationHandler() =
     infoPrint "middleware: launching trace id=", $data.trace.id, " folder=", $data.trace.outputFolder
+
+    # it's important that this is in the `dapInitializationHandler` that is
+    #   in the not defined(ctInExtension) case!
+    # in vscode, we assume the vscode editors handle breakpoints
+    # so we do this only for our codetracer non-extension editors
+    # important to send this before configurationDone: to
+    #   send the existing breakpoints and sync in this way even
+    # however, try to do this only after restart of subsystem
+    #   as this currently is the same trace where if no source edits have been done
+    #   the breakpoints should continue making sense
+    #
+    # TODO
+    # maybe for other trace restarts, like re-record/record-test we need to delete
+    #   the breakpoints or move them? not sure for now
+    # for just the beginning we might also send this, if we assume this code here happens a bit later
+    #   and the user has already managed to setup breakpoints or if we start
+    #   having storeable breakpoints between codetracer sessions
+    infoPrint "last restart kind ", $data.lastRestartKind
+    if data.lastRestartKind == RestartSubsystem:
+      data.services.debugger.dapSetBreakpoints()
+
     data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     data.dapApi.sendCtRequest(DapLaunch, js{
       traceFolder: data.trace.outputFolder,
