@@ -41,9 +41,9 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
       for chart in value.charts:
         chart.replaceAllValues(expression, localVariable.value.elements)
 
-      # to not leave history for expressions with older context
-      value.showInline = JsAssoc[cstring, bool]{}
-      value.charts = JsAssoc[cstring, ChartComponent]{}
+      # # to not leave history for expressions with older context
+      # value.showInline = JsAssoc[cstring, bool]{}
+      # value.charts = JsAssoc[cstring, ChartComponent]{}
 
   self.completeMoveIndex += 1
   self.redraw()

@@ -161,13 +161,10 @@
   padding-left: 4px
   padding-right: 4px
 
-  &:hover
-    background: ACTIVE_MENU_BACKGROUND !important
-    border-radius: 4px !important
-
   .history-text-element
     display: flex
     justify-content: flex-start
+    width: inherit
     // border: 1px COLOR solid
 
     .history-location-element
@@ -175,6 +172,9 @@
       display: flex
       flex-direction: column
       align-items: end
+    
+    .history-value-element
+      width: inherit
 
     .history-location
       // flex-basis: 25%
@@ -187,7 +187,11 @@
       white-space: nowrap
       color: VALUE_RESULT_COLOR
       margin-right: 25px
+      padding-left: 4px
 
+      &:hover
+        background: ACTIVE_MENU_BACKGROUND !important
+        border-radius: 4px !important
 
 .history-header
   position: relative
@@ -219,7 +223,8 @@
   color: TEXT_CONTENT_COLOR
   font-size: 14px
   cursor: pointer
-  height: 100px
+  max-height: 100px !important
+  min-height: fit-content
   position: relative
   display: flex
   overflow-y: scroll
