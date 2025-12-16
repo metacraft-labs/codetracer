@@ -23,9 +23,98 @@ proc eventuallyWrapElectron*: bool =
   else:
     false
 
+proc unescapeEnvValue(s: string): string =
+  ## Unescape common escape sequences in .env file values.
+  ## Handles: \n, \r, \t, \\, \", \'
+  ## Also strips surrounding quotes if present.
+  var value = s
+  # Strip surrounding quotes if present
+  if value.len >= 2:
+    if (value[0] == '"' and value[^1] == '"') or
+       (value[0] == '\'' and value[^1] == '\''):
+      value = value[1 ..< ^1]
+
+  result = newStringOfCap(value.len)
+  var i = 0
+  while i < value.len:
+    if value[i] == '\\' and i + 1 < value.len:
+      case value[i + 1]
+      of 'n': result.add('\n')
+      of 'r': result.add('\r')
+      of 't': result.add('\t')
+      of '\\': result.add('\\')
+      of '"': result.add('"')
+      of '\'': result.add('\'')
+      else:
+        # Unknown escape, keep as-is
+        result.add(value[i])
+        result.add(value[i + 1])
+      i += 2
+    else:
+      result.add(value[i])
+      i += 1
+
+proc loadEnvFiles(envFiles: seq[string], nullSeparated: bool, deleteAfterLoad: bool) =
+  ## Load environment variables from files in order.
+  ## nullSeparated: if true, entries are separated by null bytes (from 'env -0');
+  ##                if false, entries are newline-separated KEY=VALUE lines with escape sequences.
+  ## deleteAfterLoad: if true, delete the file after loading.
+  ## Later files override earlier ones.
+  for envFile in envFiles:
+    if not fileExists(envFile):
+      continue
+    try:
+      if nullSeparated:
+        let content = readFile(envFile)
+        for entry in content.split('\0'):
+          if entry.len == 0:
+            continue
+          let eqPos = entry.find('=')
+          if eqPos > 0:
+            let key = entry[0 ..< eqPos]
+            let value = entry[eqPos + 1 .. ^1]
+            putEnv(key, value)
+      else:
+        for line in lines(envFile):
+          let trimmed = line.strip()
+          # Skip empty lines and comments
+          if trimmed.len == 0 or trimmed.startsWith("#"):
+            continue
+          let eqPos = trimmed.find('=')
+          if eqPos > 0:
+            let key = trimmed[0 ..< eqPos]
+            let value = unescapeEnvValue(trimmed[eqPos + 1 .. ^1])
+            putEnv(key, value)
+    finally:
+      if deleteAfterLoad:
+        try:
+          removeFile(envFile)
+        except CatchableError:
+          discard
+
 proc runInitial*(conf: CodetracerConf) =
   # TODO should this be here?
   workaroundIntelECoreProblem()
+
+  # Load environment variables from env files.
+  # This is needed when CodeTracer is launched via macOS 'open' command,
+  # which doesn't preserve the shell environment.
+  # Temporary files are loaded first (and deleted), then persistent files.
+  # Later files override earlier ones within each category.
+  if conf.tmpEnv0Files.len > 0:
+    loadEnvFiles(conf.tmpEnv0Files, nullSeparated = true, deleteAfterLoad = true)
+  if conf.tmpEnvFiles.len > 0:
+    loadEnvFiles(conf.tmpEnvFiles, nullSeparated = false, deleteAfterLoad = true)
+  if conf.env0Files.len > 0:
+    loadEnvFiles(conf.env0Files, nullSeparated = true, deleteAfterLoad = false)
+  if conf.envFiles.len > 0:
+    loadEnvFiles(conf.envFiles, nullSeparated = false, deleteAfterLoad = false)
+
+  # Change to the specified working directory if provided.
+  # This is needed when CodeTracer is launched via macOS 'open' command,
+  # which starts the app with cwd=/ instead of the user's current directory.
+  if conf.cwd.isSome:
+    setCurrentDir(conf.cwd.get)
 
   case conf.cmd:
     of StartupCommand.install:

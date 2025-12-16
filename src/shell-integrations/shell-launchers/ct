@@ -1,14 +1,55 @@
 #!/usr/bin/env bash
 
-if [[ -s ~/.local/share/codetracer/app-install-fs-location ]]; then
-  app_location=$(< ~/.local/share/codetracer/app-install-fs-location)
+CODETRACER_BUNDLE_ID="com.codetracer.CodeTracer"
+CODETRACER_LOCATION_FILE="$HOME/.local/share/codetracer/app-install-fs-location"
+
+# Create a temporary file containing all current environment variables.
+# This preserves the full shell environment when launching via macOS 'open'.
+# Uses null-separated format (env -0) to correctly handle multi-line values.
+create_env_file() {
+  local env_file
+  env_file=$(mktemp)
+  env -0 > "$env_file"
+  echo "$env_file"
+}
+
+# Use Spotlight to find the CodeTracer.app by its bundle identifier.
+# This allows us to locate the app even if the user has moved it.
+# Prefers standard locations over other locations if multiple installations exist.
+find_codetracer_app() {
+  local results
+  results=$(mdfind "kMDItemCFBundleIdentifier == '$CODETRACER_BUNDLE_ID'" 2>/dev/null)
+
+  # Prefer standard locations: /Applications first, then ~/Applications
+  if echo "$results" | grep -q "^/Applications/"; then
+    echo "$results" | grep "^/Applications/" | head -1
+  elif echo "$results" | grep -q "^$HOME/Applications/"; then
+    echo "$results" | grep "^$HOME/Applications/" | head -1
+  else
+    echo "$results" | head -1
+  fi
+}
+
+# Update the stored app location file with a new path
+update_app_location() {
+  local new_location="$1"
+  if [[ -n "$new_location" ]]; then
+    echo "$new_location" > "$CODETRACER_LOCATION_FILE"
+  fi
+}
+
+if [[ -s "$CODETRACER_LOCATION_FILE" ]]; then
+  app_location=$(< "$CODETRACER_LOCATION_FILE")
   os=$(uname)
   if [[ "$os" == "Darwin" ]]; then
     if [ -d "$app_location" ]; then
       # We need to launch the CodeTracer app like this in order for the OS
       # to display its icon and name property in the Dock, Alt+Tab menus, etc.
       if [[ $1 == "" || $1 == "run" ]]; then
-        open "$app_location" --args "$@"
+        # When using 'open', the app starts with cwd=/ and loses the shell environment.
+        # We save the full environment to a temp file and pass it via --tmp-env0-file.
+        env_file=$(create_env_file)
+        open "$app_location" --args --tmp-env0-file "$env_file" --cwd "$(pwd)" "$@"
       else
         "$app_location/Contents/MacOS/bin/ct" "$@"
       fi
@@ -16,11 +57,27 @@ if [[ -s ~/.local/share/codetracer/app-install-fs-location ]]; then
       # The app binary has been linked directry. This is used sometimes during development.
       "$app_location" "$@"
     else
-      # TODO: Use the 'bookmarks' feature of the macOS file system to track to
-      #       discover the new location of the CodeTracer.app
-      #       https://stackoverflow.com/questions/10276026/how-do-i-keep-track-of-file-locations-on-mac-os-x
-      echo "The CodeTracer app has been moved" >&2
-      exit 1
+      # The app has been moved or deleted. Try to find it using Spotlight.
+      new_location=$(find_codetracer_app)
+      if [[ -n "$new_location" && -d "$new_location" ]]; then
+        echo "CodeTracer.app was moved to: $new_location" >&2
+        echo "Updating stored location..." >&2
+        update_app_location "$new_location"
+        app_location="$new_location"
+        # Now launch the app from the new location
+        if [[ $1 == "" || $1 == "run" ]]; then
+          env_file=$(create_env_file)
+          open "$app_location" --args --tmp-env0-file "$env_file" --cwd "$(pwd)" "$@"
+        else
+          "$app_location/Contents/MacOS/bin/ct" "$@"
+        fi
+      else
+        echo "The CodeTracer app could not be found." >&2
+        echo "It may have been moved to an unindexed location or deleted." >&2
+        echo "Please reinstall CodeTracer or update the location in:" >&2
+        echo "  $CODETRACER_LOCATION_FILE" >&2
+        exit 1
+      fi
     fi
   elif [[ "$os" == "Linux" ]]; then
     "$app_location" "$@"
@@ -28,6 +85,30 @@ if [[ -s ~/.local/share/codetracer/app-install-fs-location ]]; then
     echo "The $os system is not yet supported by CodeTracer. Please file an issue at https://github.com/metacraft-labs/codetracer/" >&2
   fi
 else
-  echo "Unable to find the location of the CodeTracer app" >&2
-  exit 1
+  # No stored location. Try to find the app using Spotlight (macOS only).
+  os=$(uname)
+  if [[ "$os" == "Darwin" ]]; then
+    app_location=$(find_codetracer_app)
+    if [[ -n "$app_location" && -d "$app_location" ]]; then
+      echo "Found CodeTracer.app at: $app_location" >&2
+      echo "Saving location for future use..." >&2
+      mkdir -p "$(dirname "$CODETRACER_LOCATION_FILE")"
+      update_app_location "$app_location"
+      if [[ $1 == "" || $1 == "run" ]]; then
+        env_file=$(create_env_file)
+        open "$app_location" --args --tmp-env0-file "$env_file" --cwd "$(pwd)" "$@"
+      else
+        "$app_location/Contents/MacOS/bin/ct" "$@"
+      fi
+    else
+      echo "Unable to find the CodeTracer app." >&2
+      echo "Please install CodeTracer.app or set its location in:" >&2
+      echo "  $CODETRACER_LOCATION_FILE" >&2
+      exit 1
+    fi
+  else
+    echo "Unable to find the location of the CodeTracer app." >&2
+    echo "Please set the app location in: $CODETRACER_LOCATION_FILE" >&2
+    exit 1
+  fi
 fi
