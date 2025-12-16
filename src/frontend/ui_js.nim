@@ -828,6 +828,7 @@ proc onInit*(
     #   to be not very visible/jarring
     if data.lastRestartKind != RestartSubsystem:
       renderer.resetLayoutState(data)
+  
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.services.flow.enabledFlow = response.config.flow.enabled
