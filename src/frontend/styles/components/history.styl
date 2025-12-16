@@ -156,11 +156,18 @@
 .history-text
   display: flex
   flex-direction: column
-  align-items:start
+  align-items: start
+  width: inherit
+  padding-left: 4px
+  padding-right: 4px
+
+  &:hover
+    background: ACTIVE_MENU_BACKGROUND !important
+    border-radius: 4px !important
 
   .history-text-element
     display: flex
-    justify-content: flex-end
+    justify-content: flex-start
     // border: 1px COLOR solid
 
     .history-location-element
@@ -204,7 +211,7 @@
 
 .history-container
   display: flex
-  width: fit-content
+  width: -webkit-fill-available
   margin-left: 12px
 
 .inline-history, .history
@@ -217,10 +224,14 @@
   display: flex
   overflow-y: scroll
   border-radius: 6px
-  padding-left: 8px
+  padding-left: 4px
+  width: -webkit-fill-available
 
   &::-webkit-scrollbar-thumb
     border-color: DROPDOWN_BASE
+  
+  &::-webkit-scrollbar-corner
+    background-color: DROPDOWN_BASE !important
 
   .inline-history-event
     display: flex

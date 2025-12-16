@@ -49,7 +49,7 @@ proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
   result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
 
 proc createUserMessageContent(msg: AgentMessage): VNode =
-  buildHtml(tdiv(class="agent-msg-wrapper")):
+  buildHtml(tdiv(class="agent-msg-wrapper user-wrapper")):
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
         tdiv(class="user-img")
