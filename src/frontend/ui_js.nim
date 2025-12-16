@@ -1568,6 +1568,7 @@ proc configureIPC(data: Data) =
     "acp-prompt-start"
     "acp-create-terminal"
     "acp-request-permission"
+    "acp-render-diff"
 
     "reload-file"
 

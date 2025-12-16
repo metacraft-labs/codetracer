@@ -266,6 +266,33 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
             "content": chunk
           })
         if updateKind == cstring"tool_call_update":
+          # Forward file/content tool outputs directly to the renderer so the AgentActivity can render them.
+          let toolCallId =
+            if jsHasKey(updateObj, cstring"toolCallId"):
+              updateObj[cstring"toolCallId"].to(cstring)
+            else:
+              cstring""
+          var original = cstring""
+          var modified = cstring""
+          var path = cstring""
+          if jsHasKey(updateObj, cstring"rawOutput") and jsHasKey(updateObj[cstring"rawOutput"], cstring"output"):
+            original = updateObj[cstring"rawOutput"][cstring"output"].to(cstring)
+          if jsHasKey(updateObj, cstring"rawInput"):
+            let rawInput = updateObj[cstring"rawInput"]
+            if jsHasKey(rawInput, cstring"content"):
+              modified = rawInput[cstring"content"].to(cstring)
+            if jsHasKey(rawInput, cstring"filePath"):
+              path = rawInput[cstring"filePath"].to(cstring)
+          if original.len > 0 or modified.len > 0:
+            mainWindow.webContents.send("CODETRACER::acp-render-diff", js{
+              "sessionId": acpSessionId,
+              "clientSessionId": clientSessionId,
+              "id": toolCallId,
+              "path": path,
+              "original": original,
+              "modified": modified
+            })
+        if updateKind == cstring"tool_call_update":
           try:
             var path = cstring""
             if jsHasKey(updateObj, cstring"rawInput"):
