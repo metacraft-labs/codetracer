@@ -338,7 +338,7 @@ method render*(self: AgentActivityComponent): VNode =
     if not self.kxi.isNil:
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
       # self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
-      
+
       # # Use "rust" for syntax highlighting on both sides
       # let originalModel = createModel(origText.cstring, "rust".cstring)
       # let modifiedModel = createModel(modText.cstring, "rust".cstring)
@@ -435,7 +435,7 @@ method render*(self: AgentActivityComponent): VNode =
       tdiv(class="agent-buttons-container"):
         tdiv(
           class="agent-button new-agent-instance",
-          onclick = proc = 
+          onclick = proc =
             let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
             data.runTests(options)
         )
