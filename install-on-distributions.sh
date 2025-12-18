@@ -302,6 +302,14 @@ install_appimage() {
         rm -f CodeTracer-RR-Backend.AppImage
     fi
 
+    # Run ct install to add to PATH
+    eprint_note "Running ct install to add CodeTracer to PATH..."
+    if [ -f "$HOME/.local/bin/ct" ]; then
+        "$HOME/.local/bin/ct" install || eprint_warning "Failed to run ct install. You may need to add $HOME/.local/bin to your PATH manually or run: $HOME/.local/bin/ct install"
+    else
+        eprint_warning "Could not find ct binary. You may need to add $HOME/.local/bin to your PATH manually."
+    fi
+
     eprint_success
 }
 
