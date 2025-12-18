@@ -64,6 +64,9 @@ var acpInitialized = false
 var sessionsById: Table[cstring, SessionState] = initTable[cstring, SessionState]()
 var acpSessionIdsByClient: Table[cstring, cstring] = initTable[cstring, cstring]()
 var clientSessionIdsByAcp: Table[cstring, cstring] = initTable[cstring, cstring]()
+# Cache originals before writes so we can render diffs when ACP only sends the
+# new content.
+var originalFileCache: Table[cstring, cstring] = initTable[cstring, cstring]()
 
 proc getSessionState(sessionId: cstring; state: var SessionState): bool =
   if sessionsById.hasKey(sessionId):
@@ -143,6 +146,14 @@ let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] 
   if path.len == 0:
     return js{ "error": "missing path" }
   try:
+    # Capture the previous contents (best-effort) so diffs can render even when
+    # ACP only provides the new text.
+    if not originalFileCache.hasKey(path):
+      try:
+        originalFileCache[path] = await readFileUtf8(path)
+      except:
+        discard
+
     await writeFileUtf8(path, content)
     # Notify renderer so open Monaco tabs can reload updated content.
     mainWindow.webContents.send("CODETRACER::reload-file", js{ "path": path })
@@ -224,6 +235,7 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
   try:
     if jsHasKey(params, cstring"update"):
       let updateObj = params[cstring"update"]
+
       if jsHasKey(updateObj, cstring"sessionUpdate"):
         let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
         if updateKind == cstring"tool_call" and jsHasKey(updateObj, cstring"options"):
@@ -285,7 +297,46 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
               modified = rawInput[cstring"content"].to(cstring)
             if jsHasKey(rawInput, cstring"filePath"):
               path = rawInput[cstring"filePath"].to(cstring)
-          if original.len > 0 or modified.len > 0:
+            elif jsHasKey(rawInput, cstring"filepath"):
+              path = rawInput[cstring"filepath"].to(cstring)
+          # Fallbacks: newer payloads may carry the path/new text only in "content".
+          if path.len == 0 and jsHasKey(updateObj, cstring"content"):
+            try:
+              let contentItems = updateObj[cstring"content"].to(seq[JsObject])
+              for item in contentItems:
+                if jsHasKey(item, cstring"path"):
+                  path = item[cstring"path"].to(cstring)
+                if jsHasKey(item, cstring"text"):
+                  modified = item[cstring"text"].to(cstring)
+                elif jsHasKey(item, cstring"newText"):
+                  modified = item[cstring"newText"].to(cstring)
+                if path.len > 0 and modified.len > 0:
+                  break
+            except:
+              let contentObj = updateObj[cstring"content"]
+              if jsHasKey(contentObj, cstring"path"):
+                path = contentObj[cstring"path"].to(cstring)
+              if modified.len == 0:
+                if jsHasKey(contentObj, cstring"text"):
+                  modified = contentObj[cstring"text"].to(cstring)
+                elif jsHasKey(contentObj, cstring"newText"):
+                  modified = contentObj[cstring"newText"].to(cstring)
+          # Another fallback for path: some payloads nest it under location.
+          if path.len == 0 and jsHasKey(updateObj, cstring"location") and jsHasKey(updateObj[cstring"location"], cstring"path"):
+            path = updateObj[cstring"location"][cstring"path"].to(cstring)
+
+          # If ACP only delivered the new content, try to recover the original
+          # from our pre-write cache, or as a last resort from disk.
+          if original.len == 0 and path.len > 0 and originalFileCache.hasKey(path):
+            original = originalFileCache[path]
+            originalFileCache.del(path)
+          if original.len == 0 and path.len > 0:
+            try:
+              original = await readFileUtf8(path)
+            except:
+              discard
+
+          if path.len > 0 and (original.len > 0 or modified.len > 0):
             mainWindow.webContents.send("CODETRACER::acp-render-diff", js{
               "sessionId": acpSessionId,
               "clientSessionId": clientSessionId,
@@ -301,6 +352,8 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
               let rawIn = updateObj[cstring"rawInput"]
               if jsHasKey(rawIn, cstring"filepath"):
                 path = rawIn[cstring"filepath"].to(cstring)
+              elif jsHasKey(rawIn, cstring"filePath"):
+                path = rawIn[cstring"filePath"].to(cstring)
 
             if path.len == 0 and jsHasKey(updateObj, cstring"content"):
               try:
@@ -314,6 +367,8 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                 let contentObj = updateObj[cstring"content"]
                 if jsHasKey(contentObj, cstring"path"):
                   path = contentObj[cstring"path"].to(cstring)
+            if path.len == 0 and jsHasKey(updateObj, cstring"location") and jsHasKey(updateObj[cstring"location"], cstring"path"):
+              path = updateObj[cstring"location"][cstring"path"].to(cstring)
 
             if path.len == 0 and jsHasKey(updateObj, cstring"rawOutput"):
               let rawOut = updateObj[cstring"rawOutput"]
