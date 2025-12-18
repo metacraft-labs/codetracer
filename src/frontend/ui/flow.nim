@@ -3955,7 +3955,8 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
 
 
 method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
-  # self.updateFlowOnMove(response.location.rrTicks, response.location.line)
+  self.location = response.location
+  # self.updateFlowOnMove(self.location.rrTicks, self.location.line)
   self.redrawFlow()
 
 method onLoadedFlowShape*(self: Component, update: FlowShape) {.async.} =
