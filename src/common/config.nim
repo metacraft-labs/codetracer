@@ -153,6 +153,14 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     var c = Config()
     c[] = config
     c.shortcutMap = initShortcutMap(config.bindings)
+
+    # Auto-discover ct-rr-support from PATH if not configured
+    if c.rrBackend.path == "":
+      let ctRrPath = findExe("ct-rr-support")
+      if ctRrPath != "":
+        c.rrBackend.enabled = true
+        c.rrBackend.path = ctRrPath
+
     return c
   except Exception as e:
     echo "ERROR: loading config: ", e.msg
