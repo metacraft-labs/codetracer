@@ -3,6 +3,7 @@ from dom import Node
 
 const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
+const DIFF_EDITOR_DIV = "diff-editor"
 const PLACEHOLDER_MSG = "placeholder-msg"
 const TERMINAL_PREFIX = "acp-term-"
 
@@ -60,7 +61,7 @@ proc createUserMessageContent(msg: AgentMessage): VNode =
     tdiv(class="msg-content"):
       text msg.content
 
-proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNode =
+proc createAgentMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNode =
   result = buildHtml(tdiv(class="agent-msg-wrapper")):
     tdiv(class="header-wrapper"):
       tdiv(class="content-header"):
@@ -70,7 +71,7 @@ proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNod
           if msg.canceled:
             span(style=style((StyleAttr.color, cstring"red"))):
               text " (canceled)"
-        if self.isLoading and not msg.canceled:
+        if msg.isLoading and not msg.canceled:
           span(class="ai-status")
       tdiv(class="msg-controls"):
         tdiv(class="command-palette-copy-button")
@@ -78,6 +79,12 @@ proc createMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNod
         # tdiv(class="command-palette-redo-button")
     tdiv(class="msg-content", id = fmt"{AGENT_MSG_DIV}-{msg.id}"):
       text msg.content
+    for diff in msg.sessionDiffs:
+      tdiv(class="component-wrapper"):
+        tdiv(class="header-wrapper"):
+          tdiv(class="task-name"): text fmt"{diff.path}"
+        tdiv(class=fmt"agent-editor-wrapper"):
+          tdiv(class=fmt"agent-editor", id = fmt"{DIFF_EDITOR_DIV}-{self.id}-{diff.id}")
 
 proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): VNode =
   # Ensure the terminal is created after the VNode mounts so the container exists.
@@ -99,18 +106,27 @@ proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): V
 
 proc currentSessionKey(self: AgentActivityComponent): cstring
 
-proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false): AgentMessage =
-  if not self.messages.hasKey(messageId):
+proc ensureAgentMessage(self: AgentActivityComponent): seq[AgentMessage] =
+  if self.sessionMessageIds.hasKey(self.sessionId) and self.sessionMessageIds[self.sessionId].len() > 0:
+    return self.sessionMessageIds[self.sessionId]
+  return @[]
+
+proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
+  if messageId notin self.messageOrder:
     try:
-      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled)
-      self.messages[messageId] = message
+      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled, isLoading: false, sessionDiffs: @[])
+      var list = self.ensureAgentMessage()
+      list.add(message)
+      self.sessionMessageIds[self.sessionId] = list
       self.messageOrder.add(messageId)
     except:
       discard
-  result = self.messages[messageId]
 
 proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
-  var message = self.addAgentMessage(messageId, content, role, canceled)
+  self.addAgentMessage(messageId, content, role, canceled)
+  var message = self.sessionMessageIds[self.sessionId][^1]
+  echo "####### CHECK ME OUT"
+  kout message
   if append and message.content.len > 0:
     message.content = message.content & content
   else:
@@ -118,9 +134,8 @@ proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring,
   if canceled:
     message.canceled = true
 
-  self.messages[messageId] = message
   console.log cstring(fmt"[agent-activity] storing message sessionKey={self.currentSessionKey()} messageId={messageId} role={role} canceled={canceled} content={message.content} append={append}")
-  self.redraw()
+  redrawAll()
 
 proc bufferMessageChunk(self: AgentActivityComponent, messageId: cstring, content: cstring) =
   ## Accumulate streamed content for a message id until the stop event.
@@ -168,21 +183,17 @@ proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring)
   if not self.sessionMessageIds.hasKey(sessionKey):
     self.sessionMessageIds[sessionKey] = @[]
 
-proc ensureSessionDiffList(self: AgentActivityComponent, sessionKey: cstring) =
-  if not self.sessionDiffs.hasKey(sessionKey):
-    self.sessionDiffs[sessionKey] = @[]
-
-proc addDiffPreview(self: AgentActivityComponent, sessionKey, path, original, modified: cstring) =
-  self.ensureSessionDiffList(sessionKey)
-  var lst = self.sessionDiffs[sessionKey]
-  lst.add(DiffPreview(path: path, original: original, modified: modified))
-  self.sessionDiffs[sessionKey] = lst
+proc addDiffPreview(self: AgentMessage, path, original, modified: cstring) =
+  var lst = self.sessionDiffs
+  if self.sessionDiffs.len() == 0:
+    lst.add(DiffPreview(path: path, original: original, modified: modified))
+    self.sessionDiffs.add(lst)
 
 proc addMessageToSession(self: AgentActivityComponent, sessionKey, messageId: cstring) =
   self.ensureSessionMessageList(sessionKey)
   var list = self.sessionMessageIds[sessionKey]
-  if list.len == 0 or list[^1] != messageId:
-    list.add(messageId)
+  if list.len == 0 or list[^1].id != messageId:
+    list.add(AgentMessage(id: messageId, sessionDiffs: @[]))
   self.sessionMessageIds[sessionKey] = list
 
 proc isActiveAgent(self: AgentActivityComponent): bool =
@@ -229,8 +240,10 @@ proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
   let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
-  self.addMessageToSession(self.currentSessionKey(), userMessageId)
+  # self.addMessageToSession(self.currentSessionKey(), userMessageId)
+  # self.addMessageToSession(self.currentSessionKey(), PLACEHOLDER_MSG)
   discard setTimeout(proc() = scrollAgentCom(), 0)
+  redrawAll()
   sendAcpPrompt(self, promptText)
   self.promptInFlight = true
   self.clear()
@@ -339,11 +352,55 @@ method render*(self: AgentActivityComponent): VNode =
       self.inputField = cast[dom.Node](jq(fmt"#{inputId}"))
       # self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
 
-      # # Use "rust" for syntax highlighting on both sides
-      # let originalModel = createModel(origText.cstring, "rust".cstring)
-      # let modifiedModel = createModel(modText.cstring, "rust".cstring)
+      # Use "rust" for syntax highlighting on both side
+      for agentMsg in self.sessionMessageIds[self.sessionId]:
+        for diffPreview in agentMsg.sessionDiffs:
 
-      # setDiffModel(self.diffEditor, originalModel, modifiedModel)
+          let diffEditorId = fmt"{DIFF_EDITOR_DIV}-{self.id}-{diffPreview.id}"
+
+          if self.diffEditors.hasKey(diffEditorId):
+            return
+
+          var lang = fromPath(diffPreview.path)
+          let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
+
+          self.diffEditors[diffEditorId] = monaco.editor.createDiffEditor(
+            jq(fmt"#{diffEditorId}"),
+            MonacoEditorOptions(
+              language: lang.toCLang(),
+              readOnly: true,
+              theme: theme,
+              automaticLayout: true,
+              folding: true,
+              fontSize: self.data.ui.fontSize,
+              minimap: js{ enabled: false },
+              find: js{ addExtraSpaceOnTop: false },
+              renderLineHighlight: "".cstring,
+              lineNumbers: proc(line: int): cstring = self.editorLineNumber(line),
+              lineDecorationsWidth: 20,
+              mouseWheelScrollSensitivity: 0,
+              fastScrollSensitivity: 0,
+              scrollBeyondLastLine: false,
+              smoothScrolling: false,
+              contextmenu: false,
+              renderOverviewRuler: false,
+              renderSideBySide: false,
+              scrollbar: js{
+                horizontalScrollbarSize: 14,
+                horizontalSliderSize: 8,
+                verticalScrollbarSize: 14,
+                verticalSliderSize: 8
+              },
+            )
+          )
+
+          let original = diffPreview.original
+          let modified = diffPreview.modified
+
+          let originalModel = createModel(original, "rust".cstring)
+          let modifiedModel = createModel(modified, "rust".cstring)
+
+          setDiffModel(self.diffEditors[diffEditorId], originalModel, modifiedModel)
       # # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
       # # self.shell.shell.write("Another line here.\r\n")
     if data.lastAgentPrompt != "" and not data.lastAgentPrompt.isNil:
@@ -363,22 +420,12 @@ method render*(self: AgentActivityComponent): VNode =
           self.sessionMessageIds[sessionKey]
         else:
           @[]
-      for msgId in orderedMessages:
-        let message = self.messages[msgId]
-        if message.role == AgentMessageUser:
+      for msg in orderedMessages:
+        let message = msg
+        if not message.toJs.isNil and message.role == AgentMessageUser:
           createUserMessageContent(message)
         else:
-          createMessageContent(self, message)
-      if self.sessionDiffs.hasKey(sessionKey):
-        for diff in self.sessionDiffs[sessionKey]:
-          tdiv(class="agent-diff-wrapper"):
-            tdiv(class="header-wrapper"):
-              tdiv(class="task-name"): text fmt"Diff: {diff.path}"
-            tdiv(class="agent-diff-content"):
-              tdiv(class="agent-diff-original"):
-                pre: text diff.original
-              tdiv(class="agent-diff-modified"):
-                pre: text diff.modified
+          createAgentMessageContent(self, message)
 
       for termId in self.terminalOrder:
         let terminal = self.terminals[termId]
@@ -427,7 +474,8 @@ method render*(self: AgentActivityComponent): VNode =
                 e.preventDefault()
                 self.submitPrompt()
                 self.inputField.toJs.value = "".cstring
-                self.isLoading = true,
+                self.isLoading = true
+                self.sessionMessageIds[self.sessionId][^1].isLoading = true,
         oninput = proc (e: Event; n: VNode) =
           self.inputValue = self.inputField.toJs.value.to(cstring)
           autoResizeTextarea(inputId)
@@ -461,6 +509,7 @@ method render*(self: AgentActivityComponent): VNode =
               self.submitPrompt()
               self.inputField.toJs.value = "".cstring
               self.isLoading = true
+              self.sessionMessageIds[self.sessionId][^1].isLoading = true
           )
         else:
           tdiv(
@@ -473,9 +522,7 @@ method render*(self: AgentActivityComponent): VNode =
                 cancelId = self.messageOrder[^1]
 
               if cancelId.len > 0:
-                var msg = self.addAgentMessage(cancelId, cstring"", AgentMessageAgent)
-                msg.canceled = true
-                self.messages[cancelId] = msg
+                self.addAgentMessage(cancelId, cstring"", AgentMessageAgent, true)
 
               if self.activeAgentMessageId.len > 0:
                 data.ipc.send("CODETRACER::acp-cancel-prompt", js{
@@ -512,7 +559,8 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
 
   # Filter the placeholder msg for the agent:
   self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
-  self.messages.del(PLACEHOLDER_MSG)
+  # self.messages.del(PLACEHOLDER_MSG)
+  self.sessionMessageIds[self.sessionId] = self.sessionMessageIds[self.sessionId].filterIt(it.id != PLACEHOLDER_MSG)
 
   scrollAgentCom()
 
@@ -545,14 +593,13 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
 
   if hasContent and not isFinal:
     let previewStr = $content
-    let preview =
-      if previewStr.len > 200: previewStr[0..199].cstring else: previewStr.cstring
+    let preview = previewStr
     console.log cstring(fmt"[agent-activity] chunk sessionId={sessionId} componentId={self.id} messageId={messageId} len={content.len} content={preview}")
     self.bufferMessageChunk(messageId, content)
     self.activeAgentMessageId = messageId
     return
 
-  let appendFlag = self.messages.hasKey(messageId) and not isFinal and hasContent
+  let appendFlag = messageId in self.messageOrder and not isFinal and hasContent
 
   if isFinal:
     try:
@@ -560,20 +607,22 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
         self.flushMessageBuffer(messageId, AgentMessageAgent, canceledFlag)
       elif hasContent:
         self.updateAgentMessageContent(messageId, content, false, AgentMessageAgent, canceledFlag)
-      self.addMessageToSession(sessionId, messageId)
+      # self.addMessageToSession(sessionId, messageId)
       self.activeAgentMessageId = cstring""
     except:
       discard
     self.isLoading = false
+    self.sessionMessageIds[self.sessionId][^1].isLoading = false
     self.promptInFlight = false
     redrawAll()
-  elif hasContent or not self.messages.hasKey(messageId):
+  elif hasContent or messageId notin self.messageOrder:
     try:
       console.log cstring(fmt"[agent-activity] render update sessionKey={self.currentSessionKey()} componentId={self.id} messageId={messageId} append={appendFlag} canceled={canceledFlag} len={content.len}")
       self.updateAgentMessageContent(messageId, content, appendFlag, AgentMessageAgent, canceledFlag)
       self.activeAgentMessageId = messageId
     except:
       discard
+  redrawAll()
 
 proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
 
@@ -639,8 +688,11 @@ proc onAcpRenderDiff*(sender: js, response: JsObject) {.async.} =
       cstring""
   if original.len == 0 and modified.len == 0:
     return
-  self.addDiffPreview(sessionId, path, original, modified)
-  self.redraw()
+  echo "TRYING TO ADD A DIFF"
+  self.ensureSessionMessageList(sessionId)
+  self.sessionMessageIds[sessionId][^1].addDiffPreview(path, original, modified)
+  echo "NEW: ", self.sessionMessageIds[sessionId][^1].sessionDiffs.len()
+  redrawAll()
 
 proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
   let clientSessionId =

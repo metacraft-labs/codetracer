@@ -762,17 +762,20 @@ type
     AgentMessageAgent
     AgentMessageUser
 
-  AgentMessage* = object
+  AgentMessage* = ref object
     id*: cstring
     content*: cstring
     role*: AgentMessageRole
     canceled*: bool
+    isLoading*: bool
+    sessionDiffs*: seq[DiffPreview]
 
   AgentTerminal* = object
     id*: cstring
     shell*: ShellComponent
 
-  DiffPreview* = object
+  DiffPreview* = ref object
+    id*: int
     path*: cstring
     original*: cstring
     modified*: cstring
@@ -784,14 +787,13 @@ type
     pendingPrompts*: seq[cstring] ## Queue prompts until the ACP session is ready
     promptInFlight*: bool       ## Prevent duplicate prompt sends per component
     messageBuffers*: JsAssoc[cstring, cstring] ## Buffer streamed content by message id
-    sessionMessageIds*: JsAssoc[cstring, seq[cstring]] ## sessionId -> ordered message ids
+    sessionMessageIds*: JsAssoc[cstring, seq[AgentMessage]] ## sessionId -> ordered message ids
     workspaceDir*: cstring      ## Workspace root returned by the ACP session init (agent-harbor)
-    sessionDiffs*: JsAssoc[cstring, seq[DiffPreview]] ## sessionId -> diff previews
     inputField*: dom.Node
     inputValue*: cstring
     commandPalette*: CommandPaletteComponent
     expandControl*: seq[bool]
-    diffEditor*: DiffEditor
+    diffEditors*: JsAssoc[cstring, DiffEditor]
     monacoEditor*: MonacoEditor
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]

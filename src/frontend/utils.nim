@@ -384,7 +384,7 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     ),
     inExtension: inExtension,
     expandControl: @[],
-    messages: JsAssoc[cstring, AgentMessage]{},
+    # messages: JsAssoc[cstring, AgentMessage]{},
     messageOrder: @[],
     terminals: JsAssoc[cstring, AgentTerminal]{},
     terminalOrder: @[],
@@ -393,9 +393,9 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     pendingPrompts: @[],
     promptInFlight: false,
     messageBuffers: JsAssoc[cstring, cstring]{},
-    sessionMessageIds: JsAssoc[cstring, seq[cstring]]{},
+    sessionMessageIds: JsAssoc[cstring, seq[AgentMessage]]{},
+    diffEditors: JsAssoc[cstring, DiffEditor]{},
     workspaceDir: cstring"",
-    sessionDiffs: JsAssoc[cstring, seq[DiffPreview]]{},
     acpInitSent: false,
     activeAgentMessageId: cstring""
   )
