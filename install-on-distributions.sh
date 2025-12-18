@@ -66,6 +66,9 @@ install_apt() {
     eprint_note "Installing CodeTracer!"
     "$super" apt install -y codetracer || eprint_install_fail
 
+    eprint_note "Installing CodeTracer RR Backend (optional)!"
+    "$super" apt install -y codetracer-rr-backend || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
+
     eprint_success
 }
 
@@ -97,6 +100,9 @@ install_dnf() {
     eprint_note "Installing CodeTracer"
     "$super" dnf -y install codetracer || eprint_install_fail
 
+    eprint_note "Installing CodeTracer RR Backend (optional)"
+    "$super" dnf -y install codetracer-rr-backend || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
+
     eprint_success
 }
 
@@ -112,6 +118,9 @@ install_yum() {
 
     eprint_note "Installing CodeTracer"
     "$super" yum -y install codetracer || eprint_install_fail
+
+    eprint_note "Installing CodeTracer RR Backend (optional)"
+    "$super" yum -y install codetracer-rr-backend || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
 
     eprint_success
 }
@@ -140,24 +149,39 @@ install_portage() {
     eprint_note "Installing CodeTracer"
     "$super" emerge codetracer-bin || eprint_install_fail
 
+    eprint_note "Installing CodeTracer RR Backend (optional)"
+    "$super" emerge codetracer-rr-backend-bin || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
+
     eprint_success
 }
 
 install_pamac() {
     eprint_note "Installing CodeTracer"
     pamac build codetracer --no-confirm || eprint_install_fail
+
+    eprint_note "Installing CodeTracer RR Backend (optional)"
+    pamac build codetracer-rr-backend --no-confirm || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
+
     eprint_success
 }
 
 install_yay() {
     eprint_note "Installing CodeTracer"
     yay -S codetracer --noconfirm || eprint_install_fail
+
+    eprint_note "Installing CodeTracer RR Backend (optional)"
+    yay -S codetracer-rr-backend --noconfirm || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
+
     eprint_success
 }
 
 install_paru() {
     eprint_note "Installing CodeTracer"
     paru -S codetracer --noconfirm || eprint_install_fail
+
+    eprint_note "Installing CodeTracer RR Backend (optional)"
+    paru -S codetracer-rr-backend --noconfirm || eprint_warning "Couldn't install RR backend. C/C++/Rust/Go support will not be available."
+
     eprint_success
 }
 
@@ -259,6 +283,16 @@ install_appimage() {
     install -Dm644 resources/codetracer.desktop "$HOME"/.local/share/applications/codetracer.desktop
 
     rm -rf resources/ resources.tar.xz
+
+    # Install RR Backend AppImage
+    eprint_note "Installing CodeTracer RR Backend AppImage (optional)"
+    curl -fL --output "CodeTracer-RR-Backend.AppImage" "https://downloads.codetracer.com/CodeTracer-RR-Backend-latest-amd64.AppImage" || eprint_warning "Couldn't download RR backend. C/C++/Rust/Go support will not be available."
+
+    if [ -f "CodeTracer-RR-Backend.AppImage" ]; then
+        mv CodeTracer-RR-Backend.AppImage "$HOME/.local/bin/ct-rr-support" || eprint_warning "Couldn't install ct-rr-support in $HOME/.local/bin/"
+        chmod +x "$HOME/.local/bin/ct-rr-support" || eprint_warning "Couldn't make ct-rr-support executable!"
+        rm -f CodeTracer-RR-Backend.AppImage
+    fi
 
     eprint_success
 }
