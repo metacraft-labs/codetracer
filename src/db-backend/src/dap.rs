@@ -2,7 +2,7 @@
 use crate::dap_error::DapError;
 
 use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
-use crate::task::{self, CtUpdatedTableResponseBody};
+use crate::task::{self, CtUpdatedTableResponseBody, Location};
 use crate::transport::DapResult;
 use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
 use serde_json::Value;
@@ -39,6 +39,8 @@ pub struct LaunchRequestArguments {
     pub raw_diff_index: Option<String>,
     #[serde(rename = "ctRRWorkerExe", skip_serializing_if = "Option::is_none")]
     pub ct_rr_worker_exe: Option<PathBuf>,
+    #[serde(rename = "restoreLocation", skip_serializing_if = "Option::is_none")]
+    pub restore_location: Option<Location>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

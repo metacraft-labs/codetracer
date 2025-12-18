@@ -47,6 +47,7 @@ fn _test_backend_dap_server_stdio() {
         typ: None,
         session_id: None,
         ct_rr_worker_exe: None,
+        restore_location: None,
     };
     let launch = client.launch(launch_args).expect("failed to build launch request");
     writer

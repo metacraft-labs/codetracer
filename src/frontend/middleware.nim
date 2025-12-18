@@ -37,10 +37,18 @@ when not defined(ctInExtension):
       data.services.debugger.dapSetBreakpoints()
 
     data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+    # in db-backend/rust: interpret as Some(Location..) in the first case
+    #   and None: in the second case
+    let restoreLocation = if data.lastRestartKind == RestartSubsystem:
+        data.services.debugger.location.toJs
+      else:
+        # in this case, it should just jump to entry
+        cast[JsObject](nil) # Location(path: "", line: NO_LINE)
     data.dapApi.sendCtRequest(DapLaunch, js{
       traceFolder: data.trace.outputFolder,
       rawDiffIndex: data.startOptions.rawDiffIndex,
       ctRRWorkerExe: data.config.rrBackend.path,
+      restoreLocation: restoreLocation
     })
 
   proc newOperationHandler*(viewsApi: MediatorWithSubscribers, operation: NewOperation) =
@@ -99,6 +107,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     viewsApi.emit(CtCompleteMove, value)
     lastCompleteMove = value
+    
     when not defined(ctInExtension):
       data.status.stableBusy = false
       data.status.hasStarted = true

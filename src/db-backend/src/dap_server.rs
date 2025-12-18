@@ -153,6 +153,7 @@ fn setup(
     trace_file: &Path,
     raw_diff_index: Option<String>,
     ct_rr_worker_exe: &Path,
+    restore_location: Option<Location>,
     sender: Sender<DapMessage>,
     for_launch: bool,
     thread_name: &str,
@@ -185,7 +186,7 @@ fn setup(
         );
         handler.raw_diff_index = raw_diff_index;
         if for_launch {
-            handler.run_to_entry(dap::Request::default(), sender)?;
+            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
         }
         handler.initialized = true;
         Ok(handler)
@@ -203,7 +204,7 @@ fn setup(
             let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
             handler.raw_diff_index = raw_diff_index;
             if for_launch {
-                handler.run_to_entry(dap::Request::default(), sender)?;
+                handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
             }
             handler.initialized = true;
             Ok(handler)
@@ -287,7 +288,7 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             req.load_args::<dap_types::VariablesArguments>()?,
             sender.clone(),
         )?,
-        "restart" => handler.run_to_entry(req.clone(), sender.clone())?,
+        "restart" => handler.run_to_entry(req.clone(), None, sender.clone())?,
         "setBreakpoints" => handler.set_breakpoints(
             req.clone(),
             req.load_args::<dap_types::SetBreakpointsArguments>()?,
@@ -325,7 +326,7 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         }
         "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?, sender.clone())?,
-        "ct/run-to-entry" => handler.run_to_entry(req.clone(), sender.clone())?,
+        "ct/run-to-entry" => handler.run_to_entry(req.clone(), None, sender.clone())?,
         "ct/run-tracepoints" => {
             handler.run_tracepoints(req.clone(), req.load_args::<RunTracepointsArg>()?, sender.clone())?
         }
@@ -379,6 +380,7 @@ pub struct Ctx {
     pub launch_trace_file: PathBuf,
     pub launch_raw_diff_index: Option<String>,
     pub ct_rr_worker_exe: PathBuf,
+    pub restore_location: Option<Location>,
     pub received_configuration_done: bool,
 
     pub to_stable_sender: Option<Sender<dap::Request>>,
@@ -397,6 +399,7 @@ impl Default for Ctx {
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
             ct_rr_worker_exe: PathBuf::from(""),
+            restore_location: None,
             received_configuration_done: false,
 
             to_stable_sender: None,
@@ -484,6 +487,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
 
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
                 ctx.ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
+                ctx.restore_location = args.restore_location.clone();
 
                 if ctx.received_configuration_done {
                     if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
@@ -594,6 +598,7 @@ fn task_thread(
             &ctx_with_cached_launch.launch_trace_file,
             ctx_with_cached_launch.launch_raw_diff_index.clone(),
             &ctx_with_cached_launch.ct_rr_worker_exe,
+            ctx_with_cached_launch.restore_location.clone(),
             sender.clone(),
             for_launch,
             name,
@@ -636,6 +641,7 @@ fn task_thread(
 
                 let launch_raw_diff_index = args.raw_diff_index.clone();
                 let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap(); // unwrap_or(PathBuf::from(""));
+                let restore_location = args.restore_location.clone();
 
                 let for_launch = run_to_entry;
                 handler = setup(
@@ -643,6 +649,7 @@ fn task_thread(
                     &launch_trace_file,
                     launch_raw_diff_index.clone(),
                     &ct_rr_worker_exe,
+                    restore_location,
                     sender.clone(),
                     for_launch,
                     name,

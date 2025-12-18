@@ -357,8 +357,21 @@ impl Handler {
         Ok(())
     }
 
-    pub fn run_to_entry(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        self.replay.run_to_entry()?;
+    pub fn run_to_entry(
+        &mut self,
+        _req: dap::Request,
+        restore_location: Option<Location>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        if let Some(location) = restore_location {
+            if location.path != NO_PATH && location.line != NO_POSITION {
+                self.replay.location_jump(&location)?;
+            } else {
+                self.replay.run_to_entry()?;
+            }
+        } else {
+            self.replay.run_to_entry()?;
+        }
         self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
         self.complete_move(true, sender)?;
         Ok(())
