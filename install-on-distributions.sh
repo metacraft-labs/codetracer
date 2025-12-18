@@ -259,6 +259,14 @@ install_dmg() {
 
     rm -rf CodeTracer.dmg
 
+    # Run ct install to add to PATH
+    eprint_note "Running ct install to add CodeTracer to PATH..."
+    if [ -f "/Applications/CodeTracer.app/Contents/MacOS/bin/ct" ]; then
+        "/Applications/CodeTracer.app/Contents/MacOS/bin/ct" install || eprint_warning "Failed to run ct install. You may need to run it manually from /Applications/CodeTracer.app/Contents/MacOS/bin/ct install"
+    else
+        eprint_warning "Could not find ct binary in the app bundle. You may need to run ct install manually."
+    fi
+
     eprint_success
 }
 
