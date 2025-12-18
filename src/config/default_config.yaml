@@ -85,7 +85,6 @@ bindings:
   goDown: "Down"
   pageUp: "PageUp"
   pageDown: "PageDown"
-  switchDebug: "CTRL+D"
   switchEdit: "CTRL+E"
   fileSearch: "CTRL+P"
   commandSearch: "ALT+P"

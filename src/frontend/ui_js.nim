@@ -649,15 +649,23 @@ proc switchToEdit*(data: Data) =
   redrawAll()
 
 proc switchToDebug*(data: Data) =
-  if data.ui.mode != DebugMode:
-    data.ui.mode = DebugMode
-    # TODO separate action?
-    data.ui.layout.root.contentItems[0].contentItems[0].config.width = 50
-    data.ui.layout.root.contentItems[0].contentItems[1].config.width = 50
-    data.ui.layout.updateSize()
-    data.ui.layout.root.contentItems[0].contentItems[1].element.show()
-  data.setEditorsReadOnlyState(true)
-  redrawAll()
+  # TODO: in the future we might support also a button/shortcut to switch back to the original trace
+  #   maybe in a new window (or in the same)?
+  # eventually a more mixed more, or a way to combine the edits with existing debug info might exist
+  #   but it seems like a lot more work
+  # for now we keep the action, posibility to include it in user .config.yaml
+  # but we remove it from the default config, so it's hidden/not set by default
+  cwarn "for now : not supported: one shouldn't be able to switch this way to debug, just to re-record!"
+
+  # if data.ui.mode != DebugMode:
+  #   data.ui.mode = DebugMode
+  #   # TODO separate action?
+  #   data.ui.layout.root.contentItems[0].contentItems[0].config.width = 50
+  #   data.ui.layout.root.contentItems[0].contentItems[1].config.width = 50
+  #   data.ui.layout.updateSize()
+  #   data.ui.layout.root.contentItems[0].contentItems[1].element.show()
+  # data.setEditorsReadOnlyState(true)
+  # redrawAll()
 
 proc toggleMode*(data: Data) =
   if data.ui.mode == DebugMode:

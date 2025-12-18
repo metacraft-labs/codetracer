@@ -87,6 +87,11 @@ proc action(self: DebugComponent, id: string) =
 
   of "run-to-entry": self.runToEntry()
 
+  of "run-tests":
+    # copied from alt+l shorcut handling in shortcuts.nim
+    let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+    data.runTests(options)
+
   of "history-back":
     self.handleHistoryJump(isForward = true)
 
@@ -136,7 +141,9 @@ var buttons = JsAssoc[cstring, VNode]{
   "stop": buildHtml(img(src="public/resources/debug/stop_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
   "jump-before": buildHtml(img(src="public/resources/debug/jump-before_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
   "jump-after": buildHtml(img(src="public/resources/debug/jump-after_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
-  "run-to-entry": buildHtml(img(src="public/resources/debug/run_to_entry_dark.svg", height="20px", width="18px", class="debug-button-svg"))
+  "run-to-entry": buildHtml(img(src="public/resources/debug/run_to_entry_dark.svg", height="20px", width="18px", class="debug-button-svg")),
+  # TODO: separate icon!
+  "run-tests": buildHtml(img(src="public/resources/debug/continue_dark.svg", height="16px", width="28px", class="debug-button-svg"))
  }
 
 let shortcuts = JsAssoc[cstring, cstring]{
@@ -148,6 +155,7 @@ let shortcuts = JsAssoc[cstring, cstring]{
   "reverse-step-out": "Shift-F12",
   "continue": "F8",
   "reverse-continue": "Shift-F8",
+  # TODO: "run-tests": shortcut? alt+l?
  }
 
 let tooltipText = JsAssoc[cstring, cstring]{
@@ -163,6 +171,7 @@ let tooltipText = JsAssoc[cstring, cstring]{
   "history-back": "History back",
   "history-forward": "History forward",
   "reset-operation": "Reset operation",
+  "run-tests": "Record and replay tests in a new window",
 }
 
 proc buildListItem(self: DebugComponent, history: JumpHistory, id: int): VNode =
@@ -344,6 +353,8 @@ method render*(self: DebugComponent): VNode =
         debugButton("run-to-entry")
         separateBar()
         debugButton("reset-operation", false) # not self.stableBusy)
+        separateBar()
+        debugButton("run-tests")
         separateBar()
       else:
         debugStepButton("continue", Continue, false)
