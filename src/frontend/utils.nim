@@ -597,6 +597,8 @@ data.ui = Components(
   fontSize: 15,
   editModeHiddenPanels: @[],
   savedLayoutBeforeEdit: nil,
+  editModeLayout: nil,
+  lastUsedEditLayout: nil,
   activeAgentSessionId: cstring"")
   # mode: CalltraceMode)
 
