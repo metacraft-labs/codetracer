@@ -24,6 +24,7 @@ type
     layout*: js
     helpers*: Helpers
     bootstrapMessages*: seq[BootstrapPayload]
+    workspaceFolder*: cstring  # The folder opened in edit mode (persists across mode switches)
 
   DebugInstance* = object
     process*:       NodeSubProcess

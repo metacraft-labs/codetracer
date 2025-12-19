@@ -1068,6 +1068,36 @@ proc onFilesystemLoaded(
   data.services.editor.filesystem = response.folders
   data.redraw()
 
+proc onFilesystemCategoryLoaded(
+  sender: js,
+  response: jsobject(
+    category=cstring,
+    folders=CodetracerFile)) =
+  # Add a new category to the filesystem tree
+  if data.services.editor.filesystem.isNil:
+    # If no filesystem exists yet, just use this as the root
+    data.services.editor.filesystem = response.folders
+  else:
+    # Add the category as a sibling to existing filesystem
+    # We need to create a new root that contains both categories
+    var newRoot = CodetracerFile(
+      text: cstring"Files",
+      children: @[],
+      state: js{opened: true},
+      index: 0,
+      parentIndices: @[],
+      original: CodetracerFileData(
+        text: cstring"Files",
+        path: cstring""))
+
+    # Add existing workspace as first child
+    newRoot.children.add(data.services.editor.filesystem)
+    # Add trace files category as second child
+    newRoot.children.add(response.folders)
+
+    data.services.editor.filesystem = newRoot
+  data.redraw()
+
 proc onUpdatePathContent(
   sender: js,
   response: jsobject(
@@ -1539,6 +1569,7 @@ proc configureIPC(data: Data) =
     "log-output"
     # filesystem handlers
     "filesystem-loaded"
+    "filesystem-category-loaded"
     "update-path-content"
     # load trace resources
     "filenames-loaded"
