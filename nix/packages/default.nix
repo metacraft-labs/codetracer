@@ -26,6 +26,51 @@
         cargo-stylus =
           inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus;
 
+        codex-acp =
+          let
+            # Pick a recent nightly (post-1.88) so dependencies like `home`
+            # accept the compiler version and we can still opt into unstable
+            # `File::lock` support.
+            nightly = inputs.fenix.packages.${system}.default;
+            nightlyPlatform = pkgs.makeRustPlatform {
+              inherit (nightly) cargo rustc;
+            };
+          in
+          nightlyPlatform.buildRustPackage rec {
+            pname = "codex-acp";
+            version = "0.7.4";
+
+            src = pkgs.fetchFromGitHub {
+              owner = "zed-industries";
+              repo = "codex-acp";
+              rev = "v${version}";
+              hash = "sha256-QGK4CkcH3eaOsjBwCoUSIYglFQ7pw0KtIfJAR9tTpbI=";
+              sha256 = "";
+            };
+
+            cargoHash = "sha256-Cojr5+ZZTpnOYA0QJ622UFlMhiEbdkkxvnVQqkFxBEI=";
+
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.openssl ];
+
+            doCheck = false;
+
+            # Allow unstable APIs (File::lock) even though this is a nightly
+            # build; some crates also gate on minimum rustc versions.
+            RUSTC_BOOTSTRAP = "1";
+
+            meta = with pkgs.lib; {
+              description = "An ACP-compatible coding agent powered by Codex";
+              homepage = "https://github.com/zed-industries/codex-acp";
+              changelog = "https://github.com/zed-industries/codex-acp/releases/tag/v${version}";
+              license = licenses.asl20;
+              maintainers = with maintainers; [ ];
+              platforms = platforms.unix;
+              sourceProvenance = with sourceTypes; [ fromSource ];
+              mainProgram = "codex-acp";
+            };
+          };
+
         # curl = pkgs.curl;
         inherit (pkgs) curl;
 
@@ -249,9 +294,8 @@
           version = "83d7053";
 
           src = pkgs.fetchurl {
-            url =
-              "https://downloads.codetracer.com/DesktopClient.App/DesktopClient.App-linux-x64-${version}.tar.gz";
-              sha256 = "sha256-qRja6e+uaM+vfYPXnHIa2L7xTeQvuTqoBIHGP7bexnY=";
+            url = "https://downloads.codetracer.com/DesktopClient.App/DesktopClient.App-linux-x64-${version}.tar.gz";
+            sha256 = "sha256-qRja6e+uaM+vfYPXnHIa2L7xTeQvuTqoBIHGP7bexnY=";
           };
 
           dontUnpack = true;
@@ -371,7 +415,8 @@
             wazero
             ruby-recorder-pure
             pkgs.universal-ctags
-          ] ++ staticDeps.paths;
+          ]
+          ++ staticDeps.paths;
 
           postBuild = ''
 
@@ -440,18 +485,16 @@
               pkgs.typescript
             ];
 
-            installPhase =
-              oldAttrs.installPhase
-              + ''
-                ls -al $out
-                # mkdir -p $out/bin
+            installPhase = oldAttrs.installPhase + ''
+              ls -al $out
+              # mkdir -p $out/bin
 
-                ln -sf $out/libexec/$name/node_modules $out/bin/node_modules
+              ln -sf $out/libexec/$name/node_modules $out/bin/node_modules
 
-                echo "after"
+              echo "after"
 
-                ls -al $out
-              '';
+              ls -al $out
+            '';
           });
 
         codetracer-electron = stdenv.mkDerivation {

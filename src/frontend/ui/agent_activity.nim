@@ -557,11 +557,6 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   if self.isNil:
     return
 
-  # Filter the placeholder msg for the agent:
-  self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
-  # self.messages.del(PLACEHOLDER_MSG)
-  self.sessionMessageIds[self.sessionId] = self.sessionMessageIds[self.sessionId].filterIt(it.id != PLACEHOLDER_MSG)
-
   scrollAgentCom()
 
   let messageId =
@@ -591,6 +586,14 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
 
   let canceledFlag = isFinal and stopReason == cstring"cancelled"
 
+  if messageId.len == 0 or messageId == PLACEHOLDER_MSG:
+    if isFinal:
+      # Filter the placeholder msg for the agent even if no message id was
+      # provided, so the UI clears the spinner row.
+      self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+      self.sessionMessageIds[self.sessionId] = self.sessionMessageIds[self.sessionId].filterIt(it.id != PLACEHOLDER_MSG)
+    return
+
   if hasContent and not isFinal:
     let previewStr = $content
     let preview = previewStr
@@ -602,6 +605,19 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   let appendFlag = messageId in self.messageOrder and not isFinal and hasContent
 
   if isFinal:
+    # Capture placeholder diffs before we drop it so we can migrate them.
+    var placeholderDiffs: seq[DiffPreview] = @[]
+    if self.sessionMessageIds.hasKey(self.sessionId):
+      for msg in self.sessionMessageIds[self.sessionId]:
+        if msg.id == PLACEHOLDER_MSG:
+          placeholderDiffs = msg.sessionDiffs
+          break
+
+    # Filter the placeholder msg for the agent.
+    self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+    # self.messages.del(PLACEHOLDER_MSG)
+    self.sessionMessageIds[self.sessionId] = self.sessionMessageIds[self.sessionId].filterIt(it.id != PLACEHOLDER_MSG)
+
     try:
       if self.messageBuffers.hasKey(messageId):
         self.flushMessageBuffer(messageId, AgentMessageAgent, canceledFlag)
@@ -614,6 +630,18 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     self.isLoading = false
     self.sessionMessageIds[self.sessionId][^1].isLoading = false
     self.promptInFlight = false
+    # Move any diffs captured on the placeholder onto the actual agent message.
+    if placeholderDiffs.len > 0 and self.sessionMessageIds.hasKey(self.sessionId):
+      var target: AgentMessage = nil
+      for msg in self.sessionMessageIds[self.sessionId]:
+        if msg.id == messageId:
+          target = msg
+          break
+      if target.isNil:
+        self.addAgentMessage(messageId)
+        target = self.sessionMessageIds[self.sessionId][^1]
+      for d in placeholderDiffs:
+        target.addDiffPreview(d.path, d.original, d.modified)
     redrawAll()
   elif hasContent or messageId notin self.messageOrder:
     try:
@@ -622,6 +650,9 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       self.activeAgentMessageId = messageId
     except:
       discard
+  else:
+    # No final stopReason yet: keep placeholder and collected diffs in place.
+    discard
   redrawAll()
 
 proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =

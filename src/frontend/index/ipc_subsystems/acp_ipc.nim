@@ -7,6 +7,7 @@ import
 
 proc getEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.split(' ').filter(Boolean) : [])(#)".}
+proc normalizePath(p: cstring): cstring {.importjs: "require('path').resolve(#)".}
 
 proc spawnProcess(cmd: cstring, args: seq[cstring]): JsObject {.
   importjs: "require('child_process').spawn(#, #, { stdio: ['pipe', 'pipe', 'inherit'] })".}
@@ -291,6 +292,16 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
           var path = cstring""
           if jsHasKey(updateObj, cstring"rawOutput") and jsHasKey(updateObj[cstring"rawOutput"], cstring"output"):
             original = updateObj[cstring"rawOutput"][cstring"output"].to(cstring)
+          if jsHasKey(updateObj, cstring"rawOutput") and jsHasKey(updateObj[cstring"rawOutput"], cstring"filediff"):
+            let fd = updateObj[cstring"rawOutput"][cstring"filediff"]
+            if path.len == 0 and jsHasKey(fd, cstring"file"):
+              path = fd[cstring"file"].to(cstring)
+            if original.len == 0 and jsHasKey(fd, cstring"original"):
+              original = fd[cstring"original"].to(cstring)
+            if modified.len == 0 and jsHasKey(fd, cstring"modified"):
+              modified = fd[cstring"modified"].to(cstring)
+            if modified.len == 0 and jsHasKey(fd, cstring"newText"):
+              modified = fd[cstring"newText"].to(cstring)
           if jsHasKey(updateObj, cstring"rawInput"):
             let rawInput = updateObj[cstring"rawInput"]
             if jsHasKey(rawInput, cstring"content"):
@@ -310,6 +321,10 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                   modified = item[cstring"text"].to(cstring)
                 elif jsHasKey(item, cstring"newText"):
                   modified = item[cstring"newText"].to(cstring)
+                elif jsHasKey(item, cstring"modified"):
+                  modified = item[cstring"modified"].to(cstring)
+                if original.len == 0 and jsHasKey(item, cstring"original"):
+                  original = item[cstring"original"].to(cstring)
                 if path.len > 0 and modified.len > 0:
                   break
             except:
@@ -335,6 +350,24 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
               original = await readFileUtf8(path)
             except:
               discard
+          # If ACP omitted the modified text, fall back to the current file
+          # contents so the renderer still shows a diff.
+          if modified.len == 0 and path.len > 0:
+            try:
+              modified = await readFileUtf8(path)
+            except:
+              discard
+
+          # Log what we are about to forward (trim content to avoid huge console noise).
+          let origPreview =
+            block:
+              let s = $original
+              (if s.len > 200: (s[0 .. 199] & "...") else: s).cstring
+          let modPreview =
+            block:
+              let s = $modified
+              (if s.len > 200: (s[0 .. 199] & "...") else: s).cstring
+          echo fmt"[acp_ipc] render-diff payload path={path} origLen={original.len} modLen={modified.len} origPreview={origPreview} modPreview={modPreview}"
 
           if path.len > 0 and (original.len > 0 or modified.len > 0):
             mainWindow.webContents.send("CODETRACER::acp-render-diff", js{

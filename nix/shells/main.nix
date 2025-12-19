@@ -56,6 +56,9 @@ in
           # stylus
           ourPkgs.cargo-stylus
 
+          # codex acp agent client
+          ourPkgs.codex-acp
+
           yarn
           yarn2nix
 
