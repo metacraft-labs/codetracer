@@ -177,7 +177,10 @@ type
     aReRecord,
     aReRecordProject,
     aRestartDbBackend,
-    aRestartBackendManager
+    aRestartBackendManager,
+    aOpenTrace,          # Open existing trace file/folder
+    aRecordNewTrace,     # Show record new trace dialog
+    aRecordFromLaunch    # Record using launch.json configuration
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

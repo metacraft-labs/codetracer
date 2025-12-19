@@ -395,6 +395,31 @@ proc onLoadRecentFolder*(sender: js, response: jsobject(folderPath=cstring)) {.a
   mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
     js{folderPath: response.folderPath}
 
+proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
+  ## Show file dialog to select a trace folder/file
+  let selection = await selectDir(cstring"Select Trace Folder")
+  if selection.len == 0:
+    debugPrint "no trace folder selected"
+  else:
+    debugPrint "selected trace folder: ", selection
+    # Check if it's a valid trace folder (contains trace.db or similar)
+    # For now, just try to load it
+    var traceResponse = js{tracePath: selection}
+    await onOpenLocalTrace(sender, traceResponse)
+
+proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
+  ## Parse launch.json and execute recording
+  ## For now, just show a message - full implementation requires launch_config module
+  debugPrint "onRecordFromLaunch called"
+  # TODO: Implement launch.json parsing and recording
+  # This would:
+  # 1. Find .vscode/launch.json in workspace
+  # 2. Parse configurations
+  # 3. Show selection dialog if multiple configs
+  # 4. Execute recording with selected config
+  mainWindow.webContents.send "CODETRACER::new-notification",
+    newNotification(NotificationInfo, "Launch config recording not yet implemented")
+
 proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "new-notification", notification
