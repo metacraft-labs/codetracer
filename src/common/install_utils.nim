@@ -1,5 +1,5 @@
 import
-  std/[strutils, strformat, os],
+  std/[strutils, strformat, os, osproc],
   results,
   strings, filepaths
 
@@ -253,7 +253,7 @@ when defined(linux):
       # ran the `install` command
 
       echo fmt"Replacing exec field with {execPath}"
-      contents = contents.replace("Exec=ct", fmt"Exec={execPath}")
+      contents = contents.replace("Exec=ct edit %F", fmt"Exec={execPath} edit %F")
 
       let desktopFile = desktopFileDir / "codetracer.desktop"
 
@@ -273,6 +273,17 @@ when defined(linux):
       else:
         writeFile(desktopFile, contents)
         echo "Successfully copied the desktop file"
+
+      # Update the desktop database to register the new MIME type
+      try:
+        let process = startProcess("update-desktop-database", args = @[desktopFileDir], options = {})
+        let exitCode = waitForExit(process)
+        if exitCode == 0:
+          echo "Successfully updated desktop database"
+        else:
+          echo "Warning: update-desktop-database returned non-zero exit code: " & $exitCode
+      except CatchableError as e:
+        echo "Warning: Failed to update desktop database: " & e.msg
 
     except OSError as e:
       echo "Failed to install desktop file: ", e.msg
