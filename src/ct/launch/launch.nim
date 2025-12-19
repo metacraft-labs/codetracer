@@ -296,6 +296,7 @@ proc runInitial*(conf: CodetracerConf) =
         conf.traceMetadataIdArg, conf.traceMetadataPathArg,
         conf.traceMetadataProgramArg, conf.traceMetadataRecordPidArg,
         conf.traceMetadataRecent,
+        conf.traceMetadataRecentFolders,
         conf.traceMetadataRecentLimit,
         conf.traceMetadataTest)
     of StartupCommand.start_backend:

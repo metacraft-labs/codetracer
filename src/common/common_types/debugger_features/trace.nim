@@ -93,3 +93,9 @@ type
     traceOutputFolder*: langstring
 
   CoreTrace* = ref CoreTraceObject
+
+  RecentFolder* = ref object
+    id*: int
+    path*: langstring
+    name*: langstring
+    lastOpened*: langstring
