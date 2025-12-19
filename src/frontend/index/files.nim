@@ -157,6 +157,39 @@ proc loadFilesystem*(paths: seq[cstring], traceFilesPath: cstring, selfContained
 
   return folderGroup
 
+proc loadFilesystemWithCategory*(categoryName: cstring, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool): Future[CodetracerFile] {.async.}=
+  # Load filesystem with a custom category name
+  var folderGroup = CodetracerFile(
+    text: categoryName,
+    children: @[],
+    state: js{opened: true},
+    index: 0,
+    parentIndices: @[],
+    original: CodetracerFileData(
+      text: categoryName,
+      path: cstring""))
+
+  var parentIndices: seq[int] = @[]
+  for index, path in paths:
+    let file = await loadPathContentPartially(path, index, parentIndices, traceFilesPath, selfContained)
+    if not file.isNil:
+      folderGroup.children.add(file)
+
+  return folderGroup
+
+proc isPathInside*(child: cstring, parent: cstring): bool =
+  # Check if child path is inside parent directory
+  let childStr = $child
+  let parentStr = $parent
+  # Normalize paths by ensuring they end with /
+  var normalizedParent = parentStr
+  if not normalizedParent.endsWith("/"):
+    normalizedParent.add("/")
+  var normalizedChild = childStr
+  if not normalizedChild.endsWith("/"):
+    normalizedChild.add("/")
+  return normalizedChild.startsWith(normalizedParent)
+
 proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
   var save = Save(project: Project(), files: @[], id: -1)
   return save

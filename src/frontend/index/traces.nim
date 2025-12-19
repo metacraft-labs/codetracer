@@ -143,6 +143,10 @@ proc sendFilesystem(main: js, paths: seq[cstring], traceFilesPath: cstring, self
   let folders = await loadFilesystem(paths, traceFilesPath, selfContained)
   main.webContents.send "CODETRACER::filesystem-loaded", js{ folders: folders }
 
+proc sendFilesystemWithCategory(main: js, categoryName: cstring, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
+  let folders = await loadFilesystemWithCategory(categoryName, paths, traceFilesPath, selfContained)
+  main.webContents.send "CODETRACER::filesystem-category-loaded", js{ category: categoryName, folders: folders }
+
 proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
   try:
     let symbols = await loadSymbols(traceFolder)
@@ -157,7 +161,27 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
 
   let traceFilesPath = cstring($trace.outputFolder / "files")
   discard sendFilenames(main, trace.sourceFolders, trace.outputFolder, trace.imported)
-  discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
+
+  # Check if we have a workspace folder and if trace files are outside it
+  if not data.workspaceFolder.isNil and data.workspaceFolder.len > 0:
+    # Check if all trace source folders are inside the workspace
+    var allInside = true
+    var outsideFolders: seq[cstring] = @[]
+    for folder in trace.sourceFolders:
+      if not isPathInside(folder, data.workspaceFolder):
+        allInside = false
+        outsideFolders.add(folder)
+
+    if not allInside and outsideFolders.len > 0:
+      # Send trace files as a separate category
+      discard sendFilesystemWithCategory(main, cstring"Trace Files", outsideFolders, traceFilesPath, trace.imported)
+    else:
+      # All trace files are inside workspace, just update the existing tree
+      discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
+  else:
+    # No workspace folder set, use normal loading
+    discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
+
   discard sendSymbols(main, trace.outputFolder)
 
   var functions = await loadFunctions(cstring($trace.outputFolder / "function_index.json"))
