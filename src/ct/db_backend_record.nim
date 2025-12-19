@@ -84,7 +84,8 @@ proc recordDb(
     lang: Lang, vmExe: string,
     program: string, args: seq[string],
     backend: string, traceFolder: string, stylusTrace: string,
-    traceId: int, pythonActivationPath: string = ""): Trace =
+    traceId: int, pythonActivationPath: string = "",
+    pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
 
   createDir(traceFolder)
   let tracePath = traceFolder / "trace.json"
@@ -126,7 +127,12 @@ proc recordDb(
       if pythonActivationPath.len > 0:
         recorderArgs.add("--activation-path")
         recorderArgs.add(pythonActivationPath)
-      recorderArgs.add(program)
+      # Handle test framework mode (pytest/unittest)
+      if pythonTestFramework.len > 0:
+        recorderArgs.add("--" & pythonTestFramework)
+        recorderArgs = recorderArgs.concat(pythonTestArgs)
+      else:
+        recorderArgs.add(program)
       startArgs = recorderArgs
     else:
       echo fmt"error: lang {lang} not supported for recordDb"
@@ -190,7 +196,8 @@ proc record(
     test = false, basic = false,
     traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = "",
     traceKind: string = "db", rrSupportPath: string = "",
-    pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false): Trace =
+    pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
+    pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
   var traceID: int
   if traceIDRecord == -1:
     traceID = trace_index.newID(test)
@@ -213,18 +220,26 @@ proc record(
   let argsShell = args.join " "
   var shellCmd = cmd & " " & argsShell
   let shellArgs = @[cmd].concat(args)
-  var executable = cmd.split(" ", 1)[0]
-  try:
-    executable = expandFilename(expandTilde(executable))
-  except OsError:
-    let foundExe = findExe(executable)
-    if foundExe == "":
-      errorMessage fmt"Can't find {executable}"
-      quit(1)
-    else:
-      executable = foundExe
 
-  let lang = detectLang(executable, langArg)
+  # For pytest/unittest mode, cmd might be empty since args are passed via pythonTestArgs
+  var executable: string
+  if pythonTestFramework.len > 0 and cmd.len == 0:
+    # Test framework mode - use pytest/unittest as the "executable" for metadata
+    executable = pythonTestFramework
+  else:
+    executable = cmd.split(" ", 1)[0]
+    try:
+      executable = expandFilename(expandTilde(executable))
+    except OsError:
+      let foundExe = findExe(executable)
+      if foundExe == "":
+        errorMessage fmt"Can't find {executable}"
+        quit(1)
+      else:
+        executable = foundExe
+
+  # For test framework mode, use the explicitly set langArg
+  let lang = if pythonTestFramework.len > 0: langArg else: detectLang(executable, langArg)
   # echo "in db ", lang, " ", executable
   if lang == LangUnknown:
     if traceKind == "db":
@@ -309,7 +324,9 @@ proc record(
         outputFolder,
         stylusTrace,
         traceId,
-        pythonActivationPath = activationPathResolved)
+        pythonActivationPath = activationPathResolved,
+        pythonTestFramework = pythonTestFramework,
+        pythonTestArgs = pythonTestArgs)
     elif traceKind == "rr":
       echo "rr"
       echo rrSupportPath
@@ -426,6 +443,8 @@ proc main*(): Trace =
   var pythonInterpreter = ""
   var traceKind = "db" # by default
   var rrSupportPath = ""
+  var pythonTestFramework = ""
+  var pythonTestArgs: seq[string] = @[]
 
   echo args
 
@@ -499,6 +518,22 @@ proc main*(): Trace =
         return
       rrSupportPath = args[i + 1]
       i += 2
+    elif arg == "--pytest":
+      # Collect all remaining args as pytest arguments
+      pythonTestFramework = "pytest"
+      lang = LangPythonDb
+      i += 1
+      while i < args.len:
+        pythonTestArgs.add(args[i])
+        i += 1
+    elif arg == "--unittest":
+      # Collect all remaining args as unittest arguments
+      pythonTestFramework = "unittest"
+      lang = LangPythonDb
+      i += 1
+      while i < args.len:
+        pythonTestArgs.add(args[i])
+        i += 1
     else:
       if program == "":
         program = arg
@@ -588,7 +623,9 @@ proc main*(): Trace =
       program, recordArgs, "", lang, backend, stylusTrace,
       traceIDRecord=traceID, outputFolderArg=outputFolder,
       traceKind=traceKind, rrSupportPath=rrSupportPath,
-      pythonInterpreter=pythonInterpreter)
+      pythonInterpreter=pythonInterpreter,
+      pythonTestFramework=pythonTestFramework,
+      pythonTestArgs=pythonTestArgs)
     traceId = trace.id
     outputFolder = trace.outputFolder
 

@@ -356,3 +356,9 @@ dev-tools-test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
     env CODETRACER_DEV_TOOLS=1 npx playwright test --reporter=list --workers=1 \
       {{args}}
+
+# ====
+# Python recorder tests
+
+test-python-recorder:
+  ./ci/test/python-recorder-smoke.sh

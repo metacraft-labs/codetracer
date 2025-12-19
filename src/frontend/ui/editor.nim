@@ -1400,8 +1400,34 @@ proc getLineFunctionName(self: EditorViewComponent, line: int): cstring =
   var name = "".cstring
   if tokens.len() > 1:
     name = tokens[^1].split("(")[0]
-  
+
   return name
+
+proc getPythonTestFunctionName(self: EditorViewComponent, line: int): cstring =
+  ## Extract Python test function name from a line containing def test_* or async def test_*
+  let model = self.monacoEditor.getModel()
+  let lineContent = $cast[cstring](model.getLineContent(line))
+  let stripped = lineContent.strip()
+
+  # Handle both "def test_*" and "async def test_*"
+  var funcPart = ""
+  if stripped.startsWith("def test_"):
+    funcPart = stripped[4..^1]  # Skip "def "
+  elif stripped.startsWith("async def test_"):
+    funcPart = stripped[10..^1]  # Skip "async def "
+  else:
+    return "".cstring
+
+  # Extract function name up to the opening paren
+  let parenIdx = funcPart.find('(')
+  if parenIdx > 0:
+    return funcPart[0..<parenIdx].cstring
+  return "".cstring
+
+proc isPythonTestLine(lineContent: string): bool =
+  ## Check if a line starts a Python test function (def test_* or async def test_*)
+  let stripped = lineContent.strip()
+  return stripped.startsWith("def test_") or stripped.startsWith("async def test_")
 
 proc loadAnimation(self: EditorViewComponent, el: Element, i: var int) =
   let frames = ["Running.  ", "Running.. ", "Running..."]
@@ -1418,8 +1444,13 @@ proc redrawActiveTestButton(self: EditorViewComponent) =
 
   discard setTimeout(proc() = loadAnimation(self, el, i), 0)
 
-proc testVNode(self: EditorViewComponent, line: int): VNode =
-  let testName = self.getLineFunctionName(line + 1)
+proc testVNode(self: EditorViewComponent, line: int, isPythonTest: bool = false): VNode =
+  # For Python tests, the function name is on the same line (line)
+  # For Rust tests, the function is on the next line (line + 1, after #[test])
+  let testName = if isPythonTest:
+    self.getPythonTestFunctionName(line)
+  else:
+    self.getLineFunctionName(line + 1)
   let testId = &"ct-test-action-{self.id}-{line}"
   if self.activeTestId == testId:
     discard setTimeout(proc() = redrawActiveTestButton(self), 0)
@@ -1464,9 +1495,20 @@ proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
   )
 
 proc addTestActions(self: EditorViewComponent) =
+  # Determine if this is a Python file
+  let lang = fromPath(self.name)
+  let isPythonFile = lang == LangPythonDb
+
   for i, line in self.tabInfo.sourceLines:
     let rLine = i + 1
-    if ($line).strip() == "#[test]".cstring and not self.testDom.hasKey(rLine):
+    let lineStr = $line
+
+    # Check for Rust tests (#[test] attribute)
+    let isRustTest = lineStr.strip() == "#[test]" and not isPythonFile
+    # Check for Python tests (def test_* or async def test_*)
+    let isPythonTest = isPythonFile and isPythonTestLine(lineStr)
+
+    if (isRustTest or isPythonTest) and not self.testDom.hasKey(rLine):
       self.testLines[rLine] = self.makeFlowLine(rLine)
 
       self.ensureTestLineContainer(rLine)
@@ -1474,7 +1516,7 @@ proc addTestActions(self: EditorViewComponent) =
       let widget = self.testDom[rLine]
       let testContainer = self.makeTestContainer(rLine)
       let parentContainer = self.testDom[rLine]
-      let testVNode = testVNode(self, rLine)
+      let testVNode = testVNode(self, rLine, isPythonTest)
       let testNode = vnodeToDom(testVNode, KaraxInstance())
 
       testContainer.appendChild(testNode)

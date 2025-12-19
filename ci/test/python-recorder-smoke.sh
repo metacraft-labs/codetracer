@@ -148,4 +148,38 @@ if ! grep -q "does not resolve to a Python interpreter" <<<"${MISSING_INTERP_OUT
   exit 1
 fi
 
+echo '###############################################################################'
+echo "Testing ct record-test with pytest"
+echo '###############################################################################'
+
+# Re-activate the venv with recorder installed
+# shellcheck source=/dev/null
+source "${VENV_DIR}/bin/activate"
+
+# Install pytest in the venv
+python -m pip install pytest
+
+PYTEST_TEST_FILE="${ROOT_DIR}/test-programs/py_pytest_example/test_calculator.py"
+
+# Test recording a single pytest test function
+# ct record-test <testName> <path> <line> <column>
+# Line 17 is where test_add_positive is defined
+RECORD_TEST_OUTPUT=$("${CT_BIN}" record-test test_add_positive "${PYTEST_TEST_FILE}" 17 0 2>&1)
+echo "${RECORD_TEST_OUTPUT}"
+
+# Verify the output contains a traceId
+if ! grep -q "traceId:" <<<"${RECORD_TEST_OUTPUT}"; then
+  echo "error: ct record-test did not output traceId"
+  exit 1
+fi
+
+# Extract trace ID and verify the trace exists
+PYTEST_TRACE_ID=$(echo "${RECORD_TEST_OUTPUT}" | grep "traceId:" | tail -1 | sed 's/.*traceId://')
+if [[ -z "${PYTEST_TRACE_ID}" ]]; then
+  echo "error: could not extract trace ID from ct record-test output"
+  exit 1
+fi
+
+echo "Successfully recorded pytest test with trace ID: ${PYTEST_TRACE_ID}"
+
 echo "Smoke test succeeded; artifacts stored in ${TRACE_DIR}"

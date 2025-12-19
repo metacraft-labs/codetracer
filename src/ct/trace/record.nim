@@ -363,7 +363,7 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
 
           echo output
           quit(0)
-      
+
       echo output
       quit(1)
       #let exitCode = waitForExit(process)
@@ -372,6 +372,65 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       echo fmt"Assuming recording language {lang}: "
       echo "  this functionality requires a codetracer-rr-backend installation"
       quit(1)
+  elif lang == LangPythonDb:
+    # Python test recording using pytest
+    let (pythonInterpreter, resolverError) = resolvePythonInterpreter()
+    if resolverError.len > 0:
+      echo "error: " & resolverError
+      quit(1)
+    if pythonInterpreter.len == 0:
+      echo "error: Python interpreter not found. Set CODETRACER_PYTHON_INTERPRETER or ensure `python` is on PATH."
+      quit(1)
+
+    let checkResult = checkPythonRecorder(pythonInterpreter)
+    case checkResult.status
+    of recorderPresent:
+      discard
+    of recorderMissing:
+      echo "error: Python module `codetracer_python_recorder` is not installed for interpreter: " & pythonInterpreter
+      if checkResult.diagnostics.len > 0:
+        echo checkResult.diagnostics
+      echo "help: Install it in that environment with `python -m pip install codetracer_python_recorder`"
+      quit(1)
+    of recorderError:
+      echo "error: Failed to import `codetracer_python_recorder` using interpreter: " & pythonInterpreter
+      if checkResult.diagnostics.len > 0:
+        echo checkResult.diagnostics
+      quit(1)
+
+    # Build pytest node ID: path::testName
+    let pytestNodeId = fullPath & "::" & testName
+
+    # Build arguments for db_backend_record
+    # Note: --trace-kind must come BEFORE --pytest since --pytest captures all remaining args
+    var pargs: seq[string] = @[]
+    pargs.add("--lang")
+    pargs.add("python")
+    pargs.add("--python-interpreter")
+    pargs.add(pythonInterpreter)
+    pargs.add("--trace-kind")
+    pargs.add("db")
+    # Pass pytest arguments: --pytest <node_id> (must be last, captures remaining args)
+    pargs.add("--pytest")
+    pargs.add(pytestNodeId)
+    pargs.add("-v")  # Verbose output for better test feedback
+
+    if getEnv("CODETRACER_WRAPPER_PID", "").len == 0:
+      putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
+
+    let trace = recordInternal(
+      dbBackendRecordExe,
+      pargs,
+      withDiff,
+      storeTraceFolderForPid,
+      upload=false)
+
+    if not trace.isNil:
+      echo fmt"traceId:{trace.id}"
+      quit(0)
+    else:
+      echo "error: Failed to record pytest test"
+      quit(1)
   else:
-    echo fmt"Assuming recording language {lang}: currently `ct record-test` not supported for db traces"
-    # quit(1)
+    echo fmt"Assuming recording language {lang}: currently `ct record-test` not supported for this db-based language"
+    quit(1)
