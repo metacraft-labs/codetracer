@@ -139,6 +139,8 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
   elif data.startOptions.edit:
     let file = ($data.startOptions.name)
     var folder = data.startOptions.folder
+    # Store workspace folder for later use when switching modes
+    data.workspaceFolder = folder
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
     var filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
     var functions: seq[Function] = @[] # TODO load with rg or similar?

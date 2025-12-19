@@ -1521,6 +1521,7 @@ type
     status*:                StatusState
     lspStarted*:            bool
     lastRestartKind*:       RestartKind
+    workspaceFolder*:       cstring  # The folder opened in edit mode (persists across mode switches)
 
 
   KeyPluginContext* = ref object
