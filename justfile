@@ -347,6 +347,21 @@ ls-trace-folder-for-id trace_id:
 # ====
 # e2e helpers
 
+test-frontend-js:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Nim language definition tests..."
+  node src/frontend/tests/nimLanguage.test.mjs
+  echo ""
+  echo "Running Nim tokenizer pattern tests..."
+  node src/frontend/tests/nimTokenizer.test.mjs
+  echo ""
+  echo "Running Nim Monarch grammar compilation tests..."
+  node src/frontend/tests/nimMonarchDirect.test.mjs
+  echo ""
+  echo "Running Nim Monaco integration tests (real tokenizer)..."
+  node --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/nimMonacoTokenizer.test.mjs 2>&1 | grep -v "ExperimentalWarning"
+
 test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --reporter=list --workers=1 \
