@@ -1,6 +1,10 @@
 import * as monaco from 'monaco-editor';
 window.monaco = monaco;
 
+// Register Nim language with Monaco
+import { registerNimLanguage } from './languages/nimLanguage.js';
+registerNimLanguage(monaco);
+
 import 'vscode/localExtensionHost';
 
 import { MonacoLanguageClient } from 'monaco-languageclient';

@@ -107,6 +107,14 @@ test:ui-tests:
   script:
     - nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh
 
+test:frontend-js:
+  stage: test
+  only:
+    - master
+    - merge_requests
+  script:
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/frontend-js.sh
+
 push-to-cachix:
   stage: deploy
   only:

@@ -99,6 +99,25 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/ui-tests.sh"
+
+  test-frontend-js:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+
+      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/test/frontend-js.sh"
+
   push-gpg-public-key:
     runs-on: [self-hosted, nixos]
     steps:
