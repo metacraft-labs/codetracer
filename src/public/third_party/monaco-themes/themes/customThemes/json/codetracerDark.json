@@ -11,16 +11,55 @@
       "token": "comment"
     },
     {
+      "foreground": "FB923C",
+      "fontStyle": "underline",
+      "token": "comment.doc"
+    },
+    {
       "foreground": "cdd3de",
       "token": "variable"
+    },
+    {
+      "foreground": "cdd3de",
+      "token": "variable.name"
+    },
+    {
+      "foreground": "A5D6FF",
+      "token": "variable.parameter"
+    },
+    {
+      "foreground": "cdd3de",
+      "token": "variable.member"
+    },
+    {
+      "foreground": "DCDCAA",
+      "token": "variable.member.function"
+    },
+    {
+      "foreground": "79C0FF",
+      "fontStyle": "bold",
+      "token": "variable.language"
     },
     {
       "foreground": "22D3EE",
       "token": "keyword"
     },
     {
+      "foreground": "22D3EE",
+      "token": "keyword.operator"
+    },
+    {
+      "foreground": "22D3EE",
+      "fontStyle": "bold",
+      "token": "keyword.type"
+    },
+    {
       "foreground": "cd536d",
       "token": "type"
+    },
+    {
+      "foreground": "cd536d",
+      "token": "type.identifier"
     },
     {
       "foreground": "BBF7D0",
@@ -31,8 +70,89 @@
       "token": "number"
     },
     {
-      "foreground":"F3F3F3",
+      "foreground": "BBF7D0",
+      "token": "number.hex"
+    },
+    {
+      "foreground": "BBF7D0",
+      "token": "number.octal"
+    },
+    {
+      "foreground": "BBF7D0",
+      "token": "number.binary"
+    },
+    {
+      "foreground": "BBF7D0",
+      "token": "number.float"
+    },
+    {
+      "foreground": "F3F3F3",
       "token": "delimiter"
+    },
+    {
+      "foreground": "F3F3F3",
+      "token": "delimiter.backtick"
+    },
+    {
+      "foreground": "F3F3F3",
+      "token": "operator"
+    },
+    {
+      "foreground": "FFA657",
+      "fontStyle": "bold",
+      "token": "modifier.export"
+    },
+    {
+      "foreground": "4EC9B0",
+      "fontStyle": "bold",
+      "token": "entity.name.type"
+    },
+    {
+      "foreground": "DCDCAA",
+      "fontStyle": "bold",
+      "token": "entity.name.function"
+    },
+    {
+      "foreground": "DCDCAA",
+      "token": "identifier.function"
+    },
+    {
+      "foreground": "DCDCAA",
+      "token": "support.function"
+    },
+    {
+      "foreground": "9CDCFE",
+      "token": "constant"
+    },
+    {
+      "foreground": "C586C0",
+      "token": "namespace"
+    },
+    {
+      "foreground": "FF7B72",
+      "fontStyle": "bold",
+      "token": "namespace.std"
+    },
+    {
+      "foreground": "FFA657",
+      "fontStyle": "bold",
+      "token": "namespace.system"
+    },
+    {
+      "foreground": "A5D6FF",
+      "token": "namespace.library"
+    },
+    {
+      "foreground": "8B949E",
+      "token": "namespace.except"
+    },
+    {
+      "foreground": "D7BA7D",
+      "token": "metatag"
+    },
+    {
+      "foreground": "9CDCFE",
+      "token": "attribute.name"
     }
   ],
   "colors": {
