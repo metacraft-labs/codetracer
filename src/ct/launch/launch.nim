@@ -270,6 +270,12 @@ proc runInitial*(conf: CodetracerConf) =
         echo res
     of StartupCommand.`index-diff`:
       indexDiff(conf.indexDiffTracePath)
+    of StartupCommand.edit:
+      let absPath = absolutePath(conf.editPath)
+      if not fileExists(absPath) and not dirExists(absPath):
+        errorMessage "Path does not exist: " & absPath
+        quit(1)
+      discard launchElectron(args = @["edit", absPath])
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,
