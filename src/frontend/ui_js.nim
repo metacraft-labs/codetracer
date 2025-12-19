@@ -1111,6 +1111,14 @@ proc onFilesystemCategoryLoaded(
     data.services.editor.filesystem = newRoot
   data.redraw()
 
+proc onLoadFolderEditMode(
+  sender: js,
+  response: jsobject(folderPath=cstring)) =
+  # Load a folder in edit mode (from welcome screen)
+  # This triggers a reload similar to how `ct edit <path>` works
+  # For now, we send a request to the index process to load the folder
+  data.ipc.send "CODETRACER::init-edit-mode", js{ folder: response.folderPath }
+
 proc onUpdatePathContent(
   sender: js,
   response: jsobject(
@@ -1584,6 +1592,7 @@ proc configureIPC(data: Data) =
     "filesystem-loaded"
     "filesystem-category-loaded"
     "update-path-content"
+    "load-folder-edit-mode"
     # load trace resources
     "filenames-loaded"
     "symbols-loaded"
