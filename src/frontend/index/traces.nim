@@ -354,11 +354,19 @@ proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
   if selection.len == 0:
     debugPrint "no folder selected"
   else:
+    # Track folder in recent folders
+    discard await readProcessOutput(
+      codetracerExe.cstring,
+      @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($selection)])
     # Load folder in edit mode
     mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
       js{folderPath: selection}
 
 proc onLoadRecentFolder*(sender: js, response: jsobject(folderPath=cstring)) {.async.} =
+  # Track folder in recent folders (update timestamp)
+  discard await readProcessOutput(
+    codetracerExe.cstring,
+    @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($response.folderPath)])
   # Load folder in edit mode
   mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
     js{folderPath: response.folderPath}
