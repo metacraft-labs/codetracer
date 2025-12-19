@@ -160,6 +160,7 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
     }
   else:
     let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=NO_LIMIT)
+    let recentFolders = await electron_vars.app.findRecentFoldersWithCodetracer(limit=NO_LIMIT)
     var recentTransactions: seq[StylusTransaction] = @[]
     if data.startOptions.stylusExplorer:
       recentTransactions = await electron_vars.app.findRecentTransactions(limit=NO_LIMIT)
@@ -169,5 +170,6 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
       startOptions: data.startOptions,
       config: data.config,
       recentTraces: recentTraces,
+      recentFolders: recentFolders,
       recentTransactions: recentTransactions
     }
