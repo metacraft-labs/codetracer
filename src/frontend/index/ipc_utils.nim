@@ -37,6 +37,8 @@ proc configureIpcMain* =
     "load-codetracer-shell"
     "load-recent-trace"
     "open-local-trace"
+    "open-folder-dialog"
+    "load-recent-folder"
     "load-recent-transaction"
 
     "tab-load"

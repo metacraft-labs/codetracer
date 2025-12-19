@@ -1247,6 +1247,7 @@ type
     loading*: bool
     loadingTrace*: Trace
     recentTracesScroll*: int
+    recentFoldersScroll*: int
     copyMessageActive*: JsAssoc[int, bool]
     infoMessageActive*: JsAssoc[int, bool]
     errorMessageActive*: JsAssoc[int, MessageKind]
@@ -1503,6 +1504,7 @@ type
     keyPlugins*:            array[Content, JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]]
     recentProjects*:        seq[Project]
     recentTraces*:          seq[Trace]
+    recentFolders*:         seq[RecentFolder]
     stylusTransactions*:    seq[StylusTransaction]
     pointList*:             PointListData
     minRRTicks*:            int

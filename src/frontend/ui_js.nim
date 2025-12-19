@@ -1287,6 +1287,7 @@ proc onWelcomeScreen(
     startOptions=StartOptions,
     config=Config,
     recentTraces=seq[Trace],
+    recentFolders=seq[RecentFolder],
     recentTransactions=seq[StylusTransaction]
   )
 ) =
@@ -1301,6 +1302,7 @@ proc onWelcomeScreen(
   data.config = response.config
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.recentTraces = response.recentTraces
+  data.recentFolders = response.recentFolders
   data.stylusTransactions = response.recentTransactions
   loadTheme(data.config.theme)
   configureShortcuts()
