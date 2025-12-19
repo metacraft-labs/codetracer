@@ -6,7 +6,7 @@ import std/strutils,
 proc traceMetadata*(
     idArg: Option[int], pathArg: Option[string],
     programArg: Option[string], recordPidArg: Option[int],
-    recent: bool, recentLimit: int, test: bool) =
+    recent: bool, recentFolders: bool, recentLimit: int, test: bool) =
   if idArg.isSome:
     let trace = trace_index.find(idArg.get, test)
     echo Json.encode(trace)
@@ -25,5 +25,8 @@ proc traceMetadata*(
   elif recent:
     let traces = trace_index.findRecentTraces(limit=recentLimit, test)
     echo Json.encode(traces)
+  elif recentFolders:
+    let folders = trace_index.findRecentFolders(limit=recentLimit, test)
+    echo Json.encode(folders)
   else:
     echo "null"

@@ -47,6 +47,11 @@ const SQL_CREATE_TABLE_STATEMENTS = @[
   """CREATE TABLE IF NOT EXISTS record_pid_trace_id_map (
       pid integer,
       traceId integer);""",
+  """CREATE TABLE IF NOT EXISTS recent_folders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT UNIQUE,
+      name TEXT,
+      lastOpened TEXT);""",
 ]
 
 const SQL_INITIAL_INSERT_STATEMENTS = @[

@@ -586,9 +586,14 @@ type
         desc: "return recent traces",
         defaultValue: false,
       .}: bool
+      traceMetadataRecentFolders* {.
+        name: "recent-folders",
+        desc: "return recent folders",
+        defaultValue: false,
+      .}: bool
       traceMetadataRecentLimit* {.
         name: "limit",
-        desc: "recent traces limit",
+        desc: "recent traces/folders limit",
         defaultValue: 4,
       .}: int
       traceMetadataTest* {.

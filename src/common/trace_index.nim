@@ -458,3 +458,79 @@ proc newID*(test: bool): int =
       sleep 100
 
   db.close()
+
+proc addRecentFolder*(path: string, test: bool) =
+  ## Add or update a recent folder entry
+  let currentDate: DateTime = now()
+  var lastOpenedStr: string = ""
+  lastOpenedStr.formatValue(currentDate, "yyyy/MM/dd HH:mm:ss")
+
+  let folderName = extractFilename(path)
+  let db = ensureDB(test)
+
+  # Use INSERT OR REPLACE to handle both new and existing entries
+  try:
+    db.exec(
+      sql"""INSERT OR REPLACE INTO recent_folders (path, name, lastOpened)
+            VALUES (?, ?, ?)""",
+      path, folderName, lastOpenedStr)
+  except DbError:
+    echo "error: addRecentFolder: ", getCurrentExceptionMsg()
+
+  db.close()
+
+proc findRecentFolders*(limit: int, test: bool): seq[RecentFolder] =
+  ## Find recent folders ordered by last opened (most recent first)
+  let db = ensureDB(test)
+  result = @[]
+
+  try:
+    let folders =
+      if limit > 0:
+        db.getAllRows(
+          sql("SELECT id, path, name, lastOpened FROM recent_folders ORDER BY lastOpened DESC LIMIT ?"),
+          $limit)
+      else:
+        db.getAllRows(
+          sql("SELECT id, path, name, lastOpened FROM recent_folders ORDER BY lastOpened DESC"))
+
+    for folder in folders:
+      result.add(RecentFolder(
+        id: folder[0].parseInt,
+        path: folder[1],
+        name: folder[2],
+        lastOpened: folder[3]))
+  except DbError:
+    echo "error: findRecentFolders: ", getCurrentExceptionMsg()
+
+  db.close()
+
+proc updateRecentFolder*(path: string, test: bool) =
+  ## Update the lastOpened timestamp for an existing folder
+  let currentDate: DateTime = now()
+  var lastOpenedStr: string = ""
+  lastOpenedStr.formatValue(currentDate, "yyyy/MM/dd HH:mm:ss")
+
+  let db = ensureDB(test)
+
+  try:
+    db.exec(
+      sql"UPDATE recent_folders SET lastOpened = ? WHERE path = ?",
+      lastOpenedStr, path)
+  except DbError:
+    echo "error: updateRecentFolder: ", getCurrentExceptionMsg()
+
+  db.close()
+
+proc removeRecentFolder*(path: string, test: bool) =
+  ## Remove a folder from recent folders
+  let db = ensureDB(test)
+
+  try:
+    db.exec(
+      sql"DELETE FROM recent_folders WHERE path = ?",
+      path)
+  except DbError:
+    echo "error: removeRecentFolder: ", getCurrentExceptionMsg()
+
+  db.close()
