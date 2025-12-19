@@ -323,8 +323,10 @@ proc record*(lang: string,
         storeTraceFolderForPid,
         upload)
     else:
-      echo fmt"Assuming recording language {detectedLang}: "
-      echo "  this functionality requires a codetracer-rr-backend installation"
+      let guidance = rrBackendMissingGuidanceLines()
+      echo fmt"Assuming recording language {detectedLang}:"
+      for line in guidance:
+        echo "  " & line
       quit(1)
 
 proc recordTest*(testName: string, path: string, line: int, column: int, withDiff: string, storeTraceFolderForPid: int) =
@@ -369,8 +371,10 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       #let exitCode = waitForExit(process)
       #quit(exitCode)
     else:
-      echo fmt"Assuming recording language {lang}: "
-      echo "  this functionality requires a codetracer-rr-backend installation"
+      let guidance = rrBackendMissingGuidanceLines()
+      echo fmt"Assuming recording language {lang}:"
+      for line in guidance:
+        echo "  " & line
       quit(1)
   else:
     echo fmt"Assuming recording language {lang}: currently `ct record-test` not supported for db traces"
