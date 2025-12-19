@@ -40,6 +40,8 @@ proc configureIpcMain* =
     "open-folder-dialog"
     "load-recent-folder"
     "load-recent-transaction"
+    "open-trace-dialog"
+    "record-from-launch"
 
     "tab-load"
     "load-low-level-tab"

@@ -247,6 +247,8 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # element "Open File", openFile
           # element "Open Folder", openFolder, false
           # element "Open Recent", openRecent, false
+          element "Open Trace...", aOpenTrace
+          element "Record New Trace...", aRecordNewTrace
           # --sub
           # element "Save", aSave
           # element "Save As ...", saveAs
@@ -381,6 +383,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         folder "Debug":
           # element "Trace Existing Program...", aTrace, false
           # element "Load Existing Trace...", aLoadTrace, false
+          element "Record from Launch Config...", aRecordFromLaunch
           # folder "Panes":
           #   folder "New":
           #     element "Program state explorer", aNewState, false
@@ -2140,6 +2143,9 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc = data.reRecordCurrent(projectOnly=true),
   proc = data.restartSubsystem(name="db-backend"),
   proc = data.restartSubsystem(name="backend-manager"),
+  proc = data.openTraceDialog(),
+  proc = data.showRecordNewTraceDialog(),
+  proc = data.recordFromLaunchConfig(),
 ]
 
 data.actions = actions
