@@ -349,6 +349,20 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     else:
       errorPrint "There is no record at given path."
 
+proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
+  let selection = await selectDir(cstring"Select Folder to Open")
+  if selection.len == 0:
+    debugPrint "no folder selected"
+  else:
+    # Load folder in edit mode
+    mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
+      js{folderPath: selection}
+
+proc onLoadRecentFolder*(sender: js, response: jsobject(folderPath=cstring)) {.async.} =
+  # Load folder in edit mode
+  mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
+    js{folderPath: response.folderPath}
+
 proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "new-notification", notification

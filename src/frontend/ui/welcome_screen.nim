@@ -99,6 +99,21 @@ proc recentTransactionView(self: WelcomeScreenComponent, tx: StylusTransaction, 
       )
 
 
+proc recentFolderView(self: WelcomeScreenComponent, folder: RecentFolder, position: int): VNode =
+  buildHtml(
+    tdiv(class = "recent-folder-container")
+  ):
+    tdiv(
+      class = "recent-folder",
+      onclick = proc (ev: Event, tg: VNode) =
+        self.loading = true
+        ev.target.focus()
+        data.redraw()
+        self.data.ipc.send "CODETRACER::load-recent-folder", js{ folderPath: folder.path }
+    ):
+      tdiv(class = "recent-folder-name"):
+        text $folder.name
+
 proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int): VNode =
   let tooltipTopPosition = (position + 1) * 36 - self.recentTracesScroll
   let activeClass = if self.copyMessageActive.hasKey(trace.id) and self.copyMessageActive[trace.id]: "welcome-path-active" else: ""
@@ -243,6 +258,24 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
                   text "The key has expired"
                 else:
                   text &"The online share key expires on {formatted}"
+
+proc recentFoldersView(self: WelcomeScreenComponent): VNode =
+  buildHtml(
+    tdiv(class = "recent-folders")
+  ):
+    tdiv(class = "recent-folders-title"):
+      text "RECENT FOLDERS"
+    tdiv(
+      class = "recent-folders-list",
+      onscroll = proc(ev: Event, tg: VNode) =
+        self.recentFoldersScroll = cast[int](ev.target.scrollTop)
+    ):
+      if self.data.recentFolders.len > 0:
+        for (i, folder) in enumerate(self.data.recentFolders):
+          recentFolderView(self, folder, i)
+      else:
+        tdiv(class = "no-recent-folders"):
+          text "No folders yet."
 
 proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   buildHtml(
@@ -465,7 +498,7 @@ proc onlineFormView(self: WelcomeScreenComponent): VNode =
   ):
     renderInputRow(
       "args",
-      "Download ID with password",
+      "Download URL or key",
       "",
       proc(ev: Event, tg: VNode) = discard,
       proc(ev: Event, tg: VNode) =
@@ -651,6 +684,11 @@ proc onlineTraceView(self: WelcomeScreenComponent): VNode =
 proc loadInitialOptions(self: WelcomeScreenComponent) =
   self.options = @[
     WelcomeScreenOption(
+      name: "Open folder",
+      command: proc =
+        self.data.ipc.send "CODETRACER::open-folder-dialog"
+    ),
+    WelcomeScreenOption(
       name: "Record new trace",
       command: proc =
         self.welcomeScreen = false
@@ -683,7 +721,7 @@ proc loadInitialOptions(self: WelcomeScreenComponent) =
     WelcomeScreenOption(
       name: "Open online trace",
       inactive: not self.showTraceSharing,
-      command: proc = 
+      command: proc =
         self.openOnlineTrace = true
         self.welcomeScreen = false
         self.newDownload = NewDownloadRecord(
@@ -719,8 +757,11 @@ proc welcomeScreenView(self: WelcomeScreenComponent): VNode =
       tdiv(class = "welcome-version"):
         text fmt"Version {CodeTracerVersionStr}"
     tdiv(class = "welcome-content"):
-      recentProjectsView(self)
-      renderStartOptions(self)
+      tdiv(class = "welcome-left-panel"):
+        recentFoldersView(self)
+      tdiv(class = "welcome-right-panel"):
+        recentProjectsView(self)
+    renderStartOptions(self)
 
 proc loadingOverlay(self: WelcomeScreenComponent): VNode =
   buildHtml(
@@ -732,7 +773,7 @@ proc loadingOverlay(self: WelcomeScreenComponent): VNode =
 
 # TODO: adapt or change for newer uploading api; for now hiddden
 #   available only from CLI:
-const TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN = true
+const TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN = false
 
 method render*(self: WelcomeScreenComponent): VNode =
   if self.data.ui.welcomeScreen.isNil:
