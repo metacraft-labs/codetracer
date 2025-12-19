@@ -34,6 +34,7 @@ type
     `import`,
     arb,
     `index-diff`,
+    edit,
 
     # `g++`,
     # gcc,
@@ -502,6 +503,11 @@ type
       indexDiffTracePath* {.
         argument
         desc: "Path to a trace with diffs: for now indexing only a single trace"
+      .}: string
+    of edit:
+      editPath* {.
+        argument
+        desc: "Path to a directory or file to open for editing"
       .}: string
 
     # of `import`:
