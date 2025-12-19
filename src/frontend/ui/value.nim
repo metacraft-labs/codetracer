@@ -722,7 +722,12 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
     # toHex(update.address) seem to produce a smaller value? maybe because of JavaScript number 
     #   something like ~2^53 limitation for nim ints? not sure
     #   that's why we use baseAddress, assuming the history is for this value
-    let expression = cstring(fmt"({self.baseValue.typ.langType}){self.baseAddress}")
+    let expression = if self.baseValue.typ.kind == Pointer:
+        # here for `int* a` and its address we would track `(int*)a`
+        cstring(fmt"({self.baseValue.typ.langType})0x{toHex(self.baseAddress)}")
+      else:
+        # here, for `int a` and its address we would track `(int*)a_address`
+        cstring(fmt"({self.baseValue.typ.langType}*)0x{toHex(self.baseAddress)}")
     if expression notin self.state.watchExpressions:
       self.state.watchExpressions.add(expression)
 
