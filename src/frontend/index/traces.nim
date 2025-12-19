@@ -424,6 +424,39 @@ proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "new-notification", notification
 
+proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
+  ## Initialize edit mode for a folder - called from welcome screen after folder selection
+  # Set the startup options to edit mode
+  data.startOptions.edit = true
+  data.startOptions.folder = response.folder
+  data.startOptions.name = cstring""
+  data.workspaceFolder = response.folder
+
+  # Load filesystem and filenames for the folder
+  let filesystem = await loadFilesystem(@[response.folder], traceFilesPath=cstring"", selfContained=false)
+  let filenames = await loadFilenames(@[response.folder], traceFolder=cstring"", selfContained=false)
+  var functions: seq[Function] = @[]
+  let save = await getSave(@[response.folder], data.config.test)
+  data.save = save
+
+  # Load layout
+  let layout = await loadLayoutConfig(mainWindow, fmt"{userLayoutDir}/default_layout.json")
+
+  # Send no-trace message to switch to edit mode
+  mainWindow.webContents.send "CODETRACER::no-trace", js{
+    path: cstring"",
+    lang: save.project.lang,
+    home: paths.home.cstring,
+    layout: layout,
+    helpers: data.helpers,
+    startOptions: data.startOptions,
+    config: data.config,
+    filenames: filenames,
+    filesystem: filesystem,
+    functions: functions,
+    save: save
+  }
+
 proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject, projectOnly=bool)) {.async.}=
   infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly
   # TODO fix replay
