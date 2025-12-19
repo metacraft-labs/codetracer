@@ -54,4 +54,5 @@ proc build*(programPath: string, outputPath: string): string =
       errorPrint "[codetracer] error: ct build plugin error: ", getCurrentExceptionMsg()
       quit(1)
   else:
-    errorPrint "This functionality requires a ct-rr-support installation"
+    for line in rrBackendMissingGuidanceLines():
+      errorPrint line

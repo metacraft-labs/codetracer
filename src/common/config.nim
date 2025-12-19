@@ -85,6 +85,21 @@ let configDir* = linksPath / "config"
 let userConfigDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
 let userLayoutDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
 
+proc userConfigFilePath*: string =
+  ## Absolute path to the user's active configuration file.
+  userConfigDir / configPath
+
+proc rrBackendMissingGuidanceLines*: seq[string] =
+  ## Standard guidance for missing rr backend installations, including the user config path.
+  let configFile = userConfigFilePath()
+  @[
+    "This functionality requires a ct-rr-support installation.",
+    fmt"To fix this issue either add ct-rr-support to your PATH or open {configFile} and set:",
+    "rrBackend:",
+    "  enabled: true",
+    "  path:<ct-rr-support binary or AppImage location>",
+  ]
+
 func normalize(shortcut: string): string =
   # for now we expect to write editor-style monaco shortcuts
   shortcut
@@ -176,4 +191,3 @@ proc loadConfig*(folder: string, inTest: bool): Config =
       echo "ERROR: couldn't backup your existing config file; error: ", copyError.msg
     copyFile(configDir / defaultConfigPath, file)
     echo "  REPLACED with new up to date default config file"
-
