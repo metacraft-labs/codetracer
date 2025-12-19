@@ -102,3 +102,22 @@ proc findByPath*(app: ElectronApp, path: cstring): Future[Trace] {.async.} =
   else:
     echo "error: trying to run the codetracer trace metadata command: ", res.error
     app.quit(1)
+
+proc findRecentFoldersWithCodetracer*(app: ElectronApp, limit: int): Future[seq[RecentFolder]] {.async.} =
+  let res = await readProcessOutput(
+    codetracerExe.cstring,
+    @[cstring"trace-metadata", cstring"--recent-folders", cstring(fmt"--limit={limit}")])
+
+  if res.isOk:
+    let raw = res.value
+    let folders = cast[seq[RecentFolder]](JSON.parse(raw))
+    return folders
+  else:
+    echo "error: trying to run the codetracer trace metadata command: ", res.error
+    app.quit(1)
+
+  # should be an unreachable default..
+  # otherwise it doesn't compiler, maybe because of my async
+  # template/macro, sorry
+  var emptyFolders: seq[RecentFolder] = @[]
+  return emptyFolders
