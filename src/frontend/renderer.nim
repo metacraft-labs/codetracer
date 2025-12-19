@@ -1406,6 +1406,22 @@ proc commandSelectNext* =
 proc setOpen* =
   ipc.send "CODETRACER::set-open"
 
+proc openTraceDialog*(data: Data) =
+  ## Show file dialog to select trace folder
+  data.ipc.send("CODETRACER::open-trace-dialog", js{})
+
+proc showRecordNewTraceDialog*(data: Data) =
+  ## Show the new-record-screen from welcome_screen
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.welcomeScreen = false
+    data.ui.welcomeScreen.newRecordScreen = true
+    data.redraw()
+  else:
+    data.viewsApi.warnMessage(cstring"Welcome screen not available")
+
+proc recordFromLaunchConfig*(data: Data) =
+  ## Parse launch.json and show selection dialog (or record directly if only one config)
+  data.ipc.send("CODETRACER::record-from-launch", js{})
 
 var scrollAssembly* = -1
 
