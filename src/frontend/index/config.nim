@@ -245,6 +245,31 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
       errorPrint "index: load layout config error: ", errCopy
       quit(1)
 
+proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
+  ## Load edit mode layout configuration from file
+  let (data, err) = await fsreadFileWithErr(cstring(filename))
+  if err.isNil:
+    let config = JSON.parse(data)
+    return config
+  else:
+    # Edit mode layout file doesn't exist yet - use default debug layout as fallback
+    let defaultLayoutFile = userLayoutDir / "default_layout.json"
+    let (defaultData, defaultErr) = await fsreadFileWithErr(cstring(defaultLayoutFile))
+    if defaultErr.isNil:
+      let config = JSON.parse(defaultData)
+      return config
+    else:
+      # Fall back to the bundled default layout
+      let errCopy = await fsCopyFileWithErr(
+        cstring(fmt"{configDir / defaultLayoutPath}"),
+        cstring(filename)
+      )
+      if errCopy.isNil:
+        return await loadEditLayoutConfig(main, filename)
+      else:
+        errorPrint "index: load edit layout config error: ", errCopy
+        quit(1)
+
 proc loadValues*(a: js, id: cstring): JsAssoc[cstring, cstring] =
   var fields = JsAssoc[cstring, js]{}
   var values = JsAssoc[cstring, cstring]{}

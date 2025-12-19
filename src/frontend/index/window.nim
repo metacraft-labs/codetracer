@@ -1,8 +1,8 @@
 import
-  std / [ async, jsffi, json, strutils, strformat ],
+  std / [ async, jsffi, json, strutils, strformat, os ],
   electron_vars, server_config, base_handlers, config, lsp_bridge,
   ../lib/[ jslib, electron_lib ],
-  ../[ types ],
+  ../[ types, config as frontend_config ],
   ../../common/[ paths, ct_logging ]
 
 var
@@ -117,8 +117,21 @@ proc onMaximizeWindow*(sender: js, response: JsObject) {.async.} =
 proc onCloseWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.close()
 
-proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring)) {.async.} =
-  warnprint "FOR NOW: persisting config disabled"
+proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, isEditMode=bool)) {.async.} =
+  # Determine which layout file to save to based on mode
+  let layoutFileName = if response.isEditMode:
+      "default_edit_layout.json"
+    else:
+      "default_layout.json"
+
+  let layoutFilePath = frontend_config.userLayoutDir / layoutFileName
+
+  # Save layout to file (directory should already exist from app startup)
+  let errWrite = await fsWriteFileWithErr(cstring(layoutFilePath), response.layout)
+  if not errWrite.isNil:
+    errorPrint "save layout config error: ", errWrite
+  else:
+    infoPrint fmt"Layout saved to {layoutFilePath} (editMode={response.isEditMode})"
 
 proc onExitError*(sender: js, response: cstring) {.async.} =
   # we call this on fatal errors

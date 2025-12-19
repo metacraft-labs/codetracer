@@ -142,10 +142,11 @@ proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, edi
 
 proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # kout layoutConfig.toJs
-  if data.ui.mode == DebugMode:
-    ipc.send "CODETRACER::save-config", js{
-      name: cstring"default_layout",
-      layout: JSON.stringify(layoutConfig.toJs)}
+  let isEditMode = data.ui.mode == EditMode
+  ipc.send "CODETRACER::save-config", js{
+    name: cstring"default_layout",
+    layout: JSON.stringify(layoutConfig.toJs),
+    isEditMode: isEditMode}
 
 
 var redrawIndex* = 0
@@ -270,7 +271,9 @@ proc resetLayoutState*(data: Data) =
     fontSize: fontSize,
     focusHistory: @[],
     editModeHiddenPanels: @[],
-    savedLayoutBeforeEdit: nil
+    savedLayoutBeforeEdit: nil,
+    editModeLayout: nil,
+    lastUsedEditLayout: nil
   )
   data.ui.pageLoaded = pageLoaded
   data.ui.initEventReceived = initEventReceived
