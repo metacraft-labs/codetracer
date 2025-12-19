@@ -1454,6 +1454,8 @@ type
     contentItemConfig*: GoldenLayoutItemConfigClass
     resolvedConfig*: GoldenLayoutResolvedConfig
     savedLayoutBeforeEdit*: GoldenLayoutResolvedConfig
+    editModeLayout*: GoldenLayoutResolvedConfig         # NEW - persistent edit layout
+    lastUsedEditLayout*: GoldenLayoutResolvedConfig     # NEW - last saved edit layout
     layout*:         GoldenLayout
     mode*:           LayoutMode
     readOnly*:       bool
@@ -1740,7 +1742,9 @@ when defined(ctRenderer):
     ui: Components(
       focusHistory: @[],
       editModeHiddenPanels: @[],
-      savedLayoutBeforeEdit: nil
+      savedLayoutBeforeEdit: nil,
+      editModeLayout: nil,
+      lastUsedEditLayout: nil
     ),
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
     maxRRTicks: 100_000) # TODO, not based on events which don't update? somehow record/send from record

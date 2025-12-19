@@ -634,14 +634,21 @@ proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
 proc switchToEdit*(data: Data) =
   if data.ui.mode != EditMode:
     data.ui.mode = EditMode
-    # TODO separate action for those?
-    # data.ui.layout.root.contentItems[0].contentItems[1].config.width = 0
-    # data.ui.layout.root.contentItems[0].contentItems[0].config.width = 100
 
-    # data.ui.layout.root.contentItems[0].contentItems[0].contentItems[0].config.width = 20
-    # data.ui.layout.root.contentItems[0].contentItems[0].contentItems[1].config.width = 80
-    # data.ui.layout.updateSize()
-    # data.ui.layout.root.contentItems[0].contentItems[1].element.hide()
+    # Save current debug layout before switching
+    if not data.ui.layout.isNil:
+      let currentLayout = data.ui.layout.saveLayout()
+      data.ui.savedLayoutBeforeEdit = cast[GoldenLayoutResolvedConfig](
+        JSON.parse(JSON.stringify(currentLayout)))
+
+    # Restore edit layout if we have one saved
+    if not data.ui.lastUsedEditLayout.isNil and not data.ui.layout.isNil:
+      try:
+        data.ui.layout.loadLayout(data.ui.lastUsedEditLayout)
+        data.ui.resolvedConfig = data.ui.lastUsedEditLayout
+      except:
+        cerror fmt"edit-mode: failed to restore edit layout: {getCurrentExceptionMsg()}"
+
     for content, map in data.ui.componentMapping:
       for id, component in map:
         try:
@@ -652,23 +659,26 @@ proc switchToEdit*(data: Data) =
   redrawAll()
 
 proc switchToDebug*(data: Data) =
-  # TODO: in the future we might support also a button/shortcut to switch back to the original trace
-  #   maybe in a new window (or in the same)?
-  # eventually a more mixed more, or a way to combine the edits with existing debug info might exist
-  #   but it seems like a lot more work
-  # for now we keep the action, posibility to include it in user .config.yaml
-  # but we remove it from the default config, so it's hidden/not set by default
-  cwarn "for now : not supported: one shouldn't be able to switch this way to debug, just to re-record!"
+  # Save current edit layout before switching
+  if data.ui.mode == EditMode and not data.ui.layout.isNil:
+    let currentLayout = data.ui.layout.saveLayout()
+    data.ui.lastUsedEditLayout = cast[GoldenLayoutResolvedConfig](
+      JSON.parse(JSON.stringify(currentLayout)))
 
-  # if data.ui.mode != DebugMode:
-  #   data.ui.mode = DebugMode
-  #   # TODO separate action?
-  #   data.ui.layout.root.contentItems[0].contentItems[0].config.width = 50
-  #   data.ui.layout.root.contentItems[0].contentItems[1].config.width = 50
-  #   data.ui.layout.updateSize()
-  #   data.ui.layout.root.contentItems[0].contentItems[1].element.show()
-  # data.setEditorsReadOnlyState(true)
-  # redrawAll()
+  if data.ui.mode != DebugMode:
+    data.ui.mode = DebugMode
+
+    # Restore debug layout if we saved it before
+    if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
+      try:
+        data.ui.layout.loadLayout(data.ui.savedLayoutBeforeEdit)
+        data.ui.resolvedConfig = data.ui.savedLayoutBeforeEdit
+        data.ui.savedLayoutBeforeEdit = nil
+      except:
+        cerror fmt"debug-mode: failed to restore debug layout: {getCurrentExceptionMsg()}"
+
+  data.setEditorsReadOnlyState(true)
+  redrawAll()
 
 proc toggleMode*(data: Data) =
   if data.ui.mode == DebugMode:
