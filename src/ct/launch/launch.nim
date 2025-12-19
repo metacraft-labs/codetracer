@@ -1,6 +1,6 @@
 import
   std/[ json, os, osproc, strutils ],
-  ../../common/[ paths, types, intel_fix, install_utils ],
+  ../../common/[ paths, types, intel_fix, install_utils, trace_index ],
   ../utilities/[ git ],
   ../cli/[ logging, list, help, build],
   ../online_sharing/[ upload, download, delete, remote ],
@@ -275,6 +275,9 @@ proc runInitial*(conf: CodetracerConf) =
       if not fileExists(absPath) and not dirExists(absPath):
         errorMessage "Path does not exist: " & absPath
         quit(1)
+      # Track folder in recent folders if it's a directory
+      if dirExists(absPath):
+        trace_index.addRecentFolder(absPath, test = false)
       discard launchElectron(args = @["edit", absPath])
     # of StartupCommand.host:
     #   host(
@@ -297,6 +300,7 @@ proc runInitial*(conf: CodetracerConf) =
         conf.traceMetadataProgramArg, conf.traceMetadataRecordPidArg,
         conf.traceMetadataRecent,
         conf.traceMetadataRecentFolders,
+        conf.traceMetadataAddRecentFolder,
         conf.traceMetadataRecentLimit,
         conf.traceMetadataTest)
     of StartupCommand.start_backend:

@@ -591,6 +591,10 @@ type
         desc: "return recent folders",
         defaultValue: false,
       .}: bool
+      traceMetadataAddRecentFolder* {.
+        name: "add-recent-folder",
+        desc: "add a folder to recent folders"
+      .}: Option[string]
       traceMetadataRecentLimit* {.
         name: "limit",
         desc: "recent traces/folders limit",
