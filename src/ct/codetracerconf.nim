@@ -94,6 +94,18 @@ type
       defaultValue: @[]
     .} : seq[string]
 
+    # These options are recognized directly because Playwright injects them
+    # when launching Electron apps for testing. They get forwarded to Electron.
+    inspect* {.
+      name: "inspect"
+      desc: "Node.js inspector port (injected by Playwright for debugging)"
+    .} : Option[string]
+
+    remoteDebuggingPort* {.
+      name: "remote-debugging-port"
+      desc: "Chrome remote debugging port (injected by Playwright for debugging)"
+    .} : Option[string]
+
     case cmd* {.
       command,
       defaultValue: StartUpCommand.noCommand
@@ -557,7 +569,7 @@ type
     #     desc: "Warning message for sensative data"
     #   .} : bool
     of electron:
-      electronArgs* {.
+      electronAppArgs* {.
         restOfArgs
         defaultValue: @[]
         desc: "Arguments for electron",

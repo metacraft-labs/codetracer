@@ -13,12 +13,20 @@ import
   results,
   json_serialization
 
-proc eventuallyWrapElectron*: bool =
+proc eventuallyWrapElectron*(conf: CodetracerConf): bool =
   if getEnv("CODETRACER_WRAP_ELECTRON", "") == "1":
-    var args: seq[string] = @[]
+    var appArgs: seq[string] = @[]
     for i in 1 .. paramCount():
-      args.add(paramStr(i))
-    wrapElectron(args)
+      appArgs.add(paramStr(i))
+
+    # Collect electron debug flags injected by Playwright
+    var electronArgs: seq[string] = @[]
+    if conf.inspect.isSome:
+      electronArgs.add("--inspect=" & conf.inspect.get)
+    if conf.remoteDebuggingPort.isSome:
+      electronArgs.add("--remote-debugging-port=" & conf.remoteDebuggingPort.get)
+
+    wrapElectron(electronArgs, appArgs)
     true
   else:
     false
@@ -293,7 +301,14 @@ proc runInitial*(conf: CodetracerConf) =
     # of StartupCommand.`report-bug`:
     #   sendBugReportAndLogsCommand(conf.title, conf.description, conf.pid, conf.confirmSend)
     of StartupCommand.electron:
-      wrapElectron(conf.electronArgs)
+      # Collect electron debug flags if provided
+      var electronArgs: seq[string] = @[]
+      if conf.inspect.isSome:
+        electronArgs.add("--inspect=" & conf.inspect.get)
+      if conf.remoteDebuggingPort.isSome:
+        electronArgs.add("--remote-debugging-port=" & conf.remoteDebuggingPort.get)
+      # conf.electronAppArgs: command-specific restOfArgs (app arguments)
+      wrapElectron(electronArgs, conf.electronAppArgs)
     of StartupCommand.`trace-metadata`:
       traceMetadata(
         conf.traceMetadataIdArg, conf.traceMetadataPathArg,

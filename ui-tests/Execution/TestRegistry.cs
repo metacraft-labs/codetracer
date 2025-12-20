@@ -170,6 +170,37 @@ internal sealed class TestRegistry : ITestRegistry
                 "NoirSpaceShip.ValueHistoryContextMenuOptions",
                 "Noir Space Ship / Value History Context Menu Options",
                 async context => await NoirSpaceShipTests.ValueHistoryContextMenuOptions(context.Page)));
+
+        // Layout resilience tests - verify app can recover from corrupt layout files
+        Register(
+            new UiTestDescriptor(
+                "Layout.RecoveryFromCorruptedJson",
+                "Layout Resilience / Recovery From Corrupted JSON",
+                async context => await LayoutResilienceTests.RecoveryFromCorruptedJsonInDebugMode(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "Layout.RecoveryFromInvalidStructure",
+                "Layout Resilience / Recovery From Invalid Structure",
+                async context => await LayoutResilienceTests.RecoveryFromInvalidStructure(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "Layout.RecoveryFromMissingType",
+                "Layout Resilience / Recovery From Missing Type",
+                async context => await LayoutResilienceTests.RecoveryFromMissingType(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "Layout.UiFunctionalityAfterRecovery",
+                "Layout Resilience / UI Functionality After Recovery",
+                async context => await LayoutResilienceTests.UiFunctionalityAfterRecovery(context.Page)));
+
+        Register(
+            new UiTestDescriptor(
+                "Layout.NormalOperationWithValidLayout",
+                "Layout Resilience / Normal Operation With Valid Layout",
+                async context => await LayoutResilienceTests.NormalOperationWithValidLayout(context.Page)));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();

@@ -119,6 +119,15 @@ async function fsMkdirWithErr(directory: string, options: any): Promise<any> {
   return promise
 }
 
+async function fsUnlinkWithErr(path: string): Promise<any> {
+  var promise = new Promise<any>(resolve => {
+    fs.unlink(path, (err: any) => {
+        resolve(err)
+    })
+  })
+  return promise
+}
+
 async function childProcessExec(cmd: string, options: any = {}): Promise<{Field0: string, Field1: string, Field2: any}> {
     var promise = new Promise<{Field0: string, Field1: string, Field2: any}>(resolve => {
         options.maxBuffer = 5_000_000;
@@ -145,4 +154,4 @@ async function wait(ms: number): Promise<number> {
 
 var path = require('path')
 
-export {dbGet, dbAll, fsRead, fsOpen, fsReadFile, fsWriteFile, fsReadFileWithErr, fsWriteFileWithErr, fsReaddir, fsCopyFileWithErr, fsMkdirWithErr, childProcessExec, fs, wait}
+export {dbGet, dbAll, fsRead, fsOpen, fsReadFile, fsWriteFile, fsReadFileWithErr, fsWriteFileWithErr, fsReaddir, fsCopyFileWithErr, fsMkdirWithErr, fsUnlinkWithErr, childProcessExec, fs, wait}
