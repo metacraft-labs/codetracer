@@ -178,9 +178,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
     return
 
   if data.startOptions.welcomeScreen and data.trace.isNil:
+    clog "initLayout: setting up welcome screen renderer"
     kxiMap["welcome-screen"] =
       setRenderer(
         proc: VNode =
+          clog "welcome screen render proc called"
           if not data.ui.welcomeScreen.isNil:
             data.ui.welcomeScreen.render()
           else:
@@ -188,6 +190,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
         "welcomeScreen",
         proc = discard)
     data.ui.welcomeScreen.kxi = kxiMap["welcome-screen"]
+    clog "initLayout: welcome screen kxi set, calling redrawSync"
+    # Force immediate redraw since window.onload may have already fired
+    redrawSync(kxiMap["welcome-screen"])
     return
 
   let root = document.getElementById(cstring"ROOT")

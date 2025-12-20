@@ -107,8 +107,80 @@ export function wait(ms: number): Promise<void> {
   return future;
 }
 
+/// Launch CodeTracer showing the welcome screen (no trace)
+export function ctWelcomeScreen(): void {
+  test.beforeAll(async () => {
+    setupLdLibraryPath();
+    await launchWelcomeScreen();
+  });
+}
+
+/// Launch CodeTracer in edit mode with a folder
+export function ctEditMode(folderPath: string): void {
+  test.beforeAll(async () => {
+    setupLdLibraryPath();
+    await launchEditMode(folderPath);
+  });
+}
+
 /// end of exported public functions
 /// ===================================
+
+async function launchWelcomeScreen(): Promise<void> {
+  console.log("# launching codetracer welcome screen");
+
+  // Create a clean env without trace-related vars
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.CODETRACER_TRACE_ID;
+  delete cleanEnv.CODETRACER_CALLER_PID;
+
+  cleanEnv.CODETRACER_IN_UI_TEST = "1";
+  cleanEnv.CODETRACER_TEST = "1";
+  cleanEnv.CODETRACER_WRAP_ELECTRON = "1";
+  cleanEnv.CODETRACER_START_INDEX = "1";
+
+  electronApp = await electron.launch({
+    executablePath: codetracerPath,
+    cwd: codetracerInstallDir,
+    args: ["--welcome-screen"],
+    env: cleanEnv,
+  });
+
+  const firstWindow = await electronApp.firstWindow();
+  const firstWindowTitle = await firstWindow.title();
+
+  if (firstWindowTitle === "DevTools") {
+    window = electronApp.windows()[EDITOR_WINDOW_INDEX];
+  } else {
+    window = firstWindow;
+  }
+  page = window;
+}
+
+async function launchEditMode(folderPath: string): Promise<void> {
+  console.log(`# launching codetracer edit mode for ${folderPath}`);
+
+  process.env.CODETRACER_IN_UI_TEST = "1";
+  process.env.CODETRACER_TEST = "1";
+  process.env.CODETRACER_WRAP_ELECTRON = "1";
+  process.env.CODETRACER_START_INDEX = "1";
+
+  electronApp = await electron.launch({
+    executablePath: codetracerPath,
+    cwd: codetracerInstallDir,
+    args: ["edit", folderPath],
+  });
+
+  const firstWindow = await electronApp.firstWindow();
+  const firstWindowTitle = await firstWindow.title();
+
+  if (firstWindowTitle === "DevTools") {
+    window = electronApp.windows()[EDITOR_WINDOW_INDEX];
+  } else {
+    window = firstWindow;
+  }
+  page = window;
+}
 
 function setupLdLibraryPath(): void {
   // originally in src/tester/tester.nim

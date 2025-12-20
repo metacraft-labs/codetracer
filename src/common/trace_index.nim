@@ -259,6 +259,7 @@ proc loadTrace(trace: Row, test: bool): Trace =
 
       calltrace: trace[15].parseInt != 0,
       calltraceMode: loadCalltraceMode(trace[16], lang),
+      date: trace[17],
       downloadKey: trace[18],
       controlId: trace[19],
       onlineExpireTime: expireTime)

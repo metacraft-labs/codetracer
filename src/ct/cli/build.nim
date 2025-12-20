@@ -25,13 +25,15 @@ proc setupEnv*(configPath: string): StringTableRef =
   result = env
 
 
-proc build*(programPath: string, outputPath: string): string =
+proc build*(programPath: string, outputPath: string, nimcachePath: string = ""): string =
   let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
   if ctConfig.rrBackend.enabled:
     try:
       var args = @["build", programPath]
       if outputPath.len > 0:
         args.add(outputPath)
+      if nimcachePath.len > 0:
+        args.add("--nimcache=" & nimcachePath)
       # assume for now that the build process prints the `binary` result
       #   if it is succesful
       let p = startProcess(

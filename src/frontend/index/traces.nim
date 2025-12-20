@@ -428,6 +428,7 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
   ## Initialize edit mode for a folder - called from welcome screen after folder selection
   # Set the startup options to edit mode
   data.startOptions.edit = true
+  data.startOptions.welcomeScreen = false  # No longer in welcome screen mode
   data.startOptions.folder = response.folder
   data.startOptions.name = cstring""
   data.workspaceFolder = response.folder
@@ -439,8 +440,8 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
   let save = await getSave(@[response.folder], data.config.test)
   data.save = save
 
-  # Load layout
-  let layout = await loadLayoutConfig(mainWindow, fmt"{userLayoutDir}/default_layout.json")
+  # Load layout - use edit mode layout since we're opening a folder for editing
+  let layout = await loadLayoutConfig(mainWindow, fmt"{userLayoutDir}/default_edit_layout.json")
 
   # Send no-trace message to switch to edit mode
   mainWindow.webContents.send "CODETRACER::no-trace", js{

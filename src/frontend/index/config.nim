@@ -84,7 +84,8 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   # ctrlp/filesystem: maybe based on where the file comes from:
   #   trace paths/trace sourcefolder or direct filesystem/other
   # ctrl+o/similar => direct
-  var readPath = if data.trace.imported:
+  let traceImported = not data.trace.isNil and data.trace.imported
+  var readPath = if traceImported:
       let traceFilesFolder = $data.trace.outputFolder / "files"
       cstring(traceFilesFolder / $filename)
     else:
@@ -97,7 +98,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
     # filename = cstring"<file missing: " & filename & cstring">"
     # missing = true
     console.log "error reading file directly ", filename, " ", err
-    if data.trace.imported:
+    if traceImported:
       # try original filename if
       # it was first tried with a trace copy path
       (source, err) = await fsReadFileWithErr(filename)
