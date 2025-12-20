@@ -85,7 +85,10 @@ proc launchElectron*(
 when defined(posix):
   import std / posix
 
-  proc wrapElectron*(args: seq[string]) =
+  proc wrapElectron*(electronArgs: seq[string], appArgs: seq[string]) =
+    ## Launch Electron via execv, replacing the current process.
+    ## electronArgs: Electron/Node runtime flags (e.g., --inspect=0) - passed before the app entry point
+    ## appArgs: Application arguments (e.g., edit /path) - passed after the app entry point
     let startIndex = getEnv("CODETRACER_START_INDEX", "") == "1"
 
     # internal ct runs should be normal, not wrapping electron again
@@ -103,17 +106,21 @@ when defined(posix):
     if getEnv("ELECTRON_ENABLE_LOGGING", "") == "":
       putEnv("ELECTRON_ENABLE_LOGGING", "1")
 
-    let execvArgsCount = if startIndex: args.len + 2 else: args.len + 1
+    # Build execv args: electron [electronArgs] [indexPath] [appArgs]
+    var finalArgs: seq[string] = @[]
+    finalArgs.add(electronArgs)
+    if startIndex:
+      finalArgs.add(electronIndexPath)
+    finalArgs.add(appArgs)
+
+    let execvArgsCount = finalArgs.len + 1
 
     # copied and adapted from nim forum: nucky9 and Araq:
     #   https://forum.nim-lang.org/t/7415#47044
     var execvArgs = cast[cstringArray](alloc0((execvArgsCount + 1) * sizeof(cstring)))
     execvArgs[0] = electronExe.cstring
-    for i, arg in args:
+    for i, arg in finalArgs:
       execvArgs[i + 1] = arg.cstring
-
-    if startIndex:
-      execvArgs[execvArgsCount - 1] = electronIndexPath.cstring
 
     execvArgs[execvArgsCount] = nil
 
@@ -126,7 +133,7 @@ when defined(posix):
     # quit(code)
 
 else:
-  proc wrapElectron*(args: seq[string]) =
+  proc wrapElectron*(electronArgs: seq[string], appArgs: seq[string]) =
     echo "UNSUPPORTED: wrapping electron with ct currently on this platform"
     # TODO find the equivalent of `execv` on windows, if it makes sense for
     # the e2e (playwright) case

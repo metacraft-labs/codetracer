@@ -67,6 +67,7 @@ var
   fsCopyFileWithErr    {.  importcpp: "helpers.fsCopyFileWithErr(#, #)"                    .}:  proc(a: cstring, b: cstring):                    Future[js]
   fsMkdirWithErr       {.  importcpp: "helpers.fsMkdirWithErr(#, #)"                       .}:  proc(a: cstring, options: JsObject):             Future[JsObject]
   fsReadFileWithErr*   {.  importcpp: "helpers.fsReadFileWithErr(#)"                       .}:  proc(f: cstring):                                Future[(cstring, js)]
+  fsUnlinkWithErr*     {.  importcpp: "helpers.fsUnlinkWithErr(#)"                         .}:  proc(f: cstring):                                Future[js]
 
 proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int): Future[void] {.async.} =
   var source = cstring""
@@ -219,15 +220,78 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
     let config = cast[Config](yaml.load(s))
     config.shortcutMap = initShortcutMap(config.bindings)
     return config
-  except:
+  except CatchableError:
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
     quit(1)
+
+proc isValidLayoutConfig(config: js): bool =
+  ## Check if a layout config has the minimum required structure for GoldenLayout.
+  ## This helps detect corrupt or incompatible layout files from different branches.
+  if config.isNil:
+    return false
+  # GoldenLayout requires at least a 'root' property with a 'type' and 'content'
+  let root = config["root"]
+  if root.isNil:
+    return false
+  let rootType = root["type"]
+  if rootType.isNil:
+    return false
+  # Basic structure looks valid
+  return true
+
+proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
+  ## Delete the corrupt layout file and copy the bundled default.
+  ## Returns the fresh default config.
+  warnPrint "Resetting layout to default due to corrupt/incompatible config: ", filename
+
+  # Try to delete the corrupt file
+  let errUnlink = await fsUnlinkWithErr(cstring(filename))
+  if not errUnlink.isNil:
+    warnPrint "Could not delete corrupt layout file (may not exist): ", errUnlink
+
+  let directory = filename.parentDir
+  # Use newJsObject with []= to avoid jsffi gensym collisions
+  var mkdirOpts = newJsObject()
+  mkdirOpts["recursive"] = true
+  let errMkdir = await fsMkdirWithErr(cstring(directory), mkdirOpts)
+  if not errMkdir.isNil:
+    errorPrint "mkdir for layout config folder error: ", errMkdir
+    # Don't quit - try to continue with bundled default
+
+  let errCopy = await fsCopyFileWithErr(
+    cstring(fmt"{configDir / defaultLayoutPath}"),
+    cstring(filename)
+  )
+
+  if errCopy.isNil:
+    # Read the fresh copy
+    let (freshData, freshErr) = await fsreadFileWithErr(cstring(filename))
+    if freshErr.isNil:
+      return JSON.parse(freshData)
+
+  # Last resort: read directly from bundled default without saving
+  warnPrint "Could not copy default layout, reading bundled default directly"
+  let (bundledData, bundledErr) = await fsreadFileWithErr(cstring(fmt"{configDir / defaultLayoutPath}"))
+  if bundledErr.isNil:
+    return JSON.parse(bundledData)
+
+  errorPrint "index: critical - cannot load any layout config"
+  quit(1)
 
 proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
-    let config = JSON.parse(data)
-    return config
+    try:
+      let config = JSON.parse(data)
+      # Validate the loaded config structure
+      if not isValidLayoutConfig(config):
+        warnPrint "Layout config is invalid or incompatible: ", filename
+        return await resetLayoutToDefault(filename)
+      return config
+    except CatchableError:
+      # JSON parse error - file is corrupt
+      warnPrint "Layout config JSON parse error: ", getCurrentExceptionMsg()
+      return await resetLayoutToDefault(filename)
   else:
     let directory = filename.parentDir
     let errMkdir = await fsMkdirWithErr(cstring(directory), js{recursive: true})
@@ -250,15 +314,31 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   ## Load edit mode layout configuration from file
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
-    let config = JSON.parse(data)
-    return config
+    try:
+      let config = JSON.parse(data)
+      # Validate the loaded config structure
+      if not isValidLayoutConfig(config):
+        warnPrint "Edit layout config is invalid or incompatible: ", filename
+        return await resetLayoutToDefault(filename)
+      return config
+    except CatchableError:
+      # JSON parse error - file is corrupt
+      warnPrint "Edit layout config JSON parse error: ", getCurrentExceptionMsg()
+      return await resetLayoutToDefault(filename)
   else:
     # Edit mode layout file doesn't exist yet - use default debug layout as fallback
     let defaultLayoutFile = userLayoutDir / "default_layout.json"
     let (defaultData, defaultErr) = await fsreadFileWithErr(cstring(defaultLayoutFile))
     if defaultErr.isNil:
-      let config = JSON.parse(defaultData)
-      return config
+      try:
+        let config = JSON.parse(defaultData)
+        if not isValidLayoutConfig(config):
+          warnPrint "Default layout config is invalid: ", defaultLayoutFile
+          return await resetLayoutToDefault(defaultLayoutFile)
+        return config
+      except CatchableError:
+        warnPrint "Default layout config JSON parse error: ", getCurrentExceptionMsg()
+        return await resetLayoutToDefault(defaultLayoutFile)
     else:
       # Fall back to the bundled default layout
       let errCopy = await fsCopyFileWithErr(

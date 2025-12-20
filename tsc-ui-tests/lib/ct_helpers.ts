@@ -160,15 +160,24 @@ async function launchWelcomeScreen(): Promise<void> {
 async function launchEditMode(folderPath: string): Promise<void> {
   console.log(`# launching codetracer edit mode for ${folderPath}`);
 
-  process.env.CODETRACER_IN_UI_TEST = "1";
-  process.env.CODETRACER_TEST = "1";
-  process.env.CODETRACER_WRAP_ELECTRON = "1";
-  process.env.CODETRACER_START_INDEX = "1";
+  // Create a clean env like launchWelcomeScreen does
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.CODETRACER_TRACE_ID;
+  delete cleanEnv.CODETRACER_CALLER_PID;
 
+  cleanEnv.CODETRACER_IN_UI_TEST = "1";
+  cleanEnv.CODETRACER_TEST = "1";
+  cleanEnv.CODETRACER_WRAP_ELECTRON = "1";
+  cleanEnv.CODETRACER_START_INDEX = "1";
+
+  // Launch ct directly with edit command.
+  // The ct binary handles Playwright's injected --inspect and
+  // --remote-debugging-port flags by forwarding them to Electron.
   electronApp = await electron.launch({
     executablePath: codetracerPath,
     cwd: codetracerInstallDir,
     args: ["edit", folderPath],
+    env: cleanEnv,
   });
 
   const firstWindow = await electronApp.firstWindow();
