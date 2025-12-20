@@ -172,7 +172,8 @@ proc importTrace*(
         break # for now assume the first detected lang is ok
 
   if dirExists(traceFolder / "files"):
-    copyDir(traceFolder / "files", outputFolder / "files")
+    if traceFolder != outputFolder:
+      copyDir(traceFolder / "files", outputFolder / "files")
   elif selfContained and downloadUrl == "":
     # for now assuming if no `files/` dir already,
     # it happens on the original machine
