@@ -1,8 +1,9 @@
 import std/[os, osproc, strformat, sequtils],
-  ../../common/[ paths, lang, types ],
+  ../../common/[ paths, lang, types, trace_index ],
   ../launch/electron,
   ../utilities/[ env, language_detection ],
   ../cli/[logging, build],
+  ../globals,
   record
 
 # run a recorded trace based on args, a saving project for it in the process
@@ -47,14 +48,25 @@ proc runWithRestart(
         else:
           "wasm"
 
+      var outputFolder = ""
+      var nimcachePath = ""
+
+      # For Nim, pre-create the trace folder so we can set nimcache to be inside it
+      # This matches the legacy backend behavior where generated C files are kept in the trace
+      if lang == LangNim:
+        let traceID = trace_index.newID(test=false)
+        outputFolder = codetracerShareFolder / fmt"trace-{traceID}"
+        createDir(outputFolder)
+        nimcachePath = outputFolder / "nimcache"
+
       let program = if lang.isDbBased:
           recordArgs[0]
         else:
-          let binary = build(recordArgs[0], "")
+          let binary = build(recordArgs[0], "", nimcachePath)
           binary
 
       recordedTrace = record(lang=extension,
-                             outputFolder="",
+                             outputFolder=outputFolder,
                              exportFile="",
                              stylusTrace="",
                              address="",

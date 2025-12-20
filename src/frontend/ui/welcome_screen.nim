@@ -1,15 +1,72 @@
 import
-  std/[ options, jsffi, enumerate ],
+  std/[ options, jsffi, enumerate, strutils, sequtils, os ],
   ui_imports,
   ../[ types ],
   ../../ct/version
 import std/times except now
 
 const
-  PROGRAM_NAME_LIMIT = 45
+  COMMAND_DISPLAY_LIMIT = 50
   NO_EXPIRE_TIME = -1
   EMPTY_STRING = ""
   ERROR_DOWNLOAD_KEY = "Errored"
+
+proc formatTimeAgo(dateStr: cstring): cstring =
+  ## Format a date string like "yyyy/MM/dd" or "yyyy/MM/dd HH:mm:ss" as human-friendly "time ago"
+  ## Uses JavaScript Date API for parsing since this runs in browser context
+  if dateStr.len == 0:
+    return cstring""
+
+  # Convert date format from "yyyy/MM/dd" or "yyyy/MM/dd HH:mm:ss" to ISO format for JS Date
+  # Replace slashes with dashes for ISO date parsing
+  let isoStr = cstring(($dateStr).replace("/", "-"))
+
+  # Parse using JavaScript Date
+  let parsedDate = newJsDate(isoStr)
+
+  if not parsedDate.isValidDate:
+    return dateStr
+
+  # Get current time and calculate difference in seconds
+  let diffMs = dateNowMs() - parsedDate.getTime()
+  let seconds = int(diffMs / 1000)
+  let minutes = seconds div 60
+  let hours = minutes div 60
+  let days = hours div 24
+  let weeks = days div 7
+  let months = days div 30
+  let years = days div 365
+
+  if seconds < 60:
+    return cstring"just now"
+  elif minutes < 60:
+    return if minutes == 1: cstring"1 minute ago" else: cstring($minutes & " minutes ago")
+  elif hours < 24:
+    return if hours == 1: cstring"1 hour ago" else: cstring($hours & " hours ago")
+  elif days < 7:
+    return if days == 1: cstring"yesterday" else: cstring($days & " days ago")
+  elif weeks < 4:
+    return if weeks == 1: cstring"1 week ago" else: cstring($weeks & " weeks ago")
+  elif months < 12:
+    return if months == 1: cstring"1 month ago" else: cstring($months & " months ago")
+  else:
+    return if years == 1: cstring"1 year ago" else: cstring($years & " years ago")
+
+proc formatCommand(program: cstring, args: seq[cstring]): string =
+  ## Format program and args as a shell command display string
+  let basename = extractFilename($program)
+  if args.len == 0:
+    return basename
+  else:
+    let argsStr = args.mapIt($it).join(" ")
+    return basename & " " & argsStr
+
+proc truncateCommand(cmd: string, limit: int): string =
+  ## Truncate command string, keeping it readable
+  if cmd.len <= limit:
+    return cmd
+  else:
+    return cmd[0..<(limit - 2)] & ".."
 
 proc resetView*(self: WelcomeScreenComponent) =
   self.loading = false
@@ -142,30 +199,60 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
     else:
       (ThreeDaysLeft, "trace-info-button-active")
 
+  # Format command as "basename arg1 arg2 ..."
+  let fullCommand = formatCommand(trace.program, trace.args)
+  let displayCommand = truncateCommand(fullCommand, COMMAND_DISPLAY_LIMIT)
+  # Format "time ago" - handle nil/empty date
+  let timeAgo = if trace.date.isNil or trace.date.len == 0:
+      cstring""
+    else:
+      formatTimeAgo(trace.date)
+
+  # Build tooltip content with full details
+  let tooltipLines = @[
+    "Program: " & $trace.program,
+    if trace.args.len > 0: "Args: " & trace.args.mapIt($it).join(" ") else: "",
+    if trace.workdir.len > 0: "Workdir: " & $trace.workdir else: "",
+    "Recorded: " & $trace.date,
+    if trace.duration.len > 0: "Duration: " & $trace.duration else: "",
+    "ID: " & $trace.id
+  ].filterIt(it.len > 0).join("\n")
+
+  let tooltipId = cstring("tooltip-" & $trace.id)
+
+  proc positionTooltip(ev: Event) =
+    let tooltip = document.getElementById(tooltipId)
+    if not tooltip.isNil:
+      let target = ev.currentTarget
+      if not target.isNil:
+        let rect = target.Element.getBoundingClientRect()
+        tooltip.style.right = cstring($(window.innerWidth.int - rect.left.int + 12) & "px")
+        tooltip.style.top = cstring($(rect.top.int + rect.height.int div 2) & "px")
+        tooltip.style.transform = cstring"translateY(-50%)"
+        tooltip.style.left = cstring"auto"
+
+  proc handleClick(ev: Event, tg: VNode) =
+    self.loading = true
+    self.loadingTrace = trace
+    ev.target.focus()
+    data.redraw()
+    self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: trace.id }
+
+  proc handleMouseEnter(ev: Event, tg: VNode) =
+    positionTooltip(ev)
+
   buildHtml(
     tdiv(class = "recent-trace-container")
   ):
-    tdiv(
-      class = "recent-trace",
-      onclick = proc (ev: Event, tg: VNode) =
-        self.loading = true
-        self.loadingTrace = trace
-        ev.target.focus()
-        data.redraw()
-        self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: trace.id }
-    ):
-      let programLimitName = PROGRAM_NAME_LIMIT
-      let limitedProgramName = if trace.program.len > programLimitName:
-          ".." & ($trace.program)[^programLimitName..^1]
-        else:
-          $trace.program
-
+    tdiv(class = "recent-trace", onclick = handleClick, onmouseenter = handleMouseEnter):
       tdiv(class = "recent-trace-title"):
-        span(class = "recent-trace-title-id"):
-          text fmt"ID: {trace.id}"
+        span(class = "recent-trace-title-time"):
+          text timeAgo
         separateBar()
         span(class = "recent-trace-title-content"):
-          text limitedProgramName # TODO: tippy
+          text displayCommand
+      tdiv(class = "recent-trace-tooltip", id = tooltipId):
+        text tooltipLines
     if self.showTraceSharing:
       tdiv(class = "online-functionality-buttons"):
         if self.isUploading[trace.id]:
@@ -260,6 +347,8 @@ proc recentProjectView(self: WelcomeScreenComponent, trace: Trace, position: int
                   text &"The online share key expires on {formatted}"
 
 proc recentFoldersView(self: WelcomeScreenComponent): VNode =
+  let isFirstTime = self.data.recentFolders.len == 0 and self.data.recentTraces.len == 0
+
   buildHtml(
     tdiv(class = "recent-folders")
   ):
@@ -274,8 +363,15 @@ proc recentFoldersView(self: WelcomeScreenComponent): VNode =
         for (i, folder) in enumerate(self.data.recentFolders):
           recentFolderView(self, folder, i)
       else:
-        tdiv(class = "no-recent-folders"):
-          text "No folders yet."
+        tdiv(class = "empty-state-message"):
+          if isFirstTime:
+            tdiv(class = "empty-state-welcome"):
+              text "Welcome to CodeTracer!"
+            tdiv(class = "empty-state-text"):
+              text "Open a folder to start editing code, or record a program to begin time-travel debugging."
+          else:
+            tdiv(class = "empty-state-text"):
+              text "Open a folder to start editing."
 
 proc recentProjectsView(self: WelcomeScreenComponent): VNode =
   buildHtml(
@@ -292,8 +388,9 @@ proc recentProjectsView(self: WelcomeScreenComponent): VNode =
         for (i, trace) in enumerate(self.data.recentTraces):
           recentProjectView(self, trace, i)
       else:
-        tdiv(class = "no-recent-traces"):
-          text "No traces yet."
+        tdiv(class = "empty-state-message"):
+          tdiv(class = "empty-state-text"):
+            text "Record a program to create your first trace, or open an existing trace file."
 
 proc recentTransactionsView(self: WelcomeScreenComponent): VNode =
   buildHtml(

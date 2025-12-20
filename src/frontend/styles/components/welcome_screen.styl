@@ -122,243 +122,273 @@
       flex-direction: column
       min-width: 0
 
-      .start-options
+    // Start options - direct child of .welcome-screen
+    .start-options
+      position: relative
+      display: flex
+      width: -webkit-fill-available
+      justify-content: space-between
+
+      .start-option
         position: relative
+        right: 0
         display: flex
-        width: -webkit-fill-available
+        cursor: pointer
+        justify-content: center
+        font-family: 'SpaceGrotesk'
+
+        &.hovered
+          opacity: 1
+
+      .inactive-start-option
+        opacity: 0.2
+        pointer-events: none
+
+        &.hovered
+          color: inherit
+          opacity: 0.2
+
+      .start-option-icon
+        width: 100px
+        height: 100px
+        background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON
+        background-repeat: no-repeat
+        background-position: center
+
+        &.hovered
+          background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON_HOVERED
+          opacity: 1
+
+      .start-option-name
+        text-align: center
+        font-size: 14px
+        font-weight: BOLD_WEIGHT
+        letter-spacing: -0.14px
+        line-height: 18px
+        background-color: ACTIVE_ROW
+        display: flex
+        align-items: center
+        color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR
+        justify-content: center
+        white-space: nowrap
+        padding: 6px
+        padding-left: 14px
+        padding-right: 14px
+        border-radius: 6px
+
+        &.hovered
+          // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
+          // background-color: PRIMARY_BASE
+          outline: 1px solid SEARCH_STROKE
+          opacity: 1
+
+    // Recent traces styles - in welcome-right-panel
+    .recent-traces
+      position: relative
+      width: -webkit-fill-available
+      background-color: SECONDARY_BASE
+      border-radius: 6px
+      padding: 8px
+      margin-top: 48px
+      margin-bottom: 48px
+      padding-right: 0px
+      overflow: visible
+
+    .recent-traces-title
+      text-align: start
+      font-size: 18px
+      font-weight: BOLD_WEIGHT
+      line-height: 18px
+      letter-spacing: -0.18px
+      font-family: 'SpaceGrotesk'
+      margin-bottom: 6px
+
+    .recent-traces-list
+      max-height: 172px
+      overflow-y: auto
+      overflow-x: visible
+      // Allow tooltips to overflow - they use position: absolute and high z-index
+      clip-path: none
+
+      .empty-state-message
+        padding: 16px 8px
+        display: flex
+        flex-direction: column
+        gap: 8px
+
+        .empty-state-welcome
+          font-size: 16px
+          font-weight: 600
+          font-family: 'SpaceGrotesk'
+          color: PRIMARY_TEXT_COLOR
+
+        .empty-state-text
+          font-size: 13px
+          font-family: 'SpaceGrotesk'
+          color: #888888
+          line-height: 1.5
+
+      .recent-trace-container
+        display: flex
+        align-items: center
         justify-content: space-between
 
-        .start-option
-          position: relative
-          right: 0
-          display: flex
+      .recent-trace
+        color: WELCOME_SCREEN_RECENT_TRACE_COLOR
+        background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
+        height: 28px
+        margin-top: 2px
+        margin-bottom: 6px
+        display: flex
+        position: relative
+        text-align: left
+        border-radius: 4px
+        width: -webkit-fill-available
+
+        &:hover
           cursor: pointer
-          justify-content: center
-          font-family: 'SpaceGrotesk'
+          background-color: PRIMARY_BASE
 
-          &.hovered
+          .recent-trace-tooltip
             opacity: 1
+            visibility: visible
+            transition-delay: 0.5s
 
-        .inactive-start-option
-          opacity: 0.2
-          pointer-events: none
-
-          &.hovered
-            color: inherit
-            opacity: 0.2
-
-        .start-option-icon
-          width: 100px
-          height: 100px
-          background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON
-          background-repeat: no-repeat
-          background-position: center
-
-          &.hovered
-            background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON_HOVERED
-            opacity: 1
-
-        .start-option-name
-          text-align: center
-          font-size: 14px
-          font-weight: BOLD_WEIGHT
-          letter-spacing: -0.14px
-          line-height: 18px
-          background-color: ACTIVE_ROW
+        .recent-trace-title
           display: flex
           align-items: center
-          color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR
-          justify-content: center
-          white-space: nowrap
-          padding: 6px
-          padding-left: 14px
-          padding-right: 14px
-          border-radius: 6px
-
-          &.hovered
-            // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
-            // background-color: PRIMARY_BASE
-            outline: 1px solid SEARCH_STROKE
-            opacity: 1
-
-      .no-recent-traces
-        height: 67px;
-        width: 350px;
-        align-items: center;
-        display: flex;
-        text-align: left;
-        font-size: 18px;
-        font-weight: bold;
-        font-style: italic;
-
-      .recent-traces
-        position: relative
-        width: -webkit-fill-available
-        background-color: SECONDARY_BASE
-        border-radius: 6px
-        padding: 8px
-        margin-top: 48px
-        margin-bottom: 48px
-        padding-right: 0px
-
-      .recent-traces-title
-        text-align: start
-        font-size: 18px
-        font-weight: BOLD_WEIGHT
-        line-height: 18px
-        letter-spacing: -0.18px
-        font-family: 'SpaceGrotesk'
-        margin-bottom: 6px
-
-      .recent-traces-list
-        max-height: 172px
-        overflow-y: scroll
-        overflow-x: visible
-
-        .recent-trace
-          color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
-          height: 28px
-          margin-top: 2px
-          margin-bottom: 6px
-          display: flex
           position: relative
-          text-align: left
-          border-radius: 4px
-          width: -webkit-fill-available
+          flex: 1
+          min-width: 0
 
-          &:hover
-            cursor: pointer
-            background-color: PRIMARY_BASE
+          .separate-bar
+            border-color: WELCOME_SCREEN_SEPARATE_BAR_COLOR
 
-          .recent-trace-title
-            display:flex
-            align-items: center
-            position: relative
-
-            .separate-bar
-              border-color: WELCOME_SCREEN_SEPARATE_BAR_COLOR
-
-            .recent-trace-title-id,.recent-trace-title-content
-              margin-left: 8px
-              margin-right: 8px
-              font-size: 14px
-              font-weight: BOLD_WEIGHT
-              font-family: 'FiraCode'
-              line-height: 18px
-              letter-spacing: -0.14px
-              // font-weight: bold
-              position: relative
-              overflow: hidden
-              white-space: nowrap
-              text-overflow: ellipsis
+          .recent-trace-title-time
+            margin-left: 8px
+            margin-right: 8px
+            font-size: 12px
+            font-family: 'SpaceGrotesk'
+            line-height: 18px
+            color: #888888
+            white-space: nowrap
+            min-width: 90px
 
           .recent-trace-title-content
-            // seems to be required, so ellipsis can work
-            max-width: 45ch
-            // this could put an ellipsis in the beginning if long
-            // but it seems it has problems with punctuation, and indeed with
-            // path separators e.g. `/` going in the end
-            // ( https://stackoverflow.com/a/74455333/438099 )
-            // so: for now we're trying to limit the count of characters
-            // programatically in the frontend code, and put there an
-            // `..` ellipsis in the beginning if needed
-            // as it's more useful to see the end of the path with the filename
-            // usually
-            //
-            // direction: rtl
-
-          .recent-trace-info
-            height: 40px
-            display: flex
+            margin-left: 8px
+            margin-right: 8px
+            font-size: 14px
+            font-weight: BOLD_WEIGHT
+            font-family: 'FiraCode'
+            line-height: 18px
+            letter-spacing: -0.14px
             position: relative
+            overflow: hidden
+            white-space: nowrap
+            text-overflow: ellipsis
+            flex: 1
 
-            .recent-trace-date
-              padding-left: 10px
-              width: 50%
-              text-align: left
-              display: flex
-              align-items: center
-
-            .recent-trace-duration
-              width: 50%
-              text-align: right
-              display: flex
-              align-items: center
-              color: #667283
-
-      // Recent folders styles (mirroring recent traces)
-      .no-recent-folders
-        height: 67px
-        width: 350px
-        align-items: center
-        display: flex
-        text-align: left
-        font-size: 18px
-        font-weight: bold
-        font-style: italic
-
-      .recent-folders
-        position: relative
-        width: -webkit-fill-available
-        background-color: SECONDARY_BASE
-        border-radius: 6px
-        padding: 8px
-        margin-top: 48px
-        margin-bottom: 48px
-        padding-right: 0px
-
-      .recent-folders-title
-        text-align: start
-        font-size: 18px
-        font-weight: BOLD_WEIGHT
-        line-height: 18px
-        letter-spacing: -0.18px
-        font-family: 'SpaceGrotesk'
-        margin-bottom: 6px
-
-      .recent-folders-list
-        max-height: 172px
-        overflow-y: scroll
-        overflow-x: visible
-
-        .recent-folder
-          color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-          background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
-          height: 28px
-          margin-top: 2px
-          margin-bottom: 6px
-          display: flex
-          position: relative
-          text-align: left
+        .recent-trace-tooltip
+          position: fixed
+          background-color: #1B1B1B
+          color: #f3f3f3
+          padding: 8px 12px
+          font-size: 12px
+          font-family: 'FiraCode'
           border-radius: 4px
-          width: -webkit-fill-available
+          white-space: pre-line
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4)
+          opacity: 0
+          visibility: hidden
+          transition: opacity 0.2s ease, visibility 0.2s ease
+          pointer-events: none
+          z-index: 1000
+          max-width: 400px
+          line-height: 1.4
+          // Position will be set via JavaScript on hover
+          // Fallback positioning for when JS isn't setting it
+          left: 50%
+          top: 50%
+          transform: translate(-50%, -50%)
 
-          &:hover
-            cursor: pointer
-            background-color: PRIMARY_BASE
+    // Recent folders styles - in welcome-left-panel
+    .recent-folders
+      position: relative
+      width: -webkit-fill-available
+      background-color: SECONDARY_BASE
+      border-radius: 6px
+      padding: 8px
+      margin-top: 48px
+      margin-bottom: 48px
+      padding-right: 0px
 
-          .recent-folder-title
-            display: flex
-            align-items: center
-            position: relative
+    .recent-folders-title
+      text-align: start
+      font-size: 18px
+      font-weight: BOLD_WEIGHT
+      line-height: 18px
+      letter-spacing: -0.18px
+      font-family: 'SpaceGrotesk'
+      margin-bottom: 6px
 
-            .recent-folder-title-name,.recent-folder-title-path
-              margin-left: 8px
-              margin-right: 8px
-              font-size: 14px
-              font-weight: BOLD_WEIGHT
-              font-family: 'FiraCode'
-              line-height: 18px
-              letter-spacing: -0.14px
-              position: relative
-              overflow: hidden
-              white-space: nowrap
-              text-overflow: ellipsis
+    .recent-folders-list
+      max-height: 172px
+      overflow-y: scroll
+      overflow-x: visible
 
-          .recent-folder-title-path
-            max-width: 30ch
-            color: #667283
+      .empty-state-message
+        padding: 16px 8px
+        display: flex
+        flex-direction: column
+        gap: 8px
+
+        .empty-state-welcome
+          font-size: 16px
+          font-weight: 600
+          font-family: 'SpaceGrotesk'
+          color: PRIMARY_TEXT_COLOR
+
+        .empty-state-text
+          font-size: 13px
+          font-family: 'SpaceGrotesk'
+          color: #888888
+          line-height: 1.5
+
+      .recent-folder-container
+        display: flex
+        align-items: center
+        justify-content: space-between
+
+      .recent-folder
+        color: WELCOME_SCREEN_RECENT_TRACE_COLOR
+        background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
+        height: 28px
+        margin-top: 2px
+        margin-bottom: 6px
+        display: flex
+        position: relative
+        text-align: left
+        border-radius: 4px
+        width: -webkit-fill-available
+
+        &:hover
+          cursor: pointer
+          background-color: PRIMARY_BASE
+
+        .recent-folder-name
+          margin-left: 8px
+          margin-right: 8px
+          font-size: 14px
+          font-weight: BOLD_WEIGHT
+          font-family: 'FiraCode'
+          line-height: 18px
+          letter-spacing: -0.14px
+          position: relative
+          overflow: hidden
+          white-space: nowrap
+          text-overflow: ellipsis
+          display: flex
+          align-items: center
 
   .new-record-screen
     position: relative

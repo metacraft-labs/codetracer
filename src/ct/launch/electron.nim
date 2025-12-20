@@ -48,24 +48,22 @@ proc launchElectron*(
   )
 
   if args.len > 0:
+    ensureExists(electronExe)
+    var electronArgs = @[electronIndexPath].concat(args)
     if not trace.isNil:
-      ensureExists(electronExe)
-      let args = @[
-          electronIndexPath].
-            concat(args).
-            concat(@["--caller-pid", $getCurrentProcessId()].
-            concat(optionalElectronArgs))
-      var processUI = startProcess(
-        electronExe,
-        workingDir = workdir,
-        args = args,
-        env = env,
-        options = {poParentStreams})
-      electronPid = processUI.processID
-      let electronExitCode = waitForExit(processUI)
-      sleep(100)
+      electronArgs = electronArgs.concat(@["--caller-pid", $getCurrentProcessId()])
+    electronArgs = electronArgs.concat(optionalElectronArgs)
+    var processUI = startProcess(
+      electronExe,
+      workingDir = workdir,
+      args = electronArgs,
+      env = env,
+      options = {poParentStreams})
+    electronPid = processUI.processID
+    let electronExitCode = waitForExit(processUI)
+    sleep(100)
 
-      return electronExitCode == RESTART_EXIT_CODE
+    return electronExitCode == RESTART_EXIT_CODE
 
   else:
     ensureExists(electronExe)

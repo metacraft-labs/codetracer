@@ -1195,6 +1195,10 @@ proc onNoTrace(
   data.services.debugger.functions = response.functions
   data.ui.menuNode = data.webTechMenu(baseName(response.path))
 
+  # Hide welcome screen if it's currently displayed
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.resetView()
+
   for path in data.services.debugger.paths:
     data.services.search.pathsPrepared.add(fuzzysort.prepare(path))
 
@@ -1212,24 +1216,47 @@ proc onNoTrace(
   data.services.editor.filesystem = response.filesystem
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
-  data.config.layout = cstring"default_white"
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.save = response.save
   data.save.fileMap = JsAssoc[cstring, int]{}
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
-  loadTheme(cstring"default_white")
+  # Use the configured theme from user settings
+  loadTheme(data.config.theme)
   # data.tabManager.tabs = JsAssoc[cstring, TabInfo]{}
   # data.tabManager.tabList = @[]
-  if response.path.len > 0:
-    data.openTab(response.path, ViewSource) # , response.lang)
   data.startOptions.screen = false
   data.startOptions.loading = false
 
   data.ui.initEventReceived = true
-  data.tryInitLayout()
 
-  data.switchToEdit()
+  # Create UI components if not already created (needed for menu, status bar, etc.)
+  # This must happen before tryInitLayout since layout initialization uses these components
+  data.createUIComponents()
+
+  # Check if coming from welcome screen (where layout was already initialized)
+  let wasFromWelcomeScreen = not data.ui.layout.isNil
+
+  # If layout already exists (e.g., from welcome screen), reload it with the new config
+  if wasFromWelcomeScreen:
+    try:
+      data.ui.layout.loadLayout(data.ui.resolvedConfig)
+    except:
+      cerror "onNoTrace: failed to reload layout: " & getCurrentExceptionMsg()
+  else:
+    data.tryInitLayout()
+
+  # Set mode to EditMode directly - don't call switchToEdit() if coming from welcome screen
+  # because we just loaded the layout fresh and don't want to re-load or access stale components
+  if wasFromWelcomeScreen:
+    data.ui.mode = EditMode
+    data.setEditorsReadOnlyState(false)
+  else:
+    data.switchToEdit()
+
+  # Open the file AFTER layout is initialized
+  if response.path.len > 0:
+    data.openTab(response.path, ViewSource) # , response.lang)
   let ext = $toJsLang(response.lang)
   # for i, file in data.save.files:
     # if i < TAB_LIMIT:
@@ -1244,10 +1271,12 @@ proc onNoTrace(
 
   configureShortcuts()
   redrawAll()
-  data.ui.layout.updateSize()
+  if not data.ui.layout.isNil:
+    data.ui.layout.updateSize()
   discard windowSetTimeout(proc =
     redrawAll()
-    data.ui.layout.updateSize(), 1_000)
+    if not data.ui.layout.isNil:
+      data.ui.layout.updateSize(), 1_000)
   discard windowSetTimeout(proc = redrawAll(), 5_000)
   # sometimes stuff isn't rendered and it needs redraw
 

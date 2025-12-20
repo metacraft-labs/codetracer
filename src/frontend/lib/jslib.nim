@@ -16,6 +16,9 @@ type
   DateJS* = ref object of js
     now*: proc: int
 
+  # JavaScript Date instance for date parsing and manipulation
+  JsDate* {.importc: "Date".} = ref object of JsRoot
+
   JsSet*[T] {.importc.} = JsAssoc[T, bool]
 
   Buffer* {.importc.} = ref object
@@ -146,6 +149,16 @@ proc floor*(a: float): int {.importcpp: "Math.floor(#)".}
 
 proc newChart*(ctx: js, config: js): js {.importcpp: "new Chart(#, #)".}
 proc now*: int64 {.importcpp: "(new Date()).getTime()".}
+
+# JavaScript Date utilities
+proc newJsDate*(dateStr: cstring): JsDate {.importjs: "new Date(#)".}
+  ## Create a new JavaScript Date from a date string
+proc getTime*(date: JsDate): float {.importjs: "#.getTime()".}
+  ## Get milliseconds since epoch from a Date object
+proc isValidDate*(date: JsDate): bool {.importjs: "!isNaN(#.getTime())".}
+  ## Check if a Date object represents a valid date
+proc dateNowMs*(): float {.importjs: "Date.now()".}
+  ## Get current time in milliseconds since epoch
 
 var lastJSError* {.importc.}: JsObject
 
