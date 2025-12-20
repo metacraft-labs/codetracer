@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser, Tree}; // Language,
+use tree_sitter_nim;
 use tree_sitter_pascal;
 use tree_sitter_traversal2::{traverse_tree, Order};
 
@@ -123,6 +124,21 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         },
     );
 
+    // Nim language support
+    m.insert(
+        Lang::Nim,
+        NodeNames {
+            if_conditions: vec!["if_stmt".to_string(), "when_stmt".to_string(), "case_stmt".to_string()],
+            else_conditions: vec!["else_branch".to_string()],
+            loops: vec!["for_stmt".to_string(), "while_stmt".to_string()],
+            branches_body: vec!["inline_stmt_list".to_string()],
+            branches: vec!["inline_stmt_list".to_string()],
+            functions: vec!["routine_definition".to_string()],
+            values: vec!["identifier".to_string()],
+            comments: vec!["comment".to_string()],
+        },
+    );
+
     m
 });
 
@@ -225,6 +241,8 @@ impl ExprLoader {
                 Lang::RustWasm // TODO RustWasm?
             } else if extension == "py" {
                 Lang::PythonDb
+            } else if extension == "nim" || extension == "nims" || extension == "nimble" {
+                Lang::Nim
             } else {
                 Lang::Unknown
             }
@@ -256,6 +274,8 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_ruby::LANGUAGE.into())?;
         } else if lang == Lang::PythonDb {
             parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
+        } else if lang == Lang::Nim {
+            parser.set_language(&tree_sitter_nim::LANGUAGE.into())?;
         } else {
             // else if lang == Lang::Small {
             //     parser.set_language(&tree_sitter_elisp::LANGUAGE.into())?;
@@ -401,6 +421,82 @@ impl ExprLoader {
                             return false;
                         }
                     }
+                }
+
+                true
+            }
+            Lang::Nim => {
+                // Filter out non-variable identifiers in Nim
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out routine definitions (proc, func, method, iterator, etc.)
+                // The identifier is the "name" field of routine_definition
+                if parent_kind == "routine_definition" {
+                    if let Some(name_field) = field_name_in_parent(node) {
+                        if name_field == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out exported_symbol (used in routine names, type names, etc.)
+                if parent_kind == "exported_symbol" {
+                    if let Some(grandparent) = parent.parent() {
+                        let grandparent_kind = grandparent.kind();
+                        // Routine definitions, type definitions, enum fields
+                        if matches!(grandparent_kind,
+                            "routine_definition" | "type_def" | "enum_field_def"
+                        ) {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out function calls - identifier followed by call_suffix
+                if parent_kind == "postfix_expr" || parent_kind == "command_expr" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "function" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out qualified identifiers used as function names
+                if parent_kind == "qualified_identifier" {
+                    if let Some(grandparent) = parent.parent() {
+                        if grandparent.kind() == "postfix_expr" || grandparent.kind() == "command_expr" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out type names in type expressions
+                if parent_kind == "qualified_identifier" {
+                    if let Some(grandparent) = parent.parent() {
+                        let gp_kind = grandparent.kind();
+                        if matches!(gp_kind,
+                            "type_expr" | "ref_type" | "ptr_type" | "var_type"
+                            | "generic_type" | "param_decl" | "object_field"
+                        ) {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out import/export identifiers
+                if matches!(parent_kind,
+                    "import_stmt" | "export_stmt" | "import_expr" | "import_path"
+                    | "import_symbol" | "from_import_stmt" | "include_stmt"
+                ) {
+                    return false;
                 }
 
                 true
