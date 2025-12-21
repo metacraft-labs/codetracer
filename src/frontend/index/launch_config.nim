@@ -6,6 +6,9 @@ import
   ../lib/[jslib],
   ../../common/ct_logging
 
+# JavaScript Object global binding
+var Object* {.importc, nodecl.}: JsObject
+
 type
   LaunchConfig* = ref object
     name*: cstring
@@ -13,14 +16,15 @@ type
     args*: seq[cstring]
     cwd*: cstring
     configType*: cstring  # "launch" or "attach"
+    env*: seq[tuple[key: cstring, value: cstring]]  # Environment variables
 
 proc substituteVariables(value: cstring, workspaceFolder: cstring): cstring =
   ## Substitute VS Code variables like ${workspaceFolder}
-  var result = $value
-  result = result.replace("${workspaceFolder}", $workspaceFolder)
-  result = result.replace("${workspaceFolderBasename}", $(workspaceFolder.splitPath().tail))
+  var res = $value
+  res = res.replace("${workspaceFolder}", $workspaceFolder)
+  res = res.replace("${workspaceFolderBasename}", ($workspaceFolder).splitPath().tail)
   # Add more variable substitutions as needed
-  result.cstring
+  res.cstring
 
 proc parseLaunchJson*(launchJsonPath: cstring, workspaceFolder: cstring): seq[LaunchConfig] =
   ## Parse a VS Code launch.json file and return launch configurations
@@ -57,7 +61,8 @@ proc parseLaunchJson*(launchJsonPath: cstring, workspaceFolder: cstring): seq[La
         name: cstring"",
         program: cstring"",
         args: @[],
-        cwd: workspaceFolder
+        cwd: workspaceFolder,
+        env: @[]
       )
 
       # Get name
@@ -81,6 +86,16 @@ proc parseLaunchJson*(launchJsonPath: cstring, workspaceFolder: cstring): seq[La
       if not config["cwd"].isUndefined:
         let rawCwd = config["cwd"].to(cstring)
         launchConfig.cwd = substituteVariables(rawCwd, workspaceFolder)
+
+      # Get environment variables
+      if not config["env"].isUndefined:
+        let envObj = config["env"]
+        let keys = Object.keys(envObj)
+        let keysLen = cast[int](keys.length)
+        for j in 0..<keysLen:
+          let key = keys[j].to(cstring)
+          let value = envObj[key].to(cstring)
+          launchConfig.env.add((key: key, value: substituteVariables(value, workspaceFolder)))
 
       # Only add if we have a program to run
       if launchConfig.program.len > 0:

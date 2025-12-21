@@ -42,6 +42,7 @@ proc configureIpcMain* =
     "load-recent-transaction"
     "open-trace-dialog"
     "record-from-launch"
+    "record-with-launch-config"
     "init-edit-mode"
 
     "tab-load"

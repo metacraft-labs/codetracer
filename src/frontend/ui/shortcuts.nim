@@ -69,7 +69,7 @@ proc delegateShortcut*(
 proc bindShortcut(action: ClientAction, renderer: cstring) =
   Mousetrap.`bind`(renderer) do ():
     cdebug "shortcuts: global handle " & $renderer & " " & $action
-    data.actions[action]()
+    data.actions[action](nil)
 
 proc configureShortcuts* =
   if data.config.shortcutMap.conflictList.len > 0:

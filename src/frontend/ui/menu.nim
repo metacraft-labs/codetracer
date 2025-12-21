@@ -6,7 +6,7 @@ const FONT_UPPERCASE_WIDTH_FACTOR = 1.5
 
 proc enterElement*(self: MenuComponent, node: MenuNode)
 
-proc runAction*(self: MenuComponent, action: proc: void)
+proc runAction*(self: MenuComponent, action: ClientActionHandler, actionData: JsObject = nil)
 
 proc closeMenu(self: MenuComponent) =
   self.activePath = @[]
@@ -212,16 +212,16 @@ proc closeFolder*(self: MenuComponent) =
     self.activeLength = node.elements.len
     self.data.redraw()
 
-proc runAction*(self: MenuComponent, action: proc: void) =
+proc runAction*(self: MenuComponent, action: ClientActionHandler, actionData: JsObject = nil) =
   if not action.isNil:
-    action()
+    action(actionData)
     self.active = false
     self.closeMenu()
 
 proc enterElement*(self: MenuComponent, node: MenuNode) =
   if node.enabled:
     var action = self.data.actions[node.action]
-    self.runAction(action)
+    self.runAction(action, node.actionData)
 
 proc enterElement*(self: MenuComponent) =
   var enteredNode: MenuNode

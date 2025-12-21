@@ -60,6 +60,14 @@ type
     loading*:         bool
     noInfo*:          bool
 
+  FrontendLaunchConfig* = object
+    index*: int
+    name*: cstring
+    program*: cstring
+    args*: seq[cstring]
+    cwd*: cstring
+    configType*: cstring
+
   UIBreakpoint* = object
     line*: int
     path*: cstring
@@ -1300,8 +1308,12 @@ type
     active*: bool
     service*: SearchService
 
+  CommandPaletteMode* = enum
+    CommandPaletteNormal
+
   CommandPaletteComponent* = ref object of Component
     active*:  bool
+    mode*: CommandPaletteMode
     query*: SearchQuery
     prevCommandValue*: cstring
     queries*: seq[string]
@@ -1367,6 +1379,7 @@ type
   MenuNode* = ref object
     name*:                  cstring
     action*:                ClientAction
+    actionData*:            JsObject  # Optional data passed to action handler
     enabled*:               bool
     kind*:                  MenuNodeKind
     elements*:              seq[MenuNode]
@@ -1474,13 +1487,14 @@ type
     openComponentIds*:        array[Content, seq[int]]
     saveLayout*:     bool
     menuNode*: MenuNode
+    launchConfigs*: seq[FrontendLaunchConfig]
     pageLoaded*: bool
     initEventReceived*: bool
     focusHistory*: seq[JsObject]
     editModeHiddenPanels*: seq[EditModeHiddenPanel]
 
 
-  ClientActionHandler* = proc: void {.nimcall.}
+  ClientActionHandler* = proc(actionData: JsObject): void {.nimcall.}
 
   RestartKind* = enum
     NoRestart,

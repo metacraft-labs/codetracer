@@ -227,7 +227,7 @@ macro defineMenu(code: untyped): untyped =
 proc webTechMenu(data: Data, program: cstring): MenuNode =
   let config = data.config
   if not data.startOptions.shellUi:
-    defineMenu:
+    result = defineMenu:
       folder program:
         # Needed for compliance on macOS
         macfolder "CodeTracer", "":
@@ -383,7 +383,6 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         folder "Debug":
           # element "Trace Existing Program...", aTrace, false
           # element "Load Existing Trace...", aLoadTrace, false
-          element "Record from Launch Config...", aRecordFromLaunch
           # folder "Panes":
           #   folder "New":
           #     element "Program state explorer", aNewState, false
@@ -432,8 +431,38 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
         # generated automatically
         macfolder "Help", "help"
+
+    # Add dynamic launch configurations to Debug menu if available
+    if data.ui.launchConfigs.len > 0:
+      for element in result.elements:
+        if element.kind == MenuFolder and element.name == cstring"Debug":
+          var launchFolder = MenuNode(
+            kind: MenuFolder,
+            name: cstring"Launch Configurations",
+            enabled: true,
+            elements: @[],
+            isBeforeNextSubGroup: true,
+            menuOs: 0,
+            role: cstring""
+          )
+          for i, config in data.ui.launchConfigs:
+            launchFolder.elements.add(MenuNode(
+              kind: MenuElement,
+              name: config.name,
+              action: aRecordFromLaunch,
+              actionData: js{configIndex: i},
+              enabled: true,
+              elements: @[],
+              isBeforeNextSubGroup: false,
+              menuOs: 0,
+              role: cstring""
+            ))
+          # Insert at the beginning of the Debug menu
+          element.elements.insert(launchFolder, 0)
+          break
+
   else:
-    defineMenu:
+    result = defineMenu:
       folder program:
         macfolder "CodeTracer", "":
           macrole "about"
@@ -1071,7 +1100,7 @@ proc onSymbolsLoaded(
 proc onMenuAction(sender: js, response: jsobject(action=ClientAction)) =
   let f = data.actions[response.action]
   if not f.isNil:
-    f()
+    f(nil)
 
 
 proc onFilesystemLoaded(
@@ -1118,6 +1147,15 @@ proc onLoadFolderEditMode(
   # This triggers a reload similar to how `ct edit <path>` works
   # For now, we send a request to the index process to load the folder
   data.ipc.send "CODETRACER::init-edit-mode", js{ folder: response.folderPath }
+
+proc onLaunchConfigsLoaded(
+  sender: js,
+  response: jsobject(configs=seq[FrontendLaunchConfig])) =
+  ## Store launch configs and reconstruct the menu to include them
+  data.ui.launchConfigs = response.configs
+  # Reconstruct menu - webTechMenu now includes launch configs automatically
+  data.ui.menuNode = data.webTechMenu(cstring"CodeTracer")
+  data.redraw()
 
 proc onUpdatePathContent(
   sender: js,
@@ -1622,6 +1660,7 @@ proc configureIPC(data: Data) =
     "filesystem-category-loaded"
     "update-path-content"
     "load-folder-edit-mode"
+    "launch-configs-loaded"
     # load trace resources
     "filenames-loaded"
     "symbols-loaded"
@@ -2003,87 +2042,87 @@ proc toggleTracepoint*(path: cstring, line: int) {.exportc.} =
   data.ui.editors[path].toggleTrace(path, line)
 
 var actions*: array[ClientAction, ClientActionHandler] = [
-  proc = forwardContinue(fromShortcut=true),
-  proc = reverseContinue(fromShortcut=true),
-  proc = next(fromShortcut=true),
-  proc = reverseNext(fromShortcut=true),
-  proc = stepIn(fromShortcut=true),
-  proc = reverseStepIn(fromShortcut=true),
-  proc = stepOut(fromShortcut=true),
-  proc = reverseStepOut(fromShortcut=true),
-  proc = stopAction(),
-  proc = data.update(build=true),
-  proc = switchTab(change = -1),
-  proc = switchTab(change = 1),
-  proc = data.switchTabHistory(),
-  proc = openFile(),
-  proc = data.openNewTab(),
-  proc = data.reopenLastTab(),
-  proc = data.closeActiveTab(),
-  proc = data.switchToEdit(),
-  proc = data.switchToDebug(),
-  proc = data.commandSearch(),
-  proc = data.fileSearch(),
-  proc = data.fixedSearch(),
-  proc =
+  proc(actionData: JsObject) = forwardContinue(fromShortcut=true),
+  proc(actionData: JsObject) = reverseContinue(fromShortcut=true),
+  proc(actionData: JsObject) = next(fromShortcut=true),
+  proc(actionData: JsObject) = reverseNext(fromShortcut=true),
+  proc(actionData: JsObject) = stepIn(fromShortcut=true),
+  proc(actionData: JsObject) = reverseStepIn(fromShortcut=true),
+  proc(actionData: JsObject) = stepOut(fromShortcut=true),
+  proc(actionData: JsObject) = reverseStepOut(fromShortcut=true),
+  proc(actionData: JsObject) = stopAction(),
+  proc(actionData: JsObject) = data.update(build=true),
+  proc(actionData: JsObject) = switchTab(change = -1),
+  proc(actionData: JsObject) = switchTab(change = 1),
+  proc(actionData: JsObject) = data.switchTabHistory(),
+  proc(actionData: JsObject) = openFile(),
+  proc(actionData: JsObject) = data.openNewTab(),
+  proc(actionData: JsObject) = data.reopenLastTab(),
+  proc(actionData: JsObject) = data.closeActiveTab(),
+  proc(actionData: JsObject) = data.switchToEdit(),
+  proc(actionData: JsObject) = data.switchToDebug(),
+  proc(actionData: JsObject) = data.commandSearch(),
+  proc(actionData: JsObject) = data.fileSearch(),
+  proc(actionData: JsObject) = data.fixedSearch(),
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.delete(),
-  proc = discard data.onSelectFlow(),
-  proc = discard data.onSelectState(),
-  proc =
+  proc(actionData: JsObject) = discard data.onSelectFlow(),
+  proc(actionData: JsObject) = discard data.onSelectState(),
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onUp(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onDown(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onRight(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onLeft(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onPageUp(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil and not data.isEditorFocused() and not data.isInputElementFocused():
       discard data.ui.activeFocus.onPageDown(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onGotoStart(),
-  proc =
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onGotoEnd(),
-  proc = # aEnter
+  proc(actionData: JsObject) = # aEnter
     # echo "global array map: enter"
     # affects only renderer, map manually editor differently
     if not data.ui.activeFocus.isNil and not data.isInputElementFocused():
       # echo "  => global array map: enter: activeFocus not nil, calling its method"
       discard data.ui.activeFocus.onEnter(),
-  proc = # goUp
+  proc(actionData: JsObject) = # goUp
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onEscape(),
-  proc = data.zoomInEditors(),
-  proc = data.zoomOutEditors(),
-  (proc = echo "example"),
-  proc = discard data.exit(), # aExit
-  proc = data.openNewTab(), # NewFile
-  proc = data.openPreferences(), # TODO: fix bottom panels Preferences
+  proc(actionData: JsObject) = data.zoomInEditors(),
+  proc(actionData: JsObject) = data.zoomOutEditors(),
+  (proc(actionData: JsObject) = echo "example"),
+  proc(actionData: JsObject) = discard data.exit(), # aExit
+  proc(actionData: JsObject) = data.openNewTab(), # NewFile
+  proc(actionData: JsObject) = data.openPreferences(), # TODO: fix bottom panels Preferences
   nil,# TODO proc = data.openNewTab(folder=true), # NewFold
   nil,# TODO OpenRecent
   # aSave
-  proc = data.saveFiles(data.services.editor.active),
-  proc = data.saveFiles(data.services.editor.active, saveAs=true),
-  proc = data.saveFiles(),
-  proc = discard data.closeAllFiles(), # close all,
-  (proc = clipboardCopy(data.getMonacoSelectionText())), # aCut
-  (proc = clipboardCopy(data.getMonacoSelectionText())), # aCopy
-  (proc = data.clipboardPaste()), # aPaste
-  proc =
+  proc(actionData: JsObject) = data.saveFiles(data.services.editor.active),
+  proc(actionData: JsObject) = data.saveFiles(data.services.editor.active, saveAs=true),
+  proc(actionData: JsObject) = data.saveFiles(),
+  proc(actionData: JsObject) = discard data.closeAllFiles(), # close all,
+  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), # aCut
+  (proc(actionData: JsObject) = clipboardCopy(data.getMonacoSelectionText())), # aCopy
+  (proc(actionData: JsObject) = data.clipboardPaste()), # aPaste
+  proc(actionData: JsObject) =
     if not data.ui.activeFocus.isNil:
       discard data.ui.activeFocus.onFindOrFilter(),
   nil,
-  proc = data.findInFiles(),
+  proc(actionData: JsObject) = data.findInFiles(),
   nil,
   nil,
   nil,
@@ -2092,35 +2131,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   nil,
   nil,
   nil,
-  proc = data.expandWholeSource(), # aExpandAll
-  proc = data.collapseWholeSource(), # aCollapseAll
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc = loadThemeForIndex(0), # aTheme0
-  proc = loadThemeForIndex(1), # aTheme1
-  proc = loadThemeForIndex(2), # aTheme2
-  proc = loadThemeForIndex(3), # aTheme3
-  nil,
-  nil,
-  nil,
-  nil,
-  nil,
-  proc = data.openLowLevelCode(), # aLowLevel1
-  proc = data.toggleMinimap(), # aShowMinimap
+  proc(actionData: JsObject) = data.expandWholeSource(), # aExpandAll
+  proc(actionData: JsObject) = data.collapseWholeSource(), # aCollapseAll
   nil,
   nil,
   nil,
@@ -2137,6 +2149,17 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   nil,
   nil,
   nil,
+  proc(actionData: JsObject) = loadThemeForIndex(0), # aTheme0
+  proc(actionData: JsObject) = loadThemeForIndex(1), # aTheme1
+  proc(actionData: JsObject) = loadThemeForIndex(2), # aTheme2
+  proc(actionData: JsObject) = loadThemeForIndex(3), # aTheme3
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  proc(actionData: JsObject) = data.openLowLevelCode(), # aLowLevel1
+  proc(actionData: JsObject) = data.toggleMinimap(), # aShowMinimap
   nil,
   nil,
   nil,
@@ -2145,55 +2168,71 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   nil,
   nil,
   nil,
-  proc = data.openLayoutTab(Content.PointList),
-  nil,
-  proc = data.openLayoutTab(Content.Calltrace),
-  proc = data.openLayoutTab(Content.State),
-  proc = data.openLayoutTab(Content.EventLog),
-  proc = data.openLayoutTab(Content.TerminalOutput),
-  proc = data.openLayoutTab(Content.StepList),
-  proc = data.openLayoutTab(Content.Scratchpad),
-  proc = data.openLayoutTab(Content.AgentActivity),
-  proc = data.openLayoutTab(Content.Filesystem),
-  proc = data.openShellTab(),
-  nil,
-  nil,
-  proc = data.addBreakpointAtPosition(),
-  proc = data.removeBreakpointAtPosition(),
-  proc = data.removeAllBreakpoints(),
-  proc = data.enableBreakpointAtPosition(),
-  proc = data.enableAllBreakpoints(),
-  proc = data.disableBreakpointAtPosition(),
-  proc = data.disableAllBreakpoints(),
-  proc = data.addTracepointAtPosition(),
-  proc = data.removeTracepointAtPosition(),
-  proc = data.enableTracepointAtPosition(),
-  proc = data.enableAllTracepoints(),
-  proc = data.disableTracepointAtPosition(),
-  proc = data.disableAllTracepoints(),
-  proc = data.runTracepoints(),
   nil,
   nil,
   nil,
   nil,
-  proc = data.ui.menu.toggle(),
-  proc = data.zoomFlowLoopIn(),
-  proc = data.zoomFlowLoopOut(),
-  proc = data.switchFocusedLoopLevelUp(),
-  proc = data.switchFocusedLoopLevelDown(),
-  proc = data.switchFocusedLoopLevelAtPosition(),
-  proc = data.setFlowTypeToMultiline(),
-  proc = data.setFlowTypeToParallel(),
-  proc = data.setFlowTypeToInline(),
-  proc = data.restartCodetracer(),
-  proc = data.findSymbol(),
-  proc = data.reRecordCurrent(projectOnly=false),
-  proc = data.reRecordCurrent(projectOnly=true),
-  proc = data.restartSubsystem(name="db-backend"),
-  proc = data.restartSubsystem(name="backend-manager"),
-  proc = data.openTraceDialog(),
-  proc = data.showRecordNewTraceDialog(),
-  proc = data.recordFromLaunchConfig(),
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  nil,
+  proc(actionData: JsObject) = data.openLayoutTab(Content.PointList),
+  nil,
+  proc(actionData: JsObject) = data.openLayoutTab(Content.Calltrace),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.State),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.EventLog),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.TerminalOutput),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.StepList),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.Scratchpad),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.AgentActivity),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.Filesystem),
+  proc(actionData: JsObject) = data.openShellTab(),
+  nil,
+  nil,
+  proc(actionData: JsObject) = data.addBreakpointAtPosition(),
+  proc(actionData: JsObject) = data.removeBreakpointAtPosition(),
+  proc(actionData: JsObject) = data.removeAllBreakpoints(),
+  proc(actionData: JsObject) = data.enableBreakpointAtPosition(),
+  proc(actionData: JsObject) = data.enableAllBreakpoints(),
+  proc(actionData: JsObject) = data.disableBreakpointAtPosition(),
+  proc(actionData: JsObject) = data.disableAllBreakpoints(),
+  proc(actionData: JsObject) = data.addTracepointAtPosition(),
+  proc(actionData: JsObject) = data.removeTracepointAtPosition(),
+  proc(actionData: JsObject) = data.enableTracepointAtPosition(),
+  proc(actionData: JsObject) = data.enableAllTracepoints(),
+  proc(actionData: JsObject) = data.disableTracepointAtPosition(),
+  proc(actionData: JsObject) = data.disableAllTracepoints(),
+  proc(actionData: JsObject) = data.runTracepoints(),
+  nil,
+  nil,
+  nil,
+  nil,
+  proc(actionData: JsObject) = data.ui.menu.toggle(),
+  proc(actionData: JsObject) = data.zoomFlowLoopIn(),
+  proc(actionData: JsObject) = data.zoomFlowLoopOut(),
+  proc(actionData: JsObject) = data.switchFocusedLoopLevelUp(),
+  proc(actionData: JsObject) = data.switchFocusedLoopLevelDown(),
+  proc(actionData: JsObject) = data.switchFocusedLoopLevelAtPosition(),
+  proc(actionData: JsObject) = data.setFlowTypeToMultiline(),
+  proc(actionData: JsObject) = data.setFlowTypeToParallel(),
+  proc(actionData: JsObject) = data.setFlowTypeToInline(),
+  proc(actionData: JsObject) = data.restartCodetracer(),
+  proc(actionData: JsObject) = data.findSymbol(),
+  proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=false),
+  proc(actionData: JsObject) = data.reRecordCurrent(projectOnly=true),
+  proc(actionData: JsObject) = data.restartSubsystem(name="db-backend"),
+  proc(actionData: JsObject) = data.restartSubsystem(name="backend-manager"),
+  proc(actionData: JsObject) = data.openTraceDialog(),
+  proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
+  proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
 ]
 
 data.actions = actions

@@ -6,6 +6,7 @@ proc clear(self: CommandPaletteComponent) =
   self.inputPlaceholder = ""
   self.query = nil
   self.results = @[]
+  self.mode = CommandPaletteNormal
 
 proc close(self: CommandPaletteComponent) =
   self.active = false
