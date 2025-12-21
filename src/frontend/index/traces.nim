@@ -8,6 +8,7 @@ import
   ../../common/[ ct_logging, paths, ],
   # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
+  ./launch_config,
   ../lang
 
 var
@@ -408,17 +409,120 @@ proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
     await onOpenLocalTrace(sender, traceResponse)
 
 proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
-  ## Parse launch.json and execute recording
-  ## For now, just show a message - full implementation requires launch_config module
+  ## Parse launch.json and send configurations to frontend for menu display
   debugPrint "onRecordFromLaunch called"
-  # TODO: Implement launch.json parsing and recording
-  # This would:
-  # 1. Find .vscode/launch.json in workspace
-  # 2. Parse configurations
-  # 3. Show selection dialog if multiple configs
-  # 4. Execute recording with selected config
+
+  if data.workspaceFolder.isNil or data.workspaceFolder.len == 0:
+    mainWindow.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationWarning, "No workspace folder opened")
+    return
+
+  let launchConfigs = getLaunchConfigsForWorkspace(data.workspaceFolder)
+
+  if launchConfigs.len == 0:
+    mainWindow.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationWarning, "No launch configurations found in .vscode/launch.json")
+    return
+
+  # Convert to JS-friendly format for sending to renderer
+  var configsJs: seq[JsObject] = @[]
+  for i, config in launchConfigs:
+    var envJs: seq[JsObject] = @[]
+    for envPair in config.env:
+      envJs.add(js{key: envPair.key, value: envPair.value})
+    configsJs.add(js{
+      index: i,
+      name: config.name,
+      program: config.program,
+      args: config.args,
+      cwd: config.cwd,
+      configType: config.configType,
+      env: envJs
+    })
+
+  mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+
+proc onRecordWithLaunchConfig*(sender: js, response: jsobject(configIndex=int)) {.async.} =
+  ## Execute recording with a specific launch configuration
+  infoPrint "onRecordWithLaunchConfig called with index: ", $response.configIndex
+  infoPrint "workspaceFolder: ", $data.workspaceFolder
+
+  if data.workspaceFolder.isNil or data.workspaceFolder.len == 0:
+    mainWindow.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationError, "No workspace folder opened")
+    return
+
+  let launchConfigs = getLaunchConfigsForWorkspace(data.workspaceFolder)
+
+  if response.configIndex < 0 or response.configIndex >= launchConfigs.len:
+    mainWindow.webContents.send "CODETRACER::new-notification",
+      newNotification(NotificationError, "Invalid launch configuration index")
+    return
+
+  let config = launchConfigs[response.configIndex]
+
+  infoPrint fmt"Recording with launch config: {config.name}"
+  infoPrint fmt"  Program: {config.program}"
+  infoPrint fmt"  Args: {config.args}"
+  infoPrint fmt"  CWD: {config.cwd}"
+  infoPrint fmt"  codetracerExe: {codetracerExe}"
+
+  # Build record arguments
+  var recordArgs = @[config.program]
+  for arg in config.args:
+    recordArgs.add(arg)
+
+  # Build process options with environment variables
+  var processOptions = js{
+    "cwd": config.cwd,
+    "stdio": cstring"inherit"
+  }
+
+  # Set up environment if we have env vars
+  if config.env.len > 0:
+    let processEnv = js{}
+    # First copy existing env
+    let nodeEnv = nodeProcess.toJs.env
+    let envKeys = Object.keys(nodeEnv)
+    for i in 0..<cast[int](envKeys.length):
+      let key = envKeys[i].to(cstring)
+      processEnv[key] = nodeEnv[key]
+    # Add launch config env vars (they override)
+    for envPair in config.env:
+      processEnv[envPair.key] = envPair.value.toJs
+    processOptions["env"] = processEnv
+
   mainWindow.webContents.send "CODETRACER::new-notification",
-    newNotification(NotificationInfo, "Launch config recording not yet implemented")
+    newNotification(NotificationInfo, fmt"Recording: {config.name}")
+
+  let processResult = await startProcess(
+    codetracerExe,
+    @[cstring"record"].concat(recordArgs),
+    processOptions)
+
+  if processResult.isOk:
+    infoPrint "index: record process started with pid " & $processResult.value.pid
+    data.recordProcess = processResult.value
+    let error = await waitProcessResult(processResult.value)
+
+    if error.isNil:
+      infoPrint "index: recorded successfully from launch config, now loading trace..."
+      mainWindow.webContents.send "CODETRACER::successful-record"
+      infoPrint "index: calling onLoadTraceByRecordProcessId with pid " & $processResult.value.pid
+      await onLoadTraceByRecordProcessId(nil, processResult.value.pid)
+      infoPrint "index: onLoadTraceByRecordProcessId completed"
+    else:
+      errorPrint "record error: ", error
+      errorPrint "record error message: ", cast[cstring](error)
+      if not data.recordProcess.isNil:
+        mainWindow.webContents.send "CODETRACER::failed-record",
+          js{errorMessage: cstring"codetracer record command failed"}
+  else:
+    errorPrint "record start process error: ", processResult.error
+    let errorSpecificText = if not processResult.error.isNil: cast[cstring](processResult.error.code) else: cstring""
+    let errorText = cstring"record start process error: " & errorSpecificText
+    mainWindow.webContents.send "CODETRACER::failed-record",
+      js{errorMessage: errorText}
 
 proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
@@ -457,6 +561,25 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
     functions: functions,
     save: save
   }
+
+  # Also load and send launch configs for the workspace
+  let launchConfigs = getLaunchConfigsForWorkspace(response.folder)
+  if launchConfigs.len > 0:
+    var configsJs: seq[JsObject] = @[]
+    for i, config in launchConfigs:
+      var envJs: seq[JsObject] = @[]
+      for envPair in config.env:
+        envJs.add(js{key: envPair.key, value: envPair.value})
+      configsJs.add(js{
+        index: i,
+        name: config.name,
+        program: config.program,
+        args: config.args,
+        cwd: config.cwd,
+        configType: config.configType,
+        env: envJs
+      })
+    mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
 
 proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject, projectOnly=bool)) {.async.}=
   infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly

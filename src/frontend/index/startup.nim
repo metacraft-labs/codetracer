@@ -1,7 +1,7 @@
 import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
-  window, traces, files, config, install, electron_vars, debugger,
+  window, traces, files, config, install, electron_vars, debugger, launch_config,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -160,6 +160,26 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
       functions: functions,
       save: save
     }
+
+    # Load and send launch configs for the workspace
+    let launchConfigs = getLaunchConfigsForWorkspace(folder)
+    if launchConfigs.len > 0:
+      var configsJs: seq[JsObject] = @[]
+      for i, config in launchConfigs:
+        var envJs: seq[JsObject] = @[]
+        for envPair in config.env:
+          envJs.add(js{key: envPair.key, value: envPair.value})
+        configsJs.add(js{
+          index: i,
+          name: config.name,
+          program: config.program,
+          args: config.args,
+          cwd: config.cwd,
+          configType: config.configType,
+          env: envJs
+        })
+      mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+
   else:
     let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=NO_LIMIT)
     let recentFolders = await electron_vars.app.findRecentFoldersWithCodetracer(limit=NO_LIMIT)

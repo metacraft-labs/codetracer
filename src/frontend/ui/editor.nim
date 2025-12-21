@@ -183,7 +183,7 @@ proc delegateShortcuts*(self: EditorViewComponent, editor: MonacoEditor) =
       capture action, editorShortcut:
         let command = proc(editor: MonacoEditor, e: EditorViewComponent) =
           cdebug "editor: shortcuts: monaco handle " & $editorShortcut & " " & $action
-          data.actions[action]()
+          data.actions[action](nil)
         self.delegateShortcut(editorShortcut, command, editor)
 
 proc closeEditorTab*(data: Data, id: cstring) =

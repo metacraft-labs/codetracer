@@ -1422,9 +1422,32 @@ proc showRecordNewTraceDialog*(data: Data) =
   else:
     data.viewsApi.warnMessage(cstring"Welcome screen not available")
 
-proc recordFromLaunchConfig*(data: Data) =
-  ## Parse launch.json and show selection dialog (or record directly if only one config)
-  data.ipc.send("CODETRACER::record-from-launch", js{})
+proc recordWithConfigIndex*(data: Data, configIndex: int) =
+  ## Record with a specific launch configuration by index
+  data.ipc.send("CODETRACER::record-with-launch-config", js{configIndex: configIndex})
+
+proc recordFromLaunchConfig*(data: Data, actionData: JsObject = nil) =
+  ## Record with a launch configuration
+  ## If actionData contains configIndex, use that config directly
+  ## Otherwise, if only one config exists, use it; if none, request loading them
+
+  # Check if a specific config was selected from the menu via actionData
+  if not actionData.isNil and not actionData["configIndex"].isUndefined:
+    let configIndex = actionData["configIndex"].to(int)
+    data.recordWithConfigIndex(configIndex)
+    return
+
+  # No specific config selected
+  if data.ui.launchConfigs.len == 0:
+    # No configs loaded yet, request them from the backend
+    data.ipc.send("CODETRACER::record-from-launch", js{})
+  elif data.ui.launchConfigs.len == 1:
+    # Only one config, record with it directly
+    data.recordWithConfigIndex(0)
+  else:
+    # Multiple configs but none selected - this happens when clicking
+    # "Record from Launch Config..." directly. Just show a notification.
+    data.viewsApi.infoMessage(cstring"Select a configuration from Debug > Launch Configurations")
 
 var scrollAssembly* = -1
 
