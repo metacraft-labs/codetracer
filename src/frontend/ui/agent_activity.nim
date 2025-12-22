@@ -513,7 +513,7 @@ method render*(self: AgentActivityComponent): VNode =
           onclick = proc =
             echo "#TODO: Open the model table"
         ):
-          tdiv(): text "#TODO: name"
+          tdiv(): text "GPT 5"
           tdiv(class="agent-model-img")
         if not self.isLoading:
           tdiv(
