@@ -264,7 +264,8 @@ proc disableDebugShortcuts*(self: EditorViewComponent) =
 proc enableDebugShortcuts*(self: EditorViewComponent) =
   console.log("EDITOR VIEW COMPONENT")
   console.log(self)
-  self.readOnly.set(true)
+  if not self.readOnly.isNil:
+    self.readOnly.set(true)
 
 proc highlightTag(path: cstring, tag: Tag, name: cstring) =
   var line = -1
