@@ -241,12 +241,18 @@ type
     fullHistory*:           bool
     activeHistory*:         cstring
     usingContextMenu*:      bool
+    pendingAckOpId*:        int
+    pendingAckTimeoutId*:   int
+    hasPendingAck*:         bool
+    pendingRestartLocation*: Location
+    hasPendingRestartLocation*: bool
 
     # TODO: think if this is the best place for it
     paths*:                 seq[string]
     functions*:             seq[Function]
 
     onCompleteMove*: proc(self: DebuggerService, response: MoveState): Future[void]
+    onAckHandlingMove*: proc(self: DebuggerService, response: AckHandlingMove): Future[void]
     onLoadedLocals*: proc(self: DebuggerService, response: JsAssoc[cstring, Value]): Future[void]
     onDebuggerStarted*: proc(self: DebuggerService, response: int): Future[void]
     onUpdatedEvents*: proc(self: DebuggerService, response: seq[ProgramEvent]): Future[void]
@@ -1759,6 +1765,9 @@ when defined(ctRenderer):
   data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     discard data.services.debugger.onCompleteMove(data.services.debugger, value)
     discard data.services.editor.onCompleteMove(data.services.editor, value))
+
+  data.dapApi.on(CtAckHandlingMove, proc(kind: CtEventKind, value: AckHandlingMove) =
+    discard data.services.debugger.onAckHandlingMove(data.services.debugger, value))
 
   var domwindow {.importc: "window".}: JsObject
   domwindow.data = data

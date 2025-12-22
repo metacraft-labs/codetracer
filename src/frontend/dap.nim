@@ -50,6 +50,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtUpdatedCalltrace: "ct/updated-calltrace",
   CtLoadCalltraceSection: "ct/load-calltrace-section",
   CtCompleteMove: "ct/complete-move",
+  CtAckHandlingMove: "ct/ack-handling-move",
   DapStopped: "stopped",
   DapInitialized: "initialized",
   DapInitialize: "initialize",

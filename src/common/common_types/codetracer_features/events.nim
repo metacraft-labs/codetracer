@@ -94,3 +94,4 @@ type
     eventIndex*: int # index in the overall events sequence
     base64Encoded*: bool
     maxRRTicks*: int
+    opId*: int

@@ -274,6 +274,8 @@ pub struct Location {
     pub originating_instruction_address: i64,
     pub key: String,
     pub global_call_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<i64>,
 
     // for now not including most expansion-related fields
     // including this to make sure we don't pass undefined/null
@@ -306,6 +308,7 @@ impl Location {
             key: key.to_string(),
             global_call_key: global_call_key.to_string(),
             callstack_depth,
+            op_id: None,
 
             function_first: NO_POSITION,
             function_last: NO_POSITION,
@@ -330,6 +333,13 @@ pub struct MoveState {
     pub reset_flow: bool,
     pub stop_signal: RRGDBStopSignal,
     pub frame_info: FrameInfo,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct AckHandlingMove {
+    pub op_id: i64,
+    pub kind: String,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
@@ -698,6 +708,8 @@ pub struct ProgramEvent {
     pub base64_encoded: bool,
     #[serde(rename = "maxRRTicks")]
     pub max_rr_ticks: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<i64>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -733,6 +745,8 @@ pub struct FunctionLocation {
 pub struct SourceLocation {
     pub path: String,
     pub line: usize,
+    #[serde(rename = "opId", skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<i64>,
 }
 
 impl fmt::Display for SourceLocation {
@@ -746,6 +760,8 @@ pub struct SourceCallJumpTarget {
     pub path: String,
     pub line: usize,
     pub token: String,
+    #[serde(rename = "opId", skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<i64>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1643,6 +1659,8 @@ pub struct LocalStepJump {
     pub first_loop_line: i64,
     pub rr_ticks: i64,
     pub reverse: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<i64>,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]

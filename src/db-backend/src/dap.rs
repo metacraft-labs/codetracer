@@ -283,6 +283,17 @@ impl DapClient {
         }))
     }
 
+    pub fn ack_handling_move_event(&mut self, ack: &task::AckHandlingMove) -> DapResult<DapMessage> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/ack-handling-move".to_string(),
+            body: serde_json::to_value(ack)?,
+        }))
+    }
+
     pub fn loaded_terminal_event(&mut self, events: Vec<task::ProgramEvent>) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
