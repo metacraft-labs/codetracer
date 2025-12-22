@@ -186,7 +186,7 @@
     "editorBracketHighlight.foreground5": "#8B5CF6",
     "editorBracketHighlight.foreground6": "#3B82F6",
     "editor.foreground": "#CDD6DF",
-    "editor.background": "#1F2124",
+    "editor.background": "#2c2c2c",
     "editor.selectionBackground": "#3a3a3ab3",
     "editor.lineHighlightBackground": "#3A3A3AB3",
     "editorWhitespace.foreground": "#65737e",
