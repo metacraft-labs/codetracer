@@ -1992,9 +1992,12 @@ mod tests {
     use std::env;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
+    use std::time::Duration;
 
     use super::*;
     // use crate::event_db;
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
     use crate::lang;
     use crate::task;
     use crate::task::{gen_task_id, GlobalCallLineIndex};
@@ -2032,6 +2035,34 @@ mod tests {
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
         assert!(!handler.breakpoints.is_empty());
+    }
+
+    #[test]
+    fn test_load_memory_range_placeholder() -> Result<(), Box<dyn Error>> {
+        let db = setup_db();
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
+        let (sender, receiver) = mpsc::channel();
+        let request = dap::Request {
+            command: "ct/load-memory-range".to_string(),
+            ..Default::default()
+        };
+        let args = task::CtLoadMemoryRangeArguments { address: 0, length: 8 };
+
+        handler.load_memory_range(request, args, sender)?;
+
+        let message = receiver.recv_timeout(Duration::from_secs(1))?;
+        let response = match message {
+            DapMessage::Response(response) => response,
+            other => return Err(format!("unexpected dap message: {other:?}").into()),
+        };
+        let body: task::CtLoadMemoryRangeResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.start_address, 0);
+        assert_eq!(body.length, 8);
+        assert_eq!(body.state, task::MemoryRangeState::Loaded);
+        assert!(body.error.is_empty());
+        let decoded = STANDARD.decode(body.bytes_base64)?;
+        assert_eq!(decoded, vec![0u8; 8]);
+        Ok(())
     }
 
     // Test single tracepoint
