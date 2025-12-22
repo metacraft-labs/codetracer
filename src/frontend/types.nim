@@ -806,6 +806,7 @@ type
     messages*: JsAssoc[cstring, AgentMessage]
     messageOrder*: seq[cstring]
     isLoading*: bool
+    reRecordInProgress*: bool
     wantsPassword*: bool
     wantsPermission*: bool
     wasCancelled*: bool
