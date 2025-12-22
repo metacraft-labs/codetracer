@@ -1546,17 +1546,18 @@ impl Handler {
 
             self.complete_move(false, sender)?;
         } else {
-            // trying to do a reverse step-out and forward step-in again
-            //   to go back to the beginning of a call
-            //   and then `n` next-s to the `n-th` step count
-            //   (not sure if always equivalent: we might skip next-s in flow preloading?)
-            self.replay.step(Action::StepOut, false)?;
-            self.replay.step(Action::StepIn, true)?;
-            for _i in 0..arg.step_count {
-                self.replay.step(Action::Next, true)?;
-            }
-            self.complete_move(false, sender)?;
-            // warn!("local_step_jump not implemented for RR traces");
+            // TODO?
+            // // trying to do a reverse step-out and forward step-in again
+            // //   to go back to the beginning of a call
+            // //   and then `n` next-s to the `n-th` step count
+            // //   (not sure if always equivalent: we might skip next-s in flow preloading?)
+            // self.replay.step(Action::StepOut, false)?;
+            // self.replay.step(Action::StepIn, true)?;
+            // for _i in 0..arg.step_count {
+            //     self.replay.step(Action::Next, true)?;
+            // }
+            // self.complete_move(false, sender)?;
+            warn!("local_step_jump not implemented for RR traces");
         }
         Ok(())
     }
