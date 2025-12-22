@@ -90,6 +90,7 @@
     border-radius: 6px
     padding-right: 8px
     white-space: nowrap
+    text-overflow: ellipsis
     height: 28px
     margin-right: 6px
 
@@ -101,11 +102,11 @@
       width: 28px
       height: 28px
       margin-right: 4px
-    
+
   .new-agent-instance
-    background-image: ADD_TO_SCRATCHPAD_BUTTON_IMAGE
+    background-image: RERECORD_AGENT_IMAGE
     min-width: 28px
-    background-size: 26px, 26px
+    background-size: 14px, 8px
     background-position: center
     background-repeat: no-repeat
 
@@ -133,7 +134,7 @@
     height: 28px
     min-width: 28px
     border-radius: 6px
-    background-color:#b91c1c
+    background-color: ACTIVE_ROW
     background-image: COMMAND_PALETTE_STOP_MSG_IMG
     background-repeat: no-repeat
     background-size: 16px
@@ -141,7 +142,7 @@
     cursor: pointer
 
     &:hover
-      background-color: #dc2626 !important
+      opacity: 0.7 !important
 
 .agent-model-img
   height: 24px
