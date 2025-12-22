@@ -481,12 +481,19 @@ method render*(self: AgentActivityComponent): VNode =
           autoResizeTextarea(inputId)
       )
       tdiv(class="agent-buttons-container"):
-        tdiv(
-          class="agent-button new-agent-instance",
-          onclick = proc =
-            let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
-            data.runTests(options)
-        )
+        if not self.reRecordInProgress:
+          tdiv(
+            class="agent-button new-agent-instance",
+            onclick = proc =
+              let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+              self.reRecordInProgress = true
+              data.runTests(options)
+              redrawAll()
+          )
+        else:
+          tdiv(
+            class="agent-button agent-progress-loading"
+          )
         tdiv(
           class="agent-button",
           onclick = proc =
