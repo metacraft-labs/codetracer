@@ -37,6 +37,7 @@ use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
+const PLACEHOLDER_LOCAL_SIZE: i64 = 8;
 
 #[derive(Debug)]
 pub struct Handler {
@@ -1960,7 +1961,7 @@ impl Handler {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.db.to_ct_value(&v.value),
                 address: NO_ADDRESS,
-                size: 0,
+                size: PLACEHOLDER_LOCAL_SIZE,
             })
             .collect();
 

@@ -122,6 +122,7 @@ method render*(self: StateComponent): VNode =
         showInline: JsAssoc[cstring, bool]{},
         baseExpression: name,
         baseAddress: localVariable.address,
+        baseSize: localVariable.size,
         stateID: self.id,
         id: self.values.len,
         data: self.data,
@@ -136,6 +137,7 @@ method render*(self: StateComponent): VNode =
 
     # ensure it's updated so we show history for the right, maybe differrent expression
     self.values[name].baseAddress = localVariable.address
+    self.values[name].baseSize = localVariable.size
   
     for key, history in self.valueHistory:
       if cstring($self.values[name].baseAddress) == key:

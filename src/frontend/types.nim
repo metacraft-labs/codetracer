@@ -636,6 +636,7 @@ type
     baseValue*:          Value
     baseExpression*:     cstring
     baseAddress*:        int
+    baseSize*:           int
     charts*:             JsAssoc[cstring, ChartComponent]
     i*:                  int
     fresh*:              bool

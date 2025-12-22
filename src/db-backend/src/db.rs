@@ -26,6 +26,7 @@ use crate::task::{
 use crate::value::{Type, Value, ValueRecordWithType};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
+const PLACEHOLDER_LOCAL_SIZE: i64 = 8;
 const MAX_MEMORY_RANGE_BYTES: i64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -1181,7 +1182,7 @@ impl Replay for DbReplay {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.to_value_record_with_type(&v.value),
                 address: NO_ADDRESS,
-                size: 0,
+                size: PLACEHOLDER_LOCAL_SIZE,
                 // &self.db.to_ct_value(&v.value),
             })
             .collect();
@@ -1198,7 +1199,7 @@ impl Replay for DbReplay {
                     expression: self.db.variable_name(*variable_id).to_string(),
                     value: self.to_value_record_with_type(&value),
                     address: NO_ADDRESS,
-                    size: 0,
+                    size: PLACEHOLDER_LOCAL_SIZE,
                 }
             })
             .collect();
