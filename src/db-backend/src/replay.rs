@@ -5,8 +5,8 @@ use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
-    ProgramEvent, VariableWithRecord,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, CtLoadMemoryRangeArguments, CtLoadMemoryRangeResponseBody,
+    Events, HistoryResultWithRecord, LoadHistoryArg, Location, ProgramEvent, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -16,6 +16,10 @@ pub trait Replay: std::fmt::Debug {
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>>;
+    fn load_memory_range(
+        &mut self,
+        arg: CtLoadMemoryRangeArguments,
+    ) -> Result<CtLoadMemoryRangeResponseBody, Box<dyn Error>>;
 
     // currently depth_limit, lang only used for rr!
     // for db returning full values in their existing form

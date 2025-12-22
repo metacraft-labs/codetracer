@@ -17,8 +17,9 @@ use crate::paths::ct_rr_worker_socket_path;
 use crate::query::CtRRQuery;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
-    ProgramEvent, VariableWithRecord, NO_STEP_ID,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, CtLoadMemoryRangeArguments,
+    CtLoadMemoryRangeResponseBody, Events, HistoryResultWithRecord, LoadHistoryArg, Location, ProgramEvent,
+    VariableWithRecord, NO_STEP_ID,
 };
 use crate::value::ValueRecordWithType;
 
@@ -221,6 +222,13 @@ impl Replay for RRDispatcher {
         let res =
             serde_json::from_str::<Vec<VariableWithRecord>>(&self.stable.run_query(CtRRQuery::LoadLocals { arg })?)?;
         Ok(res)
+    }
+
+    fn load_memory_range(
+        &mut self,
+        _arg: CtLoadMemoryRangeArguments,
+    ) -> Result<CtLoadMemoryRangeResponseBody, Box<dyn Error>> {
+        Err("memory range loading is not supported for rr traces yet".into())
     }
 
     fn load_value(

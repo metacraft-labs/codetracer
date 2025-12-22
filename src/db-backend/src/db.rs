@@ -17,8 +17,9 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
-    LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION,
+    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, CtLoadMemoryRangeArguments,
+    CtLoadMemoryRangeResponseBody, Events, HistoryResultWithRecord, LoadHistoryArg, Location, ProgramEvent, RRTicks,
+    VariableWithRecord, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION,
 };
 use crate::value::{Type, Value, ValueRecordWithType};
 
@@ -1211,6 +1212,13 @@ impl Replay for DbReplay {
         locals.dedup_by(|a, b| a.expression == b.expression);
 
         Ok(locals)
+    }
+
+    fn load_memory_range(
+        &mut self,
+        _arg: CtLoadMemoryRangeArguments,
+    ) -> Result<CtLoadMemoryRangeResponseBody, Box<dyn Error>> {
+        Err("memory range loading is not supported for db replay yet".into())
     }
 
     // currently depth_limit, lang only used for rr!

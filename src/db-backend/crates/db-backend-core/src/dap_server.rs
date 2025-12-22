@@ -4,9 +4,10 @@ use crate::db::Db;
 use crate::handler::Handler;
 use crate::paths::CODETRACER_PATHS;
 use crate::task::{
-    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments, CtLoadFlowArguments, FunctionLocation,
-    LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
-    StepArg, Task, TaskKind, TracepointId, UpdateTableArgs,
+    gen_task_id, Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadLocalsArguments,
+    CtLoadMemoryRangeArguments, CtLoadFlowArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location,
+    ProgramEvent, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Task, TaskKind, TracepointId,
+    UpdateTableArgs,
 };
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use log::{error, info, warn};
@@ -145,6 +146,9 @@ fn handle_request<W: Write>(
         "variables" => handler.variables(req.clone(), req.load_args::<dap_types::VariablesArguments>()?)?,
         "restart" => handler.run_to_entry(req.clone())?,
         "ct/load-locals" => handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?)?,
+        "ct/load-memory-range" => {
+            handler.load_memory_range(req.clone(), req.load_args::<CtLoadMemoryRangeArguments>()?)?
+        }
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?)?,
         "ct/event-load" => handler.event_load(req.clone())?,
         "ct/load-terminal" => handler.load_terminal(req.clone())?,

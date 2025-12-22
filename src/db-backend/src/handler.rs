@@ -403,6 +403,28 @@ impl Handler {
         // Ok(())
     }
 
+    pub fn load_memory_range(
+        &mut self,
+        req: dap::Request,
+        args: task::CtLoadMemoryRangeArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let start_address = args.address;
+        let length = args.length;
+        let response = match self.replay.load_memory_range(args) {
+            Ok(payload) => payload,
+            Err(err) => task::CtLoadMemoryRangeResponseBody {
+                start_address,
+                length,
+                bytes_base64: String::new(),
+                state: task::MemoryRangeState::Error,
+                error: err.to_string(),
+            },
+        };
+        self.respond_dap(req, response, sender)?;
+        Ok(())
+    }
+
     // pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
     //     let callstack: Vec<Call> = self
     //         .calltrace
