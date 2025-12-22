@@ -80,6 +80,40 @@ response behavior per command.
 | `ct/loaded-terminal` | `Vec<ProgramEvent>` | Filtered stdout write events. |
 | `ct/notification` | `Notification` | UI notification payload. |
 
+## Rust client example
+
+Simple `load_flow` usage with the Rust DAP wrapper:
+
+```rust
+use db_backend::dap_client::{CtBackendDapWrapper, CtDapEvent, CtLaunchOptions};
+use db_backend::dap_types::InitializeRequestArguments;
+use db_backend::task::{CtLoadFlowArguments, FlowMode, Location};
+
+let trace_path = std::path::PathBuf::from("/tmp/trace");
+let ct_backend = CtBackendDapWrapper::new().expect("dap start");
+
+let init_args = InitializeRequestArguments {
+    adapter_id: "codetracer".to_string(),
+    ..Default::default()
+};
+ct_backend.initialize(init_args).expect("initialize");
+ct_backend
+    .launch(trace_path, CtLaunchOptions::default())
+    .expect("launch");
+
+ct_backend
+    .on(CtDapEvent::LoadedFlow, |event| {
+        println!("event {event:?}");
+    })
+    .expect("subscribe");
+
+let flow_args = CtLoadFlowArguments {
+    flow_mode: FlowMode::Call,
+    location: Location::default(),
+};
+ct_backend.load_flow(flow_args).expect("load flow");
+```
+
 ## Type Reference (Custom)
 
 Types live in `src/db-backend/src/task.rs` unless noted.
