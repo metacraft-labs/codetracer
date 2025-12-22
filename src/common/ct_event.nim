@@ -6,6 +6,8 @@ type
     CtSubscribe,
     CtLoadLocals,
     CtLoadLocalsResponse,
+    CtLoadMemoryRange,
+    CtLoadMemoryRangeResponse,
     CtUpdatedCalltrace,
     CtLoadCalltraceSection,
     CtCompleteMove,
@@ -82,4 +84,3 @@ type
   CtEvent*[T] = ref object
     kind*: CtEventKind
     value: T
-

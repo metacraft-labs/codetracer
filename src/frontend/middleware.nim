@@ -100,6 +100,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
 
   dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
   dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
+  dapApi.on(CtLoadMemoryRangeResponse, proc(kind: CtEventKind, value: CtLoadMemoryRangeResponseBody) =
+    viewsApi.emit(CtLoadMemoryRangeResponse, value))
   dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
   dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
   dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
@@ -160,6 +162,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(CtReverseStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   
   viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtLoadMemoryRange, proc(kind: CtEventKind, value: CtLoadMemoryRangeArguments, sub: Subscriber) =
+    dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadCalltraceSection, proc(kind: CtEventKind, value: CalltraceLoadArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtEventLoad, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))

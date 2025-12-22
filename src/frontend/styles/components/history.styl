@@ -148,6 +148,35 @@
       content: '';
       position: absolute;
       left: -14px
+
+.toggle-memory-view
+  background-image: HISTORY_VALUE_VIEW_TOGGLE_IMAGE
+  background-size: 10px 10px
+  background-position: center
+  background-repeat: no-repeat
+  display: inline-block
+  height: 16px
+  min-width: 16px
+  margin-left: 6px
+  transform: translateY(3px)
+  padding: 2px
+  border-radius: 100px
+  cursor: pointer
+  outline: 1px solid HISTORY_TOGGLE_ACTIVE_OUTLINE
+
+  &:hover > .custom-tooltip
+    opacity: 1
+    visibility: visible
+    transition-delay: TOOLTIP_DELAY_TIMER
+
+  .custom-tooltip
+    top: -30%
+    left: 120%
+
+    &:after
+      content: '';
+      position: absolute;
+      left: -14px
       top: 20%
       border-width: 8px
       border-style: solid

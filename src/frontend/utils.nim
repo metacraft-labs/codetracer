@@ -588,6 +588,22 @@ proc makeStepListComponent*(data: Data, id: int): StepListComponent =
     service: data.services.flow)
   data.registerComponent(result, Content.StepList)
 
+proc makeMemoryViewComponent*(data: Data, id: int): MemoryViewComponent =
+  result = MemoryViewComponent(
+    id: id,
+    rangeStart: 0,
+    rangeEnd: 0,
+    bytesPerRow: 16,
+    rowCount: 8,
+    loading: false,
+    bytes: @[],
+    state: MemoryRangeLoaded,
+    error: cstring"",
+    highlightStart: 0,
+    highlightLength: 0
+  )
+  data.registerComponent(result, Content.MemoryView)
+
 data.ui = Components(
   editors: JsAssoc[cstring, EditorViewComponent]{},
   idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
@@ -634,6 +650,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.Shell:           data.makeShellComponent(id)
   of Content.StepList:        data.makeStepListComponent(id)
   of Content.LowLevelCode:    data.makeLowLevelCodeComponent(id)
+  of Content.MemoryView:      data.makeMemoryViewComponent(id)
   of Content.AgentActivity:   data.makeAgentActivityComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:

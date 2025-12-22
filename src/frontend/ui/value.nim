@@ -1,7 +1,8 @@
 import
   ui_imports,
   ../[ types, renderer, utils, communication, event_helpers],
-  ../../common/ct_event
+  ../../common/ct_event,
+  memory_view
 
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
@@ -1240,6 +1241,18 @@ proc view(
             ):
               tdiv(class = "custom-tooltip"):
                 text "Toggle history value"
+            span(
+              class = "toggle-memory-view",
+              onmousedown = proc(ev: Event, tg: VNode) =
+                if cast[MouseEvent](ev).button == 0 and
+                    self.data.ui.componentMapping[Content.MemoryView].len > 0:
+                  let memoryView = MemoryViewComponent(self.data.ui.componentMapping[Content.MemoryView][0])
+                  let highlightSize = if self.baseSize > 0: self.baseSize else: 0
+                  let highlightStart = if self.baseAddress == NO_ADDRESS: 0 else: self.baseAddress
+                  memoryView.highlightRange(highlightStart, highlightSize)
+            ):
+              tdiv(class = "custom-tooltip"):
+                text "Highlight in memory view"
       tdiv():
         var s: VStyle
 
@@ -1267,6 +1280,18 @@ proc view(
         ):
           tdiv(class = "custom-tooltip"):
             text "Toggle history value"
+        span(
+          class = "toggle-memory-view",
+          onmousedown = proc(ev: Event, tg: VNode) =
+            if cast[MouseEvent](ev).button == 0 and
+                self.data.ui.componentMapping[Content.MemoryView].len > 0:
+              let memoryView = MemoryViewComponent(self.data.ui.componentMapping[Content.MemoryView][0])
+              let highlightSize = if self.baseSize > 0: self.baseSize else: 0
+              let highlightStart = if self.baseAddress == NO_ADDRESS: 0 else: self.baseAddress
+              memoryView.highlightRange(highlightStart, highlightSize)
+        ):
+          tdiv(class = "custom-tooltip"):
+            text "Highlight in memory view"
       if value.partiallyExpanded and self.uiExpanded(value, expression):
         button(
           class = "value-load-more-button",

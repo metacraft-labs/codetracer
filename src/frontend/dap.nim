@@ -47,6 +47,8 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtSubscribe: "",
   CtLoadLocals: "ct/load-locals",
   CtLoadLocalsResponse: "",
+  CtLoadMemoryRange: "ct/load-memory-range",
+  CtLoadMemoryRangeResponse: "",
   CtUpdatedCalltrace: "ct/updated-calltrace",
   CtLoadCalltraceSection: "ct/load-calltrace-section",
   CtCompleteMove: "ct/complete-move",
@@ -122,6 +124,7 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # TODO: based on $kind? or mapping?
   case kind:
   of CtLoadLocals: CtLoadLocalsResponse
+  of CtLoadMemoryRange: CtLoadMemoryRangeResponse
   of DapInitialize: DapInitializeResponse
   of DapLaunch: DapLaunchResponse
   of DapStepIn: DapStepInResponse
@@ -147,6 +150,7 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   # or some common mapping?
   case $command:
   of "ct/load-locals": CtLoadLocalsResponse
+  of "ct/load-memory-range": CtLoadMemoryRangeResponse
   of "initialize": DapInitializeResponse
   of "launch": DapLaunchResponse
   of "configurationDone": DapConfigurationDoneResponse

@@ -81,6 +81,22 @@ type
   CtLoadLocalsResponseBody* = ref object
     locals*: seq[Variable]
 
+  MemoryRangeState* = enum
+    MemoryRangeLoaded,
+    MemoryRangeUnmapped,
+    MemoryRangeError
+
+  CtLoadMemoryRangeArguments* = ref object
+    address*: int
+    length*: int
+
+  CtLoadMemoryRangeResponseBody* = ref object
+    startAddress*: int
+    length*: int
+    bytesBase64*: langstring
+    state*: MemoryRangeState
+    error*: langstring
+
   CtUpdatedTableResponseBody* = ref object
     tableUpdate*: TableUpdate
 
@@ -91,3 +107,4 @@ type
     # for db-backend for now NO_ADDRESS
     # used mostly for RR
     address*: int
+    size*: int

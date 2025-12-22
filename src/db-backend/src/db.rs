@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,12 +19,15 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::Replay;
 use crate::task::{
-    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
-    LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION,
+    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, CtLoadMemoryRangeArguments,
+    CtLoadMemoryRangeResponseBody, Events, HistoryResultWithRecord, LoadHistoryArg, Location, MemoryRangeState,
+    ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION,
 };
 use crate::value::{Type, Value, ValueRecordWithType};
 
 const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
+const PLACEHOLDER_LOCAL_SIZE: i64 = 8;
+const MAX_MEMORY_RANGE_BYTES: i64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -1177,6 +1182,7 @@ impl Replay for DbReplay {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.to_value_record_with_type(&v.value),
                 address: NO_ADDRESS,
+                size: PLACEHOLDER_LOCAL_SIZE,
                 // &self.db.to_ct_value(&v.value),
             })
             .collect();
@@ -1193,6 +1199,7 @@ impl Replay for DbReplay {
                     expression: self.db.variable_name(*variable_id).to_string(),
                     value: self.to_value_record_with_type(&value),
                     address: NO_ADDRESS,
+                    size: PLACEHOLDER_LOCAL_SIZE,
                 }
             })
             .collect();
@@ -1211,6 +1218,34 @@ impl Replay for DbReplay {
         locals.dedup_by(|a, b| a.expression == b.expression);
 
         Ok(locals)
+    }
+
+    fn load_memory_range(
+        &mut self,
+        arg: CtLoadMemoryRangeArguments,
+    ) -> Result<CtLoadMemoryRangeResponseBody, Box<dyn Error>> {
+        if arg.address < 0 {
+            return Err("memory range address must be non-negative".into());
+        }
+        if arg.length < 0 {
+            return Err("memory range length must be non-negative".into());
+        }
+        if arg.length > MAX_MEMORY_RANGE_BYTES {
+            return Err(format!(
+                "memory range length exceeds placeholder limit ({MAX_MEMORY_RANGE_BYTES} bytes)"
+            )
+            .into());
+        }
+        let length = arg.length as usize;
+        // Placeholder until db replay supports actual memory reads.
+        let bytes = vec![0u8; length];
+        Ok(CtLoadMemoryRangeResponseBody {
+            start_address: arg.address,
+            length: arg.length,
+            bytes_base64: STANDARD.encode(bytes),
+            state: MemoryRangeState::Loaded,
+            error: String::new(),
+        })
     }
 
     // currently depth_limit, lang only used for rr!

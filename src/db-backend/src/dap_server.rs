@@ -19,8 +19,8 @@ use crate::paths::CODETRACER_PATHS;
 use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
-    FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget,
-    SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
+    CtLoadMemoryRangeArguments, FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent,
+    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
@@ -296,6 +296,9 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         )?,
         "ct/load-locals" => {
             handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?, sender.clone())?
+        }
+        "ct/load-memory-range" => {
+            handler.load_memory_range(req.clone(), req.load_args::<CtLoadMemoryRangeArguments>()?, sender.clone())?
         }
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?, sender.clone())?,
         "ct/event-load" => handler.event_load(req.clone(), sender.clone())?,

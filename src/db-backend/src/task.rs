@@ -37,6 +37,35 @@ pub struct CtLoadLocalsResponseBody {
     pub locals: Vec<Variable>,
 }
 
+/// state of a memory range load operation
+#[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq, JsonSchema)]
+#[repr(u8)]
+pub enum MemoryRangeState {
+    #[default]
+    Loaded,
+    Unmapped,
+    Error,
+}
+
+/// args for `ct/load-memory-range`
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadMemoryRangeArguments {
+    pub address: i64,
+    pub length: i64,
+}
+
+/// response for `ct/load-memory-range`
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadMemoryRangeResponseBody {
+    pub start_address: i64,
+    pub length: i64,
+    pub bytes_base64: String,
+    pub state: MemoryRangeState,
+    pub error: String,
+}
+
 /// flow mode for flow preloader
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq, JsonSchema)]
 #[repr(u8)]
@@ -129,6 +158,8 @@ pub struct Variable {
     // for db traces: usually NO_ADDRESS = -1
     // used for now for rr traces
     pub address: i64,
+    #[serde(default)]
+    pub size: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +168,8 @@ pub struct VariableWithRecord {
     pub expression: String,
     pub value: ValueRecordWithType,
     pub address: i64,
+    #[serde(default)]
+    pub size: i64,
 }
 
 // pub struct ValueRecordAndType {
@@ -1208,6 +1241,7 @@ pub enum TaskKind {
     Step,
     Start,
     LoadLocals,
+    LoadMemoryRange,
     LoadCallstack,
     AddBreak,
     DeleteBreak,
@@ -1731,6 +1765,7 @@ pub fn to_task_kind(raw_task_kind: &str) -> Option<TaskKind> {
         "start" => Some(TaskKind::Start),
         "runToEntry" => Some(TaskKind::RunToEntry),
         "loadLocals" => Some(TaskKind::LoadLocals),
+        "loadMemoryRange" => Some(TaskKind::LoadMemoryRange),
         "loadCallstack" => Some(TaskKind::LoadCallstack),
         "collapseCalls" => Some(TaskKind::CollapseCalls),
         "expandCalls" => Some(TaskKind::ExpandCalls),
@@ -1766,6 +1801,7 @@ pub fn to_task_kind(raw_task_kind: &str) -> Option<TaskKind> {
         "run-to-entry" => Some(TaskKind::RunToEntry),
         "load-callstack" => Some(TaskKind::LoadCallstack),
         "load-locals" => Some(TaskKind::LoadLocals),
+        "load-memory-range" => Some(TaskKind::LoadMemoryRange),
         "load-flow" => Some(TaskKind::LoadFlow),
         "event-load" => Some(TaskKind::EventLoad),
         "register-events" => Some(TaskKind::RegisterEvents),

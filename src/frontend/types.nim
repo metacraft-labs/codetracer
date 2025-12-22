@@ -636,6 +636,7 @@ type
     baseValue*:          Value
     baseExpression*:     cstring
     baseAddress*:        int
+    baseSize*:           int
     charts*:             JsAssoc[cstring, ChartComponent]
     i*:                  int
     fresh*:              bool
@@ -815,6 +816,18 @@ type
     # totalStepsCount*: int
     # lastScrollFireTime*: int64
     service*: FlowService
+
+  MemoryViewComponent* = ref object of Component
+    rangeStart*: int
+    rangeEnd*: int
+    bytesPerRow*: int
+    rowCount*: int
+    loading*: bool
+    bytes*: seq[int]
+    state*: MemoryRangeState
+    error*: cstring
+    highlightStart*: int
+    highlightLength*: int
 
   LowLevelCodeComponent* = ref object of Component
     editor*: EditorViewComponent

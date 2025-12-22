@@ -37,6 +37,7 @@ use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
+const PLACEHOLDER_LOCAL_SIZE: i64 = 8;
 
 #[derive(Debug)]
 pub struct Handler {
@@ -393,6 +394,7 @@ impl Handler {
                 expression: l.expression.clone(),
                 value: to_ct_value(&l.value),
                 address: l.address,
+                size: l.size,
             })
             .collect();
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
@@ -401,6 +403,28 @@ impl Handler {
 
         // self.respond_dap(req, task::CtLoadLocalsResponseBody { locals })?;
         // Ok(())
+    }
+
+    pub fn load_memory_range(
+        &mut self,
+        req: dap::Request,
+        args: task::CtLoadMemoryRangeArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let start_address = args.address;
+        let length = args.length;
+        let response = match self.replay.load_memory_range(args) {
+            Ok(payload) => payload,
+            Err(err) => task::CtLoadMemoryRangeResponseBody {
+                start_address,
+                length,
+                bytes_base64: String::new(),
+                state: task::MemoryRangeState::Error,
+                error: err.to_string(),
+            },
+        };
+        self.respond_dap(req, response, sender)?;
+        Ok(())
     }
 
     // pub fn load_callstack(&mut self, task: Task) -> Result<(), Box<dyn Error>> {
@@ -1937,6 +1961,7 @@ impl Handler {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.db.to_ct_value(&v.value),
                 address: NO_ADDRESS,
+                size: PLACEHOLDER_LOCAL_SIZE,
             })
             .collect();
 
@@ -1970,9 +1995,12 @@ mod tests {
     use std::env;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
+    use std::time::Duration;
 
     use super::*;
     // use crate::event_db;
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
     use crate::lang;
     use crate::task;
     use crate::task::{gen_task_id, GlobalCallLineIndex};
@@ -2010,6 +2038,34 @@ mod tests {
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
         assert!(!handler.breakpoints.is_empty());
+    }
+
+    #[test]
+    fn test_load_memory_range_placeholder() -> Result<(), Box<dyn Error>> {
+        let db = setup_db();
+        let mut handler: Handler = Handler::new(TraceKind::DB, CtRRArgs::default(), Box::new(db));
+        let (sender, receiver) = mpsc::channel();
+        let request = dap::Request {
+            command: "ct/load-memory-range".to_string(),
+            ..Default::default()
+        };
+        let args = task::CtLoadMemoryRangeArguments { address: 0, length: 8 };
+
+        handler.load_memory_range(request, args, sender)?;
+
+        let message = receiver.recv_timeout(Duration::from_secs(1))?;
+        let response = match message {
+            DapMessage::Response(response) => response,
+            other => return Err(format!("unexpected dap message: {other:?}").into()),
+        };
+        let body: task::CtLoadMemoryRangeResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.start_address, 0);
+        assert_eq!(body.length, 8);
+        assert_eq!(body.state, task::MemoryRangeState::Loaded);
+        assert!(body.error.is_empty());
+        let decoded = STANDARD.decode(body.bytes_base64)?;
+        assert_eq!(decoded, vec![0u8; 8]);
+        Ok(())
     }
 
     // Test single tracepoint
