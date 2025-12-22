@@ -26,6 +26,8 @@ pub mod calltrace;
 pub mod core;
 
 pub mod dap;
+#[cfg(feature = "io-transport")]
+pub mod dap_client;
 pub mod dap_error;
 pub mod dap_server;
 pub mod dap_types;
