@@ -180,7 +180,8 @@ type
     aRestartBackendManager,
     aOpenTrace,          # Open existing trace file/folder
     aRecordNewTrace,     # Show record new trace dialog
-    aRecordFromLaunch    # Record using launch.json configuration
+    aRecordFromLaunch,   # Record using launch.json configuration
+    aMemoryView
 
   InputShortcutMap* = TableLike[langstring, langstring]
 
@@ -254,7 +255,8 @@ type
     CommandPalette = 32,
     StepList = 33,
     NoInfo = 34,
-    AgentActivity = 35
+    AgentActivity = 35,
+    MemoryView = 36
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

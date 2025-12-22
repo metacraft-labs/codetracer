@@ -123,6 +123,16 @@
                                     "content": 24
                                 },
                                 "title": "genericUiComponent"
+                            },
+                            {
+                                "type": "component",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
+                                    "label": "memoryViewComponent-0",
+                                    "content": 36
+                                },
+                                "title": "genericUiComponent"
                             }
                         ]
                     }

@@ -5,7 +5,7 @@ import
       state, calltrace, loading, start, menu,
       debug, flow, filesystem, value, repl,
       build, welcome_screen, point_list, scratchpad,
-      trace_log, calltrace_editor, terminal_output, shell,
+      trace_log, calltrace_editor, terminal_output, memory_view, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code],
   lib/[ jslib ],
   types, lang, utils, renderer, config, dap,
@@ -299,6 +299,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Calltrace", aFullCalltrace
           element "State", aState
           element "Event Log", aEventLog
+          element "Memory View", aMemoryView
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
           element "Agent Activity", aAgentActivity
@@ -2194,6 +2195,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc = data.openTraceDialog(),
   proc = data.showRecordNewTraceDialog(),
   proc = data.recordFromLaunchConfig(),
+  proc = data.openLayoutTab(Content.MemoryView),
 ]
 
 data.actions = actions
