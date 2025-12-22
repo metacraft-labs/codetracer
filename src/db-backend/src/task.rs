@@ -158,6 +158,8 @@ pub struct Variable {
     // for db traces: usually NO_ADDRESS = -1
     // used for now for rr traces
     pub address: i64,
+    #[serde(default)]
+    pub size: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +168,8 @@ pub struct VariableWithRecord {
     pub expression: String,
     pub value: ValueRecordWithType,
     pub address: i64,
+    #[serde(default)]
+    pub size: i64,
 }
 
 // pub struct ValueRecordAndType {

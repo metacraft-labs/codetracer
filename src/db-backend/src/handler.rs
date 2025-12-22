@@ -393,6 +393,7 @@ impl Handler {
                 expression: l.expression.clone(),
                 value: to_ct_value(&l.value),
                 address: l.address,
+                size: l.size,
             })
             .collect();
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
@@ -1959,6 +1960,7 @@ impl Handler {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.db.to_ct_value(&v.value),
                 address: NO_ADDRESS,
+                size: 0,
             })
             .collect();
 

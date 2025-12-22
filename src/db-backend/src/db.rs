@@ -1181,6 +1181,7 @@ impl Replay for DbReplay {
                 expression: self.db.variable_name(v.variable_id).to_string(),
                 value: self.to_value_record_with_type(&v.value),
                 address: NO_ADDRESS,
+                size: 0,
                 // &self.db.to_ct_value(&v.value),
             })
             .collect();
@@ -1197,6 +1198,7 @@ impl Replay for DbReplay {
                     expression: self.db.variable_name(*variable_id).to_string(),
                     value: self.to_value_record_with_type(&value),
                     address: NO_ADDRESS,
+                    size: 0,
                 }
             })
             .collect();

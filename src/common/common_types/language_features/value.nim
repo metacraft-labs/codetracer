@@ -107,3 +107,4 @@ type
     # for db-backend for now NO_ADDRESS
     # used mostly for RR
     address*: int
+    size*: int
