@@ -142,8 +142,7 @@ var buttons = JsAssoc[cstring, VNode]{
   "jump-before": buildHtml(img(src="public/resources/debug/jump-before_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
   "jump-after": buildHtml(img(src="public/resources/debug/jump-after_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
   "run-to-entry": buildHtml(img(src="public/resources/debug/run_to_entry_dark.svg", height="20px", width="18px", class="debug-button-svg")),
-  # TODO: separate icon!
-  "run-tests": buildHtml(img(src="public/resources/debug/continue_dark.svg", height="16px", width="28px", class="debug-button-svg"))
+  "run-tests": buildHtml(img(src="public/resources/shared/run_test_img.svg", height="12px", width="18px", class="debug-button-svg"))
  }
 
 let shortcuts = JsAssoc[cstring, cstring]{
