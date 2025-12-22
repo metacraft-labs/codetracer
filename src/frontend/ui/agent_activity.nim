@@ -489,6 +489,13 @@ method render*(self: AgentActivityComponent): VNode =
               self.reRecordInProgress = true
               data.runTests(options)
               redrawAll()
+              # TODO: For now only for the demo hardcode before
+              #       we figure out how to check when the other process has started
+              discard setTimeout(proc() =
+                self.reRecordInProgress = false
+                redrawAll(),
+                10000
+              )
           )
         else:
           tdiv(
