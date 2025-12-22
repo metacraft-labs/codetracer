@@ -827,6 +827,10 @@ type
     error*: cstring
     highlightStart*: int
     highlightLength*: int
+    cache*: JsAssoc[int, seq[int]]
+    cacheOrder*: seq[int]
+    lastRequestedStart*: int
+    searchValue*: cstring
 
   LowLevelCodeComponent* = ref object of Component
     editor*: EditorViewComponent

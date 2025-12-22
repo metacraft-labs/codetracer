@@ -600,7 +600,11 @@ proc makeMemoryViewComponent*(data: Data, id: int): MemoryViewComponent =
     state: MemoryRangeLoaded,
     error: cstring"",
     highlightStart: 0,
-    highlightLength: 0
+    highlightLength: 0,
+    cache: JsAssoc[int, seq[int]]{},
+    cacheOrder: @[],
+    lastRequestedStart: -1,
+    searchValue: cstring""
   )
   data.registerComponent(result, Content.MemoryView)
 

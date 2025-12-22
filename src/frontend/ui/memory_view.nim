@@ -5,6 +5,9 @@ import ../../common/ct_event
 const
   DEFAULT_BYTES_PER_ROW = 16
   DEFAULT_ROW_COUNT = 8
+  ROW_HEIGHT_PX = 24
+  OVERSCAN_ROWS = 4
+  CACHE_MAX_ENTRIES = 32
 
 proc decodeBytes(base64Value: cstring): seq[int] =
   if base64Value.len == 0:
@@ -15,17 +18,60 @@ proc decodeBytes(base64Value: cstring): seq[int] =
     result[i] = ord(ch)
 
 proc requestRange(self: MemoryViewComponent) =
-  if self.loading or self.api.isNil:
+  if self.api.isNil:
     return
   let length = self.bytesPerRow * self.rowCount
   if length <= 0:
     return
+  if self.cache.hasKey(self.rangeStart):
+    self.bytes = self.cache[self.rangeStart]
+    return
+  if self.loading and self.lastRequestedStart == self.rangeStart:
+    return
   self.rangeEnd = self.rangeStart + length
   self.loading = true
+  self.lastRequestedStart = self.rangeStart
   self.api.emit(CtLoadMemoryRange, CtLoadMemoryRangeArguments(
     address: self.rangeStart,
     length: length
   ))
+
+proc updateRangeFromScroll(self: MemoryViewComponent) =
+  let scrollNode = document.getElementById(cstring(fmt"memory-view-scroll-{self.id}"))
+  if scrollNode.isNil:
+    return
+  let scrollTop = cast[int](scrollNode.toJs.scrollTop)
+  let firstRow = if scrollTop > 0: scrollTop div ROW_HEIGHT_PX else: 0
+  let startRow = if firstRow > OVERSCAN_ROWS: firstRow - OVERSCAN_ROWS else: 0
+  let newStart = startRow * self.bytesPerRow
+  if newStart != self.rangeStart:
+    self.rangeStart = newStart
+    self.requestRange()
+
+proc parseSearchAddress(value: cstring): int =
+  let raw = ($value).strip
+  if raw.len == 0:
+    return NO_ADDRESS
+  try:
+    var token = raw
+    if token.len > 2 and (token.startsWith("0x") or token.startsWith("0X")):
+      token = token[2..^1]
+    if token.len == 0:
+      return NO_ADDRESS
+    return parseHexInt(token)
+  except:
+    return NO_ADDRESS
+
+proc applySearch(self: MemoryViewComponent) =
+  let addr = parseSearchAddress(self.searchValue)
+  if addr == NO_ADDRESS:
+    self.error = cstring"Invalid address"
+    self.redraw()
+    return
+  self.error = cstring""
+  self.rangeStart = addr
+  self.requestRange()
+  self.redraw()
 
 proc highlightRange*(self: MemoryViewComponent, startAddress: int, length: int) =
   self.highlightStart = startAddress
@@ -63,7 +109,15 @@ method register*(self: MemoryViewComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtLoadMemoryRangeResponse, proc(kind: CtEventKind, response: CtLoadMemoryRangeResponseBody, sub: Subscriber) =
     self.rangeStart = response.startAddress
     self.rangeEnd = response.startAddress + response.length
-    self.bytes = decodeBytes(response.bytesBase64)
+    let bytes = decodeBytes(response.bytesBase64)
+    self.bytes = bytes
+    if not self.cache.hasKey(response.startAddress):
+      self.cacheOrder.add(response.startAddress)
+    self.cache[response.startAddress] = bytes
+    if self.cacheOrder.len > CACHE_MAX_ENTRIES:
+      let evictKey = self.cacheOrder[0]
+      self.cacheOrder.delete(0, 0)
+      self.cache.del(evictKey)
     self.state = response.state
     self.error = response.error
     self.loading = false
@@ -97,12 +151,33 @@ method render*(self: MemoryViewComponent): VNode =
         text cstring(fmt"bytes/row: {bytesPerRow}")
       span(class = "memory-view-control"):
         text cstring(fmt"rows: {rows}")
+      tdiv(class = "memory-view-search"):
+        input(
+          `type`="text",
+          value = self.searchValue,
+          placeholder = "0x0000",
+          oninput = proc(ev: Event, tg: VNode) =
+            self.searchValue = ev.target.toJs.value.to(cstring)
+        )
+        button(
+          class = "memory-view-search-button",
+          onmousedown = proc(ev: Event, tg: VNode) =
+            if cast[MouseEvent](ev).button == 0:
+              self.applySearch()
+        ):
+          text "Go"
       if self.error.len > 0:
         span(class = "memory-view-error"):
           text self.error
-    tdiv(class = "memory-view-grid"):
-      for rowIndex in 0..<rows:
-        placeholderRowView(self, rowIndex)
+    tdiv(
+      id = cstring(fmt"memory-view-scroll-{self.id}"),
+      class = "memory-view-scroll",
+      onscroll = proc(ev: Event, tg: VNode) =
+        self.updateRangeFromScroll()
+    ):
+      tdiv(class = "memory-view-grid"):
+        for rowIndex in 0..<rows:
+          placeholderRowView(self, rowIndex)
 
 proc registerMemoryViewComponent*(component: MemoryViewComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)

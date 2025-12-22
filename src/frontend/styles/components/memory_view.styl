@@ -6,6 +6,7 @@
   background: linear-gradient(135deg, #0f141a 0%, #151a20 60%, #1c222b 100%)
   color: #d8dee9
   font-family: "SpaceGrotesk"
+  height: 100%
 
 .memory-view-header
   display: flex
@@ -32,12 +33,41 @@
   gap: 12px
   font-size: 12px
   color: #a5b0bf
+  align-items: center
+  flex-wrap: wrap
 
 .memory-view-control
   padding: 3px 8px
   background: rgba(255, 255, 255, 0.05)
   border: 1px solid rgba(255, 255, 255, 0.08)
   border-radius: 6px
+
+.memory-view-search
+  display: flex
+  gap: 6px
+  align-items: center
+
+  input
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 6px
+    color: #e6edf6
+    padding: 4px 8px
+    font-family: "FiraCode"
+    font-size: 12px
+    min-width: 120px
+
+.memory-view-search-button
+  background: rgba(255, 255, 255, 0.12)
+  border: 1px solid rgba(255, 255, 255, 0.2)
+  color: #e6edf6
+  border-radius: 6px
+  padding: 4px 10px
+  font-size: 12px
+  cursor: pointer
+
+  &:hover
+    background: rgba(255, 255, 255, 0.18)
 
 .memory-view-error
   color: #ff9b8a
@@ -51,11 +81,17 @@
   padding: 10px
   background: rgba(10, 12, 16, 0.6)
 
+.memory-view-scroll
+  flex: 1
+  min-height: 0
+  overflow-y: auto
+
 .memory-view-row
   display: grid
   grid-template-columns: 140px 1fr
   gap: 10px
   align-items: center
+  height: 24px
 
 .memory-view-address
   font-family: "FiraCode"
