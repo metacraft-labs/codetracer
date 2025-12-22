@@ -1245,11 +1245,11 @@ proc view(
               class = "toggle-memory-view",
               onmousedown = proc(ev: Event, tg: VNode) =
                 if cast[MouseEvent](ev).button == 0 and
-                    self.data.ui.componentMapping[Content.MemoryView].len > 0 and
-                    self.baseAddress != NO_ADDRESS:
+                    self.data.ui.componentMapping[Content.MemoryView].len > 0:
                   let memoryView = MemoryViewComponent(self.data.ui.componentMapping[Content.MemoryView][0])
                   let highlightSize = if self.baseSize > 0: self.baseSize else: 0
-                  memoryView.highlightRange(self.baseAddress, highlightSize)
+                  let highlightStart = if self.baseAddress == NO_ADDRESS: 0 else: self.baseAddress
+                  memoryView.highlightRange(highlightStart, highlightSize)
             ):
               tdiv(class = "custom-tooltip"):
                 text "Highlight in memory view"
@@ -1284,11 +1284,11 @@ proc view(
           class = "toggle-memory-view",
           onmousedown = proc(ev: Event, tg: VNode) =
             if cast[MouseEvent](ev).button == 0 and
-                self.data.ui.componentMapping[Content.MemoryView].len > 0 and
-                self.baseAddress != NO_ADDRESS:
+                self.data.ui.componentMapping[Content.MemoryView].len > 0:
               let memoryView = MemoryViewComponent(self.data.ui.componentMapping[Content.MemoryView][0])
               let highlightSize = if self.baseSize > 0: self.baseSize else: 0
-              memoryView.highlightRange(self.baseAddress, highlightSize)
+              let highlightStart = if self.baseAddress == NO_ADDRESS: 0 else: self.baseAddress
+              memoryView.highlightRange(highlightStart, highlightSize)
         ):
           tdiv(class = "custom-tooltip"):
             text "Highlight in memory view"
