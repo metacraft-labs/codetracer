@@ -658,10 +658,11 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor
-  var currentOptions = editorInstance.getOptions()
+  if not editorInstance.isNil:
+    var currentOptions = editorInstance.getOptions()
 
-  currentOptions["lineNumbers"] = proc(line: int): cstring = self.editorLineNumber(self.path, line)
-  editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
+    currentOptions["lineNumbers"] = proc(line: int): cstring = self.editorLineNumber(self.path, line)
+    editorInstance.updateOptions(cast[MonacoEditorOptions](currentOptions))
 
 proc toggleTraceState*(self: TraceComponent) =
   self.api.emit(CtTracepointToggle, TracepointId(id: self.id))
