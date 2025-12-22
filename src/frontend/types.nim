@@ -824,6 +824,8 @@ type
     bytes*: seq[int]
     state*: MemoryRangeState
     error*: cstring
+    highlightStart*: int
+    highlightLength*: int
 
   LowLevelCodeComponent* = ref object of Component
     editor*: EditorViewComponent

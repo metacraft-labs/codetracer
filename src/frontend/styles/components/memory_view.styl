@@ -1,0 +1,86 @@
+.memory-view
+  padding: 12px 14px
+  display: flex
+  flex-direction: column
+  gap: 10px
+  background: linear-gradient(135deg, #0f141a 0%, #151a20 60%, #1c222b 100%)
+  color: #d8dee9
+  font-family: "SpaceGrotesk"
+
+.memory-view-header
+  display: flex
+  align-items: baseline
+  justify-content: space-between
+  gap: 12px
+
+.memory-view-title
+  font-size: 16px
+  letter-spacing: 0.5px
+
+.memory-view-range
+  font-size: 12px
+  color: #9aa4b2
+
+.memory-view-status
+  font-size: 11px
+  color: #7fddb8
+  text-transform: uppercase
+  letter-spacing: 0.6px
+
+.memory-view-controls
+  display: flex
+  gap: 12px
+  font-size: 12px
+  color: #a5b0bf
+
+.memory-view-control
+  padding: 3px 8px
+  background: rgba(255, 255, 255, 0.05)
+  border: 1px solid rgba(255, 255, 255, 0.08)
+  border-radius: 6px
+
+.memory-view-error
+  color: #ff9b8a
+
+.memory-view-grid
+  display: flex
+  flex-direction: column
+  gap: 6px
+  border: 1px solid rgba(255, 255, 255, 0.08)
+  border-radius: 10px
+  padding: 10px
+  background: rgba(10, 12, 16, 0.6)
+
+.memory-view-row
+  display: grid
+  grid-template-columns: 140px 1fr
+  gap: 10px
+  align-items: center
+
+.memory-view-address
+  font-family: "FiraCode"
+  font-size: 12px
+  color: #b7c0cc
+
+.memory-view-bytes
+  display: grid
+  grid-auto-flow: column
+  grid-auto-columns: 20px
+  gap: 6px
+
+.memory-view-byte
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  height: 20px
+  border-radius: 4px
+  border: 1px solid rgba(255, 255, 255, 0.08)
+  background: rgba(255, 255, 255, 0.04)
+  font-family: "FiraCode"
+  font-size: 11px
+  color: #dce2ea
+
+.memory-view-byte-highlight
+  border-color: rgba(255, 199, 102, 0.7)
+  background: rgba(255, 199, 102, 0.22)
+  color: #ffe2a8

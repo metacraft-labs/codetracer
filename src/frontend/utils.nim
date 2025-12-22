@@ -598,7 +598,9 @@ proc makeMemoryViewComponent*(data: Data, id: int): MemoryViewComponent =
     loading: false,
     bytes: @[],
     state: MemoryRangeLoaded,
-    error: cstring""
+    error: cstring"",
+    highlightStart: 0,
+    highlightLength: 0
   )
   data.registerComponent(result, Content.MemoryView)
 

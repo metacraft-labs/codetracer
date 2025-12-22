@@ -27,6 +27,11 @@ proc requestRange(self: MemoryViewComponent) =
     length: length
   ))
 
+proc highlightRange*(self: MemoryViewComponent, startAddress: int, length: int) =
+  self.highlightStart = startAddress
+  self.highlightLength = length
+  self.redraw()
+
 proc placeholderRowView(self: MemoryViewComponent, rowIndex: int): VNode =
   let address = self.rangeStart + rowIndex * self.bytesPerRow
   let addressHex = toHex(address, 8)
@@ -38,12 +43,19 @@ proc placeholderRowView(self: MemoryViewComponent, rowIndex: int): VNode =
     tdiv(class = "memory-view-bytes"):
       for colIndex in 0..<self.bytesPerRow:
         let byteIndex = rowIndex * self.bytesPerRow + colIndex
+        let byteAddress = address + colIndex
+        let highlightEnd = self.highlightStart + self.highlightLength
+        let highlightActive =
+          self.highlightLength > 0 and
+          byteAddress >= self.highlightStart and
+          byteAddress < highlightEnd
         let byteValue =
           if byteIndex < self.bytes.len:
             cstring(toHex(self.bytes[byteIndex], 2))
           else:
-            cstring("..")
-        span(class = "memory-view-byte"):
+            cstring("00")
+        let highlightClass = if highlightActive: " memory-view-byte-highlight" else: ""
+        span(class = cstring("memory-view-byte" & highlightClass)):
           text byteValue
 
 method register*(self: MemoryViewComponent, api: MediatorWithSubscribers) =
