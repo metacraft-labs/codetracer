@@ -437,14 +437,19 @@ impl<'a> CallFlowPreloader<'a> {
             };
 
             if self.mode == FlowMode::Call && tracked_call_key != new_call_key || !progressing {
-                replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
-                let return_location = replay.load_location(&mut expr_loader)?;
                 let mut load_return_value = false;
-                // maybe this can be improved with a limited loop/jump to return/exit of call in the future
-                if let Ok(return_call_key) = self.call_key_from(&return_location) {
-                    if return_call_key == tracked_call_key {
-                        flow_view_update = self.add_return_value(flow_view_update, replay);
-                        load_return_value = true;
+
+                // for now return value loading not working well for RR!
+                //   should be fixed/improved in ct-rr-support
+                if self.trace_kind == TraceKind::DB {
+                    replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
+                    let return_location = replay.load_location(&mut expr_loader)?;
+                    // maybe this can be improved with a limited loop/jump to return/exit of call in the future
+                    if let Ok(return_call_key) = self.call_key_from(&return_location) {
+                        if return_call_key == tracked_call_key {
+                            flow_view_update = self.add_return_value(flow_view_update, replay);
+                            load_return_value = true;
+                        }
                     }
                 }
                 if !load_return_value {
