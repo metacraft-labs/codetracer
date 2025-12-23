@@ -609,6 +609,7 @@ type
     activeHistory*: cstring
     finished*: bool
     jumpHistory*: seq[JumpHistory]
+    isLoading*: bool
 
 
 

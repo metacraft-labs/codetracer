@@ -90,7 +90,14 @@ proc action(self: DebugComponent, id: string) =
   of "run-tests":
     # copied from alt+l shorcut handling in shortcuts.nim
     let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
+    self.isLoading = true
     data.runTests(options)
+    # TODO: For now hardcode the animation reset
+    discard setTimeout(proc() =
+      self.isLoading = false
+      redrawAll(),
+      10000
+    )
 
   of "history-back":
     self.handleHistoryJump(isForward = true)
@@ -142,7 +149,8 @@ var buttons = JsAssoc[cstring, VNode]{
   "jump-before": buildHtml(img(src="public/resources/debug/jump-before_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
   "jump-after": buildHtml(img(src="public/resources/debug/jump-after_16_dark.svg", height="16px", width="16px", class="debug-button-svg")),
   "run-to-entry": buildHtml(img(src="public/resources/debug/run_to_entry_dark.svg", height="20px", width="18px", class="debug-button-svg")),
-  "run-tests": buildHtml(img(src="public/resources/shared/run_test_img.svg", height="12px", width="18px", class="debug-button-svg"))
+  "run-tests": buildHtml(img(src="public/resources/shared/run_test_img.svg", height="12px", width="18px", class="debug-button-svg")),
+  "run-tests-loading": buildHtml(img(src="public/resources/shared/rerecord_animation.svg", height="18px", width="18px", class="debug-button-svg"))
  }
 
 let shortcuts = JsAssoc[cstring, cstring]{
@@ -353,7 +361,10 @@ method render*(self: DebugComponent): VNode =
         separateBar()
         debugButton("reset-operation", false) # not self.stableBusy)
         separateBar()
-        debugButton("run-tests")
+        if not self.isLoading:
+          debugButton("run-tests")
+        else:
+          debugButton("run-tests-loading")
         separateBar()
       else:
         debugStepButton("continue", Continue, false)
