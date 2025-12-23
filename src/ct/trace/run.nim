@@ -7,7 +7,7 @@ import std/[os, osproc, strformat, sequtils],
   record
 
 # run a recorded trace based on args, a saving project for it in the process
-# returns true only if it should restart
+# Note: This function does not return on POSIX (launchElectron uses execv)
 proc runRecordedTrace*(
   trace: Trace,
   test: bool,
@@ -15,7 +15,7 @@ proc runRecordedTrace*(
   structuredDiffPath: string = "",
   indexDiffPath: string = "",
   recordCore: bool = false
-): bool =
+) =
   var args = if test: @[$trace.id, "--test"] else: @[$trace.id]
   let traceStructuredDiffPath = trace.outputFolder / "diff.json"
   let traceIndexDiffPath = trace.outputFolder / "diff_index.json"
@@ -25,7 +25,7 @@ proc runRecordedTrace*(
     if existsFile(traceIndexDiffPath):
       args.add("--diff-index")
       args.add(traceIndexDiffPath)
-  return launchElectron(args, trace, ElectronLaunchMode.Default, recordCore, test)
+  launchElectron(args, trace, ElectronLaunchMode.Default, recordCore, test)
 
 
 proc runWithRestart(
@@ -77,14 +77,10 @@ proc runWithRestart(
                              program=program,
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:
-      let shouldRestart =
-        if not afterRestart:
-          # for now assume not a multitrace/no diff
-          # .. returns true if it should restart
-          runRecordedTrace(recordedTrace, test, structuredDiffPath="", indexDiffPath="", recordCore=recordCore)
-        else:
-          let process = startProcess(codetracerExe, args = @["replay", fmt"--id={recordedTrace.id}"], options = {poParentStreams})
-          waitForExit(process) == RESTART_EXIT_CODE
+      # Always spawn a subprocess for replay so the restart loop can work.
+      # (runRecordedTrace uses execv which never returns)
+      let process = startProcess(codetracerExe, args = @["replay", fmt"--id={recordedTrace.id}"], options = {poParentStreams})
+      let shouldRestart = waitForExit(process) == RESTART_EXIT_CODE
 
       if not shouldRestart:
         break

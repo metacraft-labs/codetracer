@@ -136,8 +136,6 @@ async function launchWelcomeScreen(): Promise<void> {
 
   cleanEnv.CODETRACER_IN_UI_TEST = "1";
   cleanEnv.CODETRACER_TEST = "1";
-  cleanEnv.CODETRACER_WRAP_ELECTRON = "1";
-  cleanEnv.CODETRACER_START_INDEX = "1";
 
   electronApp = await electron.launch({
     executablePath: codetracerPath,
@@ -167,12 +165,10 @@ async function launchEditMode(folderPath: string): Promise<void> {
 
   cleanEnv.CODETRACER_IN_UI_TEST = "1";
   cleanEnv.CODETRACER_TEST = "1";
-  cleanEnv.CODETRACER_WRAP_ELECTRON = "1";
-  cleanEnv.CODETRACER_START_INDEX = "1";
 
   // Launch ct directly with edit command.
-  // The ct binary handles Playwright's injected --inspect and
-  // --remote-debugging-port flags by forwarding them to Electron.
+  // The ct binary uses execv to replace itself with Electron,
+  // forwarding Playwright's --inspect and --remote-debugging-port flags.
   electronApp = await electron.launch({
     executablePath: codetracerPath,
     cwd: codetracerInstallDir,
@@ -234,13 +230,9 @@ async function replayCodetracerInElectron(
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
   process.env.CODETRACER_TEST = "1";
-  process.env.CODETRACER_WRAP_ELECTRON = "1";
-  process.env.CODETRACER_START_INDEX = "1";
-
-  // console.log(ctProcess);
 
   electronApp = await electron.launch({
-    executablePath: codetracerPath, // electronPath,
+    executablePath: codetracerPath,
     cwd: codetracerInstallDir,
     args: [],
   });
@@ -348,7 +340,6 @@ function buildTestProgram(
 
 function recordTestProgram(recordArg: string): number {
   process.env.CODETRACER_IN_UI_TEST = "1";
-  process.env.CODETRACER_WRAP_ELECTRON = "";
 
   // non-obvious options!
   // stdio: 'pipe', encoding: 'utf8' found form

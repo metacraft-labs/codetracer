@@ -108,8 +108,6 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         info.EnvironmentVariables.Add("CODETRACER_TRACE_ID", traceId.ToString());
         info.EnvironmentVariables.Add("CODETRACER_IN_UI_TEST", "1");
         info.EnvironmentVariables.Add("CODETRACER_TEST", "1");
-        info.EnvironmentVariables.Add("CODETRACER_WRAP_ELECTRON", "1");
-        info.EnvironmentVariables.Add("CODETRACER_START_INDEX", "1");
         info.EnvironmentVariables["CODETRACER_LSP_PORT"] = rustLspPort.ToString();
         info.EnvironmentVariables["CODETRACER_RUBY_LSP_PORT"] = rubyLspPort.ToString();
 

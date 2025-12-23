@@ -12,9 +12,8 @@ try:
     version="CodeTracer version: " & version.CodeTracerVersionStr & (when defined(debug): "(debug)" else: ""),
     copyrightBanner="CodeTracer - the user-friendly time-travelling debugger"
   )
-  if not eventuallyWrapElectron(conf):
-    customValidateConfig(conf)
-    runInitial(conf)
+  customValidateConfig(conf)
+  runInitial(conf)
 except CatchableError as ex:
   echo "Error: Unhandled exception"
   echo getStackTrace(ex)
