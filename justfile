@@ -52,7 +52,7 @@ build-docs:
   mdbook build
 
 build-ui-js output:
-  nim \
+  nim1 \
     -d:chronicles_enabled=off \
     -d:ctRenderer \
     -d:ctInExtension \
@@ -377,3 +377,132 @@ dev-tools-test-e2e *args:
 
 test-python-recorder:
   ./ci/test/python-recorder-smoke.sh
+
+# ====
+# Nim flow/omniscience integration tests
+# Tests the db-backend's ability to resolve Nim global variables using mangled names
+#
+# Uses scripts/with-nim-* wrappers which can be chained with other language wrappers:
+#   scripts/with-nim-1.6 scripts/with-rust-1.80 cargo test ...
+
+# Test with Nim 1.6.x (uses ROT13 mangling)
+test-nim-flow-1_6:
+  #!/usr/bin/env bash
+  set -e
+  echo "Testing Nim flow integration with Nim 1.6..."
+  ./scripts/with-nim-1.6 nim --version
+  cd src/db-backend
+  ../../scripts/with-nim-1.6 cargo test test_nim_flow -- --nocapture
+  echo "Nim 1.6 flow test passed!"
+
+# Test with Nim 2.0.x (uses direct mangling, no ROT13)
+test-nim-flow-2_0:
+  #!/usr/bin/env bash
+  set -e
+  echo "Testing Nim flow integration with Nim 2.0..."
+  ./scripts/with-nim-2.0 nim --version
+  cd src/db-backend
+  ../../scripts/with-nim-2.0 cargo test test_nim_flow -- --nocapture
+  echo "Nim 2.0 flow test passed!"
+
+# Test with Nim 2.2.x (uses direct mangling, no ROT13)
+test-nim-flow-2_2:
+  #!/usr/bin/env bash
+  set -e
+  echo "Testing Nim flow integration with Nim 2.2..."
+  ./scripts/with-nim-2.2 nim --version
+  cd src/db-backend
+  ../../scripts/with-nim-2.2 cargo test test_nim_flow -- --nocapture
+  echo "Nim 2.2 flow test passed!"
+
+# Test with all Nim versions
+test-nim-flow-all:
+  #!/usr/bin/env bash
+  set -e
+  echo "========================================"
+  echo "Testing Nim flow with all Nim versions"
+  echo "========================================"
+  echo ""
+  just test-nim-flow-1_6
+  echo ""
+  echo "----------------------------------------"
+  echo ""
+  just test-nim-flow-2_0
+  echo ""
+  echo "----------------------------------------"
+  echo ""
+  just test-nim-flow-2_2
+  echo ""
+  echo "========================================"
+  echo "All Nim flow tests passed!"
+  echo "========================================"
+
+# ====
+# Rust flow/omniscience integration tests
+# Tests the db-backend's ability to load Rust local variables
+#
+# Note: db-backend requires Rust edition 2024 support, so older Rust versions
+# won't work. Use scripts/with-rust-* wrappers which can be chained with other
+# language wrappers for future multi-language testing.
+
+# Test with current Rust (from environment)
+test-rust-flow:
+  #!/usr/bin/env bash
+  set -e
+  echo "Testing Rust flow integration..."
+  rustc --version
+  cd src/db-backend
+  cargo test test_rust_flow -- --nocapture
+  echo "Rust flow test passed!"
+
+# Test with Rust stable (via nix)
+test-rust-flow-stable:
+  #!/usr/bin/env bash
+  set -e
+  echo "Testing Rust flow integration with Rust stable..."
+  ./scripts/with-rust-stable rustc --version
+  cd src/db-backend
+  ../../scripts/with-rust-stable cargo test test_rust_flow -- --nocapture
+  echo "Rust stable flow test passed!"
+
+# Test with Rust nightly (via nix)
+test-rust-flow-nightly:
+  #!/usr/bin/env bash
+  set -e
+  echo "Testing Rust flow integration with Rust nightly..."
+  ./scripts/with-rust-nightly rustc --version
+  cd src/db-backend
+  ../../scripts/with-rust-nightly cargo test test_rust_flow -- --nocapture
+  echo "Rust nightly flow test passed!"
+
+# Test with all supported Rust versions
+test-rust-flow-all:
+  #!/usr/bin/env bash
+  set -e
+  echo "========================================"
+  echo "Testing Rust flow with supported versions"
+  echo "========================================"
+  echo ""
+  just test-rust-flow-stable
+  echo ""
+  echo "========================================"
+  echo "All Rust flow tests passed!"
+  echo "========================================"
+
+# ====
+# All flow/omniscience integration tests for all languages and versions
+
+test-flow-all:
+  #!/usr/bin/env bash
+  set -e
+  echo "╔════════════════════════════════════════════════════════════╗"
+  echo "║ Running all flow integration tests for all languages       ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  echo ""
+  just test-nim-flow-all
+  echo ""
+  just test-rust-flow-all
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════╗"
+  echo "║ All flow integration tests passed!                         ║"
+  echo "╚════════════════════════════════════════════════════════════╝"

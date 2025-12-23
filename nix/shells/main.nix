@@ -145,6 +145,10 @@ in
           # ourPkgs.staticDeps
           ourPkgs.upstream-nim-codetracer
 
+          # Nim versions for runtime (tracing/testing user Nim programs)
+          # nim-2_2 provides 'nim' binary for runtime compilation
+          ourPkgs.nim-2_2
+
           # useful for lsp/editor support
           nimlsp
           nimlangserver
@@ -258,7 +262,7 @@ in
 
         # TODO: try to add an option to link to libs/upstream-nim, libs/rr
         #   for faster iteration when patching them as Zahary suggested?
-        [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
+        [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
         # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
         [ ! -f links/codetracer-pure-ruby-recorder ] && ln -s \

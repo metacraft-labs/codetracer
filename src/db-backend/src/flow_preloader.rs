@@ -9,6 +9,7 @@ use crate::{
     db::{Db, DbRecordEvent},
     expr_loader::ExprLoader,
     lang::{lang_from_context, Lang},
+    nim_mangling,
     replay::Replay,
     task::{
         Action, BranchesTaken, CoreTrace, FlowEvent, FlowMode, FlowStep, FlowUpdate, FlowUpdateState,
@@ -314,7 +315,24 @@ impl<'a> CallFlowPreloader<'a> {
             // for now assume it can't fail: `?` only because of more general api
             replay.jump_to(step_id)?;
         } else {
-            if let Ok(location) = replay.jump_to_call(&self.location) {
+            // For RR traces: if we already have a valid location (e.g., from a breakpoint),
+            // jump to that location instead of using jump_to_call which may not work correctly.
+            if self.location.rr_ticks.0 > 0 && self.location.line > 0 {
+                info!("  move_to_first_step: jumping to location at line {} rr_ticks={}",
+                      self.location.line, self.location.rr_ticks.0);
+                if let Err(e) = replay.location_jump(&self.location) {
+                    warn!("  location_jump error: {e:?}, falling back to jump_to_call");
+                    if let Ok(location) = replay.jump_to_call(&self.location) {
+                        step_id = StepId(location.rr_ticks.0);
+                        progressing = true;
+                    } else {
+                        move_error = true;
+                    }
+                } else {
+                    step_id = StepId(self.location.rr_ticks.0);
+                    progressing = true;
+                }
+            } else if let Ok(location) = replay.jump_to_call(&self.location) {
                 step_id = StepId(location.rr_ticks.0);
                 progressing = true;
             } else {
@@ -662,7 +680,73 @@ impl<'a> CallFlowPreloader<'a> {
         if let Some(var_list) = self.flow_preloader.get_var_list(line, location) {
             info!("  log expressions: {:?}", var_list.clone());
             for value_name in &var_list {
-                if let Ok(value) = replay.load_value(value_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang) {
+                // Try loading the value with the original name first
+                let value_result = replay.load_value(value_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang);
+
+                // Check if we need to try alternate names (either error or "not found" value)
+                let needs_alternate_names = self.lang == Lang::Nim && match &value_result {
+                    Err(_) => true,
+                    Ok(v) => v.is_not_found(),
+                };
+
+                // For Nim, try alternate naming strategies if the original name fails
+                let final_value = if needs_alternate_names {
+                    let mut found_value = None;
+
+                    // Strategy 1: Try _pN suffixes for parameters (Nim 2.x uses _p0, _p1, etc.)
+                    for suffix in 0..=5 {
+                        let param_name = format!("{}_p{}", value_name, suffix);
+                        if let Ok(value) = replay.load_value(&param_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang) {
+                            if !value.is_not_found() {
+                                info!("    found Nim param via suffixed name: {} -> {}", value_name, param_name);
+                                found_value = Some(value);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Strategy 2: Try _N suffixes for local variables (Nim 2.2+ uses _1, _2, etc.)
+                    if found_value.is_none() {
+                        for suffix in 1..=5 {
+                            let suffixed_name = format!("{}_{}", value_name, suffix);
+                            if let Ok(value) = replay.load_value(&suffixed_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang) {
+                                if !value.is_not_found() {
+                                    info!("    found Nim local via suffixed name: {} -> {}", value_name, suffixed_name);
+                                    found_value = Some(value);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Strategy 3: Try mangled names for global variables (module-level)
+                    // Uses both Nim 1.6 (ROT13) and Nim 2.x (direct) styles
+                    if found_value.is_none() {
+                        let path = Path::new(&location.path);
+                        if let Some(mut iter) = nim_mangling::MangledNameDualIterator::new(value_name, path, 20) {
+                            while let Some(mangled_name) = iter.next_candidate() {
+                                if let Ok(value) = replay.load_value(mangled_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang) {
+                                    if !value.is_not_found() {
+                                        // Copy name only on success (to release borrow before calling iter methods)
+                                        let matched_name = mangled_name.to_string();
+                                        info!("    found Nim global via mangled name: {} -> {} (style: {:?})",
+                                              value_name, matched_name, iter.current_style());
+                                        // Record successful style for future lookups
+                                        iter.record_success();
+                                        found_value = Some(value);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    found_value.ok_or_else(|| -> Box<dyn Error> { "not found".into() })
+                } else {
+                    value_result
+                };
+
+                if let Ok(value) = final_value {
                     // if variable_map.contains_key(value_name) {
                     let ct_value = to_ct_value(&value);
                     flow_view_update

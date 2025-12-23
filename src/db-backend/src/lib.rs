@@ -37,6 +37,7 @@ pub mod expr_loader;
 pub mod flow_preloader;
 pub mod handler;
 pub mod lang;
+pub mod nim_mangling;
 pub mod paths;
 pub mod program_search_tool;
 pub mod query;

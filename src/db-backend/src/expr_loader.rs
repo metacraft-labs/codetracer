@@ -313,13 +313,32 @@ impl ExprLoader {
     fn get_method_name(&self, node: &Node, path: &PathBuf, row: usize) -> Option<String> {
         let lang = self.get_current_language(path);
         let source_code = self.get_source_line(path, row);
-        for child in node.children(&mut node.walk()) {
-            if NODE_NAMES[&lang].values.contains(&child.kind().to_string()) {
-                let start = child.start_position().column;
-                let end = child.end_position().column;
-                return Some(source_code[start..end].to_string());
+
+        // Helper function to recursively search for the identifier and return its column range
+        fn find_identifier_range(node: &Node, values: &[String], depth: usize) -> Option<(usize, usize)> {
+            // Limit recursion depth
+            if depth > 5 {
+                return None;
             }
+
+            for child in node.children(&mut node.walk()) {
+                if values.contains(&child.kind().to_string()) {
+                    return Some((child.start_position().column, child.end_position().column));
+                }
+                // For Nim, the identifier is inside exported_symbol/symbol
+                if child.kind() == "exported_symbol" || child.kind() == "symbol" {
+                    if let Some(range) = find_identifier_range(&child, values, depth + 1) {
+                        return Some(range);
+                    }
+                }
+            }
+            None
         }
+
+        if let Some((start, end)) = find_identifier_range(node, &NODE_NAMES[&lang].values, 0) {
+            return Some(source_code[start..end].to_string());
+        }
+
         None
     }
 
@@ -469,24 +488,84 @@ impl ExprLoader {
                     }
                 }
 
-                // Filter out qualified identifiers used as function names
-                if parent_kind == "qualified_identifier" {
-                    if let Some(grandparent) = parent.parent() {
-                        if grandparent.kind() == "postfix_expr" || grandparent.kind() == "command_expr" {
+                // Filter out function calls
+                // For function calls like run(), the AST structure is:
+                //   postfix_expr
+                //     postfixable_primary
+                //       qualified_identifier
+                //         symbol
+                //           identifier "run"
+                //     call_suffix
+                //       (
+                //       )
+                // So the identifier has ancestors: symbol -> qualified_identifier -> postfixable_primary -> postfix_expr
+                // We need to traverse up and check if any ancestor is postfix_expr with a call_suffix child
+
+                // Handle the case where parent is "symbol" (common in Nim)
+                let mut current = parent.clone();
+                let mut check_parent = parent_kind.to_string();
+
+                // Navigate up through symbol and qualified_identifier to reach postfixable_primary/postfix_expr
+                while check_parent == "symbol" || check_parent == "qualified_identifier" {
+                    if let Some(next) = current.parent() {
+                        current = next;
+                        check_parent = current.kind().to_string();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Now current should be postfixable_primary
+                if check_parent == "postfixable_primary" {
+                    if let Some(postfix_parent) = current.parent() {
+                        if postfix_parent.kind() == "postfix_expr" {
+                            // Check if there's a call_suffix sibling
+                            let mut cursor = postfix_parent.walk();
+                            if cursor.goto_first_child() {
+                                loop {
+                                    if cursor.node().kind() == "call_suffix" {
+                                        return false; // This is a function call
+                                    }
+                                    if !cursor.goto_next_sibling() {
+                                        break;
+                                    }
+                                }
+                            }
+                            // Also check if postfix_expr is inside command_expr (e.g., echo x)
+                            if let Some(grandparent) = postfix_parent.parent() {
+                                if grandparent.kind() == "command_expr" {
+                                    return false;
+                                }
+                            }
+                        }
+                        // Direct command_expr as parent of postfixable_primary
+                        if postfix_parent.kind() == "command_expr" {
                             return false;
                         }
                     }
                 }
 
+                // Direct check for postfix_expr or command_expr in the ancestor chain
+                if parent_kind == "postfix_expr" || parent_kind == "command_expr" {
+                    return false;
+                }
+
                 // Filter out type names in type expressions
-                if parent_kind == "qualified_identifier" {
-                    if let Some(grandparent) = parent.parent() {
-                        let gp_kind = grandparent.kind();
-                        if matches!(gp_kind,
+                // With the symbol node, we need to check: identifier -> symbol -> qualified_identifier -> type_expr
+                if parent_kind == "symbol" || parent_kind == "qualified_identifier" {
+                    let mut ancestor = parent.parent();
+                    // Navigate up past symbol and qualified_identifier
+                    while let Some(anc) = ancestor {
+                        let anc_kind = anc.kind();
+                        if anc_kind == "symbol" || anc_kind == "qualified_identifier" {
+                            ancestor = anc.parent();
+                        } else if matches!(anc_kind,
                             "type_expr" | "ref_type" | "ptr_type" | "var_type"
                             | "generic_type" | "param_decl" | "object_field"
                         ) {
                             return false;
+                        } else {
+                            break;
                         }
                     }
                 }
@@ -827,5 +906,177 @@ mod tests {
 
         fs::remove_file(&file_path)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod nim_tests {
+    use super::*;
+
+    /// Test that Nim function calls are correctly filtered out of the variable list
+    /// while actual variables are preserved.
+    #[test]
+    fn test_nim_excludes_function_calls_from_variables() {
+        use std::fs;
+
+        // Nim code with function calls that should NOT be extracted as variables
+        let code = r#"
+when isMainModule:
+  run()
+  let x = 10
+  exampleFlow1()
+  echo x
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("nim_func_test.nim");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Collect all extracted variables
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+
+        // Function calls should NOT be in the variables list
+        assert!(!all_vars.contains(&"run".to_string()), "run() should not be a variable");
+        assert!(!all_vars.contains(&"exampleFlow1".to_string()), "exampleFlow1() should not be a variable");
+        assert!(!all_vars.contains(&"echo".to_string()), "echo should not be a variable");
+
+        // But x should be in the variables list
+        assert!(all_vars.contains(&"x".to_string()), "x should be a variable");
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that variables inside Nim procs are correctly extracted
+    #[test]
+    fn test_nim_variables_inside_proc() {
+        use std::fs;
+
+        let code = r#"proc main() =
+  let intValue = 42
+  let stringValue = "hello"
+  let doubled = intValue * 2
+  echo intValue
+  echo doubled
+
+main()
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("nim_proc_vars.nim");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Print all extracted variables by line
+        println!("Variables by line:");
+        for (pos, vars) in &info.variables {
+            println!("  Line {}: {:?}", pos.0, vars);
+        }
+
+        // Line 5 (echo intValue) should have intValue as a variable
+        let line5_vars = info.variables.get(&Position(5));
+        println!("Line 5 (echo intValue): {:?}", line5_vars);
+        assert!(
+            line5_vars.is_some() && line5_vars.unwrap().contains(&"intValue".to_string()),
+            "intValue should be extracted from echo line"
+        );
+
+        // Line 2 (let intValue = 42) should have intValue
+        let line2_vars = info.variables.get(&Position(2));
+        println!("Line 2 (let intValue): {:?}", line2_vars);
+        assert!(
+            line2_vars.is_some() && line2_vars.unwrap().contains(&"intValue".to_string()),
+            "intValue should be extracted from let line"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that Nim proc definitions are correctly identified
+    #[test]
+    fn test_nim_proc_function_registration() {
+        use std::fs;
+        use tree_sitter::Parser;
+
+        let code = r#"proc main() =
+  let x = 42
+  echo x
+
+main()
+"#;
+
+        // First, let's see what tree-sitter-nim produces
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_nim::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(code, None).unwrap();
+
+        fn print_tree(node: tree_sitter::Node, depth: usize) {
+            let indent = "  ".repeat(depth);
+            let start = node.start_position();
+            let end = node.end_position();
+            println!(
+                "{}{}: lines {}-{}",
+                indent,
+                node.kind(),
+                start.row + 1,
+                end.row + 1
+            );
+
+            let mut cursor = node.walk();
+            if cursor.goto_first_child() {
+                loop {
+                    print_tree(cursor.node(), depth + 1);
+                    if !cursor.goto_next_sibling() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        println!("\n=== Nim AST ===");
+        print_tree(tree.root_node(), 0);
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("nim_proc_test.nim");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Print debug info about functions
+        println!("\nFunctions registered:");
+        for (pos, funcs) in &info.functions {
+            for (name, start, end) in funcs {
+                println!("  Line {}: {} (lines {}-{})", pos.0, name, start.0, end.0);
+            }
+        }
+
+        // Lines 1-4 should be registered as part of the main() function
+        assert!(
+            info.functions.contains_key(&Position(1)),
+            "Line 1 (proc main) should be registered"
+        );
+        assert!(
+            info.functions.contains_key(&Position(2)),
+            "Line 2 (let x) should be registered as part of main"
+        );
+        assert!(
+            info.functions.contains_key(&Position(3)),
+            "Line 3 (echo x) should be registered as part of main"
+        );
+
+        fs::remove_file(&file_path).unwrap();
     }
 }
