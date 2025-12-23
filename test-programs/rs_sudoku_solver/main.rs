@@ -68,6 +68,71 @@ fn solve_sudoku(board: &mut [[u8; 9]; 9]) -> bool {
     false
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn solves_classic_board() {
+        // Classic Sudoku puzzle from the sample program with its known solution.
+        let mut board: [[u8; 9]; 9] = [
+            [5, 3, 0, 0, 7, 0, 0, 0, 0],
+            [6, 0, 0, 1, 9, 5, 0, 0, 0],
+            [0, 9, 8, 0, 0, 0, 0, 6, 0],
+            [8, 0, 0, 0, 6, 0, 0, 0, 3],
+            [4, 0, 0, 8, 0, 3, 0, 0, 1],
+            [7, 0, 0, 0, 2, 0, 0, 0, 6],
+            [0, 6, 0, 0, 0, 0, 2, 8, 0],
+            [0, 0, 0, 4, 1, 9, 0, 0, 5],
+            [0, 0, 0, 0, 8, 0, 0, 7, 9],
+        ];
+        let expected_solution: [[u8; 9]; 9] = [
+            [5, 3, 4, 6, 7, 8, 9, 1, 2],
+            [6, 7, 2, 1, 9, 5, 3, 4, 8],
+            [1, 9, 8, 3, 4, 2, 5, 6, 7],
+            [8, 5, 9, 7, 6, 1, 4, 2, 3],
+            [4, 2, 6, 8, 5, 3, 7, 9, 1],
+            [7, 1, 3, 9, 2, 4, 8, 5, 6],
+            [9, 6, 1, 5, 3, 7, 2, 8, 4],
+            [2, 8, 7, 4, 1, 9, 6, 3, 5],
+            [3, 4, 5, 2, 8, 6, 1, 7, 9],
+        ];
+
+        println!("Solving classic Sudoku board used by the CLI example");
+        let solved = solve_sudoku(&mut board);
+        assert!(solved, "solver should succeed on a valid puzzle");
+        assert_eq!(board, expected_solution);
+    }
+
+    #[test]
+    fn rejects_unsolvable_board() {
+        // The last cell in the first row cannot take any value because 9 is already
+        // present in the same column, so backtracking must eventually give up.
+        let mut board: [[u8; 9]; 9] = [
+            [1, 2, 3, 4, 5, 6, 7, 8, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 9],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ];
+
+        println!("Trying to solve an intentionally inconsistent puzzle");
+        assert!(
+            !solve_sudoku(&mut board),
+            "solver should report failure when the first row cannot be completed"
+        );
+        assert_eq!(
+            board[0][8],
+            0,
+            "solver should leave the impossible cell untouched when it backtracks"
+        );
+    }
+}
+
 fn main() {
     let mut test_boards = vec![
         // Example 1
