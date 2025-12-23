@@ -13,24 +13,6 @@ import
   results,
   json_serialization
 
-proc eventuallyWrapElectron*(conf: CodetracerConf): bool =
-  if getEnv("CODETRACER_WRAP_ELECTRON", "") == "1":
-    var appArgs: seq[string] = @[]
-    for i in 1 .. paramCount():
-      appArgs.add(paramStr(i))
-
-    # Collect electron debug flags injected by Playwright
-    var electronArgs: seq[string] = @[]
-    if conf.inspect.isSome:
-      electronArgs.add("--inspect=" & conf.inspect.get)
-    if conf.remoteDebuggingPort.isSome:
-      electronArgs.add("--remote-debugging-port=" & conf.remoteDebuggingPort.get)
-
-    wrapElectron(electronArgs, appArgs)
-    true
-  else:
-    false
-
 proc unescapeEnvValue(s: string): string =
   ## Unescape common escape sequences in .env file values.
   ## Handles: \n, \r, \t, \\, \", \'
@@ -173,28 +155,16 @@ proc runInitial*(conf: CodetracerConf) =
       quit(0)
 
     of StartupCommand.replay:
-      let shouldRestart = replay(
+      replay(
         conf.lastTraceMatchingPattern,
         conf.replayTraceId,
         conf.replayTraceFolder,
         replayInteractive
       )
-      if shouldRestart:
-        quit(RESTART_EXIT_CODE)
     of StartupCommand.noCommand:
-      let workdir = codetracerInstallDir
-
-      # sometimes things like "--no-sandbox" are useful e.g. for now for
-      # experimenting with appimage
-      # let optionalElectronArgs = getEnv("CODETRACER_ELECTRON_ARGS", "").splitWhitespace()
-      discard launchElectron()
-      # var processUI = startProcess(
-      #   electronExe,
-      #   workingDir = workdir,
-      #   args = @[electronIndexPath].concat(optionalElectronArgs),
-      #   options={poParentStreams})
-      # electronPid = processUI.processID
-      # echo "status code:", waitForExit(processUI)
+      launchElectron(
+        inspect = conf.inspect,
+        remoteDebuggingPort = conf.remoteDebuggingPort)
     # of StartupCommand.ruby:
     #   runCompilerProcess(
     #     "ruby",
@@ -265,7 +235,10 @@ proc runInitial*(conf: CodetracerConf) =
         quit 1
       of ArbCommand.explorer:
         # Launch CodeTracer in arb explorer mode
-        discard launchElectron(mode = ElectronLaunchMode.ArbExplorer)
+        launchElectron(
+          mode = ElectronLaunchMode.ArbExplorer,
+          inspect = conf.inspect,
+          remoteDebuggingPort = conf.remoteDebuggingPort)
       of ArbCommand.record:
         discard recordStylus(conf.arbRecordTransaction)
       of ArbCommand.replay:
@@ -286,7 +259,10 @@ proc runInitial*(conf: CodetracerConf) =
       # Track folder in recent folders if it's a directory
       if dirExists(absPath):
         trace_index.addRecentFolder(absPath, test = false)
-      discard launchElectron(args = @["edit", absPath])
+      launchElectron(
+        args = @["edit", absPath],
+        inspect = conf.inspect,
+        remoteDebuggingPort = conf.remoteDebuggingPort)
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,

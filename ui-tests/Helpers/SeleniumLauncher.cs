@@ -31,8 +31,6 @@ public static class SeleniumLauncher
         psi.Environment["CODETRACER_TRACE_ID"] = traceId.ToString();
         psi.Environment["CODETRACER_IN_UI_TEST"] = "1";
         psi.Environment["CODETRACER_TEST"] = "1";
-        psi.Environment["CODETRACER_WRAP_ELECTRON"] = "1";
-        psi.Environment["CODETRACER_START_INDEX"] = "1";
         // Process.Start(psi);
 
         var options = new ChromeOptions();

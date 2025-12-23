@@ -120,7 +120,8 @@ proc replay*(
   traceIdArg: Option[int],
   traceFolderArg: Option[string],
   interactive: bool
-): bool =
+) =
+  ## Note: This function does not return on POSIX (launchElectron uses execv)
   let recordCore = envLoadRecordCore()
   var trace: Trace
 
@@ -130,7 +131,7 @@ proc replay*(
     if traceFolderArg.isSome:
       let traceFolder = traceFolderArg.get
       let filename = traceFolder.extractFilename
-      # TODO: when restoring multitraces: 
+      # TODO: when restoring multitraces:
       # if filename.startsWith("multitrace-") and filename.endsWith(".zip"):
         # return replayMultitrace(traceFolder)
 
@@ -143,4 +144,4 @@ proc replay*(
     if trace.isNil:
       echo "ERROR: can't find or import trace"
       quit(1)
-  return runRecordedTrace(trace, test=false, recordCore=recordCore)
+  runRecordedTrace(trace, test=false, recordCore=recordCore)
