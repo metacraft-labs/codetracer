@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Execute a command with Rust nightly in PATH
+# Usage: with-rust-nightly <command> [args...]
+#
+# Example:
+#   with-rust-nightly rustc --version
+#   with-rust-nightly cargo test test_rust_flow
+
+set -e
+
+if [ $# -eq 0 ]; then
+    echo "Usage: with-rust-nightly <command> [args...]"
+    echo "Execute a command with Rust nightly in PATH"
+    exit 1
+fi
+
+RUST_PATH=$(nix build --no-link --print-out-paths '.#rust-nightly')/bin
+export PATH="$RUST_PATH:$PATH"
+
+exec "$@"
