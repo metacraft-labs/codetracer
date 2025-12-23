@@ -930,6 +930,8 @@ proc focusLine(editor: EditorViewComponent, line: int) =
   editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: 0))
   editor.monacoEditor.focus()
 
+proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE)
+
 proc openNewEditorView*(
     data: Data,
     name: cstring,
@@ -940,6 +942,7 @@ proc openNewEditorView*(
     data.openNoSourceView(name, noInfoMessage)
     return
   elif not data.services.editor.open.hasKey(name):
+    let hasRestoredEditor = data.ui.editors.hasKey(name)
     data.services.editor.open[name] = TabInfo(loading: true)
     data.removeEditorFromClosedTabs(name)
     data.removeEditorFromLoading(name)
@@ -977,6 +980,27 @@ proc openNewEditorView*(
     # except:
     #   cwarn $tabInfo
     #   cerror "editor: tabInfo print: " & getCurrentExceptionMsg()
+
+    if hasRestoredEditor:
+      let editorComponent = data.ui.editors[name]
+      editorComponent.tabInfo = tabInfo
+      editorComponent.editorView = editorView
+      editorComponent.lang = tabInfo.lang
+      editorComponent.location = location
+      data.services.editor.open[name] = tabInfo
+      data.services.editor.active = name
+      if line != NO_LINE:
+        proc cb =
+          if isNull(data.ui.editors[name].monacoEditor):
+            discard setTimeout(cb, 10)
+          else:
+            data.ui.editors[name].focusLine(line)
+
+        discard setTimeout(cb, 10)
+      if not editorComponent.layoutItem.isNil:
+        data.showTab(name, noInfoMessage=noInfoMessage, line=NO_LINE)
+      data.redraw()
+      return
 
     data.makeEditorViewDetailed(
       name,

@@ -337,7 +337,8 @@ proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js
     self.refreshEditorLine(lineNumber)
 
 method clear*(self: EditorViewComponent) =
-  self.flow.clear()
+  if not self.flow.isNil:
+    self.flow.clear()
 
 func has(tab: TabInfo, instruction: Instruction, i: int, offset: int): bool =
   if i + 1 < tab.instructions.instructions.len:
