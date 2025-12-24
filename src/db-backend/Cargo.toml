@@ -58,7 +58,7 @@ tree-sitter-pascal = "0.10.0"
 tree-sitter-d = "0.8.2"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-python = "0.25.0"
-tree-sitter-nim = { path = "../../../tree-sitter-nim/bindings/rust" }
+tree-sitter-nim = { path = "../../libs/tree-sitter-nim/bindings/rust" }
 
 # the binding for our custom tracepoint tresitter grammar:
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
