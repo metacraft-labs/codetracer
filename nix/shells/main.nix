@@ -145,9 +145,10 @@ in
           # ourPkgs.staticDeps
           ourPkgs.upstream-nim-codetracer
 
-          # Nim versions for runtime (tracing/testing user Nim programs)
-          # nim-2_2 provides 'nim' binary for runtime compilation
-          ourPkgs.nim-2_2
+          # Nim 1.6 for runtime/development - compatible with vendored libs and nimsuggest
+          # Note: Don't add nim-2_x here - it breaks nimsuggest compatibility.
+          # Use scripts/with-nim-* for multi-version testing instead.
+          ourPkgs.nim-1_6
 
           # useful for lsp/editor support
           nimlsp
@@ -294,6 +295,11 @@ in
         export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
         export CODETRACER_DEV_TOOLS=0
         export CODETRACER_LOG_LEVEL=INFO
+
+        # Ensure tree-sitter-nim parser is generated (cached - only regenerates if needed)
+        if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
+          (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
+        fi
 
         figlet "Welcome to CodeTracer"
       '';

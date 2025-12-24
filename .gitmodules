@@ -81,3 +81,6 @@
 	path = libs/nim-confutils
 	url = https://github.com/metacraft-labs/nim-confutils
 	branch = codetracer
+[submodule "libs/tree-sitter-nim"]
+	path = libs/tree-sitter-nim
+	url = git@github.com:metacraft-labs/tree-sitter-nim.git
