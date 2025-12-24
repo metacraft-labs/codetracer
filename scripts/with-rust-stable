@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Execute a command with Rust stable in PATH
+# Usage: with-rust-stable <command> [args...]
+#
+# Example:
+#   with-rust-stable rustc --version
+#   with-rust-stable cargo test test_rust_flow
+
+set -e
+
+if [ $# -eq 0 ]; then
+    echo "Usage: with-rust-stable <command> [args...]"
+    echo "Execute a command with Rust stable in PATH"
+    exit 1
+fi
+
+RUST_PATH=$(nix build --no-link --print-out-paths '.#rust-stable')/bin
+export PATH="$RUST_PATH:$PATH"
+
+exec "$@"

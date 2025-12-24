@@ -10,12 +10,30 @@
       inherit (pkgs) stdenv;
 
       src = ../../.;
+
+      # Import multiple Nim versions
+      nimVersions = import ../nim-versions { inherit pkgs; };
+
+      # Import multiple Rust versions via fenix
+      rustVersions = import ../rust-versions {
+        inherit pkgs;
+        fenix = inputs.fenix;
+      };
     in
     {
       packages = rec {
-        upstream-nim-codetracer = pkgs.buildPackages.nim1.overrideAttrs (_: {
-          postInstallPhase = ''
-            mv $out/nim $out/upstream-nim
+        # Nim versions for testing with different compilers
+        inherit (nimVersions) nim-1_6 nim-2_0 nim-2_2;
+
+        # Rust versions for testing with different compilers
+        inherit (rustVersions) rust-stable rust-nightly rust-1_75 rust-1_80;
+
+        # nim1 is used for building CodeTracer itself
+        # It provides only 'nim1' binary (not 'nim') to ensure we don't
+        # accidentally use it for runtime compilation
+        upstream-nim-codetracer = nimVersions.nim-1_6.overrideAttrs (old: {
+          postInstall = (old.postInstall or "") + ''
+            mv $out/bin/nim $out/bin/nim1
           '';
         });
 
@@ -183,12 +201,12 @@
           ];
 
           buildPhase = ''
-            ${upstream-nim-codetracer.out}/bin/nim \
+            ${upstream-nim-codetracer.out}/bin/nim1 \
               --warnings:off --sourcemap:on \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
-            ${upstream-nim-codetracer.out}/bin/nim \
+            ${upstream-nim-codetracer.out}/bin/nim1 \
               --warnings:off --sourcemap:on \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
@@ -214,7 +232,7 @@
 
           buildPhase = ''
 
-            ${upstream-nim-codetracer}/bin/nim \
+            ${upstream-nim-codetracer}/bin/nim1 \
                 --hints:off --warnings:off \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
@@ -240,7 +258,7 @@
           ];
 
           buildPhase = ''
-            ${upstream-nim-codetracer.out}/bin/nim \
+            ${upstream-nim-codetracer.out}/bin/nim1 \
               --hints:off --warnings:off \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
@@ -332,7 +350,7 @@
           ];
 
           buildPhase = ''
-            ${upstream-nim-codetracer.out}/bin/nim \
+            ${upstream-nim-codetracer.out}/bin/nim1 \
               -d:ctRepl --debugInfo --lineDir:on --threads:on \
               --hints:off --warnings:off \
               -d:chronicles_enabled=off \
@@ -410,7 +428,6 @@
             pkgs.ruby
             indexJavascript
             uiJavascript
-            upstream-nim-codetracer
             noir
             wazero
             ruby-recorder-pure
@@ -440,9 +457,6 @@
             # Ruby
             # cp -Lr ${ruby-recorder-pure.out}/bin/codetracer-pure-ruby-recorder \
             # $out/bin/
-
-            # Nim
-            cp -L ${upstream-nim-codetracer.out}/bin/nim $out/bin/upstream-nim
 
             ln -sf ${codetracer-electron.out}/src/helpers.js $out/src/helpers.js
 
@@ -650,7 +664,7 @@
             echo ${runtimeDeps.outPath}/bin
             ls -al ${runtimeDeps.outPath}/bin
 
-            ${upstream-nim-codetracer.out}/bin/nim \
+            ${upstream-nim-codetracer.out}/bin/nim1 \
               -d:debug -d:asyncBackend=asyncdispatch \
               --gc:refc --hints:off --warnings:off \
               --debugInfo --lineDir:on \
@@ -668,7 +682,7 @@
               --nimcache:nimcache \
               --out:ct c ./src/ct/codetracer.nim
 
-            ${upstream-nim-codetracer.out}/bin/nim \
+            ${upstream-nim-codetracer.out}/bin/nim1 \
               -d:debug -d:asyncBackend=asyncdispatch \
               --gc:refc --hints:off --warnings:off \
               --debugInfo --lineDir:on \

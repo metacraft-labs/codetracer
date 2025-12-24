@@ -145,6 +145,11 @@ in
           # ourPkgs.staticDeps
           ourPkgs.upstream-nim-codetracer
 
+          # Nim 1.6 for runtime/development - compatible with vendored libs and nimsuggest
+          # Note: Don't add nim-2_x here - it breaks nimsuggest compatibility.
+          # Use scripts/with-nim-* for multi-version testing instead.
+          ourPkgs.nim-1_6
+
           # useful for lsp/editor support
           nimlsp
           nimlangserver
@@ -258,7 +263,7 @@ in
 
         # TODO: try to add an option to link to libs/upstream-nim, libs/rr
         #   for faster iteration when patching them as Zahary suggested?
-        [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
+        [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
         # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
         [ ! -f links/codetracer-pure-ruby-recorder ] && ln -s \
@@ -290,6 +295,11 @@ in
         export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
         export CODETRACER_DEV_TOOLS=0
         export CODETRACER_LOG_LEVEL=INFO
+
+        # Ensure tree-sitter-nim parser is generated (cached - only regenerates if needed)
+        if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
+          (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
+        fi
 
         figlet "Welcome to CodeTracer"
       '';

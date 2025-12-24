@@ -226,7 +226,7 @@ mkShell {
     [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
     # TODO: try to add an option to link to libs/upstream-nim, libs/rr
     #   for faster iteration when patching them as Zahary suggested?
-    [ ! -f links/upstream-nim ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/upstream-nim
+    [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
     [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
     [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
     [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py

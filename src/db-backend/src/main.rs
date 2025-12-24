@@ -37,6 +37,7 @@ mod expr_loader;
 mod flow_preloader;
 mod handler;
 mod lang;
+mod nim_mangling;
 mod paths;
 mod program_search_tool;
 mod query;

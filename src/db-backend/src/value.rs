@@ -199,6 +199,20 @@ pub enum ValueRecordWithType {
     },
 }
 
+impl ValueRecordWithType {
+    /// Check if this value represents a "not found" or error state.
+    /// This is used to determine when to try alternative name lookups (e.g., mangled names).
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            ValueRecordWithType::None { .. } => true,
+            ValueRecordWithType::Error { .. } => true,
+            // LLDB returns Raw with "<NONE>" when variable is not found
+            ValueRecordWithType::Raw { r, .. } if r == "<NONE>" => true,
+            _ => false,
+        }
+    }
+}
+
 pub fn to_ct_value(v: &ValueRecordWithType) -> Value {
     match v {
         ValueRecordWithType::Int { i, typ } => {

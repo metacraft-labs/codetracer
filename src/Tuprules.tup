@@ -35,7 +35,7 @@ NIM_DANGER_FLAGS=\
 --linetrace:off
 
 ROOT = $(TUP_CWD)/../../
-NIM_BIN = nim
+NIM_BIN = nim1
 
 NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
 NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)

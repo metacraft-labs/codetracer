@@ -19,7 +19,7 @@ echo "${APP_DIR}"
     # --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
 
 # codetracer
-nim -d:release \
+nim1 -d:release \
     --d:asyncBackend=asyncdispatch \
     --dynlibOverride:std -d:staticStd \
     --gc:refc --hints:on --warnings:off \
@@ -49,7 +49,7 @@ nim -d:release \
     --out:"${APP_DIR}/bin/ct_unwrapped" c ./src/ct/codetracer.nim
 
 
-nim \
+nim1 \
     -d:release -d:asyncBackend=asyncdispatch \
     --gc:refc --hints:off --warnings:off \
     --debugInfo --lineDir:on \
@@ -85,20 +85,20 @@ nim \
 
 
 # index.js
-nim \
+nim1 \
     --hints:on --warnings:off --sourcemap:on \
     -d:ctIndex -d:chronicles_sinks=json \
     -d:nodejs --out:"${APP_DIR}/index.js" js src/frontend/index.nim
 cp "${APP_DIR}/index.js" "${APP_DIR}/src/index.js"
 
-nim \
+nim1 \
     --hints:on --warnings:off --sourcemap:on \
     -d:ctIndex -d:server -d:chronicles_sinks=json \
     -d:nodejs --out:"${APP_DIR}/server_index.js" js src/frontend/index.nim
 cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
 
 # ui.js
-nim \
+nim1 \
     --hints:off --warnings:off \
     -d:chronicles_enabled=off  \
     -d:ctRenderer \
@@ -106,7 +106,7 @@ nim \
 cp "${APP_DIR}/ui.js" "${APP_DIR}/src/ui.js"
 
 # subwindow.js
-nim \
+nim1 \
     --hints:off --warnings:off \
     -d:chronicles_enabled=off  \
     -d:ctRenderer \

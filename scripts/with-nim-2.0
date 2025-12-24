@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Execute a command with Nim 2.0.x in PATH
+# Usage: with-nim-2.0 <command> [args...]
+#
+# Example:
+#   with-nim-2.0 nim --version
+#   with-nim-2.0 cargo test test_nim_flow
+
+set -e
+
+if [ $# -eq 0 ]; then
+    echo "Usage: with-nim-2.0 <command> [args...]"
+    echo "Execute a command with Nim 2.0.x in PATH"
+    exit 1
+fi
+
+NIM_PATH=$(nix build --no-link --print-out-paths '.#nim-2_0')/bin
+export PATH="$NIM_PATH:$PATH"
+
+exec "$@"
