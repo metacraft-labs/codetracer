@@ -3,7 +3,26 @@ import
   ../dap,
   ../lib/[ logging, jslib ],
   ../../common/ct_event,
+  ../event_helpers,
   service_imports
+
+const ACK_HANDLING_MOVE_TIMEOUT_MS = 1_000
+
+proc clearAckHandlingMove(self: DebuggerService) =
+  if self.hasPendingAck:
+    if self.pendingAckTimeoutId != 0:
+      windowClearTimeout(self.pendingAckTimeoutId)
+    self.pendingAckTimeoutId = 0
+    self.pendingAckOpId = 0
+    self.hasPendingAck = false
+
+proc clearPendingRestartLocation*(self: DebuggerService) =
+  self.hasPendingRestartLocation = false
+  self.pendingRestartLocation = Location()
+
+proc setPendingRestartLocation*(self: DebuggerService, location: Location) =
+  self.pendingRestartLocation = location
+  self.hasPendingRestartLocation = location.path.len > 0
 
 proc restart*(self: DebuggerService) =
   self.locals = @[]
@@ -381,8 +400,26 @@ data.services.debugger.onDebuggerStarted = proc(self: DebuggerService, response:
   self.data.redraw()
   self.runToEntry()
 
+data.services.debugger.onAckHandlingMove = proc(self: DebuggerService, response: AckHandlingMove) {.async.} =
+  self.clearAckHandlingMove()
+  self.pendingAckOpId = response.opId
+  self.hasPendingAck = true
+  let opId = response.opId
+  self.pendingAckTimeoutId = windowSetTimeout(proc =
+    if not self.hasPendingAck or self.pendingAckOpId != opId:
+      return
+    self.clearAckHandlingMove()
+    self.data.viewsApi.warnMessage(cstring"Jump operation timed out; restarting db-backend.")
+    when not defined(ctInExtension):
+      self.data.lastRestartKind = RestartSubsystem
+      self.data.ipc.send("CODETRACER::restart-subsystem", cstring"db-backend")
+      self.data.viewsApi.infoMessage(cstring"Restart requested; relaunching trace.")
+  , ACK_HANDLING_MOVE_TIMEOUT_MS)
+
 
 data.services.debugger.onCompleteMove = proc(self: DebuggerService, response: MoveState) {.async.} =
+  self.clearAckHandlingMove()
+  self.clearPendingRestartLocation()
   self.location = response.location
   self.cLocation = response.cLocation
   self.frameInfo = response.frameInfo

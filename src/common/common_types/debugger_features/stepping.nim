@@ -37,3 +37,7 @@ type
     complete*: bool
     skipInternal*: bool
     skipNoSource*: bool
+
+  AckHandlingMove* = object
+    opId*: int
+    kind*: langstring

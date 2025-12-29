@@ -40,7 +40,12 @@ when not defined(ctInExtension):
     # in db-backend/rust: interpret as Some(Location..) in the first case
     #   and None: in the second case
     let restoreLocation = if data.lastRestartKind == RestartSubsystem:
-        data.services.debugger.location.toJs
+        if data.services.debugger.hasPendingRestartLocation:
+          let pending = data.services.debugger.pendingRestartLocation
+          data.services.debugger.clearPendingRestartLocation()
+          pending.toJs
+        else:
+          data.services.debugger.location.toJs
       else:
         # in this case, it should just jump to entry
         cast[JsObject](nil) # Location(path: "", line: NO_LINE)
@@ -76,6 +81,20 @@ when not defined(ctInExtension):
 
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   var lastCompleteMove: MoveState = nil
+  proc nextJumpOpId(): int =
+    data.services.debugger.currentJump += 1
+    data.services.debugger.currentJump
+
+  proc noteEventJumpLocation(event: ProgramEvent) =
+    if event.highLevelPath.len == 0:
+      return
+    data.services.debugger.setPendingRestartLocation(
+      Location(
+        path: event.highLevelPath,
+        line: event.highLevelLine,
+        rrTicks: event.directLocationRRTicks,
+      )
+    )
 
   # for event in ..
   # dapApi.onRaw(DapStopped, proc(kind: CtEventKind, value: JsObject) = viewsApi.emit(DapStopped, value))
@@ -166,17 +185,57 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(CtLoadTerminal, proc(kind: CtEventkind, value: EmptyArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtCollapseCalls, proc(kind: CtEventkind, value: CollapseCallsArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtExpandCalls, proc(kind: CtEventkind, value: CollapseCallsArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtCalltraceJump, proc(kind: CtEventKind, value: Location, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtEventJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtCalltraceJump, proc(kind: CtEventKind, value: Location, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    data.services.debugger.setPendingRestartLocation(payload)
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
+  viewsApi.subscribe(CtEventJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    noteEventJumpLocation(payload)
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
   viewsApi.subscribe(CtLoadHistory, proc(kind: CtEventKind, value: LoadHistoryArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtHistoryJump, proc(kind: CtEventKind, value: Location, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtHistoryJump, proc(kind: CtEventKind, value: Location, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    data.services.debugger.setPendingRestartLocation(payload)
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
   viewsApi.subscribe(CtSearchCalltrace, proc(kind: CtEventKind, value: CallSearchArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtSourceLineJump, proc(kind: CtEventKind, value: SourceLineJumpTarget, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtSourceCallJump, proc(kind: CtEventKind, value: SourceCallJumpTarget, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtLocalStepJump, proc(kind: CtEventKind, value: LocalStepJump, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtSourceLineJump, proc(kind: CtEventKind, value: SourceLineJumpTarget, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
+  viewsApi.subscribe(CtSourceCallJump, proc(kind: CtEventKind, value: SourceCallJumpTarget, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
+  viewsApi.subscribe(CtLocalStepJump, proc(kind: CtEventKind, value: LocalStepJump, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    if data.services.debugger.location.path.len > 0:
+      data.services.debugger.setPendingRestartLocation(
+        Location(
+          path: data.services.debugger.location.path,
+          line: data.services.debugger.location.line,
+          rrTicks: payload.rrTicks,
+        )
+      )
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
   viewsApi.subscribe(CtTracepointToggle, proc(kind: CtEventKind, value: TracepointId, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtTracepointDelete, proc(kind: CtEventKind, value: TracepointId, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  viewsApi.subscribe(CtTraceJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
+  viewsApi.subscribe(CtTraceJump, proc(kind: CtEventKind, value: ProgramEvent, sub: Subscriber) =
+    var payload = value
+    payload.opId = nextJumpOpId()
+    noteEventJumpLocation(payload)
+    dapApi.sendCtRequest(kind, payload.toJs)
+  )
   viewsApi.subscribe(CtLoadFlow, proc(kind: CtEventKind, value: CtLoadFlowArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtRunToEntry, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtRunTracepoints, proc(kind: CtEventKind, value: RunTracepointsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))

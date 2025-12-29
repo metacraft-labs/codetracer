@@ -1033,6 +1033,7 @@ impl DbReplay {
                 })
                 .step_id
                 .0,
+            op_id: None,
         }
     }
 

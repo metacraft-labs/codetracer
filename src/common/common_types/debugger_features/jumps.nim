@@ -7,6 +7,7 @@ type
     firstLoopLine*: int
     rrTicks*: int
     reverse*: bool
+    opId*: int
 
   JumpBehaviour* = enum
     SmartJump,
@@ -17,12 +18,14 @@ type
     path*: langstring
     line*: int
     behaviour*: JumpBehaviour
+    opId*: int
 
   SourceCallJumpTarget* = object
     path*: langstring
     line*: int
     token*: langstring
     behaviour*: JumpBehaviour
+    opId*: int
 
   CallstackJump* = object
     index*: int
