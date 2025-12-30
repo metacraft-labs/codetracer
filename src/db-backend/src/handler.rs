@@ -940,9 +940,10 @@ impl Handler {
 
             let location = self.replay.load_location(&mut self.expr_loader)?;
             if move_error || location.path != source_location.path || location.line != source_location.line as i64 {
-                self.replay.run_to_entry()?;
-                // TODO: send a notification error like "can't jump there"
-                // or find a way to return to/stay in original place
+                self.send_notification(NotificationKind::Error, "can't jump to line", false, sender.clone())?;
+                // (alexander): for now, less bad is to stay here: running to entry seems very confusing when you tried to jump to a completely different place IMO
+                // self.replay.run_to_entry()?;
+                // TODO: find a way to return to/stay in original place?
             }
 
             self.step_id = self.replay.current_step_id();
