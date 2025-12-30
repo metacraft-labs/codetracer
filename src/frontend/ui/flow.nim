@@ -1135,10 +1135,11 @@ proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: 
       path: path,
       line: line,
       stepCount: stepCount,
-      iteration: iteration,
+      targetIteration: iteration,
       firstLoopLine: firstLoopLine,
       rrTicks: rrTicks,
-      reverse: reverse
+      reverse: reverse,
+      activeIteration: self.activeIteration
     )
   )
   self.api.emit(InternalNewOperation, NewOperation(name: "local step jump", stableBusy: true))
@@ -3957,6 +3958,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
 method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
   self.location = response.location
   # self.updateFlowOnMove(self.location.rrTicks, self.location.line)
+  self.activeIteration = 0
   self.redrawFlow()
 
 method onLoadedFlowShape*(self: Component, update: FlowShape) {.async.} =
