@@ -1433,7 +1433,6 @@ impl Handler {
         if !is_empty {
             // Handle id_table and results for the TraceUpdate
             self.handle_trace_steps(&args)?;
-            warn!("-------- CHECK HERE !!!!!");
             info!("{:?}", self.event_db);
         }
         for trace in tracepoints.iter() {
@@ -1548,18 +1547,37 @@ impl Handler {
 
             self.complete_move(false, sender)?;
         } else {
-            // TODO?
-            // // trying to do a reverse step-out and forward step-in again
-            // //   to go back to the beginning of a call
-            // //   and then `n` next-s to the `n-th` step count
-            // //   (not sure if always equivalent: we might skip next-s in flow preloading?)
-            // self.replay.step(Action::StepOut, false)?;
-            // self.replay.step(Action::StepIn, true)?;
-            // for _i in 0..arg.step_count {
-            //     self.replay.step(Action::Next, true)?;
-            // }
-            // self.complete_move(false, sender)?;
-            warn!("local_step_jump not implemented for RR traces");
+            self.replay.disable_breakpoints()?;
+            let bp = self.replay.add_breakpoint(&arg.path, arg.first_loop_line + 1)?;
+            let location = self.replay.load_location(&mut self.expr_loader)?;
+            if location.line < arg.first_loop_line {
+                self.replay.step(Action::Continue, true)?;
+            } else if location.line > arg.first_loop_line {
+                self.replay.step(Action::Continue, false)?;
+            }
+
+            if arg.active_iteration < arg.target_iteration {
+                for _ in arg.active_iteration..arg.target_iteration {
+                    self.replay.step(Action::Continue, true)?;
+                }
+            } else {
+                for _ in arg.target_iteration..arg.active_iteration {
+                    self.replay.step(Action::Continue, false)?;
+                }                
+            }
+
+            if location.line < arg.first_loop_line + 1 {
+                self.replay.step(Action::Continue, true)?;
+            } else if location.line > arg.first_loop_line + 1 {
+                self.replay.step(Action::Continue, false)?;
+            }
+            self.replay.delete_breakpoint(&bp)?;
+            self.replay.enable_breakpoints()?;
+
+            self.step_id = self.replay.current_step_id();
+
+            self.complete_move(false, sender)?;
+            // warn!("local_step_jump not implemented for RR traces");
         }
         Ok(())
     }

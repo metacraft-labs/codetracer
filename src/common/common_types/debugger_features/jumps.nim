@@ -3,10 +3,11 @@ type
     path*: langstring
     line*: int
     stepCount*: int
-    iteration*: int
+    targetIteration*: int
     firstLoopLine*: int
     rrTicks*: int
     reverse*: bool
+    activeIteration*: int # For rr backend navigation
 
   JumpBehaviour* = enum
     SmartJump,
