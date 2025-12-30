@@ -657,19 +657,25 @@ impl ExprLoader {
         Ok(())
     }
 
+    fn find_real_path(&self, path: &PathBuf) -> PathBuf {
+        let read_path = if self.trace.imported {
+            let trace_files_folder = PathBuf::from(&self.trace.trace_output_folder).join("files");
+            // take only after root: /path -> path, so join will work,
+            // because otherwise join /trace_output, /path returns just /path
+            // but we want /trace_output/path
+            let after_root_path = &(path.display().to_string())[1..];
+            info!("after root path {after_root_path:?}");
+            trace_files_folder.join(PathBuf::from(after_root_path))
+        } else {
+            path.clone()
+        };
+
+        read_path
+    }
+
     pub fn file_source_code(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
         if !self.processed_files.contains_key(path) {
-            let read_path = if self.trace.imported {
-                let trace_files_folder = PathBuf::from(&self.trace.trace_output_folder).join("files");
-                // take only after root: /path -> path, so join will work,
-                // because otherwise join /trace_output, /path returns just /path
-                // but we want /trace_output/path
-                let after_root_path = &(path.display().to_string())[1..];
-                info!("after root path {after_root_path:?}");
-                trace_files_folder.join(PathBuf::from(after_root_path))
-            } else {
-                path.clone()
-            };
+            let read_path = self.find_real_path(path);
             info!("try to read {read_path:?}");
             let source_result = fs::read_to_string(read_path);
             match source_result {
@@ -860,6 +866,8 @@ impl ExprLoader {
                 updated_location.function_last = end.0;
             }
         }
+        let real_path = self.find_real_path(path_buf);
+        updated_location.missing_path = !real_path.exists();
         updated_location
     }
 
