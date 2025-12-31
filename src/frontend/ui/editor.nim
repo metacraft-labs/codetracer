@@ -1838,12 +1838,6 @@ proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, l
 
     discard
 
-proc resetJumpHistory(self: DebuggerService) =
-  let startIndex = self.jumpHistory.len - self.historyIndex + 1
-
-  self.jumpHistory.delete(startIndex ..< self.jumpHistory.len)
-  self.historyIndex = 1
-
 proc loadingLowLevel: VNode =
   text("LOADING CODE")
 
@@ -1933,18 +1927,6 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
   if self.data.trace.lang != LangRubyDb:
     discard data.services.debugger.loadParsedExprs(self.service.currentLine, response.cLocation.path)
 
-  if self.data.services.debugger.jumpHistory == @[] or
-    response.location != self.data.services.debugger.jumpHistory[^1].location:
-      if self.data.services.debugger.currentOperation != HISTORY_JUMP_VALUE:
-        if self.data.services.debugger.historyIndex != 1:
-          self.data.services.debugger.resetJumpHistory()
-        let action = if self.data.services.debugger.currentOperation.isNil: cstring"" else: self.data.services.debugger.currentOperation
-        self.data.services.debugger.jumpHistory.add(
-          JumpHistory(
-            location: response.location,
-            lastOperation: action
-          )
-        )
   if not self.flow.isNil:
     discard self.flow.onCompleteMove(response)
   self.data.redraw()

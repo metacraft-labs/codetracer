@@ -1594,6 +1594,9 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
             #   var component = `data`.ui.list[i]
             for content, map in `data`.ui.componentMapping:
               for id, component in map:
+                # echo "=> component for content ", content, " with id ", id
+                # echo "  method  ", `nameLit`
+                # EDIT: now mostly middleware/`self.api.subscribe` is needed/used!
                 discard component.`name`(cast[`temp`](`response`))
         handlers.add(handler)
       messageCode = quote:

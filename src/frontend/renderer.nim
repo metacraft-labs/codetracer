@@ -18,7 +18,6 @@ import
   ],
   lib/[ logging, monaco_lib, jslib, misc_lib, electron_lib ],
   lsp_client, lsp_controller
-  # ui / datatable
 
 # (alexander): if i remember correctly: to prevent clashes with other dom-related modules
 from std / dom import Element, getAttribute, Node, preventDefault, document, window,
@@ -1325,8 +1324,18 @@ proc buildRecordEnv(envDump: cstring): JsObject =
 
   envObject
 
+proc resetBeforeRestart*(data: Data) =
+  for content, mapping in data.ui.componentMapping:
+    for id, component in mapping:
+      try:
+        component.resetBeforeRestart()
+      except:
+        cwarn fmt"resetBeforeRestart exception for {content}#{id}: {getCurrentExceptionMsg()}"
+
 proc runTests*(data: Data, options: RunTestOptions) =
   data.lastRestartKind = RestartNewTrace
+  if not options.newWindow:
+    data.resetBeforeRestart()
   data.ipc.send("CODETRACER::run-test", options)
 
 proc reRecordCurrent*(data: Data, projectOnly: bool) =
@@ -1377,6 +1386,8 @@ proc reRecordCurrent*(data: Data, projectOnly: bool) =
     options["env".cstring] = envObject
 
   options[cstring"stdio"] = cstring"ignore"
+
+  data.resetBeforeRestart()
 
   data.viewsApi.infoMessage(cstring"Building/recording a new trace…")
   data.ipc.send(
