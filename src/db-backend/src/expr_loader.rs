@@ -83,7 +83,11 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     let rust_node_names = NodeNames {
         if_conditions: vec!["if_expression".to_string()],
         else_conditions: vec!["else_clause".to_string()],
-        loops: vec!["for_expression".to_string()],
+        loops: vec![
+            "for_expression".to_string(),
+            "loop_expression".to_string(),
+            "while_expression".to_string(),
+        ],
         branches_body: vec!["block".to_string()],
         branches: vec!["block".to_string()],
         functions: vec!["function_item".to_string()],
@@ -471,9 +475,7 @@ impl ExprLoader {
                     if let Some(grandparent) = parent.parent() {
                         let grandparent_kind = grandparent.kind();
                         // Routine definitions, type definitions, enum fields
-                        if matches!(grandparent_kind,
-                            "routine_definition" | "type_def" | "enum_field_def"
-                        ) {
+                        if matches!(grandparent_kind, "routine_definition" | "type_def" | "enum_field_def") {
                             return false;
                         }
                     }
@@ -559,9 +561,15 @@ impl ExprLoader {
                         let anc_kind = anc.kind();
                         if anc_kind == "symbol" || anc_kind == "qualified_identifier" {
                             ancestor = anc.parent();
-                        } else if matches!(anc_kind,
-                            "type_expr" | "ref_type" | "ptr_type" | "var_type"
-                            | "generic_type" | "param_decl" | "object_field"
+                        } else if matches!(
+                            anc_kind,
+                            "type_expr"
+                                | "ref_type"
+                                | "ptr_type"
+                                | "var_type"
+                                | "generic_type"
+                                | "param_decl"
+                                | "object_field"
                         ) {
                             return false;
                         } else {
@@ -571,9 +579,15 @@ impl ExprLoader {
                 }
 
                 // Filter out import/export identifiers
-                if matches!(parent_kind,
-                    "import_stmt" | "export_stmt" | "import_expr" | "import_path"
-                    | "import_symbol" | "from_import_stmt" | "include_stmt"
+                if matches!(
+                    parent_kind,
+                    "import_stmt"
+                        | "export_stmt"
+                        | "import_expr"
+                        | "import_path"
+                        | "import_symbol"
+                        | "from_import_stmt"
+                        | "include_stmt"
                 ) {
                     return false;
                 }
@@ -589,12 +603,14 @@ impl ExprLoader {
         let start = self.get_first_line(node);
         let end = self.get_last_line(node);
         let lang = self.get_current_language(path);
-        // info!(
-        //    "process_node {:?} {:?} {:?}",
-        //    lang,
-        //    NODE_NAMES[&lang].values,
-        //    node.kind()
-        //);
+        debug!(
+            "process_node {:?} {:?} {:?} {:?} {:?}",
+            lang,
+            NODE_NAMES[&lang].loops,
+            node.kind(),
+            start,
+            end,
+        );
         // extract variable names
         if self.is_variable_node(lang, node) {
             let value = self.extract_expr(node, path, row);
@@ -950,7 +966,10 @@ when isMainModule:
 
         // Function calls should NOT be in the variables list
         assert!(!all_vars.contains(&"run".to_string()), "run() should not be a variable");
-        assert!(!all_vars.contains(&"exampleFlow1".to_string()), "exampleFlow1() should not be a variable");
+        assert!(
+            !all_vars.contains(&"exampleFlow1".to_string()),
+            "exampleFlow1() should not be a variable"
+        );
         assert!(!all_vars.contains(&"echo".to_string()), "echo should not be a variable");
 
         // But x should be in the variables list
@@ -1023,22 +1042,14 @@ main()
 
         // First, let's see what tree-sitter-nim produces
         let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_nim::LANGUAGE.into())
-            .unwrap();
+        parser.set_language(&tree_sitter_nim::LANGUAGE.into()).unwrap();
         let tree = parser.parse(code, None).unwrap();
 
         fn print_tree(node: tree_sitter::Node, depth: usize) {
             let indent = "  ".repeat(depth);
             let start = node.start_position();
             let end = node.end_position();
-            println!(
-                "{}{}: lines {}-{}",
-                indent,
-                node.kind(),
-                start.row + 1,
-                end.row + 1
-            );
+            println!("{}{}: lines {}-{}", indent, node.kind(), start.row + 1, end.row + 1);
 
             let mut cursor = node.walk();
             if cursor.goto_first_child() {
