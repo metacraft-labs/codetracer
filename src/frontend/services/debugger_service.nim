@@ -183,10 +183,11 @@ proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount
     path: path,
     line: line,
     stepCount: stepCount,
-    iteration: iteration,
+    targetIteration: iteration,
     firstLoopLine: firstLoopLine,
     rrTicks: rrTicks,
-    reverse: reverse
+    reverse: reverse,
+    activeIteration: 0
   )
 
 
