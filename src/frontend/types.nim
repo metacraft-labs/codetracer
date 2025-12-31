@@ -1133,8 +1133,6 @@ type
     tippyElement*: JsObject
     leftPos*: cstring
     lastScrollFireTime*: int64
-    position*: int
-    activeIteration*: int
     # codeID*: int64
 
 
