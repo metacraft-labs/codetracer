@@ -1560,11 +1560,11 @@ impl Handler {
                 for _ in arg.active_iteration..arg.target_iteration {
                     self.replay.step(Action::Continue, true)?;
                 }
-            } else {
+            } else if arg.active_iteration > arg.target_iteration {
                 for _ in arg.target_iteration..arg.active_iteration {
                     self.replay.step(Action::Continue, false)?;
-                }                
-            }
+                }
+            } // else: we should be already on the loop line and target iteration hopefully
 
             if location.line < arg.first_loop_line + 1 {
                 self.replay.step(Action::Continue, true)?;
