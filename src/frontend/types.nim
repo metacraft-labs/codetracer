@@ -609,6 +609,7 @@ type
     activeHistory*: cstring
     finished*: bool
     jumpHistory*: seq[JumpHistory]
+    currentOperation*: cstring
     isLoading*: bool
 
 
@@ -1990,6 +1991,9 @@ method onUpdatedShell*(self: Component, response: ShellUpdate) {.base, async.} =
   discard
 
 method restart*(self: Service) {.base.} =
+  discard
+
+method resetBeforeRestart*(self: Component) {.base.} =
   discard
 
 method onDebugOutput*(self: Component, response: DebugOutput) {.base, async.} =

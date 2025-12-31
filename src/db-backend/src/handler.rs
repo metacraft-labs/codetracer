@@ -852,6 +852,7 @@ impl Handler {
         loc: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        info!("history_jump: doing location jump to {loc:?}");
         self.replay.location_jump(&loc)?;
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;

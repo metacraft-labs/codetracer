@@ -200,7 +200,7 @@ proc buildListItem(self: DebugComponent, history: JumpHistory, id: int): VNode =
           self.fullHistory = false
           self.historyJump(myLocation.location)
           self.historyIndex = id + 1
-          self.service.currentOperation = HISTORY_JUMP_VALUE):
+          self.currentOperation = HISTORY_JUMP_VALUE):
       text fmt"{history.lastOperation} => {history.location.highLevelFunctionName} || {fileName}:{history.location.line}"
 
 proc buildFullHistory(self: DebugComponent): VNode =
@@ -244,6 +244,49 @@ proc buildHistoryMenu(self: DebugComponent): VNode =
         text fmt"View full history"
         span(class = "menu-expand")
       buildFullHistory(self)
+
+proc resetJumpHistoryFromStartIndex(self: DebugComponent) =
+  let startIndex = self.jumpHistory.len - self.historyIndex + 1
+
+  if self.jumpHistory.len > startIndex:
+    self.jumpHistory.delete(startIndex ..< self.jumpHistory.len)
+  self.historyIndex = 1
+
+method resetBeforeRestart*(self: DebugComponent) =
+  self.jumpHistory = @[]
+  self.currentOperation = nil
+  # not sure why 1, but resetJumpHistoryFromStartIndex does it
+  # and that's what the onCompleteMove checks for
+  self.historyIndex = 1
+
+method onCompleteMove*(self: DebugComponent, response: MoveState) {.async.} =
+  echo "onCompleteMove for debug "
+  console.log(response.location)
+  if self.jumpHistory.len() > 0:
+    console.log(self.jumpHistory[^1].location)
+  if self.jumpHistory == @[] or response.location != self.jumpHistory[^1].location:
+    if self.currentOperation != HISTORY_JUMP_VALUE:
+      echo "in if"
+      if self.historyIndex != 1:
+        self.resetJumpHistoryFromStartIndex()
+      let action = if self.currentOperation.isNil: 
+          cstring""
+        else:
+          self.currentOperation
+      echo "action ", action
+      self.jumpHistory.add(
+        JumpHistory(
+          location: response.location,
+          lastOperation: action
+        )
+      )
+      console.log cstring"after add", self.jumpHistory
+
+method register*(self: DebugComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
 
 
 method render*(self: DebugComponent): VNode =
