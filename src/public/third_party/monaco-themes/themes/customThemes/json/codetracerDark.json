@@ -44,7 +44,6 @@
     },
     {
       "foreground": "79C0FF",
-      "fontStyle": "bold",
       "token": "variable.language"
     },
     {
@@ -60,8 +59,7 @@
       "token": "operator"
     },
     {
-      "foreground": "22D3EE",
-      "fontStyle": "bold",
+      "foreground": "63CBB6",
       "token": "keyword.type"
     },
     {
@@ -110,17 +108,14 @@
     },
     {
       "foreground": "FFA657",
-      "fontStyle": "bold",
       "token": "modifier.export"
     },
     {
       "foreground": "4EC9B0",
-      "fontStyle": "bold",
       "token": "entity.name.type"
     },
     {
       "foreground": "D7C98A",
-      "fontStyle": "bold",
       "token": "entity.name.function"
     },
     {
@@ -145,12 +140,10 @@
     },
     {
       "foreground": "FF7B72",
-      "fontStyle": "bold",
       "token": "namespace.std"
     },
     {
       "foreground": "FFA657",
-      "fontStyle": "bold",
       "token": "namespace.system"
     },
     {
