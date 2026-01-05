@@ -1639,10 +1639,11 @@ pub struct LocalStepJump {
     pub path: String,
     pub line: i64,
     pub step_count: i64,
-    pub iteration: i64,
+    pub target_iteration: i64,
     pub first_loop_line: i64,
     pub rr_ticks: i64,
     pub reverse: bool,
+    pub active_iteration: i64,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]

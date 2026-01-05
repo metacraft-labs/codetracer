@@ -1129,16 +1129,22 @@ proc jumpToLocalStep*(self: FlowComponent, path: cstring, line: int, stepCount: 
       # e.g. step list jump for now
       -1
 
+  let activeIteration = if self.loopStates.hasKey(line):
+      self.loopStates[line].activeIteration
+    else:
+      0
+
   self.api.emit(
     CtLocalStepJump,
     LocalStepJump(
       path: path,
       line: line,
       stepCount: stepCount,
-      iteration: iteration,
+      targetIteration: iteration,
       firstLoopLine: firstLoopLine,
       rrTicks: rrTicks,
-      reverse: reverse
+      reverse: reverse,
+      activeIteration: activeIteration
     )
   )
   self.api.emit(InternalNewOperation, NewOperation(name: "local step jump", stableBusy: true))
