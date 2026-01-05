@@ -471,6 +471,9 @@
           background-color: NEW_RECORD_SCREEN_INPUT_BACKGROUND_COLOR
           margin-left: 0px !important
           margin-bottom: 0px !important
+          background-image: none !important
+          color: NEW_RECORD_LABEL_COLOR
+          padding-left: 8px !important
 
           &.disabled
             pointer-events: none
@@ -517,6 +520,13 @@
             width: 146px
             padding-left: 16px
             padding-right: 16px
+
+            &:hover
+              background-color: CT_PRIMARY_DEFAULT_FOCUSED !important
+              opacity: 1 !important
+
+            &:active
+              outline: 1px solid NEW_RECORD_ACTIVE_BUTTON_BORDER !important
 
       .new-record-form-row:last-child
         display: flex

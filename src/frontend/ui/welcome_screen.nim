@@ -729,7 +729,7 @@ proc newRecordFormView(self: WelcomeScreenComponent): VNode =
                 }
             )
         ):
-          text "Run"
+          text "Record"
 
     of InProgress:
       tdiv(class = "new-record-form-row"):
@@ -875,7 +875,7 @@ const TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN = false
 method render*(self: WelcomeScreenComponent): VNode =
   if self.data.ui.welcomeScreen.isNil:
     return
-  
+
   self.showTraceSharing = when TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN:
       false
     else:
