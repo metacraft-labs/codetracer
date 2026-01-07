@@ -170,6 +170,7 @@ impl EventDb {
             stdout: false,
             base64_encoded: false,
             max_rr_ticks: 0,
+            op_id: None,
         }
     }
 

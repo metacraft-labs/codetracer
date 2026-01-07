@@ -243,6 +243,22 @@ impl Handler {
         Ok(raw_complete_move_event)
     }
 
+    fn send_ack_handling_move(
+        &mut self,
+        request_seq: i64,
+        op_id: Option<i64>,
+        kind: &str,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let ack = task::AckHandlingMove {
+            op_id: op_id.unwrap_or(request_seq),
+            kind: kind.to_string(),
+        };
+        let raw_event = self.dap_client.ack_handling_move_event(&ack)?;
+        sender.send(raw_event)?;
+        Ok(())
+    }
+
     fn prepare_output_events(&mut self) -> Result<Vec<DapMessage>, Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
             warn!("prepare_output_events not implemented for rr");
@@ -742,10 +758,11 @@ impl Handler {
 
     pub fn event_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(req.base.seq, event.op_id, "event-jump", sender.clone())?;
         if event.kind != EventLogKind::TraceLogEvent {
             let _ = self.replay.event_jump(&event)?;
         } else {
@@ -759,10 +776,11 @@ impl Handler {
 
     pub fn calltrace_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         location: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(req.base.seq, location.op_id, "calltrace-jump", sender.clone())?;
         if self.trace_kind == TraceKind::DB {
             let step_id = StepId(location.rr_ticks.0); // using this field
                                                        // for compat with rr/gdb core support
@@ -847,10 +865,11 @@ impl Handler {
 
     pub fn history_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         loc: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(req.base.seq, loc.op_id, "history-jump", sender.clone())?;
         self.replay.location_jump(&loc)?;
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
@@ -903,10 +922,16 @@ impl Handler {
 
     pub fn source_line_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         source_location: SourceLocation,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(
+            req.base.seq,
+            source_location.op_id,
+            "source-line-jump",
+            sender.clone(),
+        )?;
         if self.trace_kind == TraceKind::DB {
             if let Some(step_id) = self.get_closest_step_id(&source_location) {
                 self.replay.jump_to(step_id)?;
@@ -990,6 +1015,7 @@ impl Handler {
         if let Some(step_id) = self.get_closest_step_id(&SourceLocation {
             line: line.into(),
             path: self.db.load_path_from_id(&path_id).to_string(),
+            op_id: None,
         }) {
             return Some(step_id);
         }
@@ -999,13 +1025,20 @@ impl Handler {
 
     pub fn source_call_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         call_target: SourceCallJumpTarget,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(
+            req.base.seq,
+            call_target.op_id,
+            "source-call-jump",
+            sender.clone(),
+        )?;
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
             path: call_target.path.clone(),
+            op_id: None,
         }) {
             self.replay.jump_to(line_step_id)?;
             self.step_id = self.replay.current_step_id();
@@ -1049,6 +1082,7 @@ impl Handler {
                 let _ = self.add_breakpoint(SourceLocation {
                     path: path.clone(),
                     line: line as usize,
+                    op_id: None,
                 });
                 results.push(dap_types::Breakpoint {
                     id: None,
@@ -1450,10 +1484,11 @@ impl Handler {
 
     pub fn trace_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(req.base.seq, event.op_id, "trace-jump", sender.clone())?;
         self.replay.tracepoint_jump(&event)?;
         // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         _ = self.replay.load_location(&mut self.expr_loader)?;
@@ -1537,10 +1572,11 @@ impl Handler {
 
     pub fn local_step_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         arg: LocalStepJump,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.send_ack_handling_move(req.base.seq, arg.op_id, "local-step-jump", sender.clone())?;
         if self.trace_kind == TraceKind::DB {
             self.replay.jump_to(StepId(arg.rr_ticks))?;
             self.step_id = self.replay.current_step_id();
@@ -1798,6 +1834,7 @@ impl Handler {
                 })
                 .step_id
                 .0,
+            op_id: None,
         }
     }
 
@@ -2139,6 +2176,7 @@ mod tests {
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
             line: 3,
+            op_id: None,
         };
         handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
@@ -2147,6 +2185,7 @@ mod tests {
             SourceLocation {
                 path: path.to_string(),
                 line: 2,
+                op_id: None,
             },
             sender.clone(),
         )?;
@@ -2157,6 +2196,7 @@ mod tests {
                 path: "/test/workdir".to_string(),
                 line: 1,
                 token: "<top-level>".to_string(),
+                op_id: None,
             },
             sender,
         )?;

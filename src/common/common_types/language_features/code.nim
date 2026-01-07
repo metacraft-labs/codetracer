@@ -55,6 +55,7 @@ type
     originatingInstructionAddress*: int
     key*: langstring
     globalCallKey*: langstring
+    opId*: int
     # expansion location
     expansionParents*: seq[(langstring, int, int)]
     expansionDepth*: int

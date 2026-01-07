@@ -9,6 +9,7 @@ type
     CtUpdatedCalltrace,
     CtLoadCalltraceSection,
     CtCompleteMove,
+    CtAckHandlingMove,
     DapStopped,
     DapInitialized,
     DapInitialize,
@@ -82,4 +83,3 @@ type
   CtEvent*[T] = ref object
     kind*: CtEventKind
     value: T
-
