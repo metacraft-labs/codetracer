@@ -191,16 +191,17 @@ fn handle_request<W: Write>(
     write_dap_messages(writer, handler, seq)
 }
 
+let mut received_launch = false;
+let mut received_configuration_done = false;
+
 fn handle_client<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let mut seq = 1i64;
     let mut breakpoints: HashMap<String, HashSet<i64>> = HashMap::new();
     // let (tx, _rx) = mpsc::channel();
     let mut handler: Option<Handler> = None;
-    let mut received_launch = false;
     let mut launch_trace_folder = PathBuf::from("");
     let mut launch_trace_file = PathBuf::from("");
-    let mut launch_raw_diff_index: Option<String> = None; 
-    let mut received_configuration_done = false;
+    let mut launch_raw_diff_index: Option<String> = None;
     while let Ok(msg) = dap::from_reader(reader) {
         info!("DAP <- {:?}", msg);
 
