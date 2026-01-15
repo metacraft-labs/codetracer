@@ -11,7 +11,8 @@ import
   types, lang, utils, renderer, config, dap,
   ../common/ct_logging,
   property_test / test,
-  event_helpers
+  event_helpers,
+  .. / common / ct_event
 
 when defined(ctInExtension):
   import vscode
@@ -878,7 +879,7 @@ proc onInit*(
     #   to be not very visible/jarring
     if data.lastRestartKind != RestartSubsystem:
       renderer.resetLayoutState(data)
-  
+
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.services.flow.enabledFlow = response.config.flow.enabled
@@ -900,8 +901,7 @@ proc onInit*(
 
 when not defined(ctInExtension):
   import
-    communication, middleware, dap,
-    .. / common / ct_event
+    communication, middleware, dap
 
   const logging = true # TODO: maybe overridable dynamically
 

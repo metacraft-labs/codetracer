@@ -870,10 +870,10 @@ proc ensureMonacoEditor(self: TraceComponent) =
         lineNumbers: traceLine,
         folding: false,
         glyphMargin: false,
-        fontSize: j"14px",
+        fontSize: 14,
         minimap: js{ enabled: false },
         scrollbar: js{
-          vertical: j"visible",
+          vertical: "visible",
           horizontalScrollbarSize: 4,
           horizontalSliderSize: 4,
           verticalScrollbarSize: 4,
@@ -970,17 +970,17 @@ method render*(self: TraceComponent): VNode =
         ev.stopPropagation()
         if self.data.ui.activeFocus != self:
           self.data.ui.activeFocus = self,
-      onmousemove = proc(ev: Event, tg:VNode) =
-        if self.splitterClicked:
-          resizeEditor(ev,tg),
-      onmousedown = proc(ev: Event, tg: VNode) =
-        if self.splitterClicked:
-          initialPosition = cast[MouseEvent](ev).screenY.toJs.to(float),
-      onmouseup = proc(ev: Event, tg: VNode) =
-        if self.splitterClicked:
-          self.splitterClicked = false
-          ev.stopPropagation(),
-      onmouseleave = proc = self.splitterClicked = false
+      # onmousemove = proc(ev: Event, tg:VNode) =
+      #   if self.splitterClicked:
+      #     resizeEditor(ev,tg),
+      # onmousedown = proc(ev: Event, tg: VNode) =
+      #   if self.splitterClicked:
+      #     initialPosition = cast[MouseEvent](ev).screenY.toJs.to(float),
+      # onmouseup = proc(ev: Event, tg: VNode) =
+      #   if self.splitterClicked:
+      #     self.splitterClicked = false
+      #     ev.stopPropagation(),
+      # onmouseleave = proc = self.splitterClicked = false
     ):
       tdiv(class = "trace-chevron"):
         tdiv(class = "trace-chevron-arrow")
@@ -1009,10 +1009,6 @@ method render*(self: TraceComponent): VNode =
             document.getElementById(cstring(fmt"trace-modal-window-{self.line}")).style.display = "none"
         )
         tdiv(id = cstring(fmt"modal-content-{self.line}"))
-
-proc traceBase(self: TraceComponent): VNode =
-  buildHtml(tdiv(id = cstring(fmt"trace-{self.id}"), class="trace")):
-    tdiv(id = cstring(fmt"trace-editor-{self.id}"))
 
 const TOGGLE_REPEAT_TIME_LIMIT = 100i64
 

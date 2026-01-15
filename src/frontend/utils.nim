@@ -510,7 +510,7 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: 
       line: line,
       # offset: offset,
       # lang: editorUI.lang, # TODO: Fix this after extension implementation
-      expression: j"",
+      expression: "",
       lastRender: 0,
       results: @[],
       tracepointError: ""),

@@ -2,7 +2,7 @@ when defined(ctInExtension):
   import std / [async, jsffi, jsconsole, strformat, strutils]
   import .. / common / [ct_event, paths]
   import communication
-  import lib, results
+  import results
 
   type
     VsCode* = ref object
@@ -27,8 +27,8 @@ when defined(ctInExtension):
       `type`*: cstring
       event*: cstring
       command*: cstring
-      body*: JsObject 
-      
+      body*: JsObject
+
   proc acquireVsCodeApi*(): VsCode {.importc.}
 
   {.emit: "var vscode = null; try { vscode = require(\"vscode\"); } catch { vscode = acquireVsCodeApi(); }".}
@@ -89,6 +89,8 @@ when defined(ctInExtension):
 
 
   when defined(ctInCentralExtensionContext):
+    import lib/[ jslib, electron_lib ], std/sequtils
+
     proc parseCTJson(raw: cstring): js =
       let rawString = $raw
       let idx = rawString.find(".AppImage installed")
