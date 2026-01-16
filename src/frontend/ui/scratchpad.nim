@@ -85,3 +85,6 @@ method render*(self: ScratchpadComponent): VNode =
         else:
           tdiv(class = "empty-overlay"):
             text "You can add values from other components by right clicking on them and then click on 'Add value to scratchpad'."
+
+proc registerScratchpadComponent*(component: ScratchpadComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)

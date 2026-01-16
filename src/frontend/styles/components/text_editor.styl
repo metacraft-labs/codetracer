@@ -23,7 +23,7 @@
 
   .monaco-editor-background
     background-color: DIFF_BACKGROUND !important
-  
+
   .margin
     background-color: DIFF_BACKGROUND !important
 
@@ -902,19 +902,117 @@ else
 .inactive-tab
   display: none
 
-.editor-test-action
-  color: AGENT_WHITE
-  background: AGENT_BACKGROUND
-  padding-left: 12px
-  padding-right: 12px
-  border-radius: 4px
-  font-family: "SpaceGrotesk"
-  transform: translate(0, 1.2ch) !important
-  cursor: pointer
+.flow-multiline-value-container
+  position: absolute
+  // background-color: FLOW_PARALLEL_BACKGROUND_COLOR
+  height: 20px
+  width: fit-content
+  // min-width: 20px
+  // max-width: 250px
+  z-index:1
+  display: flex
+  align-items: center
+
+button
+  background-color: PRIMARY_BASE
+  padding-left: 10px
+  color: PRIMARY_TEXT_COLOR
+  padding-right: 10px
+  // height: 100%
+  // font-size: 13px
+  font-family: "FiraCode"
+  margin: 1px !important
+  margin-left: 2px !important
+  display: flex
+  align-items: center
+  border-radius: 4px !important
+  cursor: pointer !important
+  background-position: center
+  background-repeat: no-repeat
+  if IS_EXTENSION
+    background-size: 8px
+  else
+    background-size: 1ch
 
   &:hover
-    background: AGENT_HOVER_BACKGROUND
-    outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+    background-color: ACTIVE_MENU_BACKGROUND
 
-.active-test-button
-  background: TEST_ACTIVE_BACKGROUND !important
+  &:disabled
+    opacity: 0.5 !important
+    cursor: default !important
+
+    &:hover
+      background-color: PRIMARY_BASE
+
+  &.backward
+    background-image: url('../../public/resources/shared/omniscience_backward_dark.svg')
+
+  &.forward
+    background-image: url('../../public/resources/shared/omniscience_forward_dark.svg')
+
+.flow-parallel-value
+  display: inline-flex
+  padding-right: 0
+  align-items: center
+  margin-right: 10px
+
+.flow-parallel-value-name
+  // font-size: 13px
+  font-family: "FiraCode"
+  background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+  // box-shadow: 1px 1px 1px FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
+  color: FLOW_PARALLEL_NAME_COLOR
+  padding-left: 5px
+  padding-right: 5px
+  padding-top: 0
+  padding-bottom: 0
+  // height: 17px
+  // line-height: 17px
+  display: flex
+  border-radius: 2px
+  box-sizing: border-box
+  white-space: nowrap
+
+.flow-loop.value
+  font-size: inherit
+
+  span
+    font-size: inherit
+
+.flow-loop-value-name
+  // font-size: 13px
+  font-family: "FiraCode"
+  background: PRIMARY_BASE
+  box-shadow: 1px 1px 1px FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
+  color: PRIMARY_TEXT_COLOR
+  padding-left: 5px
+  padding-right: 5px
+  padding-top: 0
+  padding-bottom: 0
+  margin-right: 0px !important
+  // height: 17px
+  // line-height: 17px
+  display: flex
+  border-radius: 2px
+  box-sizing: border-box
+  white-space: nowrap
+
+.flow-loop-textarea
+  height: 100%
+  background-color: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
+  font-family: monospace
+  border: 0
+  padding: 0
+  padding-right: 3px
+  overflow: hidden
+  resize: none
+  color: FLOW_PARALLEL_NAME_COLOR
+  outline: none
+  cursor: text
+  opacity: 0.7
+
+  &:focus
+    opacity: 1
+
+  &::placeholder
+    color: FLOW_PARALLEL_NAME_COLOR

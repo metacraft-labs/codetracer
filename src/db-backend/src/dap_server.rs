@@ -101,10 +101,7 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
         Ok(())
     })?;
 
-    // let mut writer = std::io::stdout();
-
-    let stream = UnixStream::connect("/tmp/test")?; // TODO: not correct, just testing
-    handle_client(receiving_receiver, true, &receiving_thread, stream)
+    handle_client(receiving_receiver, true, &receiving_thread, None)
 }
 
 #[cfg(feature = "io-transport")]
@@ -145,7 +142,7 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
         Ok(())
     })?;
 
-    handle_client(receiving_receiver, false, &receiving_thread, writer)
+    handle_client(receiving_receiver, false, &receiving_thread, Some(writer))
 }
 
 fn setup(
@@ -640,7 +637,7 @@ fn task_thread(
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
                 let launch_raw_diff_index = args.raw_diff_index.clone();
-                let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap(); // unwrap_or(PathBuf::from(""));
+                let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from("")); // unwrap_or(PathBuf::from(""));
                 let restore_location = args.restore_location.clone();
 
                 let for_launch = run_to_entry;
@@ -679,7 +676,7 @@ fn handle_client(
     receiver: Receiver<DapMessage>,
     is_stdio: bool,
     _receiving_thread: &thread::JoinHandle<Result<(), String>>,
-    stream: UnixStream,
+    stream: Option<UnixStream>,
 ) -> Result<(), Box<dyn Error>> {
     use log::error;
 
@@ -695,7 +692,7 @@ fn handle_client(
         let mut transport: Box<dyn DapTransport> = if is_stdio {
             Box::new(std::io::stdout())
         } else {
-            Box::new(stream)
+            Box::new(stream.expect("stream must be initialized if not stdio!"))
         };
         loop {
             info!("wait for next message from dap server/task threads");

@@ -4,7 +4,7 @@ import
 
 var coreProcessId* = -1
 
-proc startBackend*(backendKind: string, isStdio: bool, socketPath: Option[string]) =
+proc startBackend*(backendKind: string, isStdio: bool = true, socketPath: Option[string]) =
   let backendExe =
     if backendKind == "db":
       dbBackendExe
