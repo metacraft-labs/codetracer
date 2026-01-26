@@ -325,18 +325,19 @@ impl Calltrace {
 
     pub fn load_callstack(&self, step_id: StepId, db: &Db) -> Vec<DbCall> {
         let mut callstack = vec![];
+        if step_id.0 < db.steps.len().try_into().unwrap() {
+            let current_step = &db.steps[step_id];
+            let mut call_key = current_step.call_key;
 
-        let current_step = &db.steps[step_id];
-        let mut call_key = current_step.call_key;
+            assert!(call_key.0 >= 0);
 
-        assert!(call_key.0 >= 0);
+            // info!("step {:#?}", current_step);
+            while call_key != NO_KEY {
+                let call_record = &db.calls[call_key];
+                callstack.push(call_record.clone());
 
-        // info!("step {:#?}", current_step);
-        while call_key != NO_KEY {
-            let call_record = &db.calls[call_key];
-            callstack.push(call_record.clone());
-
-            call_key = call_record.parent_key;
+                call_key = call_record.parent_key;
+            }
         }
 
         callstack
