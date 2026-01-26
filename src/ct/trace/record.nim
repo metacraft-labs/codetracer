@@ -3,7 +3,8 @@ import std/[os, osproc, strutils, sequtils, strtabs, strformat, json, options],
   ../../common/[ lang, paths, types, trace_index, config ],
   ../utilities/[language_detection ],
   ../cli/build,
-  ../online_sharing/upload
+  ../online_sharing/upload,
+  ../globals
 
 proc stripEnclosingQuotes(value: string): string =
   ## Remove a single layer of matching quotes from ``value`` if present.
@@ -236,13 +237,16 @@ proc record*(lang: string,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
+  var outputFolderValue = outputFolder
+  var programToRecord = program
+  var nimcachePath = ""
   var pargs: seq[string] = @[]
   if lang != "":
     pargs.add("--lang")
     pargs.add(lang)
-  if outputFolder != "" and outputFolder != ".":
+  if outputFolderValue != "" and outputFolderValue != ".":
     pargs.add("-o")
-    pargs.add(outputFolder)
+    pargs.add(outputFolderValue)
   if exportFile != "":
     pargs.add("-e")
     pargs.add(exportFile)
@@ -288,7 +292,19 @@ proc record*(lang: string,
     pargs.add("--python-interpreter")
     pargs.add(pythonInterpreter)
 
-  pargs.add(program)
+  if not detectedLang.isDbBased:
+    # Match `ct run` behavior for RR-based languages by building first.
+    if detectedLang == LangNim and outputFolderValue.len == 0:
+      let traceID = trace_index.newID(test=false)
+      outputFolderValue = codetracerShareFolder / fmt"trace-{traceID}"
+      createDir(outputFolderValue)
+      nimcachePath = outputFolderValue / "nimcache"
+      # Ensure the output folder is passed to the recorder after we create it.
+      pargs.add("-o")
+      pargs.add(outputFolderValue)
+    programToRecord = build(program, "", nimcachePath)
+
+  pargs.add(programToRecord)
   if args.len != 0:
     pargs = concat(pargs, args)
 

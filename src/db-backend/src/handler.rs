@@ -27,11 +27,12 @@ use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAndValueTuple, TraceKind};
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
-    CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation,
-    HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump,
-    Location, MoveState, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg,
-    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId,
-    TracepointResults, UpdateTableArgs, Variable, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
+    CallLineContentKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
+    FrameInfo, FunctionLocation, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg,
+    LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent,
+    RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
+    Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_ADDRESS,
+    NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
@@ -1872,14 +1873,78 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
-            self.calltrace
-                .load_callstack(self.step_id, &self.db)
-                .iter()
-                .map(|call_record| {
-                    // expanded children count not relevant in raw callstack
-                    self.produce_stack_frame(call_record)
-                })
-                .collect()
+            if self.trace_kind == TraceKind::RR {
+                // RR traces need a stack frame derived from the current location so VS Code can show the locator arrow.
+                let current_location = self.replay.load_location(&mut self.expr_loader)?;
+                let mut stack_frames: Vec<dap_types::StackFrame> = Vec::new();
+                stack_frames.push(dap_types::StackFrame {
+                    id: 0,
+                    name: current_location.function_name.clone(),
+                    source: Some(dap_types::Source {
+                        name: Some("".to_string()),
+                        path: Some(current_location.path.clone()),
+                        source_reference: None,
+                        adapter_data: None,
+                        checksums: None,
+                        origin: None,
+                        presentation_hint: None,
+                        sources: None,
+                    }),
+                    line: if current_location.line >= 0 { current_location.line } else { 0 },
+                    column: 1,
+                    end_line: None,
+                    end_column: None,
+                    instruction_pointer_reference: None,
+                    module_id: None,
+                    presentation_hint: None,
+                    can_restart: None,
+                });
+
+                let callstack_lines = self.replay.load_callstack()?;
+                for line in callstack_lines.into_iter() {
+                    if line.content.kind != CallLineContentKind::Call {
+                        continue;
+                    }
+                    let location = line.content.call.location;
+                    if location.path == current_location.path && location.line == current_location.line {
+                        continue;
+                    }
+                    let next_id = stack_frames.len() as i64;
+                    stack_frames.push(dap_types::StackFrame {
+                        id: next_id,
+                        name: location.function_name,
+                        source: Some(dap_types::Source {
+                            name: Some("".to_string()),
+                            path: Some(location.path),
+                            source_reference: None,
+                            adapter_data: None,
+                            checksums: None,
+                            origin: None,
+                            presentation_hint: None,
+                            sources: None,
+                        }),
+                        line: if location.line >= 0 { location.line } else { 0 },
+                        column: 1,
+                        end_line: None,
+                        end_column: None,
+                        instruction_pointer_reference: None,
+                        module_id: None,
+                        presentation_hint: None,
+                        can_restart: None,
+                    });
+                }
+
+                stack_frames
+            } else {
+                self.calltrace
+                    .load_callstack(self.step_id, &self.db)
+                    .iter()
+                    .map(|call_record| {
+                        // expanded children count not relevant in raw callstack
+                        self.produce_stack_frame(call_record)
+                    })
+                    .collect()
+            }
         } else {
             vec![]
         };
@@ -1901,6 +1966,10 @@ impl Handler {
         arg: dap_types::ScopesArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![] }, sender)?;
+            return Ok(());
+        }
         let call = &self.db.calls[CallKey(arg.frame_id)];
         let function = &self.db.functions[call.function_id];
         let scope = dap_types::Scope {
@@ -1932,6 +2001,14 @@ impl Handler {
         _arg: dap_types::VariablesArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::RR {
+            self.respond_dap(
+                request,
+                dap_types::VariablesResponseBody { variables: vec![] },
+                sender,
+            )?;
+            return Ok(());
+        }
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
             .iter()
             .map(|v| Variable {
