@@ -44,6 +44,8 @@
       flake = true;
     };
 
+    # Pre-commit hooks
+    git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };
 
   # outputs = {
@@ -87,6 +89,7 @@
       imports = [
         ./nix/shells
         ./nix/packages
+        inputs.git-hooks-nix.flakeModule
       ];
 
       perSystem =
@@ -112,6 +115,11 @@
                 "electron-24.8.6"
               ];
             };
+          };
+
+          # Pre-commit hooks configuration
+          pre-commit.settings = import ./nix/pre-commit.nix {
+            pkgs = import nixpkgs { inherit system; };
           };
         };
     };
