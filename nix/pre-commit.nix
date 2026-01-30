@@ -1,4 +1,7 @@
-{ pkgs }:
+{
+  pkgs,
+  rustPkgs ? null,
+}:
 {
   # Exclude third-party and generated files from all hooks
   excludes = [
@@ -11,11 +14,64 @@
   ];
 
   hooks = {
+    # Rust hooks
+    # TODO: Enable when nixpkgs version is compatible with git-hooks-nix
+    # clippy = {
+    #   enable = true;
+    #   packageOverrides = {
+    #     cargo = rustPkgs.rust-stable;
+    #     clippy = rustPkgs.rust-stable;
+    #   };
+    #   settings.denyWarnings = true;
+    # };
+    # cargo-check = {
+    #   enable = true;
+    #   package = rustPkgs.rust-stable;
+    # };
+    # rustfmt = {
+    #   enable = true;
+    #   packageOverrides = {
+    #     cargo = rustPkgs.rust-stable;
+    #     rustfmt = rustPkgs.rust-stable;
+    #   };
+    # };
+
+    # Shell hooks
+    shellcheck.enable = true;
+    shfmt.enable = true;
+
     # Nix formatter
     nixfmt-rfc-style.enable = true;
 
-    # Shell script checks
-    shellcheck.enable = true;
+    # TOML formatter
+    taplo.enable = true;
+
+    # Spell checker for markdown
+    cspell = {
+      enable = true;
+      name = "cspell (cached)";
+      entry = "cspell --no-progress --cache --config .cspell.json";
+      language = "system";
+      pass_filenames = true;
+      files = "\\.(md)$";
+      extraPackages = [ pkgs.nodePackages.cspell ];
+    };
+
+    # Markdown linter
+    markdownlint-fix = {
+      enable = true;
+      name = "markdownlint-cli2 (fix)";
+      entry = "markdownlint-cli2 --fix";
+      language = "system";
+      pass_filenames = true;
+      files = "\\.md$";
+      excludes = [
+        "^AGENTS\\.md$"
+        "^tasks\\.md$"
+        "^docs/" # Many legacy docs with formatting issues
+      ];
+      extraPackages = [ pkgs.markdownlint-cli2 ];
+    };
 
     # General hooks
     trim-trailing-whitespace.enable = true;

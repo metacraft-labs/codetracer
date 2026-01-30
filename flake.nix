@@ -93,7 +93,7 @@
       ];
 
       perSystem =
-        { system, ... }:
+        { system, config, ... }:
         {
           _module.args.pkgs = import nixpkgs {
             inherit system;
@@ -120,6 +120,7 @@
           # Pre-commit hooks configuration
           pre-commit.settings = import ./nix/pre-commit.nix {
             pkgs = import nixpkgs { inherit system; };
+            rustPkgs = config.packages;
           };
         };
     };

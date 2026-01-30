@@ -1,0 +1,14 @@
+codetracer
+nim
+nixos
+nix
+flake
+rustfmt
+clippy
+shellcheck
+shfmt
+taplo
+direnv
+envrc
+submodule
+submodules
