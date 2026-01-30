@@ -12,7 +12,7 @@ use crate::{
     nim_mangling,
     replay::Replay,
     task::{
-        Action, BranchesTaken, CoreTrace, FlowEvent, FlowMode, FlowStep, FlowUpdate, FlowUpdateState,
+        Action, BranchesTaken, CoreTrace, FlowEvent, FlowMode, FlowRenderValue, FlowStep, FlowUpdate, FlowUpdateState,
         FlowUpdateStateKind, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps, Position, RRTicks,
         StepCount, TraceKind,
     },
@@ -538,6 +538,8 @@ impl<'a> CallFlowPreloader<'a> {
                 .expr_loader
                 .final_branch_load(path_buf, &flow_view_update.branches_taken[0][0].table),
         );
+        let render_value_groups = self.build_render_values(&flow_view_update);
+        flow_view_update.render_value_groups = render_value_groups;
         Ok(flow_view_update)
     }
 
@@ -801,4 +803,190 @@ impl<'a> CallFlowPreloader<'a> {
         self.last_expr_order = expr_order;
         flow_view_update
     }
+
+    fn build_render_values(&self, flow_view_update: &FlowViewUpdate) -> Vec<Vec<FlowRenderValue>> {
+        // Build per-line render values with source column offsets, preferring the latest step per loop/line/expression.
+        let mut values_by_key: HashMap<(i64, i64, String), (i64, FlowRenderValue)> = HashMap::new();
+        let location = &flow_view_update.location;
+
+        let active_rr_ticks = flow_view_update.location.rr_ticks.0;
+        let active_step_count = flow_view_update
+            .steps
+            .iter()
+            .filter(|step| step.rr_ticks.0 <= active_rr_ticks && step.position.0 == flow_view_update.location.line)
+            .map(|step| step.step_count.0)
+            .max()
+            .or_else(|| {
+                flow_view_update
+                    .steps
+                    .iter()
+                    .filter(|step| step.rr_ticks.0 <= active_rr_ticks)
+                    .map(|step| step.step_count.0)
+                    .max()
+            })
+            .unwrap_or(0);
+
+        let mut active_iteration_by_loop_line: HashMap<(i64, i64), i64> = HashMap::new();
+
+        let resolve_active_iteration = |loop_id: i64, line: i64| -> Option<i64> {
+            let loop_index = loop_id as usize;
+            let iterations = flow_view_update.loop_iteration_steps.get(loop_index)?;
+            let mut best: Option<(i64, i64)> = None;
+            for (iteration_index, iteration_steps) in iterations.iter().enumerate() {
+                if let Some(step_count) = iteration_steps.table.get(&(line as usize)) {
+                    let step_count = *step_count as i64;
+                    if step_count <= active_step_count {
+                        match best {
+                            Some((best_step, _)) if step_count <= best_step => {}
+                            _ => {
+                                best = Some((step_count, iteration_index as i64));
+                            }
+                        }
+                    }
+                }
+            }
+            best.map(|(_, iteration)| iteration)
+        };
+
+        for step in &flow_view_update.steps {
+            let line = step.position.0;
+            let step_count = step.step_count.0;
+            let loop_id = resolve_loop_id(flow_view_update, step);
+            let iteration = step.iteration.0;
+            let rr_ticks = step.rr_ticks.0;
+            let mut expressions: Vec<String> = if !step.expr_order.is_empty() {
+                step.expr_order.clone()
+            } else {
+                let mut all = HashSet::new();
+                for key in step.before_values.keys() {
+                    all.insert(key.clone());
+                }
+                for key in step.after_values.keys() {
+                    all.insert(key.clone());
+                }
+                all.into_iter().collect()
+            };
+            expressions.sort();
+
+            for expression in expressions {
+                let before_value = step.before_values.get(&expression).cloned();
+                let after_value = step.after_values.get(&expression).cloned();
+                if before_value.is_none() && after_value.is_none() {
+                    continue;
+                }
+
+                let text = format_render_text(&expression, before_value.as_ref(), after_value.as_ref());
+                if text.is_empty() {
+                    continue;
+                }
+
+                let column = match self
+                    .flow_preloader
+                    .expr_loader
+                    .get_expr_column(Position(line), &expression, location)
+                {
+                    Some(col) => col as i64,
+                    None => continue,
+                };
+
+                let render_value = FlowRenderValue {
+                    line,
+                    column,
+                    loop_id,
+                    iteration,
+                    rr_ticks,
+                    text,
+                };
+                let key = (loop_id, line, expression);
+                let replace = match values_by_key.get(&key) {
+                    Some((existing_step, _)) => step_count >= *existing_step,
+                    None => true,
+                };
+                if replace {
+                    values_by_key.insert(key, (step_count, render_value));
+                }
+            }
+        }
+
+        let mut flat_values: Vec<FlowRenderValue> = Vec::new();
+        let mut grouped: HashMap<i64, Vec<FlowRenderValue>> = HashMap::new();
+        for (_, value) in values_by_key.into_values() {
+            if value.loop_id != 0 {
+                let key = (value.loop_id, value.line);
+                let active_iteration = active_iteration_by_loop_line
+                    .get(&key)
+                    .copied()
+                    .or_else(|| {
+                        let resolved = resolve_active_iteration(value.loop_id, value.line);
+                        if let Some(iteration) = resolved {
+                            active_iteration_by_loop_line.insert(key, iteration);
+                        }
+                        resolved
+                    });
+                if let Some(active_iteration) = active_iteration {
+                    if value.iteration != active_iteration {
+                        continue;
+                    }
+                }
+            }
+            flat_values.push(value.clone());
+            grouped.entry(value.loop_id).or_default().push(value);
+        }
+
+        for values in grouped.values_mut() {
+            values.sort_by(|left, right| (left.line, left.column, &left.text).cmp(&(right.line, right.column, &right.text)));
+        }
+
+        let mut loop_ids: Vec<i64> = grouped.keys().cloned().collect();
+        loop_ids.sort();
+        if !loop_ids.contains(&0) {
+            loop_ids.insert(0, 0);
+        }
+
+        let mut groups: Vec<Vec<FlowRenderValue>> = Vec::new();
+        for loop_id in loop_ids {
+            groups.push(grouped.remove(&loop_id).unwrap_or_default());
+        }
+
+        if groups.len() == 1 && groups[0].is_empty() && !flat_values.is_empty() {
+            groups[0] = flat_values;
+        }
+
+        groups
+    }
+}
+
+fn format_render_text(expression: &str, before_value: Option<&Value>, after_value: Option<&Value>) -> String {
+    let before_text = before_value.map(|value| value.text_repr()).unwrap_or_default();
+    let after_text = after_value.map(|value| value.text_repr()).unwrap_or_default();
+
+    if before_text.is_empty() && after_text.is_empty() {
+        return String::new();
+    }
+    if !before_text.is_empty() && !after_text.is_empty() {
+        if before_text == after_text {
+            return format!("{}: {}", expression, before_text);
+        }
+        return format!("{}: {} => {}", expression, before_text, after_text);
+    }
+    let single = if !after_text.is_empty() { after_text } else { before_text };
+    format!("{}: {}", expression, single)
+}
+
+fn resolve_loop_id(flow_view_update: &FlowViewUpdate, step: &FlowStep) -> i64 {
+    if step.r#loop.0 != 0 {
+        return step.r#loop.0;
+    }
+
+    let line = step.position.0;
+    let mut selected = 0;
+    for loop_info in &flow_view_update.loops {
+        if loop_info.base.0 == 0 {
+            continue;
+        }
+        if loop_info.first.0 <= line && loop_info.last.0 >= line {
+            selected = loop_info.base.0;
+        }
+    }
+    selected
 }
