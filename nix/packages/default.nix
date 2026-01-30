@@ -1,4 +1,4 @@
-{ inputs, ... }:
+{ inputs, self, ... }:
 {
   perSystem =
     {
@@ -9,7 +9,10 @@
     let
       inherit (pkgs) stdenv;
 
-      src = ../../.;
+      # Use self.outPath to get the flake source with submodules
+      # When building with .?submodules=1, Nix will fetch submodules
+      # and self.outPath will include them
+      src = self.outPath;
 
       # Import multiple Nim versions
       nimVersions = import ../nim-versions { inherit pkgs; };
