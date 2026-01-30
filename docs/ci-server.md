@@ -1,5 +1,5 @@
 
-### Setup 
+### Setup
 
 ### Set up the container options
 
@@ -108,7 +108,7 @@ sudo cp /home/codetracer/config.toml /etc/gitlab-runner/config.toml
   * It seems the url for our repo might be <https://gitlab.com/metacraft-labs/code-tracer/CodeTracer/-/runners#js-runners-settings> or
       <https://gitlab.com/metacraft-labs/code-tracer/CodeTracer/-/settings/ci_cd>
 * Use the token and run on the server
-  
+
 ```bash
 export GITLAB_RUNNER_TOKEN=<insert token>
 

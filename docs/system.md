@@ -2,7 +2,7 @@
 
 ## system
 
-UI 
+UI
 ==
 
 UI is important.
@@ -11,7 +11,7 @@ We have most of our code in `ui/`.
 `ui_js.nim` is the main file.
 We define the root view.
 
-Most of the components are defined in their own modules: 
+Most of the components are defined in their own modules:
 
 * `calltrace` the calltrace, expanding and collapse
 * `chronology` the chronology and input
@@ -52,7 +52,7 @@ Most of our state is in the `data` global. It can certainly be optimized.
 We maintain our panel in `sys`.
 
 When you need to talk with the server, you send a message using `ipc.send`.
-We apply the "CODETRACER::" namespace. In a browser this is a socket message, in 
+We apply the "CODETRACER::" namespace. In a browser this is a socket message, in
 Electron we send it to the main process.
 The main process responds, and usually you register a listener with ipcConfigure.
 
@@ -149,7 +149,7 @@ and starts the other needed processes.
 The stable process jumps to main and calls back the server so the ui can show the main program.
 
 We have a listener for gdb events and use a system of JavaScript promises to await actions.
-The problem is that an action usually ends before the info of the new location arrives, so we have our own 
+The problem is that an action usually ends before the info of the new location arrives, so we have our own
 helpers in process_gdb which we should use.
 
 The other bizarre part is the export api: it defines with a macro the debugger interface and generates export code for it. We expose a type to other modules, so they can call our functions in a type safe way.
@@ -158,7 +158,7 @@ it can crash or block the main process.
 
 It communicates using helpers and ipc send. This is also complicated internally as on desktop it uses electron, and on server `node-ipc` mapping the calls (probably).
 
-We have some helpers to report errors and to load stuff from the server. 
+We have some helpers to report errors and to load stuff from the server.
 A lot of the moves are basically taking arguments from the server , invoking typed functions which implement the logic
 and call python commands as primitives. Some actions periodically update the server , e.g. preloading.
 
@@ -185,7 +185,7 @@ The backend, the archive runner, the archive server, the shell support, codetrac
 
 
 Codetracer calls the server, a local database and Redis.
-  
+
 The server is the main Electron process which dispatches tasks and messages to the renderer and the debugger.
 
 It also maintains a running plugin for the current language and communicates on stdout with json.
@@ -213,7 +213,6 @@ The telemetry is used for logging by me most of the time: it logs to the screen 
 Plugin communicator
 ==
 
-Plugins are supposed to analyze language-specific things using the language tools. 
+Plugins are supposed to analyze language-specific things using the language tools.
 For Nim, we just import the compiler.
 For C++, currently we parse clang's dump output: we have to write a plugin in C++ which actually analyzes the AST, but I had some problems with the parser API: TODO.
-

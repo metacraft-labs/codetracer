@@ -6,7 +6,7 @@ large_n = 600_851_475_143
 # Find all potential numbers that could be factors
 factor_bound = (large_n**0.5).to_i
 
-# not prime if any factors other than 
+# not prime if any factors other than
 def prime?(integer)
   return false if integer % 2 == 0
   bound = (integer**0.5).to_i

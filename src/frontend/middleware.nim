@@ -116,7 +116,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # viewsApi.subscribeRaw(DapStepIn, proc(kind: CtEventKind, value: JsObject, sub: Subscriber) = dapApi.sendCtRequest(kind, value))
   # for event in InternalFirst..InternalLast
   # or maybe custom for each case!
-  # viewsApi.subscribeRaw(InternalAddToScratchpad, proc(kind: CtEventKind, value: JsObject, sub: Subscriber) = 
+  # viewsApi.subscribeRaw(InternalAddToScratchpad, proc(kind: CtEventKind, value: JsObject, sub: Subscriber) =
     # viewsApi.emit(kind, value))
   # for other custom cases, manual overrides! maybe typed
   # problem: almost nowhere actual enforcing of types
@@ -127,7 +127,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   # ..
   # so one can either take a CtEvent
   # or a payload/kind+payload
-  # or directly kind+raw 
+  # or directly kind+raw
 
 
   dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
@@ -139,7 +139,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     viewsApi.emit(CtCompleteMove, value)
     lastCompleteMove = value
-    
+
     when not defined(ctInExtension):
       data.status.stableBusy = false
       data.status.hasStarted = true
@@ -174,7 +174,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) =
       addToScratchpadHandler(viewsApi, value))
   else:
-    # TODO: also in extension: opening again/focusing scratchpad and 
+    # TODO: also in extension: opening again/focusing scratchpad and
     # sending to it, maybe using a handler that we pass to setupMiddlewareApis ?
     # or a global function?
     viewsApi.subscribe(InternalAddToScratchpad, proc(kind: CtEventKind, value: ValueWithExpression, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpad, value))
@@ -190,7 +190,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(DapSetBreakpoints, proc(kind: CtEventKind, value: DapSetBreakpointsArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtReverseStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtReverseStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
-  
+
   viewsApi.subscribe(CtLoadLocals, proc(kind: CtEventKind, value: LoadLocalsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtUpdateTable, proc(kind: CtEventKind, value: UpdateTableArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadCalltraceSection, proc(kind: CtEventKind, value: CalltraceLoadArgs, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))

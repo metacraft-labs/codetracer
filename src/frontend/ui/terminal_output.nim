@@ -130,7 +130,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
 method onLoadedTerminal*(self: TerminalOutputComponent, eventList: seq[ProgramEvent]) {.async.} =
   self.initialUpdate = false
   self.cacheAnsiToHtmlLines(eventList)
-  
+
 
 proc onTerminalEventClick(self: TerminalOutputComponent, eventElement: ProgramEvent) =
   self.api.emit(CtEventJump, eventElement)

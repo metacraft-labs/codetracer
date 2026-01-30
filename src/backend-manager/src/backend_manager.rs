@@ -189,7 +189,7 @@ impl BackendManager {
 
         create_dir_all(&socket_dir).await?;
 
-        
+
         // reserve place
         self.children.push(None);
         // must be > 0 here!
@@ -307,7 +307,7 @@ impl BackendManager {
 
     pub async fn stop_replay(&mut self, id: usize) -> Result<(), Box<dyn Error>> {
         info!("Stopping replay with id {id}");
-        
+
         self.check_id(id)?;
 
         if let Some(child_opt) = self.children.get_mut(id) {

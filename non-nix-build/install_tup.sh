@@ -26,4 +26,3 @@ cd tup
 git checkout $WANTED_TUP_REVISION
 ./bootstrap.sh
 cp ./tup "$BIN_DIR"/
-

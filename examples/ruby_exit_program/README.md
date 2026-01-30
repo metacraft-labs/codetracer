@@ -26,7 +26,6 @@ ruby bin/with_extensions/<script_name> or ruby bin/without_extension/<script_nam
 
 - **`bin/with_extension/`**:
   - Contains Ruby scripts with the `.rb` extension. These are primarily used during development and debugging when integration with IDEs and other development tools is required.
-  
+
 - **`bin/without_extension/`**:
   - Contains executable scripts without the `.rb` extension, optimized for direct execution from the command line. These scripts provide a cleaner and more tool-like interface for users and are intended for production use or manual execution.
-

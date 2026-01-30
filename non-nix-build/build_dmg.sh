@@ -12,4 +12,3 @@ create-dmg \
   --app-drop-link 450 200 \
   "CodeTracer.dmg" \
   "CodeTracer.app"
-

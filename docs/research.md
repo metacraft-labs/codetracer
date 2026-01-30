@@ -4,7 +4,7 @@ I spent some time with the Nim compiler today, as I want to improve the rr logic
 
 Various observations:
 
-* I often want to trace just a certain period of the program, e.g. 
+* I often want to trace just a certain period of the program, e.g.
 I know that it behaves ok in the first 90% of invocations, and it breaks just in a certain moment.
 Here is probably where some kind of condition-based tracing/searching might help.
 A progress bar on which you can jump to %-event of the program also seems like a possible solution, but it's more of a gimmick, and I am not totally sure how useful would it be in general
@@ -43,11 +43,8 @@ and that would be the result
   var filename = "z"        ! filename = "z"
 ```
 
-The point is that we follow not only to the allocation of a variable, but also detect how it's constructed and we also follow the history of those values recursively to get a full picture of how 
+The point is that we follow not only to the allocation of a variable, but also detect how it's constructed and we also follow the history of those values recursively to get a full picture of how
 was our value constructed(because that might map to something a human would do manually).
-I toyed with recognizing common patterns (e.g. arg passing), I admit analyzing this seem harder and 
+I toyed with recognizing common patterns (e.g. arg passing), I admit analyzing this seem harder and
 full of edge cases, but a not-always-perfect version of it seems simple: not tough to recognize calls/variables on right of assignment or in a call and to re-apply recursively the same actions on them
 As a whole that's a dubious and indefinite future idea of course, but I'll document here just in case.
-
-
-

@@ -13,7 +13,7 @@ pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field, 
         }
         status_report(i,initial_shield, remaining_shield, damage, regeneration);
     }
-    
+
     // We need to have at least 1 unit of shields left in order to survive the cosmic radiation.
     let result = remaining_shield as i32 > 0;
     result
@@ -32,7 +32,7 @@ fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass: Field)
         damage = mass * (100 - shield_pct);
     }
     if(damage as u32 > remaining_shield as u32){
-        damage = remaining_shield; 
+        damage = remaining_shield;
         }
     damage as Field
 }

@@ -21,4 +21,3 @@ fn looper(x: Field, y: Field) -> Field {
     }
     result
 }
-

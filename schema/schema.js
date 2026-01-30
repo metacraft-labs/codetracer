@@ -34,8 +34,8 @@ class Generator {
                         lastTokenStart = i;
                     }
                 } else {
-                    customChange = true; 
-                    // multiple capital letters => hard to turn back to camel case, 
+                    customChange = true;
+                    // multiple capital letters => hard to turn back to camel case,
                     // signify so generator can hint keeping the original field for serialization
                 }
                 isLastSymbolUpper = true;
@@ -48,7 +48,7 @@ class Generator {
         }
         return [parts.join('_'), customChange];
     }
-    
+
     toPascalCase(original) {
         // console.log('type name : ', name);
         let tokens = original.split('_');
@@ -111,12 +111,12 @@ class Generator {
 
     typeGeneratedForCt(typeName) {
         return !typeName.endsWith('Request') &&
-            !typeName.endsWith('Response') && 
+            !typeName.endsWith('Response') &&
             !typeName.endsWith('Event') &&
             typeName !== 'ProtocolMessage' &&
             IGNORE_TYPES[typeName] === undefined;
     }
-    
+
     generateType(typeName, definition) {
         if (definition.type === 'object') {
             return this.generateObject(typeName, definition);
@@ -179,7 +179,7 @@ class Generator {
     }
 
     translatesAsObjectMapping(definition) {
-        return definition.additionalProperties !== undefined && 
+        return definition.additionalProperties !== undefined &&
             definition.additionalProperties.type !== undefined;
     }
 
@@ -218,7 +218,7 @@ class RustGenerator extends Generator {
             return {
                 fieldName: rawFieldName,
                 customChange: customChange
-            }; 
+            };
         }
     }
 
@@ -306,11 +306,11 @@ class NimGenerator extends Generator {
 function run() {
     // "debugAdapterProtocol.json"
     // src/db-backend/ct_types.json
-    // 
+    //
     // TODO:
     // schema-generator ct_types.json
     // node schema/schema.js ct_types.json --lang=nim -o src/frontend/ct_types.nim
-    
+
     let schema = fs.readFileSync("libs/vscode-debugadapter-node/debugProtocol.json", {encoding: 'utf8'});
     let targetLang = 'rust';
     let definitions = JSON.parse(schema).definitions;
@@ -339,6 +339,6 @@ function run() {
 
 run();
 
-// TODO: 
+// TODO:
 // schemars;
 // nim?

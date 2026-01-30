@@ -128,7 +128,7 @@ proc parseDiff(rawDiff: string): Diff =
               of ' ': (true, NonChanged)
               # not expected to have another symbol: probably a diff metadata line, line `diff `, `index`
               # or `new mode ` or other:
-              else:   (false, NonChanged) 
+              else:   (false, NonChanged)
             if isLineDiff:
               var diffLine = DiffLine(
                 kind: kind,
@@ -170,7 +170,7 @@ proc parseDiff(rawDiff: string): Diff =
 #   # TODO: eventually diff-index in the future
 #   # in the future store as a new trace-id?
 #   # for now in a custom place
-  
+
 #   # find the diff, parse
 #   let rawDiff = findDiff(diffSpecification)
 #   # echo rawDiff

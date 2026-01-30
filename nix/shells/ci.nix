@@ -1,17 +1,18 @@
 {
   pkgs,
   self',
-}: let
+}:
+let
   ourPkgs = self'.packages;
 in
-  pkgs.mkShell {
-    packages = with pkgs; [
-      python3Packages.flake8
-      shellcheck
-      xz
-      gnutar
-      pkgs.gawk
-      gnupg
-      pkgs.wget
-    ];
-  }
+pkgs.mkShell {
+  packages = with pkgs; [
+    python3Packages.flake8
+    shellcheck
+    xz
+    gnutar
+    pkgs.gawk
+    gnupg
+    pkgs.wget
+  ];
+}

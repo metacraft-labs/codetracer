@@ -62,7 +62,7 @@ module RubyTracer
 
     def replace_expect(proc)
       s(:begin, *proc.children.map do |node|
-        if node.type == :send && node.children[0] && 
+        if node.type == :send && node.children[0] &&
            node.children[0].type == :block &&
            node.children[0].children[0] && node.children[0].children[0].type == :send &&
            node.children[0].children[0].children[1] == :expect

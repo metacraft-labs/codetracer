@@ -10,4 +10,3 @@ clean:
 	rm -rf example example_2
 
 all: example example_2
-

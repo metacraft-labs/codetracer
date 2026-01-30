@@ -71,7 +71,7 @@ type
     InternalNewOperation,
     InternalTraceMapUpdate,
     CtNotification,
-    
+
 when defined(js):
   import std / jsffi
 
@@ -84,4 +84,3 @@ type
   CtEvent*[T] = ref object
     kind*: CtEventKind
     value: T
-

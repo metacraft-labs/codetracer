@@ -542,7 +542,7 @@ proc events(self: EventLogComponent) =
           bInfo: false,
           createdRow: rowTimestamp,
           language: js{
-            emptyTable: proc: cstring = 
+            emptyTable: proc: cstring =
               # TODO if self.receivedUpdates:
               """The current record appears to not have any system events like std read/write,
               network or disc operations.</br>You can add trace point events to your code by selecting any
@@ -1098,7 +1098,7 @@ method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.
   if not self.denseTable.isNil and not self.denseTable.context.isNil:
     self.denseTable.context.ajax.reload()
   self.redraw()
-  
+
 
 method clear*(self: EventLogComponent) =
   if not self.denseTable.isNil and not self.denseTable.context.isNil:
@@ -1219,7 +1219,7 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
       self.denseTable.context.column(2).visible(false)
     except:
       cwarn "Complete move came before initializing the event log component"
-  
+
   let currentTime: int64 = now()
   self.location = response.location
 

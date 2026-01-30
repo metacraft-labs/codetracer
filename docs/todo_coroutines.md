@@ -39,7 +39,7 @@ for nim, improve linedir
 
 for asynccheck:
   # co-step-in as step-in
-  # co-next go over or skip 		 	
+  # co-next go over or skip
 
   aIter_async.
 
@@ -70,7 +70,7 @@ c:
 
 steps: what to do by default?
 maybe next should be co-next for async context
-and we should have a normal-next and normal-step-in 
+and we should have a normal-next and normal-step-in
 when we make sure it's .. normal
 as a fallback
 but how to do it as shortcuts
@@ -144,4 +144,3 @@ step-in:
         ok
   else:
     next
-

@@ -1564,7 +1564,7 @@ impl Handler {
             } else {
                 for _ in arg.target_iteration..arg.active_iteration {
                     self.replay.step(Action::Continue, false)?;
-                }                
+                }
             }
 
             if location.line < arg.first_loop_line + 1 {

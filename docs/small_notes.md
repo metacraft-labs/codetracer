@@ -37,7 +37,7 @@ Plan value support?
   Simple events for value register/modify
   Add value id as an node in the graph;
   and events as edges;
-  value_node: 
+  value_node:
     value_id or
     literal
   full_value register specifically
@@ -48,7 +48,7 @@ Plan value support?
 
   register_cell(value_id, atom_value);
   register_compound(value_id, eventually_kind: seq/object/other? or just type_id, type_id);
-  register_modify(value_id, coord, cell_value_id); 
+  register_modify(value_id, coord, cell_value_id);
   // eventually coord / modify_info can include push/pop/insert etc?
   register_variable(variable_id, value_id);
   // reassign => new register_variable or assign?
@@ -80,13 +80,13 @@ Plan value support?
   remove(value_id); // maybe connect to variables? as well
   variable(variable_id, value_id);
 
-  #id @name 
+  #id @name
 
   register can generate many edges in one
   maybe still better than producing many mini-events for now
   or we can produce them internally from register
   register_compound_value(#value_id, value)
-  
+
   register_compound_value(#0, [0 1 2 3 4]) -> #5 -> #0 -> 0; #1 -> 1; etc
 
 
@@ -96,7 +96,7 @@ Plan value support?
 
   or just
   register_compound(values); and produce the init/edges at once in the backend
-  
+
   variable("list", #0 @list)
   register_atom_value(#6 @limit, 10_000)
   variable("limit", #6 @limit)
@@ -116,7 +116,7 @@ Plan value support?
   set -> assign_atom_value(#1 @list[0], 1)
   etc..
 
-  list now : #0 -> #1 
+  list now : #0 -> #1
                 -> #2 etc
 
   ready!
@@ -124,7 +124,7 @@ Plan value support?
   modify(value_id, sub_value_coord, sub_value_node);
   sub_value_coord:
     index value_node(int); int: probably always can use int; but tracking value id useful for read-flow/usage references
-    or 
+    or
     field string name
     or slice?
     or address?
@@ -138,4 +138,3 @@ Editors:
   Helix/emacs/vim?
 
   zed/custom/codetracer/other??
-

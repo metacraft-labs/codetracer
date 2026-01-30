@@ -4,7 +4,7 @@ def run_counter_loop(i)
   p i
   while counter <= 10 do
     puts counter
-    
+
     counter += 1
     if counter > 5
       raise "error"

@@ -19,4 +19,3 @@ if ! diff "$NIX_NODE" bin/Debug/net8.0/.playwright/node/linux-x64/node ; then
   exit 0
 fi
 # echo "same"
-

@@ -157,4 +157,3 @@ Currently, we are trying to support
 We had prototypes for Ruby/Lua in the past, and support for other native language implementations or simple interpreters(no JIT) shouldn't be too hard if we need it:
 
 Eventually TODO more detailed documentation of core from a lang support view.
-

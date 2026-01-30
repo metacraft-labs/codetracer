@@ -75,4 +75,3 @@ if a {
 } else {
     log(g)
 }
-

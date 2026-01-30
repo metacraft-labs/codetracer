@@ -7,7 +7,7 @@ pushd docs/book/
 # TODO: eventually: a more fine-grained nix shell/env?
 # nix-shell --command "mdbook build"
 
-# for now depending on global project devshell 
+# for now depending on global project devshell
 mdbook build # build output is in the `book` directory
 
 # Prune any stale worktrees that no longer exist on disk

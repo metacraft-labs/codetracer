@@ -92,10 +92,10 @@ proc importTrace*(
   downloadUrl: string = "",
   traceKind: string = "db",
 ): Trace =
-  
+
   # for now support different files with the same subset of fields:
   #   db: trace_metadata.json
-  #   rr: trace_db_metadata.json: 
+  #   rr: trace_db_metadata.json:
   # both should have `program`, `args`, `workdir`(but maybe also others)
   let traceMetadataPath = if traceKind == "db":
       traceFolder / "trace_metadata.json"

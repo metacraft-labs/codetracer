@@ -136,7 +136,7 @@ method render*(self: StateComponent): VNode =
 
     # ensure it's updated so we show history for the right, maybe differrent expression
     self.values[name].baseAddress = localVariable.address
-  
+
     for key, history in self.valueHistory:
       if cstring($self.values[name].baseAddress) == key:
         # reload history chart for it: without reloading value history
@@ -144,8 +144,8 @@ method render*(self: StateComponent): VNode =
         self.values[name].charts = JsAssoc[cstring, ChartComponent]{}
         self.values[name].showInline = JsAssoc[cstring, bool]{}
         discard self.values[name].showHistory(name, redraw=false)
-    
-    
+
+
   try:
     proc renderFunction(value: ValueComponent): VNode =
       value.nameWidth = self.nameWidth
@@ -155,9 +155,9 @@ method render*(self: StateComponent): VNode =
     var initialPosition: float
 
     proc resizeColumns(ev: Event, tg:VNode) =
-      let mouseEvent = cast[MouseEvent](ev) 
+      let mouseEvent = cast[MouseEvent](ev)
       let containerWidth = jq(".active-state #chevron-container").offsetWidth.toJs.to(float)
-      let currentPosition = mouseEvent.screenX.toJs.to(float) 
+      let currentPosition = mouseEvent.screenX.toJs.to(float)
       let movementX = (currentPosition-initialPosition) * 100 / containerWidth
       let newPosition = self.nameWidth + movementX
 
@@ -177,7 +177,7 @@ method render*(self: StateComponent): VNode =
         #     resizeColumns(ev,tg),
         # onmousedown = proc(ev: Event, tg:VNode) =
         #   if self.chevronClicked:
-        #     initialPosition = cast[MouseEvent](ev).screenX.toJs.to(float), 
+        #     initialPosition = cast[MouseEvent](ev).screenX.toJs.to(float),
         onmouseup = proc =
           self.chevronClicked = false,
         onmouseleave = proc = self.chevronClicked = false
@@ -277,7 +277,7 @@ proc watchView(self: StateComponent): VNode =
     ):
       input(`type`="text", placeholder="Enter a watch expression", id="watch")
 
-  
+
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.location = response.location
   for value in self.values:
