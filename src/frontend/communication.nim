@@ -42,7 +42,7 @@ type
   #   in order to not use inheritance and methods, but to support generic api
   #   as otherwise if we use generic methods, we get
   #   `generic methods are deprecated` warning
-  #   
+  #
   #   some field types do use internally inheritance: can be overriden:
   #     Subscriber and Transport (but they represent values/data as raw JsObject-s,
   #       so their methods are not generic)
@@ -86,7 +86,7 @@ proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsOb
     for handler in m.handlers[eventKind]:
       try:
         console.log cstring"  handler: call"
-        handler(eventKind, rawValue, subscriber)  
+        handler(eventKind, rawValue, subscriber)
       except:
         echo fmt"mediator {m.name} handler error: {getCurrentExceptionMsg()}"
   else:
@@ -110,4 +110,3 @@ proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber
 # usecases:
 # -> load locals --send event to the central context -> does stuff; <-> backend; -> send us back loaded locals event or response;
 # -> update status/notification --send event .. -> does stuff; -> send event to another component/webview;
- 

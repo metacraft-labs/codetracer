@@ -18,7 +18,7 @@ This document captures the current best-practices for starting multiple CodeTrac
 
 ## Launching Workflow
 
-1. **Record or locate a trace**  
+1. **Record or locate a trace**
    The startup example records the Noir Space Ship program on demand. If you need a custom trace, set `CODETRACER_TRACE_PATH` before running the harness.
 
 2. **Run the harness with the correct library path**
@@ -46,16 +46,16 @@ This document captures the current best-practices for starting multiple CodeTrac
 
 ## Troubleshooting Checklist
 
-- `Error while processing the port= parameter: invalid integer:`  
+- `Error while processing the port= parameter: invalid integer:`
   You passed `--flag value`. Switch to `--flag=value`.
 
-- `Error: listen EADDRINUSE`  
+- `Error: listen EADDRINUSE`
   Reusing a socket. Ensure the backend and frontend socket ports are identical and genuinely free before each run.
 
-- UI not fullscreen or zoomed incorrectly  
+- UI not fullscreen or zoomed incorrectly
   Confirm the resize event executes and that monitor detection returned sensible values.
 
-- Timeouts waiting for `#eventLog-0-dense-table-0`  
+- Timeouts waiting for `#eventLog-0-dense-table-0`
   Check that `ct host` is still running. Inspect `[ct host:<label>]` logs for early exits and review socket arguments.
 
 ## Next Steps for `ui-tests-v3/`

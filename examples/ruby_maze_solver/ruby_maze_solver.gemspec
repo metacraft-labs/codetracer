@@ -8,10 +8,10 @@ Gem::Specification.new do |spec|
     spec.files       = Dir['lib/**/*.rb']
     spec.homepage    = 'http://example.com/my_gem'
     spec.license     = 'MIT'
-  
+
     spec.metadata['homepage_uri'] = spec.homepage
     spec.metadata['source_code_uri'] = 'http://example.com/my_gem'
     spec.metadata['changelog_uri'] = 'http://example.com/my_gem/CHANGELOG.md'
-  
+
     spec.require_paths = ['lib']
   end

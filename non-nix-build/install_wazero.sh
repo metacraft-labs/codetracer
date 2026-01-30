@@ -21,4 +21,3 @@ if [ "$(git rev-parse HEAD)" != "${commit}" ]; then
   go build cmd/wazero/wazero.go
   cp ./wazero "$BIN_DIR/"
 fi
-

@@ -36,7 +36,7 @@ proc downloadTrace*(url: string): int =
       break
 
   let lang = detectLang(pathValue.extractFilename, LangUnknown, isWasm)
-  let recordPid = NO_PID # for now not processing the pid , but it can be 
+  let recordPid = NO_PID # for now not processing the pid , but it can be
   # accessed from trace metadata file if we need it in the future
   discard importTrace(unzippedLocation, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, url)
   return traceId

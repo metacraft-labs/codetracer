@@ -37,4 +37,3 @@ proc callView(self: CalltraceEditorComponent, location: types.Location): VNode =
 
 method render*(self: CalltraceEditorComponent): VNode =
   result = buildHtml(tdiv(class=componentContainerClass("calltrace-editor")))
-

@@ -307,4 +307,3 @@ export class LayoutPage extends BasePage {
     return this.editorTabsCache;
   }
 }
-

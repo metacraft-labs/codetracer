@@ -7,13 +7,13 @@ pub fn make_transaction(
 ) -> (Field, Field) {
     // Verify sender's identity
     let _ = verify_identity(sender_account_hash, sender_provided_hash);
-    
+
     // Verify recipient's identity
     let _ = verify_identity(recipient_account_hash, recipient_provided_hash);
 
     // Validate that the sender has enough balance
     let remaining_balance = validate_balance(sender_balance, transaction_amount);
-    
+
     // Update recipient's balance (no early return)
     let updated_recipient_balance = recipient_balance + transaction_amount;
 

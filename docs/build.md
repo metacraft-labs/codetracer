@@ -4,7 +4,7 @@ notes about build and dependencies
 ### monaco-editor notes
 
 * TODO: list
-* Temporary : copy all to `editor.main.js` 
+* Temporary : copy all to `editor.main.js`
 IMPORTANT: change that to normal build or a simpler auto operation ?
 
 ### golden-layout notes
@@ -13,4 +13,3 @@ IMPORTANT: change that to normal build or a simpler auto operation ?
 * Copy its `dist/umd/golden-layout.js` file to `src/public/third_party/goldenlayout.js`
 * Comment out the `// else if(typeof define === 'function' && define.amd) .. // define(["jquery"], factory);`
 TODO: license
-

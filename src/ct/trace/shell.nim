@@ -33,7 +33,7 @@ proc findTraceForArgs*(
     patternArg: Option[string],
     traceIdArg: Option[int],
     traceFolderArg: Option[string]): Trace =
-  # if no trace found, returning nil for now 
+  # if no trace found, returning nil for now
   if traceIdArg.isSome:
     let traceId = traceIdArg.get
     let trace = trace_index.find(traceId, test=false)

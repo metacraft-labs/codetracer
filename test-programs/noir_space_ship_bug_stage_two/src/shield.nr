@@ -8,7 +8,7 @@ pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field, 
         remaining_shield += regeneration;
         status_report(i, initial_shield, remaining_shield, damage, regeneration);
     }
-    
+
     let result = remaining_shield as i32 > 0;
     result
 }

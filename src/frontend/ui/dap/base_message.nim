@@ -3,7 +3,7 @@ import json_serialization
 
   Event = object
     test: int
-  
+
   ReverseRequest = object
     test: int
 

@@ -3,9 +3,9 @@ mod eligibility;
 use crate::eligibility::verify_eligibility;
 
 fn main(
-    patient_score: pub Field, 
-    min_score: pub Field, 
-    hashed_patient_data: pub Field, 
+    patient_score: pub Field,
+    min_score: pub Field,
+    hashed_patient_data: pub Field,
     provided_hash: Field
 ) {
     // Call the eligibility verification function

@@ -14,13 +14,15 @@ let
   fenixPkgs = fenix.packages.${pkgs.system};
 
   # Create a complete toolchain from a fenix channel
-  mkRustToolchain = channel: channel.withComponents [
-    "cargo"
-    "clippy"
-    "rust-src"
-    "rustc"
-    "rustfmt"
-  ];
+  mkRustToolchain =
+    channel:
+    channel.withComponents [
+      "cargo"
+      "clippy"
+      "rust-src"
+      "rustc"
+      "rustfmt"
+    ];
 
   # Specific versions we want to support for testing
   # These are selected to cover a range of Rust versions
@@ -36,7 +38,8 @@ let
     };
   };
 
-in {
+in
+{
   # Current stable channel
   rust-stable = mkRustToolchain fenixPkgs.stable;
 

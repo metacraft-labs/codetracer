@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-cd src/db-backend
+cd src/db-backend || exit
 #cargo build
 cargo test --no-run
 if timeout 5 cargo test dap_server_socket ; then
@@ -9,6 +9,3 @@ else
   echo "TIMEOUT!"
   exit 1
 fi
-
-
-

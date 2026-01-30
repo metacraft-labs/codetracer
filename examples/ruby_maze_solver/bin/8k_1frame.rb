@@ -4,7 +4,7 @@ require_relative '../lib/maze_solver'
 
 print "starting ruby_maze_solver"
 p "starting ruby_maze_solver"
- 
+
 GRID_COUNT = 1 # a single frame
 GRID_HEIGHT = 7680
 GRID_WIDTH = 4320

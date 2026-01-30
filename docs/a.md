@@ -7,7 +7,7 @@
 
 ### Local
 
-I sometimes do 
+I sometimes do
 `set -gx PATH /home/al/codetracer/src/build-debug $PATH`
 to get many codetracer-related binaries in my path: `codetracer`, `tester` and maybe others
 
@@ -27,7 +27,7 @@ to get many codetracer-related binaries in my path: `codetracer`, `tester` and m
 
 # Tracepoints:
   Tracepoint: `active` and `not active`, `valid` and `invalid`
-  
+
   Trace: `running` and `stopped`.
 
   We can just run one trace at a time.
@@ -63,7 +63,7 @@ to get many codetracer-related binaries in my path: `codetracer`, `tester` and m
 # event-jump:
   We jump to an event:
     If we hit an error, we should try to present an ok error message and just leave where we are
-  
+
     If we dont : we get to the new position or we pause
 
     Can we cancel ? Pausing should be basically cancelling and should try to get us back to the previous location
@@ -77,10 +77,3 @@ to get many codetracer-related binaries in my path: `codetracer`, `tester` and m
 
 # events prestarting:
   We just get to those
-
-
-
-
-
-
-

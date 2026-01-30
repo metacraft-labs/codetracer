@@ -37,14 +37,14 @@ You can download a `.dmg` app bundle from our website:
 > You can place the downloaded app in a location of your choosing (e.g., the `Applications` folder on macOS).
 > When you launch CodeTracer for the first time, it will prompt you to complete the remaining installation steps, such as adding the command-line utilities to your PATH.
 
-> [!CAUTION]  
-> Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `xattr -c <path/to/CodeTracer.app>`. 
-> 
+> [!CAUTION]
+> Upon the first launch, macOS users will see the error message "CodeTracer is damaged and can't be opened". To resolve this problem, please execute the command `xattr -c <path/to/CodeTracer.app>`.
+>
 > We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program that will ensure CodeTracer is properly signed and whitelisted by Apple. See [this discussion](https://discussions.apple.com/thread/253714860?sortBy=rank) for more details.
 
 > [!CAUTION]
 > Recording ruby on macOS requires you to install ruby through [homebrew](https://brew.sh), otherwise trying to record ruby programs will fail due to the built-in ruby binary on macOS being more than 7 years old.
-> 
+>
 > Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
 
 > [!NOTE]

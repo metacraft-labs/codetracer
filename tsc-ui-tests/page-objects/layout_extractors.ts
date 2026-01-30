@@ -114,4 +114,3 @@ export async function extractLayoutPageModel(page: LayoutPage): Promise<LayoutPa
 
   return model;
 }
-

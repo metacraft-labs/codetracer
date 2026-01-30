@@ -3,7 +3,7 @@
 deps/
 
 # All build tools go here
-bin/ 
+bin/
 
 # All files for distribution go here
 dist/

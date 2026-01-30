@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("logging from db-backend");
 
     info!("pid {:?}", std::process::id());
-    
+
     let run_id = std::process::id() as usize;
 
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };

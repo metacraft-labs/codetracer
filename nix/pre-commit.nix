@@ -16,8 +16,9 @@
     check-merge-conflict = {
       enable = true;
       name = "check merge conflict markers";
+      # Match exact conflict markers (7 chars), not RST-style headings like ==================
       entry = ''
-        bash -c 'set -e; rc=0; for f in "$@"; do [ -f "$f" ] || continue; if grep -n "^<<<<<<<\|^=======\|^>>>>>>>" "$f" >/dev/null 2>&1; then echo "Merge conflict markers in $f"; rc=1; fi; done; exit $rc' --
+        bash -c 'set -e; rc=0; for f in "$@"; do [ -f "$f" ] || continue; if grep -En "^(<{7}|={7}|>{7})( |$)" "$f" >/dev/null 2>&1; then echo "Merge conflict markers in $f"; rc=1; fi; done; exit $rc' --
       '';
       language = "system";
       pass_filenames = true;

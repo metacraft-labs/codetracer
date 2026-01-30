@@ -10,4 +10,3 @@ proc pointListView*: VNode =
         text "tracepoints"
     table(id = "breakpoint-list")
     table(id = "tracepoint-list")
-

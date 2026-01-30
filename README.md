@@ -5,7 +5,7 @@
 
 CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages.
 
-It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward 
+It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward
 through the execution and to examine the history of all memory locations. They say a picture is worth a thousand words — well, a video is even better! Watch the demo below to see CodeTracer in action:
 
 [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
@@ -147,7 +147,7 @@ PGP Key signatures:
 [![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)
 
 > [!CAUTION]
-> When launched for the first time, macOS users will see the error message "CodeTracer is damaged and can't be opened". 
+> When launched for the first time, macOS users will see the error message "CodeTracer is damaged and can't be opened".
 > To resolve this problem, please execute the command `user $ xattr -c <path/to/CodeTracer.app>`.
 >
 > We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program which will ensure CodeTracer is properly signed and whitelisted by Apple.
@@ -180,7 +180,7 @@ On macOS, we do not yet have support for Nix, instead we compile by using the no
 1. Clone this repository
 1. Open a terminal and run `bash non-nix-build/build.sh`
 1. Wait until it finishes installing and packaging
-1. The end result will be a `CodeTracer.dmg` file that can be found under the `non-nix-build` folder. 
+1. The end result will be a `CodeTracer.dmg` file that can be found under the `non-nix-build` folder.
 1. For quicker testing without manually unpacking CodeTracer every time you can experiment with the contents of the `non-nix-build/CodeTracer.app` folder, which is equivalent to the final app bundle
 
 ## The CodeTracer CLI

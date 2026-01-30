@@ -22,5 +22,5 @@ export RUSTUP_INIT_SKIP_PATH_CHECK=yes
 
 curl --proto '=https' --tlsv1.2 -sf https://sh.rustup.rs | sh -s -- --no-modify-path -y --default-toolchain nightly
 
+# shellcheck source=/dev/null
 source "$CARGO_HOME"/env # adds rustc to our PATH
-

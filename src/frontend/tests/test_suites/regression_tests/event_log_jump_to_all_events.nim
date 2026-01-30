@@ -120,4 +120,3 @@ proc jumpToAllEventsOnce*(filePath: cstring, fileName: cstring, lang: Lang): Fut
     #this is not run on the first pass when the expected file is not created
     if not (await compareFiles(actualFilePath, expectedFilePath)):
       raise UnexpectedTestResult.newException(&"{expectedFilePath} differs from {actualFilePath}")
-

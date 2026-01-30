@@ -7,7 +7,7 @@ bin/rubytracer <rspec>
 ```
 
 Currently implemented just using the tracepoint ruby api. Some investigation
-in directly doing this with gdb + Ruby VM shows it shouldn't be too hard, but 
+in directly doing this with gdb + Ruby VM shows it shouldn't be too hard, but
 that server as a quick pre-experiment.
 
 ## infer types from trace
@@ -82,7 +82,7 @@ Ruby::RObj:
   class:
 ```
 
-The currently used type "system" is very simple: it has 
+The currently used type "system" is very simple: it has
 * `atomic` and `class` types that
   correspond to builtin types like String and to classes (currently no real difference)
 * `none` type for nil
@@ -92,10 +92,8 @@ The currently used type "system" is very simple: it has
 * `optional`: `A?` when it can be A or nil
 
 We also unify concrete types with unifiable params.
-It's probably not very good for a language like Ruby where something more similar to 
+It's probably not very good for a language like Ruby where something more similar to
 duck typing like some form of structural typing will be better. However it's sufficient for demonstration in that simple prototype
 
-We rewrite the spec so we can call the code in the `it` and we trace it and analyze it in 
-`trace.rb`. 
-
-
+We rewrite the spec so we can call the code in the `it` and we trace it and analyze it in
+`trace.rb`.

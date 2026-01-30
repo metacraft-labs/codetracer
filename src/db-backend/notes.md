@@ -63,4 +63,3 @@ TODO:
   setup sockets in ruby-db-backend: input/output(separate thread) and sender to output thread
   receive/parse messages and send responses with sender+output thread
   start threads for received tasks and send events/res to output thread
-

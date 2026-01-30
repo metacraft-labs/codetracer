@@ -286,5 +286,3 @@ type
   NewOperation* = ref object
     name*: langstring
     stableBusy*: bool
-
-    

@@ -1,5 +1,5 @@
-import std / [ 
-  os, osproc, strformat, httpclient, json, strutils, sequtils, 
+import std / [
+  os, osproc, strformat, httpclient, json, strutils, sequtils,
   times, db_sqlite
 ]
 import json_serialization
@@ -270,9 +270,9 @@ proc loadTrace(trace: Row, test: bool): Trace =
     ========
     error: can't load the trace: maybe the db schema is changed?
       * try to check if correct args are passed
-      * maybe there is a db schema change or other db issue? 
+      * maybe there is a db schema change or other db issue?
         if so, delete the db and re-record again: using:
-        
+
         `just reset-db` # deleting the db
         # or
         `just clear-local-traces` # deleting all local traces and the db
@@ -286,7 +286,7 @@ proc loadTrace(trace: Row, test: bool): Trace =
     quit(1)
 
 
-proc sendEvent(socketPath: string, address: string, rawEvent: string) = 
+proc sendEvent(socketPath: string, address: string, rawEvent: string) =
   let debugCtSendWithCurl = getEnv("CODETRACER_DEBUG_CURL", "0") == "1"
 
   if debugCtSendWithCurl:
@@ -341,7 +341,7 @@ proc registerRecordingCommandForCI*(
         recordPid: recordPid,
         traceArchivePath: traceArchivePath,
         langName: langName)))
-  
+
 proc registerRecordingCommand*(
     reportFile: string, socketPath: string, address: string,
     sessionId: int, actionId: int, recordPid: int, traceArchivePath: string,

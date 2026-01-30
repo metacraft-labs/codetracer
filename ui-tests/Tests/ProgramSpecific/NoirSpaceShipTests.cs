@@ -19,13 +19,13 @@ public static class NoirSpaceShipTests
     /// Ensure the Noir Space Ship example opens an editor tab titled "src/main.nr".
     /// </summary>
     public static async Task EditorLoadedMainNrFile(IPage page)
-    {    
+    {
         var layout = new LayoutPage(page);
 
         await layout.WaitForAllComponentsLoadedAsync();
-        
+
         var editors = await layout.EditorTabsAsync();
-        
+
         if (!editors.Any(e => e.TabButtonText == "src/main.nr"))
         {
             throw new Exception("Expected editor tab 'src/main.nr' not found.");
@@ -955,7 +955,7 @@ public static class NoirSpaceShipTests
         // TODO: replace gotoLine-based navigation with breakpoint + continue workflow
         await editor.OpenTrace(firstLine);
         await Task.Delay(1000);
-        
+
         var firstTracePanel = new TraceLogPanel(editor, firstLine);
         await firstTracePanel.Root.WaitForAsync(new() { State = WaitForSelectorState.Visible });
 

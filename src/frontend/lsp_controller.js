@@ -21,10 +21,10 @@ var NNI33555116 = {kind: 2, len: 0, offset: 0, typ: null, name: null, sons: []};
 NTI33555116.node = NNI33555116;
 NTI33555167.base = NTI33555115;
 NTI33555168.base = NTI33555115;
-var NNI33555115 = {kind: 2, len: 5, offset: 0, typ: null, name: null, sons: [{kind: 1, offset: "parent", len: 0, typ: NTI33555167, name: "parent", sons: null}, 
-{kind: 1, offset: "name", len: 0, typ: NTI33554440, name: "name", sons: null}, 
-{kind: 1, offset: "message", len: 0, typ: NTI33554439, name: "msg", sons: null}, 
-{kind: 1, offset: "trace", len: 0, typ: NTI33554439, name: "trace", sons: null}, 
+var NNI33555115 = {kind: 2, len: 5, offset: 0, typ: null, name: null, sons: [{kind: 1, offset: "parent", len: 0, typ: NTI33555167, name: "parent", sons: null},
+{kind: 1, offset: "name", len: 0, typ: NTI33554440, name: "name", sons: null},
+{kind: 1, offset: "message", len: 0, typ: NTI33554439, name: "msg", sons: null},
+{kind: 1, offset: "trace", len: 0, typ: NTI33554439, name: "trace", sons: null},
 {kind: 1, offset: "up", len: 0, typ: NTI33555168, name: "up", sons: null}]};
 NTI33555115.node = NNI33555115;
 var NNI33555086 = {kind: 2, len: 0, offset: 0, typ: null, name: null, sons: []};
@@ -54,16 +54,16 @@ function makeNimstrLit(c_33556801) {
     result[i] = c_33556801.charCodeAt(i);
   }
   return result;
-  
 
-  
+
+
 }
 
 function mnewString(len_33556893) {
         return new Array(len_33556893);
-  
 
-  
+
+
 }
 
 function toJSStr(s_33556807) {
@@ -94,13 +94,13 @@ function toJSStr(s_33556807) {
                   else {
                   helper_33556857.push("%");;
                   }
-                  
+
                   helper_33556857.push(code_33556858);;
                   i_33556843 += 1;
                     if (((s_33556807).length <= i_33556843)) Temporary5 = true; else {                      Temporary5 = (s_33556807[i_33556843] < 128);                    }                  if (Temporary5) {
                   break Label3;
                   }
-                  
+
                   c_33556845 = s_33556807[i_33556843];
                 }
             } while (false);
@@ -117,7 +117,7 @@ function toJSStr(s_33556807) {
             } finally {
             }
           }
-          
+
           j_33556844 += 1;
         }
     } while (false);
@@ -134,10 +134,10 @@ function raiseException(e_33556667, ename_33556668) {
     if ((excHandler == 0)) {
     unhandledException(e_33556667);
     }
-    
+
     throw e_33556667;
 
-  
+
 }
 
 function chckRange(i_33557189, a_33557190, b_33557191) {
@@ -153,7 +153,7 @@ function chckRange(i_33557189, a_33557190, b_33557191) {
     else {
     raiseRangeError();
     }
-    
+
   } while (false);
 
   return result_33557192;
@@ -173,9 +173,9 @@ function setConstr() {
       }
     }
     return result;
-  
 
-  
+
+
 }
 var ConstSet1 = setConstr(17, 16, 4, 18, 27, 19, 23, 22, 21);
 
@@ -193,7 +193,7 @@ function nimCopy(dest_33557140, src_33557141, ti_33557142) {
       else {
         result_33557151 = [src_33557141[0], src_33557141[1]];
       }
-      
+
       break;
     case 19:
             if (dest_33557140 === null || dest_33557140 === undefined) {
@@ -204,7 +204,7 @@ function nimCopy(dest_33557140, src_33557141, ti_33557142) {
       }
       for (var key in src_33557141) { dest_33557140[key] = src_33557141[key]; }
       result_33557151 = dest_33557140;
-    
+
       break;
     case 18:
     case 17:
@@ -237,15 +237,15 @@ function nimCopy(dest_33557140, src_33557141, ti_33557142) {
           result_33557151[i] = nimCopy(result_33557151[i], src_33557141[i], ti_33557142.base);
         }
       }
-    
+
       break;
     case 28:
             if (src_33557141 !== null) {
         result_33557151 = src_33557141.slice(0);
       }
-    
+
       break;
-    default: 
+    default:
       result_33557151 = src_33557141;
       break;
     }
@@ -258,9 +258,9 @@ function addInt(a_33556940, b_33556941) {
         var result = a_33556940 + b_33556941;
     checkOverflowInt(result);
     return result;
-  
 
-  
+
+
 }
 
 function chckIndx(i_33557184, a_33557185, b_33557186) {
@@ -276,7 +276,7 @@ function chckIndx(i_33557184, a_33557185, b_33557186) {
     else {
     raiseIndexError(i_33557184, a_33557185, b_33557186);
     }
-    
+
   } while (false);
 
   return result_33557187;
@@ -287,9 +287,9 @@ function subInt(a_33556944, b_33556945) {
         var result = a_33556944 - b_33556945;
     checkOverflowInt(result);
     return result;
-  
 
-  
+
+
 }
 var ConstSet2 = setConstr([65, 90]);
 
@@ -327,9 +327,9 @@ function cstrToNimstr(c_33556804) {
     ++r;
   }
   return result;
-  
 
-  
+
+
 }
 if (!Math.trunc) {
   Math.trunc = function(v) {
@@ -352,9 +352,9 @@ function add_33556419(x_33556420, x_33556420_Idx, y_33556421) {
       for (var i = 0; i < y_33556421.length; ++i) {
         x_33556420[x_33556420_Idx][off+i] = y_33556421.charCodeAt(i);
       }
-    
 
-  
+
+
 }
 
 function newSeq_33556825(len_33556827) {
@@ -374,7 +374,7 @@ function unhandledException(e_33556663) {
     else {
     buf_33556664[0].push.apply(buf_33556664[0], makeNimstrLit("Error: unhandled exception"));;
     }
-    
+
     buf_33556664[0].push.apply(buf_33556664[0], makeNimstrLit(" ["));;
     add_33556419(buf_33556664, 0, e_33556663.name);
     buf_33556664[0].push.apply(buf_33556664[0], makeNimstrLit("]\x0A"));;
@@ -385,15 +385,15 @@ function unhandledException(e_33556663) {
   else {
     throw cbuf_33556665;
   }
-  
 
-  
+
+
 }
 
 function raiseRangeError() {
     raiseException({message: makeNimstrLit("value out of range"), parent: null, m_type: NTI33555133, name: null, trace: [], up: null}, "RangeDefect");
 
-  
+
 }
 
 function isFatPointer_33557131(ti_33557132) {
@@ -414,37 +414,37 @@ function nimCopyAux(dest_33557144, src_33557145, n_33557146) {
       break;
     case 1:
             dest_33557144[n_33557146.offset] = nimCopy(dest_33557144[n_33557146.offset], src_33557145[n_33557146.offset], n_33557146.typ);
-    
+
       break;
     case 2:
           for (var i = 0; i < n_33557146.sons.length; i++) {
       nimCopyAux(dest_33557144, src_33557145, n_33557146.sons[i]);
     }
-    
+
       break;
     case 3:
             dest_33557144[n_33557146.offset] = nimCopy(dest_33557144[n_33557146.offset], src_33557145[n_33557146.offset], n_33557146.typ);
       for (var i = 0; i < n_33557146.sons.length; ++i) {
         nimCopyAux(dest_33557144, src_33557145, n_33557146.sons[i][1]);
       }
-    
+
       break;
     }
 
-  
+
 }
 
 function raiseOverflow() {
     raiseException({message: makeNimstrLit("over- or underflow"), parent: null, m_type: NTI33555125, name: null, trace: [], up: null}, "OverflowDefect");
 
-  
+
 }
 
 function checkOverflowInt(a_33556938) {
         if (a_33556938 > 2147483647 || a_33556938 < -2147483648) raiseOverflow();
-  
 
-  
+
+
 }
 
 function addChars_251658415(result_251658417, result_251658417_Idx, x_251658418, start_251658419, n_251658420) {
@@ -463,25 +463,25 @@ function addChars_251658415(result_251658417, result_251658417_Idx, x_251658418,
       } while (false);
     } while (false);
 
-  
+
 }
 
 function addChars_251658411(result_251658413, result_251658413_Idx, x_251658414) {
     addChars_251658415(result_251658413, result_251658413_Idx, x_251658414, 0, ((x_251658414) == null ? 0 : (x_251658414).length));
 
-  
+
 }
 
 function addInt_251658436(result_251658437, result_251658437_Idx, x_251658438) {
     addChars_251658411(result_251658437, result_251658437_Idx, ((x_251658438) + ""));
 
-  
+
 }
 
 function addInt_251658457(result_251658458, result_251658458_Idx, x_251658459) {
     addInt_251658436(result_251658458, result_251658458_Idx, x_251658459);
 
-  
+
 }
 
 function HEX24_335544323(x_335544324) {
@@ -502,10 +502,10 @@ function raiseIndexError(i_33556754, a_33556755, b_33556756) {
     else {
     Temporary1 = (makeNimstrLit("index ") || []).concat(HEX24_335544323(i_33556754) || [],makeNimstrLit(" not in ") || [],HEX24_335544323(a_33556755) || [],makeNimstrLit(" .. ") || [],HEX24_335544323(b_33556756) || []);
     }
-    
+
     raiseException({message: nimCopy(null, Temporary1, NTI33554439), parent: null, m_type: NTI33555131, name: null, trace: [], up: null}, "IndexDefect");
 
-  
+
 }
 
 function nimIdentNormalize_452984937(s_452984938) {
@@ -516,7 +516,7 @@ function nimIdentNormalize_452984937(s_452984938) {
     if (((s_452984938).length == 0)) {
     break BeforeRet;
     }
-    
+
     result_452984939[chckIndx(0, 0, (result_452984939).length - 1)] = s_452984938[chckIndx(0, 0, (s_452984938).length - 1)];
     var j_452984940 = 1;
     Label1: do {
@@ -545,7 +545,7 @@ function nimIdentNormalize_452984937(s_452984938) {
     if (!((j_452984940 == (s_452984938).length))) {
     (result_452984939.length = chckRange(j_452984940, 0, 2147483647));
     }
-    
+
   } while (false);
 
   return result_452984939;
@@ -570,7 +570,7 @@ function parseEnum_1174405132(s_1174405134) {
     case "Error":
       Temporary1 = 3;
       break;
-    default: 
+    default:
       raiseException({message: (makeNimstrLit("Invalid enum value: ") || []).concat(s_1174405134 || []), parent: null, m_type: NTI33555128, name: null, trace: [], up: null}, "ValueError");
       break;
     }
@@ -593,7 +593,7 @@ function get_1191182353(a_1191182354, default_1191182355) {
       result_1191182356 = nimCopy(null, default_1191182355, NTI33554439);
       break BeforeRet;
     }
-    
+
   } while (false);
 
   return result_1191182356;

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317  # False positives: exit statements are reachable after successful installs
 
 set -e
 
@@ -271,8 +272,8 @@ install_dmg() {
 }
 
 install_appimage() {
-    download_and_verify AppImage amd64 || 
-    
+    download_and_verify AppImage amd64 ||
+
     eprint_note "Installing AppImage"
     mkdir -p "$HOME/.local/bin" || (rm -rf CodeTracer.AppImage && eprint_error "Couldn't create $HOME/.local/bin!")
     mv CodeTracer.AppImage "$HOME/.local/bin/ct" || (rm -rf CodeTracer.AppImage && eprint_error "Couldn't install ct in $HOME/.local/bin!")

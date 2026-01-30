@@ -76,7 +76,7 @@ class Unsupported < TreeFileBase
 
   def render(depth=0, spaces=2)
     "#{offset(depth, spaces)}<unsupported: #{@path}>\n"
-  end  
+  end
 end
 
 class Tree

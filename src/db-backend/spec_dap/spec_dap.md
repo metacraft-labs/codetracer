@@ -383,12 +383,12 @@ interface OutputEvent extends Event {
 
     /**
      * The output to report.
-     * 
+     *
      * ANSI escape sequences may be used to influence text color and styling if
      * `supportsANSIStyling` is present in both the adapter's `Capabilities` and
      * the client's `InitializeRequestArguments`. A client may strip any
      * unrecognized ANSI sequences.
-     * 
+     *
      * If the `supportsANSIStyling` capabilities are not both true, then the
      * client should display the output literally.
      */
@@ -449,7 +449,7 @@ interface OutputEvent extends Event {
      * the adapter may be able to look up the function's location. This should
      * be present only if the adapter is likely to be able to resolve the
      * location.
-     * 
+     *
      * This reference shares the same lifetime as the `variablesReference`. See
      * 'Lifetime of Object References' in the Overview section for details.
      */
@@ -1456,7 +1456,7 @@ interface DataBreakpointInfoArguments {
    * memory extending `bytes` number of bytes from the address or variable
    * specified by `name`. Breakpoints set using the resulting data ID should
    * pause on data access anywhere within that range.
-   * 
+   *
    * Clients may set this property only if the `supportsDataBreakpointBytes`
    * capability is true.
    */
@@ -1465,7 +1465,7 @@ interface DataBreakpointInfoArguments {
   /**
    * If `true`, the `name` is a memory address and the debugger should interpret
    * it as a decimal value, or hex value if it is prefixed with `0x`.
-   * 
+   *
    * Clients may set this property only if the `supportsDataBreakpointBytes`
    * capability is true.
    */
@@ -2151,7 +2151,7 @@ interface SetVariableResponse extends Response {
      * children can be retrieved by passing `variablesReference` to the
      * `variables` request as long as execution remains suspended. See 'Lifetime
      * of Object References' in the Overview section for details.
-     * 
+     *
      * If this property is included in the response, any `variablesReference`
      * previously associated with the updated variable, and those of its
      * children, are no longer valid.
@@ -2188,7 +2188,7 @@ interface SetVariableResponse extends Response {
      * value is declared. For example, if the new value is function pointer, the
      * adapter may be able to look up the function's location. This should be
      * present only if the adapter is likely to be able to resolve the location.
-     * 
+     *
      * This reference shares the same lifetime as the `variablesReference`. See
      * 'Lifetime of Object References' in the Overview section for details.
      */
@@ -2391,7 +2391,7 @@ interface EvaluateArguments {
   /**
    * The contextual column where the expression should be evaluated. This may be
    * provided if `line` is also provided.
-   * 
+   *
    * It is measured in UTF-16 code units and the client capability
    * `columnsStartAt1` determines whether it is 0- or 1-based.
    */
@@ -2488,7 +2488,7 @@ interface EvaluateResponse extends Response {
      * returned, the adapter may be able to look up the function's location.
      * This should be present only if the adapter is likely to be able to
      * resolve the location.
-     * 
+     *
      * This reference shares the same lifetime as the `variablesReference`. See
      * 'Lifetime of Object References' in the Overview section for details.
      */
@@ -2597,7 +2597,7 @@ interface SetExpressionResponse extends Response {
      * value is declared. For example, if the new value is function pointer, the
      * adapter may be able to look up the function's location. This should be
      * present only if the adapter is likely to be able to resolve the location.
-     * 
+     *
      * This reference shares the same lifetime as the `variablesReference`. See
      * 'Lifetime of Object References' in the Overview section for details.
      */
@@ -3256,7 +3256,7 @@ interface Capabilities {
    * Modes of breakpoints supported by the debug adapter, such as 'hardware' or
    * 'software'. If present, the client may allow the user to select a mode and
    * include it in its `setBreakpoints` request.
-   * 
+   *
    * Clients may present the first applicable mode in this array as the
    * 'default' mode in gestures that set breakpoints.
    */
@@ -3790,7 +3790,7 @@ interface Variable {
    * A reference that allows the client to request the location where the
    * variable is declared. This should be present only if the adapter is likely
    * to be able to resolve the location.
-   * 
+   *
    * This reference shares the same lifetime as the `variablesReference`. See
    * 'Lifetime of Object References' in the Overview section for details.
    */
@@ -3802,7 +3802,7 @@ interface Variable {
    * function pointer, the adapter may be able to look up the function's
    * location. This should be present only if the adapter is likely to be able
    * to resolve the location.
-   * 
+   *
    * This reference shares the same lifetime as the `variablesReference`. See
    * 'Lifetime of Object References' in the Overview section for details.
    */
@@ -4136,7 +4136,7 @@ interface Breakpoint {
    * A machine-readable explanation of why a breakpoint may not be verified. If
    * a breakpoint is verified or a specific reason is not known, the adapter
    * should omit this property. Possible values include:
-   * 
+   *
    * - `pending`: Indicates a breakpoint might be verified in the future, but
    * the adapter cannot verify it in the current state.
    * - `failed`: Indicates a breakpoint was not able to be verified, and the
@@ -4568,7 +4568,7 @@ interface DisassembledInstruction {
 
   /**
    * A hint for how to present the instruction in the UI.
-   * 
+   *
    * A value of `invalid` may be used to indicate this instruction is 'filler'
    * and cannot be reached by the program. For example, unreadable memory
    * addresses may be presented is 'invalid.'
@@ -4635,10 +4635,8 @@ Requests
 Reverse Requests
 Types
 
-    Hello from Seattle and Zürich. 
+    Hello from Seattle and Zürich.
 
     Manage cookies
     Microsoft
     © 2024 Microsoft
-
-

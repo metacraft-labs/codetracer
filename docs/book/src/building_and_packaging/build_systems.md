@@ -43,10 +43,10 @@ Coming soon!
 
 > [!TIP]
 > If you're a user that wants a package for your distribution contact us. We're currently in the process of creating
-> packages for popular distributions, such as Debian/Ubuntu, Fedora/RHEL, Arch Linux, Gentoo, Void, etc. 
+> packages for popular distributions, such as Debian/Ubuntu, Fedora/RHEL, Arch Linux, Gentoo, Void, etc.
 
-To package for another Linux distribution with a ports-based package manager, you can utilise our AppImage(currently unreleased), 
-which you can install to `/usr/bin`. Along with it, you should also install our icon and desktop file 
+To package for another Linux distribution with a ports-based package manager, you can utilise our AppImage(currently unreleased),
+which you can install to `/usr/bin`. Along with it, you should also install our icon and desktop file
 from `resources/` to the needed directories, such as `/usr/share/pixmaps` and `/usr/share/applications`.
 
 ### Packaging for Windows(DB-backend only)
@@ -56,4 +56,3 @@ Coming soon!
 ### Packaging for macOS(DB-backend only)
 
 Coming soon!
-
