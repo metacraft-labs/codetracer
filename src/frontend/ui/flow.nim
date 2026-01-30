@@ -3215,22 +3215,23 @@ proc renderFlowLines*(self: FlowComponent) =
     let loopId = step.loop
     let loopIteration = step.iteration
 
-    # TODO: FOR NOW DISCARD THIS PART: calculate variables position on the line
-    # if toSeq(self.flowLines[step.position].variablesPositions.keys()).len == 0:
-    #   for expression, values in step.beforeValues:
-    #     discard calculateVariablePosition(self, step.position, expression)
-    #   self.sortVariablesPositions(step, false)
+    # TODO: We need to calculate the position beforehand
+    # it will be used both in the extension and standalone
+    if toSeq(self.flowLines[step.position].variablesPositions.keys()).len == 0:
+      for expression, values in step.beforeValues:
+        discard calculateVariablePosition(self, step.position, expression)
+      self.sortVariablesPositions(step, false)
 
     # add step values
-    # let monacoEditorRange = self.editorUI.monacoEditor.getVisibleRanges()[0]
-    # let flowViewStartLine = monacoEditorRange.startLineNumber.to(int)
-    # let flowViewEndLine = monacoEditorRange.endLineNumber.to(int)
+    let monacoEditorRange = self.editorUI.monacoEditor.getVisibleRanges()[0]
+    let flowViewStartLine = monacoEditorRange.startLineNumber.to(int)
+    let flowViewEndLine = monacoEditorRange.endLineNumber.to(int)
 
     if not self.stepNodes.hasKey(step.stepCount):
       if step.position == self.flow.loops[loopId].registeredLine:
         self.addLoopInfo(step)
-      # if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
-      #   self.addStepValues(step)
+      if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
+        self.addStepValues(step)
 
 proc reloadFlow*(self:FlowComponent) =
   self.renderFlowLines()
