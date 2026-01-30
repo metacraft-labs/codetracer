@@ -50,6 +50,7 @@ if [ ! -f "$ROOT_DIR"/ct_paths.json ]; then
 fi
 
 export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build-debug/bin:$PATH
+export NIM1=$DEPS_DIR/nim/bin/nim
 
 if [ "$os" == "mac" ]; then
   brew install sqlite3 ruby node universal-ctags go capnp
