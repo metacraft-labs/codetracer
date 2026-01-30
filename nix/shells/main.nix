@@ -2,8 +2,10 @@
   pkgs,
   inputs',
   self',
+  config,
 }: let
   ourPkgs = self'.packages;
+  preCommit = config.pre-commit;
 in
   with pkgs;
     mkShell {
@@ -183,11 +185,20 @@ in
         ++ pkgs.lib.optionals stdenv.isDarwin [
           # Building AppImage
           create-dmg
-        ];
+        ]
+        # Pre-commit hooks
+        ++ [ preCommit.settings.package ]
+        ++ preCommit.settings.enabledPackages;
 
       # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
       shellHook = ''
+        # Install pre-commit hooks automatically
+        ${preCommit.installationScript}
+
+        # Symlink the generated config
+        ln -sf ${preCommit.settings.configFile} .pre-commit-config.yaml
+
         rustup override set 1.89
         rustup target add wasm32-unknown-unknown
         rustup target add wasm32-unknown-emscripten
