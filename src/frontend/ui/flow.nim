@@ -3337,9 +3337,9 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       self.resetFlow()
       self.key = update.location.key
       if self.flow.isNil:
-        self.flow = update.view_updates[editorView]
+        self.flow = update.viewUpdates[editorView]
     else:
-      self.flow = update.view_updates[editorView]
+      self.flow = update.viewUpdates[editorView]
 
     if not self.inExtension:
       self.editorUI.flowUpdate = update

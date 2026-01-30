@@ -513,6 +513,19 @@ pub struct FlowStep {
     pub events: Vec<FlowEvent>,
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct FlowRenderValue {
+    // 1-based source line/column for the value's expression.
+    pub line: i64,
+    pub column: i64,
+    // 0 means not in a loop; positive values map to loop ids.
+    pub loop_id: i64,
+    pub iteration: i64,
+    pub rr_ticks: i64,
+    pub text: String,
+}
+
 // for now not sending last step id for line visit
 // but this flow step object *can* contain info about several actual steps
 // e.g. events from some of the next steps on the same line visit
@@ -598,6 +611,7 @@ pub struct FlowViewUpdate {
     pub loop_iteration_steps: Vec<Vec<LoopIterationSteps>>,
     pub relevant_step_count: Vec<usize>,
     pub comment_lines: Vec<Position>,
+    pub render_value_groups: Vec<Vec<FlowRenderValue>>,
 }
 
 impl FlowViewUpdate {
@@ -611,6 +625,7 @@ impl FlowViewUpdate {
             loop_iteration_steps: vec![vec![LoopIterationSteps::default()]],
             relevant_step_count: vec![],
             comment_lines: vec![],
+            render_value_groups: vec![],
         }
     }
 
