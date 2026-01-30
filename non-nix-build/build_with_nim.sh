@@ -3,8 +3,11 @@
 # depends on env `$ROOT_DIR` and `$DIST_DIR`
 #   and nim 1.6 installed
 #   and valid env `$LIBSQLITE3_PATH` at least for nixos
+# Set NIM1 env var to override nim command (defaults to nim1 from nix)
 
 set -e
+
+NIM1=${NIM1:-nim1}
 
 export GIT_ROOT=$(git rev-parse --show-toplevel)
 
@@ -20,7 +23,7 @@ echo "==========="
 #       run-time decisions.
 
 # codetracer
-nim1 -d:release \
+$NIM1 -d:release \
     -d:asyncBackend=asyncdispatch \
     --passL:"-headerpad_max_install_names" \
     --gc:refc --hints:on --warnings:off \
@@ -45,7 +48,7 @@ install_name_tool -add_rpath "@loader_path" "${DIST_DIR}/bin/ct"
 
 codesign -s - --force --deep "${DIST_DIR}/bin/ct"
 
-nim1 -d:release \
+$NIM1 -d:release \
     -d:asyncBackend=asyncdispatch \
     --passL:"-headerpad_max_install_names" \
     --gc:refc --hints:on --warnings:off \
@@ -74,7 +77,7 @@ codesign -s - --force --deep "${DIST_DIR}/bin/db-backend-record"
 
 
 # index.js
-nim1 \
+$NIM1 \
     --hints:on --warnings:off --sourcemap:on \
     -d:ctIndex -d:chronicles_sinks=json \
     -d:ctmacos \
@@ -82,7 +85,7 @@ nim1 \
 cp "$DIST_DIR/index.js" "$DIST_DIR/src/index.js"
 
 # ui.js
-nim1 \
+$NIM1 \
     --hints:off --warnings:off \
     -d:chronicles_enabled=off  \
     -d:ctRenderer \
@@ -91,7 +94,7 @@ nim1 \
 cp "$DIST_DIR/ui.js" "$DIST_DIR/src/ui.js"
 
 # subwindow.js
-nim1 \
+$NIM1 \
     --hints:off --warnings:off \
     -d:chronicles_enabled=off  \
     -d:ctRenderer \
