@@ -1,5 +1,15 @@
 { pkgs }:
 {
+  # Exclude third-party and generated files from all hooks
+  excludes = [
+    "^src/public/third_party/"
+    "^node-packages/"
+    "^libs/" # Git submodules
+    "^src/db-backend/Cargo\\.lock$"
+    "\\.min\\.js$"
+    "\\.min\\.css$"
+  ];
+
   hooks = {
     # Nix formatter
     nixfmt-rfc-style.enable = true;
