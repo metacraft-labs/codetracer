@@ -16,6 +16,9 @@ inputs:
     description: Substituters
     required: false
     default: ""
+  gh-token:
+    description: GitHub token for accessing private repos
+    required: true
 
 runs:
   using: "composite"
@@ -33,12 +36,17 @@ runs:
           allow-import-from-derivation = true
           substituters = https://cache.nixos.org ${{inputs.substituters}}
           trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{inputs.trusted-public-keys}}
-          netrc-file = $HOME/.config/nix/netrc"
+          netrc-file = $HOME/.config/nix/netrc
+          access-tokens = github.com=${{inputs.gh-token}}
         EOF
 
         cat << EOF > "$HOME/.config/nix/netrc"
           machine ${{inputs.cachix-cache}}.cachix.org password ${{inputs.cachix-auth-token}}
         EOF
+
+        # Rewrite SSH URLs to HTTPS with token for submodule cloning
+        git config --global url."https://oauth2:${{inputs.gh-token}}@github.com/".insteadOf "git@github.com:"
+        git config --global url."https://oauth2:${{inputs.gh-token}}@github.com/".insteadOf "ssh://git@github.com/"
 
     - uses: cachix/cachix-action@v15
       with:
