@@ -9,7 +9,8 @@ set -e
 
 NIM1=${NIM1:-nim1}
 
-export GIT_ROOT=$(git rev-parse --show-toplevel)
+GIT_ROOT=$(git rev-parse --show-toplevel)
+export GIT_ROOT
 
 brew install libzip
 

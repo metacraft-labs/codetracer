@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck source=/dev/null
+# shellcheck disable=SC2154  # platform and os are defined in env.sh
 
 set -e
 
@@ -6,7 +8,6 @@ NON_NIX_BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$NON_NIX_BUILD_DIR"
 
 source env.sh
-
 
 echo "platform: ${platform}; os: ${os}"
 
