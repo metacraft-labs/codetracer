@@ -55,7 +55,7 @@
     cspell = {
       enable = true;
       name = "cspell (cached)";
-      entry = "cspell --no-progress --cache --config .cspell.json";
+      entry = "cspell --no-progress --cache --no-must-find-files --config .cspell.json";
       language = "system";
       pass_filenames = true;
       files = "\\.(md)$";
