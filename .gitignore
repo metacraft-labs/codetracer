@@ -219,3 +219,4 @@ csources_v1/
 # Temporary .patch file, used to coppy results from codex and applied using git apply <file name>.patch
 *.patch
 .pre-commit-config.yaml
+.cspellcache

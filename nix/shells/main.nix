@@ -121,7 +121,6 @@ mkShell {
 
     # docs
     mdbook
-    mdbook-alerts
 
     # github CLI
     gh
