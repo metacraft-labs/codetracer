@@ -5,15 +5,19 @@ This document captures the current best-practices for starting multiple CodeTrac
 ## Prerequisites
 
 1. **Enter the Nix dev shell**
+
    ```bash
    nix develop
    ```
+
    or rely on `direnv allow` at repository root. The shell provisions Playwright, Electron, Nim, and records the runtime library path in `ct_paths.json`.
 
 2. **Build the Electron bundle once**
+
    ```bash
    just build-once
    ```
+
    Use this recipe instead of `just build`; the latter leaves `tup monitor` running indefinitely.
 
 ## Launching Workflow
@@ -22,10 +26,12 @@ This document captures the current best-practices for starting multiple CodeTrac
    The startup example records the Noir Space Ship program on demand. If you need a custom trace, set `CODETRACER_TRACE_PATH` before running the harness.
 
 2. **Run the harness with the correct library path**
+
    ```bash
    LD_LIBRARY_PATH=$(jq -r '.LD_LIBRARY_PATH' ct_paths.json) \
      dotnet run --project <your-ui-tests-v3-harness>
    ```
+
    Replace `<your-ui-tests-v3-harness>` with whichever project currently drives the experimental runner.
 
 3. **Socket allocation**

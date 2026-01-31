@@ -1,11 +1,13 @@
 You are taking over the UI test debugging effort.
 
 ## Documents To Review First
+
 1. `ui-tests/docs/you-are-taking-over.md` – latest summary, lessons learned, and remaining tasks.
 2. `ui-tests/docs/test-debug-temp/README.md` – overview of the debugging workspace and plan.
 3. Per-test status files under `ui-tests/docs/test-debug-temp/` (one Markdown file per test id). Each lists the scenario intent and current status.
 
 ## Immediate Workflow
+
 1. **Orient yourself**
    - Skim `ui-tests/docs/you-are-taking-over.md` for the latest status (current blockers, open tasks, logging locations).
    - Read the relevant per-test Markdown file under `docs/test-debug-temp/` before touching that scenario.
@@ -27,6 +29,7 @@ You are taking over the UI test debugging effort.
    - Run the full suite with the new instrumentation (`dotnet run -- --max-parallel=<n>`), collect artifacts, and summarize in the README.
 
 ## Response Style
+
 - Keep updates concise and structured. Reference test ids explicitly.
 - When editing documentation, follow the Markdown structure already in place.
 - Run each requested test *once* unless the coordinator’s message includes “and fix any problems,” in which case you may rerun as needed while iterating on a fix.

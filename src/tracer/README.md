@@ -2,7 +2,7 @@
 tracer
 -----------------
 
-ruby tracer MOVED to a separate repo https://github.com/metacraft-labs/codetracer-ruby-recorder
+ruby tracer MOVED to a separate repo <https://github.com/metacraft-labs/codetracer-ruby-recorder>
 
 original readme:
 
@@ -37,6 +37,7 @@ cat trace.json
 ### in codetracer
 
 it should be callable by codetracer with
+
 ```bash
 ct record <path to ruby-program>
 ct replay <ruby-program-name>

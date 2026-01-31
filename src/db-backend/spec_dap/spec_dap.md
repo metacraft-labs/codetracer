@@ -1,5 +1,4 @@
 
-
 We use optional cookies to improve your experience on our websites, such as through social media connections, and to display personalized advertising based on your online activity. If you reject optional cookies, only cookies necessary to provide you the services will be used. You may change your selection by clicking “Manage Cookies” at the bottom of the page. Privacy Statement Third-Party Cookies
 DAP
 
@@ -21,19 +20,21 @@ Base class of requests, responses, and events.
 
 interface ProtocolMessage {
   /**
-   * Sequence number of the message (also known as message ID). The `seq` for
-   * the first message sent by a client or debug adapter is 1, and for each
-   * subsequent message is 1 greater than the previous message sent by that
-   * actor. `seq` can be used to order requests, responses, and events, and to
-   * associate requests with their corresponding responses. For protocol
-   * messages of type `request` the sequence number can be used to cancel the
-   * request.
+
+* Sequence number of the message (also known as message ID). The `seq` for
+* the first message sent by a client or debug adapter is 1, and for each
+* subsequent message is 1 greater than the previous message sent by that
+* actor. `seq` can be used to order requests, responses, and events, and to
+* associate requests with their corresponding responses. For protocol
+* messages of type `request` the sequence number can be used to cancel the
+* request.
    */
   seq: number;
 
   /**
-   * Message type.
-   * Values: 'request', 'response', 'event', etc.
+
+* Message type.
+* Values: 'request', 'response', 'event', etc.
    */
   type: 'request' | 'response' | 'event' | string;
 }
@@ -46,12 +47,14 @@ interface Request extends ProtocolMessage {
   type: 'request';
 
   /**
-   * The command to execute.
+
+* The command to execute.
    */
   command: string;
 
   /**
-   * Object containing arguments for the command.
+
+* Object containing arguments for the command.
    */
   arguments?: any;
 }
@@ -64,12 +67,14 @@ interface Event extends ProtocolMessage {
   type: 'event';
 
   /**
-   * Type of event.
+
+* Type of event.
    */
   event: string;
 
   /**
-   * Event-specific information.
+
+* Event-specific information.
    */
   body?: any;
 }
@@ -82,41 +87,46 @@ interface Response extends ProtocolMessage {
   type: 'response';
 
   /**
-   * Sequence number of the corresponding request.
+
+* Sequence number of the corresponding request.
    */
   request_seq: number;
 
   /**
-   * Outcome of the request.
-   * If true, the request was successful and the `body` attribute may contain
-   * the result of the request.
-   * If the value is false, the attribute `message` contains the error in short
-   * form and the `body` may contain additional information (see
-   * `ErrorResponse.body.error`).
+
+* Outcome of the request.
+* If true, the request was successful and the `body` attribute may contain
+* the result of the request.
+* If the value is false, the attribute `message` contains the error in short
+* form and the `body` may contain additional information (see
+* `ErrorResponse.body.error`).
    */
   success: boolean;
 
   /**
-   * The command requested.
+
+* The command requested.
    */
   command: string;
 
   /**
-   * Contains the raw error in short form if `success` is false.
-   * This raw error might be interpreted by the client and is not shown in the
-   * UI.
-   * Some predefined values exist.
-   * Values:
-   * 'cancelled': the request was cancelled.
-   * 'notStopped': the request may be retried once the adapter is in a 'stopped'
-   * state.
-   * etc.
+
+* Contains the raw error in short form if `success` is false.
+* This raw error might be interpreted by the client and is not shown in the
+* UI.
+* Some predefined values exist.
+* Values:
+* 'cancelled': the request was cancelled.
+* 'notStopped': the request may be retried once the adapter is in a 'stopped'
+* state.
+* etc.
    */
   message?: 'cancelled' | 'notStopped' | string;
 
   /**
-   * Contains request result if success is true and error details if success is
-   * false.
+
+* Contains request result if success is true and error details if success is
+* false.
    */
   body?: any;
 }
@@ -128,7 +138,7 @@ On error (whenever success is false), the body can provide more details.
 interface ErrorResponse extends Response {
   body: {
     /**
-     * A structured error message.
+     *A structured error message.
      */
     error?: Message;
   };
@@ -165,16 +175,18 @@ Arguments for cancel request.
 
 interface CancelArguments {
   /**
-   * The ID (attribute `seq`) of the request to cancel. If missing no request is
-   * cancelled.
-   * Both a `requestId` and a `progressId` can be specified in one request.
+
+* The ID (attribute `seq`) of the request to cancel. If missing no request is
+* cancelled.
+* Both a `requestId` and a `progressId` can be specified in one request.
    */
   requestId?: number;
 
   /**
-   * The ID (attribute `progressId`) of the progress to cancel. If missing no
-   * progress is cancelled.
-   * Both a `requestId` and a `progressId` can be specified in one request.
+
+* The ID (attribute `progressId`) of the progress to cancel. If missing no
+* progress is cancelled.
+* Both a `requestId` and a `progressId` can be specified in one request.
    */
   progressId?: string;
 }
@@ -215,11 +227,11 @@ interface StoppedEvent extends Event {
 
   body: {
     /**
-     * The reason for the event.
+     *The reason for the event.
      * For backward compatibility this string is shown in the UI if the
-     * `description` attribute is missing (but it must not be translated).
+     *`description` attribute is missing (but it must not be translated).
      * Values: 'step', 'breakpoint', 'exception', 'pause', 'entry', 'goto',
-     * 'function breakpoint', 'data breakpoint', 'instruction breakpoint', etc.
+     *'function breakpoint', 'data breakpoint', 'instruction breakpoint', etc.
      */
     reason: 'step' | 'breakpoint' | 'exception' | 'pause' | 'entry' | 'goto'
         | 'function breakpoint' | 'data breakpoint' | 'instruction breakpoint'
@@ -285,7 +297,7 @@ interface ContinuedEvent extends Event {
 
   body: {
     /**
-     * The thread which was continued.
+     *The thread which was continued.
      */
     threadId: number;
 
@@ -307,7 +319,7 @@ interface ExitedEvent extends Event {
 
   body: {
     /**
-     * The exit code returned from the debuggee.
+     *The exit code returned from the debuggee.
      */
     exitCode: number;
   };
@@ -322,9 +334,9 @@ interface TerminatedEvent extends Event {
 
   body?: {
     /**
-     * A debug adapter may set `restart` to true (or to an arbitrary object) to
+     *A debug adapter may set `restart` to true (or to an arbitrary object) to
      * request that the client restarts the session.
-     * The value is not interpreted by the client and passed unmodified as an
+     *The value is not interpreted by the client and passed unmodified as an
      * attribute `__restart` to the `launch` and `attach` requests.
      */
     restart?: any;
@@ -340,7 +352,7 @@ interface ThreadEvent extends Event {
 
   body: {
     /**
-     * The reason for the event.
+     *The reason for the event.
      * Values: 'started', 'exited', etc.
      */
     reason: 'started' | 'exited' | string;
@@ -361,23 +373,23 @@ interface OutputEvent extends Event {
 
   body: {
     /**
-     * The output category. If not specified or if the category is not
+     *The output category. If not specified or if the category is not
      * understood by the client, `console` is assumed.
-     * Values:
+     *Values:
      * 'console': Show the output in the client's default message UI, e.g. a
-     * 'debug console'. This category should only be used for informational
+     *'debug console'. This category should only be used for informational
      * output from the debugger (as opposed to the debuggee).
-     * 'important': A hint for the client to show the output in the client's UI
+     *'important': A hint for the client to show the output in the client's UI
      * for important and highly visible information, e.g. as a popup
-     * notification. This category should only be used for important messages
+     *notification. This category should only be used for important messages
      * from the debugger (as opposed to the debuggee). Since this category value
-     * is a hint, clients might ignore the hint and assume the `console`
+     *is a hint, clients might ignore the hint and assume the `console`
      * category.
-     * 'stdout': Show the output as normal program output from the debuggee.
+     *'stdout': Show the output as normal program output from the debuggee.
      * 'stderr': Show the output as error program output from the debuggee.
-     * 'telemetry': Send the output to telemetry instead of showing it to the
+     *'telemetry': Send the output to telemetry instead of showing it to the
      * user.
-     * etc.
+     *etc.
      */
     category?: 'console' | 'important' | 'stdout' | 'stderr' | 'telemetry' | string;
 
@@ -466,7 +478,7 @@ interface BreakpointEvent extends Event {
 
   body: {
     /**
-     * The reason for the event.
+     *The reason for the event.
      * Values: 'changed', 'new', 'removed', etc.
      */
     reason: 'changed' | 'new' | 'removed' | string;
@@ -488,7 +500,7 @@ interface ModuleEvent extends Event {
 
   body: {
     /**
-     * The reason for the event.
+     *The reason for the event.
      * Values: 'new', 'changed', 'removed'
      */
     reason: 'new' | 'changed' | 'removed';
@@ -510,7 +522,7 @@ interface LoadedSourceEvent extends Event {
 
   body: {
     /**
-     * The reason for the event.
+     *The reason for the event.
      * Values: 'new', 'changed', 'removed'
      */
     reason: 'new' | 'changed' | 'removed';
@@ -531,7 +543,7 @@ interface ProcessEvent extends Event {
 
   body: {
     /**
-     * The logical name of the process. This is usually the full path to
+     *The logical name of the process. This is usually the full path to
      * process's executable file. Example: /home/example/myproj/program.js.
      */
     name: string;
@@ -582,7 +594,7 @@ interface CapabilitiesEvent extends Event {
 
   body: {
     /**
-     * The set of updated capabilities.
+     *The set of updated capabilities.
      */
     capabilities: Capabilities;
   };
@@ -601,9 +613,9 @@ interface ProgressStartEvent extends Event {
 
   body: {
     /**
-     * An ID that can be used in subsequent `progressUpdate` and `progressEnd`
+     *An ID that can be used in subsequent `progressUpdate` and `progressEnd`
      * events to make them refer to the same progress reporting.
-     * IDs must be unique within a debug session.
+     *IDs must be unique within a debug session.
      */
     progressId: string;
 
@@ -658,7 +670,7 @@ interface ProgressUpdateEvent extends Event {
 
   body: {
     /**
-     * The ID that was introduced in the initial `progressStart` event.
+     *The ID that was introduced in the initial `progressStart` event.
      */
     progressId: string;
 
@@ -687,7 +699,7 @@ interface ProgressEndEvent extends Event {
 
   body: {
     /**
-     * The ID that was introduced in the initial `ProgressStartEvent`.
+     *The ID that was introduced in the initial `ProgressStartEvent`.
      */
     progressId: string;
 
@@ -712,11 +724,11 @@ interface InvalidatedEvent extends Event {
 
   body: {
     /**
-     * Set of logical areas that got invalidated. This property has a hint
+     *Set of logical areas that got invalidated. This property has a hint
      * characteristic: a client can only be expected to make a 'best effort' in
-     * honoring the areas but there are no guarantees. If this property is
+     *honoring the areas but there are no guarantees. If this property is
      * missing, empty, or if values are not understood, the client should assume
-     * a single value `all`.
+     *a single value `all`.
      */
     areas?: InvalidatedAreas[];
 
@@ -747,7 +759,7 @@ interface MemoryEvent extends Event {
 
   body: {
     /**
-     * Memory reference of a memory range that has been updated.
+     *Memory reference of a memory range that has been updated.
      */
     memoryReference: string;
 
@@ -786,40 +798,46 @@ Arguments for runInTerminal request.
 
 interface RunInTerminalRequestArguments {
   /**
-   * What kind of terminal to launch. Defaults to `integrated` if not specified.
-   * Values: 'integrated', 'external'
+
+* What kind of terminal to launch. Defaults to `integrated` if not specified.
+* Values: 'integrated', 'external'
    */
   kind?: 'integrated' | 'external';
 
   /**
-   * Title of the terminal.
+
+* Title of the terminal.
    */
   title?: string;
 
   /**
-   * Working directory for the command. For non-empty, valid paths this
-   * typically results in execution of a change directory command.
+
+* Working directory for the command. For non-empty, valid paths this
+* typically results in execution of a change directory command.
    */
   cwd: string;
 
   /**
-   * List of arguments. The first argument is the command to run.
+
+* List of arguments. The first argument is the command to run.
    */
   args: string[];
 
   /**
-   * Environment key-value pairs that are added to or removed from the default
-   * environment.
+
+* Environment key-value pairs that are added to or removed from the default
+* environment.
    */
   env?: { [key: string]: string | null; };
 
   /**
-   * This property should only be set if the corresponding capability
-   * `supportsArgsCanBeInterpretedByShell` is true. If the client uses an
-   * intermediary shell to launch the application, then the client must not
-   * attempt to escape characters with special meanings for the shell. The user
-   * is fully responsible for escaping as needed and that arguments using
-   * special characters may not be portable across shells.
+
+* This property should only be set if the corresponding capability
+* `supportsArgsCanBeInterpretedByShell` is true. If the client uses an
+* intermediary shell to launch the application, then the client must not
+* attempt to escape characters with special meanings for the shell. The user
+* is fully responsible for escaping as needed and that arguments using
+* special characters may not be portable across shells.
    */
   argsCanBeInterpretedByShell?: boolean;
 }
@@ -829,7 +847,7 @@ Response to runInTerminal request.
 interface RunInTerminalResponse extends Response {
   body: {
     /**
-     * The process ID. The value should be less than or equal to 2147483647
+     *The process ID. The value should be less than or equal to 2147483647
      * (2^31-1).
      */
     processId?: number;
@@ -860,17 +878,19 @@ Arguments for startDebugging request.
 
 interface StartDebuggingRequestArguments {
   /**
-   * Arguments passed to the new debug session. The arguments must only contain
-   * properties understood by the `launch` or `attach` requests of the debug
-   * adapter and they must not contain any client-specific properties (e.g.
-   * `type`) or client-specific features (e.g. substitutable 'variables').
+
+* Arguments passed to the new debug session. The arguments must only contain
+* properties understood by the `launch` or `attach` requests of the debug
+* adapter and they must not contain any client-specific properties (e.g.
+* `type`) or client-specific features (e.g. substitutable 'variables').
    */
   configuration: { [key: string]: any; };
 
   /**
-   * Indicates whether the new debug session should be started with a `launch`
-   * or `attach` request.
-   * Values: 'launch', 'attach'
+
+* Indicates whether the new debug session should be started with a `launch`
+* or `attach` request.
+* Values: 'launch', 'attach'
    */
   request: 'launch' | 'attach';
 }
@@ -901,92 +921,109 @@ Arguments for initialize request.
 
 interface InitializeRequestArguments {
   /**
-   * The ID of the client using this adapter.
+
+* The ID of the client using this adapter.
    */
   clientID?: string;
 
   /**
-   * The human-readable name of the client using this adapter.
+
+* The human-readable name of the client using this adapter.
    */
   clientName?: string;
 
   /**
-   * The ID of the debug adapter.
+
+* The ID of the debug adapter.
    */
   adapterID: string;
 
   /**
-   * The ISO-639 locale of the client using this adapter, e.g. en-US or de-CH.
+
+* The ISO-639 locale of the client using this adapter, e.g. en-US or de-CH.
    */
   locale?: string;
 
   /**
-   * If true all line numbers are 1-based (default).
+
+* If true all line numbers are 1-based (default).
    */
   linesStartAt1?: boolean;
 
   /**
-   * If true all column numbers are 1-based (default).
+
+* If true all column numbers are 1-based (default).
    */
   columnsStartAt1?: boolean;
 
   /**
-   * Determines in what format paths are specified. The default is `path`, which
-   * is the native format.
-   * Values: 'path', 'uri', etc.
+
+* Determines in what format paths are specified. The default is `path`, which
+* is the native format.
+* Values: 'path', 'uri', etc.
    */
   pathFormat?: 'path' | 'uri' | string;
 
   /**
-   * Client supports the `type` attribute for variables.
+
+* Client supports the `type` attribute for variables.
    */
   supportsVariableType?: boolean;
 
   /**
-   * Client supports the paging of variables.
+
+* Client supports the paging of variables.
    */
   supportsVariablePaging?: boolean;
 
   /**
-   * Client supports the `runInTerminal` request.
+
+* Client supports the `runInTerminal` request.
    */
   supportsRunInTerminalRequest?: boolean;
 
   /**
-   * Client supports memory references.
+
+* Client supports memory references.
    */
   supportsMemoryReferences?: boolean;
 
   /**
-   * Client supports progress reporting.
+
+* Client supports progress reporting.
    */
   supportsProgressReporting?: boolean;
 
   /**
-   * Client supports the `invalidated` event.
+
+* Client supports the `invalidated` event.
    */
   supportsInvalidatedEvent?: boolean;
 
   /**
-   * Client supports the `memory` event.
+
+* Client supports the `memory` event.
    */
   supportsMemoryEvent?: boolean;
 
   /**
-   * Client supports the `argsCanBeInterpretedByShell` attribute on the
-   * `runInTerminal` request.
+
+* Client supports the `argsCanBeInterpretedByShell` attribute on the
+* `runInTerminal` request.
    */
   supportsArgsCanBeInterpretedByShell?: boolean;
 
   /**
-   * Client supports the `startDebugging` request.
+
+* Client supports the `startDebugging` request.
    */
   supportsStartDebuggingRequest?: boolean;
 
   /**
-   * The client will interpret ANSI escape sequences in the display of
-   * `OutputEvent.output` and `Variable.value` fields when
-   * `Capabilities.supportsANSIStyling` is also enabled.
+
+* The client will interpret ANSI escape sequences in the display of
+* `OutputEvent.output` and `Variable.value` fields when
+* `Capabilities.supportsANSIStyling` is also enabled.
    */
   supportsANSIStyling?: boolean;
 }
@@ -995,7 +1032,8 @@ Response to initialize request.
 
 interface InitializeResponse extends Response {
   /**
-   * The capabilities of this debug adapter.
+
+* The capabilities of this debug adapter.
    */
   body?: Capabilities;
 }
@@ -1040,15 +1078,17 @@ Arguments for launch request. Additional attributes are implementation specific.
 
 interface LaunchRequestArguments {
   /**
-   * If true, the launch request should launch the program without enabling
-   * debugging.
+
+* If true, the launch request should launch the program without enabling
+* debugging.
    */
   noDebug?: boolean;
 
   /**
-   * Arbitrary data from the previous, restarted session.
-   * The data is sent as the `restart` attribute of the `terminated` event.
-   * The client should leave the data intact.
+
+* Arbitrary data from the previous, restarted session.
+* The data is sent as the `restart` attribute of the `terminated` event.
+* The client should leave the data intact.
    */
   __restart?: any;
 }
@@ -1074,9 +1114,10 @@ Arguments for attach request. Additional attributes are implementation specific.
 
 interface AttachRequestArguments {
   /**
-   * Arbitrary data from the previous, restarted session.
-   * The data is sent as the `restart` attribute of the `terminated` event.
-   * The client should leave the data intact.
+
+* Arbitrary data from the previous, restarted session.
+* The data is sent as the `restart` attribute of the `terminated` event.
+* The client should leave the data intact.
    */
   __restart?: any;
 }
@@ -1102,7 +1143,8 @@ Arguments for restart request.
 
 interface RestartArguments {
   /**
-   * The latest version of the `launch` or `attach` configuration.
+
+* The latest version of the `launch` or `attach` configuration.
    */
   arguments?: LaunchRequestArguments | AttachRequestArguments;
 }
@@ -1130,26 +1172,29 @@ Arguments for disconnect request.
 
 interface DisconnectArguments {
   /**
-   * A value of true indicates that this `disconnect` request is part of a
-   * restart sequence.
+
+* A value of true indicates that this `disconnect` request is part of a
+* restart sequence.
    */
   restart?: boolean;
 
   /**
-   * Indicates whether the debuggee should be terminated when the debugger is
-   * disconnected.
-   * If unspecified, the debug adapter is free to do whatever it thinks is best.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportTerminateDebuggee` is true.
+
+* Indicates whether the debuggee should be terminated when the debugger is
+* disconnected.
+* If unspecified, the debug adapter is free to do whatever it thinks is best.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportTerminateDebuggee` is true.
    */
   terminateDebuggee?: boolean;
 
   /**
-   * Indicates whether the debuggee should stay suspended when the debugger is
-   * disconnected.
-   * If unspecified, the debuggee should resume execution.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportSuspendDebuggee` is true.
+
+* Indicates whether the debuggee should stay suspended when the debugger is
+* disconnected.
+* If unspecified, the debuggee should resume execution.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportSuspendDebuggee` is true.
    */
   suspendDebuggee?: boolean;
 }
@@ -1179,8 +1224,9 @@ Arguments for terminate request.
 
 interface TerminateArguments {
   /**
-   * A value of true indicates that this `terminate` request is part of a
-   * restart sequence.
+
+* A value of true indicates that this `terminate` request is part of a
+* restart sequence.
    */
   restart?: boolean;
 }
@@ -1206,36 +1252,41 @@ Arguments for breakpointLocations request.
 
 interface BreakpointLocationsArguments {
   /**
-   * The source location of the breakpoints; either `source.path` or
-   * `source.sourceReference` must be specified.
+
+* The source location of the breakpoints; either `source.path` or
+* `source.sourceReference` must be specified.
    */
   source: Source;
 
   /**
-   * Start line of range to search possible breakpoint locations in. If only the
-   * line is specified, the request returns all possible locations in that line.
+
+* Start line of range to search possible breakpoint locations in. If only the
+* line is specified, the request returns all possible locations in that line.
    */
   line: number;
 
   /**
-   * Start position within `line` to search possible breakpoint locations in. It
-   * is measured in UTF-16 code units and the client capability
-   * `columnsStartAt1` determines whether it is 0- or 1-based. If no column is
-   * given, the first position in the start line is assumed.
+
+* Start position within `line` to search possible breakpoint locations in. It
+* is measured in UTF-16 code units and the client capability
+* `columnsStartAt1` determines whether it is 0- or 1-based. If no column is
+* given, the first position in the start line is assumed.
    */
   column?: number;
 
   /**
-   * End line of range to search possible breakpoint locations in. If no end
-   * line is given, then the end line is assumed to be the start line.
+
+* End line of range to search possible breakpoint locations in. If no end
+* line is given, then the end line is assumed to be the start line.
    */
   endLine?: number;
 
   /**
-   * End position within `endLine` to search possible breakpoint locations in.
-   * It is measured in UTF-16 code units and the client capability
-   * `columnsStartAt1` determines whether it is 0- or 1-based. If no end column
-   * is given, the last position in the end line is assumed.
+
+* End position within `endLine` to search possible breakpoint locations in.
+* It is measured in UTF-16 code units and the client capability
+* `columnsStartAt1` determines whether it is 0- or 1-based. If no end column
+* is given, the last position in the end line is assumed.
    */
   endColumn?: number;
 }
@@ -1247,7 +1298,7 @@ Contains possible locations for source breakpoints.
 interface BreakpointLocationsResponse extends Response {
   body: {
     /**
-     * Sorted set of possible breakpoint locations.
+     *Sorted set of possible breakpoint locations.
      */
     breakpoints: BreakpointLocation[];
   };
@@ -1271,24 +1322,28 @@ Arguments for setBreakpoints request.
 
 interface SetBreakpointsArguments {
   /**
-   * The source location of the breakpoints; either `source.path` or
-   * `source.sourceReference` must be specified.
+
+* The source location of the breakpoints; either `source.path` or
+* `source.sourceReference` must be specified.
    */
   source: Source;
 
   /**
-   * The code locations of the breakpoints.
+
+* The code locations of the breakpoints.
    */
   breakpoints?: SourceBreakpoint[];
 
   /**
-   * Deprecated: The code locations of the breakpoints.
+
+* Deprecated: The code locations of the breakpoints.
    */
   lines?: number[];
 
   /**
-   * A value of true indicates that the underlying source has been modified
-   * which results in new breakpoint locations.
+
+* A value of true indicates that the underlying source has been modified
+* which results in new breakpoint locations.
    */
   sourceModified?: boolean;
 }
@@ -1306,9 +1361,9 @@ The breakpoints returned are in the same order as the elements of the breakpoint
 interface SetBreakpointsResponse extends Response {
   body: {
     /**
-     * Information about the breakpoints.
+     *Information about the breakpoints.
      * The array elements are in the same order as the elements of the
-     * `breakpoints` (or the deprecated `lines`) array in the arguments.
+     *`breakpoints` (or the deprecated `lines`) array in the arguments.
      */
     breakpoints: Breakpoint[];
   };
@@ -1334,7 +1389,8 @@ Arguments for setFunctionBreakpoints request.
 
 interface SetFunctionBreakpointsArguments {
   /**
-   * The function names of the breakpoints.
+
+* The function names of the breakpoints.
    */
   breakpoints: FunctionBreakpoint[];
 }
@@ -1346,7 +1402,7 @@ Returned is information about each breakpoint created by this request.
 interface SetFunctionBreakpointsResponse extends Response {
   body: {
     /**
-     * Information about the breakpoints. The array elements correspond to the
+     *Information about the breakpoints. The array elements correspond to the
      * elements of the `breakpoints` array.
      */
     breakpoints: Breakpoint[];
@@ -1369,25 +1425,28 @@ Arguments for setExceptionBreakpoints request.
 
 interface SetExceptionBreakpointsArguments {
   /**
-   * Set of exception filters specified by their ID. The set of all possible
-   * exception filters is defined by the `exceptionBreakpointFilters`
-   * capability. The `filter` and `filterOptions` sets are additive.
+
+* Set of exception filters specified by their ID. The set of all possible
+* exception filters is defined by the `exceptionBreakpointFilters`
+* capability. The `filter` and `filterOptions` sets are additive.
    */
   filters: string[];
 
   /**
-   * Set of exception filters and their options. The set of all possible
-   * exception filters is defined by the `exceptionBreakpointFilters`
-   * capability. This attribute is only honored by a debug adapter if the
-   * corresponding capability `supportsExceptionFilterOptions` is true. The
-   * `filter` and `filterOptions` sets are additive.
+
+* Set of exception filters and their options. The set of all possible
+* exception filters is defined by the `exceptionBreakpointFilters`
+* capability. This attribute is only honored by a debug adapter if the
+* corresponding capability `supportsExceptionFilterOptions` is true. The
+* `filter` and `filterOptions` sets are additive.
    */
   filterOptions?: ExceptionFilterOptions[];
 
   /**
-   * Configuration options for selected exceptions.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsExceptionOptions` is true.
+
+* Configuration options for selected exceptions.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsExceptionOptions` is true.
    */
   exceptionOptions?: ExceptionOptions[];
 }
@@ -1403,11 +1462,11 @@ For backward compatibility both the breakpoints array and the enclosing body are
 interface SetExceptionBreakpointsResponse extends Response {
   body?: {
     /**
-     * Information about the exception breakpoints or filters.
+     *Information about the exception breakpoints or filters.
      * The breakpoints returned are in the same order as the elements of the
-     * `filters`, `filterOptions`, `exceptionOptions` arrays in the arguments.
+     *`filters`, `filterOptions`, `exceptionOptions` arrays in the arguments.
      * If both `filters` and `filterOptions` are given, the returned array must
-     * start with `filters` information first, followed by `filterOptions`
+     *start with `filters` information first, followed by `filterOptions`
      * information.
      */
     breakpoints?: Breakpoint[];
@@ -1430,50 +1489,56 @@ Arguments for dataBreakpointInfo request.
 
 interface DataBreakpointInfoArguments {
   /**
-   * Reference to the variable container if the data breakpoint is requested for
-   * a child of the container. The `variablesReference` must have been obtained
-   * in the current suspended state. See 'Lifetime of Object References' in the
-   * Overview section for details.
+
+* Reference to the variable container if the data breakpoint is requested for
+* a child of the container. The `variablesReference` must have been obtained
+* in the current suspended state. See 'Lifetime of Object References' in the
+* Overview section for details.
    */
   variablesReference?: number;
 
   /**
-   * The name of the variable's child to obtain data breakpoint information for.
-   * If `variablesReference` isn't specified, this can be an expression, or an
-   * address if `asAddress` is also true.
+
+* The name of the variable's child to obtain data breakpoint information for.
+* If `variablesReference` isn't specified, this can be an expression, or an
+* address if `asAddress` is also true.
    */
   name: string;
 
   /**
-   * When `name` is an expression, evaluate it in the scope of this stack frame.
-   * If not specified, the expression is evaluated in the global scope. When
-   * `variablesReference` is specified, this property has no effect.
+
+* When `name` is an expression, evaluate it in the scope of this stack frame.
+* If not specified, the expression is evaluated in the global scope. When
+* `variablesReference` is specified, this property has no effect.
    */
   frameId?: number;
 
   /**
-   * If specified, a debug adapter should return information for the range of
-   * memory extending `bytes` number of bytes from the address or variable
-   * specified by `name`. Breakpoints set using the resulting data ID should
-   * pause on data access anywhere within that range.
-   *
-   * Clients may set this property only if the `supportsDataBreakpointBytes`
-   * capability is true.
+
+* If specified, a debug adapter should return information for the range of
+* memory extending `bytes` number of bytes from the address or variable
+* specified by `name`. Breakpoints set using the resulting data ID should
+* pause on data access anywhere within that range.
+*
+* Clients may set this property only if the `supportsDataBreakpointBytes`
+* capability is true.
    */
   bytes?: number;
 
   /**
-   * If `true`, the `name` is a memory address and the debugger should interpret
-   * it as a decimal value, or hex value if it is prefixed with `0x`.
-   *
-   * Clients may set this property only if the `supportsDataBreakpointBytes`
-   * capability is true.
+
+* If `true`, the `name` is a memory address and the debugger should interpret
+* it as a decimal value, or hex value if it is prefixed with `0x`.
+*
+* Clients may set this property only if the `supportsDataBreakpointBytes`
+* capability is true.
    */
   asAddress?: boolean;
 
   /**
-   * The mode of the desired breakpoint. If defined, this must be one of the
-   * `breakpointModes` the debug adapter advertised in its `Capabilities`.
+
+* The mode of the desired breakpoint. If defined, this must be one of the
+* `breakpointModes` the debug adapter advertised in its `Capabilities`.
    */
   mode?: string;
 }
@@ -1483,13 +1548,13 @@ Response to dataBreakpointInfo request.
 interface DataBreakpointInfoResponse extends Response {
   body: {
     /**
-     * An identifier for the data on which a data breakpoint can be registered
+     *An identifier for the data on which a data breakpoint can be registered
      * with the `setDataBreakpoints` request or null if no data breakpoint is
-     * available. If a `variablesReference` or `frameId` is passed, the `dataId`
+     *available. If a `variablesReference` or `frameId` is passed, the `dataId`
      * is valid in the current suspended state, otherwise it's valid
-     * indefinitely. See 'Lifetime of Object References' in the Overview section
+     *indefinitely. See 'Lifetime of Object References' in the Overview section
      * for details. Breakpoints set using the `dataId` in the
-     * `setDataBreakpoints` request may outlive the lifetime of the associated
+     *`setDataBreakpoints` request may outlive the lifetime of the associated
      * `dataId`.
      */
     dataId: string | null;
@@ -1534,8 +1599,9 @@ Arguments for setDataBreakpoints request.
 
 interface SetDataBreakpointsArguments {
   /**
-   * The contents of this array replaces all existing data breakpoints. An empty
-   * array clears all data breakpoints.
+
+* The contents of this array replaces all existing data breakpoints. An empty
+* array clears all data breakpoints.
    */
   breakpoints: DataBreakpoint[];
 }
@@ -1547,7 +1613,7 @@ Returned is information about each breakpoint created by this request.
 interface SetDataBreakpointsResponse extends Response {
   body: {
     /**
-     * Information about the data breakpoints. The array elements correspond to
+     *Information about the data breakpoints. The array elements correspond to
      * the elements of the input argument `breakpoints` array.
      */
     breakpoints: Breakpoint[];
@@ -1574,7 +1640,8 @@ Arguments for setInstructionBreakpoints request
 
 interface SetInstructionBreakpointsArguments {
   /**
-   * The instruction references of the breakpoints
+
+* The instruction references of the breakpoints
    */
   breakpoints: InstructionBreakpoint[];
 }
@@ -1584,7 +1651,7 @@ Response to setInstructionBreakpoints request
 interface SetInstructionBreakpointsResponse extends Response {
   body: {
     /**
-     * Information about the breakpoints. The array elements correspond to the
+     *Information about the breakpoints. The array elements correspond to the
      * elements of the `breakpoints` array.
      */
     breakpoints: Breakpoint[];
@@ -1605,15 +1672,17 @@ Arguments for continue request.
 
 interface ContinueArguments {
   /**
-   * Specifies the active thread. If the debug adapter supports single thread
-   * execution (see `supportsSingleThreadExecutionRequests`) and the argument
-   * `singleThread` is true, only the thread with this ID is resumed.
+
+* Specifies the active thread. If the debug adapter supports single thread
+* execution (see `supportsSingleThreadExecutionRequests`) and the argument
+* `singleThread` is true, only the thread with this ID is resumed.
    */
   threadId: number;
 
   /**
-   * If this flag is true, execution is resumed only for the thread with given
-   * `threadId`.
+
+* If this flag is true, execution is resumed only for the thread with given
+* `threadId`.
    */
   singleThread?: boolean;
 }
@@ -1623,9 +1692,9 @@ Response to continue request.
 interface ContinueResponse extends Response {
   body: {
     /**
-     * If omitted or set to `true`, this response signals to the client that all
+     *If omitted or set to `true`, this response signals to the client that all
      * threads have been resumed. The value `false` indicates that not all
-     * threads were resumed.
+     *threads were resumed.
      */
     allThreadsContinued?: boolean;
   };
@@ -1649,19 +1718,22 @@ Arguments for next request.
 
 interface NextArguments {
   /**
-   * Specifies the thread for which to resume execution for one step (of the
-   * given granularity).
+
+* Specifies the thread for which to resume execution for one step (of the
+* given granularity).
    */
   threadId: number;
 
   /**
-   * If this flag is true, all other suspended threads are not resumed.
+
+* If this flag is true, all other suspended threads are not resumed.
    */
   singleThread?: boolean;
 
   /**
-   * Stepping granularity. If no granularity is specified, a granularity of
-   * `statement` is assumed.
+
+* Stepping granularity. If no granularity is specified, a granularity of
+* `statement` is assumed.
    */
   granularity?: SteppingGranularity;
 }
@@ -1697,24 +1769,28 @@ Arguments for stepIn request.
 
 interface StepInArguments {
   /**
-   * Specifies the thread for which to resume execution for one step-into (of
-   * the given granularity).
+
+* Specifies the thread for which to resume execution for one step-into (of
+* the given granularity).
    */
   threadId: number;
 
   /**
-   * If this flag is true, all other suspended threads are not resumed.
+
+* If this flag is true, all other suspended threads are not resumed.
    */
   singleThread?: boolean;
 
   /**
-   * Id of the target to step into.
+
+* Id of the target to step into.
    */
   targetId?: number;
 
   /**
-   * Stepping granularity. If no granularity is specified, a granularity of
-   * `statement` is assumed.
+
+* Stepping granularity. If no granularity is specified, a granularity of
+* `statement` is assumed.
    */
   granularity?: SteppingGranularity;
 }
@@ -1742,19 +1818,22 @@ Arguments for stepOut request.
 
 interface StepOutArguments {
   /**
-   * Specifies the thread for which to resume execution for one step-out (of the
-   * given granularity).
+
+* Specifies the thread for which to resume execution for one step-out (of the
+* given granularity).
    */
   threadId: number;
 
   /**
-   * If this flag is true, all other suspended threads are not resumed.
+
+* If this flag is true, all other suspended threads are not resumed.
    */
   singleThread?: boolean;
 
   /**
-   * Stepping granularity. If no granularity is specified, a granularity of
-   * `statement` is assumed.
+
+* Stepping granularity. If no granularity is specified, a granularity of
+* `statement` is assumed.
    */
   granularity?: SteppingGranularity;
 }
@@ -1784,19 +1863,22 @@ Arguments for stepBack request.
 
 interface StepBackArguments {
   /**
-   * Specifies the thread for which to resume execution for one step backwards
-   * (of the given granularity).
+
+* Specifies the thread for which to resume execution for one step backwards
+* (of the given granularity).
    */
   threadId: number;
 
   /**
-   * If this flag is true, all other suspended threads are not resumed.
+
+* If this flag is true, all other suspended threads are not resumed.
    */
   singleThread?: boolean;
 
   /**
-   * Stepping granularity to step. If no granularity is specified, a granularity
-   * of `statement` is assumed.
+
+* Stepping granularity to step. If no granularity is specified, a granularity
+* of `statement` is assumed.
    */
   granularity?: SteppingGranularity;
 }
@@ -1822,15 +1904,17 @@ Arguments for reverseContinue request.
 
 interface ReverseContinueArguments {
   /**
-   * Specifies the active thread. If the debug adapter supports single thread
-   * execution (see `supportsSingleThreadExecutionRequests`) and the
-   * `singleThread` argument is true, only the thread with this ID is resumed.
+
+* Specifies the active thread. If the debug adapter supports single thread
+* execution (see `supportsSingleThreadExecutionRequests`) and the
+* `singleThread` argument is true, only the thread with this ID is resumed.
    */
   threadId: number;
 
   /**
-   * If this flag is true, backward execution is resumed only for the thread
-   * with given `threadId`.
+
+* If this flag is true, backward execution is resumed only for the thread
+* with given `threadId`.
    */
   singleThread?: boolean;
 }
@@ -1858,9 +1942,10 @@ Arguments for restartFrame request.
 
 interface RestartFrameArguments {
   /**
-   * Restart the stack frame identified by `frameId`. The `frameId` must have
-   * been obtained in the current suspended state. See 'Lifetime of Object
-   * References' in the Overview section for details.
+
+* Restart the stack frame identified by `frameId`. The `frameId` must have
+* been obtained in the current suspended state. See 'Lifetime of Object
+* References' in the Overview section for details.
    */
   frameId: number;
 }
@@ -1892,12 +1977,14 @@ Arguments for goto request.
 
 interface GotoArguments {
   /**
-   * Set the goto target for this thread.
+
+* Set the goto target for this thread.
    */
   threadId: number;
 
   /**
-   * The location where the debuggee will continue to run.
+
+* The location where the debuggee will continue to run.
    */
   targetId: number;
 }
@@ -1923,7 +2010,8 @@ Arguments for pause request.
 
 interface PauseArguments {
   /**
-   * Pause execution for this thread.
+
+* Pause execution for this thread.
    */
   threadId: number;
 }
@@ -1949,27 +2037,31 @@ Arguments for stackTrace request.
 
 interface StackTraceArguments {
   /**
-   * Retrieve the stacktrace for this thread.
+
+* Retrieve the stacktrace for this thread.
    */
   threadId: number;
 
   /**
-   * The index of the first frame to return; if omitted frames start at 0.
+
+* The index of the first frame to return; if omitted frames start at 0.
    */
   startFrame?: number;
 
   /**
-   * The maximum number of frames to return. If levels is not specified or 0,
-   * all frames are returned.
+
+* The maximum number of frames to return. If levels is not specified or 0,
+* all frames are returned.
    */
   levels?: number;
 
   /**
-   * Specifies details on how to format the returned `StackFrame.name`. The
-   * debug adapter may format requested details in any way that would make sense
-   * to a developer.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsValueFormattingOptions` is true.
+
+* Specifies details on how to format the returned `StackFrame.name`. The
+* debug adapter may format requested details in any way that would make sense
+* to a developer.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsValueFormattingOptions` is true.
    */
   format?: StackFrameFormat;
 }
@@ -1979,9 +2071,9 @@ Response to stackTrace request.
 interface StackTraceResponse extends Response {
   body: {
     /**
-     * The frames of the stack frame. If the array has length zero, there are no
+     *The frames of the stack frame. If the array has length zero, there are no
      * stack frames available.
-     * This means that there is no location information available.
+     *This means that there is no location information available.
      */
     stackFrames: StackFrame[];
 
@@ -2011,9 +2103,10 @@ Arguments for scopes request.
 
 interface ScopesArguments {
   /**
-   * Retrieve the scopes for the stack frame identified by `frameId`. The
-   * `frameId` must have been obtained in the current suspended state. See
-   * 'Lifetime of Object References' in the Overview section for details.
+
+* Retrieve the scopes for the stack frame identified by `frameId`. The
+* `frameId` must have been obtained in the current suspended state. See
+* 'Lifetime of Object References' in the Overview section for details.
    */
   frameId: number;
 }
@@ -2023,7 +2116,7 @@ Response to scopes request.
 interface ScopesResponse extends Response {
   body: {
     /**
-     * The scopes of the stack frame. If the array has length zero, there are no
+     *The scopes of the stack frame. If the array has length zero, there are no
      * scopes available.
      */
     scopes: Scope[];
@@ -2046,38 +2139,43 @@ Arguments for variables request.
 
 interface VariablesArguments {
   /**
-   * The variable for which to retrieve its children. The `variablesReference`
-   * must have been obtained in the current suspended state. See 'Lifetime of
-   * Object References' in the Overview section for details.
+
+* The variable for which to retrieve its children. The `variablesReference`
+* must have been obtained in the current suspended state. See 'Lifetime of
+* Object References' in the Overview section for details.
    */
   variablesReference: number;
 
   /**
-   * Filter to limit the child variables to either named or indexed. If omitted,
-   * both types are fetched.
-   * Values: 'indexed', 'named'
+
+* Filter to limit the child variables to either named or indexed. If omitted,
+* both types are fetched.
+* Values: 'indexed', 'named'
    */
   filter?: 'indexed' | 'named';
 
   /**
-   * The index of the first variable to return; if omitted children start at 0.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsVariablePaging` is true.
+
+* The index of the first variable to return; if omitted children start at 0.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsVariablePaging` is true.
    */
   start?: number;
 
   /**
-   * The number of variables to return. If count is missing or 0, all variables
-   * are returned.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsVariablePaging` is true.
+
+* The number of variables to return. If count is missing or 0, all variables
+* are returned.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsVariablePaging` is true.
    */
   count?: number;
 
   /**
-   * Specifies details on how to format the Variable values.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsValueFormattingOptions` is true.
+
+* Specifies details on how to format the Variable values.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsValueFormattingOptions` is true.
    */
   format?: ValueFormat;
 }
@@ -2087,7 +2185,7 @@ Response to variables request.
 interface VariablesResponse extends Response {
   body: {
     /**
-     * All (or a range) of variables for the given variable reference.
+     *All (or a range) of variables for the given variable reference.
      */
     variables: Variable[];
   };
@@ -2109,24 +2207,28 @@ Arguments for setVariable request.
 
 interface SetVariableArguments {
   /**
-   * The reference of the variable container. The `variablesReference` must have
-   * been obtained in the current suspended state. See 'Lifetime of Object
-   * References' in the Overview section for details.
+
+* The reference of the variable container. The `variablesReference` must have
+* been obtained in the current suspended state. See 'Lifetime of Object
+* References' in the Overview section for details.
    */
   variablesReference: number;
 
   /**
-   * The name of the variable in the container.
+
+* The name of the variable in the container.
    */
   name: string;
 
   /**
-   * The value of the variable.
+
+* The value of the variable.
    */
   value: string;
 
   /**
-   * Specifies details on how to format the response value.
+
+* Specifies details on how to format the response value.
    */
   format?: ValueFormat;
 }
@@ -2136,7 +2238,7 @@ Response to setVariable request.
 interface SetVariableResponse extends Response {
   body: {
     /**
-     * The new value of the variable.
+     *The new value of the variable.
      */
     value: string;
 
@@ -2210,15 +2312,17 @@ Arguments for source request.
 
 interface SourceArguments {
   /**
-   * Specifies the source content to load. Either `source.path` or
-   * `source.sourceReference` must be specified.
+
+* Specifies the source content to load. Either `source.path` or
+* `source.sourceReference` must be specified.
    */
   source?: Source;
 
   /**
-   * The reference to the source. This is the same as `source.sourceReference`.
-   * This is provided for backward compatibility since old clients do not
-   * understand the `source` attribute.
+
+* The reference to the source. This is the same as `source.sourceReference`.
+* This is provided for backward compatibility since old clients do not
+* understand the `source` attribute.
    */
   sourceReference: number;
 }
@@ -2228,7 +2332,7 @@ Response to source request.
 interface SourceResponse extends Response {
   body: {
     /**
-     * Content of the source reference.
+     *Content of the source reference.
      */
     content: string;
 
@@ -2252,7 +2356,7 @@ Response to threads request.
 interface ThreadsResponse extends Response {
   body: {
     /**
-     * All threads.
+     *All threads.
      */
     threads: Thread[];
   };
@@ -2274,7 +2378,8 @@ Arguments for terminateThreads request.
 
 interface TerminateThreadsArguments {
   /**
-   * Ids of threads to be terminated.
+
+* Ids of threads to be terminated.
    */
   threadIds?: number[];
 }
@@ -2300,13 +2405,15 @@ Arguments for modules request.
 
 interface ModulesArguments {
   /**
-   * The index of the first module to return; if omitted modules start at 0.
+
+* The index of the first module to return; if omitted modules start at 0.
    */
   startModule?: number;
 
   /**
-   * The number of modules to return. If `moduleCount` is not specified or 0,
-   * all modules are returned.
+
+* The number of modules to return. If `moduleCount` is not specified or 0,
+* all modules are returned.
    */
   moduleCount?: number;
 }
@@ -2316,7 +2423,7 @@ Response to modules request.
 interface ModulesResponse extends Response {
   body: {
     /**
-     * All modules or range of modules.
+     *All modules or range of modules.
      */
     modules: Module[];
 
@@ -2349,7 +2456,7 @@ Response to loadedSources request.
 interface LoadedSourcesResponse extends Response {
   body: {
     /**
-     * Set of loaded sources.
+     *Set of loaded sources.
      */
     sources: Source[];
   };
@@ -2371,58 +2478,65 @@ Arguments for evaluate request.
 
 interface EvaluateArguments {
   /**
-   * The expression to evaluate.
+
+* The expression to evaluate.
    */
   expression: string;
 
   /**
-   * Evaluate the expression in the scope of this stack frame. If not specified,
-   * the expression is evaluated in the global scope.
+
+* Evaluate the expression in the scope of this stack frame. If not specified,
+* the expression is evaluated in the global scope.
    */
   frameId?: number;
 
   /**
-   * The contextual line where the expression should be evaluated. In the
-   * 'hover' context, this should be set to the start of the expression being
-   * hovered.
+
+* The contextual line where the expression should be evaluated. In the
+* 'hover' context, this should be set to the start of the expression being
+* hovered.
    */
   line?: number;
 
   /**
-   * The contextual column where the expression should be evaluated. This may be
-   * provided if `line` is also provided.
-   *
-   * It is measured in UTF-16 code units and the client capability
-   * `columnsStartAt1` determines whether it is 0- or 1-based.
+
+* The contextual column where the expression should be evaluated. This may be
+* provided if `line` is also provided.
+*
+* It is measured in UTF-16 code units and the client capability
+* `columnsStartAt1` determines whether it is 0- or 1-based.
    */
   column?: number;
 
   /**
-   * The contextual source in which the `line` is found. This must be provided
-   * if `line` is provided.
+
+* The contextual source in which the `line` is found. This must be provided
+* if `line` is provided.
    */
   source?: Source;
 
   /**
-   * The context in which the evaluate request is used.
-   * Values:
-   * 'watch': evaluate is called from a watch view context.
-   * 'repl': evaluate is called from a REPL context.
-   * 'hover': evaluate is called to generate the debug hover contents.
-   * This value should only be used if the corresponding capability
-   * `supportsEvaluateForHovers` is true.
-   * 'clipboard': evaluate is called to generate clipboard contents.
-   * This value should only be used if the corresponding capability
-   * `supportsClipboardContext` is true.
-   * 'variables': evaluate is called from a variables view context.
-   * etc.
+
+* The context in which the evaluate request is used.
+* Values:
+* 'watch': evaluate is called from a watch view context.
+* 'repl': evaluate is called from a REPL context.
+* 'hover': evaluate is called to generate the debug hover contents.
+* This value should only be used if the corresponding capability
+* `supportsEvaluateForHovers` is true.
+* 'clipboard': evaluate is called to generate clipboard contents.
+* This value should only be used if the corresponding capability
+* `supportsClipboardContext` is true.
+* 'variables': evaluate is called from a variables view context.
+* etc.
    */
   context?: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' | string;
 
   /**
-   * Specifies details on how to format the result.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsValueFormattingOptions` is true.
+
+* Specifies details on how to format the result.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsValueFormattingOptions` is true.
    */
   format?: ValueFormat;
 }
@@ -2432,7 +2546,7 @@ Response to evaluate request.
 interface EvaluateResponse extends Response {
   body: {
     /**
-     * The result of the evaluate request.
+     *The result of the evaluate request.
      */
     result: string;
 
@@ -2516,23 +2630,27 @@ Arguments for setExpression request.
 
 interface SetExpressionArguments {
   /**
-   * The l-value expression to assign to.
+
+* The l-value expression to assign to.
    */
   expression: string;
 
   /**
-   * The value expression to assign to the l-value expression.
+
+* The value expression to assign to the l-value expression.
    */
   value: string;
 
   /**
-   * Evaluate the expressions in the scope of this stack frame. If not
-   * specified, the expressions are evaluated in the global scope.
+
+* Evaluate the expressions in the scope of this stack frame. If not
+* specified, the expressions are evaluated in the global scope.
    */
   frameId?: number;
 
   /**
-   * Specifies how the resulting value should be formatted.
+
+* Specifies how the resulting value should be formatted.
    */
   format?: ValueFormat;
 }
@@ -2542,7 +2660,7 @@ Response to setExpression request.
 interface SetExpressionResponse extends Response {
   body: {
     /**
-     * The new value of the expression.
+     *The new value of the expression.
      */
     value: string;
 
@@ -2623,7 +2741,8 @@ Arguments for stepInTargets request.
 
 interface StepInTargetsArguments {
   /**
-   * The stack frame for which to retrieve the possible step-in targets.
+
+* The stack frame for which to retrieve the possible step-in targets.
    */
   frameId: number;
 }
@@ -2633,7 +2752,7 @@ Response to stepInTargets request.
 interface StepInTargetsResponse extends Response {
   body: {
     /**
-     * The possible step-in targets of the specified source location.
+     *The possible step-in targets of the specified source location.
      */
     targets: StepInTarget[];
   };
@@ -2657,19 +2776,22 @@ Arguments for gotoTargets request.
 
 interface GotoTargetsArguments {
   /**
-   * The source location for which the goto targets are determined.
+
+* The source location for which the goto targets are determined.
    */
   source: Source;
 
   /**
-   * The line location for which the goto targets are determined.
+
+* The line location for which the goto targets are determined.
    */
   line: number;
 
   /**
-   * The position within `line` for which the goto targets are determined. It is
-   * measured in UTF-16 code units and the client capability `columnsStartAt1`
-   * determines whether it is 0- or 1-based.
+
+* The position within `line` for which the goto targets are determined. It is
+* measured in UTF-16 code units and the client capability `columnsStartAt1`
+* determines whether it is 0- or 1-based.
    */
   column?: number;
 }
@@ -2679,7 +2801,7 @@ Response to gotoTargets request.
 interface GotoTargetsResponse extends Response {
   body: {
     /**
-     * The possible goto targets of the specified location.
+     *The possible goto targets of the specified location.
      */
     targets: GotoTarget[];
   };
@@ -2701,27 +2823,31 @@ Arguments for completions request.
 
 interface CompletionsArguments {
   /**
-   * Returns completions in the scope of this stack frame. If not specified, the
-   * completions are returned for the global scope.
+
+* Returns completions in the scope of this stack frame. If not specified, the
+* completions are returned for the global scope.
    */
   frameId?: number;
 
   /**
-   * One or more source lines. Typically this is the text users have typed into
-   * the debug console before they asked for completion.
+
+* One or more source lines. Typically this is the text users have typed into
+* the debug console before they asked for completion.
    */
   text: string;
 
   /**
-   * The position within `text` for which to determine the completion proposals.
-   * It is measured in UTF-16 code units and the client capability
-   * `columnsStartAt1` determines whether it is 0- or 1-based.
+
+* The position within `text` for which to determine the completion proposals.
+* It is measured in UTF-16 code units and the client capability
+* `columnsStartAt1` determines whether it is 0- or 1-based.
    */
   column: number;
 
   /**
-   * A line for which to determine the completion proposals. If missing the
-   * first line of the text is assumed.
+
+* A line for which to determine the completion proposals. If missing the
+* first line of the text is assumed.
    */
   line?: number;
 }
@@ -2731,7 +2857,7 @@ Response to completions request.
 interface CompletionsResponse extends Response {
   body: {
     /**
-     * The possible completions for .
+     *The possible completions for .
      */
     targets: CompletionItem[];
   };
@@ -2753,7 +2879,8 @@ Arguments for exceptionInfo request.
 
 interface ExceptionInfoArguments {
   /**
-   * Thread for which exception information should be retrieved.
+
+* Thread for which exception information should be retrieved.
    */
   threadId: number;
 }
@@ -2763,7 +2890,7 @@ Response to exceptionInfo request.
 interface ExceptionInfoResponse extends Response {
   body: {
     /**
-     * ID of the exception that was thrown.
+     *ID of the exception that was thrown.
      */
     exceptionId: string;
 
@@ -2800,18 +2927,21 @@ Arguments for readMemory request.
 
 interface ReadMemoryArguments {
   /**
-   * Memory reference to the base location from which data should be read.
+
+* Memory reference to the base location from which data should be read.
    */
   memoryReference: string;
 
   /**
-   * Offset (in bytes) to be applied to the reference location before reading
-   * data. Can be negative.
+
+* Offset (in bytes) to be applied to the reference location before reading
+* data. Can be negative.
    */
   offset?: number;
 
   /**
-   * Number of bytes to read at the specified location and offset.
+
+* Number of bytes to read at the specified location and offset.
    */
   count: number;
 }
@@ -2821,9 +2951,9 @@ Response to readMemory request.
 interface ReadMemoryResponse extends Response {
   body?: {
     /**
-     * The address of the first byte of data returned.
+     *The address of the first byte of data returned.
      * Treated as a hex value if prefixed with `0x`, or as a decimal value
-     * otherwise.
+     *otherwise.
      */
     address: string;
 
@@ -2861,29 +2991,33 @@ Arguments for writeMemory request.
 
 interface WriteMemoryArguments {
   /**
-   * Memory reference to the base location to which data should be written.
+
+* Memory reference to the base location to which data should be written.
    */
   memoryReference: string;
 
   /**
-   * Offset (in bytes) to be applied to the reference location before writing
-   * data. Can be negative.
+
+* Offset (in bytes) to be applied to the reference location before writing
+* data. Can be negative.
    */
   offset?: number;
 
   /**
-   * Property to control partial writes. If true, the debug adapter should
-   * attempt to write memory even if the entire memory region is not writable.
-   * In such a case the debug adapter should stop after hitting the first byte
-   * of memory that cannot be written and return the number of bytes written in
-   * the response via the `offset` and `bytesWritten` properties.
-   * If false or missing, a debug adapter should attempt to verify the region is
-   * writable before writing, and fail the response if it is not.
+
+* Property to control partial writes. If true, the debug adapter should
+* attempt to write memory even if the entire memory region is not writable.
+* In such a case the debug adapter should stop after hitting the first byte
+* of memory that cannot be written and return the number of bytes written in
+* the response via the `offset` and `bytesWritten` properties.
+* If false or missing, a debug adapter should attempt to verify the region is
+* writable before writing, and fail the response if it is not.
    */
   allowPartial?: boolean;
 
   /**
-   * Bytes to write, encoded using base64.
+
+* Bytes to write, encoded using base64.
    */
   data: string;
 }
@@ -2893,9 +3027,9 @@ Response to writeMemory request.
 interface WriteMemoryResponse extends Response {
   body?: {
     /**
-     * Property that should be returned when `allowPartial` is true to indicate
+     *Property that should be returned when `allowPartial` is true to indicate
      * the offset of the first byte of data successfully written. Can be
-     * negative.
+     *negative.
      */
     offset?: number;
 
@@ -2923,35 +3057,40 @@ Arguments for disassemble request.
 
 interface DisassembleArguments {
   /**
-   * Memory reference to the base location containing the instructions to
-   * disassemble.
+
+* Memory reference to the base location containing the instructions to
+* disassemble.
    */
   memoryReference: string;
 
   /**
-   * Offset (in bytes) to be applied to the reference location before
-   * disassembling. Can be negative.
+
+* Offset (in bytes) to be applied to the reference location before
+* disassembling. Can be negative.
    */
   offset?: number;
 
   /**
-   * Offset (in instructions) to be applied after the byte offset (if any)
-   * before disassembling. Can be negative.
+
+* Offset (in instructions) to be applied after the byte offset (if any)
+* before disassembling. Can be negative.
    */
   instructionOffset?: number;
 
   /**
-   * Number of instructions to disassemble starting at the specified location
-   * and offset.
-   * An adapter must return exactly this number of instructions - any
-   * unavailable instructions should be replaced with an implementation-defined
-   * 'invalid instruction' value.
+
+* Number of instructions to disassemble starting at the specified location
+* and offset.
+* An adapter must return exactly this number of instructions - any
+* unavailable instructions should be replaced with an implementation-defined
+* 'invalid instruction' value.
    */
   instructionCount: number;
 
   /**
-   * If true, the adapter should attempt to resolve memory addresses and other
-   * values to symbolic names.
+
+* If true, the adapter should attempt to resolve memory addresses and other
+* values to symbolic names.
    */
   resolveSymbols?: boolean;
 }
@@ -2961,7 +3100,7 @@ Response to disassemble request.
 interface DisassembleResponse extends Response {
   body?: {
     /**
-     * The list of disassembled instructions.
+     *The list of disassembled instructions.
      */
     instructions: DisassembledInstruction[];
   };
@@ -2981,7 +3120,8 @@ Arguments for locations request.
 
 interface LocationsArguments {
   /**
-   * Location reference to resolve.
+
+* Location reference to resolve.
    */
   locationReference: number;
 }
@@ -2991,7 +3131,7 @@ Response to locations request.
 interface LocationsResponse extends Response {
   body?: {
     /**
-     * The source containing the location; either `source.path` or
+     *The source containing the location; either `source.path` or
      * `source.sourceReference` must be specified.
      */
     source: Source;
@@ -3032,239 +3172,281 @@ Information about the capabilities of a debug adapter.
 
 interface Capabilities {
   /**
-   * The debug adapter supports the `configurationDone` request.
+
+* The debug adapter supports the `configurationDone` request.
    */
   supportsConfigurationDoneRequest?: boolean;
 
   /**
-   * The debug adapter supports function breakpoints.
+
+* The debug adapter supports function breakpoints.
    */
   supportsFunctionBreakpoints?: boolean;
 
   /**
-   * The debug adapter supports conditional breakpoints.
+
+* The debug adapter supports conditional breakpoints.
    */
   supportsConditionalBreakpoints?: boolean;
 
   /**
-   * The debug adapter supports breakpoints that break execution after a
-   * specified number of hits.
+
+* The debug adapter supports breakpoints that break execution after a
+* specified number of hits.
    */
   supportsHitConditionalBreakpoints?: boolean;
 
   /**
-   * The debug adapter supports a (side effect free) `evaluate` request for data
-   * hovers.
+
+* The debug adapter supports a (side effect free) `evaluate` request for data
+* hovers.
    */
   supportsEvaluateForHovers?: boolean;
 
   /**
-   * Available exception filter options for the `setExceptionBreakpoints`
-   * request.
+
+* Available exception filter options for the `setExceptionBreakpoints`
+* request.
    */
   exceptionBreakpointFilters?: ExceptionBreakpointsFilter[];
 
   /**
-   * The debug adapter supports stepping back via the `stepBack` and
-   * `reverseContinue` requests.
+
+* The debug adapter supports stepping back via the `stepBack` and
+* `reverseContinue` requests.
    */
   supportsStepBack?: boolean;
 
   /**
-   * The debug adapter supports setting a variable to a value.
+
+* The debug adapter supports setting a variable to a value.
    */
   supportsSetVariable?: boolean;
 
   /**
-   * The debug adapter supports restarting a frame.
+
+* The debug adapter supports restarting a frame.
    */
   supportsRestartFrame?: boolean;
 
   /**
-   * The debug adapter supports the `gotoTargets` request.
+
+* The debug adapter supports the `gotoTargets` request.
    */
   supportsGotoTargetsRequest?: boolean;
 
   /**
-   * The debug adapter supports the `stepInTargets` request.
+
+* The debug adapter supports the `stepInTargets` request.
    */
   supportsStepInTargetsRequest?: boolean;
 
   /**
-   * The debug adapter supports the `completions` request.
+
+* The debug adapter supports the `completions` request.
    */
   supportsCompletionsRequest?: boolean;
 
   /**
-   * The set of characters that should trigger completion in a REPL. If not
-   * specified, the UI should assume the `.` character.
+
+* The set of characters that should trigger completion in a REPL. If not
+* specified, the UI should assume the `.` character.
    */
   completionTriggerCharacters?: string[];
 
   /**
-   * The debug adapter supports the `modules` request.
+
+* The debug adapter supports the `modules` request.
    */
   supportsModulesRequest?: boolean;
 
   /**
-   * The set of additional module information exposed by the debug adapter.
+
+* The set of additional module information exposed by the debug adapter.
    */
   additionalModuleColumns?: ColumnDescriptor[];
 
   /**
-   * Checksum algorithms supported by the debug adapter.
+
+* Checksum algorithms supported by the debug adapter.
    */
   supportedChecksumAlgorithms?: ChecksumAlgorithm[];
 
   /**
-   * The debug adapter supports the `restart` request. In this case a client
-   * should not implement `restart` by terminating and relaunching the adapter
-   * but by calling the `restart` request.
+
+* The debug adapter supports the `restart` request. In this case a client
+* should not implement `restart` by terminating and relaunching the adapter
+* but by calling the `restart` request.
    */
   supportsRestartRequest?: boolean;
 
   /**
-   * The debug adapter supports `exceptionOptions` on the
-   * `setExceptionBreakpoints` request.
+
+* The debug adapter supports `exceptionOptions` on the
+* `setExceptionBreakpoints` request.
    */
   supportsExceptionOptions?: boolean;
 
   /**
-   * The debug adapter supports a `format` attribute on the `stackTrace`,
-   * `variables`, and `evaluate` requests.
+
+* The debug adapter supports a `format` attribute on the `stackTrace`,
+* `variables`, and `evaluate` requests.
    */
   supportsValueFormattingOptions?: boolean;
 
   /**
-   * The debug adapter supports the `exceptionInfo` request.
+
+* The debug adapter supports the `exceptionInfo` request.
    */
   supportsExceptionInfoRequest?: boolean;
 
   /**
-   * The debug adapter supports the `terminateDebuggee` attribute on the
-   * `disconnect` request.
+
+* The debug adapter supports the `terminateDebuggee` attribute on the
+* `disconnect` request.
    */
   supportTerminateDebuggee?: boolean;
 
   /**
-   * The debug adapter supports the `suspendDebuggee` attribute on the
-   * `disconnect` request.
+
+* The debug adapter supports the `suspendDebuggee` attribute on the
+* `disconnect` request.
    */
   supportSuspendDebuggee?: boolean;
 
   /**
-   * The debug adapter supports the delayed loading of parts of the stack, which
-   * requires that both the `startFrame` and `levels` arguments and the
-   * `totalFrames` result of the `stackTrace` request are supported.
+
+* The debug adapter supports the delayed loading of parts of the stack, which
+* requires that both the `startFrame` and `levels` arguments and the
+* `totalFrames` result of the `stackTrace` request are supported.
    */
   supportsDelayedStackTraceLoading?: boolean;
 
   /**
-   * The debug adapter supports the `loadedSources` request.
+
+* The debug adapter supports the `loadedSources` request.
    */
   supportsLoadedSourcesRequest?: boolean;
 
   /**
-   * The debug adapter supports log points by interpreting the `logMessage`
-   * attribute of the `SourceBreakpoint`.
+
+* The debug adapter supports log points by interpreting the `logMessage`
+* attribute of the `SourceBreakpoint`.
    */
   supportsLogPoints?: boolean;
 
   /**
-   * The debug adapter supports the `terminateThreads` request.
+
+* The debug adapter supports the `terminateThreads` request.
    */
   supportsTerminateThreadsRequest?: boolean;
 
   /**
-   * The debug adapter supports the `setExpression` request.
+
+* The debug adapter supports the `setExpression` request.
    */
   supportsSetExpression?: boolean;
 
   /**
-   * The debug adapter supports the `terminate` request.
+
+* The debug adapter supports the `terminate` request.
    */
   supportsTerminateRequest?: boolean;
 
   /**
-   * The debug adapter supports data breakpoints.
+
+* The debug adapter supports data breakpoints.
    */
   supportsDataBreakpoints?: boolean;
 
   /**
-   * The debug adapter supports the `readMemory` request.
+
+* The debug adapter supports the `readMemory` request.
    */
   supportsReadMemoryRequest?: boolean;
 
   /**
-   * The debug adapter supports the `writeMemory` request.
+
+* The debug adapter supports the `writeMemory` request.
    */
   supportsWriteMemoryRequest?: boolean;
 
   /**
-   * The debug adapter supports the `disassemble` request.
+
+* The debug adapter supports the `disassemble` request.
    */
   supportsDisassembleRequest?: boolean;
 
   /**
-   * The debug adapter supports the `cancel` request.
+
+* The debug adapter supports the `cancel` request.
    */
   supportsCancelRequest?: boolean;
 
   /**
-   * The debug adapter supports the `breakpointLocations` request.
+
+* The debug adapter supports the `breakpointLocations` request.
    */
   supportsBreakpointLocationsRequest?: boolean;
 
   /**
-   * The debug adapter supports the `clipboard` context value in the `evaluate`
-   * request.
+
+* The debug adapter supports the `clipboard` context value in the `evaluate`
+* request.
    */
   supportsClipboardContext?: boolean;
 
   /**
-   * The debug adapter supports stepping granularities (argument `granularity`)
-   * for the stepping requests.
+
+* The debug adapter supports stepping granularities (argument `granularity`)
+* for the stepping requests.
    */
   supportsSteppingGranularity?: boolean;
 
   /**
-   * The debug adapter supports adding breakpoints based on instruction
-   * references.
+
+* The debug adapter supports adding breakpoints based on instruction
+* references.
    */
   supportsInstructionBreakpoints?: boolean;
 
   /**
-   * The debug adapter supports `filterOptions` as an argument on the
-   * `setExceptionBreakpoints` request.
+
+* The debug adapter supports `filterOptions` as an argument on the
+* `setExceptionBreakpoints` request.
    */
   supportsExceptionFilterOptions?: boolean;
 
   /**
-   * The debug adapter supports the `singleThread` property on the execution
-   * requests (`continue`, `next`, `stepIn`, `stepOut`, `reverseContinue`,
-   * `stepBack`).
+
+* The debug adapter supports the `singleThread` property on the execution
+* requests (`continue`, `next`, `stepIn`, `stepOut`, `reverseContinue`,
+* `stepBack`).
    */
   supportsSingleThreadExecutionRequests?: boolean;
 
   /**
-   * The debug adapter supports the `asAddress` and `bytes` fields in the
-   * `dataBreakpointInfo` request.
+
+* The debug adapter supports the `asAddress` and `bytes` fields in the
+* `dataBreakpointInfo` request.
    */
   supportsDataBreakpointBytes?: boolean;
 
   /**
-   * Modes of breakpoints supported by the debug adapter, such as 'hardware' or
-   * 'software'. If present, the client may allow the user to select a mode and
-   * include it in its `setBreakpoints` request.
-   *
-   * Clients may present the first applicable mode in this array as the
-   * 'default' mode in gestures that set breakpoints.
+
+* Modes of breakpoints supported by the debug adapter, such as 'hardware' or
+* 'software'. If present, the client may allow the user to select a mode and
+* include it in its `setBreakpoints` request.
+*
+* Clients may present the first applicable mode in this array as the
+* 'default' mode in gestures that set breakpoints.
    */
   breakpointModes?: BreakpointMode[];
 
   /**
-   * The debug adapter supports ANSI escape sequences in styling of
-   * `OutputEvent.output` and `Variable.value` fields.
+
+* The debug adapter supports ANSI escape sequences in styling of
+* `OutputEvent.output` and `Variable.value` fields.
    */
   supportsANSIStyling?: boolean;
 }
@@ -3275,37 +3457,43 @@ An ExceptionBreakpointsFilter is shown in the UI as an filter option for configu
 
 interface ExceptionBreakpointsFilter {
   /**
-   * The internal ID of the filter option. This value is passed to the
-   * `setExceptionBreakpoints` request.
+
+* The internal ID of the filter option. This value is passed to the
+* `setExceptionBreakpoints` request.
    */
   filter: string;
 
   /**
-   * The name of the filter option. This is shown in the UI.
+
+* The name of the filter option. This is shown in the UI.
    */
   label: string;
 
   /**
-   * A help text providing additional information about the exception filter.
-   * This string is typically shown as a hover and can be translated.
+
+* A help text providing additional information about the exception filter.
+* This string is typically shown as a hover and can be translated.
    */
   description?: string;
 
   /**
-   * Initial value of the filter option. If not specified a value false is
-   * assumed.
+
+* Initial value of the filter option. If not specified a value false is
+* assumed.
    */
   default?: boolean;
 
   /**
-   * Controls whether a condition can be specified for this filter option. If
-   * false or missing, a condition can not be set.
+
+* Controls whether a condition can be specified for this filter option. If
+* false or missing, a condition can not be set.
    */
   supportsCondition?: boolean;
 
   /**
-   * A help text providing information about the condition. This string is shown
-   * as the placeholder text for a text box and can be translated.
+
+* A help text providing information about the condition. This string is shown
+* as the placeholder text for a text box and can be translated.
    */
   conditionDescription?: string;
 }
@@ -3316,44 +3504,51 @@ A structured message object. Used to return errors from requests.
 
 interface Message {
   /**
-   * Unique (within a debug adapter implementation) identifier for the message.
-   * The purpose of these error IDs is to help extension authors that have the
-   * requirement that every user visible error message needs a corresponding
-   * error number, so that users or customer support can find information about
-   * the specific error more easily.
+
+* Unique (within a debug adapter implementation) identifier for the message.
+* The purpose of these error IDs is to help extension authors that have the
+* requirement that every user visible error message needs a corresponding
+* error number, so that users or customer support can find information about
+* the specific error more easily.
    */
   id: number;
 
   /**
-   * A format string for the message. Embedded variables have the form `{name}`.
-   * If variable name starts with an underscore character, the variable does not
-   * contain user data (PII) and can be safely used for telemetry purposes.
+
+* A format string for the message. Embedded variables have the form `{name}`.
+* If variable name starts with an underscore character, the variable does not
+* contain user data (PII) and can be safely used for telemetry purposes.
    */
   format: string;
 
   /**
-   * An object used as a dictionary for looking up the variables in the format
-   * string.
+
+* An object used as a dictionary for looking up the variables in the format
+* string.
    */
   variables?: { [key: string]: string; };
 
   /**
-   * If true send to telemetry.
+
+* If true send to telemetry.
    */
   sendTelemetry?: boolean;
 
   /**
-   * If true show user.
+
+* If true show user.
    */
   showUser?: boolean;
 
   /**
-   * A url where additional information about this message can be found.
+
+* A url where additional information about this message can be found.
    */
   url?: string;
 
   /**
-   * A label that is presented to the user as the UI for opening the url.
+
+* A label that is presented to the user as the UI for opening the url.
    */
   urlLabel?: string;
 }
@@ -3372,57 +3567,67 @@ To avoid an unnecessary proliferation of additional attributes with similar sema
 
 interface Module {
   /**
-   * Unique identifier for the module.
+
+* Unique identifier for the module.
    */
   id: number | string;
 
   /**
-   * A name of the module.
+
+* A name of the module.
    */
   name: string;
 
   /**
-   * Logical full path to the module. The exact definition is implementation
-   * defined, but usually this would be a full path to the on-disk file for the
-   * module.
+
+* Logical full path to the module. The exact definition is implementation
+* defined, but usually this would be a full path to the on-disk file for the
+* module.
    */
   path?: string;
 
   /**
-   * True if the module is optimized.
+
+* True if the module is optimized.
    */
   isOptimized?: boolean;
 
   /**
-   * True if the module is considered 'user code' by a debugger that supports
-   * 'Just My Code'.
+
+* True if the module is considered 'user code' by a debugger that supports
+* 'Just My Code'.
    */
   isUserCode?: boolean;
 
   /**
-   * Version of Module.
+
+* Version of Module.
    */
   version?: string;
 
   /**
-   * User-understandable description of if symbols were found for the module
-   * (ex: 'Symbols Loaded', 'Symbols not found', etc.)
+
+* User-understandable description of if symbols were found for the module
+* (ex: 'Symbols Loaded', 'Symbols not found', etc.)
    */
   symbolStatus?: string;
 
   /**
-   * Logical full path to the symbol file. The exact definition is
-   * implementation defined.
+
+* Logical full path to the symbol file. The exact definition is
+* implementation defined.
    */
   symbolFilePath?: string;
 
   /**
-   * Module created or modified, encoded as a RFC 3339 timestamp.
+
+* Module created or modified, encoded as a RFC 3339 timestamp.
    */
   dateTimeStamp?: string;
 
   /**
-   * Address range covered by this module.
+
+* Address range covered by this module.
    */
   addressRange?: string;
 }
@@ -3437,29 +3642,34 @@ It is only used if the underlying UI actually supports this level of customizati
 
 interface ColumnDescriptor {
   /**
-   * Name of the attribute rendered in this column.
+
+* Name of the attribute rendered in this column.
    */
   attributeName: string;
 
   /**
-   * Header UI label of column.
+
+* Header UI label of column.
    */
   label: string;
 
   /**
-   * Format to use for the rendered values in this column. TBD how the format
-   * strings looks like.
+
+* Format to use for the rendered values in this column. TBD how the format
+* strings looks like.
    */
   format?: string;
 
   /**
-   * Datatype of values in this column. Defaults to `string` if not specified.
-   * Values: 'string', 'number', 'boolean', 'unixTimestampUTC'
+
+* Datatype of values in this column. Defaults to `string` if not specified.
+* Values: 'string', 'number', 'boolean', 'unixTimestampUTC'
    */
   type?: 'string' | 'number' | 'boolean' | 'unixTimestampUTC';
 
   /**
-   * Width of this column in characters (hint only).
+
+* Width of this column in characters (hint only).
    */
   width?: number;
 }
@@ -3470,12 +3680,14 @@ A Thread
 
 interface Thread {
   /**
-   * Unique identifier for the thread.
+
+* Unique identifier for the thread.
    */
   id: number;
 
   /**
-   * The name of the thread.
+
+* The name of the thread.
    */
   name: string;
 }
@@ -3488,57 +3700,65 @@ It is returned from the debug adapter as part of a StackFrame and it is used by 
 
 interface Source {
   /**
-   * The short name of the source. Every source returned from the debug adapter
-   * has a name.
-   * When sending a source to the debug adapter this name is optional.
+
+* The short name of the source. Every source returned from the debug adapter
+* has a name.
+* When sending a source to the debug adapter this name is optional.
    */
   name?: string;
 
   /**
-   * The path of the source to be shown in the UI.
-   * It is only used to locate and load the content of the source if no
-   * `sourceReference` is specified (or its value is 0).
+
+* The path of the source to be shown in the UI.
+* It is only used to locate and load the content of the source if no
+* `sourceReference` is specified (or its value is 0).
    */
   path?: string;
 
   /**
-   * If the value > 0 the contents of the source must be retrieved through the
-   * `source` request (even if a path is specified).
-   * Since a `sourceReference` is only valid for a session, it can not be used
-   * to persist a source.
-   * The value should be less than or equal to 2147483647 (2^31-1).
+
+* If the value > 0 the contents of the source must be retrieved through the
+* `source` request (even if a path is specified).
+* Since a `sourceReference` is only valid for a session, it can not be used
+* to persist a source.
+* The value should be less than or equal to 2147483647 (2^31-1).
    */
   sourceReference?: number;
 
   /**
-   * A hint for how to present the source in the UI.
-   * A value of `deemphasize` can be used to indicate that the source is not
-   * available or that it is skipped on stepping.
-   * Values: 'normal', 'emphasize', 'deemphasize'
+
+* A hint for how to present the source in the UI.
+* A value of `deemphasize` can be used to indicate that the source is not
+* available or that it is skipped on stepping.
+* Values: 'normal', 'emphasize', 'deemphasize'
    */
   presentationHint?: 'normal' | 'emphasize' | 'deemphasize';
 
   /**
-   * The origin of this source. For example, 'internal module', 'inlined content
-   * from source map', etc.
+
+* The origin of this source. For example, 'internal module', 'inlined content
+* from source map', etc.
    */
   origin?: string;
 
   /**
-   * A list of sources that are related to this source. These may be the source
-   * that generated this source.
+
+* A list of sources that are related to this source. These may be the source
+* that generated this source.
    */
   sources?: Source[];
 
   /**
-   * Additional data that a debug adapter might want to loop through the client.
-   * The client should leave the data intact and persist it across sessions. The
-   * client should not interpret the data.
+
+* Additional data that a debug adapter might want to loop through the client.
+* The client should leave the data intact and persist it across sessions. The
+* client should not interpret the data.
    */
   adapterData?: any;
 
   /**
-   * The checksums associated with this file.
+
+* The checksums associated with this file.
    */
   checksums?: Checksum[];
 }
@@ -3549,73 +3769,84 @@ A Stackframe contains the source location.
 
 interface StackFrame {
   /**
-   * An identifier for the stack frame. It must be unique across all threads.
-   * This id can be used to retrieve the scopes of the frame with the `scopes`
-   * request or to restart the execution of a stack frame.
+
+* An identifier for the stack frame. It must be unique across all threads.
+* This id can be used to retrieve the scopes of the frame with the `scopes`
+* request or to restart the execution of a stack frame.
    */
   id: number;
 
   /**
-   * The name of the stack frame, typically a method name.
+
+* The name of the stack frame, typically a method name.
    */
   name: string;
 
   /**
-   * The source of the frame.
+
+* The source of the frame.
    */
   source?: Source;
 
   /**
-   * The line within the source of the frame. If the source attribute is missing
-   * or doesn't exist, `line` is 0 and should be ignored by the client.
+
+* The line within the source of the frame. If the source attribute is missing
+* or doesn't exist, `line` is 0 and should be ignored by the client.
    */
   line: number;
 
   /**
-   * Start position of the range covered by the stack frame. It is measured in
-   * UTF-16 code units and the client capability `columnsStartAt1` determines
-   * whether it is 0- or 1-based. If attribute `source` is missing or doesn't
-   * exist, `column` is 0 and should be ignored by the client.
+
+* Start position of the range covered by the stack frame. It is measured in
+* UTF-16 code units and the client capability `columnsStartAt1` determines
+* whether it is 0- or 1-based. If attribute `source` is missing or doesn't
+* exist, `column` is 0 and should be ignored by the client.
    */
   column: number;
 
   /**
-   * The end line of the range covered by the stack frame.
+
+* The end line of the range covered by the stack frame.
    */
   endLine?: number;
 
   /**
-   * End position of the range covered by the stack frame. It is measured in
-   * UTF-16 code units and the client capability `columnsStartAt1` determines
-   * whether it is 0- or 1-based.
+
+* End position of the range covered by the stack frame. It is measured in
+* UTF-16 code units and the client capability `columnsStartAt1` determines
+* whether it is 0- or 1-based.
    */
   endColumn?: number;
 
   /**
-   * Indicates whether this frame can be restarted with the `restartFrame`
-   * request. Clients should only use this if the debug adapter supports the
-   * `restart` request and the corresponding capability `supportsRestartFrame`
-   * is true. If a debug adapter has this capability, then `canRestart` defaults
-   * to `true` if the property is absent.
+
+* Indicates whether this frame can be restarted with the `restartFrame`
+* request. Clients should only use this if the debug adapter supports the
+* `restart` request and the corresponding capability `supportsRestartFrame`
+* is true. If a debug adapter has this capability, then `canRestart` defaults
+* to `true` if the property is absent.
    */
   canRestart?: boolean;
 
   /**
-   * A memory reference for the current instruction pointer in this frame.
+
+* A memory reference for the current instruction pointer in this frame.
    */
   instructionPointerReference?: string;
 
   /**
-   * The module associated with this frame, if any.
+
+* The module associated with this frame, if any.
    */
   moduleId?: number | string;
 
   /**
-   * A hint for how to present this frame in the UI.
-   * A value of `label` can be used to indicate that the frame is an artificial
-   * frame that is used as a visual label or separator. A value of `subtle` can
-   * be used to change the appearance of a frame in a 'subtle' way.
-   * Values: 'normal', 'label', 'subtle'
+
+* A hint for how to present this frame in the UI.
+* A value of `label` can be used to indicate that the frame is an artificial
+* frame that is used as a visual label or separator. A value of `subtle` can
+* be used to change the appearance of a frame in a 'subtle' way.
+* Values: 'normal', 'label', 'subtle'
    */
   presentationHint?: 'normal' | 'label' | 'subtle';
 }
@@ -3626,78 +3857,89 @@ A Scope is a named container for variables. Optionally a scope can map to a sour
 
 interface Scope {
   /**
-   * Name of the scope such as 'Arguments', 'Locals', or 'Registers'. This
-   * string is shown in the UI as is and can be translated.
+
+* Name of the scope such as 'Arguments', 'Locals', or 'Registers'. This
+* string is shown in the UI as is and can be translated.
    */
   name: string;
 
   /**
-   * A hint for how to present this scope in the UI. If this attribute is
-   * missing, the scope is shown with a generic UI.
-   * Values:
-   * 'arguments': Scope contains method arguments.
-   * 'locals': Scope contains local variables.
-   * 'registers': Scope contains registers. Only a single `registers` scope
-   * should be returned from a `scopes` request.
-   * 'returnValue': Scope contains one or more return values.
-   * etc.
+
+* A hint for how to present this scope in the UI. If this attribute is
+* missing, the scope is shown with a generic UI.
+* Values:
+* 'arguments': Scope contains method arguments.
+* 'locals': Scope contains local variables.
+* 'registers': Scope contains registers. Only a single `registers` scope
+* should be returned from a `scopes` request.
+* 'returnValue': Scope contains one or more return values.
+* etc.
    */
   presentationHint?: 'arguments' | 'locals' | 'registers' | 'returnValue' | string;
 
   /**
-   * The variables of this scope can be retrieved by passing the value of
-   * `variablesReference` to the `variables` request as long as execution
-   * remains suspended. See 'Lifetime of Object References' in the Overview
-   * section for details.
+
+* The variables of this scope can be retrieved by passing the value of
+* `variablesReference` to the `variables` request as long as execution
+* remains suspended. See 'Lifetime of Object References' in the Overview
+* section for details.
    */
   variablesReference: number;
 
   /**
-   * The number of named variables in this scope.
-   * The client can use this information to present the variables in a paged UI
-   * and fetch them in chunks.
+
+* The number of named variables in this scope.
+* The client can use this information to present the variables in a paged UI
+* and fetch them in chunks.
    */
   namedVariables?: number;
 
   /**
-   * The number of indexed variables in this scope.
-   * The client can use this information to present the variables in a paged UI
-   * and fetch them in chunks.
+
+* The number of indexed variables in this scope.
+* The client can use this information to present the variables in a paged UI
+* and fetch them in chunks.
    */
   indexedVariables?: number;
 
   /**
-   * If true, the number of variables in this scope is large or expensive to
-   * retrieve.
+
+* If true, the number of variables in this scope is large or expensive to
+* retrieve.
    */
   expensive: boolean;
 
   /**
-   * The source for this scope.
+
+* The source for this scope.
    */
   source?: Source;
 
   /**
-   * The start line of the range covered by this scope.
+
+* The start line of the range covered by this scope.
    */
   line?: number;
 
   /**
-   * Start position of the range covered by the scope. It is measured in UTF-16
-   * code units and the client capability `columnsStartAt1` determines whether
-   * it is 0- or 1-based.
+
+* Start position of the range covered by the scope. It is measured in UTF-16
+* code units and the client capability `columnsStartAt1` determines whether
+* it is 0- or 1-based.
    */
   column?: number;
 
   /**
-   * The end line of the range covered by this scope.
+
+* The end line of the range covered by this scope.
    */
   endLine?: number;
 
   /**
-   * End position of the range covered by the scope. It is measured in UTF-16
-   * code units and the client capability `columnsStartAt1` determines whether
-   * it is 0- or 1-based.
+
+* End position of the range covered by the scope. It is measured in UTF-16
+* code units and the client capability `columnsStartAt1` determines whether
+* it is 0- or 1-based.
    */
   endColumn?: number;
 }
@@ -3718,93 +3960,104 @@ The client can use this information to present the children in a paged UI and fe
 
 interface Variable {
   /**
-   * The variable's name.
+
+* The variable's name.
    */
   name: string;
 
   /**
-   * The variable's value.
-   * This can be a multi-line text, e.g. for a function the body of a function.
-   * For structured variables (which do not have a simple value), it is
-   * recommended to provide a one-line representation of the structured object.
-   * This helps to identify the structured object in the collapsed state when
-   * its children are not yet visible.
-   * An empty string can be used if no value should be shown in the UI.
+
+* The variable's value.
+* This can be a multi-line text, e.g. for a function the body of a function.
+* For structured variables (which do not have a simple value), it is
+* recommended to provide a one-line representation of the structured object.
+* This helps to identify the structured object in the collapsed state when
+* its children are not yet visible.
+* An empty string can be used if no value should be shown in the UI.
    */
   value: string;
 
   /**
-   * The type of the variable's value. Typically shown in the UI when hovering
-   * over the value.
-   * This attribute should only be returned by a debug adapter if the
-   * corresponding capability `supportsVariableType` is true.
+
+* The type of the variable's value. Typically shown in the UI when hovering
+* over the value.
+* This attribute should only be returned by a debug adapter if the
+* corresponding capability `supportsVariableType` is true.
    */
   type?: string;
 
   /**
-   * Properties of a variable that can be used to determine how to render the
-   * variable in the UI.
+
+* Properties of a variable that can be used to determine how to render the
+* variable in the UI.
    */
   presentationHint?: VariablePresentationHint;
 
   /**
-   * The evaluatable name of this variable which can be passed to the `evaluate`
-   * request to fetch the variable's value.
+
+* The evaluatable name of this variable which can be passed to the `evaluate`
+* request to fetch the variable's value.
    */
   evaluateName?: string;
 
   /**
-   * If `variablesReference` is > 0, the variable is structured and its children
-   * can be retrieved by passing `variablesReference` to the `variables` request
-   * as long as execution remains suspended. See 'Lifetime of Object References'
-   * in the Overview section for details.
+
+* If `variablesReference` is > 0, the variable is structured and its children
+* can be retrieved by passing `variablesReference` to the `variables` request
+* as long as execution remains suspended. See 'Lifetime of Object References'
+* in the Overview section for details.
    */
   variablesReference: number;
 
   /**
-   * The number of named child variables.
-   * The client can use this information to present the children in a paged UI
-   * and fetch them in chunks.
+
+* The number of named child variables.
+* The client can use this information to present the children in a paged UI
+* and fetch them in chunks.
    */
   namedVariables?: number;
 
   /**
-   * The number of indexed child variables.
-   * The client can use this information to present the children in a paged UI
-   * and fetch them in chunks.
+
+* The number of indexed child variables.
+* The client can use this information to present the children in a paged UI
+* and fetch them in chunks.
    */
   indexedVariables?: number;
 
   /**
-   * A memory reference associated with this variable.
-   * For pointer type variables, this is generally a reference to the memory
-   * address contained in the pointer.
-   * For executable data, this reference may later be used in a `disassemble`
-   * request.
-   * This attribute may be returned by a debug adapter if corresponding
-   * capability `supportsMemoryReferences` is true.
+
+* A memory reference associated with this variable.
+* For pointer type variables, this is generally a reference to the memory
+* address contained in the pointer.
+* For executable data, this reference may later be used in a `disassemble`
+* request.
+* This attribute may be returned by a debug adapter if corresponding
+* capability `supportsMemoryReferences` is true.
    */
   memoryReference?: string;
 
   /**
-   * A reference that allows the client to request the location where the
-   * variable is declared. This should be present only if the adapter is likely
-   * to be able to resolve the location.
-   *
-   * This reference shares the same lifetime as the `variablesReference`. See
-   * 'Lifetime of Object References' in the Overview section for details.
+
+* A reference that allows the client to request the location where the
+* variable is declared. This should be present only if the adapter is likely
+* to be able to resolve the location.
+*
+* This reference shares the same lifetime as the `variablesReference`. See
+* 'Lifetime of Object References' in the Overview section for details.
    */
   declarationLocationReference?: number;
 
   /**
-   * A reference that allows the client to request the location where the
-   * variable's value is declared. For example, if the variable contains a
-   * function pointer, the adapter may be able to look up the function's
-   * location. This should be present only if the adapter is likely to be able
-   * to resolve the location.
-   *
-   * This reference shares the same lifetime as the `variablesReference`. See
-   * 'Lifetime of Object References' in the Overview section for details.
+
+* A reference that allows the client to request the location where the
+* variable's value is declared. For example, if the variable contains a
+* function pointer, the adapter may be able to look up the function's
+* location. This should be present only if the adapter is likely to be able
+* to resolve the location.
+*
+* This reference shares the same lifetime as the `variablesReference`. See
+* 'Lifetime of Object References' in the Overview section for details.
    */
   valueLocationReference?: number;
 }
@@ -3815,69 +4068,73 @@ Properties of a variable that can be used to determine how to render the variabl
 
 interface VariablePresentationHint {
   /**
-   * The kind of variable. Before introducing additional values, try to use the
-   * listed values.
-   * Values:
-   * 'property': Indicates that the object is a property.
-   * 'method': Indicates that the object is a method.
-   * 'class': Indicates that the object is a class.
-   * 'data': Indicates that the object is data.
-   * 'event': Indicates that the object is an event.
-   * 'baseClass': Indicates that the object is a base class.
-   * 'innerClass': Indicates that the object is an inner class.
-   * 'interface': Indicates that the object is an interface.
-   * 'mostDerivedClass': Indicates that the object is the most derived class.
-   * 'virtual': Indicates that the object is virtual, that means it is a
-   * synthetic object introduced by the adapter for rendering purposes, e.g. an
-   * index range for large arrays.
-   * 'dataBreakpoint': Deprecated: Indicates that a data breakpoint is
-   * registered for the object. The `hasDataBreakpoint` attribute should
-   * generally be used instead.
-   * etc.
+
+* The kind of variable. Before introducing additional values, try to use the
+* listed values.
+* Values:
+* 'property': Indicates that the object is a property.
+* 'method': Indicates that the object is a method.
+* 'class': Indicates that the object is a class.
+* 'data': Indicates that the object is data.
+* 'event': Indicates that the object is an event.
+* 'baseClass': Indicates that the object is a base class.
+* 'innerClass': Indicates that the object is an inner class.
+* 'interface': Indicates that the object is an interface.
+* 'mostDerivedClass': Indicates that the object is the most derived class.
+* 'virtual': Indicates that the object is virtual, that means it is a
+* synthetic object introduced by the adapter for rendering purposes, e.g. an
+* index range for large arrays.
+* 'dataBreakpoint': Deprecated: Indicates that a data breakpoint is
+* registered for the object. The `hasDataBreakpoint` attribute should
+* generally be used instead.
+* etc.
    */
   kind?: 'property' | 'method' | 'class' | 'data' | 'event' | 'baseClass'
       | 'innerClass' | 'interface' | 'mostDerivedClass' | 'virtual'
       | 'dataBreakpoint' | string;
 
   /**
-   * Set of attributes represented as an array of strings. Before introducing
-   * additional values, try to use the listed values.
-   * Values:
-   * 'static': Indicates that the object is static.
-   * 'constant': Indicates that the object is a constant.
-   * 'readOnly': Indicates that the object is read only.
-   * 'rawString': Indicates that the object is a raw string.
-   * 'hasObjectId': Indicates that the object can have an Object ID created for
-   * it. This is a vestigial attribute that is used by some clients; 'Object
-   * ID's are not specified in the protocol.
-   * 'canHaveObjectId': Indicates that the object has an Object ID associated
-   * with it. This is a vestigial attribute that is used by some clients;
-   * 'Object ID's are not specified in the protocol.
-   * 'hasSideEffects': Indicates that the evaluation had side effects.
-   * 'hasDataBreakpoint': Indicates that the object has its value tracked by a
-   * data breakpoint.
-   * etc.
+
+* Set of attributes represented as an array of strings. Before introducing
+* additional values, try to use the listed values.
+* Values:
+* 'static': Indicates that the object is static.
+* 'constant': Indicates that the object is a constant.
+* 'readOnly': Indicates that the object is read only.
+* 'rawString': Indicates that the object is a raw string.
+* 'hasObjectId': Indicates that the object can have an Object ID created for
+* it. This is a vestigial attribute that is used by some clients; 'Object
+* ID's are not specified in the protocol.
+* 'canHaveObjectId': Indicates that the object has an Object ID associated
+* with it. This is a vestigial attribute that is used by some clients;
+* 'Object ID's are not specified in the protocol.
+* 'hasSideEffects': Indicates that the evaluation had side effects.
+* 'hasDataBreakpoint': Indicates that the object has its value tracked by a
+* data breakpoint.
+* etc.
    */
   attributes?: ('static' | 'constant' | 'readOnly' | 'rawString' | 'hasObjectId'
       | 'canHaveObjectId' | 'hasSideEffects' | 'hasDataBreakpoint' | string)[];
 
   /**
-   * Visibility of variable. Before introducing additional values, try to use
-   * the listed values.
-   * Values: 'public', 'private', 'protected', 'internal', 'final', etc.
+
+* Visibility of variable. Before introducing additional values, try to use
+* the listed values.
+* Values: 'public', 'private', 'protected', 'internal', 'final', etc.
    */
   visibility?: 'public' | 'private' | 'protected' | 'internal' | 'final' | string;
 
   /**
-   * If true, clients can present the variable with a UI that supports a
-   * specific gesture to trigger its evaluation.
-   * This mechanism can be used for properties that require executing code when
-   * retrieving their value and where the code execution can be expensive and/or
-   * produce side-effects. A typical example are properties based on a getter
-   * function.
-   * Please note that in addition to the `lazy` flag, the variable's
-   * `variablesReference` is expected to refer to a variable that will provide
-   * the value through another `variable` request.
+
+* If true, clients can present the variable with a UI that supports a
+* specific gesture to trigger its evaluation.
+* This mechanism can be used for properties that require executing code when
+* retrieving their value and where the code execution can be expensive and/or
+* produce side-effects. A typical example are properties based on a getter
+* function.
+* Please note that in addition to the `lazy` flag, the variable's
+* `variablesReference` is expected to refer to a variable that will provide
+* the value through another `variable` request.
    */
   lazy?: boolean;
 }
@@ -3888,26 +4145,30 @@ Properties of a breakpoint location returned from the breakpointLocations reques
 
 interface BreakpointLocation {
   /**
-   * Start line of breakpoint location.
+
+* Start line of breakpoint location.
    */
   line: number;
 
   /**
-   * The start position of a breakpoint location. Position is measured in UTF-16
-   * code units and the client capability `columnsStartAt1` determines whether
-   * it is 0- or 1-based.
+
+* The start position of a breakpoint location. Position is measured in UTF-16
+* code units and the client capability `columnsStartAt1` determines whether
+* it is 0- or 1-based.
    */
   column?: number;
 
   /**
-   * The end line of breakpoint location if the location covers a range.
+
+* The end line of breakpoint location if the location covers a range.
    */
   endLine?: number;
 
   /**
-   * The end position of a breakpoint location (if the location covers a range).
-   * Position is measured in UTF-16 code units and the client capability
-   * `columnsStartAt1` determines whether it is 0- or 1-based.
+
+* The end position of a breakpoint location (if the location covers a range).
+* Position is measured in UTF-16 code units and the client capability
+* `columnsStartAt1` determines whether it is 0- or 1-based.
    */
   endColumn?: number;
 }
@@ -3918,49 +4179,55 @@ Properties of a breakpoint or logpoint passed to the setBreakpoints request.
 
 interface SourceBreakpoint {
   /**
-   * The source line of the breakpoint or logpoint.
+
+* The source line of the breakpoint or logpoint.
    */
   line: number;
 
   /**
-   * Start position within source line of the breakpoint or logpoint. It is
-   * measured in UTF-16 code units and the client capability `columnsStartAt1`
-   * determines whether it is 0- or 1-based.
+
+* Start position within source line of the breakpoint or logpoint. It is
+* measured in UTF-16 code units and the client capability `columnsStartAt1`
+* determines whether it is 0- or 1-based.
    */
   column?: number;
 
   /**
-   * The expression for conditional breakpoints.
-   * It is only honored by a debug adapter if the corresponding capability
-   * `supportsConditionalBreakpoints` is true.
+
+* The expression for conditional breakpoints.
+* It is only honored by a debug adapter if the corresponding capability
+* `supportsConditionalBreakpoints` is true.
    */
   condition?: string;
 
   /**
-   * The expression that controls how many hits of the breakpoint are ignored.
-   * The debug adapter is expected to interpret the expression as needed.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsHitConditionalBreakpoints` is true.
-   * If both this property and `condition` are specified, `hitCondition` should
-   * be evaluated only if the `condition` is met, and the debug adapter should
-   * stop only if both conditions are met.
+
+* The expression that controls how many hits of the breakpoint are ignored.
+* The debug adapter is expected to interpret the expression as needed.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsHitConditionalBreakpoints` is true.
+* If both this property and `condition` are specified, `hitCondition` should
+* be evaluated only if the `condition` is met, and the debug adapter should
+* stop only if both conditions are met.
    */
   hitCondition?: string;
 
   /**
-   * If this attribute exists and is non-empty, the debug adapter must not
-   * 'break' (stop)
-   * but log the message instead. Expressions within `{}` are interpolated.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsLogPoints` is true.
-   * If either `hitCondition` or `condition` is specified, then the message
-   * should only be logged if those conditions are met.
+
+* If this attribute exists and is non-empty, the debug adapter must not
+* 'break' (stop)
+* but log the message instead. Expressions within `{}` are interpolated.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsLogPoints` is true.
+* If either `hitCondition` or `condition` is specified, then the message
+* should only be logged if those conditions are met.
    */
   logMessage?: string;
 
   /**
-   * The mode of this breakpoint. If defined, this must be one of the
-   * `breakpointModes` the debug adapter advertised in its `Capabilities`.
+
+* The mode of this breakpoint. If defined, this must be one of the
+* `breakpointModes` the debug adapter advertised in its `Capabilities`.
    */
   mode?: string;
 }
@@ -3971,22 +4238,25 @@ Properties of a breakpoint passed to the setFunctionBreakpoints request.
 
 interface FunctionBreakpoint {
   /**
-   * The name of the function.
+
+* The name of the function.
    */
   name: string;
 
   /**
-   * An expression for conditional breakpoints.
-   * It is only honored by a debug adapter if the corresponding capability
-   * `supportsConditionalBreakpoints` is true.
+
+* An expression for conditional breakpoints.
+* It is only honored by a debug adapter if the corresponding capability
+* `supportsConditionalBreakpoints` is true.
    */
   condition?: string;
 
   /**
-   * An expression that controls how many hits of the breakpoint are ignored.
-   * The debug adapter is expected to interpret the expression as needed.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsHitConditionalBreakpoints` is true.
+
+* An expression that controls how many hits of the breakpoint are ignored.
+* The debug adapter is expected to interpret the expression as needed.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsHitConditionalBreakpoints` is true.
    */
   hitCondition?: string;
 }
@@ -4003,24 +4273,28 @@ Properties of a data breakpoint passed to the setDataBreakpoints request.
 
 interface DataBreakpoint {
   /**
-   * An id representing the data. This id is returned from the
-   * `dataBreakpointInfo` request.
+
+* An id representing the data. This id is returned from the
+* `dataBreakpointInfo` request.
    */
   dataId: string;
 
   /**
-   * The access type of the data.
+
+* The access type of the data.
    */
   accessType?: DataBreakpointAccessType;
 
   /**
-   * An expression for conditional breakpoints.
+
+* An expression for conditional breakpoints.
    */
   condition?: string;
 
   /**
-   * An expression that controls how many hits of the breakpoint are ignored.
-   * The debug adapter is expected to interpret the expression as needed.
+
+* An expression that controls how many hits of the breakpoint are ignored.
+* The debug adapter is expected to interpret the expression as needed.
    */
   hitCondition?: string;
 }
@@ -4031,37 +4305,42 @@ Properties of a breakpoint passed to the setInstructionBreakpoints request
 
 interface InstructionBreakpoint {
   /**
-   * The instruction reference of the breakpoint.
-   * This should be a memory or instruction pointer reference from an
-   * `EvaluateResponse`, `Variable`, `StackFrame`, `GotoTarget`, or
-   * `Breakpoint`.
+
+* The instruction reference of the breakpoint.
+* This should be a memory or instruction pointer reference from an
+* `EvaluateResponse`, `Variable`, `StackFrame`, `GotoTarget`, or
+* `Breakpoint`.
    */
   instructionReference: string;
 
   /**
-   * The offset from the instruction reference in bytes.
-   * This can be negative.
+
+* The offset from the instruction reference in bytes.
+* This can be negative.
    */
   offset?: number;
 
   /**
-   * An expression for conditional breakpoints.
-   * It is only honored by a debug adapter if the corresponding capability
-   * `supportsConditionalBreakpoints` is true.
+
+* An expression for conditional breakpoints.
+* It is only honored by a debug adapter if the corresponding capability
+* `supportsConditionalBreakpoints` is true.
    */
   condition?: string;
 
   /**
-   * An expression that controls how many hits of the breakpoint are ignored.
-   * The debug adapter is expected to interpret the expression as needed.
-   * The attribute is only honored by a debug adapter if the corresponding
-   * capability `supportsHitConditionalBreakpoints` is true.
+
+* An expression that controls how many hits of the breakpoint are ignored.
+* The debug adapter is expected to interpret the expression as needed.
+* The attribute is only honored by a debug adapter if the corresponding
+* capability `supportsHitConditionalBreakpoints` is true.
    */
   hitCondition?: string;
 
   /**
-   * The mode of this breakpoint. If defined, this must be one of the
-   * `breakpointModes` the debug adapter advertised in its `Capabilities`.
+
+* The mode of this breakpoint. If defined, this must be one of the
+* `breakpointModes` the debug adapter advertised in its `Capabilities`.
    */
   mode?: string;
 }
@@ -4072,76 +4351,87 @@ Information about a breakpoint created in setBreakpoints, setFunctionBreakpoints
 
 interface Breakpoint {
   /**
-   * The identifier for the breakpoint. It is needed if breakpoint events are
-   * used to update or remove breakpoints.
+
+* The identifier for the breakpoint. It is needed if breakpoint events are
+* used to update or remove breakpoints.
    */
   id?: number;
 
   /**
-   * If true, the breakpoint could be set (but not necessarily at the desired
-   * location).
+
+* If true, the breakpoint could be set (but not necessarily at the desired
+* location).
    */
   verified: boolean;
 
   /**
-   * A message about the state of the breakpoint.
-   * This is shown to the user and can be used to explain why a breakpoint could
-   * not be verified.
+
+* A message about the state of the breakpoint.
+* This is shown to the user and can be used to explain why a breakpoint could
+* not be verified.
    */
   message?: string;
 
   /**
-   * The source where the breakpoint is located.
+
+* The source where the breakpoint is located.
    */
   source?: Source;
 
   /**
-   * The start line of the actual range covered by the breakpoint.
+
+* The start line of the actual range covered by the breakpoint.
    */
   line?: number;
 
   /**
-   * Start position of the source range covered by the breakpoint. It is
-   * measured in UTF-16 code units and the client capability `columnsStartAt1`
-   * determines whether it is 0- or 1-based.
+
+* Start position of the source range covered by the breakpoint. It is
+* measured in UTF-16 code units and the client capability `columnsStartAt1`
+* determines whether it is 0- or 1-based.
    */
   column?: number;
 
   /**
-   * The end line of the actual range covered by the breakpoint.
+
+* The end line of the actual range covered by the breakpoint.
    */
   endLine?: number;
 
   /**
-   * End position of the source range covered by the breakpoint. It is measured
-   * in UTF-16 code units and the client capability `columnsStartAt1` determines
-   * whether it is 0- or 1-based.
-   * If no end line is given, then the end column is assumed to be in the start
-   * line.
+
+* End position of the source range covered by the breakpoint. It is measured
+* in UTF-16 code units and the client capability `columnsStartAt1` determines
+* whether it is 0- or 1-based.
+* If no end line is given, then the end column is assumed to be in the start
+* line.
    */
   endColumn?: number;
 
   /**
-   * A memory reference to where the breakpoint is set.
+
+* A memory reference to where the breakpoint is set.
    */
   instructionReference?: string;
 
   /**
-   * The offset from the instruction reference.
-   * This can be negative.
+
+* The offset from the instruction reference.
+* This can be negative.
    */
   offset?: number;
 
   /**
-   * A machine-readable explanation of why a breakpoint may not be verified. If
-   * a breakpoint is verified or a specific reason is not known, the adapter
-   * should omit this property. Possible values include:
-   *
-   * - `pending`: Indicates a breakpoint might be verified in the future, but
-   * the adapter cannot verify it in the current state.
-   * - `failed`: Indicates a breakpoint was not able to be verified, and the
-   * adapter does not believe it can be verified without intervention.
-   * Values: 'pending', 'failed'
+
+* A machine-readable explanation of why a breakpoint may not be verified. If
+* a breakpoint is verified or a specific reason is not known, the adapter
+* should omit this property. Possible values include:
+*
+* * `pending`: Indicates a breakpoint might be verified in the future, but
+* the adapter cannot verify it in the current state.
+* * `failed`: Indicates a breakpoint was not able to be verified, and the
+* adapter does not believe it can be verified without intervention.
+* Values: 'pending', 'failed'
    */
   reason?: 'pending' | 'failed';
 }
@@ -4162,36 +4452,42 @@ A StepInTarget can be used in the stepIn request and determines into which singl
 
 interface StepInTarget {
   /**
-   * Unique identifier for a step-in target.
+
+* Unique identifier for a step-in target.
    */
   id: number;
 
   /**
-   * The name of the step-in target (shown in the UI).
+
+* The name of the step-in target (shown in the UI).
    */
   label: string;
 
   /**
-   * The line of the step-in target.
+
+* The line of the step-in target.
    */
   line?: number;
 
   /**
-   * Start position of the range covered by the step in target. It is measured
-   * in UTF-16 code units and the client capability `columnsStartAt1` determines
-   * whether it is 0- or 1-based.
+
+* Start position of the range covered by the step in target. It is measured
+* in UTF-16 code units and the client capability `columnsStartAt1` determines
+* whether it is 0- or 1-based.
    */
   column?: number;
 
   /**
-   * The end line of the range covered by the step-in target.
+
+* The end line of the range covered by the step-in target.
    */
   endLine?: number;
 
   /**
-   * End position of the range covered by the step in target. It is measured in
-   * UTF-16 code units and the client capability `columnsStartAt1` determines
-   * whether it is 0- or 1-based.
+
+* End position of the range covered by the step in target. It is measured in
+* UTF-16 code units and the client capability `columnsStartAt1` determines
+* whether it is 0- or 1-based.
    */
   endColumn?: number;
 }
@@ -4204,38 +4500,45 @@ The possible goto targets can be determined via the gotoTargets request.
 
 interface GotoTarget {
   /**
-   * Unique identifier for a goto target. This is used in the `goto` request.
+
+* Unique identifier for a goto target. This is used in the `goto` request.
    */
   id: number;
 
   /**
-   * The name of the goto target (shown in the UI).
+
+* The name of the goto target (shown in the UI).
    */
   label: string;
 
   /**
-   * The line of the goto target.
+
+* The line of the goto target.
    */
   line: number;
 
   /**
-   * The column of the goto target.
+
+* The column of the goto target.
    */
   column?: number;
 
   /**
-   * The end line of the range covered by the goto target.
+
+* The end line of the range covered by the goto target.
    */
   endLine?: number;
 
   /**
-   * The end column of the range covered by the goto target.
+
+* The end column of the range covered by the goto target.
    */
   endColumn?: number;
 
   /**
-   * A memory reference for the instruction pointer value represented by this
-   * target.
+
+* A memory reference for the instruction pointer value represented by this
+* target.
    */
   instructionPointerReference?: string;
 }
@@ -4246,64 +4549,73 @@ CompletionItems are the suggestions returned from the completions request.
 
 interface CompletionItem {
   /**
-   * The label of this completion item. By default this is also the text that is
-   * inserted when selecting this completion.
+
+* The label of this completion item. By default this is also the text that is
+* inserted when selecting this completion.
    */
   label: string;
 
   /**
-   * If text is returned and not an empty string, then it is inserted instead of
-   * the label.
+
+* If text is returned and not an empty string, then it is inserted instead of
+* the label.
    */
   text?: string;
 
   /**
-   * A string that should be used when comparing this item with other items. If
-   * not returned or an empty string, the `label` is used instead.
+
+* A string that should be used when comparing this item with other items. If
+* not returned or an empty string, the `label` is used instead.
    */
   sortText?: string;
 
   /**
-   * A human-readable string with additional information about this item, like
-   * type or symbol information.
+
+* A human-readable string with additional information about this item, like
+* type or symbol information.
    */
   detail?: string;
 
   /**
-   * The item's type. Typically the client uses this information to render the
-   * item in the UI with an icon.
+
+* The item's type. Typically the client uses this information to render the
+* item in the UI with an icon.
    */
   type?: CompletionItemType;
 
   /**
-   * Start position (within the `text` attribute of the `completions` request)
-   * where the completion text is added. The position is measured in UTF-16 code
-   * units and the client capability `columnsStartAt1` determines whether it is
-   * 0- or 1-based. If the start position is omitted the text is added at the
-   * location specified by the `column` attribute of the `completions` request.
+
+* Start position (within the `text` attribute of the `completions` request)
+* where the completion text is added. The position is measured in UTF-16 code
+* units and the client capability `columnsStartAt1` determines whether it is
+* 0- or 1-based. If the start position is omitted the text is added at the
+* location specified by the `column` attribute of the `completions` request.
    */
   start?: number;
 
   /**
-   * Length determines how many characters are overwritten by the completion
-   * text and it is measured in UTF-16 code units. If missing the value 0 is
-   * assumed which results in the completion text being inserted.
+
+* Length determines how many characters are overwritten by the completion
+* text and it is measured in UTF-16 code units. If missing the value 0 is
+* assumed which results in the completion text being inserted.
    */
   length?: number;
 
   /**
-   * Determines the start of the new selection after the text has been inserted
-   * (or replaced). `selectionStart` is measured in UTF-16 code units and must
-   * be in the range 0 and length of the completion text. If omitted the
-   * selection starts at the end of the completion text.
+
+* Determines the start of the new selection after the text has been inserted
+* (or replaced). `selectionStart` is measured in UTF-16 code units and must
+* be in the range 0 and length of the completion text. If omitted the
+* selection starts at the end of the completion text.
    */
   selectionStart?: number;
 
   /**
-   * Determines the length of the new selection after the text has been inserted
-   * (or replaced) and it is measured in UTF-16 code units. The selection can
-   * not extend beyond the bounds of the completion text. If omitted the length
-   * is assumed to be 0.
+
+* Determines the length of the new selection after the text has been inserted
+* (or replaced) and it is measured in UTF-16 code units. The selection can
+* not extend beyond the bounds of the completion text. If omitted the length
+* is assumed to be 0.
    */
   selectionLength?: number;
 }
@@ -4329,12 +4641,14 @@ The checksum of an item calculated by the specified algorithm.
 
 interface Checksum {
   /**
-   * The algorithm used to calculate this checksum.
+
+* The algorithm used to calculate this checksum.
    */
   algorithm: ChecksumAlgorithm;
 
   /**
-   * Value of the checksum, encoded as a hexadecimal value.
+
+* Value of the checksum, encoded as a hexadecimal value.
    */
   checksum: string;
 }
@@ -4345,7 +4659,8 @@ Provides formatting information for a value.
 
 interface ValueFormat {
   /**
-   * Display the value in hex.
+
+* Display the value in hex.
    */
   hex?: boolean;
 }
@@ -4356,38 +4671,45 @@ Provides formatting information for a stack frame.
 
 interface StackFrameFormat extends ValueFormat {
   /**
-   * Displays parameters for the stack frame.
+
+* Displays parameters for the stack frame.
    */
   parameters?: boolean;
 
   /**
-   * Displays the types of parameters for the stack frame.
+
+* Displays the types of parameters for the stack frame.
    */
   parameterTypes?: boolean;
 
   /**
-   * Displays the names of parameters for the stack frame.
+
+* Displays the names of parameters for the stack frame.
    */
   parameterNames?: boolean;
 
   /**
-   * Displays the values of parameters for the stack frame.
+
+* Displays the values of parameters for the stack frame.
    */
   parameterValues?: boolean;
 
   /**
-   * Displays the line number of the stack frame.
+
+* Displays the line number of the stack frame.
    */
   line?: boolean;
 
   /**
-   * Displays the module of the stack frame.
+
+* Displays the module of the stack frame.
    */
   module?: boolean;
 
   /**
-   * Includes all stack frames, including those the debug adapter might
-   * otherwise hide.
+
+* Includes all stack frames, including those the debug adapter might
+* otherwise hide.
    */
   includeAll?: boolean;
 }
@@ -4398,21 +4720,24 @@ An ExceptionFilterOptions is used to specify an exception filter together with a
 
 interface ExceptionFilterOptions {
   /**
-   * ID of an exception filter returned by the `exceptionBreakpointFilters`
-   * capability.
+
+* ID of an exception filter returned by the `exceptionBreakpointFilters`
+* capability.
    */
   filterId: string;
 
   /**
-   * An expression for conditional exceptions.
-   * The exception breaks into the debugger if the result of the condition is
-   * true.
+
+* An expression for conditional exceptions.
+* The exception breaks into the debugger if the result of the condition is
+* true.
    */
   condition?: string;
 
   /**
-   * The mode of this exception breakpoint. If defined, this must be one of the
-   * `breakpointModes` the debug adapter advertised in its `Capabilities`.
+
+* The mode of this exception breakpoint. If defined, this must be one of the
+* `breakpointModes` the debug adapter advertised in its `Capabilities`.
    */
   mode?: string;
 }
@@ -4423,15 +4748,17 @@ An ExceptionOptions assigns configuration options to a set of exceptions.
 
 interface ExceptionOptions {
   /**
-   * A path that selects a single or multiple exceptions in a tree. If `path` is
-   * missing, the whole tree is selected.
-   * By convention the first segment of the path is a category that is used to
-   * group exceptions in the UI.
+
+* A path that selects a single or multiple exceptions in a tree. If `path` is
+* missing, the whole tree is selected.
+* By convention the first segment of the path is a category that is used to
+* group exceptions in the UI.
    */
   path?: ExceptionPathSegment[];
 
   /**
-   * Condition when a thrown exception should result in a break.
+
+* Condition when a thrown exception should result in a break.
    */
   breakMode: ExceptionBreakMode;
 }
@@ -4459,14 +4786,16 @@ If a segment consists of more than one name, it matches the names provided if ne
 
 interface ExceptionPathSegment {
   /**
-   * If false or missing this segment matches the names provided, otherwise it
-   * matches anything except the names provided.
+
+* If false or missing this segment matches the names provided, otherwise it
+* matches anything except the names provided.
    */
   negate?: boolean;
 
   /**
-   * Depending on the value of `negate` the names that should match or not
-   * match.
+
+* Depending on the value of `negate` the names that should match or not
+* match.
    */
   names: string[];
 }
@@ -4477,33 +4806,39 @@ Detailed information about an exception that has occurred.
 
 interface ExceptionDetails {
   /**
-   * Message contained in the exception.
+
+* Message contained in the exception.
    */
   message?: string;
 
   /**
-   * Short type name of the exception object.
+
+* Short type name of the exception object.
    */
   typeName?: string;
 
   /**
-   * Fully-qualified type name of the exception object.
+
+* Fully-qualified type name of the exception object.
    */
   fullTypeName?: string;
 
   /**
-   * An expression that can be evaluated in the current scope to obtain the
-   * exception object.
+
+* An expression that can be evaluated in the current scope to obtain the
+* exception object.
    */
   evaluateName?: string;
 
   /**
-   * Stack trace at the time the exception was thrown.
+
+* Stack trace at the time the exception was thrown.
    */
   stackTrace?: string;
 
   /**
-   * Details of the exception contained by this exception, if any.
+
+* Details of the exception contained by this exception, if any.
    */
   innerException?: ExceptionDetails[];
 }
@@ -4514,65 +4849,75 @@ Represents a single disassembled instruction.
 
 interface DisassembledInstruction {
   /**
-   * The address of the instruction. Treated as a hex value if prefixed with
-   * `0x`, or as a decimal value otherwise.
+
+* The address of the instruction. Treated as a hex value if prefixed with
+* `0x`, or as a decimal value otherwise.
    */
   address: string;
 
   /**
-   * Raw bytes representing the instruction and its operands, in an
-   * implementation-defined format.
+
+* Raw bytes representing the instruction and its operands, in an
+* implementation-defined format.
    */
   instructionBytes?: string;
 
   /**
-   * Text representing the instruction and its operands, in an
-   * implementation-defined format.
+
+* Text representing the instruction and its operands, in an
+* implementation-defined format.
    */
   instruction: string;
 
   /**
-   * Name of the symbol that corresponds with the location of this instruction,
-   * if any.
+
+* Name of the symbol that corresponds with the location of this instruction,
+* if any.
    */
   symbol?: string;
 
   /**
-   * Source location that corresponds to this instruction, if any.
-   * Should always be set (if available) on the first instruction returned,
-   * but can be omitted afterwards if this instruction maps to the same source
-   * file as the previous instruction.
+
+* Source location that corresponds to this instruction, if any.
+* Should always be set (if available) on the first instruction returned,
+* but can be omitted afterwards if this instruction maps to the same source
+* file as the previous instruction.
    */
   location?: Source;
 
   /**
-   * The line within the source location that corresponds to this instruction,
-   * if any.
+
+* The line within the source location that corresponds to this instruction,
+* if any.
    */
   line?: number;
 
   /**
-   * The column within the line that corresponds to this instruction, if any.
+
+* The column within the line that corresponds to this instruction, if any.
    */
   column?: number;
 
   /**
-   * The end line of the range that corresponds to this instruction, if any.
+
+* The end line of the range that corresponds to this instruction, if any.
    */
   endLine?: number;
 
   /**
-   * The end column of the range that corresponds to this instruction, if any.
+
+* The end column of the range that corresponds to this instruction, if any.
    */
   endColumn?: number;
 
   /**
-   * A hint for how to present the instruction in the UI.
-   *
-   * A value of `invalid` may be used to indicate this instruction is 'filler'
-   * and cannot be reached by the program. For example, unreadable memory
-   * addresses may be presented is 'invalid.'
-   * Values: 'normal', 'invalid'
+
+* A hint for how to present the instruction in the UI.
+*
+* A value of `invalid` may be used to indicate this instruction is 'filler'
+* and cannot be reached by the program. For example, unreadable memory
+* addresses may be presented is 'invalid.'
+* Values: 'normal', 'invalid'
    */
   presentationHint?: 'normal' | 'invalid';
 }
@@ -4595,24 +4940,28 @@ A BreakpointMode is provided as a option when setting breakpoints on sources or 
 
 interface BreakpointMode {
   /**
-   * The internal ID of the mode. This value is passed to the `setBreakpoints`
-   * request.
+
+* The internal ID of the mode. This value is passed to the `setBreakpoints`
+* request.
    */
   mode: string;
 
   /**
-   * The name of the breakpoint mode. This is shown in the UI.
+
+* The name of the breakpoint mode. This is shown in the UI.
    */
   label: string;
 
   /**
-   * A help text providing additional information about the breakpoint mode.
-   * This string is typically shown as a hover and can be translated.
+
+* A help text providing additional information about the breakpoint mode.
+* This string is typically shown as a hover and can be translated.
    */
   description?: string;
 
   /**
-   * Describes one or more type of breakpoint this mode applies to.
+
+* Describes one or more type of breakpoint this mode applies to.
    */
   appliesTo: BreakpointModeApplicability[];
 }

@@ -14,7 +14,7 @@ Here are some recommendations, however if you want more info, our docs/contribut
 
 The guide is written as a set of markdown documents and built using [mdbook](https://rust-lang.github.io/mdBook/) and [mdbook-alerts](https://crates.io/crates/mdbook-alerts) .
 
-You can contribute to the documentation itself, by editing it in `docs/book` and making a pull request. You can iterate on it locally , by cloning the repo, activating it's nix devshell and running `just serve-docs [hostname port]`: it will serve it locally(by default on http://localhost:3000).
+You can contribute to the documentation itself, by editing it in `docs/book` and making a pull request. You can iterate on it locally , by cloning the repo, activating it's nix devshell and running `just serve-docs [hostname port]`: it will serve it locally(by default on <http://localhost:3000>).
 
 ### Style guide
 
