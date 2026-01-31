@@ -14,6 +14,9 @@
     "libs/**",
     "node-packages/**",
     "src/public/third_party/**",
-    "docs/**"
+    "docs/**",
+    "src/db-backend/spec_dap/**",
+    "PLAN_OPEN_DIR.md",
+    "test-programs/stylus_fund_tracker/licenses/**"
   ]
 }
