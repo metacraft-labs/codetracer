@@ -17,4 +17,4 @@ CodeTracer dev team may be able to help, depending on their availability.
 Metacraft Labs offers commercial support for Enterprise CodeTracer users.
 Beyond traditional support and training, we can assist you in developing
 bespoke CodeTracer extensions and integrations with new or existing software.
-Please contact us at enterprise@codetracer.com for further details.
+Please contact us at <enterprise@codetracer.com> for further details.

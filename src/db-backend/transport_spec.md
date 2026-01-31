@@ -12,16 +12,19 @@ The `db-backend` utilizes the Debug Adapter Protocol (DAP) as its primary commun
 
 DAP messages are exchanged using a simple, length-prefixed JSON format. Each message consists of two parts:
 
-1.  **Header**: A set of HTTP-like headers, terminated by a `\r\n\r\n` sequence. The most crucial header is `Content-Length`, which indicates the size of the following JSON payload in bytes.
+1. **Header**: A set of HTTP-like headers, terminated by a `\r\n\r\n` sequence. The most crucial header is `Content-Length`, which indicates the size of the following JSON payload in bytes.
+
     ```/dev/null/example.txt#L1-2
     Content-Length: 123
     Content-Type: application/json
     ```
+
     The `Content-Type` header is optional but recommended. If present, its value must be `application/json`.
 
-2.  **Content**: The actual DAP message, which is a JSON object encoded in UTF-8. The size of this content must exactly match the `Content-Length` specified in the header.
+2. **Content**: The actual DAP message, which is a JSON object encoded in UTF-8. The size of this content must exactly match the `Content-Length` specified in the header.
 
 Example of a complete message:
+
 ```/dev/null/example.txt#L1-5
 Content-Length: 72
 Content-Type: application/json
@@ -33,8 +36,8 @@ Content-Type: application/json
 
 The `db-backend` primarily uses **Standard I/O (stdin/stdout)** for its transport layer.
 
-*   **Input (stdin)**: The `db-backend` reads incoming DAP messages from its standard input stream.
-*   **Output (stdout)**: The `db-backend` writes outgoing DAP messages to its standard output stream.
+* **Input (stdin)**: The `db-backend` reads incoming DAP messages from its standard input stream.
+* **Output (stdout)**: The `db-backend` writes outgoing DAP messages to its standard output stream.
 
 Each message (header + content) is transmitted as a contiguous block of bytes. There should be no additional delimiters or framing between messages beyond the `\r\n\r\n` separator between the header and the content.
 
@@ -44,10 +47,10 @@ Each message (header + content) is transmitted as a contiguous block of bytes. T
 
 If the `db-backend` receives a message that does not conform to the specified header and content format (e.g., missing `Content-Length`, invalid `Content-Length`, or non-JSON content), it should:
 
-*   Attempt to log the error internally (if a logging mechanism is available).
-*   Discard the malformed message.
-*   Continue processing subsequent messages, if possible.
-*   It should **not** send an error response over the DAP channel for transport-layer parsing errors, as the message might be too corrupted to respond to meaningfully.
+* Attempt to log the error internally (if a logging mechanism is available).
+* Discard the malformed message.
+* Continue processing subsequent messages, if possible.
+* It should **not** send an error response over the DAP channel for transport-layer parsing errors, as the message might be too corrupted to respond to meaningfully.
 
 ### 5.2. Protocol Errors (DAP Level)
 

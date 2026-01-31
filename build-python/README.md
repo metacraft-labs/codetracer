@@ -1,4 +1,5 @@
 # CodeTracer Python Distribution
+
 ## TODO: update readme
 
 This package delivers the CodeTracer time-traveling debugger binaries to Python
@@ -23,8 +24,8 @@ binaries.
 
 ## Project links
 
-* Documentation: https://docs.codetracer.com
-* Issue tracker: https://github.com/metacraft-labs/codetracer/issues
+* Documentation: <https://docs.codetracer.com>
+* Issue tracker: <https://github.com/metacraft-labs/codetracer/issues>
 
 ## License
 

@@ -3,9 +3,10 @@
 This document describes the Debug Adapter Protocol (DAP) requests that the
 CodeTracer db-backend accepts, with emphasis on the custom `ct/*` commands.
 For the base protocol and standard request shapes, see the DAP specification:
-https://microsoft.github.io/debug-adapter-protocol/specification
+<https://microsoft.github.io/debug-adapter-protocol/specification>
 
 Sources of truth in this repo:
+
 - `src/db-backend/src/dap.rs`
 - `src/db-backend/src/dap_server.rs`
 - `src/db-backend/src/handler.rs`
@@ -154,7 +155,7 @@ Types live in `src/db-backend/src/task.rs` unless noted.
 ### TableArgs
 
 DataTables server-side parameters:
-https://datatables.net/manual/server-side
+<https://datatables.net/manual/server-side>
 
 | Field | Type |
 | --- | --- |

@@ -9,7 +9,6 @@
   or some kind of more general handler? something like core_db which chooses?
   for now simplest just start custom core_db_ruby
 
-
   core_db_ruby: a rust binary
 
   same api: using a socket
@@ -50,9 +49,6 @@
       send cant be just direct as we have one socket to client and we want to keep it one
       still we can have a sender thread
       and many task threads, not just one
-
-
-
 
 TODO:
   `ct import-trace trace.json`

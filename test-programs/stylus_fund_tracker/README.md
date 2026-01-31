@@ -125,7 +125,6 @@ Estimated gas for deployment: 1874876
 
 The above only estimates gas for the deployment tx by default. To estimate gas for activation, first deploy your program using `--mode=deploy-only`, and then run `cargo stylus deploy` with the `--estimate-gas` flag, `--mode=activate-only`, and specify `--activate-program-address`.
 
-
 Here's how to deploy:
 
 ```bash

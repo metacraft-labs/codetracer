@@ -83,6 +83,7 @@ Ruby::RObj:
 ```
 
 The currently used type "system" is very simple: it has
+
 * `atomic` and `class` types that
   correspond to builtin types like String and to classes (currently no real difference)
 * `none` type for nil

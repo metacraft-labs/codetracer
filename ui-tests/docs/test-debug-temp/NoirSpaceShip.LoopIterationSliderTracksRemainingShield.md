@@ -7,6 +7,7 @@
 - **Notes:** The flow slider renders only when execution is inside `iterate_asteroids`. Without a prior jump into that function, the `.flow-loop-slider` element never appears. Pure Playwright drag-drop now replaces the previous JavaScript setter, with an intentional 1s pause after each move for debugging.
 
 ## Case Study – Surfacing the Loop Slider
+
 - Initial Playwright-only interaction failed before touching the slider: `shield.nr` editor tab was absent because the session never navigated into `iterate_asteroids`.
 - The latest focused run (command above) drove both Electron and Web modes into `iterate_asteroids`; `CallTraceEntry[iterate_asteroids]` activation now appears in `bin/Debug/net8.0/ui-tests-debug.log`.
 - Insight: bring Codetracer into `iterate_asteroids` first. Options:

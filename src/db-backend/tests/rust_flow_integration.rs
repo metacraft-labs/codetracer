@@ -62,12 +62,7 @@ fn test_rust_flow_integration() {
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| {
-            s.split_whitespace()
-                .nth(1)
-                .unwrap_or("unknown")
-                .to_string()
-        })
+        .map(|s| s.split_whitespace().nth(1).unwrap_or("unknown").to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
     match run_flow_test(&config, &version_label) {
