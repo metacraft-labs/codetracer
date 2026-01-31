@@ -14,27 +14,32 @@
   ];
 
   hooks = {
-    # Rust hooks
-    # TODO: Enable when nixpkgs version is compatible with git-hooks-nix
-    # clippy = {
-    #   enable = true;
-    #   packageOverrides = {
-    #     cargo = rustPkgs.rust-stable;
-    #     clippy = rustPkgs.rust-stable;
-    #   };
-    #   settings.denyWarnings = true;
-    # };
-    # cargo-check = {
-    #   enable = true;
-    #   package = rustPkgs.rust-stable;
-    # };
-    # rustfmt = {
-    #   enable = true;
-    #   packageOverrides = {
-    #     cargo = rustPkgs.rust-stable;
-    #     rustfmt = rustPkgs.rust-stable;
-    #   };
-    # };
+    # Rust hooks (run from src/db-backend directory)
+    # Use cargo from PATH (set up by nix shell with rustup override)
+    clippy = {
+      enable = true;
+      name = "clippy";
+      entry = "cargo clippy --manifest-path src/db-backend/Cargo.toml --all-targets -- -D warnings";
+      language = "system";
+      files = "\\.rs$";
+      pass_filenames = false;
+    };
+    cargo-check = {
+      enable = true;
+      name = "cargo-check";
+      entry = "cargo check --manifest-path src/db-backend/Cargo.toml --all-targets";
+      language = "system";
+      files = "\\.rs$";
+      pass_filenames = false;
+    };
+    rustfmt = {
+      enable = true;
+      name = "rustfmt";
+      entry = "cargo fmt --manifest-path src/db-backend/Cargo.toml -- --check";
+      language = "system";
+      files = "\\.rs$";
+      pass_filenames = false;
+    };
 
     # Shell hooks
     shellcheck.enable = true;
@@ -66,9 +71,29 @@
       pass_filenames = true;
       files = "\\.md$";
       excludes = [
-        "^AGENTS\\.md$"
+        "AGENTS\\.md$" # Agent instruction files
         "^tasks\\.md$"
         "^docs/" # Many legacy docs with formatting issues
+        "^ui-tests/docs/" # Test debug temp docs
+        "^ui-tests-v3/" # UI tests v3 docs
+        "^src/db-backend/" # db-backend internal docs
+        "^examples/" # Example project READMEs with varied formatting
+        "^test-programs/" # Test program READMEs
+        "^tsc-ui-tests/" # TypeScript UI tests
+        "^build-python/" # Python build docs
+        "^src/tracer/" # Tracer docs
+        "^CHANGELOG\\.md$" # Auto-generated changelog
+        "^CONTRIBUTING\\.md$"
+        "^SUPPORT\\.md$"
+        "^SECURITY\\.md$"
+        "^README\\.md$" # Main README with complex formatting
+        "^CODE_OF_CONDUCT\\.md$"
+        "^release_checklist\\.md$"
+        "^PLAN_OPEN_DIR\\.md$" # Large planning document
+        "^ct-dap\\.md$" # DAP protocol doc
+        "^0\\d{3}-.*\\.md$" # RFC-style docs (e.g. 0007-ct-host-...)
+        "-implementation-plan\\.md$" # Implementation plan docs
+        "-status\\.md$" # Status docs
       ];
       extraPackages = [ pkgs.markdownlint-cli2 ];
     };
