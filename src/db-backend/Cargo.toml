@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-cc="*"
+cc = "*"
 
 [dependencies]
 num-traits = "0.2"
@@ -34,16 +34,21 @@ runtime_tracing = "0.14.1"
 num-bigint = "0.4.6"
 chrono = "0.4.41"
 
-serde-wasm-bindgen = { version = "0.6.5", optional = true}
+serde-wasm-bindgen = { version = "0.6.5", optional = true }
 js-sys = { version = "0.3", optional = true }
-wasm-bindgen = { version = "0.2.100", optional = true}
+wasm-bindgen = { version = "0.2.100", optional = true }
 web-sys = { version = "0.3", optional = true, features = [
-  "DedicatedWorkerGlobalScope", "WorkerGlobalScope", "console", "MessageEvent",
-  "Worker", "Window" ] }
+  "DedicatedWorkerGlobalScope",
+  "WorkerGlobalScope",
+  "console",
+  "MessageEvent",
+  "Worker",
+  "Window",
+] }
 
 vfs = "0.12"
 
-expanduser = { version = "1.2.2", optional = true}
+expanduser = { version = "1.2.2", optional = true }
 
 ntest = "0.9.3"
 
@@ -67,7 +72,7 @@ tree-sitter-go = "0.25.0"
 [lib]
 name = "db_backend"
 path = "src/lib.rs"
-crate-type   = ["rlib", "cdylib"]
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "db-backend"
@@ -90,5 +95,10 @@ debugging = []
 default = ["io-transport"]
 
 io-transport = ["dep:expanduser"]
-browser-transport = ["dep:serde-wasm-bindgen", "dep:wasm-bindgen",
-  "dep:web-sys", "dep:console_error_panic_hook", "dep:wasm-logger"]
+browser-transport = [
+  "dep:serde-wasm-bindgen",
+  "dep:wasm-bindgen",
+  "dep:web-sys",
+  "dep:console_error_panic_hook",
+  "dep:wasm-logger",
+]
