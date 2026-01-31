@@ -265,7 +265,7 @@ impl Db {
     }
 
     fn to_ct_type(&self, type_id: &TypeId) -> Type {
-        if self.types.len() == 0 {
+        if self.types.is_empty() {
             // probably rr trace case
             warn!("to_ct_type: for now returning just a placeholder type: assuming rr trace!");
             return Type::new(TypeKind::None, "<None>");
@@ -815,6 +815,7 @@ impl DbReplay {
         TypeId(self.db.types.len() - 1)
     }
 
+    #[allow(clippy::wrong_self_convention)] // Needs &mut self to register types
     pub fn to_value_record(&mut self, v: ValueRecordWithType) -> ValueRecord {
         match v {
             ValueRecordWithType::Int { i, typ } => {
@@ -951,7 +952,7 @@ impl DbReplay {
                 type_id,
             } => ValueRecordWithType::Variant {
                 discriminator: discriminator.clone(),
-                contents: Box::new(self.to_value_record_with_type(&**contents)),
+                contents: Box::new(self.to_value_record_with_type(contents)),
                 typ: self.db.types[*type_id].clone(),
             },
             ValueRecord::Reference {
@@ -960,7 +961,7 @@ impl DbReplay {
                 mutable,
                 type_id,
             } => ValueRecordWithType::Reference {
-                dereferenced: Box::new(self.to_value_record_with_type(&**&dereferenced)),
+                dereferenced: Box::new(self.to_value_record_with_type(dereferenced)),
                 address: *address,
                 mutable: *mutable,
                 typ: self.db.types[*type_id].clone(),
@@ -976,7 +977,7 @@ impl DbReplay {
             ValueRecord::None { type_id } => ValueRecordWithType::None {
                 typ: self.db.types[*type_id].clone(),
             },
-            ValueRecord::Cell { place } => ValueRecordWithType::Cell { place: place.clone() },
+            ValueRecord::Cell { place } => ValueRecordWithType::Cell { place: *place },
             ValueRecord::BigInt { b, negative, type_id } => ValueRecordWithType::BigInt {
                 b: b.clone(),
                 negative: *negative,
@@ -1071,6 +1072,7 @@ impl DbReplay {
     }
 
     // returns if it has hit any breakpoints
+    #[allow(clippy::expect_used)] // Trace must have at least one step
     fn step_continue(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
         for step in self.db.step_from(self.step_id, forward) {
             if !self.breakpoint_list.is_empty() {
@@ -1199,7 +1201,7 @@ impl Replay for DbReplay {
 
         // TODO: watches require tracepoint-like evaluate_expression or would duplicate locals
         // for now don't evaluate/support them for db traces: just ignoring
-        if arg.watch_expressions.len() > 0 {
+        if !arg.watch_expressions.is_empty() {
             warn!("watch expressions not supported for db traces currently");
         }
 
@@ -1229,7 +1231,7 @@ impl Replay for DbReplay {
                 return Ok(self.to_value_record_with_type(&variable.value.clone()));
             }
         }
-        return Err(format!("variable {expression} not found on this step").into());
+        Err(format!("variable {expression} not found on this step").into())
     }
 
     // currently depth_limit, lang only used for rr!
@@ -1252,6 +1254,7 @@ impl Replay for DbReplay {
         Ok(vec![])
     }
 
+    #[allow(clippy::expect_used)] // now >= UNIX_EPOCH is always true
     fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
         let mut history_results: Vec<HistoryResultWithRecord> = vec![];
         // from start to end:

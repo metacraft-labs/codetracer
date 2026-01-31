@@ -325,7 +325,7 @@ impl Calltrace {
 
     pub fn load_callstack(&self, step_id: StepId, db: &Db) -> Vec<DbCall> {
         let mut callstack = vec![];
-        if step_id.0 < db.steps.len().try_into().unwrap() {
+        if step_id.0 < db.steps.len().try_into().unwrap_or(i64::MAX) {
             let current_step = &db.steps[step_id];
             let mut call_key = current_step.call_key;
 

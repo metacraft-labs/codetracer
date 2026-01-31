@@ -62,6 +62,7 @@ pub fn make_transport() -> DapResult<WorkerTransport> {
     WorkerTransport::new()
 }
 
+#[allow(clippy::unwrap_used)] // Mutex poisoning indicates unrecoverable state
 pub fn socket_path_for(pid: usize) -> PathBuf {
     CODETRACER_PATHS
         .lock()
@@ -105,12 +106,12 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(feature = "io-transport")]
-pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     use std::io::BufReader;
 
     let (receiving_sender, receiving_receiver) = mpsc::channel();
 
-    let socket_path_owned = socket_path.clone();
+    let socket_path_owned = socket_path.to_path_buf();
 
     let stream = UnixStream::connect(&socket_path_owned)?;
     let writer = stream.try_clone()?;
@@ -145,6 +146,7 @@ pub fn run(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     handle_client(receiving_receiver, false, &receiving_thread, Some(writer))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn setup(
     trace_folder: &Path,
     trace_file: &Path,
@@ -414,7 +416,7 @@ impl Ctx {
         messages: &[DapMessage],
     ) -> Result<(), Box<dyn Error>> {
         for message in messages {
-            let message_with_seq = patch_message_seq(&message, self.seq);
+            let message_with_seq = patch_message_seq(message, self.seq);
             self.seq += 1;
             sender.send(message_with_seq)?;
         }
@@ -656,15 +658,13 @@ fn task_thread(
                     format!("launch error: {e:?}")
                 })?;
             }
-        } else {
-            if handler.initialized {
-                let res = handle_request(&mut handler, request, sender.clone());
-                if let Err(e) = res {
-                    warn!("  handle_request error in thread: {e:?}");
-                    // continue with other request; trying to be more robust
-                    // assuming it's for individual requests to fail
-                    //   TODO: is it possible for some to leave bad state ?
-                }
+        } else if handler.initialized {
+            let res = handle_request(&mut handler, request, sender.clone());
+            if let Err(e) = res {
+                warn!("  handle_request error in thread: {e:?}");
+                // continue with other request; trying to be more robust
+                // assuming it's for individual requests to fail
+                //   TODO: is it possible for some to leave bad state ?
             }
         }
     }
@@ -672,6 +672,7 @@ fn task_thread(
 }
 
 #[cfg(feature = "io-transport")]
+#[allow(clippy::expect_used)] // stream must be Some when is_stdio is false - internal invariant
 fn handle_client(
     receiver: Receiver<DapMessage>,
     is_stdio: bool,

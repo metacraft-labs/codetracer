@@ -180,7 +180,7 @@ impl EventDb {
                 self.trace_list.push(table_id);
             }
             let event = self.convert_stop_to_program_event(result);
-            self.register_in_global_table(&[event.clone()], table_id);
+            self.register_in_global_table(std::slice::from_ref(&event), table_id);
             // sort global?
             self.insert_in_single_table(event, table_id.0);
 

@@ -12,6 +12,9 @@
 //! - `DapTestClient`: A wrapper around the DAP client with test-friendly helpers
 //! - `FlowTestCase`: Configuration for running flow-based tests
 
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::task::{CtLoadFlowArguments, FlowMode, Location};
 use db_backend::transport::DapTransport;
@@ -19,12 +22,12 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, BufReader, ErrorKind, Write};
+use std::io::{self, BufReader, ErrorKind};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Supported languages for test programs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,11 +89,7 @@ impl TestRecording {
 
         // Build the program
         let build_output = Command::new(ct_rr_support)
-            .args([
-                "build",
-                source_path.to_str().unwrap(),
-                binary_path.to_str().unwrap(),
-            ])
+            .args(["build", source_path.to_str().unwrap(), binary_path.to_str().unwrap()])
             .output()
             .map_err(|e| format!("failed to run ct-rr-support build: {}", e))?;
 
@@ -189,11 +188,7 @@ impl DapTestClient {
     }
 
     /// Initialize the DAP session and launch with a recording
-    pub fn initialize_and_launch(
-        &mut self,
-        recording: &TestRecording,
-        ct_rr_support: &Path,
-    ) -> Result<(), String> {
+    pub fn initialize_and_launch(&mut self, recording: &TestRecording, ct_rr_support: &Path) -> Result<(), String> {
         // Send initialize
         let init = self.client.request("initialize", json!({}));
         self.send(&init)?;
@@ -264,10 +259,8 @@ impl DapTestClient {
         let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
 
         match complete_move {
-            DapMessage::Event(e) => {
-                serde_json::from_value(e.body["location"].clone())
-                    .map_err(|e| format!("failed to parse location: {}", e))
-            }
+            DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())
+                .map_err(|e| format!("failed to parse location: {}", e)),
             _ => Err("expected event".to_string()),
         }
     }
@@ -293,9 +286,7 @@ impl DapTestClient {
     }
 
     fn send(&mut self, msg: &DapMessage) -> Result<(), String> {
-        self.writer
-            .send(msg)
-            .map_err(|e| format!("failed to send: {}", e))
+        self.writer.send(msg).map_err(|e| format!("failed to send: {}", e))
     }
 
     fn read_until_event(&mut self, event_name: &str, timeout: Duration) -> Result<DapMessage, String> {
@@ -374,9 +365,7 @@ impl FlowData {
             .and_then(|v| v.as_array())
             .ok_or("viewUpdates should exist")?;
 
-        let first_update = view_updates
-            .first()
-            .ok_or("should have at least one view update")?;
+        let first_update = view_updates.first().ok_or("should have at least one view update")?;
 
         let steps_json = first_update
             .get("steps")
@@ -555,9 +544,8 @@ fn accept_with_timeout(
 /// Run a flow integration test with the given configuration
 pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
     // Find ct-rr-support
-    let ct_rr_support = find_ct_rr_support().ok_or(
-        "ct-rr-support not found in PATH or development locations".to_string(),
-    )?;
+    let ct_rr_support =
+        find_ct_rr_support().ok_or("ct-rr-support not found in PATH or development locations".to_string())?;
 
     if !is_rr_available() {
         return Err("rr is not available".to_string());
@@ -569,12 +557,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
 
     // Create recording
     println!("Building and recording...");
-    let recording = TestRecording::create(
-        &config.source_path,
-        config.language,
-        version_label,
-        &ct_rr_support,
-    )?;
+    let recording = TestRecording::create(&config.source_path, config.language, version_label, &ct_rr_support)?;
     println!("Recording created at: {}", recording.trace_dir.display());
 
     // Start DAP client
@@ -641,10 +624,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
             if FlowData::is_value_loaded(value) {
                 if let Some(actual) = FlowData::extract_int_value(value) {
                     if actual != *expected_value {
-                        return Err(format!(
-                            "{} should be {}, got {}",
-                            var_name, expected_value, actual
-                        ));
+                        return Err(format!("{} should be {}, got {}", var_name, expected_value, actual));
                     }
                     println!("  {} = {} ✓", var_name, actual);
                 }

@@ -26,8 +26,8 @@ use crate::dap_types;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAndValueTuple, TraceKind};
 use crate::task::{
-    Action, Call, CallArgsUpdateResults, CallLine, CallSearchArg, CalltraceLoadArgs, CalltraceNonExpandedKind,
-    CallLineContentKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
+    Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CalltraceLoadArgs,
+    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
     FrameInfo, FunctionLocation, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg,
     LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent,
     RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
@@ -545,16 +545,14 @@ impl Handler {
             // info!("load {arg:?}");
             // self.flow_preloader
             //     .load(arg.location, function_first, arg.flow_mode, &self.db)
+        } else if let Some(raw_flow) = &self.raw_diff_index {
+            serde_json::from_str::<FlowUpdate>(raw_flow)?
         } else {
-            if let Some(raw_flow) = &self.raw_diff_index {
-                serde_json::from_str::<FlowUpdate>(&raw_flow)?
-            } else {
-                // TODO: notification? or ignore
-                // eventually in the future: make a diff index now in the replay and send it
-                let message = "no raw diff index in handler, can't send flow for diff for now";
-                warn!("{}", message);
-                return Err(message.into());
-            }
+            // TODO: notification? or ignore
+            // eventually in the future: make a diff index now in the replay and send it
+            let message = "no raw diff index in handler, can't send flow for diff for now";
+            warn!("{}", message);
+            return Err(message.into());
         };
         info!("  flow ready");
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
@@ -750,7 +748,7 @@ impl Handler {
         if event.kind != EventLogKind::TraceLogEvent {
             let _ = self.replay.event_jump(&event)?;
         } else {
-            let _ = self.replay.tracepoint_jump(&event)?;
+            self.replay.tracepoint_jump(&event)?;
         }
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
@@ -1175,7 +1173,7 @@ impl Handler {
                     .entry(tracepoint.name.clone())
                     .or_default()
                     .entry(tracepoint.line)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(i);
                 location_visit_indices
                     .entry(tracepoint.name.clone())
@@ -1272,7 +1270,7 @@ impl Handler {
                                     *tracepoint_index,
                                     &tracepoint.expression,
                                     current_step_id,
-                                    lang_from_context(&Path::new(&location.path), self.trace_kind),
+                                    lang_from_context(Path::new(&location.path), self.trace_kind),
                                 );
                                 if locals.is_empty() {
                                     continue;
@@ -1336,16 +1334,12 @@ impl Handler {
                             }
                         }
                     } else if cleanup_error.is_none() {
-                        cleanup_error = Some(
-                            io::Error::new(io::ErrorKind::Other, "missing breakpoint index during restore").into(),
-                        );
+                        cleanup_error = Some(io::Error::other("missing breakpoint index during restore").into());
                     }
                 }
                 None => {
                     if cleanup_error.is_none() {
-                        cleanup_error = Some(
-                            io::Error::new(io::ErrorKind::Other, "missing breakpoint entry during restore").into(),
-                        );
+                        cleanup_error = Some(io::Error::other("missing breakpoint entry during restore").into());
                     }
                 }
             }
@@ -1748,8 +1742,8 @@ impl Handler {
 
     pub fn load_terminal(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         let mut events_list: Vec<ProgramEvent> = vec![];
-        if self.event_db.single_tables.len() > 0 {
-            for (_i, event_record) in self.event_db.single_tables[0].events.iter().enumerate() {
+        if !self.event_db.single_tables.is_empty() {
+            for event_record in self.event_db.single_tables[0].events.iter() {
                 if event_record.kind == EventLogKind::Write {
                     events_list.push(event_record.clone());
                 }
@@ -1909,7 +1903,11 @@ impl Handler {
                         presentation_hint: None,
                         sources: None,
                     }),
-                    line: if current_location.line >= 0 { current_location.line } else { 0 },
+                    line: if current_location.line >= 0 {
+                        current_location.line
+                    } else {
+                        0
+                    },
                     column: 1,
                     end_line: None,
                     end_column: None,
@@ -2021,11 +2019,7 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::RR {
-            self.respond_dap(
-                request,
-                dap_types::VariablesResponseBody { variables: vec![] },
-                sender,
-            )?;
+            self.respond_dap(request, dap_types::VariablesResponseBody { variables: vec![] }, sender)?;
             return Ok(());
         }
         let full_value_locals: Vec<Variable> = self.db.variables[self.step_id]
@@ -2063,6 +2057,9 @@ impl Handler {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::panic)]
 mod tests {
     use std::env;
     use std::path::{Path, PathBuf};
@@ -2318,7 +2315,7 @@ mod tests {
         test_step_in_scenario(&mut handler, path, sender);
     }
 
-    fn test_load_flow(handler: &mut Handler, _path: &PathBuf, sender: Sender<DapMessage>) {
+    fn test_load_flow(handler: &mut Handler, _path: &Path, sender: Sender<DapMessage>) {
         handler
             .load_flow(
                 dap::Request::default(),
@@ -2331,7 +2328,7 @@ mod tests {
             .unwrap();
     }
 
-    fn test_step_in_scenario(handler: &mut Handler, path: &PathBuf, sender: Sender<DapMessage>) {
+    fn test_step_in_scenario(handler: &mut Handler, path: &Path, sender: Sender<DapMessage>) {
         for i in 0..handler.db.steps.len() - 1 {
             // eprintln!("doing step-in {i}");
             handler.step_in(true).unwrap();
