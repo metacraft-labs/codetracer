@@ -58,7 +58,7 @@ cp -r "$BIN_DIR"/* "$DIST_DIR"/bin/
 
 mv "$DIST_DIR"/bin/ct "$DIST_DIR"/bin/ct_unwrapped
 
-cat << 'EOF' > "${DIST_DIR}"/bin/ct
+cat <<'EOF' >"${DIST_DIR}"/bin/ct
 #!/usr/bin/env bash
 
 export HERE=$(dirname $(dirname "$0"))

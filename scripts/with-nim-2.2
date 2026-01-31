@@ -9,9 +9,9 @@
 set -e
 
 if [ $# -eq 0 ]; then
-    echo "Usage: with-nim-2.2 <command> [args...]"
-    echo "Execute a command with Nim 2.2.x in PATH"
-    exit 1
+	echo "Usage: with-nim-2.2 <command> [args...]"
+	echo "Execute a command with Nim 2.2.x in PATH"
+	exit 1
 fi
 
 NIM_PATH=$(nix build --no-link --print-out-paths '.#nim-2_2')/bin

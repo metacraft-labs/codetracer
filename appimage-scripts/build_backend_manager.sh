@@ -8,7 +8,6 @@ echo "==========="
 echo "codetracer build: build backend-manager"
 echo "-----------"
 
-
 pushd "$ROOT_PATH/src/backend-manager"
 cargo build --release
 popd

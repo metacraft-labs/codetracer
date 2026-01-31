@@ -5,16 +5,16 @@ set -e
 WANTED_TUP_REVISION=4247a523
 WANTED_TUP_VERSION=v0.8-8
 
-if command -v tup &> /dev/null; then
-  TUP_VERSION=$(tup --version)
-  if [ "$TUP_VERSION" == "tup $WANTED_TUP_VERSION-g$WANTED_TUP_REVISION" ]; then
-    echo "$TUP_VERSION" is already installed
-    exit 0
-  else
-    echo "$TUP_VERSION present, but we need $WANTED_TUP_VERSION-$WANTED_TUP_REVISION! installing..."
-  fi
+if command -v tup &>/dev/null; then
+	TUP_VERSION=$(tup --version)
+	if [ "$TUP_VERSION" == "tup $WANTED_TUP_VERSION-g$WANTED_TUP_REVISION" ]; then
+		echo "$TUP_VERSION" is already installed
+		exit 0
+	else
+		echo "$TUP_VERSION present, but we need $WANTED_TUP_VERSION-$WANTED_TUP_REVISION! installing..."
+	fi
 else
-  echo tup is missing! installing...
+	echo tup is missing! installing...
 fi
 
 brew install pkg-config pcre2 macFUSE
