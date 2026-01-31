@@ -109,6 +109,7 @@ fn encode_nim_module_name_into(module_name: &str, style: NimManglingStyle, buf: 
 /// - Alphanumerics pass through
 /// - Special operators get word representations
 /// - Other characters get hex encoded
+#[allow(clippy::unwrap_used)] // char::from_digit always succeeds for 0-15
 fn mangle_nim_identifier_into(name: &str, buf: &mut String) {
     let mut requires_underscore = false;
     let mut chars = name.chars().peekable();
@@ -129,7 +130,7 @@ fn mangle_nim_identifier_into(name: &str, buf: &mut String) {
             'a'..='z' | 'A'..='Z' | '0'..='9' => buf.push(c),
             '_' => {
                 // Skip underscore if followed by a digit (used for scope disambiguation)
-                if i > 0 && chars.peek().map_or(false, |next| next.is_ascii_digit()) {
+                if i > 0 && chars.peek().is_some_and(|next| next.is_ascii_digit()) {
                     // Skip this underscore
                 } else {
                     buf.push(c);
@@ -234,9 +235,7 @@ fn mangle_nim_identifier_into(name: &str, buf: &mut String) {
 ///
 /// Given "/path/to/my_module.nim", returns "my_module"
 pub fn extract_module_name(path: &Path) -> Option<String> {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_string())
+    path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
 }
 
 /// Helper for iterating over mangled name candidates without allocations.
@@ -256,12 +255,7 @@ pub struct MangledNameIterator {
 impl MangledNameIterator {
     /// Create a new iterator for mangled name candidates with a specific style.
     /// Returns None if the module path is invalid.
-    pub fn new(
-        var_name: &str,
-        module_path: &Path,
-        max_id: usize,
-        style: NimManglingStyle,
-    ) -> Option<Self> {
+    pub fn new(var_name: &str, module_path: &Path, max_id: usize, style: NimManglingStyle) -> Option<Self> {
         let module_name = extract_module_name(module_path)?;
 
         // Build the base name directly into the buffer
@@ -388,12 +382,7 @@ impl MangledNameDualIterator {
         // Initialize secondary iterator if needed
         if self.secondary_iter.is_none() && !self.on_secondary {
             let alt_style = self.current_style.alternate();
-            self.secondary_iter = MangledNameIterator::new(
-                &self.var_name,
-                &self.module_path,
-                self.max_id,
-                alt_style,
-            );
+            self.secondary_iter = MangledNameIterator::new(&self.var_name, &self.module_path, self.max_id, alt_style);
             self.current_style = alt_style;
             self.on_secondary = true;
         }
@@ -420,6 +409,8 @@ impl MangledNameDualIterator {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 
@@ -503,8 +494,7 @@ mod tests {
     #[test]
     fn test_iterator_candidates_v1_6() {
         let path = Path::new("/tmp/nim_flow_test.nim");
-        let mut iter =
-            MangledNameIterator::new("intValue", path, 5, NimManglingStyle::V1_6_Rot13).unwrap();
+        let mut iter = MangledNameIterator::new("intValue", path, 5, NimManglingStyle::V1_6_Rot13).unwrap();
 
         // Collect candidates (must copy since buffer is reused)
         let mut candidates = Vec::new();
@@ -520,8 +510,7 @@ mod tests {
     #[test]
     fn test_iterator_candidates_v2() {
         let path = Path::new("/tmp/nim_flow_test.nim");
-        let mut iter =
-            MangledNameIterator::new("intValue", path, 5, NimManglingStyle::V2_Direct).unwrap();
+        let mut iter = MangledNameIterator::new("intValue", path, 5, NimManglingStyle::V2_Direct).unwrap();
 
         // Collect candidates (must copy since buffer is reused)
         let mut candidates = Vec::new();

@@ -161,7 +161,7 @@ impl<'a> CallFlowPreloader<'a> {
             diff_call_keys,
             mode,
             trace_kind,
-            lang: lang_from_context(&Path::new(&location.path), trace_kind),
+            lang: lang_from_context(Path::new(&location.path), trace_kind),
         }
     }
 

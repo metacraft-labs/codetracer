@@ -1,10 +1,14 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 use core::panic;
 use std::{
     env,
     error::Error,
     fs::{create_dir, remove_dir_all},
     iter::zip,
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
     sync::{LazyLock, Mutex, Once},
 };
@@ -65,27 +69,27 @@ fn var(name: &str, value: Value) -> StringAndValueTuple {
 }
 
 fn int_val(value: i64) -> Value {
-    let mut val = Value::default();
-    val.kind = TypeKind::Int;
-    val.i = value.to_string();
-
-    val
+    Value {
+        kind: TypeKind::Int,
+        i: value.to_string(),
+        ..Default::default()
+    }
 }
 
 fn str_val(value: &str) -> Value {
-    let mut val = Value::default();
-    val.kind = TypeKind::String;
-    val.text = value.to_string();
-
-    val
+    Value {
+        kind: TypeKind::String,
+        text: value.to_string(),
+        ..Default::default()
+    }
 }
 
 fn seq_val(value: Vec<Value>) -> Value {
-    let mut val = Value::default();
-    val.kind = TypeKind::Seq;
-    val.elements = value;
-
-    val
+    Value {
+        kind: TypeKind::Seq,
+        elements: value,
+        ..Default::default()
+    }
 }
 
 fn check_tracepoint_evaluate(
@@ -93,7 +97,7 @@ fn check_tracepoint_evaluate(
     line: usize,
     trace_name: &str,
     lang: Lang,
-    expected: &Vec<StringAndValueTuple>,
+    expected: &[StringAndValueTuple],
 ) -> Result<(), Box<dyn Error>> {
     let db = load_test_trace(trace_name, lang)?;
 
@@ -115,7 +119,7 @@ fn check_tracepoint_evaluate(
     Err(format!("No step for line {line} in DB").into())
 }
 
-fn check_equal(actuals: &Vec<StringAndValueTuple>, expecteds: &Vec<StringAndValueTuple>) {
+fn check_equal(actuals: &[StringAndValueTuple], expecteds: &[StringAndValueTuple]) {
     assert_eq!(actuals.len(), expecteds.len());
 
     for (actual, expected) in zip(actuals.iter(), expecteds.iter()) {
@@ -133,7 +137,7 @@ fn check_equal_values(actual: &Value, expected: &Value) {
         TypeKind::Seq => {
             assert_eq!(actual.elements.len(), expected.elements.len());
             for (v1, v2) in zip(actual.elements.iter(), expected.elements.iter()) {
-                check_equal_values(&v1, &v2);
+                check_equal_values(v1, v2);
             }
         }
 
@@ -163,7 +167,7 @@ fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
     }
 }
 
-fn record_ruby_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
+fn record_ruby_trace(program_dir: &Path, target_dir: &Path) {
     println!("TARGET DIR: ${target_dir:#?}");
     let main_path = program_dir.join("main.rb");
     let trace_path = target_dir.join("trace.json");
@@ -183,7 +187,7 @@ fn record_ruby_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
     }
 }
 
-fn record_noir_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
+fn record_noir_trace(program_dir: &Path, target_dir: &Path) {
     let result = Command::new("nargo")
         .args(["trace", "--trace-dir", target_dir.to_str().unwrap()])
         .current_dir(program_dir)
@@ -195,11 +199,11 @@ fn record_noir_trace(program_dir: &PathBuf, target_dir: &PathBuf) {
     }
 }
 
-fn record_rust_wasm_trace(_program_dir: &PathBuf, _target_dir: &PathBuf) {
+fn record_rust_wasm_trace(_program_dir: &Path, _target_dir: &Path) {
     todo!()
 }
 
-fn record_trace(program_dir: &PathBuf, target_dir: &PathBuf, lang: Lang) -> Result<(), Box<dyn Error>> {
+fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(), Box<dyn Error>> {
     match lang {
         Lang::Ruby | Lang::RubyDb => record_ruby_trace(program_dir, target_dir),
         Lang::Noir => record_noir_trace(program_dir, target_dir),

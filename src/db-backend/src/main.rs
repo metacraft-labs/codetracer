@@ -15,13 +15,13 @@ use chrono::Local;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use log::{error, info};
+use std::fs::{create_dir_all, remove_file, File};
 use std::io::Write;
+use std::os::unix::fs::symlink;
 use std::panic::PanicHookInfo;
 use std::path::PathBuf;
-use std::{error::Error, panic};
-use std::fs::{create_dir_all, remove_file, File};
-use std::os::unix::fs::symlink;
 use std::thread;
+use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .format(|buf, record| {
             let thread = thread::current();
             let thread_id_as_string = &format!("{:?}", thread.id());
-            let thread_name_or_id = thread.name().unwrap_or(&thread_id_as_string);
+            let thread_name_or_id = thread.name().unwrap_or(thread_id_as_string);
             // format explanation: `:<char><alignment-where><width>`
             //   based on https://stackoverflow.com/a/41496138/438099
             let thread_column = format!("[{: <18}]", format!("{} thread", thread_name_or_id));
