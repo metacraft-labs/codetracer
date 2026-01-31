@@ -16,12 +16,12 @@ git worktree prune
 # If the worktree directory still exists, remove it.
 # This handles the case where a previous run failed after creating the worktree.
 if [ -d "gh-pages" ]; then
-    git worktree remove gh-pages
+	git worktree remove gh-pages
 fi
 
 # If the gh-pages branch already exists, delete it first
 if git show-ref --verify --quiet refs/heads/gh-pages; then
-    git branch -D gh-pages
+	git branch -D gh-pages
 fi
 
 # Create a new orphan branch (this will overwrite any existing remote branch)
@@ -30,7 +30,7 @@ git worktree add --orphan -B gh-pages gh-pages
 cp -a book/. gh-pages
 
 # Required by github pages to set up a custom domain
-echo "docs.codetracer.com" > gh-pages/CNAME
+echo "docs.codetracer.com" >gh-pages/CNAME
 
 git config user.name "Deploy from CI"
 git config user.email ""

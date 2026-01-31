@@ -3,9 +3,9 @@
 set -e
 
 function stop_processes {
-  # stop processes: it seems they can remain hanging
-  # copied from `justfile`: `just stop`
-  killall -9 virtualization-layers db-backend node .electron-wrapped || true
+	# stop processes: it seems they can remain hanging
+	# copied from `justfile`: `just stop`
+	killall -9 virtualization-layers db-backend node .electron-wrapped || true
 }
 
 echo '###############################################################################'
