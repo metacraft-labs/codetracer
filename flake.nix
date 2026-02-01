@@ -122,6 +122,11 @@
             pkgs = import nixpkgs { inherit system; };
             rustPkgs = config.packages;
           };
+
+          # Disable pre-commit checks during nix flake check because the Rust
+          # hooks need git submodules which aren't available in the Nix sandbox.
+          # The hooks still work in the dev shell and during actual git commits.
+          pre-commit.check.enable = false;
         };
     };
 }
