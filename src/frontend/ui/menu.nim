@@ -488,5 +488,3 @@ method render*(self: MenuComponent): VNode =
       debug
 
     windowMenu(self.data)
-
-

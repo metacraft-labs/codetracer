@@ -124,6 +124,7 @@ impl CtRRWorker {
     }
 
     // for now: don't return a typed value here, only Ok(raw value) or an error
+    #[allow(clippy::expect_used)] // stream must be initialized before run_query is called
     pub fn run_query(&mut self, query: CtRRQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
@@ -169,7 +170,7 @@ impl RRDispatcher {
             let res = self.stable.start();
             if let Err(e) = res {
                 error!("can't start ct rr worker for {}! error is {:?}", self.name, e);
-                return Err(e.into());
+                return Err(e);
             }
         }
         // check again:
@@ -359,6 +360,7 @@ impl Replay for RRDispatcher {
         Ok(())
     }
 
+    #[allow(clippy::expect_used)] // load_location_directly should succeed after ensure_active_stable
     fn current_step_id(&mut self) -> StepId {
         // cache location or step_id and return
         // OR always load from worker

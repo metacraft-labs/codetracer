@@ -58,4 +58,4 @@ proc replayStylus*(hash: string) {.raises: [IOError, ValueError, OSError, Catcha
   let recordedTrace = recordStylus(hash)
   # for now it prints `traceId:<traceId>` which is read by index(from ct arb explorer) which starts the replay in its instance
   #   for example
-  #   traceId:479  
+  #   traceId:479

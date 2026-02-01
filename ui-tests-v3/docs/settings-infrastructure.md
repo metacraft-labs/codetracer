@@ -1,17 +1,20 @@
 # Settings Infrastructure Specification
 
 ## Objectives
+
 - Centralize all runtime configuration for `ui-tests-v3`, replacing the retired `ui-tests-playground` experiments.
 - Support per-run overrides required by CI farms, Docker containers, and agent-driven workflows.
 - Provide deterministic, testable configuration access without relying on hard-coded globals.
 - Enable configuration reuse in library scenarios and future tooling by avoiding static state.
 
 ## Non-Goals
+
 - Refactoring scenario orchestration logic beyond what is needed to consume the new settings services.
 - Defining every configuration value up front; the system must accommodate incremental additions.
 - Replacing existing helper abstractions (launchers, utilities) except to parameterize them.
 
 ## Target Architecture
+
 1. **Generic Host Bootstrap**
    - Replace ad-hoc `Program.Main` setup with `Host.CreateDefaultBuilder(args)` from `Microsoft.Extensions.Hosting`.
    - Configure built-in logging (console) and dependency injection container.
@@ -76,6 +79,7 @@
       - Recommendations for secrets management (e.g., use environment variables rather than JSON for sensitive data).
 
 ## Implementation Roadmap
+
 1. Scaffold configuration folder, option types, and base JSON files.
 2. Introduce generic host bootstrap and register services/options.
 3. Migrate scenario loading to configuration-driven approach with validation.
@@ -84,6 +88,7 @@
 6. Update docs and CI pipelines to supply required configuration (if any).
 
 ## Open Questions
+
 - Do we need live reload support (`IOptionsMonitor.OnChange`) or is restart-on-change acceptable for CI?
 - Should scenario definitions be split per environment (e.g., `scenarios.ci.json` vs `scenarios.local.json`)?
 - Will future agents require runtime mutation of settings (suggests allowing in-memory overrides)?

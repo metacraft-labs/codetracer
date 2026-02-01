@@ -1,0 +1,22 @@
+{
+  "version": "0.2",
+  "dictionaries": ["project-words"],
+  "dictionaryDefinitions": [
+    {
+      "name": "project-words",
+      "path": "./project-words.txt",
+      "addWords": true
+    }
+  ],
+  "ignorePaths": [
+    "AGENTS.md",
+    "tasks.md",
+    "libs/**",
+    "node-packages/**",
+    "src/public/third_party/**",
+    "docs/**",
+    "src/db-backend/spec_dap/**",
+    "PLAN_OPEN_DIR.md",
+    "test-programs/stylus_fund_tracker/licenses/**"
+  ]
+}

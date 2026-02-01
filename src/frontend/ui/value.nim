@@ -231,7 +231,7 @@ proc ensureLine*(self: ChartComponent) =
 
       gradient.addColorStop(0, cstring"grey")
       gradient.addColorStop(0.3, cstring"transparent")
-      self.lineConfig = 
+      self.lineConfig =
         js{
           "type": cstring"line",
           "data": js{
@@ -289,7 +289,7 @@ proc ensurePie*(self: ChartComponent) =
     try:
       var canvas = jq(cstring(fmt"#chart-pie-canvas-{self.getId}")).toJs.getContext(cstring"2d")
       let containerWidth = jq(".trace .editor-traces").toJs.offsetWidth.to(float)
-      
+
       self.pie = newChart(canvas, self.pieConfig)
       self.trace.traceHeight = containerWidth/2
 
@@ -319,7 +319,7 @@ proc ensureBase(self: ChartComponent) =
     self.ensurePie()
 
 proc ensure*(self: ChartComponent) =
-  var label = if self.viewKind == ViewLine: 
+  var label = if self.viewKind == ViewLine:
       "ensureLine"
     elif self.viewKind == ViewTable:
       "<not applicable>"
@@ -522,7 +522,7 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
   #     if not container.isNil:
   #       container.toJs.scrollTop = chart.historyScrollTop
   #   ) # TODO: Handle multiple state components
-  self.state.kxi.afterRedraws.add(proc = 
+  self.state.kxi.afterRedraws.add(proc =
     let container = document.getElementById(cstring(fmt"history-{expression}"))
     if not container.isNil:
       container.toJs.scrollTop = self.historyScrollTop
@@ -563,7 +563,7 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
 
   contextMenu &= addToScratchpad
 
-  return contextMenu 
+  return contextMenu
 
 proc historyJump(self: ValueComponent, location: types.Location) =
   self.api.historyJump(location)
@@ -653,7 +653,7 @@ proc checkHistoryLocation*(self: ValueComponent, expression: cstring) =
       self.showInline[expression] = false
 
 method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = true) {.async.} =
-  let key = if self.baseAddress == NO_ADDRESS: 
+  let key = if self.baseAddress == NO_ADDRESS:
       expression
     else:
       cstring($self.baseAddress)
@@ -661,7 +661,7 @@ method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = tr
   console.log self.state.valueHistory
 
   let hasValueHistory = self.state.valueHistory.hasKey(key)
-    
+
   if not hasValueHistory or self.charts.len() == 0:
     let location = self.location
 
@@ -719,7 +719,7 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
     #   if we jump to a call/frame, where no local variable matches the address of this history
     #   we can show it at least for this artifficial watch variable:
     # TODO: eventually adding `(typeName*)` ?
-    # toHex(update.address) seem to produce a smaller value? maybe because of JavaScript number 
+    # toHex(update.address) seem to produce a smaller value? maybe because of JavaScript number
     #   something like ~2^53 limitation for nim ints? not sure
     #   that's why we use baseAddress, assuming the history is for this value
     let expression = if self.baseValue.typ.kind == Pointer:
@@ -762,8 +762,8 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
     valueHistory[key].results = historyWithoutRepetitions
 
     self.redraw()
-  
-  
+
+
 proc atomValueView(self: ValueComponent, valueText: string, expression: cstring, klass: string, value: Value): VNode =
   let klassNumber =
     if self.i mod 2 == 0:
@@ -971,7 +971,7 @@ proc view(
         if not value.activeVariantValue.isNil:
           for label, fieldValue in unionChildren(value):
             children.add((label, fieldValue))
-        
+
         let left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
         let right = TOKEN_TEXTS[lang][InstanceClose]
 
@@ -1249,7 +1249,7 @@ proc view(
           s = style(StyleAttr.marginLeft, cstring"0px")
 
         span(
-          class = "value-view", 
+          class = "value-view",
           style = s
         ):
           try:

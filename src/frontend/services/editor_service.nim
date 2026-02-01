@@ -109,4 +109,3 @@ proc activeTabInfo*(self: EditorService): TabInfo =
 
 func restart*(service: EditorService) =
   discard
-

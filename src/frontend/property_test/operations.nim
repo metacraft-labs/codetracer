@@ -18,7 +18,7 @@ proc clickDebugButton(action: string) =
   let debugButtonElement = loaders.debugButton(action)
   if not debugButtonElement.isNil:
     debugButtonElement.click()
-  
+
 proc clickEvent(eventIndex: int) =
   uiTestLog fmt"info: click event {eventIndex}"
   let eventRowElement = loaders.eventRow(eventIndex)

@@ -1,5 +1,5 @@
 simple-tui: send initialize before launch in DAP
 
-we should send "initialize", receive response, and 
+we should send "initialize", receive response, and
 then send "launch"; it can still receive "initialized" and other
-events: that's not a problem! 
+events: that's not a problem!

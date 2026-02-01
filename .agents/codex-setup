@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
 
 echo "codetracer setup:"
-echo $(git rev-parse HEAD)
+git rev-parse HEAD
 echo ""
 
-# TODO: research this in depth, not critical for db-backend itself for now 
+# TODO: research this in depth, not critical for db-backend itself for now
 # git submodule update --init --recursive
 
 rustup component add clippy
 rustup component add rustfmt
 
-cd src/db-backend
+pushd src/db-backend || exit
 cargo build
-cd ../../
+popd || exit
 
-cd src/tui
+pushd src/tui || exit
 cargo build
-cd ../../
+popd || exit
 
-cd src/small-lang
+pushd src/small-lang || exit
 cargo build
-cd ../../
-
+popd || exit

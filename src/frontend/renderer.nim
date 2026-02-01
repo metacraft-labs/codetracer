@@ -1012,7 +1012,7 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
          event.keyCode = ENTER_KEY_CODE # enter
          # TODO do we need event.which
          element.toJs.dispatchEvent(event), 50))
-      
+
     data.ui.activeFocus = data.ui.commandPalette
   data.redraw()
 

@@ -11,9 +11,9 @@
 set -e
 
 cleanup() {
-  echo "Performing cleanup..."
-  chmod -R 777 "${APP_DIR}" || true
-  rm -rf ./squashfs-root
+	echo "Performing cleanup..."
+	chmod -R 777 "${APP_DIR}" || true
+	rm -rf ./squashfs-root
 }
 
 trap cleanup EXIT ERR INT TERM HUP QUIT
@@ -25,12 +25,12 @@ APP_DIR="${ROOT_PATH}/squashfs-root"
 export APP_DIR
 
 if [ -e "${ROOT_PATH}"/CodeTracer.AppImage ]; then
-  rm -rf "${ROOT_PATH}"/CodeTracer.AppImage
+	rm -rf "${ROOT_PATH}"/CodeTracer.AppImage
 fi
 
 if [ -d "${APP_DIR}" ]; then
-  chmod -R u+w "${APP_DIR}" || true
-  rm -rf "${APP_DIR}"
+	chmod -R u+w "${APP_DIR}" || true
+	rm -rf "${APP_DIR}"
 fi
 
 mkdir "${APP_DIR}"
@@ -47,7 +47,7 @@ mkdir -p "${APP_DIR}"/views
 # Install Ruby
 bash "${ROOT_PATH}"/appimage-scripts/install_ruby.sh
 
-cat << 'EOF' > "${APP_DIR}/bin/ruby"
+cat <<'EOF' >"${APP_DIR}/bin/ruby"
 #!/usr/bin/env bash
 
 HERE="${HERE:-..}"
@@ -110,7 +110,7 @@ bash "${ROOT_PATH}"/appimage-scripts/build_css.sh
 # Build/setup nim-based files
 bash "${ROOT_PATH}"/appimage-scripts/build_with_nim.sh
 
-cat << 'EOF' > "${APP_DIR}/bin/ct"
+cat <<'EOF' >"${APP_DIR}/bin/ct"
 #!/usr/bin/env bash
 
 HERE=${HERE:-$(dirname "$(readlink -f "${0}")")}
@@ -150,7 +150,6 @@ chmod +x "${APP_DIR}/bin/ctags"
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
-
 # curl
 cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
 chmod +x "${APP_DIR}/bin/curl"
@@ -163,11 +162,10 @@ chmod +x "${APP_DIR}/bin/ct-remote"
 # shellcheck disable=SC2046
 ct_remote_libs=$(lddtree -l "${APP_DIR}/bin/ct-remote" | grep -v glibc | grep /nix || true)
 if [ -n "${ct_remote_libs}" ]; then
-  # shellcheck disable=SC2086
-  cp -n ${ct_remote_libs} "${APP_DIR}"/lib
+	# shellcheck disable=SC2086
+	cp -n ${ct_remote_libs} "${APP_DIR}"/lib
 fi
 ls -al "${APP_DIR}"/lib
-
 
 # node
 cp -Lr "${ROOT_PATH}/src/links/node" "${APP_DIR}/bin/"
@@ -210,7 +208,7 @@ chmod -R +wr "${APP_DIR}/public"
 cp -Lr "${ROOT_PATH}/src/public/dist/frontend_bundle.js" "${APP_DIR}"
 
 # Create AppRun script
-cat << 'EOF' > "${APP_DIR}/AppRun"
+cat <<'EOF' >"${APP_DIR}/AppRun"
 #!/usr/bin/env bash
 
 export HERE=$(dirname "$(readlink -f "${0}")")
@@ -241,14 +239,13 @@ cp -Lr "${ROOT_PATH}"/resources "${APP_DIR}"
 SRC_ICONSET_DIR="${ROOT_PATH}/resources/Icon.iconset"
 
 # TODO: discover these dinamically perhaps
-for SIZE in 16 32 128 256 512
-do
-  XSIZE="${SIZE}x${SIZE}"
-  DST_PATH="${APP_DIR}/usr/share/icons/hicolor/${XSIZE}/apps/"
-  DOUBLE_SIZE_DST_PATH="${APP_DIR}/usr/share/icons/hicolor/${XSIZE}@2/apps/"
-  mkdir -p "${DST_PATH}" "${DOUBLE_SIZE_DST_PATH}"
-  cp "${SRC_ICONSET_DIR}/icon_${XSIZE}.png" "${DST_PATH}/codetracer.png"
-  cp "${SRC_ICONSET_DIR}/icon_${XSIZE}@2x.png" "${DOUBLE_SIZE_DST_PATH}/codetracer.png"
+for SIZE in 16 32 128 256 512; do
+	XSIZE="${SIZE}x${SIZE}"
+	DST_PATH="${APP_DIR}/usr/share/icons/hicolor/${XSIZE}/apps/"
+	DOUBLE_SIZE_DST_PATH="${APP_DIR}/usr/share/icons/hicolor/${XSIZE}@2/apps/"
+	mkdir -p "${DST_PATH}" "${DOUBLE_SIZE_DST_PATH}"
+	cp "${SRC_ICONSET_DIR}/icon_${XSIZE}.png" "${DST_PATH}/codetracer.png"
+	cp "${SRC_ICONSET_DIR}/icon_${XSIZE}@2x.png" "${DOUBLE_SIZE_DST_PATH}/codetracer.png"
 done
 
 # From the spec:
@@ -261,10 +258,10 @@ done
 # If a PNG file, the icon SHOULD be of size 256x256, 512x512, or 1024x1024 pixels.
 cp "${ROOT_PATH}/resources/Icon.iconset/icon_256x256.png" "${APP_DIR}/codetracer.png"
 
-if [[ "$CURRENT_ARCH" == "aarch64" ]]; then
-  INTERPRETER_PATH=/lib/ld-linux-aarch64.so.1
+if [[ $CURRENT_ARCH == "aarch64" ]]; then
+	INTERPRETER_PATH=/lib/ld-linux-aarch64.so.1
 else
-  INTERPRETER_PATH=/lib64/ld-linux-x86-64.so.2
+	INTERPRETER_PATH=/lib64/ld-linux-x86-64.so.2
 fi
 
 # Patchelf the executable's interpreter
@@ -296,25 +293,33 @@ patchelf --remove-rpath "${APP_DIR}"/bin/ct-remote
 patchelf --remove-rpath "${APP_DIR}"/lib/libicui18n.so.76
 patchelf --remove-rpath "${APP_DIR}"/lib/libgssapi_krb5.so.2
 
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct_unwrapped
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/db-backend
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/db-backend-record
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/backend-manager
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/nargo
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/wazero
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ctags
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/curl
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/node
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/ruby/bin/ruby
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/bin/ct-remote
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/lib/libicui18n.so.76
-patchelf --set-rpath "\$ORIGIN/../lib" "${APP_DIR}"/lib/libgssapi_krb5.so.2
+# Set rpath for binaries and libraries
+# Note: $ORIGIN is an ELF rpath token, not a shell variable - it should NOT be expanded
+RPATH_BINARIES=(
+	"${APP_DIR}"/bin/node
+	"${APP_DIR}"/bin/ct_unwrapped
+	"${APP_DIR}"/bin/db-backend
+	"${APP_DIR}"/bin/db-backend-record
+	"${APP_DIR}"/bin/backend-manager
+	"${APP_DIR}"/bin/nargo
+	"${APP_DIR}"/bin/wazero
+	"${APP_DIR}"/bin/ctags
+	"${APP_DIR}"/bin/curl
+	"${APP_DIR}"/bin/node
+	"${APP_DIR}"/ruby/bin/ruby
+	"${APP_DIR}"/bin/ct-remote
+	"${APP_DIR}"/lib/libicui18n.so.76
+	"${APP_DIR}"/lib/libgssapi_krb5.so.2
+)
+for binary in "${RPATH_BINARIES[@]}"; do
+	# shellcheck disable=SC2016
+	patchelf --set-rpath '$ORIGIN/../lib' "$binary"
+done
 
 APPIMAGE_ARCH=$CURRENT_ARCH
-if [[ "$APPIMAGE_ARCH" == "aarch64" ]]; then
-  # The appimagetool has its own convention for specifying the ARM64 arch
-  APPIMAGE_ARCH=arm_aarch64
+if [[ $APPIMAGE_ARCH == "aarch64" ]]; then
+	# The appimagetool has its own convention for specifying the ARM64 arch
+	APPIMAGE_ARCH=arm_aarch64
 fi
 
 # Use AppImage tool to create AppImage itself

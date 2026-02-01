@@ -87,7 +87,7 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
 
     var processOptions = options
     if processOptions.stdio.isNil: # nil or undefined
-      processOptions.stdio = cstring"ignore" 
+      processOptions.stdio = cstring"ignore"
       # make sure we don't let it be the default/not set
       # as this seems to lead to pass it to internal buffer/events
       # and as we might not handle that, this leads to hanging?
@@ -672,7 +672,7 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
 proc restartDbBackend {.async.} =
   # copied and adapted from Petar's code for re-recording + re-replaying up in this file
   #   or at least based on it/reusing its helpers completely
-  #   it's almost the same, but we're not re-recording, 
+  #   it's almost the same, but we're not re-recording,
   #   just re-replaying the same trace and restarting
   #   db-backend with it
   #   and in the frontend we don't delete/reinit the layout in this case

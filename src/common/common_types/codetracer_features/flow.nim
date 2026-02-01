@@ -121,7 +121,7 @@ type
   CtLoadFlowArguments* = ref object
     flowMode*: FlowMode
     location*: Location # empty/ignored for FlowMode.Diff
-  
+
 
 
 proc toLineFlowKind*(flow: FlowViewUpdate, position: int, finished: bool): LineFlowKind =

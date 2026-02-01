@@ -10,6 +10,6 @@ path = "src/main.rs"
 [lib]
 name = "rust_sample_project_lib"
 path = "src/lib.rs"
-crate-type   = ["rlib", "cdylib"]
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]

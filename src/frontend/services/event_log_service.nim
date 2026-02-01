@@ -69,7 +69,7 @@ proc loadTerminal*(self: EventLogService) =
 #   let escaped = cstring(escapedString)
 #   return escaped
 
-# data.services.eventLog.onUpdatedTrace = proc(self: EventLogService, response: TraceUpdate) {.async.} = 
+# data.services.eventLog.onUpdatedTrace = proc(self: EventLogService, response: TraceUpdate) {.async.} =
 #   let id = data.ui.activeFocus.id
 #   let eventComponent = cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][id])
 #   eventComponent.denseTable.context.ajax.reload()

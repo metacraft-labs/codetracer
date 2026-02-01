@@ -49,8 +49,8 @@ async/iterator stepping:
         else: ok
 
    OK, for C++ it's different: we might keep a separate logic for now
-   
-   libdill: 
+
+   libdill:
      * normal-or-worker context, prologue, wrapper, potential-switch context
 
      step-in or next: beginning, otherwise same

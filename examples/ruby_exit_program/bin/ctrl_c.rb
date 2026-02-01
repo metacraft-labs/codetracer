@@ -12,7 +12,6 @@ def run_forever
     puts "\nReceived CTRL + C. Exiting gracefully..."
     exit
   end
-  
+
   puts "This script will run endlessly until manually interrupted with CTRL + C."
   run_forever
-  

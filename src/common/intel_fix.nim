@@ -38,7 +38,7 @@
 # const cpuidRaptorLake* = 0xB0670
 
 proc workaroundIntelECoreProblem* =
-  discard 
+  discard
   # TODO: enable this or move this to rr/gdb backend
   # it's linux specific currently
   # and it's needed for rr only

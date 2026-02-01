@@ -4,7 +4,7 @@ type Message = enum
   Other
 
 type ResponseBody = object
-  
+
   Attach
   BreakpointLocations(BreakpointLocationsResponse)
   Completions(CompletionsResponse)
@@ -50,4 +50,4 @@ type
     request_seq: int
     success: bool
     command: string
-    response: 
+    response:

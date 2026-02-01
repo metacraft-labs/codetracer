@@ -3,8 +3,8 @@
 set -euo pipefail
 
 if [[ $# -ne 3 ]]; then
-  echo "Usage: $0 <target-os> <target-arch> <output-dir>" >&2
-  exit 1
+	echo "Usage: $0 <target-os> <target-arch> <output-dir>" >&2
+	exit 1
 fi
 
 TARGET_OS="$1"
@@ -15,35 +15,35 @@ CT_REMOTE_VERSION="${CT_REMOTE_VERSION:-102d2c8}"
 BASE_URL="https://downloads.codetracer.com/DesktopClient.App"
 
 case "${TARGET_OS}" in
-  linux)
-    case "${TARGET_ARCH}" in
-      amd64|x86_64)
-        ARCHIVE="DesktopClient.App-linux-x64-${CT_REMOTE_VERSION}.tar.gz"
-        ;;
-      *)
-        echo "Unsupported Linux architecture for ct-remote: ${TARGET_ARCH}" >&2
-        exit 1
-        ;;
-    esac
-    ;;
-  macos)
-    case "${TARGET_ARCH}" in
-      amd64|x86_64)
-        ARCHIVE="DesktopClient.App-osx-x64-${CT_REMOTE_VERSION}.tar.gz"
-        ;;
-      arm64|aarch64)
-        ARCHIVE="DesktopClient.App-osx-arm64-${CT_REMOTE_VERSION}.tar.gz"
-        ;;
-      *)
-        echo "Unsupported macOS architecture for ct-remote: ${TARGET_ARCH}" >&2
-        exit 1
-        ;;
-    esac
-    ;;
-  *)
-    echo "Unsupported operating system for ct-remote: ${TARGET_OS}" >&2
-    exit 1
-    ;;
+linux)
+	case "${TARGET_ARCH}" in
+	amd64 | x86_64)
+		ARCHIVE="DesktopClient.App-linux-x64-${CT_REMOTE_VERSION}.tar.gz"
+		;;
+	*)
+		echo "Unsupported Linux architecture for ct-remote: ${TARGET_ARCH}" >&2
+		exit 1
+		;;
+	esac
+	;;
+macos)
+	case "${TARGET_ARCH}" in
+	amd64 | x86_64)
+		ARCHIVE="DesktopClient.App-osx-x64-${CT_REMOTE_VERSION}.tar.gz"
+		;;
+	arm64 | aarch64)
+		ARCHIVE="DesktopClient.App-osx-arm64-${CT_REMOTE_VERSION}.tar.gz"
+		;;
+	*)
+		echo "Unsupported macOS architecture for ct-remote: ${TARGET_ARCH}" >&2
+		exit 1
+		;;
+	esac
+	;;
+*)
+	echo "Unsupported operating system for ct-remote: ${TARGET_OS}" >&2
+	exit 1
+	;;
 esac
 
 mkdir -p "${OUTPUT_DIR}"

@@ -12,7 +12,7 @@ Adjust the steps below for your use case or run the exact steps to launch the de
    1. Navigate to your WASM project directory.
 
    Example: ```cd codeTracer/examples/wasm_sample_atomic```
-   
+
    2. Compile the rust source code to WASM
 
    Example: ```rustc --target=wasm32-wasip1 ./sample_atomic.rs -g```

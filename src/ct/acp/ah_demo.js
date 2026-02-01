@@ -30,10 +30,10 @@ var NNI33555116 = {kind: 2, len: 0, offset: 0, typ: null, name: null, sons: []};
 NTI33555116.node = NNI33555116;
 NTI33555167.base = NTI33555115;
 NTI33555168.base = NTI33555115;
-var NNI33555115 = {kind: 2, len: 5, offset: 0, typ: null, name: null, sons: [{kind: 1, offset: "parent", len: 0, typ: NTI33555167, name: "parent", sons: null}, 
-{kind: 1, offset: "name", len: 0, typ: NTI33554440, name: "name", sons: null}, 
-{kind: 1, offset: "message", len: 0, typ: NTI33554439, name: "msg", sons: null}, 
-{kind: 1, offset: "trace", len: 0, typ: NTI33554439, name: "trace", sons: null}, 
+var NNI33555115 = {kind: 2, len: 5, offset: 0, typ: null, name: null, sons: [{kind: 1, offset: "parent", len: 0, typ: NTI33555167, name: "parent", sons: null},
+{kind: 1, offset: "name", len: 0, typ: NTI33554440, name: "name", sons: null},
+{kind: 1, offset: "message", len: 0, typ: NTI33554439, name: "msg", sons: null},
+{kind: 1, offset: "trace", len: 0, typ: NTI33554439, name: "trace", sons: null},
 {kind: 1, offset: "up", len: 0, typ: NTI33555168, name: "up", sons: null}]};
 NTI33555115.node = NNI33555115;
 var NNI33555086 = {kind: 2, len: 0, offset: 0, typ: null, name: null, sons: []};
@@ -51,7 +51,7 @@ NTI33555131.base = NTI33555116;
 var NNI33555124 = {kind: 2, len: 0, offset: 0, typ: null, name: null, sons: []};
 NTI33555124.node = NNI33555124;
 NTI33555124.base = NTI33555123;
-var NNI637540756 = {kind: 2, len: 2, offset: 0, typ: null, name: null, sons: [{kind: 1, offset: "a", len: 0, typ: NTI637540277, name: "a", sons: null}, 
+var NNI637540756 = {kind: 2, len: 2, offset: 0, typ: null, name: null, sons: [{kind: 1, offset: "a", len: 0, typ: NTI637540277, name: "a", sons: null},
 {kind: 1, offset: "b", len: 0, typ: NTI33554456, name: "b", sons: null}]};
 NTI637540756.node = NNI637540756;
 var NNI33555128 = {kind: 2, len: 0, offset: 0, typ: null, name: null, sons: []};
@@ -78,9 +78,9 @@ function setConstr() {
       }
     }
     return result;
-  
 
-  
+
+
 }
 var ConstSet1 = setConstr(17, 16, 4, 18, 27, 19, 23, 22, 21);
 
@@ -98,7 +98,7 @@ function nimCopy(dest_33557140, src_33557141, ti_33557142) {
       else {
         result_33557151 = [src_33557141[0], src_33557141[1]];
       }
-      
+
       break;
     case 19:
             if (dest_33557140 === null || dest_33557140 === undefined) {
@@ -109,7 +109,7 @@ function nimCopy(dest_33557140, src_33557141, ti_33557142) {
       }
       for (var key in src_33557141) { dest_33557140[key] = src_33557141[key]; }
       result_33557151 = dest_33557140;
-    
+
       break;
     case 18:
     case 17:
@@ -142,15 +142,15 @@ function nimCopy(dest_33557140, src_33557141, ti_33557142) {
           result_33557151[i] = nimCopy(result_33557151[i], src_33557141[i], ti_33557142.base);
         }
       }
-    
+
       break;
     case 28:
             if (src_33557141 !== null) {
         result_33557151 = src_33557141.slice(0);
       }
-    
+
       break;
-    default: 
+    default:
       result_33557151 = src_33557141;
       break;
     }
@@ -187,13 +187,13 @@ function toJSStr(s_33556807) {
                   else {
                   helper_33556857.push("%");;
                   }
-                  
+
                   helper_33556857.push(code_33556858);;
                   i_33556843 += 1;
                     if (((s_33556807).length <= i_33556843)) Temporary5 = true; else {                      Temporary5 = (s_33556807[i_33556843] < 128);                    }                  if (Temporary5) {
                   break Label3;
                   }
-                  
+
                   c_33556845 = s_33556807[i_33556843];
                 }
             } while (false);
@@ -210,7 +210,7 @@ function toJSStr(s_33556807) {
             } finally {
             }
           }
-          
+
           j_33556844 += 1;
         }
     } while (false);
@@ -228,16 +228,16 @@ function rawEcho() {
         buf += toJSStr(arguments[i]);
       }
       console.log(buf);
-    
 
-  
+
+
 }
 
 function mnewString(len_33556893) {
         return new Array(len_33556893);
-  
 
-  
+
+
 }
 
 function makeNimstrLit(c_33556801) {
@@ -246,9 +246,9 @@ function makeNimstrLit(c_33556801) {
     result[i] = c_33556801.charCodeAt(i);
   }
   return result;
-  
 
-  
+
+
 }
 
 function raiseException(e_33556667, ename_33556668) {
@@ -256,19 +256,19 @@ function raiseException(e_33556667, ename_33556668) {
     if ((excHandler == 0)) {
     unhandledException(e_33556667);
     }
-    
+
     throw e_33556667;
 
-  
+
 }
 
 function addInt(a_33556940, b_33556941) {
         var result = a_33556940 + b_33556941;
     checkOverflowInt(result);
     return result;
-  
 
-  
+
+
 }
 var ConstSet2 = setConstr(60, 62, 94);
 
@@ -285,7 +285,7 @@ function chckRange(i_33557189, a_33557190, b_33557191) {
     else {
     raiseRangeError();
     }
-    
+
   } while (false);
 
   return result_33557192;
@@ -305,7 +305,7 @@ function chckIndx(i_33557184, a_33557185, b_33557186) {
     else {
     raiseIndexError(i_33557184, a_33557185, b_33557186);
     }
-    
+
   } while (false);
 
   return result_33557187;
@@ -321,34 +321,34 @@ function subInt(a_33556944, b_33556945) {
         var result = a_33556944 - b_33556945;
     checkOverflowInt(result);
     return result;
-  
 
-  
+
+
 }
 
 function divInt(a_33556952, b_33556953) {
         if (b_33556953 == 0) raiseDivByZero();
     if (b_33556953 == -1 && a_33556952 == 2147483647) raiseOverflow();
     return Math.trunc(a_33556952 / b_33556953);
-  
 
-  
+
+
 }
 
 function mulInt(a_33556948, b_33556949) {
         var result = a_33556948 * b_33556949;
     checkOverflowInt(result);
     return result;
-  
 
-  
+
+
 }
 var ConstSet8 = setConstr([65, 90], [97, 122]);
 
 function addChar(x_33557255, c_33557256) {
     x_33557255.push(c_33557256);
 
-  
+
 }
 
 function cstrToNimstr(c_33556804) {
@@ -385,9 +385,9 @@ function cstrToNimstr(c_33556804) {
     ++r;
   }
   return result;
-  
 
-  
+
+
 }
 if (!Math.trunc) {
   Math.trunc = function(v) {
@@ -435,24 +435,24 @@ function nimCopyAux(dest_33557144, src_33557145, n_33557146) {
       break;
     case 1:
             dest_33557144[n_33557146.offset] = nimCopy(dest_33557144[n_33557146.offset], src_33557145[n_33557146.offset], n_33557146.typ);
-    
+
       break;
     case 2:
           for (var i = 0; i < n_33557146.sons.length; i++) {
       nimCopyAux(dest_33557144, src_33557145, n_33557146.sons[i]);
     }
-    
+
       break;
     case 3:
             dest_33557144[n_33557146.offset] = nimCopy(dest_33557144[n_33557146.offset], src_33557145[n_33557146.offset], n_33557146.typ);
       for (var i = 0; i < n_33557146.sons.length; ++i) {
         nimCopyAux(dest_33557144, src_33557145, n_33557146.sons[i][1]);
       }
-    
+
       break;
     }
 
-  
+
 }
 
 function newSeq_33556825(len_33556827) {
@@ -470,9 +470,9 @@ function add_33556419(x_33556420, x_33556420_Idx, y_33556421) {
       for (var i = 0; i < y_33556421.length; ++i) {
         x_33556420[x_33556420_Idx][off+i] = y_33556421.charCodeAt(i);
       }
-    
 
-  
+
+
 }
 
 function unhandledException(e_33556663) {
@@ -484,7 +484,7 @@ function unhandledException(e_33556663) {
     else {
     buf_33556664[0].push.apply(buf_33556664[0], makeNimstrLit("Error: unhandled exception"));;
     }
-    
+
     buf_33556664[0].push.apply(buf_33556664[0], makeNimstrLit(" ["));;
     add_33556419(buf_33556664, 0, e_33556663.name);
     buf_33556664[0].push.apply(buf_33556664[0], makeNimstrLit("]\x0A"));;
@@ -495,28 +495,28 @@ function unhandledException(e_33556663) {
   else {
     throw cbuf_33556665;
   }
-  
 
-  
+
+
 }
 
 function raiseOverflow() {
     raiseException({message: makeNimstrLit("over- or underflow"), parent: null, m_type: NTI33555125, name: null, trace: [], up: null}, "OverflowDefect");
 
-  
+
 }
 
 function checkOverflowInt(a_33556938) {
         if (a_33556938 > 2147483647 || a_33556938 < -2147483648) raiseOverflow();
-  
 
-  
+
+
 }
 
 function raiseRangeError() {
     raiseException({message: makeNimstrLit("value out of range"), parent: null, m_type: NTI33555133, name: null, trace: [], up: null}, "RangeDefect");
 
-  
+
 }
 
 function addChars_251658415(result_251658417, result_251658417_Idx, x_251658418, start_251658419, n_251658420) {
@@ -535,25 +535,25 @@ function addChars_251658415(result_251658417, result_251658417_Idx, x_251658418,
       } while (false);
     } while (false);
 
-  
+
 }
 
 function addChars_251658411(result_251658413, result_251658413_Idx, x_251658414) {
     addChars_251658415(result_251658413, result_251658413_Idx, x_251658414, 0, ((x_251658414) == null ? 0 : (x_251658414).length));
 
-  
+
 }
 
 function addInt_251658436(result_251658437, result_251658437_Idx, x_251658438) {
     addChars_251658411(result_251658437, result_251658437_Idx, ((x_251658438) + ""));
 
-  
+
 }
 
 function addInt_251658457(result_251658458, result_251658458_Idx, x_251658459) {
     addInt_251658436(result_251658458, result_251658458_Idx, x_251658459);
 
-  
+
 }
 
 function HEX24_335544323(x_335544324) {
@@ -574,16 +574,16 @@ function raiseIndexError(i_33556754, a_33556755, b_33556756) {
     else {
     Temporary1 = (makeNimstrLit("index ") || []).concat(HEX24_335544323(i_33556754) || [],makeNimstrLit(" not in ") || [],HEX24_335544323(a_33556755) || [],makeNimstrLit(" .. ") || [],HEX24_335544323(b_33556756) || []);
     }
-    
+
     raiseException({message: nimCopy(null, Temporary1, NTI33554439), parent: null, m_type: NTI33555131, name: null, trace: [], up: null}, "IndexDefect");
 
-  
+
 }
 
 function raiseDivByZero() {
     raiseException({message: makeNimstrLit("division by zero"), parent: null, m_type: NTI33555124, name: null, trace: [], up: null}, "DivByZeroDefect");
 
-  
+
 }
 
 function parseSaturatedNatural_469762364(s_469762365, b_469762366, b_469762366_Idx, start_469762367) {
@@ -596,7 +596,7 @@ function parseSaturatedNatural_469762364(s_469762365, b_469762366, b_469762366_I
     if (((i_469762369 < (s_469762365).length) && (s_469762365[chckIndx(i_469762369, 0, (s_469762365).length - 1)] == 43))) {
     i_469762369 = addInt(i_469762369, 1);
     }
-    
+
       if (!(i_469762369 < (s_469762365).length)) Temporary1 = false; else {        Temporary1 = (ConstSet6[s_469762365[chckIndx(i_469762369, 0, (s_469762365).length - 1)]] != undefined);      }    if (Temporary1) {
     b_469762366[b_469762366_Idx] = 0;
     Label2: do {
@@ -609,7 +609,7 @@ function parseSaturatedNatural_469762364(s_469762365, b_469762366, b_469762366_I
           else {
             b_469762366[b_469762366_Idx] = 2147483647;
           }
-          
+
           i_469762369 = addInt(i_469762369, 1);
           Label5: do {
               Label6: while (true) {
@@ -621,7 +621,7 @@ function parseSaturatedNatural_469762364(s_469762365, b_469762366, b_469762366_I
     } while (false);
     result_469762368 = subInt(i_469762369, start_469762367);
     }
-    
+
 
   return result_469762368;
 
@@ -685,17 +685,17 @@ function parseStandardFormatSpecifier_973078586(s_973078587, start_973078588, ig
     result_973078590.sign = s_973078587[chckIndx(i_973078592, 0, (s_973078587).length - 1)];
     i_973078592 = addInt(i_973078592, 1);
     }
-    
+
     if (((i_973078592 < (s_973078587).length) && (s_973078587[chckIndx(i_973078592, 0, (s_973078587).length - 1)] == 35))) {
     result_973078590.alternateForm = true;
     i_973078592 = addInt(i_973078592, 1);
     }
-    
+
       if (!((addInt(i_973078592, 1) < (s_973078587).length) && (s_973078587[chckIndx(i_973078592, 0, (s_973078587).length - 1)] == 48))) Temporary1 = false; else {        Temporary1 = (ConstSet5[s_973078587[chckIndx(addInt(i_973078592, 1), 0, (s_973078587).length - 1)]] != undefined);      }    if (Temporary1) {
     result_973078590.padWithZero = true;
     i_973078592 = addInt(i_973078592, 1);
     }
-    
+
     var parsedLength_973078629 = parseSaturatedNatural_469762364(s_973078587, result_973078590, "minimumWidth", i_973078592);
     i_973078592 = addInt(i_973078592, parsedLength_973078629);
     if (((i_973078592 < (s_973078587).length) && (s_973078587[chckIndx(i_973078592, 0, (s_973078587).length - 1)] == 46))) {
@@ -706,17 +706,17 @@ function parseStandardFormatSpecifier_973078586(s_973078587, start_973078588, ig
     else {
       result_973078590.precision = -1;
     }
-    
+
       if (!(i_973078592 < (s_973078587).length)) Temporary2 = false; else {        Temporary2 = (ConstSet8[s_973078587[chckIndx(i_973078592, 0, (s_973078587).length - 1)]] != undefined);      }    if (Temporary2) {
     result_973078590.typ = s_973078587[chckIndx(i_973078592, 0, (s_973078587).length - 1)];
     i_973078592 = addInt(i_973078592, 1);
     }
-    
+
     result_973078590.endPosition = i_973078592;
       if (!!((i_973078592 == (s_973078587).length))) Temporary3 = false; else {        Temporary3 = !(ignoreUnknownSuffix_973078589);      }    if (Temporary3) {
     raiseException({message: (makeNimstrLit("invalid format string, cannot parse: ") || []).concat(HEX5BHEX5D_637537448(s_973078587, HEX2EHEX2E_637537421(i_973078592, 1)) || []), parent: null, m_type: NTI33555128, name: null, trace: [], up: null}, "ValueError");
     }
-    
+
 
   return result_973078590;
 
@@ -814,7 +814,7 @@ function runeOffset_637534845(s_637534846, pos_637534847, start_637534848) {
           result_637534849 = -1;
           break BeforeRet;
           }
-          
+
           i_637534850 = addInt(i_637534850, 1);
         }
     } while (false);
@@ -851,7 +851,7 @@ function validateUtf8_637534485(s_637534486) {
           result_637534487 = i_637534488;
           break BeforeRet;
           }
-          
+
             if (!(addInt(i_637534488, 1) < L_637534489)) Temporary3 = false; else {              Temporary3 = ((s_637534486[chckIndx(addInt(i_637534488, 1), 0, (s_637534486).length - 1)] >>> 6) == 2);            }          if (Temporary3) {
           i_637534488 = addInt(i_637534488, 2);
           }
@@ -859,7 +859,7 @@ function validateUtf8_637534485(s_637534486) {
             result_637534487 = i_637534488;
             break BeforeRet;
           }
-          
+
           }
           else {
           if (((s_637534486[chckIndx(i_637534488, 0, (s_637534486).length - 1)] >>> 4) == 14)) {
@@ -870,7 +870,7 @@ function validateUtf8_637534485(s_637534486) {
             result_637534487 = i_637534488;
             break BeforeRet;
           }
-          
+
           }
           else {
           if (((s_637534486[chckIndx(i_637534488, 0, (s_637534486).length - 1)] >>> 3) == 30)) {
@@ -881,7 +881,7 @@ function validateUtf8_637534485(s_637534486) {
             result_637534487 = i_637534488;
             break BeforeRet;
           }
-          
+
           }
           else {
             result_637534487 = i_637534488;
@@ -936,7 +936,7 @@ function alignString_973078548(s_973078549, minimumWidth_973078550, align_973078
       else {
       Temporary1 = (s_973078549).length;
       }
-      
+
       var sRuneLen_973078554 = Temporary1;
       var toFill_973078555 = subInt(minimumWidth_973078550, sRuneLen_973078554);
       if ((toFill_973078555 <= 0)) {
@@ -956,7 +956,7 @@ function alignString_973078548(s_973078549, minimumWidth_973078550, align_973078
       }
       }}
     }
-    
+
 
   return result_973078553;
 
@@ -969,7 +969,7 @@ function formatValue_973078690(result_973078691, result_973078691_Idx, value_973
     case 115:
     case 0:
       break;
-    default: 
+    default:
       raiseException({message: (makeNimstrLit("invalid type in format string for string, expected \'s\', but got ") || []).concat([spec_973078694.typ]), parent: null, m_type: NTI33555128, name: null, trace: [], up: null}, "ValueError");
       break;
     }
@@ -977,12 +977,12 @@ function formatValue_973078690(result_973078691, result_973078691_Idx, value_973
     if ((spec_973078694.precision < nucruneLen(value_973078695))) {
     (value_973078695.length = chckRange(runeOffset_637534845(value_973078695, chckRange(spec_973078694.precision, 0, 2147483647), 0), 0, 2147483647));
     }
-    
+
     }
-    
+
     result_973078691[result_973078691_Idx].push.apply(result_973078691[result_973078691_Idx], alignString_973078548(value_973078695, spec_973078694.minimumWidth, spec_973078694.align, spec_973078694.fill));;
 
-  
+
 }
 
 function addEscapedChar_33557860(s_33557861, s_33557861_Idx, c_33557862) {
@@ -1114,7 +1114,7 @@ function addEscapedChar_33557860(s_33557861, s_33557861_Idx, c_33557862) {
     case 126:
       addChar(s_33557861[s_33557861_Idx], c_33557862);;
       break;
-    default: 
+    default:
       s_33557861[s_33557861_Idx].push.apply(s_33557861[s_33557861_Idx], makeNimstrLit("\\x"));;
       var n_33557872 = c_33557862;
       addChar(s_33557861[s_33557861_Idx], makeNimstrLit("0123456789ABCDEF")[chckIndx(((n_33557872 & 240) >> 4), 0, (makeNimstrLit("0123456789ABCDEF")).length - 1)]);;
@@ -1122,7 +1122,7 @@ function addEscapedChar_33557860(s_33557861, s_33557861_Idx, c_33557862) {
       break;
     }
 
-  
+
 }
 
 function addQuoted_704643207(s_704643209, s_704643209_Idx, x_704643210) {
@@ -1141,32 +1141,32 @@ function addQuoted_704643207(s_704643209, s_704643209_Idx, x_704643210) {
             else {
             addChar(s_704643209[s_704643209_Idx], c_704643211);;
             }
-            
+
             iHEX60gensym6_704643337 = addInt(iHEX60gensym6_704643337, 1);
           }
       } while (false);
     } while (false);
     s_704643209[s_704643209_Idx].push.apply(s_704643209[s_704643209_Idx], makeNimstrLit("\""));;
 
-  
+
 }
 
 function sysFatal_218103842(message_218103845) {
     raiseException({message: nimCopy(null, message_218103845, NTI33554439), m_type: NTI33555127, parent: null, name: null, trace: [], up: null}, "AssertionDefect");
 
-  
+
 }
 
 function raiseAssert_218103840(msg_218103841) {
     sysFatal_218103842(msg_218103841);
 
-  
+
 }
 
 function failedAssertImpl_218103864(msg_218103865) {
     raiseAssert_218103840(msg_218103865);
 
-  
+
 }
 
 function collectionToString_704643174(x_704643176, prefix_704643177, separator_704643178, suffix_704643179) {
@@ -1188,19 +1188,19 @@ function collectionToString_704643174(x_704643176, prefix_704643177, separator_7
             else {
             result_704643180[0].push.apply(result_704643180[0], separator_704643178);;
             }
-            
+
             if ((value_704643203 == null)) {
             result_704643180[0].push.apply(result_704643180[0], makeNimstrLit("nil"));;
             }
             else {
             addQuoted_704643207(result_704643180, 0, value_704643203);
             }
-            
+
             i_704643332 += 1;
             if (!(((x_704643176).length == L_704643333))) {
             failedAssertImpl_218103864(makeNimstrLit("/nix/store/j65r5dnbk40vnpx9dz9w0s8aa1wcs3wg-nim-unwrapped-1.6.20/nim/lib/system/iterators.nim:240:11 `len(a) == L` the length of the seq changed while iterating over it"));
             }
-            
+
           }
       } while (false);
     } while (false);
@@ -1222,13 +1222,13 @@ function HEX24_704643170(x_704643172) {
 function formatValue_704643165(result_704643167, result_704643167_Idx, value_704643168, specifier_704643169) {
     formatValue_973078690(result_704643167, result_704643167_Idx, HEX24_704643170(value_704643168), specifier_704643169);
 
-  
+
 }
 
 function isNimException_33556519() {
     return lastJSError && lastJSError.m_type;
 
-  
+
 }
 
 function getCurrentExceptionMsg_33556532() {
@@ -1245,16 +1245,16 @@ function getCurrentExceptionMsg_33556532() {
             if (lastJSError.message !== undefined) {
         msg_33556538 = lastJSError.message;
       }
-      
+
       if (!((msg_33556538 == null))) {
       result_33556533 = nimCopy(null, cstrToNimstr(msg_33556538), NTI33554439);
       break BeforeRet;
       }
-      
+
     }
-    
+
     }
-    
+
     result_33556533 = nimCopy(null, [], NTI33554439);
     break BeforeRet;
   } while (false);
@@ -1277,7 +1277,7 @@ async function main_704643139() {
       else {
       Temporary2 = "ah";
       }
-      
+
     } while (false);
     var cmd_704643148 = Temporary2;
     Label3: do {
@@ -1288,7 +1288,7 @@ async function main_704643139() {
       else {
       Temporary4 = defaultArgs_704643082;
       }
-      
+
     } while (false);
     var args_704643150 = nimCopy(null, Temporary4, NTI704643086);
     Label5: do {

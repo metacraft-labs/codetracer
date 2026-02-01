@@ -1,11 +1,13 @@
 # `ct host` reload resilience – status
 
 ## References
+
 - ADR: `0006-ct-host-reload-resilience.md`
 - Plan: `ct-host-reload-resilience-implementation-plan.md`
 - Testing overview: see “Automated coverage”/“Manual verification” sections in the plan for suite placement.
 
 ## Key files
+
 - `src/frontend/index/server_config.nim` — Express/socket.io server wiring; sets `ipc.socket` on connection.
 - `src/frontend/index/base_handlers.nim` — IPC plumbing; `FrontendIPC` type and `indexIpcHandlers` macro that currently binds handlers to a single socket.
 - `src/frontend/index/ipc_utils.nim` — `ready()` registers handlers and defines the `mainWindow.webContents.send` shim for server mode.
@@ -14,6 +16,7 @@
 - `src/frontend/index/electron_vars.nim`/`window.nim` — Globals and send/recv setup that will need to route through the new registry.
 
 ## Progress
+
 - Established root cause (handlers pinned to first socket) and documented solution in ADR/plan.
 - Added TDD scenarios to the plan for registry/rebind behavior.
 - Added headless test scaffold for registry attach/detach (`src/frontend/tests/ipc_registry_test.nim`) and implemented `ipc_registry` with attach/detach bindings; test now passes via `nim js -r src/frontend/tests/ipc_registry_test.nim`.
@@ -32,5 +35,6 @@
 - Added a headless host-mode smoke test that drives `server_index.js` through welcome, edit, and shell-ui flows and asserts cached bootstrap replay after reconnect (`tests/reload_bootstrap_host.js`); includes a `--welcome-screen` start flag so server builds can enter the welcome flow under test.
 
 ## Next tasks (Part 3)
+
 - Wire the reconnect coverage into CI (tester `ui` + Playwright reload) so reload resilience runs automatically during PR checks.
 - Fill out the remaining validation/doc tasks from the plan once CI coverage lands.

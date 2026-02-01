@@ -11,7 +11,7 @@ let
   defaultLayoutPath* = "default_layout.json"
 
 when not defined(ctRenderer):
-  import 
+  import
     std / os,
     paths
 
@@ -55,5 +55,3 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
   for key, value in conflicts:
     result.conflictList.add((key, value))
   return result
-
-

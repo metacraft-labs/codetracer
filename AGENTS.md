@@ -1,6 +1,6 @@
 # Instructions for Codex
 
-To build the db-backend, run: 
+To build the db-backend, run:
 
 ```
 # inside src/db-backend

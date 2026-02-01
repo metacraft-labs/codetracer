@@ -1,4 +1,4 @@
-search 
+search
 ==========
 
 An idea for a possible feature:
@@ -82,7 +82,7 @@ Sources:
 
 4) Online result: TODO maybe load from some kind of existing storage if needed
 
-5) Some kind of file/json data: TODO we can read a file with addresses or names needed for search 
+5) Some kind of file/json data: TODO we can read a file with addresses or names needed for search
 
 Operations:
 
@@ -90,7 +90,7 @@ Operations:
 
 2) `map`: just mapping a field or sub range
 
-3) Access to field 
+3) Access to field
 
 4) Access to sub range
 
@@ -123,7 +123,7 @@ a     (onclick jumps there)
 b     (onclick jumps there)
 ```
 
-TODO more 
+TODO more
 
 Design:
 
@@ -135,14 +135,14 @@ Notes:
 That's a big feature: it can be very useful, as almost a central way to analyze a program/trace, but also very complicated and time-consuming. I'd propose to write a small part of the functionality/sources code to showcase how useful it can be/to have a working example : as part of the work on normal ctrlp/search functionality (which needs some of this already).
 this can be done in limited amount of hours reserved for more experimental/rest from normal tasks work, or out of my work hours possibly.
 
-However, the focus is on documenting the idea and discussing it: it's clear that it's just one possible direction of codetracer 
+However, the focus is on documenting the idea and discussing it: it's clear that it's just one possible direction of codetracer
 
 @events |? WRITE
 
 -> Filter(Name("events"), FilterArg::NameMatch("WRITE"))
 -> events returns an events object it implements filter_by_name_match which returns needed
 
-value == 5 
+value == 5
 
 -> Cmp(Op::Eq, Name("value"), Int(5))
 
@@ -154,7 +154,7 @@ value > 5 # same
 
 value | line-chart
 
-draw line chart 
+draw line chart
 
 @calls |? parse_* |? .depth > 4
 
@@ -167,9 +167,9 @@ At: -> CallFilter
 . Cmp(Expr("value"), int)
 -> Pipe ->
 
-search through 
+search through
 
-Calls -> parse iterator 
+Calls -> parse iterator
 combined with depth filter
 final one runs after
 
@@ -185,7 +185,7 @@ For simplest for now
 
 Query parsing: maybe backend <-> frontend for highlighting/completion: yes because completion easier from backend!
 so send query to backend!
-parse -> 
+parse ->
 
 
 frontend -program-query-> backend
@@ -207,7 +207,7 @@ frontend:
   or for error: just show the error: notification or as a single result?
 
 first:
-  sending query 
+  sending query
   normal is just normal
   ! is for commands
   ? for search
@@ -215,9 +215,8 @@ first:
   parsing, sending results
 
   if hard, minimal interface
-  
-  
+
+
 terminal:
   show if under some limit
   if over, for now only show up to it (or eventually by scrolling?)
-  

@@ -1,6 +1,6 @@
 import
   results,
-  ui_imports, 
+  ui_imports,
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
 
@@ -72,7 +72,7 @@ proc action(self: DebugComponent, id: string) =
 
   # TODO: a special case: or remove, as currently we
   #   directly restart db-backend anyway?
-  #   or make several options for 
+  #   or make several options for
   #     * ) again, restoring a more gradual/internal for db-backend restart
   #     * ) db-backend restart
   #     * ) backend-manager (+ db-backend) restart
@@ -113,14 +113,14 @@ func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
   of "step-in": result.ok(DapStepIn)
   of "step-out": result.ok(DapStepOut)
   of "next": result.ok(DapNext)
-  of "continue": result.ok(DapContinue) 
+  of "continue": result.ok(DapContinue)
   of "reverse-step-in": result.ok(CtReverseStepIn)
   of "reverse-step-out": result.ok(CtReverseStepOut)
   of "reverse-next": result.ok(DapStepBack)
   of "reverse-continue": result.ok(DapReverseContinue)
   else: result.err(cstring(fmt"not added dap equivalent for {action} for now"))
 
-proc dapStep*(api: MediatorWithSubscribers, action: cstring) = 
+proc dapStep*(api: MediatorWithSubscribers, action: cstring) =
   echo "dap step ", action
   let dapActionRes = toDapStepActionEnum(action)
   if dapActionRes.isOk:
@@ -269,7 +269,7 @@ method onCompleteMove*(self: DebugComponent, response: MoveState) {.async.} =
       echo "in if"
       if self.historyIndex != 1:
         self.resetJumpHistoryFromStartIndex()
-      let action = if self.currentOperation.isNil: 
+      let action = if self.currentOperation.isNil:
           cstring""
         else:
           self.currentOperation
@@ -320,7 +320,7 @@ method render*(self: DebugComponent): VNode =
           let taskId = genTaskId(Step)
           clog "click on step button", taskId
           dapStep(self.api, id)
-          
+
           # TODO?
           # ctStep(data, id, action, reverse, 1, fromShortcutArg=false, taskId)
 

@@ -2,11 +2,11 @@
 
 set -e
 
-if command -v nargo &> /dev/null; then
-  echo nargo is already installed
-  exit 0
+if command -v nargo &>/dev/null; then
+	echo nargo is already installed
+	exit 0
 else
-  echo nargo is missing! building...
+	echo nargo is missing! building...
 fi
 
 : "${DEPS_DIR:=$PWD/deps}"
@@ -20,11 +20,11 @@ folder="noir"
 mkdir ${folder} || echo "Folder already exists"
 cd "${folder}"
 if [ "$(git rev-parse HEAD)" != "${commit}" ]; then
-  cd ../
-  rm -rf "${folder}"
-  git clone "${repo}"
-  cd "${folder}"
-  git checkout "$commit"
-  cargo build --release
-  cp ./target/release/nargo "$BIN_DIR/"
+	cd ../
+	rm -rf "${folder}"
+	git clone "${repo}"
+	cd "${folder}"
+	git checkout "$commit"
+	cargo build --release
+	cp ./target/release/nargo "$BIN_DIR/"
 fi

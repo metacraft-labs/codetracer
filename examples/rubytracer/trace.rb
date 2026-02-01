@@ -5,7 +5,7 @@ def analyze_trace(trace, trace_return)
   e = {}
   trace.each { |t| analyze(t, env, e) }
   trace_return.each { |t| analyze_return(t, env, e) }
-  
+
   # list
   env.map do |label, type|
     "#{label.to_s.ljust(60)}#{type}"
@@ -70,7 +70,7 @@ def analyze_return(trace, env, e)
     return
   end
   meth = b.eval("method(:#{method})")
-  if meth.receiver.class.name != meth.owner.name  
+  if meth.receiver.class.name != meth.owner.name
     m = :"#{meth.owner.name}.#{meth.name}:<return>"
     e[m] ||= [:class, meth.owner.name, meth.name, :"<return>"]
   else
@@ -282,10 +282,10 @@ end
 
 KNOWN = {
     Float       => R::FLOAT,
-    Fixnum      => R::FIXNUM,  
-    String      => R::STRING, 
-    TrueClass   => R::BOOLEAN, 
-    FalseClass  => R::BOOLEAN, 
+    Fixnum      => R::FIXNUM,
+    String      => R::STRING,
+    TrueClass   => R::BOOLEAN,
+    FalseClass  => R::BOOLEAN,
     NilClass    => R::NONE,
     Set         => R::SET,
     Symbol      => R::SYMBOL

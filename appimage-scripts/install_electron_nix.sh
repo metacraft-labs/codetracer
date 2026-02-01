@@ -12,7 +12,7 @@ cp -Lr "${ROOT_PATH}"/node_modules/electron/dist "${APP_DIR}"/electron
 
 set -e
 
-cat << 'EOF' > "${APP_DIR}/bin/electron"
+cat <<'EOF' >"${APP_DIR}/bin/electron"
 #!/usr/bin/env bash
 $HERE/node_modules/node_modules/electron/dist/electron --no-sandbox "$@"
 EOF

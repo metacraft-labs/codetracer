@@ -19,7 +19,7 @@
           inherit system;
           config = {
             allowUnfree = true;
-	  };
+          };
         };
         dotnet-full =
           with pkgs.dotnetCorePackages;
@@ -45,13 +45,11 @@
         vscode =
           (pkgs.vscode.overrideAttrs (prevAttrs: {
             nativeBuildInputs = prevAttrs.nativeBuildInputs ++ [ pkgs.makeWrapper ];
-            postFixup =
-              prevAttrs.postFixup
-              + ''
-                wrapProgram $out/bin/code \
-                  --set DOTNET_ROOT "${dotnet-full}/share/dotnet" \
-                  --prefix PATH : "~/.dotnet/tools"
-              '';
+            postFixup = prevAttrs.postFixup + ''
+              wrapProgram $out/bin/code \
+                --set DOTNET_ROOT "${dotnet-full}/share/dotnet" \
+                --prefix PATH : "~/.dotnet/tools"
+            '';
           })).fhsWithPackages
             (ps: deps ps);
 

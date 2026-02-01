@@ -48,7 +48,7 @@ puts trace.map { |a, b, m, c| "#{a}:#{b} method #{m} #{c}"}
 # }
 
 
-# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=client csr.json | cfssljson -bare kubebox    
+# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=client csr.json | cfssljson -bare kubebox
 
 # "client" : {
 #           "usages" : [
@@ -62,7 +62,7 @@ puts trace.map { |a, b, m, c| "#{a}:#{b} method #{m} #{c}"}
 # Key usage violation in certificate has been detected.
 
 
-# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=server csr.json | cfssljson -bare kubebox    
+# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=server csr.json | cfssljson -bare kubebox
 # "server" : {
 #           "usages" : [
 #             "signing",
@@ -74,7 +74,7 @@ puts trace.map { |a, b, m, c| "#{a}:#{b} method #{m} #{c}"}
 
 # Key usage violation in certificate has been detected.
 
-# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=kubebox csr.json | cfssljson -bare kubebox    
+# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=kubebox csr.json | cfssljson -bare kubebox
 # "kubebox" : {
 #           "usages" : [
 #             "signing",
@@ -85,7 +85,7 @@ puts trace.map { |a, b, m, c| "#{a}:#{b} method #{m} #{c}"}
 #         }
 
 
-# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=client-server csr.json | cfssljson -bare kubebox    
+# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=config.json -profile=client-server csr.json | cfssljson -bare kubebox
 # "client-server" : {
 #           "usages" : [
 #             "signing",

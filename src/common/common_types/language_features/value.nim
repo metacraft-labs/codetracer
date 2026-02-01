@@ -72,12 +72,12 @@ type
     rrTicks*: int
     countBudget*: int
     minCountLimit*: int
-    # for easier compat between nim and rust code: 
+    # for easier compat between nim and rust code:
     # NO_DEPTH_LIMIT = -1 for None for now
-    depthLimit*: int 
+    depthLimit*: int
     watchExpressions*: seq[langstring]
     lang*: Lang
-    
+
   CtLoadLocalsResponseBody* = ref object
     locals*: seq[Variable]
 

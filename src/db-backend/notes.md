@@ -9,7 +9,6 @@
   or some kind of more general handler? something like core_db which chooses?
   for now simplest just start custom core_db_ruby
 
-
   core_db_ruby: a rust binary
 
   same api: using a socket
@@ -51,9 +50,6 @@
       still we can have a sender thread
       and many task threads, not just one
 
-
-
-
 TODO:
   `ct import-trace trace.json`
   => add in local db, print out info/id
@@ -63,4 +59,3 @@ TODO:
   setup sockets in ruby-db-backend: input/output(separate thread) and sender to output thread
   receive/parse messages and send responses with sender+output thread
   start threads for received tasks and send events/res to output thread
-

@@ -7,7 +7,7 @@ mkdir -p "$DIST_DIR"/../Resources/
 iconutil -c icns "$ROOT_DIR"/resources/Icon.iconset --output "$DIST_DIR"/../Resources/CodeTracer.icns
 
 YEAR=$(grep "CodeTracerYear\*" "$ROOT_DIR"/src/ct/version.nim | sed "s/.*CodeTracerYear\* = //g")
-MONTH=$(printf '%02d' $(grep "CodeTracerMonth\*" "$ROOT_DIR"/src/ct/version.nim | sed "s/.*CodeTracerMonth\* = //g"))
+MONTH=$(printf '%02d' "$(grep "CodeTracerMonth\*" "$ROOT_DIR"/src/ct/version.nim | sed "s/.*CodeTracerMonth\* = //g")")
 BUILD=$(grep "CodeTracerBuild\*" "$ROOT_DIR"/src/ct/version.nim | sed "s/.*CodeTracerBuild\* = //g")
 
 # macOS uses core utils from FreeBSD so the additional "" is needed to execute this sed call.

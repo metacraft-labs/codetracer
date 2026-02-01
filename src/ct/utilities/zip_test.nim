@@ -1,4 +1,4 @@
-import 
+import
   std/[unittest, os, strutils, streams]
   ../utilities/zip
   ../../common/paths

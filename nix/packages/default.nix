@@ -1,4 +1,4 @@
-{ inputs, ... }:
+{ inputs, self, ... }:
 {
   perSystem =
     {
@@ -9,7 +9,10 @@
     let
       inherit (pkgs) stdenv;
 
-      src = ../../.;
+      # Use self.outPath to get the flake source with submodules
+      # When building with .?submodules=1, Nix will fetch submodules
+      # and self.outPath will include them
+      src = self.outPath;
 
       # Import multiple Nim versions
       nimVersions = import ../nim-versions { inherit pkgs; };
@@ -26,7 +29,12 @@
         inherit (nimVersions) nim-1_6 nim-2_0 nim-2_2;
 
         # Rust versions for testing with different compilers
-        inherit (rustVersions) rust-stable rust-nightly rust-1_75 rust-1_80;
+        inherit (rustVersions)
+          rust-stable
+          rust-nightly
+          rust-1_75
+          rust-1_80
+          ;
 
         # nim1 is used for building CodeTracer itself
         # It provides only 'nim1' binary (not 'nim') to ensure we don't

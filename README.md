@@ -5,7 +5,7 @@
 
 CodeTracer is a user-friendly time-traveling debugger designed to support a wide range of programming languages.
 
-It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward 
+It records the execution of a program into a sharable self-contained trace file. You can load the produced trace files in a GUI environment that allows you to move forward and backward
 through the execution and to examine the history of all memory locations. They say a picture is worth a thousand words — well, a video is even better! Watch the demo below to see CodeTracer in action:
 
 [![Watch the video](https://img.youtube.com/vi/xZsJ55JVqmU/maxresdefault.jpg)](https://www.youtube.com/watch?v=xZsJ55JVqmU)
@@ -110,16 +110,20 @@ Explore the right-click context menu for additional operations.
 
 The scratchpad provides a play area where you can pin values from different locations and moments in time. You can explore their differences both manually and algorithmically to gain quick insights into the behavior of your program.
 
-# Installating CodeTracer
+# Installing CodeTracer
+
 ## Recommended: using the CodeTracer installer
+>
 > [!WARNING]
 > On NixOS, this script currently installs CodeTracer as a raw AppImage, since our Nix package is not yet merged in nixpkgs.
 > Nix users which want to use the package should install it manually from source.
 
 On any system, you can use the CodeTracer installer script by running the following command:
+
 ```
 user $ curl "https://downloads.codetracer.com/install.sh" | sh
 ```
+
 You may be asked for sudo access depending on your installation method.
 
 This script is handy, because it installs CodeTracer in the best possible manner depending on your OS.
@@ -129,6 +133,7 @@ This script is handy, because it installs CodeTracer in the best possible manner
 > so that you can automatically get ruby support through the installer.
 
 ## Installing CodeTracer binaries manually
+
 Click on the icons below that corresponds to your distribution or packaging model:
 
 <a href="https://deb.codetracer.com/"><img width="100px" height="100px" src="https://upload.wikimedia.org/wikipedia/commons/9/9e/UbuntuCoF.svg"></a>
@@ -147,7 +152,7 @@ PGP Key signatures:
 [![Download PGP Key](https://img.shields.io/badge/Download-PGP%20key-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer.pub.asc)
 
 > [!CAUTION]
-> When launched for the first time, macOS users will see the error message "CodeTracer is damaged and can't be opened". 
+> When launched for the first time, macOS users will see the error message "CodeTracer is damaged and can't be opened".
 > To resolve this problem, please execute the command `user $ xattr -c <path/to/CodeTracer.app>`.
 >
 > We expect this inconvenience will be remedied soon through our enrollment in the Apple Developer program which will ensure CodeTracer is properly signed and whitelisted by Apple.
@@ -160,7 +165,9 @@ PGP Key signatures:
 > Once homebrew is installed, simply install ruby with `user $ brew install ruby`.
 
 ## Building from source
+
 ### Linux
+
 The Metacraft Labs team is using [Nix](https://nixos.org/) to define a reproducible development environment for working on CodeTracer. Linux is our primary development platform, while some of our team members use macOS. Building on Windows will be supported in the near future.
 
 To enter the Nix development environment, perform the following steps:
@@ -172,15 +179,17 @@ To enter the Nix development environment, perform the following steps:
 5) In the resulting shell, you can build all targets by running `just build-once` or `just build` if you intend to make continuous changes to the source code.
 
 #### NixOS
+
 On NixOS, you can install our Nix package by running `just build-nix`.
 
 ### macOS
+
 On macOS, we do not yet have support for Nix, instead we compile by using the non-nix-build scripts:
 
 1. Clone this repository
 1. Open a terminal and run `bash non-nix-build/build.sh`
 1. Wait until it finishes installing and packaging
-1. The end result will be a `CodeTracer.dmg` file that can be found under the `non-nix-build` folder. 
+1. The end result will be a `CodeTracer.dmg` file that can be found under the `non-nix-build` folder.
 1. For quicker testing without manually unpacking CodeTracer every time you can experiment with the contents of the `non-nix-build/CodeTracer.app` folder, which is equivalent to the final app bundle
 
 ## The CodeTracer CLI
@@ -196,10 +205,10 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
 1. `ct record <application>` - Creates a trace file that can be loaded later or shared. For Python scripts this reuses the interpreter you would get by running `python` in the same shell (honoring the `CODETRAC
 ER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, and `PYTHON` environment variables before falling back to `PATH`) and that interpreter must have `codetracer_python_recorder` installed.
 1. `ct replay` - Launches the CodeTracer GUI with a previously recorded trace file. Common usages are:
-   - `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
-   - `ct replay <program-name>` - Opens the last trace of an application.
-   - `ct replay --id=<trace-id>` - Opens a trace by its trace id.
-   - `ct replay --trace-folder=<trace-folder>` - Opens a trace by its trace folder.
+   * `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
+   * `ct replay <program-name>` - Opens the last trace of an application.
+   * `ct replay --id=<trace-id>` - Opens a trace by its trace id.
+   * `ct replay --trace-folder=<trace-folder>` - Opens a trace by its trace folder.
 1. `ct` - Launches the startup screen of the CodeTracer GUI.
 1. `ct help`/`ct --help` - Gives you a help message.
 1. `ct version`/`ct --version` - Returns the current version of CodeTracer.
@@ -214,14 +223,17 @@ Since CodeTracer provides a reverse counterpart to most traditional debugging op
 The user config file located at `~/.config/codetracer/.config.yml` allows you to specify custom shortcuts for all operations.
 
 # Contributing
+
 Check out our [Contributors Guide](./CONTRIBUTING.md) for more details.
 
 ## License
+
 CodeTracer is distributed under the GNU Affero General Public License (AGPLv3).
 
-The wasm-sysroot is copied from the tree-sitter repo: (https://github.com/tree-sitter/tree-sitter) : specifically https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include. The C headers there are a modified version of glibc headers, which are originally under LGPL license.
+The wasm-sysroot is copied from the tree-sitter repo: (<https://github.com/tree-sitter/tree-sitter>) : specifically <https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include>. The C headers there are a modified version of glibc headers, which are originally under LGPL license.
 
 # Miscellaneous
+
 ## Small Language Constructs
 
 CodeTracer includes a miniature Lisp-like language called **small** used in some of the example programs. The constructs demonstrate how a language can integrate with the [`runtime_tracing`](https://github.com/metacraft-labs/runtime_tracing) format.
@@ -269,4 +281,4 @@ Check out our [Contributors Guide](./CONTRIBUTING.md) for more details.
 
 CodeTracer is distributed under the GNU Affero General Public License (AGPLv3).
 
-The wasm-sysroot is copied from the tree-sitter repo: (https://github.com/tree-sitter/tree-sitter) : specifically https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include. The C headers there are a modified version of glibc headers, which are originally under LGPL license.
+The wasm-sysroot is copied from the tree-sitter repo: (<https://github.com/tree-sitter/tree-sitter>) : specifically <https://github.com/tree-sitter/tree-sitter/tree/master/crates/language/wasm/include>. The C headers there are a modified version of glibc headers, which are originally under LGPL license.

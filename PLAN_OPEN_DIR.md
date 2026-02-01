@@ -75,9 +75,11 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
 **Goal**: Enable `ct edit <path>` command from terminal
 
 #### 1.1 Add CLI Command Definition
+
 - **File**: `src/ct/codetracerconf.nim`
 - Add `edit` to `StartupCommand` enum (around line 18-51)
 - Define command arguments:
+
   ```nim
   of StartupCommand.edit:
     editPath* {.
@@ -87,8 +89,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 1.2 Implement Edit Command Handler
+
 - **File**: `src/ct/launch/launch.nim`
 - Add case for `StartupCommand.edit` in `runInitial()` (around line 119):
+
   ```nim
   of StartupCommand.edit:
     let absPath = absolutePath(conf.editPath)
@@ -99,6 +103,7 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 1.3 Verify Electron Launch
+
 - **File**: `src/ct/launch/electron.nim`
 - The existing `launchElectron(args)` should work - it passes args to electron
 - The frontend already parses `edit <path>` in `args.nim:71-87`
@@ -110,8 +115,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
 **Goal**: Store and retrieve recently opened folders
 
 #### 2.1 Add Database Table for Folders
+
 - **File**: `src/common/common_trace_index.nim`
 - Add to `SQL_CREATE_TABLE_STATEMENTS`:
+
   ```nim
   """CREATE TABLE IF NOT EXISTS recent_folders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,8 +128,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 2.2 Add Folder CRUD Operations
+
 - **File**: `src/common/trace_index.nim`
 - Add functions:
+
   ```nim
   proc addRecentFolder*(path: string, test: bool)
   proc findRecentFolders*(limit: int, test: bool): seq[RecentFolder]
@@ -130,8 +139,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 2.3 Define RecentFolder Type
+
 - **File**: `src/common/types.nim`
 - Add type:
+
   ```nim
   RecentFolder* = object
     id*: int
@@ -141,13 +152,16 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 2.4 Add CLI Metadata Command
+
 - **File**: `src/ct/trace/metadata.nim`
 - Extend `traceMetadata` to support `--recent-folders` flag
 - Return JSON array of recent folders
 
 #### 2.5 Add Frontend Folder Metadata Retrieval
+
 - **File**: `src/frontend/trace_metadata.nim`
 - Add function similar to `findRecentTracesWithCodetracer`:
+
   ```nim
   proc findRecentFoldersWithCodetracer*(app: ElectronApp, limit: int): Future[seq[RecentFolder]]
   ```
@@ -159,8 +173,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
 **Goal**: Split welcome screen into left (folders) and right (traces) panels with "Open Folder" button
 
 #### 3.1 Update Welcome Screen Layout
+
 - **File**: `src/frontend/ui/welcome_screen.nim`
 - Modify `welcomeScreenView()` (line 703-723) to have two-column layout:
+
   ```nim
   proc welcomeScreenView(self: WelcomeScreenComponent): VNode =
     buildHtml(tdiv(id = "welcome-screen", class = class)):
@@ -175,16 +191,20 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 3.2 Add Recent Folders View
+
 - **File**: `src/frontend/ui/welcome_screen.nim`
 - Add new proc:
+
   ```nim
   proc recentFolderView(self: WelcomeScreenComponent, folder: RecentFolder, position: int): VNode
   proc recentFoldersView(self: WelcomeScreenComponent): VNode
   ```
+
 - Style similar to `recentProjectsView()` but for folders
 - On click: load folder in edit mode via IPC
 
 #### 3.3 Enable "Open Online Trace" Button
+
 - **File**: `src/frontend/ui/welcome_screen.nim`
 - Change `TRACE_SHARING_HIDDEN_FOR_WELCOME_SCREEN` from `true` to `false` (line 735)
 - Fix the input label in `onlineFormView()` (line 468):
@@ -200,8 +220,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   - Calls `loadExistingRecord(traceId)` to open the trace in CodeTracer
 
 #### 3.4 Add "Open Folder" Button
+
 - **File**: `src/frontend/ui/welcome_screen.nim`
 - Modify `loadInitialOptions()` to add new option:
+
   ```nim
   WelcomeScreenOption(
     name: "Open folder",
@@ -211,8 +233,10 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 3.5 Add IPC Handler for Folder Dialog
+
 - **File**: `src/frontend/index/window.nim` or appropriate IPC handler file
 - Add handler for `CODETRACER::open-folder-dialog`:
+
   ```nim
   ipcMain.on("CODETRACER::open-folder-dialog") do (event: js):
     let result = await dialog.showOpenDialog(mainWindow, js{
@@ -224,28 +248,35 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
   ```
 
 #### 3.6 Add IPC Handler for Loading Folder
+
 - Add handler for `CODETRACER::load-recent-folder`:
   - Load folder in edit mode (similar to `CODETRACER::load-recent-trace`)
   - Update recent folders in database
 
 #### 3.7 Update WelcomeScreenComponent Type
+
 - **File**: `src/frontend/types.nim`
 - Add to `WelcomeScreenComponent`:
+
   ```nim
   recentFoldersScroll*: int
   loadingFolder*: RecentFolder
   ```
 
 #### 3.8 Update Data Type
+
 - **File**: `src/frontend/types.nim`
 - Add to `Data`:
+
   ```nim
   recentFolders*: seq[RecentFolder]
   ```
 
 #### 3.9 Pass Recent Folders in Welcome Screen Message
+
 - **File**: `src/frontend/index/startup.nim`
 - Modify the `CODETRACER::welcome-screen` message (line 166) to include:
+
   ```nim
   recentFolders: recentFolders
   ```
@@ -257,7 +288,9 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
 **Goal**: Style the split welcome screen layout while **preserving the current visual style exactly**
 
 #### Current Style Reference (MUST PRESERVE)
+
 The existing welcome screen has these key characteristics:
+
 - **Dialog**: `700px` width, `#242424` background, `12px` border-radius, `1px solid #3a3a3a` border
 - **Title**: `SpaceGrotesk` font, `32px` size, `#f3f3f3` color
 - **Recent traces container**: `#2c2c2c` background, `6px` border-radius, `8px` padding, `48px` top/bottom margin
@@ -268,12 +301,14 @@ The existing welcome screen has these key characteristics:
 - **Start option buttons**: `#3a3a3a` background, `6px` border-radius, `14px` font
 
 #### 4.1 Modify `.welcome-content` for Side-by-Side Layout
+
 - **Files**:
   - `src/build-debug/frontend/styles/default_dark_theme_electron.css`
   - `src/build-debug/frontend/styles/default_white_theme.css`
   - `src/build-debug/frontend/styles/default_dark_theme_extension.css`
 
 Current `.welcome-content` (line ~1507):
+
 ```css
 .welcome-screen-wrapper .welcome-screen .welcome-content {
   display: flex;
@@ -284,6 +319,7 @@ Current `.welcome-content` (line ~1507):
 ```
 
 Change to:
+
 ```css
 .welcome-screen-wrapper .welcome-screen .welcome-content {
   display: flex;
@@ -295,7 +331,9 @@ Change to:
 ```
 
 #### 4.2 Add Styles for Recent Folders (Clone of Recent Traces)
+
 The `.recent-folders` styles should be **identical** to `.recent-traces`:
+
 ```css
 /* Exact clone of .recent-traces styles */
 .welcome-screen-wrapper .welcome-screen .welcome-content .recent-folders {
@@ -382,7 +420,9 @@ The `.recent-folders` styles should be **identical** to `.recent-traces`:
 ```
 
 #### 4.3 Widen the Dialog
+
 Since we now have two panels side-by-side, increase dialog width:
+
 ```css
 .welcome-screen-wrapper .welcome-screen {
   width: 900px;  /* Increased from 700px */
@@ -391,7 +431,9 @@ Since we now have two panels side-by-side, increase dialog width:
 ```
 
 #### 4.4 Update All Theme Files
+
 Apply the same changes to:
+
 - `default_dark_theme_electron.css`
 - `default_white_theme.css` (with appropriate light theme colors)
 - `default_dark_theme_extension.css`
@@ -403,8 +445,10 @@ Apply the same changes to:
 **Goal**: Enable "Open with CodeTracer" in file managers
 
 #### 5.1 Update Desktop File
+
 - **File**: `resources/codetracer.desktop`
 - Change to:
+
   ```ini
   [Desktop Entry]
   Version=1.0
@@ -420,6 +464,7 @@ Apply the same changes to:
   ```
 
 #### 5.2 Update Installation
+
 - **File**: `src/common/install_utils.nim`
 - Ensure `update-desktop-database` is called after installation (if not already)
 
@@ -430,14 +475,17 @@ Apply the same changes to:
 **Goal**: Record folder opens in recent folders database
 
 #### 6.1 Update Startup to Record Folder Open
+
 - **File**: `src/frontend/index/startup.nim`
 - In the `data.startOptions.edit` branch (line 139), add:
+
   ```nim
   # Record this folder in recent folders
   await addRecentFolderViaIpc(data.startOptions.folder)
   ```
 
 #### 6.2 Add IPC for Recording Folder
+
 - Add `CODETRACER::add-recent-folder` IPC message
 - Backend handler calls `addRecentFolder()` from trace_index
 
@@ -494,6 +542,7 @@ Apply the same changes to:
 **File**: `src/common/common_types/codetracer_features/frontend.nim`
 
 Add to `ClientAction` enum (around line 60):
+
 ```nim
 aOpenTrace,          # Open existing trace file/folder
 aRecordNewTrace,     # Show record new trace dialog
@@ -505,6 +554,7 @@ aRecordFromLaunch,   # Record using launch.json configuration
 **File**: `src/frontend/ui_js.nim`
 
 Modify `webTechMenu()` (around line 243) to add items to the "File" folder:
+
 ```nim
 folder "File":
   element "Open Trace...", aOpenTrace
@@ -516,6 +566,7 @@ folder "File":
 ```
 
 Add launch config options to the existing "Build" folder (line ~368) or the "Debug" folder (line ~381):
+
 ```nim
 folder "Build":
   element "Record New Trace...", aRecordNewTrace
@@ -532,6 +583,7 @@ Note: The menu uses a `defineMenu` DSL macro. Elements need corresponding `Clien
 **File**: `src/frontend/renderer.nim`
 
 Add handlers for new actions:
+
 ```nim
 proc openTraceDialog*(data: Data) {.async.} =
   # Show file dialog to select trace folder
@@ -553,6 +605,7 @@ proc recordFromLaunchConfig*(data: Data) {.async.} =
 ```
 
 Register in action handlers:
+
 ```nim
 data.actions[aOpenTrace] = proc = discard data.openTraceDialog()
 data.actions[aRecordNewTrace] = proc = data.recordNewTraceDialog()
@@ -562,6 +615,7 @@ data.actions[aRecordFromLaunch] = proc = discard data.recordFromLaunchConfig()
 ### 8.4 launch.json Parser - Architecture Considerations
 
 **Important**: CodeTracer has two distinct compilation contexts:
+
 1. **Native (C)**: The `ct` CLI (`src/ct/`) - handles recording, replay, etc.
 2. **JavaScript**: Frontend in Electron (`src/frontend/`) - UI and IPC coordination
 
@@ -735,6 +789,7 @@ proc onRecordFromLaunch*(sender: js, response: jsobject(config=LaunchConfig)) {.
 ```
 
 **Key Insight**: The adaptation is simple because we just spawn `ct record` with the extracted program and args. CodeTracer's native `record` command handles:
+
 - Language detection from program path (`detectLang` in `record.nim:238`)
 - Python interpreter resolution (`resolvePythonInterpreter`)
 - Backend selection (rr vs db-backend)
@@ -849,6 +904,7 @@ folder "Debug":
 ```
 
 **Implementation**:
+
 - Parse launch.json on workspace load and store in `data.launchConfigs`
 - Rebuild menu when workspace changes
 - Each config item triggers recording with that specific configuration
@@ -894,6 +950,7 @@ Launch configurations are automatically available in the command palette by virt
 - Each launch config becomes a searchable command
 
 **Additional Enhancement** - Add explicit command entries:
+
 ```nim
 # In command interpreter setup
 for config in data.launchConfigs:
@@ -913,11 +970,13 @@ for config in data.launchConfigs:
 | File Menu → "Record New Trace..." | Opens manual record dialog |
 
 **New Menu Items**:
+
 - File → "Open Trace..." (shows folder picker)
 - File → "Record New Trace..." (shows existing record dialog)
 - Debug → "Record Configuration" → [dynamic list from launch.json]
 
 **launch.json Flow**:
+
 1. On workspace load, parse `.vscode/launch.json`
 2. Store configurations in `data.launchConfigs`
 3. Populate Debug menu sub-menu dynamically
@@ -935,6 +994,7 @@ for config in data.launchConfigs:
 ### Current Layout System Analysis
 
 **Key Findings**:
+
 1. **GoldenLayout** is used for the panel system (`src/public/third_party/tempL/goldenlayout.js`)
 2. Layouts are stored as JSON in `~/.config/codetracer/{layout_name}.json`
 3. Currently only ONE layout file: `default_layout.json` (used for debug mode)
@@ -943,6 +1003,7 @@ for config in data.launchConfigs:
 6. Layout persistence is currently **disabled** (window.nim:121: "FOR NOW: persisting config disabled")
 
 **Current Edit Mode Behavior** (ui_js.nim:537-631):
+
 - Saves debug layout to `savedLayoutBeforeEdit` (in memory only)
 - Closes auxiliary panels, keeping only filesystem and editors
 - Does NOT persist edit layout to disk
@@ -952,6 +1013,7 @@ for config in data.launchConfigs:
 **File**: `src/config/default_edit_layout.json` (NEW)
 
 Create a default edit-focused layout:
+
 ```json
 {
   "settings": { /* same as default_layout.json */ },
@@ -984,6 +1046,7 @@ Create a default edit-focused layout:
 **File**: `src/frontend/types.nim`
 
 Add to `Components`:
+
 ```nim
 Components* = ref object
   # ... existing fields ...
@@ -995,6 +1058,7 @@ Components* = ref object
 **File**: `src/frontend/config.nim`
 
 Add constants:
+
 ```nim
 const
   defaultLayoutPath* = "default_layout.json"      # Existing
@@ -1006,6 +1070,7 @@ const
 **File**: `src/frontend/index/config.nim`
 
 Add function to load edit layout:
+
 ```nim
 proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   ## Load edit mode layout, similar to loadLayoutConfig but for edit mode
@@ -1027,6 +1092,7 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
 **File**: `src/frontend/index/startup.nim`
 
 When entering edit mode (around line 139):
+
 ```nim
 if data.startOptions.edit:
   # Load edit-specific layout
@@ -1048,6 +1114,7 @@ if data.startOptions.edit:
 **File**: `src/frontend/index/window.nim`
 
 Enable layout persistence and add edit mode support:
+
 ```nim
 proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, isEditMode=bool)) {.async.} =
   let filename = if response.isEditMode:
@@ -1065,6 +1132,7 @@ proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, 
 **File**: `src/frontend/renderer.nim`
 
 Update `saveConfig` to include mode:
+
 ```nim
 proc saveConfig*(data: Data) =
   let layoutJson = JSON.stringify(data.ui.layout.saveLayout())
@@ -1080,6 +1148,7 @@ proc saveConfig*(data: Data) =
 **File**: `src/frontend/ui_js.nim`
 
 Modify `switchToEdit()`:
+
 ```nim
 proc switchToEdit*(data: Data) =
   if data.ui.mode != EditMode:
@@ -1106,6 +1175,7 @@ proc switchToEdit*(data: Data) =
 ```
 
 Modify `switchToDebug()`:
+
 ```nim
 proc switchToDebug*(data: Data) =
   if data.ui.mode != DebugMode:
@@ -1134,6 +1204,7 @@ proc switchToDebug*(data: Data) =
 **File**: `src/frontend/ui_js.nim`
 
 In `onNoTrace()` handler (around line 1122):
+
 ```nim
 proc onNoTrace(...) {.async.} =
   # ... existing code ...
@@ -1149,9 +1220,11 @@ proc onNoTrace(...) {.async.} =
 ### Summary of Edit Layout Changes
 
 **New Files**:
+
 - `src/config/default_edit_layout.json` - Default edit-focused layout
 
 **Modified Files**:
+
 - `src/frontend/types.nim` - Add `editModeLayout`, `lastUsedEditLayout` fields
 - `src/frontend/config.nim` - Add `defaultEditLayoutPath` constant
 - `src/frontend/index/config.nim` - Add `loadEditLayoutConfig()` function
@@ -1175,6 +1248,7 @@ proc onNoTrace(...) {.async.} =
 ## UI Mockup
 
 **IMPORTANT**: The visual style must match the existing welcome screen exactly:
+
 - Same fonts (SpaceGrotesk for titles, FiraCode for content)
 - Same colors (#242424 background, #2c2c2c panels, #3a3a3a items, #ffedd5 text)
 - Same border-radius, padding, and spacing
@@ -1285,11 +1359,13 @@ Style notes:
 ### Current Filesystem Panel Architecture
 
 **Key Files**:
+
 - `src/frontend/ui/filesystem.nim` - Main panel component using jstree
 - `src/frontend/index/files.nim` - `loadFilesystem()`, `loadFile()`, `loadPathContentPartially()`
 - `src/frontend/types.nim` - `CodetracerFile`, `EditorService.filesystem`
 
 **Current Data Flow**:
+
 ```
 Edit Mode:
   startOptions.folder → loadFilesystem([folder], "", false) → filesystem
@@ -1299,6 +1375,7 @@ Trace/Replay Mode:
 ```
 
 **Key Insight**: Currently, when loading a trace, the filesystem is **completely replaced** with `trace.sourceFolders`. We need to change this to:
+
 1. Keep the workspace tree as the primary view
 2. Add a "Trace Files" category only for files outside the workspace
 
@@ -1307,6 +1384,7 @@ Trace/Replay Mode:
 **File**: `src/frontend/types.nim`
 
 Add to `Data` or `EditorService`:
+
 ```nim
 workspaceFolder*: cstring  # The folder opened in edit mode (persists across mode switches)
 ```
@@ -1314,6 +1392,7 @@ workspaceFolder*: cstring  # The folder opened in edit mode (persists across mod
 **File**: `src/frontend/index/startup.nim`
 
 In the edit mode branch (line 139), store the workspace folder:
+
 ```nim
 data.workspaceFolder = folder  # Store for later comparison
 ```
@@ -1323,6 +1402,7 @@ data.workspaceFolder = folder  # Store for later comparison
 **File**: `src/frontend/index/traces.nim`
 
 Change `loadTrace()` (lines 153-180) to:
+
 1. NOT replace the filesystem if workspace folder is set
 2. Compare `trace.sourceFolders` against `data.workspaceFolder`
 3. Only load external files into a separate "Trace Files" category
@@ -1359,6 +1439,7 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
 **File**: `src/frontend/index/files.nim`
 
 Add new function to load filesystem with a category label:
+
 ```nim
 proc loadFilesystemWithCategory*(
     paths: seq[cstring],
@@ -1381,6 +1462,7 @@ proc loadFilesystemWithCategory*(
 **File**: `src/frontend/index/traces.nim`
 
 Add new IPC sender:
+
 ```nim
 proc sendFilesystemWithCategory(main: js, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool, category: cstring) {.async.} =
   let folders = await loadFilesystemWithCategory(paths, traceFilesPath, selfContained, category)
@@ -1392,6 +1474,7 @@ proc sendFilesystemWithCategory(main: js, paths: seq[cstring], traceFilesPath: c
 **File**: `src/frontend/ui_js.nim`
 
 Add new IPC handler:
+
 ```nim
 proc onFilesystemCategoryLoaded(
   sender: js,
@@ -1427,6 +1510,7 @@ proc onFilesystemCategoryLoaded(
 **File**: `src/frontend/index/files.nim`
 
 Modify `loadFilesystem()` to support multiple root categories:
+
 ```nim
 proc loadFilesystem*(paths: seq[cstring], traceFilesPath: cstring, selfContained: bool): Future[CodetracerFile] {.async.} =
   # Create root node that can hold multiple categories
@@ -1463,6 +1547,7 @@ When trace files are outside the workspace, group them under their common ancest
 **File**: `src/frontend/index/files.nim`
 
 Add helper:
+
 ```nim
 proc findCommonAncestor(paths: seq[cstring]): cstring =
   if paths.len == 0:
@@ -1489,6 +1574,7 @@ proc findCommonAncestor(paths: seq[cstring]): cstring =
 **File**: `src/frontend/ui_js.nim`
 
 Modify `onUpdateTrace()` to NOT replace filesystem:
+
 ```nim
 proc onUpdateTrace(sender: js, response: jsobject(trace=Trace)) =
   data.trace = response.trace
@@ -1506,6 +1592,7 @@ proc onUpdateTrace(sender: js, response: jsobject(trace=Trace)) =
 **File**: CSS files
 
 Add styling to distinguish "Trace Files" category:
+
 ```css
 /* Trace Files category styling */
 .jstree-node[data-category="trace-files"] > .jstree-anchor {

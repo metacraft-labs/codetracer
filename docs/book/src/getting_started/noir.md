@@ -34,7 +34,7 @@ ct run examples/noir_space_ship
 This command runs your program and saves its execution trace.
 
 ```sh
-ct record examples/noir_space_ship 
+ct record examples/noir_space_ship
 ```
 
 ### Replaying a Trace (`ct replay`)

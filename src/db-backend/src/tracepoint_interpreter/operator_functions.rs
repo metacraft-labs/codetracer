@@ -74,12 +74,9 @@ pub fn operator_and(
     eval_error_type: &Type,
 ) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecordWithType::Bool { b: b1, typ }, ValueRecordWithType::Bool { b: b2, .. }) => Ok(
-            ValueRecordWithType::Bool {
-                b: b1 && b2,
-                typ,
-            },
-        ),
+        (ValueRecordWithType::Bool { b: b1, typ }, ValueRecordWithType::Bool { b: b2, .. }) => {
+            Ok(ValueRecordWithType::Bool { b: b1 && b2, typ })
+        }
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -97,12 +94,9 @@ pub fn operator_or(
     eval_error_type: &Type,
 ) -> Result<ValueRecordWithType, Value> {
     match (v1, v2) {
-        (ValueRecordWithType::Bool { b: b1, typ }, ValueRecordWithType::Bool { b: b2, .. }) => Ok(
-            ValueRecordWithType::Bool {
-                b: b1 || b2,
-                typ,
-            },
-        ),
+        (ValueRecordWithType::Bool { b: b1, typ }, ValueRecordWithType::Bool { b: b2, .. }) => {
+            Ok(ValueRecordWithType::Bool { b: b1 || b2, typ })
+        }
 
         _ => {
             let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
@@ -130,10 +124,7 @@ pub fn operator_plus(
 
         (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ })
         | (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
-            Ok(ValueRecordWithType::Float {
-                f: i as f64 + f,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: i as f64 + f, typ })
         }
 
         (
@@ -143,9 +134,7 @@ pub fn operator_plus(
                 typ,
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => {
             let res = bigint_from_parts(&b1, n1) + bigint_from_parts(&b2, n2);
@@ -162,14 +151,8 @@ pub fn operator_plus(
             Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (
-            ValueRecordWithType::BigInt { b, negative, .. },
-            ValueRecordWithType::Float { f, typ },
-        )
-        | (
-            ValueRecordWithType::Float { f, typ },
-            ValueRecordWithType::BigInt { b, negative, .. },
-        ) => {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, typ })
+        | (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::BigInt { b, negative, .. }) => {
             if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 Ok(ValueRecordWithType::Float { f: b + f, typ })
             } else {
@@ -204,17 +187,11 @@ pub fn operator_minus(
         }
 
         (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ }) => {
-            Ok(ValueRecordWithType::Float {
-                f: i as f64 - f,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: i as f64 - f, typ })
         }
 
         (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
-            Ok(ValueRecordWithType::Float {
-                f: f - i as f64,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: f - i as f64, typ })
         }
 
         (
@@ -224,9 +201,7 @@ pub fn operator_minus(
                 typ,
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => {
             let res = bigint_from_parts(&b1, n1) - bigint_from_parts(&b2, n2);
@@ -289,10 +264,7 @@ pub fn operator_mult(
 
         (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ })
         | (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
-            Ok(ValueRecordWithType::Float {
-                f: i as f64 * f,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: i as f64 * f, typ })
         }
 
         (
@@ -302,9 +274,7 @@ pub fn operator_mult(
                 typ,
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => {
             let res = bigint_from_parts(&b1, n1) * bigint_from_parts(&b2, n2);
@@ -321,14 +291,8 @@ pub fn operator_mult(
             Ok(valuerecord_from_bigint(res, &typ))
         }
 
-        (
-            ValueRecordWithType::BigInt { b, negative, .. },
-            ValueRecordWithType::Float { f, typ },
-        )
-        | (
-            ValueRecordWithType::Float { f, typ },
-            ValueRecordWithType::BigInt { b, negative, .. },
-        ) => {
+        (ValueRecordWithType::BigInt { b, negative, .. }, ValueRecordWithType::Float { f, typ })
+        | (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::BigInt { b, negative, .. }) => {
             if let Some(b) = bigint_from_parts(&b, negative).to_f64() {
                 Ok(ValueRecordWithType::Float { f: b * f, typ })
             } else {
@@ -363,17 +327,11 @@ pub fn operator_div(
         }
 
         (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ }) => {
-            Ok(ValueRecordWithType::Float {
-                f: i as f64 / f,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: i as f64 / f, typ })
         }
 
         (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
-            Ok(ValueRecordWithType::Float {
-                f: f / i as f64,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: f / i as f64, typ })
         }
 
         (
@@ -383,9 +341,7 @@ pub fn operator_div(
                 typ,
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => {
             let res = bigint_from_parts(&b1, n1) / bigint_from_parts(&b2, n2);
@@ -447,17 +403,11 @@ pub fn operator_rem(
         }
 
         (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, typ }) => {
-            Ok(ValueRecordWithType::Float {
-                f: i as f64 % f,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: i as f64 % f, typ })
         }
 
         (ValueRecordWithType::Float { f, typ }, ValueRecordWithType::Int { i, .. }) => {
-            Ok(ValueRecordWithType::Float {
-                f: f % i as f64,
-                typ,
-            })
+            Ok(ValueRecordWithType::Float { f: f % i as f64, typ })
         }
 
         (
@@ -467,9 +417,7 @@ pub fn operator_rem(
                 typ,
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => {
             let res = bigint_from_parts(&b1, n1) % bigint_from_parts(&b2, n2);
@@ -528,14 +476,10 @@ pub fn operator_equal(
 
         (
             ValueRecordWithType::BigInt {
-                b: b1,
-                negative: n1,
-                ..
+                b: b1, negative: n1, ..
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => bigint_from_parts(&b1, n1) == bigint_from_parts(&b2, n2),
 
@@ -547,9 +491,7 @@ pub fn operator_equal(
             BigInt::from(i) == bigint_from_parts(&b, negative)
         }
 
-        (ValueRecordWithType::String { text: s1, .. }, ValueRecordWithType::String { text: s2, .. }) => {
-            s1 == s2
-        }
+        (ValueRecordWithType::String { text: s1, .. }, ValueRecordWithType::String { text: s2, .. }) => s1 == s2,
 
         (ValueRecordWithType::Int { i, .. }, ValueRecordWithType::Float { f, .. }) => (i as f64) == f,
 
@@ -614,14 +556,10 @@ pub fn operator_less(
 
         (
             ValueRecordWithType::BigInt {
-                b: b1,
-                negative: n1,
-                ..
+                b: b1, negative: n1, ..
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => bigint_from_parts(&b1, n1) < bigint_from_parts(&b2, n2),
 
@@ -680,14 +618,10 @@ pub fn operator_less_equal(
 
         (
             ValueRecordWithType::BigInt {
-                b: b1,
-                negative: n1,
-                ..
+                b: b1, negative: n1, ..
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => bigint_from_parts(&b1, n1) <= bigint_from_parts(&b2, n2),
 
@@ -746,14 +680,10 @@ pub fn operator_greater(
 
         (
             ValueRecordWithType::BigInt {
-                b: b1,
-                negative: n1,
-                ..
+                b: b1, negative: n1, ..
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => bigint_from_parts(&b1, n1) > bigint_from_parts(&b2, n2),
 
@@ -812,14 +742,10 @@ pub fn operator_greater_equal(
 
         (
             ValueRecordWithType::BigInt {
-                b: b1,
-                negative: n1,
-                ..
+                b: b1, negative: n1, ..
             },
             ValueRecordWithType::BigInt {
-                b: b2,
-                negative: n2,
-                ..
+                b: b2, negative: n2, ..
             },
         ) => bigint_from_parts(&b1, n1) >= bigint_from_parts(&b2, n2),
 

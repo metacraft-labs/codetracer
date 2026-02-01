@@ -11,10 +11,10 @@ proc matchLocation*(self: BuildComponent, raw: string): (bool, types.Location, c
   var l = types.Location(line: 0)
   if "Hint" in raw:
     return (false, l, cstring"", cstring"")
-      
+
   if raw.startsWith("/"):
     var after = raw.find(") ")
-  
+
     if after != -1:
       var maybeLocation = raw[0 .. after]
       var left = maybeLocation.find("(")
@@ -28,7 +28,7 @@ proc matchLocation*(self: BuildComponent, raw: string): (bool, types.Location, c
           if space != -1:
             line = maybeLocation[left + 1 ..< space].parseInt
             column = maybeLocation[space + 2 ..< after].parseInt
-            
+
           else:
             line = maybeLocation[left + 1 ..< after].parseInt
 
@@ -72,7 +72,7 @@ method onBuildStderr*(self: BuildComponent, response: BuildOutput) {.async.} =
   if self.build.output.len == 0:
     self.focusBuild()
   for line in lines:
-    self.appendBuild(line, true)    
+    self.appendBuild(line, true)
   self.data.redraw()
 
 method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
@@ -81,12 +81,12 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
   if self.build.code != 0:
     self.focusBuild()
     self.data.ui.layout.root.contentItems[0].contentItems[0].contentItems[2].setActiveContentItem(
-      self.data.ui.layout.root.contentItems[0].contentItems[0].contentItems[2].contentItems[1])    
+      self.data.ui.layout.root.contentItems[0].contentItems[0].contentItems[2].contentItems[1])
     self.data.functions.switchToEdit(self.data)
   else:
     self.data.functions.switchToDebug(self.data)
 
-  
+
 proc buildLocationView(self: BuildComponent, location: types.Location, raw: cstring, klass: string): VNode =
   result = buildHtml(tdiv(class = &"build-location {klass}", onclick = proc =
       discard jumpLocation(location))):

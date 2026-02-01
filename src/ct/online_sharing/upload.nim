@@ -1,4 +1,4 @@
-import std/[ 
+import std/[
   terminal, options, strutils, strformat,
   os, httpclient, uri, net, json,
   sequtils, streams, oids
@@ -60,7 +60,7 @@ proc uploadTrace*(trace: Trace, org: Option[string]): UploadedInfo =
   var uploadInfo = UploadedInfo()
   try:
     uploadInfo = uploadFile(outputZip, org)
-  
+
     # TODO: after we have link and welcome screen integration again
     #   for now just leave the output to ct-remote: we quit directly in uploadFile for now
     # uploadInfo.downloadKey = trace.program & "//" & uploadInfo.fileId & "//" & key.mapIt((it.uint64).toHex(2)).join("")

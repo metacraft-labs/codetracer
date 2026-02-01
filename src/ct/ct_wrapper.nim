@@ -65,4 +65,3 @@ onSignal(SIGINT):
     quit(128 + SIGINT)
 
 start(commandLineParams())
-

@@ -14,7 +14,7 @@ Before functions usually might set up something and after(check) functions check
 We should log what happens, so one can easily see how an error happened.
 
 
-Regressions: 
+Regressions:
 we can save the steps in a file by passing `--file`, instead of running those automatically again: currently its easier to add them to a normal repl test. `quicktest` did have some option for that, but for now this seems to work fine i guess
 (we don't really use much of `quicktest` here honestly, as we mostly focus on operation-specific property functions)
 

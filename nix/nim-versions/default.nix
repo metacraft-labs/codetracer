@@ -17,11 +17,12 @@ let
   versions = {
     "1.6.20" = "sha256-/+0EdQTR/K9hDw3Xzz4Ce+kaKSsMnFEWFQTC87mE/7k=";
     "2.0.14" = "sha256-1CC5VYMylLeGHj+2UCHawm0cGcUoxNbhOczTeeLBWkM=";
-    "2.2.4"  = "sha256-+CtBl1D8zlYfP4l6BIaxgBhoRddvtdmfJIzhZhCBicc=";
+    "2.2.4" = "sha256-+CtBl1D8zlYfP4l6BIaxgBhoRddvtdmfJIzhZhCBicc=";
   };
 
   # Build Nim for a specific version
-  mkNim = version: hash:
+  mkNim =
+    version: hash:
     pkgs.nim-unwrapped.overrideAttrs (old: {
       inherit version;
       pname = "nim";
@@ -30,10 +31,11 @@ let
         inherit hash;
       };
       # Clear nixpkgs patches - they're version-specific and don't apply to other versions
-      patches = [];
+      patches = [ ];
     });
 
-in {
+in
+{
   nim-1_6 = mkNim "1.6.20" versions."1.6.20";
   nim-2_0 = mkNim "2.0.14" versions."2.0.14";
   nim-2_2 = mkNim "2.2.4" versions."2.2.4";

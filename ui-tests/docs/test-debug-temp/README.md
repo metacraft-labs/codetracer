@@ -5,6 +5,7 @@ while we stabilize all scenarios. Every run should start by wiping the
 contents of this folder so that only the latest diagnostic notes remain.
 
 ## Current Situation
+
 - Integrated a large set of Noir Space Ship and program-agnostic UI scenarios.
 - A previous full-suite run was interrupted because one of the tests appeared
   to hang.
@@ -15,6 +16,7 @@ contents of this folder so that only the latest diagnostic notes remain.
   default timeout (currently 30s) remains enabled.
 
 ## Debugging Plan
+
 1. **Single-test passes**
    - Execute every test one by one using `dotnet run -- --include=<TestId>`.
    - After each run, record the outcome, logs, and any suspected hangs in the
@@ -37,18 +39,22 @@ contents of this folder so that only the latest diagnostic notes remain.
      and flag tests needing manual intervention.
 
 ## Files In This Folder
+
 Each test has its own Markdown file containing:
+
 - A short description of the scenario.
 - Current status (`Not Run`, `Passing`, `Failing`, `Hangs`, etc.).
 - Dates / commands used for the last attempt.
 - Outstanding issues or hypotheses.
 
 When you add new information:
+
 - Update the test file with the new status and findings.
 - If a workaround or fix is applied, capture the change in the test file.
 - Keep this README aligned with the latest plan.
 
 ## Logging Knobs
+
 - Runs are quiet by default. Use `--verbose-console` when you need per-test start/stop logs, process counts, and ct-host stdout while iterating.
 - Enable deep instrumentation for a single scenario by adding `"verboseLogging": true` to its config (or to the temporary config file under `docs/test-debug-temp/config/`). That flips `DebugLogger` and retry chatter on only for that scenario.
 - To capture `DebugLogger` output for every run without editing configs, export `UITESTS_DEBUG_LOG_DEFAULT=1`. Override the destination path via `UITESTS_DEBUG_LOG=/abs/path/to/log`.

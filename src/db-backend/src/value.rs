@@ -247,17 +247,17 @@ pub fn to_ct_value(v: &ValueRecordWithType) -> Value {
                 Type::new(TypeKind::Slice, &typ.lang_type)
             };
             let mut res = Value::new(TypeKind::Seq, ct_typ);
-            res.elements = elements.iter().map(|e| to_ct_value(e)).collect();
+            res.elements = elements.iter().map(to_ct_value).collect();
             res
         }
         ValueRecordWithType::Struct { field_values, typ } => {
             let mut res = Value::new(TypeKind::Struct, to_ct_type(typ));
-            res.elements = field_values.iter().map(|value| to_ct_value(value)).collect();
+            res.elements = field_values.iter().map(to_ct_value).collect();
             res
         }
         ValueRecordWithType::Tuple { elements, typ } => {
             let mut res = Value::new(TypeKind::Tuple, to_ct_type(typ));
-            res.elements = elements.iter().map(|value| to_ct_value(value)).collect();
+            res.elements = elements.iter().map(to_ct_value).collect();
             res.typ.labels = elements
                 .iter()
                 .enumerate()

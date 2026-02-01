@@ -22,7 +22,7 @@ import std / [options, os, osproc, strutils, strformat ],
 #       # for now we start with supporting only 1 trace
 #       # TODO: pass all the traces to the client
 #       break
-  
+
 #   if traceDir.len == 0:
 #     echo "ERROR: a trace folder not found inside multitrace"
 #     quit(1)
@@ -70,11 +70,11 @@ import std / [options, os, osproc, strutils, strformat ],
 #       diffIndexPath = eventualDiffIndexPath
 #     else:
 #       diffIndexPath = ""
-    
+
 #     # trace imported, diff and eventually index copied: archive still accessible
 #     # remove only the temp extracted folder?
 #     # TODO: stopped removing it (or remove after replay):
-#     #   decide what to do for this folder: for now depend on it for index/run: 
+#     #   decide what to do for this folder: for now depend on it for index/run:
 #     # removeDir(outputFolder)
 
 #     let recordCore = envLoadRecordCore()

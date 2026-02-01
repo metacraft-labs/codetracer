@@ -4,7 +4,7 @@ import
     algorithm, jsffi
   ],
   # third party
-  karax, karaxdsl, vstyles, lookuptables, # lookuptables is from karax 
+  karax, karaxdsl, vstyles, lookuptables, # lookuptables is from karax
   ../[ types, renderer, config, utils, lang ],
   ../lib/[ jslib, logging, monaco_lib, electron_lib, misc_lib ],
   ../ services / [event_log_service, debugger_service, editor_service, flow_service, search_service, shell_service]

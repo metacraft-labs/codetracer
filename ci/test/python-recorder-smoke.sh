@@ -12,9 +12,9 @@ echo '##########################################################################
 nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
 
 CT_BIN="${ROOT_DIR}/src/bin/ct"
-if [[ ! -x "${CT_BIN}" ]]; then
-  echo "error: ${CT_BIN} not found after build"
-  exit 1
+if [[ ! -x ${CT_BIN} ]]; then
+	echo "error: ${CT_BIN} not found after build"
+	exit 1
 fi
 
 VENV_DIR=$(mktemp -d -t codetracer-python-recorder-smoke-venv-XXXXXX)
@@ -24,19 +24,19 @@ MISSING_TRACE_DIR=""
 MISSING_INTERP_TRACE_DIR=""
 
 cleanup() {
-  if type deactivate >/dev/null 2>&1; then
-    deactivate || true
-  fi
-  rm -rf "${VENV_DIR}" "${TRACE_DIR}"
-  if [[ -n "${MISSING_VENV_DIR}" ]]; then
-    rm -rf "${MISSING_VENV_DIR}"
-  fi
-  if [[ -n "${MISSING_TRACE_DIR}" ]]; then
-    rm -rf "${MISSING_TRACE_DIR}"
-  fi
-  if [[ -n "${MISSING_INTERP_TRACE_DIR}" ]]; then
-    rm -rf "${MISSING_INTERP_TRACE_DIR}"
-  fi
+	if type deactivate >/dev/null 2>&1; then
+		deactivate || true
+	fi
+	rm -rf "${VENV_DIR}" "${TRACE_DIR}"
+	if [[ -n ${MISSING_VENV_DIR} ]]; then
+		rm -rf "${MISSING_VENV_DIR}"
+	fi
+	if [[ -n ${MISSING_TRACE_DIR} ]]; then
+		rm -rf "${MISSING_TRACE_DIR}"
+	fi
+	if [[ -n ${MISSING_INTERP_TRACE_DIR} ]]; then
+		rm -rf "${MISSING_INTERP_TRACE_DIR}"
+	fi
 }
 trap cleanup EXIT
 
@@ -63,13 +63,13 @@ export CODETRACER_CT_PATHS
 "${CT_BIN}" record -o="${TRACE_DIR}" "${TRACE_PROGRAM}"
 
 if [[ ! -f "${TRACE_DIR}/trace.json" ]]; then
-  echo "error: trace.json not produced at ${TRACE_DIR}"
-  exit 1
+	echo "error: trace.json not produced at ${TRACE_DIR}"
+	exit 1
 fi
 
 if [[ ! -f "${TRACE_DIR}/trace_metadata.json" ]]; then
-  echo "error: trace_metadata.json not produced at ${TRACE_DIR}"
-  exit 1
+	echo "error: trace_metadata.json not produced at ${TRACE_DIR}"
+	exit 1
 fi
 
 python - <<'PY'
@@ -102,21 +102,21 @@ STATUS=$?
 set -e
 
 if [[ ${STATUS} -eq 0 ]]; then
-  echo "error: ct record unexpectedly succeeded without codetracer_python_recorder"
-  echo "${MISSING_OUTPUT}"
-  exit 1
+	echo "error: ct record unexpectedly succeeded without codetracer_python_recorder"
+	echo "${MISSING_OUTPUT}"
+	exit 1
 fi
 
 if ! grep -q "codetracer_python_recorder" <<<"${MISSING_OUTPUT}"; then
-  echo "error: failure output did not mention codetracer_python_recorder"
-  echo "${MISSING_OUTPUT}"
-  exit 1
+	echo "error: failure output did not mention codetracer_python_recorder"
+	echo "${MISSING_OUTPUT}"
+	exit 1
 fi
 
 if ! grep -q "pip install codetracer_python_recorder" <<<"${MISSING_OUTPUT}"; then
-  echo "error: failure output did not include installation guidance"
-  echo "${MISSING_OUTPUT}"
-  exit 1
+	echo "error: failure output did not include installation guidance"
+	echo "${MISSING_OUTPUT}"
+	exit 1
 fi
 
 echo '###############################################################################'
@@ -131,21 +131,21 @@ INTERP_STATUS=$?
 set -e
 
 if [[ ${INTERP_STATUS} -eq 0 ]]; then
-  echo "error: ct record unexpectedly succeeded with a missing interpreter"
-  echo "${MISSING_INTERP_OUTPUT}"
-  exit 1
+	echo "error: ct record unexpectedly succeeded with a missing interpreter"
+	echo "${MISSING_INTERP_OUTPUT}"
+	exit 1
 fi
 
 if ! grep -q "CODETRACER_PYTHON_INTERPRETER is set" <<<"${MISSING_INTERP_OUTPUT}"; then
-  echo "error: missing interpreter output did not explain which override failed"
-  echo "${MISSING_INTERP_OUTPUT}"
-  exit 1
+	echo "error: missing interpreter output did not explain which override failed"
+	echo "${MISSING_INTERP_OUTPUT}"
+	exit 1
 fi
 
 if ! grep -q "does not resolve to a Python interpreter" <<<"${MISSING_INTERP_OUTPUT}"; then
-  echo "error: missing interpreter output did not describe the resolution failure"
-  echo "${MISSING_INTERP_OUTPUT}"
-  exit 1
+	echo "error: missing interpreter output did not describe the resolution failure"
+	echo "${MISSING_INTERP_OUTPUT}"
+	exit 1
 fi
 
 echo '###############################################################################'
@@ -169,15 +169,15 @@ echo "${RECORD_TEST_OUTPUT}"
 
 # Verify the output contains a traceId
 if ! grep -q "traceId:" <<<"${RECORD_TEST_OUTPUT}"; then
-  echo "error: ct record-test did not output traceId"
-  exit 1
+	echo "error: ct record-test did not output traceId"
+	exit 1
 fi
 
 # Extract trace ID and verify the trace exists
 PYTEST_TRACE_ID=$(echo "${RECORD_TEST_OUTPUT}" | grep "traceId:" | tail -1 | sed 's/.*traceId://')
-if [[ -z "${PYTEST_TRACE_ID}" ]]; then
-  echo "error: could not extract trace ID from ct record-test output"
-  exit 1
+if [[ -z ${PYTEST_TRACE_ID} ]]; then
+	echo "error: could not extract trace ID from ct record-test output"
+	exit 1
 fi
 
 echo "Successfully recorded pytest test with trace ID: ${PYTEST_TRACE_ID}"

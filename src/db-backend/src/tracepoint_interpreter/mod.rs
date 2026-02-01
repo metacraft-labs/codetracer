@@ -49,6 +49,5 @@ type UnaryOperatorFunction = fn(ValueRecordWithType, &Type) -> Result<ValueRecor
 type UnaryOperatorFunctions = HashMap<String, UnaryOperatorFunction>;
 
 // op(left_operand, right_operand, error_value_type)
-type BinaryOperatorFunction =
-    fn(ValueRecordWithType, ValueRecordWithType, &Type) -> Result<ValueRecordWithType, Value>;
+type BinaryOperatorFunction = fn(ValueRecordWithType, ValueRecordWithType, &Type) -> Result<ValueRecordWithType, Value>;
 type BinaryOperatorFunctions = HashMap<String, BinaryOperatorFunction>;

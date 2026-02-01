@@ -2,5 +2,5 @@ Implement stdio transport for DAP. By default use the unix domain socket transpo
 but if `--stdio` is passed with CLI use stdio transport. In it: receive
 messages by stdin and send responses/events in stdout.
 
-Add a simple test that runs db-backend in a separate process, but uses the stdio transport 
+Add a simple test that runs db-backend in a separate process, but uses the stdio transport
 and initializes the interaction.

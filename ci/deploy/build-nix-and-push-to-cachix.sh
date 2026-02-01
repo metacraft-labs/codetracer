@@ -10,7 +10,7 @@ res=$?
 
 # Propagate error if nix build fails
 if [ $res -ne 0 ]; then
-  exit $res
+	exit $res
 fi
 
 cachix push metacraft-labs-codetracer "$build_out"
@@ -24,7 +24,7 @@ res=$?
 
 # Propagate error if nix build fails
 if [ $res -ne 0 ]; then
-  exit $res
+	exit $res
 fi
 
 cachix push metacraft-labs-codetracer "$build_out"

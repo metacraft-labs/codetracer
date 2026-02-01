@@ -12,8 +12,6 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser, Tree}; // Language,
-use tree_sitter_nim;
-use tree_sitter_pascal;
 use tree_sitter_traversal2::{traverse_tree, Order};
 
 #[derive(Debug, Clone)]
@@ -237,7 +235,7 @@ impl ExprLoader {
                 Lang::Small
             } else if extension == "c" {
                 Lang::C
-            } else if extension == "cpp" || extension == "cc" || extension == "cpp" {
+            } else if extension == "cpp" || extension == "cc" {
                 Lang::Cpp
             } else if extension == "pas" {
                 Lang::Pascal
@@ -400,7 +398,7 @@ impl ExprLoader {
     }
 
     fn is_child_by_field_name(parent: &Node, node: &Node, field: &str) -> bool {
-        parent.child_by_field_name(field).map_or(false, |n| n == *node)
+        parent.child_by_field_name(field) == Some(*node)
     }
 
     fn is_variable_node(&self, lang: Lang, node: &Node) -> bool {
@@ -504,7 +502,7 @@ impl ExprLoader {
                 // We need to traverse up and check if any ancestor is postfix_expr with a call_suffix child
 
                 // Handle the case where parent is "symbol" (common in Nim)
-                let mut current = parent.clone();
+                let mut current = parent;
                 let mut check_parent = parent_kind.to_string();
 
                 // Navigate up through symbol and qualified_identifier to reach postfixable_primary/postfix_expr
@@ -673,7 +671,7 @@ impl ExprLoader {
         Ok(())
     }
 
-    fn find_real_path(&self, path: &PathBuf) -> PathBuf {
+    fn find_real_path(&self, path: &Path) -> PathBuf {
         let read_path = if self.trace.imported {
             let trace_files_folder = PathBuf::from(&self.trace.trace_output_folder).join("files");
             // take only after root: /path -> path, so join will work,
@@ -683,7 +681,7 @@ impl ExprLoader {
             info!("after root path {after_root_path:?}");
             trace_files_folder.join(PathBuf::from(after_root_path))
         } else {
-            path.clone()
+            path.to_path_buf()
         };
 
         read_path
@@ -909,6 +907,8 @@ impl ExprLoader {
 // rr_ticks_for_iterations: List[RRTicks]
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use std::fs;
@@ -934,6 +934,8 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
 mod nim_tests {
     use super::*;
 

@@ -1,8 +1,8 @@
 // Eligibility verification function
 pub fn verify_eligibility(
-    patient_score: Field, 
-    min_score: Field, 
-    hashed_patient_data: Field, 
+    patient_score: Field,
+    min_score: Field,
+    hashed_patient_data: Field,
     provided_hash: Field
 ) -> Field {
     // Ensure the patient's score meets the minimum requirement

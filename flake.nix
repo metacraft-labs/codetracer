@@ -44,6 +44,8 @@
       flake = true;
     };
 
+    # Pre-commit hooks
+    git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };
 
   # outputs = {
@@ -87,10 +89,11 @@
       imports = [
         ./nix/shells
         ./nix/packages
+        inputs.git-hooks-nix.flakeModule
       ];
 
       perSystem =
-        { system, ... }:
+        { system, config, ... }:
         {
           _module.args.pkgs = import nixpkgs {
             inherit system;
@@ -113,6 +116,17 @@
               ];
             };
           };
+
+          # Pre-commit hooks configuration
+          pre-commit.settings = import ./nix/pre-commit.nix {
+            pkgs = import nixpkgs { inherit system; };
+            rustPkgs = config.packages;
+          };
+
+          # Disable pre-commit checks during nix flake check because the Rust
+          # hooks need git submodules which aren't available in the Nix sandbox.
+          # The hooks still work in the dev shell and during actual git commits.
+          pre-commit.check.enable = false;
         };
     };
 }

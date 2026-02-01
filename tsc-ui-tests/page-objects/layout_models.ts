@@ -43,4 +43,3 @@ export interface LayoutPageModel {
   editorTabModels: EditorModel[];
   programStateTabModels: ProgramStateModel[];
 }
-

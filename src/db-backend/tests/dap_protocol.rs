@@ -45,7 +45,7 @@ fn test_serialize_initialize_response() {
 
 #[test]
 fn test_session_sequence_parse() {
-    let messages = vec![
+    let messages = [
         r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#,
         r#"{"seq":2,"type":"response","request_seq":1,"success":true,"command":"initialize","body":{"supportsLoadedSourcesRequest":true,"supportsStepBack":true,"supportsConfigurationDoneRequest":true,"supportsDisassembleRequest":true,"supportsLogPoints":true,"supportsRestartRequest":true}}"#,
         r#"{"seq":3,"type":"event","event":"initialized"}"#,

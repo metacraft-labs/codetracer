@@ -61,5 +61,3 @@ fullResetOperation:
   now: always stop existing stable process
   and replace with StepBehindTracking if available, free/new otherwise
   eventually start a new StepBehindTracking process for reserve
-
-

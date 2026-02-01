@@ -319,7 +319,7 @@ proc expandCallView(self: CalltraceComponent, call: Call, count: int, active: cs
         self.loadLines(fromScroll=false)
     )
   ):
-    tdiv(class = fmt"expand-call-img {active}") 
+    tdiv(class = fmt"expand-call-img {active}")
 
 proc collapseCallView(
   self: CalltraceComponent,
@@ -605,7 +605,7 @@ proc callView*(
   var args: seq[CallArg]
   var returnValue: Value
 
-  args = 
+  args =
     if self.args.hasKey(key):
       self.args[key]
     else:
@@ -787,7 +787,7 @@ proc ensureSvgContainer(self: CalltraceComponent): VNode =
 
 proc calltraceLines*(self: CalltraceComponent): VNode =
   let callLineCountLimit = self.panelHeight()
-    
+
   # based on https://dev.to/adamklein/build-your-own-virtual-scroll-part-i-11ib
   result = buildHtml(
     tdiv(class="calltrace-lines", style=calltraceLinesStyle(self))

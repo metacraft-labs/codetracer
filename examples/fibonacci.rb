@@ -1,4 +1,4 @@
-def fibonacci(n) 
+def fibonacci(n)
     if n > 1
         fibonacci(n - 1) + fibonacci(n - 2)
     else

@@ -57,7 +57,7 @@ proc recordWithRR(
     program: string, args: seq[string],
     traceFolder: string,
     traceId: int): Trace =
-  
+
   createDir(traceFolder)
   let traceMetadataPath = traceFolder / "trace_metadata.json"
   let traceDbMetadataPath = traceFolder / "trace_db_metadata.json"
@@ -72,7 +72,7 @@ proc recordWithRR(
   if code != 0:
     echo fmt"error: ct-rr-support returned exit code ", code
     quit(code)
-  
+
   # record pid and lang in trace_db_metadata.json
   result = importTrace(traceFolder, traceId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind="rr")
 

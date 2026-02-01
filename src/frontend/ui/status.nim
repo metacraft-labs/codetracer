@@ -1,4 +1,4 @@
-import 
+import
   std/sequtils,
   ../communication,
   ../../common/ct_event,

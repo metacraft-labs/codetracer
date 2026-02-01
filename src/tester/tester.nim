@@ -391,7 +391,7 @@ proc setupLdLibraryPath =
   # it's important: setting things like this can break other software
   # e.g. nix wasn't working because of clash between itc GLIBC version
   # and some from those LD_LIBRARY_PATH
-  # 
+  #
   # so we pass it in tester explicitly where needed
   # and this already happens in `ct`: however this breaks for now
   # `codetracer`, but not sure what to do there: maybe pass it as well?

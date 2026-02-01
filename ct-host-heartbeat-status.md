@@ -1,10 +1,12 @@
 # `ct host` heartbeats & idle timeout – status
 
 ## References
+
 - ADR: `0007-ct-host-heartbeat-and-idle-timeout.md`
 - Plan: `ct-host-heartbeat-and-idle-timeout-implementation-plan.md`
 
 ## Key files (targets)
+
 - `src/ct/trace/host.nim` — CLI parsing for `ct host`; place `--idle-timeout`/env plumbing and process exit.
 - `src/frontend/index/server_config.nim` — socket.io server; hook connection/activity timestamps and idle watchdog.
 - `src/frontend/index/base_handlers.nim` / `ipc_utils.nim` — IPC attach/detach, emit handling; update activity timestamps on inbound events.
@@ -12,6 +14,7 @@
 - `src/frontend/event_helpers.nim` / `ui/status.nim` — existing notification/status components to surface “Disconnected” warning and badge.
 
 ## Progress
+
 - ADR defined for heartbeats, idle timeout (default 10m), clean exit on inactivity, and user-facing disconnected state.
 - Implementation plan drafted, including UX reuse of `NotificationWarning` and status-bar badge for inactive connections.
 - Scoped out a browser → backend heartbeat channel: plan now targets server-side activity tracking (socket `onAny`/`__activity__` ping) instead of new frontend emits.
@@ -24,6 +27,7 @@
 - Added connection-state UX: server emits disconnect reasons for superseded clients and idle shutdown, the browser listens for socket disconnects, surfaces a persistent `NotificationWarning` with a reconnect action, guards IPC sends with the warning, and shows a status-bar “Disconnected” badge while detached.
 
 ## Next steps
+
 - Stabilize the updated integration suite in CI (JS backend build currently required for coverage) and keep `onAny` activity resets guarded by tests.
 - Harden disconnected handling: disable/short-circuit dangerous IPC interactions while detached and verify accessibility for the warning + badge.
 - Land TDD coverage for the new UX: unit/integration for disconnect reasons plus a browser/Playwright scenario asserting the warning/banner and exit behavior with short timeouts.

@@ -26,7 +26,7 @@ test("noir_space_ship smoke test", async () => {
     }
   }
 
-    
+
   // Program state
   const stateTabs = await layout.programStateTabs();
   for (const tab of stateTabs) {
@@ -49,4 +49,3 @@ test("noir_space_ship smoke test", async () => {
   // Run extractor as final step
   await extractLayoutPageModel(layout);
 });
-

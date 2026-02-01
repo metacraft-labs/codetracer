@@ -3,7 +3,7 @@ $(error Windows is not supported)
 endif
 
 LANGUAGE_NAME := tree-sitter-tracepoint
-HOMEPAGE_URL := 
+HOMEPAGE_URL :=
 VERSION := 0.1.0
 
 # repository

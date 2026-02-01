@@ -17,7 +17,7 @@
 ### Trace: right-click on a line number in the editor, e.g. 17
 
 ### Now enter an expression like `log p` and click `update traces`
-	
+
 * Scroll through the results and filter them
 
 ### Trace: now you can instead type `plot p` and `update traces`
@@ -42,7 +42,7 @@
 * We might have a button in top right of the editor that lets us switch
 
 ### Enter `alt+1`: low level view
- 
+
 * In Nim mode, you'll see the C code for your current path
 
 ### Enter `alt+2`: low level view 2

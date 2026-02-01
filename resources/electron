@@ -2,5 +2,5 @@
 
 CURRENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-cd $CURRENT_DIR
+cd "$CURRENT_DIR" || exit
 ../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron "$@"

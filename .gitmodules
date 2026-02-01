@@ -83,4 +83,4 @@
 	branch = codetracer
 [submodule "libs/tree-sitter-nim"]
 	path = libs/tree-sitter-nim
-	url = git@github.com:metacraft-labs/tree-sitter-nim.git
+	url = https://github.com/metacraft-labs/tree-sitter-nim.git

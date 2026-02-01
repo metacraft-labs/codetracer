@@ -59,6 +59,7 @@ Deliverable: desktop Codetracer builds where `ct record` for Python scripts beha
 ---
 
 **Milestones**
+
 1. Ship updated `codetracer_python_recorder` wheel with CLI parity (Part 1).
 2. Land Codetracer integration (Part 2) behind a feature flag.
 3. Remove the flag after cross-platform packaging and smoke tests succeed.

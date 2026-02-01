@@ -11,7 +11,7 @@ npm install electron --prefix "${APP_DIR}/electron"
 # ls "${APP_DIR}/electron_temp/node_modules/electron/dist"
 # cp -Lr "${APP_DIR}/electron_temp/node_modules/" "${APP_DIR}/electron"
 
-cat << 'EOF' > "${APP_DIR}/bin/electron"
+cat <<'EOF' >"${APP_DIR}/bin/electron"
 #!/usr/bin/env bash
 
 ELECTRON_DIR=${HERE:-..}/electron/node_modules/electron/dist

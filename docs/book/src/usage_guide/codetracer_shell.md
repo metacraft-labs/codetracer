@@ -21,10 +21,9 @@ For example, let's say you want to compile a C/C++ application using CMake. With
 user $ ct shell
 (ct shell) user $ mkdir build && cd build
 (ct shell) user $ cmake ..
-(ct shell) user $ make 
+(ct shell) user $ make
 ```
 using the interactive shell, or the following using commands:
 ```
 user $ ct shell -- bash -c "mkdir build && cd build && cmake .. && make"
 ```
-

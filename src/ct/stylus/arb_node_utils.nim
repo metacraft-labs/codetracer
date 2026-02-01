@@ -4,7 +4,7 @@ import ../../common/[types, paths]
 const DEFAULT_NODE_URL* = "http://localhost:8547"
 
 # TODO: get name from config? Maybe use SQLite?
-let 
+let
   CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
   EVM_TRACE_DIR_PATH* = codetracerTmpPath
 
