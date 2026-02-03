@@ -326,10 +326,10 @@
 
           doCheck = true;
           checkPhase = ''
-            cargo test --release --offline \
-              --skip=tracepoint_interpreter::tests::array_indexing \
-              --skip=tracepoint_interpreter::tests::log_array \
-              --skip=backend_dap_server
+            cargo test --release --offline -- \
+              --skip tracepoint_interpreter::tests::array_indexing \
+              --skip tracepoint_interpreter::tests::log_array \
+              --skip backend_dap_server
           '';
 
           cargoDeps = pkgs.rustPlatform.importCargoLock {
