@@ -506,3 +506,37 @@ test-flow-all:
   echo "╔════════════════════════════════════════════════════════════╗"
   echo "║ All flow integration tests passed!                         ║"
   echo "╚════════════════════════════════════════════════════════════╝"
+
+# ====
+# Cross-repo integration tests (requires codetracer-rr-backend)
+# These tests build/find ct-rr-support from the rr-backend repo and run
+# the flow integration tests against it.
+
+cross-test:
+  bash scripts/run-cross-repo-tests.sh all
+
+cross-test-nim-flow:
+  bash scripts/run-cross-repo-tests.sh nim-flow
+
+cross-test-rust-flow:
+  bash scripts/run-cross-repo-tests.sh rust-flow
+
+cross-test-go-flow:
+  bash scripts/run-cross-repo-tests.sh go-flow
+
+show-rr-backend-pin:
+  @cat .github/rr-backend-pin.txt 2>/dev/null || echo "main (default)"
+
+update-rr-backend-pin ref="":
+  #!/usr/bin/env bash
+  PIN_FILE=".github/rr-backend-pin.txt"
+  OLD_REF="$(cat "$PIN_FILE" 2>/dev/null || echo "main")"
+  OLD_REF="$(echo "$OLD_REF" | tr -d '[:space:]')"
+  NEW_REF="{{ref}}"
+  if [[ -z "$NEW_REF" ]]; then
+    echo "Usage: just update-rr-backend-pin <git-ref>"
+    echo "Current pin: $OLD_REF"
+    exit 1
+  fi
+  echo "$NEW_REF" > "$PIN_FILE"
+  echo "Updated rr-backend pin: $OLD_REF -> $NEW_REF"
