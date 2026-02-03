@@ -16,10 +16,10 @@ if [ -d "$TREE_SITTER_NIM_DIR" ]; then
 	# Generate parser if missing or outdated
 	if [ ! -f "src/parser.c" ]; then
 		echo "parser.c doesn't exist, generating..."
-		npx tree-sitter generate
+		npx tree-sitter-cli generate
 	elif [ "grammar.js" -nt "src/parser.c" ]; then
 		echo "grammar.js is newer than parser.c, regenerating..."
-		npx tree-sitter generate
+		npx tree-sitter-cli generate
 	else
 		echo "parser.c is up to date"
 	fi
