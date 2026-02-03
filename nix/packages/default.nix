@@ -302,6 +302,9 @@
               echo "Generating tree-sitter-nim parser..."
               (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
             fi
+
+            # Copy Cargo.lock to root for cargoSetupHook
+            cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
           '';
 
           preBuild = ''
