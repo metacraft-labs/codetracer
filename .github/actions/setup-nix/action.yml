@@ -42,6 +42,7 @@ runs:
 
         cat << EOF > "$HOME/.config/nix/netrc"
           machine ${{inputs.cachix-cache}}.cachix.org password ${{inputs.cachix-auth-token}}
+          machine github.com login x-access-token password ${{inputs.gh-token}}
         EOF
 
         # Rewrite SSH URLs to HTTPS with token for submodule cloning
