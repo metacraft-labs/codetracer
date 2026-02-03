@@ -36,6 +36,7 @@ pub enum Language {
     Rust,
     C,
     Cpp,
+    Go,
 }
 
 impl Language {
@@ -45,6 +46,7 @@ impl Language {
             Language::Rust => "rs",
             Language::C => "c",
             Language::Cpp => "cpp",
+            Language::Go => "go",
         }
     }
 }
@@ -377,7 +379,10 @@ impl FlowData {
         let mut values = HashMap::new();
 
         for step_json in steps_json {
-            let line = step_json.get("line").and_then(|l| l.as_i64()).unwrap_or(0);
+            // Flow steps use "position" (from FlowStep.position: Position) in camelCase JSON.
+            let line = step_json.get("position").and_then(|l| l.as_i64())
+                .or_else(|| step_json.get("line").and_then(|l| l.as_i64()))
+                .unwrap_or(0);
 
             let mut variables = Vec::new();
             if let Some(expr_order) = step_json.get("exprOrder").and_then(|e| e.as_array()) {
@@ -472,6 +477,19 @@ pub struct FlowTestConfig {
 
 /// Find ct-rr-support binary
 pub fn find_ct_rr_support() -> Option<PathBuf> {
+    // Highest priority: explicit CT_RR_SUPPORT_PATH environment variable.
+    // Used by cross-repo test scripts to communicate the binary location.
+    if let Ok(path) = env::var("CT_RR_SUPPORT_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() && p.is_file() {
+            return Some(p);
+        }
+        eprintln!(
+            "WARNING: CT_RR_SUPPORT_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
     // First check PATH
     if let Ok(output) = Command::new("which").arg("ct-rr-support").output() {
         if output.status.success() {

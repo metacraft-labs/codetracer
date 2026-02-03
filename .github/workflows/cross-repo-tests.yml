@@ -1,0 +1,96 @@
+name: Cross-Repo Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/db-backend/**'
+      - '.github/rr-backend-pin.txt'
+      - 'scripts/run-cross-repo-tests.sh'
+      - '.github/workflows/cross-repo-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/db-backend/**'
+      - '.github/rr-backend-pin.txt'
+      - 'scripts/run-cross-repo-tests.sh'
+      - '.github/workflows/cross-repo-tests.yml'
+  workflow_dispatch:
+    inputs:
+      rr_backend_ref:
+        description: 'rr-backend git ref to test against (default: from pin file)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  cross-repo-tests:
+    runs-on: [self-hosted, nixos]
+
+    steps:
+      - name: Checkout codetracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Resolve rr-backend ref
+        id: resolve-ref
+        run: |
+          if [[ -n "${{ github.event.inputs.rr_backend_ref }}" ]]; then
+            REF="${{ github.event.inputs.rr_backend_ref }}"
+          elif [[ -f .github/rr-backend-pin.txt ]]; then
+            REF="$(head -1 .github/rr-backend-pin.txt | tr -d '[:space:]')"
+          fi
+          REF="${REF:-main}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved rr-backend ref: $REF"
+
+      - name: Clone rr-backend
+        run: |
+          REF="${{ steps.resolve-ref.outputs.ref }}"
+          echo "Cloning codetracer-rr-backend at ref: $REF"
+          git clone --recursive \
+            "https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/nicholasgasior/codetracer-rr-backend.git" \
+            target/rr-backend-clone
+          cd target/rr-backend-clone
+          git checkout "$REF"
+          git submodule update --init --recursive
+
+      - name: Build ct-rr-support
+        run: |
+          nix develop target/rr-backend-clone --command \
+            bash -c "cd target/rr-backend-clone && cargo build"
+
+      - name: Resolve rr-backend LD_LIBRARY_PATH
+        id: rr-libs
+        run: |
+          RR_LD="$(nix develop target/rr-backend-clone --command bash -c 'echo "$LD_LIBRARY_PATH"')"
+          echo "ld_library_path=$RR_LD" >> "$GITHUB_OUTPUT"
+          echo "Resolved rr-backend LD_LIBRARY_PATH: $RR_LD"
+
+      - name: Run cross-repo integration tests
+        run: |
+          CT_RR_SUPPORT="$(pwd)/target/rr-backend-clone/target/debug/ct-rr-support"
+          echo "Using ct-rr-support: $CT_RR_SUPPORT"
+          nix develop .#devShells.x86_64-linux.default --command \
+            env CT_RR_SUPPORT_PATH="$CT_RR_SUPPORT" \
+                CT_RR_SUPPORT_LD_LIBRARY_PATH="${{ steps.rr-libs.outputs.ld_library_path }}" \
+                CODETRACER_RR_SOFT_MODE=1 \
+            ./scripts/run-cross-repo-tests.sh --soft all
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-test-logs
+          path: target/cross-test-logs/
+          retention-days: 14
+          if-no-files-found: ignore
