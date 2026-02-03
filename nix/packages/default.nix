@@ -277,42 +277,61 @@
           '';
         };
 
-        db-backend = pkgs.rustPlatform.buildRustPackage {
+        db-backend = let
+          fullSrc = ../../.;
+        in pkgs.stdenv.mkDerivation {
           name = "db-backend";
           pname = "db-backend";
 
-          src = ../../.;
-          sourceRoot = "source/src/db-backend";
+          src = fullSrc;
 
           nativeBuildInputs = [
             pkgs.capnproto
             pkgs.nodejs_20
             pkgs.tree-sitter
+            pkgs.rustc
+            pkgs.cargo
+            pkgs.rustPlatform.cargoSetupHook
           ];
+
+          buildInputs = [ ];
 
           postUnpack = ''
-            # Generate tree-sitter-nim parser before changing sourceRoot
-            if [ ! -f source/libs/tree-sitter-nim/src/parser.c ]; then
+            # Generate tree-sitter-nim parser
+            if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
               echo "Generating tree-sitter-nim parser..."
-              (cd source/libs/tree-sitter-nim && tree-sitter generate)
+              (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
             fi
-
-            # Make libs accessible from db-backend directory
-            ln -s ../../libs source/src/db-backend/libs
           '';
 
-          cargoLock.lockFile = ../../src/db-backend/Cargo.lock;
+          preBuild = ''
+            cd src/db-backend
+          '';
 
-          checkFlags = [
-            # skipping because it records traces with outside processes
-            # and seems more complex to support in the derivation env for now
-            "--skip=tracepoint_interpreter::tests::array_indexing"
-            # skipping because it records traces with outside processes
-            # and seems more complex to support in the derivation env for now
-            "--skip=tracepoint_interpreter::tests::log_array"
-            # os no file or directory error in nix build: not sure why
-            "--skip=backend_dap_server"
-          ];
+          buildPhase = ''
+            runHook preBuild
+            cargo build --release --offline
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            mkdir -p $out/bin
+            cp target/release/db-backend $out/bin/
+            cp target/release/virtualization-layers $out/bin/
+            cp target/release/schema-generator $out/bin/
+          '';
+
+          doCheck = true;
+          checkPhase = ''
+            cargo test --release --offline \
+              --skip=tracepoint_interpreter::tests::array_indexing \
+              --skip=tracepoint_interpreter::tests::log_array \
+              --skip=backend_dap_server
+          '';
+
+          cargoDeps = pkgs.rustPlatform.importCargoLock {
+            lockFile = ../../src/db-backend/Cargo.lock;
+          };
         };
 
         backend-manager = pkgs.rustPlatform.buildRustPackage {
