@@ -1,4 +1,4 @@
-{ inputs, self, ... }:
+{ inputs, ... }:
 {
   perSystem =
     {
@@ -9,10 +9,7 @@
     let
       inherit (pkgs) stdenv;
 
-      # Use self.outPath to get the flake source with submodules
-      # When building with .?submodules=1, Nix will fetch submodules
-      # and self.outPath will include them
-      src = self.outPath;
+      src = ../../.;
 
       # Import multiple Nim versions
       nimVersions = import ../nim-versions { inherit pkgs; };
@@ -284,9 +281,21 @@
           name = "db-backend";
           pname = "db-backend";
 
-          src = ../../src/db-backend;
+          src = ../../.;
+          buildAndTestSubdir = "src/db-backend";
 
-          nativeBuildInputs = [ pkgs.capnproto ];
+          nativeBuildInputs = [
+            pkgs.capnproto
+            pkgs.nodejs_20
+          ];
+
+          preBuild = ''
+            # Generate tree-sitter-nim parser if needed
+            if [ ! -f libs/tree-sitter-nim/src/parser.c ]; then
+              echo "Generating tree-sitter-nim parser..."
+              (cd libs/tree-sitter-nim && npx tree-sitter generate)
+            fi
+          '';
 
           cargoLock = {
             lockFile = ../../src/db-backend/Cargo.lock;
