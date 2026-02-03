@@ -286,13 +286,14 @@
           nativeBuildInputs = [
             pkgs.capnproto
             pkgs.nodejs_20
+            pkgs.tree-sitter
           ];
 
           postUnpack = ''
             # Generate tree-sitter-nim parser if needed
             if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
               echo "Generating tree-sitter-nim parser..."
-              (cd $sourceRoot/libs/tree-sitter-nim && npx tree-sitter generate)
+              (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
             fi
 
             # Symlink Cargo.lock and Cargo.toml to root for buildRustPackage
