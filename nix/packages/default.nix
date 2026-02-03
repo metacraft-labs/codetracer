@@ -282,19 +282,22 @@
           pname = "db-backend";
 
           src = ../../.;
-          buildAndTestSubdir = "src/db-backend";
 
           nativeBuildInputs = [
             pkgs.capnproto
             pkgs.nodejs_20
           ];
 
-          preBuild = ''
+          postUnpack = ''
             # Generate tree-sitter-nim parser if needed
-            if [ ! -f libs/tree-sitter-nim/src/parser.c ]; then
+            if [ ! -f source/libs/tree-sitter-nim/src/parser.c ]; then
               echo "Generating tree-sitter-nim parser..."
-              (cd libs/tree-sitter-nim && npx tree-sitter generate)
+              (cd source/libs/tree-sitter-nim && npx tree-sitter generate)
             fi
+
+            # Symlink Cargo.lock and Cargo.toml to root for buildRustPackage
+            ln -s src/db-backend/Cargo.lock source/Cargo.lock
+            ln -s src/db-backend/Cargo.toml source/Cargo.toml
           '';
 
           cargoLock = {
