@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-SDKROOT="${SDKROOT:-}"
-if [ -z "$SDKROOT" ]; then
-  SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-fi
-LIBICONV_PREFIX="${LIBICONV_PREFIX:-/usr}"
-exec /usr/bin/clang -isysroot "$SDKROOT" -L"$SDKROOT/usr/lib" -L"$LIBICONV_PREFIX/lib" "$@"
