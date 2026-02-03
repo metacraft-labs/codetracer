@@ -290,14 +290,14 @@
 
           postUnpack = ''
             # Generate tree-sitter-nim parser if needed
-            if [ ! -f source/libs/tree-sitter-nim/src/parser.c ]; then
+            if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
               echo "Generating tree-sitter-nim parser..."
-              (cd source/libs/tree-sitter-nim && npx tree-sitter generate)
+              (cd $sourceRoot/libs/tree-sitter-nim && npx tree-sitter generate)
             fi
 
             # Symlink Cargo.lock and Cargo.toml to root for buildRustPackage
-            ln -s src/db-backend/Cargo.lock source/Cargo.lock
-            ln -s src/db-backend/Cargo.toml source/Cargo.toml
+            ln -s src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
+            ln -s src/db-backend/Cargo.toml $sourceRoot/Cargo.toml
           '';
 
           cargoLock = {
