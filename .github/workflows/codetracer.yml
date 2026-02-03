@@ -534,6 +534,11 @@ jobs:
           git_user_signingkey: true
           git_commit_gpgsign: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Build
         run: ./ci/build/dmg.sh
 
