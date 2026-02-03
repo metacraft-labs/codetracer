@@ -8,6 +8,10 @@ if command -v rustc &>/dev/null; then
 	RUST_VERSION=$(rustc --version | cut -d' ' -f2)
 	if [ "$RUST_VERSION" == "$WANTED_RUST_VERSION" ]; then
 		echo "Rust $RUST_VERSION is already installed"
+		# Ensure rustup has a default toolchain set
+		if command -v rustup &>/dev/null; then
+			rustup default nightly 2>/dev/null || true
+		fi
 		exit 0
 	else
 		echo "Rust $RUST_VERSION present, but we need $WANTED_RUST_VERSION! installing..."
