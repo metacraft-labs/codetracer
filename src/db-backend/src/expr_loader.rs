@@ -12,6 +12,9 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser, Tree}; // Language,
+use tree_sitter_go;
+use tree_sitter_nim;
+use tree_sitter_pascal;
 use tree_sitter_traversal2::{traverse_tree, Order};
 
 #[derive(Debug, Clone)]
@@ -141,6 +144,25 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         },
     );
 
+    // Go language support
+    // tree-sitter-go node types reference:
+    // https://github.com/tree-sitter/tree-sitter-go/blob/master/src/node-types.json
+    m.insert(
+        Lang::Go,
+        NodeNames {
+            if_conditions: vec!["if_statement".to_string()],
+            else_conditions: vec!["else_clause".to_string()],
+            loops: vec!["for_statement".to_string()],
+            branches_body: vec!["block".to_string()],
+            branches: vec!["block".to_string()],
+            functions: vec!["function_declaration".to_string(), "method_declaration".to_string()],
+            // Variable detection is handled by is_variable_node() with custom logic;
+            // this value is not used for Lang::Go but included for completeness.
+            values: vec!["identifier".to_string()],
+            comments: vec!["comment".to_string()],
+        },
+    );
+
     m
 });
 
@@ -245,6 +267,8 @@ impl ExprLoader {
                 Lang::PythonDb
             } else if extension == "nim" || extension == "nims" || extension == "nimble" {
                 Lang::Nim
+            } else if extension == "go" {
+                Lang::Go
             } else {
                 Lang::Unknown
             }
@@ -278,6 +302,8 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
         } else if lang == Lang::Nim {
             parser.set_language(&tree_sitter_nim::LANGUAGE.into())?;
+        } else if lang == Lang::Go {
+            parser.set_language(&tree_sitter_go::LANGUAGE.into())?;
         } else {
             // else if lang == Lang::Small {
             //     parser.set_language(&tree_sitter_elisp::LANGUAGE.into())?;
@@ -588,6 +614,111 @@ impl ExprLoader {
                         | "include_stmt"
                 ) {
                     return false;
+                }
+
+                true
+            }
+            Lang::Go => {
+                // Go variable detection using tree-sitter-go AST.
+                //
+                // In Go's tree-sitter grammar, identifiers appear in many contexts.
+                // We want to extract only variable references and filter out:
+                //   - Function/method names in call expressions
+                //   - Package names in selector expressions (e.g., `fmt` in `fmt.Println`)
+                //   - Function declarations (the function name itself)
+                //   - Import paths
+                //   - Type names in type assertions, conversions, and declarations
+                //
+                // Relevant tree-sitter-go node types:
+                //   - `identifier`: local variable/function name
+                //   - `call_expression`: function call; `function` field is the callee
+                //   - `selector_expression`: dot access; `operand` is the left side,
+                //     `field` is the right side (e.g., `fmt.Println`)
+                //   - `function_declaration`: `func foo()` — `name` field is the identifier
+                //   - `method_declaration`: `func (r Recv) foo()` — `name` field
+                //   - `short_var_declaration`: `:=` declarations (variables on the left)
+                //   - `import_spec`: import paths (not variables)
+                //
+                // See: https://github.com/tree-sitter/tree-sitter-go/blob/master/src/node-types.json
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out function/method declaration names
+                if parent_kind == "function_declaration" || parent_kind == "method_declaration" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out function names in call expressions.
+                // In `foo()`, the AST is: call_expression { function: identifier "foo", ... }
+                if parent_kind == "call_expression" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "function" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out selector expressions used as function calls.
+                // In `fmt.Println(...)`, the AST is:
+                //   call_expression {
+                //     function: selector_expression {
+                //       operand: identifier "fmt"
+                //       field: field_identifier "Println"
+                //     }
+                //   }
+                // The `fmt` operand is an identifier, so we filter it out when it's
+                // the operand of a selector_expression inside a call_expression.
+                if parent_kind == "selector_expression" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "operand" {
+                            // Check if the selector_expression is the callee of a call
+                            if let Some(grandparent) = parent.parent() {
+                                if grandparent.kind() == "call_expression" {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter out import identifiers
+                if parent_kind == "import_spec" || parent_kind == "import_declaration" {
+                    return false;
+                }
+
+                // Filter out package clause identifiers
+                if parent_kind == "package_clause" {
+                    return false;
+                }
+
+                // Filter out type identifiers in type contexts
+                if parent_kind == "type_spec" || parent_kind == "type_declaration" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" || field_name == "type" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out parameter names (function parameters are not local variables
+                // in the same sense — they are already captured by the debugger separately)
+                if parent_kind == "parameter_declaration" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "type" {
+                            return false;
+                        }
+                    }
                 }
 
                 true
@@ -1097,6 +1228,72 @@ main()
             info.functions.contains_key(&Position(3)),
             "Line 3 (echo x) should be registered as part of main"
         );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod go_tests {
+    use super::*;
+
+    /// Test that Go variable extraction works correctly
+    #[test]
+    fn test_go_basic_variable_extraction() {
+        use std::fs;
+
+        // Simple Go code similar to the test program
+        let code = r#"package main
+
+import "fmt"
+
+func calculateSum(a, b int) int {
+	sum := a + b
+	doubled := sum * 2
+	fmt.Println("Sum:", sum)
+	return doubled
+}
+
+func main() {
+	x := 10
+	y := 32
+	result := calculateSum(x, y)
+	fmt.Println("Result:", result)
+}
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("go_var_test.go");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Print all extracted variables by line for debugging
+        println!("\n=== Go Variables by line ===");
+        for (pos, vars) in &info.variables {
+            println!("  Line {}: {:?}", pos.0, vars);
+        }
+
+        // Collect all extracted variables
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+        println!("\nAll variables: {:?}", all_vars);
+
+        // Function calls should NOT be in the variables list
+        assert!(!all_vars.contains(&"Println".to_string()), "Println should not be a variable");
+        assert!(!all_vars.contains(&"fmt".to_string()), "fmt should not be a variable (when used as call)");
+        assert!(!all_vars.contains(&"calculateSum".to_string()), "calculateSum should not be a variable");
+
+        // But actual variables SHOULD be in the list
+        assert!(all_vars.contains(&"sum".to_string()), "sum should be extracted as a variable");
+        assert!(all_vars.contains(&"doubled".to_string()), "doubled should be extracted as a variable");
+        assert!(all_vars.contains(&"a".to_string()), "a should be extracted as a variable");
+        assert!(all_vars.contains(&"b".to_string()), "b should be extracted as a variable");
+        assert!(all_vars.contains(&"x".to_string()), "x should be extracted as a variable");
+        assert!(all_vars.contains(&"y".to_string()), "y should be extracted as a variable");
+        assert!(all_vars.contains(&"result".to_string()), "result should be extracted as a variable");
 
         fs::remove_file(&file_path).unwrap();
     }

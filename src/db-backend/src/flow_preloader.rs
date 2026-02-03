@@ -317,25 +317,23 @@ impl<'a> CallFlowPreloader<'a> {
         } else {
             // For RR traces: if we already have a valid location (e.g., from a breakpoint),
             // jump to that location instead of using jump_to_call which may not work correctly.
-            if self.location.rr_ticks.0 > 0 && self.location.line > 0 {
-                // info!("  move_to_first_step: jumping to location at line {} rr_ticks={}",
-                //       self.location.line, self.location.rr_ticks.0);
-                // if let Err(e) = replay.location_jump(&self.location) {
-                // warn!("  location_jump error: {e:?}, falling back to jump_to_call");
-                info!(
-                    "  move_to_first_step: jumping to call with location {:?}",
-                    self.location
-                );
-                if let Ok(location) = replay.jump_to_call(&self.location) {
-                    step_id = StepId(location.rr_ticks.0);
-                    progressing = true;
+            // Check both rr_ticks and event: Delve (Go) can't provide ticks but does
+            // provide event numbers, which ct-rr-support uses as a fallback for seeking.
+            if (self.location.rr_ticks.0 > 0 || self.location.event > 0) && self.location.line > 0 {
+                info!("  move_to_first_step: jumping to location at line {} rr_ticks={} event={}",
+                      self.location.line, self.location.rr_ticks.0, self.location.event);
+                if let Err(e) = replay.location_jump(&self.location) {
+                    warn!("  location_jump error: {e:?}, falling back to jump_to_call");
+                    if let Ok(location) = replay.jump_to_call(&self.location) {
+                        step_id = StepId(location.rr_ticks.0);
+                        progressing = true;
+                    } else {
+                        move_error = true;
+                    }
                 } else {
-                    move_error = true;
+                    step_id = StepId(self.location.rr_ticks.0);
+                    progressing = true;
                 }
-                // } else {
-                //     step_id = StepId(self.location.rr_ticks.0);
-                //     progressing = true;
-                // }
             } else if let Ok(location) = replay.jump_to_call(&self.location) {
                 step_id = StepId(location.rr_ticks.0);
                 progressing = true;
