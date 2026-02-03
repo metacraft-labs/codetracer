@@ -3391,7 +3391,7 @@ proc addSliderWidget(self: FlowComponent, position:int) =
   let id = &"flow-slider-widget-{position}"
   let dom = makeSliderDom(self, position)
 
-  self.flowLoops[position].flowDom = dom
+  self.flowLoops[position].flowDom.appendChild(dom)
 
 proc resizeEditorHandler(self:FlowComponent, position: int) =
   # get new monaco editor config
