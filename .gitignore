@@ -220,3 +220,6 @@ csources_v1/
 *.patch
 .pre-commit-config.yaml
 .cspellcache
+src/libs
+src/tup.config
+.nix/
