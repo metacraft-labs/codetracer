@@ -53,10 +53,11 @@ export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/b
 export NIM1=$DEPS_DIR/nim/bin/nim
 
 if [ "$os" == "mac" ]; then
-	brew install sqlite3 ruby node universal-ctags go capnp
+	brew install sqlite3 ruby universal-ctags go capnp
 fi
 
 ./install_rust.sh
+./install_node.sh
 ./install_nargo.sh
 ./install_wazero.sh
 ./install_nim_osx.sh
