@@ -4077,8 +4077,3 @@ when defined(ctInExtension):
     # )
 
     # dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
-
-when defined(ctInExtension):
-  when defined(ctInCentralExtensionContext):
-    {.emit: "module.exports.vsUpdatedFlow = vsUpdatedFlow".}
-    {.emit: "module.exports.completeMove = completeMove".}
