@@ -61,6 +61,8 @@ jobs:
         run: |
           REF="${{ steps.resolve-ref.outputs.ref }}"
           echo "Cloning codetracer-rr-backend at ref: $REF"
+          # Ensure SSH→HTTPS rewrite is active for submodule cloning
+          git config --global url."https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
           git clone --recursive \
             "https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-rr-backend.git" \
             target/rr-backend-clone
