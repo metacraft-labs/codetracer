@@ -7,7 +7,8 @@ echo 'Running C# UI e2e playwright tests'
 echo '###############################################################################'
 
 # The nix-store Electron chrome-sandbox binary lacks the SUID bit, so we must
-# disable the Chromium sandbox when running in CI.
-export CODETRACER_ELECTRON_ARGS="--no-sandbox"
+# disable the Chromium sandbox when running in CI.  Also disable the GPU
+# process (no GPU on CI runners) to avoid Zygote fork failures.
+export CODETRACER_ELECTRON_ARGS="--no-sandbox --disable-gpu"
 
 just test-csharp-ui xvfb --mode Electron
