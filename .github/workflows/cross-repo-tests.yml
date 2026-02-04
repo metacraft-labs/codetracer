@@ -72,14 +72,14 @@ jobs:
 
       - name: Build ct-rr-support
         run: |
-          nix develop target/rr-backend-clone --command \
+          nix develop ./target/rr-backend-clone --command \
             bash -c "cd target/rr-backend-clone && cargo build"
 
       - name: Resolve rr-backend LD_LIBRARY_PATH
         id: rr-libs
         run: |
           # Use markers to extract LD_LIBRARY_PATH cleanly (nix develop may print banners)
-          RAW="$(nix develop target/rr-backend-clone --command bash -c \
+          RAW="$(nix develop ./target/rr-backend-clone --command bash -c \
             'echo "___LD_PATH_START___"; echo "$LD_LIBRARY_PATH"; echo "___LD_PATH_END___"')"
           RR_LD="$(echo "$RAW" | sed -n '/___LD_PATH_START___/{n;p;}')"
           echo "ld_library_path=$RR_LD" >> "$GITHUB_OUTPUT"
