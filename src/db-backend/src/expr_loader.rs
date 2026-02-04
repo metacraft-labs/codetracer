@@ -12,9 +12,6 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser, Tree}; // Language,
-use tree_sitter_go;
-use tree_sitter_nim;
-use tree_sitter_pascal;
 use tree_sitter_traversal2::{traverse_tree, Order};
 
 #[derive(Debug, Clone)]
@@ -1234,6 +1231,8 @@ main()
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
 mod go_tests {
     use super::*;
 
@@ -1282,18 +1281,48 @@ func main() {
         println!("\nAll variables: {:?}", all_vars);
 
         // Function calls should NOT be in the variables list
-        assert!(!all_vars.contains(&"Println".to_string()), "Println should not be a variable");
-        assert!(!all_vars.contains(&"fmt".to_string()), "fmt should not be a variable (when used as call)");
-        assert!(!all_vars.contains(&"calculateSum".to_string()), "calculateSum should not be a variable");
+        assert!(
+            !all_vars.contains(&"Println".to_string()),
+            "Println should not be a variable"
+        );
+        assert!(
+            !all_vars.contains(&"fmt".to_string()),
+            "fmt should not be a variable (when used as call)"
+        );
+        assert!(
+            !all_vars.contains(&"calculateSum".to_string()),
+            "calculateSum should not be a variable"
+        );
 
         // But actual variables SHOULD be in the list
-        assert!(all_vars.contains(&"sum".to_string()), "sum should be extracted as a variable");
-        assert!(all_vars.contains(&"doubled".to_string()), "doubled should be extracted as a variable");
-        assert!(all_vars.contains(&"a".to_string()), "a should be extracted as a variable");
-        assert!(all_vars.contains(&"b".to_string()), "b should be extracted as a variable");
-        assert!(all_vars.contains(&"x".to_string()), "x should be extracted as a variable");
-        assert!(all_vars.contains(&"y".to_string()), "y should be extracted as a variable");
-        assert!(all_vars.contains(&"result".to_string()), "result should be extracted as a variable");
+        assert!(
+            all_vars.contains(&"sum".to_string()),
+            "sum should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"doubled".to_string()),
+            "doubled should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"a".to_string()),
+            "a should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"b".to_string()),
+            "b should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"y".to_string()),
+            "y should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"result".to_string()),
+            "result should be extracted as a variable"
+        );
 
         fs::remove_file(&file_path).unwrap();
     }

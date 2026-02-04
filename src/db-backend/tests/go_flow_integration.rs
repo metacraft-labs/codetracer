@@ -48,10 +48,7 @@ fn create_go_flow_config() -> FlowTestConfig {
 
 /// Check if Delve (dlv) is available — required for Go debugging.
 fn is_delve_available() -> bool {
-    std::process::Command::new("dlv")
-        .arg("version")
-        .output()
-        .is_ok()
+    std::process::Command::new("dlv").arg("version").output().is_ok()
 }
 
 #[test]
