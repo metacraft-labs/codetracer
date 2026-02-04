@@ -380,7 +380,9 @@ impl FlowData {
 
         for step_json in steps_json {
             // Flow steps use "position" (from FlowStep.position: Position) in camelCase JSON.
-            let line = step_json.get("position").and_then(|l| l.as_i64())
+            let line = step_json
+                .get("position")
+                .and_then(|l| l.as_i64())
                 .or_else(|| step_json.get("line").and_then(|l| l.as_i64()))
                 .unwrap_or(0);
 

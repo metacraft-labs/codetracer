@@ -277,65 +277,67 @@
           '';
         };
 
-        db-backend = let
-          fullSrc = ../../.;
-        in pkgs.stdenv.mkDerivation {
-          name = "db-backend";
-          pname = "db-backend";
+        db-backend =
+          let
+            fullSrc = ../../.;
+          in
+          pkgs.stdenv.mkDerivation {
+            name = "db-backend";
+            pname = "db-backend";
 
-          src = fullSrc;
+            src = fullSrc;
 
-          nativeBuildInputs = [
-            pkgs.capnproto
-            pkgs.nodejs_20
-            pkgs.tree-sitter
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.rustPlatform.cargoSetupHook
-          ];
+            nativeBuildInputs = [
+              pkgs.capnproto
+              pkgs.nodejs_20
+              pkgs.tree-sitter
+              pkgs.rustc
+              pkgs.cargo
+              pkgs.rustPlatform.cargoSetupHook
+            ];
 
-          buildInputs = [ ];
+            buildInputs = [ ];
 
-          postUnpack = ''
-            # Generate tree-sitter-nim parser
-            if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
-              echo "Generating tree-sitter-nim parser..."
-              (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
-            fi
+            postUnpack = ''
+              # Generate tree-sitter-nim parser
+              if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
+                echo "Generating tree-sitter-nim parser..."
+                (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
+              fi
 
-            # Copy Cargo.lock to root for cargoSetupHook
-            cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
-          '';
+              # Copy Cargo.lock to root for cargoSetupHook
+              cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
+            '';
 
-          preBuild = ''
-            cd src/db-backend
-          '';
+            preBuild = ''
+              cd src/db-backend
+            '';
 
-          buildPhase = ''
-            runHook preBuild
-            cargo build --release --offline
-            runHook postBuild
-          '';
+            buildPhase = ''
+              runHook preBuild
+              cargo build --release --offline
+              runHook postBuild
+            '';
 
-          installPhase = ''
-            mkdir -p $out/bin
-            cp target/release/db-backend $out/bin/
-            cp target/release/virtualization-layers $out/bin/
-            cp target/release/schema-generator $out/bin/
-          '';
+            installPhase = ''
+              mkdir -p $out/bin
+              cp target/release/db-backend $out/bin/
+              cp target/release/virtualization-layers $out/bin/
+              cp target/release/schema-generator $out/bin/
+            '';
 
-          doCheck = true;
-          checkPhase = ''
-            cargo test --release --offline -- \
-              --skip tracepoint_interpreter::tests::array_indexing \
-              --skip tracepoint_interpreter::tests::log_array \
-              --skip backend_dap_server
-          '';
+            doCheck = true;
+            checkPhase = ''
+              cargo test --release --offline -- \
+                --skip tracepoint_interpreter::tests::array_indexing \
+                --skip tracepoint_interpreter::tests::log_array \
+                --skip backend_dap_server
+            '';
 
-          cargoDeps = pkgs.rustPlatform.importCargoLock {
-            lockFile = ../../src/db-backend/Cargo.lock;
+            cargoDeps = pkgs.rustPlatform.importCargoLock {
+              lockFile = ../../src/db-backend/Cargo.lock;
+            };
           };
-        };
 
         backend-manager = pkgs.rustPlatform.buildRustPackage {
           name = "backend-manager";

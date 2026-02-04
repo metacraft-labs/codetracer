@@ -320,8 +320,10 @@ impl<'a> CallFlowPreloader<'a> {
             // Check both rr_ticks and event: Delve (Go) can't provide ticks but does
             // provide event numbers, which ct-rr-support uses as a fallback for seeking.
             if (self.location.rr_ticks.0 > 0 || self.location.event > 0) && self.location.line > 0 {
-                info!("  move_to_first_step: jumping to location at line {} rr_ticks={} event={}",
-                      self.location.line, self.location.rr_ticks.0, self.location.event);
+                info!(
+                    "  move_to_first_step: jumping to location at line {} rr_ticks={} event={}",
+                    self.location.line, self.location.rr_ticks.0, self.location.event
+                );
                 if let Err(e) = replay.location_jump(&self.location) {
                     warn!("  location_jump error: {e:?}, falling back to jump_to_call");
                     if let Ok(location) = replay.jump_to_call(&self.location) {
