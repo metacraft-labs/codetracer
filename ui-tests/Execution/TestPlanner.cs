@@ -133,6 +133,13 @@ internal sealed class TestPlanner : ITestPlanner
             return runnerModes;
         }
 
+        // Respect the runner's execution mode filter for hardcoded scenarios too,
+        // so that --mode Electron correctly excludes Web-only scenarios.
+        if (!runnerModes.Contains(scenario.Mode))
+        {
+            return Array.Empty<TestMode>();
+        }
+
         return new[] { scenario.Mode };
     }
 }
