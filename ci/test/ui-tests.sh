@@ -6,4 +6,4 @@ echo '##########################################################################
 echo 'Running C# UI e2e playwright tests'
 echo '###############################################################################'
 
-just test-csharp-ui xvfb
+just test-csharp-ui xvfb --mode Electron

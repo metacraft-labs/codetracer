@@ -25,5 +25,8 @@ mkShell {
 
     # used in ui-tests/dotnet_build.sh
     export NIX_NODE=${pkgs.nodejs_22.outPath}/bin/node
+
+    # Runtime library path for the ct binary which uses dlopen for openssl, sqlite, etc.
+    export LD_LIBRARY_PATH="${pkgs.openssl.out}/lib:${pkgs.sqlite.out}/lib:${pkgs.pcre.out}/lib:${pkgs.glib.out}/lib:${pkgs.gcc.cc.lib}/lib:${pkgs.libzip.out}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   '';
 }
