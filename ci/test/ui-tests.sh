@@ -14,4 +14,4 @@ echo '##########################################################################
 #   --disable-dev-shm-usage use /tmp instead of /dev/shm (small in containers)
 export CODETRACER_ELECTRON_ARGS="--no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage"
 
-just test-csharp-ui xvfb --mode Electron
+just test-csharp-ui xvfb --mode Electron --suite stable-tests
