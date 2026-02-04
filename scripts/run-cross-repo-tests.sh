@@ -235,7 +235,7 @@ resolve_ct_rr_support() {
 		else
 			rm -rf "$CLONE_DIR"
 			git clone --recursive \
-				"https://github.com/nicholasgasior/codetracer-rr-backend.git" \
+				"https://github.com/metacraft-labs/codetracer-rr-backend.git" \
 				"$CLONE_DIR"
 			(cd "$CLONE_DIR" && git checkout "$ref" && git submodule update --init --recursive)
 		fi
