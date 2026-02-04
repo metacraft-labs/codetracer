@@ -121,6 +121,57 @@ test headless="0":
   {{tester}} rr-gdb-scripts
   {{tester}} core
 
+# Build the C# UI tests (requires the ui-tests nix shell)
+build-csharp-ui:
+  #!/usr/bin/env bash
+  set -e
+  cd ui-tests
+  ./dotnet_build.sh
+
+# Run C# UI tests (requires the ui-tests nix shell)
+#
+# display: controls how the graphical display is handled
+#   "default"  - use the current display, showing the Electron window
+#   "xvfb"     - use xvfb-run for a headless X11 server (used in CI)
+#   "xephyr"   - use Xephyr to show the virtual X11 server window
+#   "headless" - run with headless Electron (no X11 server needed)
+#
+# Additional arguments are forwarded to `dotnet run`, e.g.:
+#   just test-csharp-ui xvfb --suite stable-tests --mode Electron
+test-csharp-ui display="default" *args:
+  #!/usr/bin/env bash
+  set -e
+  cd ui-tests
+  ./dotnet_build.sh
+  case "{{display}}" in
+    xvfb)
+      xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+        dotnet run -- {{args}}
+      ;;
+    xephyr)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xephyr ":${DISPLAY_NUM}" -screen 1920x1080 &
+      XEPHYR_PID=$!
+      trap "kill $XEPHYR_PID 2>/dev/null || true" EXIT
+      sleep 1
+      DISPLAY=":${DISPLAY_NUM}" dotnet run -- {{args}}
+      ;;
+    headless)
+      UITESTS_ELECTRON_HEADLESS=true dotnet run -- {{args}}
+      ;;
+    default)
+      dotnet run -- {{args}}
+      ;;
+    *)
+      echo "Error: Unknown display mode '{{display}}'."
+      echo "Valid modes: default, xvfb, xephyr, headless"
+      exit 1
+      ;;
+  esac
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!
