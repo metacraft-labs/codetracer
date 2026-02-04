@@ -686,7 +686,7 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
+      - run: "nix develop .#ui-tests --command ./ci/test/ui-tests.sh"
 
   publish-pypi:
     needs:
