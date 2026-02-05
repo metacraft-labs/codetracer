@@ -808,7 +808,8 @@
 
           postFixup = ''
             wrapProgram $out/bin/ct \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ cargo-stylus ]}
+              --prefix PATH : ${pkgs.lib.makeBinPath [ cargo-stylus ]} \
+              --set LINKS_PATH_DIR ${runtimeDeps.outPath}
           '';
 
         };
