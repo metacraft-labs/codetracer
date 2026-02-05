@@ -36,9 +36,11 @@ public class TraceLogPanel
 
     /// <summary>
     /// Editable text box used to configure the trace expression.
+    /// Monaco editor creates a textarea with class 'inputarea'. The element also has
+    /// 'monaco-mouse-cursor-text' class when focused. We use First to handle any duplicates.
     /// </summary>
     public ILocator EditTextBox()
-        => Root.Locator("textarea");
+        => Root.Locator("textarea.inputarea").First;
 
     /// <summary>
     /// Rows rendered in the trace log panel.

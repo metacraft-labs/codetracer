@@ -16,6 +16,39 @@ using UiTests.Tests;
 public static class NoirSpaceShipTests
 {
     /// <summary>
+    /// Navigates via call trace to open shield.nr editor tab.
+    /// This is needed because shield.nr is not open by default - only main.nr is.
+    /// </summary>
+    private static async Task<EditorPane> NavigateToShieldEditorAsync(LayoutPage layout)
+    {
+        var callTrace = (await layout.CallTraceTabsAsync()).First();
+        await callTrace.TabButton().ClickAsync();
+        callTrace.InvalidateEntries();
+
+        var eventLog = (await layout.EventLogTabsAsync()).First();
+        await eventLog.TabButton().ClickAsync();
+        var firstRow = await eventLog.RowByIndexAsync(1, forceReload: true);
+        await firstRow.ClickAsync();
+
+        var statusReportEntry = await callTrace.FindEntryAsync("status_report", forceReload: true)
+            ?? throw new Exception("Unable to locate status_report entry in call trace.");
+        await statusReportEntry.ActivateAsync();
+        await statusReportEntry.ExpandChildrenAsync();
+        callTrace.InvalidateEntries();
+
+        var calculateDamageEntry = await callTrace.FindEntryAsync("calculate_damage", forceReload: true)
+            ?? throw new Exception("Unable to locate calculate_damage entry in call trace.");
+        await calculateDamageEntry.ActivateAsync();
+
+        var shieldEditor = (await layout.EditorTabsAsync(true))
+            .FirstOrDefault(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase))
+            ?? throw new Exception("shield.nr editor tab was not available after navigation.");
+
+        await shieldEditor.TabButton().ClickAsync();
+        return shieldEditor;
+    }
+
+    /// <summary>
     /// Ensure the Noir Space Ship example opens an editor tab titled "src/main.nr".
     /// </summary>
     public static async Task EditorLoadedMainNrFile(IPage page)
@@ -390,8 +423,7 @@ public static class NoirSpaceShipTests
         var layout = new LayoutPage(page);
         await layout.WaitForAllComponentsLoadedAsync();
 
-        var shieldEditor = (await layout.EditorTabsAsync()).First(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase));
-        await shieldEditor.TabButton().ClickAsync();
+        var shieldEditor = await NavigateToShieldEditorAsync(layout);
 
         const int traceLine = 14;
         await shieldEditor.OpenTrace(traceLine);
@@ -515,8 +547,7 @@ public static class NoirSpaceShipTests
         var layout = new LayoutPage(page);
         await layout.WaitForAllComponentsLoadedAsync();
 
-        var editor = (await layout.EditorTabsAsync()).First(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase));
-        await editor.TabButton().ClickAsync();
+        var editor = await NavigateToShieldEditorAsync(layout);
 
         const int traceLine = 14;
         await editor.OpenTrace(traceLine);
@@ -555,8 +586,7 @@ public static class NoirSpaceShipTests
         var layout = new LayoutPage(page);
         await layout.WaitForAllComponentsLoadedAsync();
 
-        var editor = (await layout.EditorTabsAsync()).First(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase));
-        await editor.TabButton().ClickAsync();
+        var editor = await NavigateToShieldEditorAsync(layout);
 
         // Collect baseline operation status
         var operationStatus = page.Locator("#operation-status");
@@ -584,8 +614,7 @@ public static class NoirSpaceShipTests
         var layout = new LayoutPage(page);
         await layout.WaitForAllComponentsLoadedAsync();
 
-        var editor = (await layout.EditorTabsAsync()).First(e => e.TabButtonText.Contains("shield.nr", StringComparison.OrdinalIgnoreCase));
-        await editor.TabButton().ClickAsync();
+        var editor = await NavigateToShieldEditorAsync(layout);
 
         const int traceLine = 14;
         await editor.OpenTrace(traceLine);
