@@ -69,6 +69,12 @@ public sealed class RunnerSettings
         = false;
 
     /// <summary>
+    /// Maximum number of retry attempts for failed tests. 0 means no retries.
+    /// </summary>
+    [Range(0, 10)]
+    public int MaxRetries { get; set; } = 0;
+
+    /// <summary>
     /// Default execution mode used when scenarios omit an explicit target.
     /// </summary>
     [EnumDataType(typeof(TestMode))]
