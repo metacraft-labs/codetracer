@@ -106,40 +106,70 @@ internal sealed class TestExecutionPipeline : IUiTestExecutionPipeline
             return;
         }
 
+        var maxAttempts = 1 + _settings.Runner.MaxRetries;
+        Exception? lastException = null;
+
         try
         {
-            if (linkedCts.IsCancellationRequested)
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                return;
+                if (linkedCts.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                var isRetry = attempt > 1;
+                var attemptSuffix = maxAttempts > 1 ? $" (attempt {attempt}/{maxAttempts})" : string.Empty;
+
+                if (ShouldEmitConsole(entry) || isRetry)
+                {
+                    var verb = isRetry ? "Retrying" : "Starting";
+                    _logger.LogInformation("{Verb} test {TestId} / scenario {ScenarioId} ({Mode}){Suffix}.",
+                        verb, entry.Test.Id, entry.Scenario.Id, entry.Mode, attemptSuffix);
+                }
+
+                try
+                {
+                    await _executors[entry.Mode].ExecuteAsync(entry, linkedCts.Token);
+
+                    if (ShouldEmitConsole(entry) || isRetry)
+                    {
+                        _logger.LogInformation("Completed test {TestId} / scenario {ScenarioId} ({Mode}){Suffix}.",
+                            entry.Test.Id, entry.Scenario.Id, entry.Mode, attemptSuffix);
+                    }
+
+                    results.Add(new TestRunResult(entry, TestOutcome.Passed));
+                    return;
+                }
+                catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+
+                    if (attempt < maxAttempts)
+                    {
+                        _logger.LogWarning(
+                            "Test {TestId} / scenario {ScenarioId} ({Mode}) failed on attempt {Attempt}/{MaxAttempts}: {Message}",
+                            entry.Test.Id, entry.Scenario.Id, entry.Mode, attempt, maxAttempts, ex.Message);
+                    }
+                }
             }
 
-            if (ShouldEmitConsole(entry))
-            {
-                _logger.LogInformation("Starting test {TestId} / scenario {ScenarioId} ({Mode}).", entry.Test.Id, entry.Scenario.Id, entry.Mode);
-            }
-
-            await _executors[entry.Mode].ExecuteAsync(entry, linkedCts.Token);
-
-            if (ShouldEmitConsole(entry))
-            {
-                _logger.LogInformation("Completed test {TestId} / scenario {ScenarioId} ({Mode}).", entry.Test.Id, entry.Scenario.Id, entry.Mode);
-            }
-
-            results.Add(new TestRunResult(entry, TestOutcome.Passed));
-        }
-        catch (OperationCanceledException ex) when (linkedCts.IsCancellationRequested)
-        {
-            failures.Enqueue(new TestFailure(entry, ex));
-            results.Add(new TestRunResult(entry, TestOutcome.Failed));
-        }
-        catch (Exception ex)
-        {
-            failures.Enqueue(new TestFailure(entry, ex));
+            // All attempts exhausted
+            failures.Enqueue(new TestFailure(entry, lastException!));
             results.Add(new TestRunResult(entry, TestOutcome.Failed));
             if (_settings.Runner.StopOnFirstFailure)
             {
                 linkedCts.Cancel();
             }
+        }
+        catch (OperationCanceledException ex) when (linkedCts.IsCancellationRequested)
+        {
+            failures.Enqueue(new TestFailure(entry, ex));
+            results.Add(new TestRunResult(entry, TestOutcome.Failed));
         }
         finally
         {
