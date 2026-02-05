@@ -25,8 +25,9 @@ public class ValueComponentView
     private ILocator NameContainer() => _root.Locator(".value-name-container");
     private ILocator ExpandButton() => NameContainer().Locator(".value-expand-button");
     private ILocator AddToScratchpadButton() => NameContainer().Locator(".add-to-scratchpad-button");
-    private ILocator HistoryToggle() => NameContainer().Locator(".toggle-value-history");
-    private ILocator ValueTypeNode() => NameContainer().Locator(".value-type");
+    // Note: toggle-value-history is a sibling of value-name-container, not inside it
+    private ILocator HistoryToggle() => _root.Locator(".toggle-value-history");
+    private ILocator ValueTypeNode() => _root.Locator(".value-type");
     private ILocator ValueTextNode() => _root.Locator(".value-expanded-text").First;
 
     /// <summary>

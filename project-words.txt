@@ -113,3 +113,5 @@ abigen
 xrandr
 myscript
 façade
+textareas
+inputarea
