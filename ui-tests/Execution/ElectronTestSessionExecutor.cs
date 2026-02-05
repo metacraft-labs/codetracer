@@ -18,6 +18,7 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
     private readonly IPortAllocator _portAllocator;
     private readonly AppSettings _settings;
     private readonly IProcessLifecycleManager _processLifecycle;
+    private readonly ITestDiagnosticsService _diagnostics;
     private readonly ILogger<ElectronTestSessionExecutor> _logger;
 
     public ElectronTestSessionExecutor(
@@ -26,7 +27,8 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         IPortAllocator portAllocator,
         IOptions<AppSettings> settings,
         ILogger<ElectronTestSessionExecutor> logger,
-        IProcessLifecycleManager processLifecycle)
+        IProcessLifecycleManager processLifecycle,
+        ITestDiagnosticsService diagnostics)
     {
         _launcher = launcher;
         _monitorLayoutService = monitorLayoutService;
@@ -34,6 +36,7 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         _settings = settings.Value;
         _logger = logger;
         _processLifecycle = processLifecycle;
+        _diagnostics = diagnostics;
     }
 
     public TestMode Mode => TestMode.Electron;
@@ -91,7 +94,16 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         var context = new TestExecutionContext(entry.Scenario, entry.Mode, page, cancellationToken);
         var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
         using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
-        await entry.Test.Handler(context);
+
+        try
+        {
+            await entry.Test.Handler(context);
+        }
+        catch (Exception ex)
+        {
+            await _diagnostics.CaptureFailureDiagnosticsAsync(page, entry, ex, attempt: 1);
+            throw;
+        }
     }
 
     private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int cdpPort, int rustLspPort, int rubyLspPort, CancellationToken cancellationToken)

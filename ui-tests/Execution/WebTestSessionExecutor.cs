@@ -20,6 +20,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
     private readonly AppSettings _settings;
     private readonly ILogger<WebTestSessionExecutor> _logger;
     private readonly IProcessLifecycleManager _processLifecycle;
+    private readonly ITestDiagnosticsService _diagnostics;
 
     public WebTestSessionExecutor(
         ICodetracerLauncher launcher,
@@ -28,7 +29,8 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         IMonitorLayoutService monitorLayoutService,
         IOptions<AppSettings> settings,
         ILogger<WebTestSessionExecutor> logger,
-        IProcessLifecycleManager processLifecycle)
+        IProcessLifecycleManager processLifecycle,
+        ITestDiagnosticsService diagnostics)
     {
         _launcher = launcher;
         _hostLauncher = hostLauncher;
@@ -37,6 +39,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         _settings = settings.Value;
         _logger = logger;
         _processLifecycle = processLifecycle;
+        _diagnostics = diagnostics;
     }
 
     public TestMode Mode => TestMode.Web;
@@ -71,7 +74,16 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             var context = new TestExecutionContext(entry.Scenario, entry.Mode, session.Page, cancellationToken);
             var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
             using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
-            await entry.Test.Handler(context);
+
+            try
+            {
+                await entry.Test.Handler(context);
+            }
+            catch (Exception ex)
+            {
+                await _diagnostics.CaptureFailureDiagnosticsAsync(session.Page, entry, ex, attempt: 1);
+                throw;
+            }
         }
         finally
         {
