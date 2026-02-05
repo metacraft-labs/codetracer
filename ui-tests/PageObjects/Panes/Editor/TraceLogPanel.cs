@@ -35,12 +35,81 @@ public class TraceLogPanel
         => ParentPane.Root.Locator($"xpath=//*[@id='edit-trace-{ParentPane.IdNumber}-{LineNumber}']/ancestor::*[@class='trace']");
 
     /// <summary>
+    /// Monaco editor's visible text area where code is rendered.
+    /// This is the clickable area that focuses the editor.
+    /// </summary>
+    public ILocator MonacoViewLines()
+        => Root.Locator(".monaco-editor .view-lines").First;
+
+    /// <summary>
     /// Editable text box used to configure the trace expression.
-    /// Monaco editor creates a textarea with class 'inputarea'. The element also has
-    /// 'monaco-mouse-cursor-text' class when focused. We use First to handle any duplicates.
+    /// Monaco editor creates a textarea for input. The class name varies by Monaco version:
+    /// - Older versions: 'inputarea'
+    /// - Newer versions: 'ime-text-area'
+    /// We use First to handle any duplicates.
     /// </summary>
     public ILocator EditTextBox()
-        => Root.Locator("textarea.inputarea").First;
+        => Root.Locator("textarea.inputarea, textarea.ime-text-area").First;
+
+    /// <summary>
+    /// Types text into the trace expression editor by clicking the Monaco view area
+    /// and using keyboard input. This is the recommended approach for newer Monaco versions.
+    /// </summary>
+    /// <param name="expression">The trace expression to type.</param>
+    public async Task TypeExpressionAsync(string expression)
+    {
+        var viewLines = MonacoViewLines();
+        await viewLines.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
+
+        // Click on the view lines to focus the Monaco editor
+        await viewLines.ClickAsync();
+        await Task.Delay(200);
+
+        var editId = $"edit-trace-{ParentPane.IdNumber}-{LineNumber}";
+        var page = ParentPane.Root.Page;
+
+        // Try to set value via Monaco API - access through data.services or global monaco
+        var setViaApi = await page.EvaluateAsync<bool>(@"(args) => {
+            const editId = args.editId;
+            const expression = args.expression;
+            const editDiv = document.getElementById(editId);
+            if (!editDiv) return false;
+
+            // Try multiple ways to access Monaco editors
+            // Method 1: Via global monaco API
+            const monacoEditors = window.monaco?.editor?.getEditors?.() || [];
+            for (const editor of monacoEditors) {
+                const domNode = editor.getDomNode();
+                if (domNode && editDiv.contains(domNode)) {
+                    editor.setValue(expression);
+                    return true;
+                }
+            }
+
+            // Method 2: Look for Monaco container's editor property
+            const monacoContainer = editDiv.querySelector('.monaco-editor');
+            if (monacoContainer && monacoContainer._editorInstance) {
+                monacoContainer._editorInstance.setValue(expression);
+                return true;
+            }
+
+            return false;
+        }", new { editId, expression });
+
+        // Always use keyboard fallback for reliability
+        // Click to ensure focus
+        await viewLines.ClickAsync();
+        await Task.Delay(150);
+
+        // Select all and delete existing content
+        await page.Keyboard.PressAsync("Control+a");
+        await Task.Delay(50);
+        await page.Keyboard.PressAsync("Delete");
+        await Task.Delay(50);
+
+        // Type the expression character by character with delay for reliability
+        await page.Keyboard.TypeAsync(expression, new() { Delay = 30 });
+    }
 
     /// <summary>
     /// Rows rendered in the trace log panel.
