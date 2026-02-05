@@ -112,6 +112,7 @@ internal static class Program
                 services.AddSingleton<ITestSessionExecutor, ElectronTestSessionExecutor>();
                 services.AddSingleton<ITestSessionExecutor, WebTestSessionExecutor>();
                 services.AddSingleton<IProcessLifecycleManager, ProcessLifecycleManager>();
+                services.AddSingleton<ITestDiagnosticsService, TestDiagnosticsService>();
 
                 services.AddLogging(builder =>
                 {
