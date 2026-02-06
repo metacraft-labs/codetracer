@@ -14,13 +14,15 @@ namespace UiTests.PageObjects.Panes.Filesystem;
 public class FilesystemNode
 {
     private readonly FilesystemPane _pane;
+    private readonly IPage _page;
     private readonly ILocator _nodeLocator;
     private readonly ILocator _anchorLocator;
     private readonly ContextMenu _contextMenu;
 
-    public FilesystemNode(FilesystemPane pane, ILocator nodeLocator, ContextMenu contextMenu)
+    public FilesystemNode(FilesystemPane pane, IPage page, ILocator nodeLocator, ContextMenu contextMenu)
     {
         _pane = pane ?? throw new ArgumentNullException(nameof(pane));
+        _page = page ?? throw new ArgumentNullException(nameof(page));
         _nodeLocator = nodeLocator ?? throw new ArgumentNullException(nameof(nodeLocator));
         _anchorLocator = _nodeLocator.Locator("> a.jstree-anchor");
         _contextMenu = contextMenu;
@@ -113,40 +115,28 @@ public class FilesystemNode
     /// </summary>
     /// <remarks>
     /// jstree uses jQuery-based event handling that binds to 'contextmenu.jstree' events
-    /// on '.jstree-anchor' elements. The handler requires both clientX/clientY and pageX/pageY
-    /// coordinates. We dispatch a proper MouseEvent with all required coordinates and use
-    /// jQuery's trigger for maximum compatibility.
+    /// on '.jstree-anchor' elements. We use Playwright's built-in right-click which
+    /// properly dispatches the contextmenu event with correct coordinates.
     /// </remarks>
     public async Task<ContextMenu> OpenContextMenuAsync()
     {
         // First ensure the element is visible and scrolled into view
         await AnchorLocator.ScrollIntoViewIfNeededAsync();
 
-        // Wait a short moment for jstree to fully initialize
-        await Task.Delay(150);
+        // Wait for jstree to fully process any pending events (folder expansion, etc.)
+        await Task.Delay(300);
 
-        // Get the element's bounding box for positioning
-        var box = await AnchorLocator.BoundingBoxAsync();
-        if (box == null)
-        {
-            throw new InvalidOperationException("Filesystem node anchor is not visible or has no bounding box.");
-        }
+        // Use Playwright's built-in right-click which handles positioning correctly
+        await AnchorLocator.ClickAsync(new() { Button = MouseButton.Right });
 
-        // Perform a right-click on the anchor to trigger jstree's contextmenu handler.
-        // NOTE: jstree's vakata-contextmenu appears to not render properly in the
-        // Electron test environment. Multiple approaches have been tried:
-        // - Playwright ClickAsync with MouseButton.Right
-        // - Page.Mouse.ClickAsync with right button
-        // - jQuery event triggering
-        // - Direct jstree.show_contextmenu() API call
-        // None of these successfully show the #vakata-contextmenu element.
-        // This may be an Electron-specific issue or a jstree configuration issue.
-        await AnchorLocator.ClickAsync(new LocatorClickOptions
+        // Wait for context menu using Playwright's WaitForAsync with reasonable timeout
+        // The jstree context menu plugin creates a .vakata-context element
+        await _contextMenu.Container.WaitForAsync(new()
         {
-            Button = MouseButton.Right
+            State = WaitForSelectorState.Visible,
+            Timeout = 5000
         });
 
-        await _contextMenu.WaitForVisibleAsync();
         return _contextMenu;
     }
 
