@@ -22,10 +22,12 @@ public class FilesystemPane : TabObject
     public FilesystemPane(IPage page, ILocator root, string tabButtonText)
         : base(page, root, tabButtonText)
     {
+        // jstree creates context menu with class .vakata-context (not #vakata-contextmenu)
+        // Menu items are <li> elements, separators have class .vakata-context-separator
         _contextMenu = new ContextMenu(
             page,
-            containerSelector: "#vakata-contextmenu",
-            itemSelector: ".vakata-contextmenu-item",
+            containerSelector: ".vakata-context",
+            itemSelector: "li:not(.vakata-context-separator)",
             hintSelector: ".vakata-contextmenu-shortcut");
     }
 
@@ -86,7 +88,7 @@ public class FilesystemPane : TabObject
             var level = index + 1;
             var name = segments[index];
             currentNodeLocator = await LocateNodeAsync(name, level);
-            var node = new FilesystemNode(this, currentNodeLocator, _contextMenu);
+            var node = new FilesystemNode(this, Page, currentNodeLocator, _contextMenu);
             if (expandIntermediate && index < segments.Count - 1)
             {
                 await node.ExpandAsync();
@@ -100,7 +102,7 @@ public class FilesystemPane : TabObject
             }
         }
 
-        return new FilesystemNode(this, currentNodeLocator!, _contextMenu);
+        return new FilesystemNode(this, Page, currentNodeLocator!, _contextMenu);
     }
 
     /// <summary>
@@ -117,6 +119,6 @@ public class FilesystemPane : TabObject
         await WaitForReadyAsync();
 
         var nodes = await TreeLocator.Locator("li.jstree-node").AllAsync();
-        return nodes.Select(locator => new FilesystemNode(this, locator, _contextMenu)).ToList();
+        return nodes.Select(locator => new FilesystemNode(this, Page, locator, _contextMenu)).ToList();
     }
 }
