@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
+using UiTests.PageObjects.Components;
 
 namespace UiTests.PageObjects.Panes.Editor;
 
@@ -369,15 +370,27 @@ public class EditorPane : TabObject
     }
 
     /// <summary>
-    /// Gathers all flow values currently rendered across visible lines.
+    /// Gathers all flow values currently rendered in the editor.
     /// </summary>
+    /// <remarks>
+    /// Flow values are rendered as Monaco content widgets and are not children of
+    /// individual line elements. They are positioned in the .contentWidgets container
+    /// and have classes like flow-parallel-value-box, flow-inline-value-box, etc.
+    /// </remarks>
     public async Task<IReadOnlyList<FlowValue>> FlowValuesAsync()
     {
-        var lines = await LinesAsync();
+        // Flow values can be rendered with different class names depending on context:
+        // - flow-parallel-value-box: parallel execution flow values
+        // - flow-inline-value-box: inline flow values
+        // - flow-loop-value-box: loop iteration flow values
+        // - flow-multiline-value-box: multi-line flow values
+        var selector = ".flow-parallel-value-box, .flow-inline-value-box, .flow-loop-value-box, .flow-multiline-value-box";
+        var locators = await Root.Locator(selector).AllAsync();
+        var menu = new ContextMenu(Page);
         var values = new List<FlowValue>();
-        foreach (var line in lines)
+        foreach (var locator in locators)
         {
-            values.AddRange(await line.FlowValuesAsync());
+            values.Add(new FlowValue(locator, menu));
         }
 
         return values;

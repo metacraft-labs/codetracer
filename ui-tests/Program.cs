@@ -30,7 +30,8 @@ internal static class Program
             ["--mode"] = "Runner:ExecutionModes:0",
             ["--default-mode"] = "Runner:DefaultMode",
             ["--verbose-console"] = "Runner:VerboseConsole",
-            ["--retries"] = "Runner:MaxRetries"
+            ["--retries"] = "Runner:MaxRetries",
+            ["--trace"] = "Runner:PlaywrightTrace"
         }.ToImmutableDictionary(StringComparer.OrdinalIgnoreCase);
 
     public static async Task<int> Main(string[] args)

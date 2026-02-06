@@ -67,7 +67,10 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
             "[{Scenario}] Launching Electron trace {TraceId} (CDP {CdpPort}, LSP {RustLspPort}, Ruby LSP {RubyLspPort}).",
             entry.Scenario.Id, traceId, cdpPort, rustLspPort, rubyLspPort);
 
-        await using var session = await LaunchElectronAsync(traceId, cdpPort, rustLspPort, rubyLspPort, cancellationToken);
+        // Create isolated config directory for this test
+        using var configScope = new IsolatedConfigScope($"{entry.Test.Id}_{entry.Scenario.Id}");
+
+        await using var session = await LaunchElectronAsync(traceId, cdpPort, rustLspPort, rubyLspPort, configScope.ConfigDirectory, cancellationToken);
         var monitors = _monitorLayoutService.DetectMonitors();
         var selectedMonitor = MonitorSelectionHelper.SelectPreferredMonitor(
             monitors,
@@ -95,6 +98,23 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
         using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
 
+        // Start Playwright trace recording if enabled
+        var browserContext = page.Context;
+        var traceEnabled = _settings.Runner.PlaywrightTrace;
+        string? tracePath = null;
+
+        if (traceEnabled)
+        {
+            tracePath = _diagnostics.GetTraceFilePath(entry);
+            _logger.LogInformation("[{Scenario}] Starting Playwright trace recording to {TracePath}", entry.Scenario.Id, tracePath);
+            await browserContext.Tracing.StartAsync(new TracingStartOptions
+            {
+                Screenshots = true,
+                Snapshots = true,
+                Sources = true
+            });
+        }
+
         try
         {
             await entry.Test.Handler(context);
@@ -104,9 +124,24 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
             await _diagnostics.CaptureFailureDiagnosticsAsync(page, entry, ex, attempt: 1);
             throw;
         }
+        finally
+        {
+            if (traceEnabled && tracePath != null)
+            {
+                try
+                {
+                    await browserContext.Tracing.StopAsync(new TracingStopOptions { Path = tracePath });
+                    _logger.LogInformation("[{Scenario}] Saved Playwright trace to {TracePath}", entry.Scenario.Id, tracePath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[{Scenario}] Failed to save Playwright trace", entry.Scenario.Id);
+                }
+            }
+        }
     }
 
-    private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int cdpPort, int rustLspPort, int rubyLspPort, CancellationToken cancellationToken)
+    private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int cdpPort, int rustLspPort, int rubyLspPort, string isolatedConfigDir, CancellationToken cancellationToken)
     {
         var info = new ProcessStartInfo(_launcher.CtPath)
         {
@@ -122,6 +157,8 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
         info.EnvironmentVariables.Add("CODETRACER_TEST", "1");
         info.EnvironmentVariables["CODETRACER_LSP_PORT"] = rustLspPort.ToString();
         info.EnvironmentVariables["CODETRACER_RUBY_LSP_PORT"] = rubyLspPort.ToString();
+        // Isolate config directory to prevent test interference
+        info.EnvironmentVariables["XDG_CONFIG_HOME"] = isolatedConfigDir;
 
         var process = Process.Start(info) ?? throw new InvalidOperationException("Failed to start CodeTracer Electron process.");
         var label = $"electron:{traceId}";

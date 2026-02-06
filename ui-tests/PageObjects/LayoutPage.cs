@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -109,6 +110,26 @@ public class LayoutPage : BasePage
 
     public Task WaitForTerminalLoadedAsync() =>
         WaitForComponentAsync("terminal", "div[id^='terminalComponent']");
+
+    /// <summary>
+    /// Waits for the trace to be fully loaded by checking the document title.
+    /// The title is set to "CodeTracer | Trace {id}: {program}" after the trace loads.
+    /// </summary>
+    public async Task WaitForTraceLoadedAsync()
+    {
+        DebugLogger.Log("LayoutPage: waiting for trace to be loaded (checking document title)");
+        await RetryHelpers.RetryAsync(async () =>
+        {
+            var title = await Page.TitleAsync();
+            var isLoaded = title.Contains("Trace", StringComparison.OrdinalIgnoreCase);
+            if (!isLoaded)
+            {
+                DebugLogger.Log($"LayoutPage: trace not yet loaded (title='{title}')");
+            }
+            return isLoaded;
+        });
+        DebugLogger.Log("LayoutPage: trace loaded confirmed via title");
+    }
 
     public Task WaitForAllComponentsLoadedAsync()
     {

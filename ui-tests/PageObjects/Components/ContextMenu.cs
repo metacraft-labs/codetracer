@@ -52,6 +52,12 @@ public class ContextMenu
     /// <summary>
     /// Retrieves the menu entries currently displayed.
     /// </summary>
+    /// <remarks>
+    /// Context menu items may contain a hint element (e.g., keyboard shortcut) nested
+    /// inside the item. Since InnerTextAsync() returns the combined text of all child
+    /// elements, we need to subtract the hint text from the full text to get just the
+    /// action name.
+    /// </remarks>
     public async Task<IReadOnlyList<ContextMenuEntry>> GetEntriesAsync()
     {
         var items = await Container.Locator(_itemSelector).AllAsync();
@@ -59,8 +65,8 @@ public class ContextMenu
 
         foreach (var item in items)
         {
-            var text = await item.InnerTextAsync() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(text))
+            var fullText = await item.InnerTextAsync() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(fullText))
             {
                 continue;
             }
@@ -68,7 +74,20 @@ public class ContextMenu
             var hint = await hintLocator.CountAsync() > 0
                 ? await hintLocator.First.InnerTextAsync() ?? string.Empty
                 : string.Empty;
-            entries.Add(new ContextMenuEntry(text.Trim(), hint.Trim()));
+
+            // Remove the hint from the full text to get just the action name.
+            // The hint text is typically appended after the action text.
+            var actionText = fullText.Trim();
+            if (!string.IsNullOrEmpty(hint))
+            {
+                var hintIndex = actionText.IndexOf(hint.Trim(), StringComparison.Ordinal);
+                if (hintIndex >= 0)
+                {
+                    actionText = actionText.Substring(0, hintIndex).Trim();
+                }
+            }
+
+            entries.Add(new ContextMenuEntry(actionText, hint.Trim()));
         }
 
         return entries;
@@ -78,6 +97,13 @@ public class ContextMenu
     /// Selects an entry whose text matches <paramref name="entryText"/>.
     /// Throws when the entry cannot be found.
     /// </summary>
+    /// <remarks>
+    /// Note: We cannot use Exact = true because context menu items may contain
+    /// hint text (e.g., keyboard shortcuts) as a nested element. The InnerText
+    /// of the menu item includes both the action text and the hint text, making
+    /// exact matches fail for entries like "Add value to scratchpad" when the
+    /// full text is "Add value to scratchpad CTRL+<click on value>".
+    /// </remarks>
     public async Task SelectAsync(string entryText)
     {
         if (string.IsNullOrWhiteSpace(entryText))
@@ -85,11 +111,27 @@ public class ContextMenu
             throw new ArgumentException("Entry text must be provided.", nameof(entryText));
         }
 
-        await Container
-            .Locator(_itemSelector)
-            .GetByText(entryText, new() { Exact = true })
-            .ClickAsync();
-        await WaitForHiddenAsync();
+        // Use filter to find items that start with the entry text to avoid
+        // matching hint text which comes after the main action text.
+        var items = Container.Locator(_itemSelector);
+        var count = await items.CountAsync();
+
+        for (int i = 0; i < count; i++)
+        {
+            var item = items.Nth(i);
+            var text = await item.InnerTextAsync();
+            // The menu item text format is: "ActionText" or "ActionText HintText"
+            // We check if the text starts with our entry text (ignoring the hint).
+            if (text != null && text.Trim().StartsWith(entryText, StringComparison.OrdinalIgnoreCase))
+            {
+                await item.ClickAsync();
+                await WaitForHiddenAsync();
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Context menu entry '{entryText}' was not found. Available items: {count}");
     }
 
     /// <summary>

@@ -136,9 +136,15 @@ public class CallTraceEntry
     /// <summary>
     /// Opens the call context menu and retrieves the visible entries.
     /// </summary>
+    /// <remarks>
+    /// We explicitly right-click on <c>.call-text</c> rather than <c>.call-child-box</c>
+    /// because the call-child-box contains both the call text and argument containers.
+    /// Arguments have their own context menu, so clicking the broader container may
+    /// inadvertently hit an argument element and return wrong menu entries.
+    /// </remarks>
     public async Task<IReadOnlyList<string>> ContextMenuEntriesAsync()
     {
-        await ChildBoxLocator().ClickAsync(new() { Button = MouseButton.Right });
+        await CallTextLocator().ClickAsync(new() { Button = MouseButton.Right });
         await _contextMenu.WaitForVisibleAsync();
         var entries = await _contextMenu.GetEntriesAsync();
         await _contextMenu.DismissAsync();
