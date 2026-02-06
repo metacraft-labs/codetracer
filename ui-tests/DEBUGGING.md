@@ -113,6 +113,75 @@ npx playwright show-trace test-diagnostics/*.trace.zip
 ./tools/trace-inspect.sh file.trace.zip network
 ```
 
+## Successful Debugging Techniques
+
+This section documents techniques that have proven successful for stabilizing tests.
+
+### Context Menu Text Includes Hints
+
+Context menu items may include keyboard shortcut hints (e.g., "Copy (Ctrl+C)").
+When matching menu items:
+
+- Use prefix matching: check if text starts with expected label
+- Or strip hint text: regex remove the parenthetical suffix
+
+```csharp
+// Prefix matching
+menuItem.GetByText(text => text.StartsWith("Add to scratchpad"))
+
+// Or filter after getting all items
+items.Where(i => i.Text.StartsWith(expectedLabel))
+```
+
+### Flow Values: Filter for Scratchpad-Compatible
+
+When testing "Add to scratchpad" from flow values, not all flow entries are
+compatible:
+
+- Stdout boxes show print output, not variable values
+- Look for flow entries that have actual values (not empty or stdout)
+
+```csharp
+var values = await GetFlowValuesAsync();
+var validValue = values.FirstOrDefault(v =>
+    !string.IsNullOrEmpty(v.ValueText) &&
+    !v.IsStdout);
+```
+
+### Dropdown Menus with Blur Handlers
+
+Some dropdown menus use blur handlers that close the menu before clicks register.
+Solution: Use JavaScript-based clicking to bypass the blur event:
+
+```csharp
+await element.EvaluateAsync("el => el.click()");
+```
+
+### Right-Click on Specific Elements
+
+When testing context menus, right-click on the specific element that has the
+context handler, not a container with multiple clickable areas:
+
+```csharp
+// Good: right-click on the call text span
+await callRow.Locator(".call-text")
+    .ClickAsync(new() { Button = MouseButton.Right });
+
+// Bad: right-click on the container row (may hit wrong element)
+await callRow.ClickAsync(new() { Button = MouseButton.Right });
+```
+
+### Check CSS Classes for State
+
+For UI elements that show busy/loading states, check CSS classes rather than
+text content:
+
+```csharp
+// Check for busy state via CSS class
+var classList = await element.GetAttributeAsync("class");
+var isBusy = classList?.Contains("busy-status") ?? false;
+```
+
 ## Common Failure Patterns
 
 ### Component Didn't Load (count=0)
