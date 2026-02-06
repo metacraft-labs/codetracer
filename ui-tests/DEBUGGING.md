@@ -253,3 +253,70 @@ Tests can be configured via CLI or `appsettings.json`:
 --verbose-console true       # Verbose output
 --retries N                  # Retry failed tests
 ```
+
+## Known Application Bugs Blocking Tests
+
+This section documents application-level bugs that cause test failures and cannot
+be fixed in the test code alone.
+
+### FilesystemContextMenuOptions: jstree Context Menu Hidden by CSS
+
+**Test**: `NoirSpaceShip.FilesystemContextMenuOptions`
+
+**Status**: Blocked by application CSS
+
+**Issue**: The jstree context menu plugin creates DOM elements, but the application's
+CSS explicitly hides them with `!important` rules.
+
+<!-- cspell:disable-next-line -->
+**Location**: `src/frontend/styles/components/shared_widgets.styl` lines 547-549
+
+```css
+.jstree-default-contextmenu
+  display: none !important
+  visibility: hidden !important
+```
+
+**Evidence from test diagnostic**:
+
+<!-- cspell:disable -->
+```text
+waiting for Locator(".vakata-context") to be visible
+  15 × locator resolved to hidden <ul class="vakata-context ...">…</ul>
+```
+<!-- cspell:enable -->
+
+**Fix required**: Remove or modify the CSS rule to allow the context menu to
+be visible. The CSS appears to intentionally disable the jstree context menu,
+possibly in favor of a custom implementation that hasn't been completed.
+
+### CreateSimpleTracePoint and ScratchpadCompareIterations: Trace Editors Not Visible
+
+**Tests**:
+
+- `NoirSpaceShip.CreateSimpleTracePoint`
+- `NoirSpaceShip.ScratchpadCompareIterations`
+
+**Status**: Blocked by application bug
+
+**Issue**: When loading trace files with multiple trace points, the Monaco
+editors for displaying trace values fail to become visible. The editors are
+created but the Monaco view zones are rendered with `visibility: hidden` or
+zero height.
+
+**Evidence**:
+
+- `ct.traceEditors` array is populated but `ct.traceEditors[1]` may be undefined
+- Monaco editors show `.view-overlays` but not `.view-zones` for trace values
+- The `tracePID` counter in `utils.nim` was found to not be incrementing properly,
+  which was partially fixed but the underlying visibility issue persists
+
+**Investigation notes**:
+
+- The `revealLineInCenterIfOutsideViewport` call in `trace.nim` (line ~1171)
+  may help with visibility in some cases
+- The issue appears related to timing of Monaco initialization and view zone
+  creation
+
+**Fix required**: Debug the Monaco view zone creation timing and ensure trace
+editors are properly initialized before tests interact with them.
