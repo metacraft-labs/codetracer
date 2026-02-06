@@ -493,9 +493,10 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: 
   #   else:
   #     NO_OFFSET
   # let traceId = 0 # data.services.trace.tracePID
-  # data.services.trace.tracePID += 1
 
   let id = if inExtension: traceId else: data.services.trace.tracePID
+  if not inExtension:
+    data.services.trace.tracePID += 1
 
   result = TraceComponent(
     id: id,

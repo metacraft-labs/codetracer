@@ -1168,6 +1168,10 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   if tabInfo.isNil:
     return
 
+  # Ensure the line is visible in the editor before creating the view zone
+  # This is critical because Monaco hides view zones for lines outside the visible viewport
+  editorUI.monacoEditor.revealLineInCenterIfOutsideViewport(line, Immediate)
+
   if trace.viewZone.isNil:
     # create trace base dom Node
     let traceNode = vnodeToDom(traceBase(trace), kxi)
