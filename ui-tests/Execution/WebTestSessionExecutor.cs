@@ -60,7 +60,11 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
 
         var label = $"{entry.Scenario.Id}-{entry.Mode}";
         var verboseConsole = ShouldEmitVerboseConsole(entry);
-        var hostProcess = _hostLauncher.StartHostProcess(httpPort, backendPort, frontendPort, tracePath, label, verboseConsole);
+
+        // Create isolated config directory for this test
+        using var configScope = new IsolatedConfigScope($"{entry.Test.Id}_{entry.Scenario.Id}");
+
+        var hostProcess = _hostLauncher.StartHostProcess(httpPort, backendPort, frontendPort, tracePath, label, verboseConsole, configScope.ConfigDirectory);
         _processLifecycle.RegisterProcess(hostProcess, $"ct-host:{label}");
         await using var session = await CreateWebSessionAsync(hostProcess, httpPort, entry, label, verboseConsole, cancellationToken);
         try
@@ -75,6 +79,23 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             var enableDebugLog = entry.Scenario.VerboseLogging || _settings.Runner.VerboseConsole;
             using var loggingScope = enableDebugLog ? DebugLogger.PushScope(true) : null;
 
+            // Start Playwright trace recording if enabled
+            var browserContext = session.Page.Context;
+            var traceEnabled = _settings.Runner.PlaywrightTrace;
+            string? pwTracePath = null;
+
+            if (traceEnabled)
+            {
+                pwTracePath = _diagnostics.GetTraceFilePath(entry);
+                _logger.LogInformation("[{Scenario}] Starting Playwright trace recording to {TracePath}", entry.Scenario.Id, pwTracePath);
+                await browserContext.Tracing.StartAsync(new TracingStartOptions
+                {
+                    Screenshots = true,
+                    Snapshots = true,
+                    Sources = true
+                });
+            }
+
             try
             {
                 await entry.Test.Handler(context);
@@ -83,6 +104,21 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
             {
                 await _diagnostics.CaptureFailureDiagnosticsAsync(session.Page, entry, ex, attempt: 1);
                 throw;
+            }
+            finally
+            {
+                if (traceEnabled && pwTracePath != null)
+                {
+                    try
+                    {
+                        await browserContext.Tracing.StopAsync(new TracingStopOptions { Path = pwTracePath });
+                        _logger.LogInformation("[{Scenario}] Saved Playwright trace to {TracePath}", entry.Scenario.Id, pwTracePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[{Scenario}] Failed to save Playwright trace", entry.Scenario.Id);
+                    }
+                }
             }
         }
         finally

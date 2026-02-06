@@ -114,9 +114,22 @@ public class TraceLogPanel
     /// <summary>
     /// Rows rendered in the trace log panel.
     /// </summary>
+    /// <remarks>
+    /// The trace table can be rendered in different views:
+    /// - .trace-view: The default view with trace rows
+    /// - .chart-table .trace-table: Alternative table view with DataTables styling
+    /// We check both selectors to handle view mode variations.
+    /// </remarks>
     public async Task<IReadOnlyList<TraceLogRow>> TraceRowsAsync()
     {
-        var locators = await Root.Locator(".trace-view tbody tr").AllAsync();
+        // Try the chart-table selector first (DataTables-based view)
+        var locators = await Root.Locator(".chart-table .trace-table tbody tr").AllAsync();
+        if (locators.Count == 0)
+        {
+            // Fall back to trace-view selector
+            locators = await Root.Locator(".trace-view tbody tr").AllAsync();
+        }
+
         var menu = new ContextMenu(ParentPane.Root.Page);
         return locators.Select(l => new TraceLogRow(l, menu)).ToList();
     }
@@ -132,7 +145,69 @@ public class TraceLogPanel
             .ToList();
     }
 
+    /// <summary>
+    /// The hamburger menu button that opens the dropdown containing Disable/Hide/Delete options.
+    /// </summary>
+    public ILocator HamburgerMenu() => Root.Locator(".hamburger-dropdown");
+
+    /// <summary>
+    /// The dropdown list container that appears when the hamburger menu is clicked.
+    /// </summary>
+    public ILocator DropdownList() => Root.Locator(".dropdown-list");
+
+    /// <summary>
+    /// The Disable/Enable toggle button inside the hamburger dropdown.
+    /// Note: This button is only visible after opening the hamburger menu.
+    /// </summary>
     public ILocator ToggleButton() => Root.Locator(".trace-disable");
+
+    /// <summary>
+    /// Opens the hamburger menu and clicks the Disable/Enable toggle button.
+    /// This method handles the dropdown visibility correctly.
+    /// The dropdown uses a blur handler that closes it when focus leaves the hamburger button,
+    /// so we need to use JavaScript evaluation to click the toggle button reliably.
+    /// </summary>
+    public async Task ClickToggleButtonAsync()
+    {
+        var page = ParentPane.Root.Page;
+        var editTraceId = $"edit-trace-{ParentPane.IdNumber}-{LineNumber}";
+
+        // Use JavaScript to reliably toggle the disable state
+        // This avoids race conditions with blur handlers
+        // We find the trace panel by locating the edit-trace element and going up to its ancestor .trace
+        await page.EvaluateAsync(@"(editTraceId) => {
+            const editTrace = document.getElementById(editTraceId);
+            if (!editTrace) {
+                console.log('Could not find edit trace element:', editTraceId);
+                return;
+            }
+
+            // Find the ancestor .trace element
+            const trace = editTrace.closest('.trace');
+            if (!trace) {
+                console.log('Could not find ancestor .trace element');
+                return;
+            }
+
+            // Find and click the hamburger to open dropdown
+            const hamburger = trace.querySelector('.hamburger-dropdown');
+            if (hamburger) {
+                hamburger.click();
+
+                // Small delay then click the disable button
+                setTimeout(() => {
+                    const toggleBtn = trace.querySelector('.trace-disable');
+                    if (toggleBtn) {
+                        toggleBtn.click();
+                    }
+                }, 150);
+            }
+        }", editTraceId);
+
+        // Wait for the action to complete
+        await Task.Delay(400);
+    }
+
     public ILocator DisabledOverlay() => Root.Locator(".trace-disabled-overlay");
     public ILocator RunButton() => Root.Locator(".trace-run-button-svg").Nth(0);
 }

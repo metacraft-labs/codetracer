@@ -106,6 +106,14 @@ public sealed class RunnerSettings
         = false;
 
     /// <summary>
+    /// When true, enables Playwright trace recording for each test execution.
+    /// Traces are saved to the diagnostics output directory as {test}_{scenario}.trace.zip
+    /// and can be viewed at https://trace.playwright.dev/ or with 'npx playwright show-trace'.
+    /// </summary>
+    public bool PlaywrightTrace { get; set; }
+        = false;
+
+    /// <summary>
     /// Optional grace periods and overrides for slow-loading UI components.
     /// </summary>
     [Required]

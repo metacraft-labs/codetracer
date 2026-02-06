@@ -149,9 +149,14 @@ public class EditorLine
     /// <summary>
     /// Returns all flow values currently attached to this line.
     /// </summary>
+    /// <remarks>
+    /// Note: Flow values are typically rendered as Monaco content widgets and may not
+    /// be direct children of line elements. For comprehensive flow value discovery,
+    /// consider using <see cref="EditorPane.FlowValuesAsync"/> instead.
+    /// </remarks>
     public async Task<IReadOnlyList<FlowValue>> FlowValuesAsync()
     {
-        var selector = ".flow-inline-value-box, .flow-loop-value-box, .flow-multiline-value-box";
+        var selector = ".flow-parallel-value-box, .flow-inline-value-box, .flow-loop-value-box, .flow-multiline-value-box";
         var locators = await Root.Locator(selector).AllAsync();
         var menu = new ContextMenu(ParentPane.Root.Page);
         var values = new List<FlowValue>();

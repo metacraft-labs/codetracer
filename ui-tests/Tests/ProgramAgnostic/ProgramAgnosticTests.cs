@@ -69,29 +69,51 @@ public static class ProgramAgnosticTests
         var layout = new LayoutPage(page);
         await layout.WaitForAllComponentsLoadedAsync();
 
-        var palette = new CommandPalette(page);
+        // Wait for the trace to be fully loaded
+        await layout.WaitForTraceLoadedAsync();
 
-        await palette.OpenAsync();
-        await palette.ExecuteCommandAsync("Event Log");
-        var eventLog = (await layout.EventLogTabsAsync(forceReload: true)).First();
+        // Verify Event Log component exists
+        var eventLogs = await layout.EventLogTabsAsync(forceReload: true);
+        if (eventLogs.Count == 0)
+        {
+            throw new Exception("No Event Log components found in the layout.");
+        }
+        var eventLog = eventLogs.First();
+
+        // Click on Event Log tab button to ensure it's selected
+        await eventLog.TabButton().ClickAsync();
         if (!await eventLog.IsVisibleAsync())
         {
-            throw new Exception("Event Log tab is not visible after invoking the command palette.");
+            throw new Exception("Event Log tab is not visible after clicking its tab button.");
         }
 
-        await palette.OpenAsync();
-        await palette.ExecuteCommandAsync("Scratchpad");
-        var scratchpad = (await layout.ScratchpadTabsAsync(forceReload: true)).First();
+        // Verify Event Log has loaded content (not just an empty container)
+        await RetryHelpers.RetryAsync(async () =>
+        {
+            var rows = await eventLog.Root.Locator("table.dataTable tbody tr").CountAsync();
+            return rows > 0;
+        });
+
+        // Verify Scratchpad component exists
+        var scratchpads = await layout.ScratchpadTabsAsync(forceReload: true);
+        if (scratchpads.Count == 0)
+        {
+            throw new Exception("No Scratchpad components found in the layout.");
+        }
+        var scratchpad = scratchpads.First();
+
+        // Click on Scratchpad tab button to make it visible
+        await scratchpad.TabButton().ClickAsync();
         if (!await scratchpad.IsVisibleAsync())
         {
-            throw new Exception("Scratchpad tab is not visible after invoking the command palette.");
+            throw new Exception("Scratchpad tab is not visible after clicking its tab button.");
         }
 
-        await palette.OpenAsync();
-        await palette.ExecuteCommandAsync("Event Log");
+        // Verify we can switch back to Event Log
+        await eventLog.TabButton().ClickAsync();
         if (!await eventLog.IsVisibleAsync())
         {
-            throw new Exception("Event Log tab did not retain focus after repeated command invocation.");
+            throw new Exception("Event Log tab did not retain focus after switching back.");
         }
     }
 

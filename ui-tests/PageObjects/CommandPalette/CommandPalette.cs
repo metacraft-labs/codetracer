@@ -20,6 +20,7 @@ public class CommandPalette
     private ILocator QueryInput => _page.Locator("#command-query-text");
     private ILocator ResultsContainer => _page.Locator("#command-results");
     private ILocator ResultItems => ResultsContainer.Locator(".command-result");
+    private ILocator MatchingResultItems => ResultsContainer.Locator(".command-result:not(.empty)");
 
     /// <summary>
     /// Opens the command palette via the keyboard shortcut.
@@ -61,9 +62,17 @@ public class CommandPalette
 
     /// <summary>
     /// Waits until the palette renders at least <paramref name="count"/> results.
+    /// This includes both matching results and the "no matching result" message.
     /// </summary>
     public Task WaitForResultsAsync(int count = 1)
         => RetryHelpers.RetryAsync(async () => await ResultItems.CountAsync() >= count);
+
+    /// <summary>
+    /// Waits until the palette renders at least <paramref name="count"/> matching command results.
+    /// This excludes the "no matching result" message.
+    /// </summary>
+    public Task WaitForMatchingResultsAsync(int count = 1)
+        => RetryHelpers.RetryAsync(async () => await MatchingResultItems.CountAsync() >= count);
 
     /// <summary>
     /// Selects the command with the provided label.
@@ -72,7 +81,7 @@ public class CommandPalette
     {
         await EnsureVisibleAsync();
         await QueryInput.FillAsync($":{commandText}");
-        await WaitForResultsAsync();
+        await WaitForMatchingResultsAsync();
         await QueryInput.PressAsync("Enter");
         await Root.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
     }

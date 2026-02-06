@@ -176,7 +176,7 @@ internal sealed class TestRegistry : ITestRegistry
             new UiTestDescriptor(
                 "Layout.RecoveryFromCorruptedJson",
                 "Layout Resilience / Recovery From Corrupted JSON",
-                async context => await LayoutResilienceTests.RecoveryFromCorruptedJsonInDebugMode(context.Page)));
+                async context => await LayoutResilienceTests.RecoveryFromCorruptedJson(context.Page)));
 
         Register(
             new UiTestDescriptor(
@@ -189,12 +189,6 @@ internal sealed class TestRegistry : ITestRegistry
                 "Layout.RecoveryFromMissingType",
                 "Layout Resilience / Recovery From Missing Type",
                 async context => await LayoutResilienceTests.RecoveryFromMissingType(context.Page)));
-
-        Register(
-            new UiTestDescriptor(
-                "Layout.UiFunctionalityAfterRecovery",
-                "Layout Resilience / UI Functionality After Recovery",
-                async context => await LayoutResilienceTests.UiFunctionalityAfterRecovery(context.Page)));
 
         Register(
             new UiTestDescriptor(

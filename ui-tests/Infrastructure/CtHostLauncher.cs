@@ -8,7 +8,7 @@ namespace UiTests.Infrastructure;
 
 internal interface ICtHostLauncher
 {
-    Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput);
+    Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput, string? isolatedConfigDir = null);
     Task WaitForServerAsync(int port, TimeSpan timeout, string label, CancellationToken cancellationToken);
 }
 
@@ -23,7 +23,7 @@ internal sealed class CtHostLauncher : ICtHostLauncher
         _logger = logger;
     }
 
-    public Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput)
+    public Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput, string? isolatedConfigDir = null)
     {
         var psi = new ProcessStartInfo(_launcher.CtPath)
         {
@@ -38,6 +38,12 @@ internal sealed class CtHostLauncher : ICtHostLauncher
         psi.ArgumentList.Add($"--backend-socket-port={backendPort.ToString(CultureInfo.InvariantCulture)}");
         psi.ArgumentList.Add($"--frontend-socket={frontendPort.ToString(CultureInfo.InvariantCulture)}");
         psi.ArgumentList.Add(tracePath);
+
+        // Isolate config directory to prevent test interference
+        if (!string.IsNullOrEmpty(isolatedConfigDir))
+        {
+            psi.EnvironmentVariables["XDG_CONFIG_HOME"] = isolatedConfigDir;
+        }
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ct host.");
 
