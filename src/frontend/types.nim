@@ -839,6 +839,44 @@ type
     currentDecorationIds*: js
     fileContentCache*: JsAssoc[cstring, cstring]
 
+  AgentWorkspaceComponent* = ref object of Component
+    ## Agent workspace view showing the agent's working directory files
+    ## with DeepReview coverage annotations and test coverage overlay.
+    ## Integrates with the Golden Layout panel system and supports
+    ## real-time updates from ACP DeepReview notifications.
+    viewState*: WorkspaceViewState
+    progress*: AgentProgress
+    drSummary*: ActivityDeepReviewSummary
+    fileEntries*: seq[ActivityFileEntry]
+    selectedFileIndex*: int
+    editor*: MonacoEditor
+    editorInitialized*: bool
+    currentDecorationIds*: js
+    notifications*: seq[DeepReviewNotification]
+    coverageOverlayEnabled*: bool
+
+  CaptionBarProgressComponent* = ref object of Component
+    ## Animated progress indicator in the caption bar that shows the
+    ## agent's current milestone progress. Clickable to toggle between
+    ## user workspace and agent workspace views.
+    progress*: AgentProgress
+    viewState*: WorkspaceViewState
+    animationFrame*: int
+    expanded*: bool
+    lastUpdateMs*: int
+
+  AgentActivityDeepReviewComponent* = ref object of Component
+    ## Enhanced agent activity pane that displays DeepReview data
+    ## (coverage summary, test results, traced functions) alongside
+    ## the agent's conversation history. Integrates with the existing
+    ## AgentActivityComponent via the ACP session id.
+    sessionId*: cstring
+    drSummary*: ActivityDeepReviewSummary
+    fileEntries*: seq[ActivityFileEntry]
+    recentNotifications*: seq[DeepReviewNotification]
+    testResults*: seq[DeepReviewNotification]
+    expanded*: bool
+
   LowLevelCodeComponent* = ref object of Component
     editor*: EditorViewComponent
     instructionsMapping*: JsAssoc[int, int]

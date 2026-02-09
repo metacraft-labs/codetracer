@@ -1,0 +1,159 @@
+// Agent Workspace component styles (M9).
+//
+// Layout: header bar, summary bar, and two-panel body with file list
+// sidebar (left) and Monaco editor with coverage overlay (right).
+// Reuses the DeepReview line decoration classes for coverage highlighting.
+
+.agent-workspace-container
+  display flex
+  flex-direction column
+  height 100%
+  width 100%
+  overflow hidden
+  font-family 'SpaceGrotesk', sans-serif
+
+// --- Header ---
+
+.agent-workspace-header
+  display flex
+  justify-content space-between
+  align-items center
+  padding 6px 16px
+  background-color var(--bg-secondary, #1e1f26)
+  border-bottom 1px solid var(--border-color, #3a3b44)
+  flex-shrink 0
+
+.agent-workspace-header-label
+  font-size 13px
+  font-weight bold
+  color var(--text-primary, #c9c9c9)
+
+.agent-workspace-header-path
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  margin-left 12px
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+  flex 1
+
+.agent-workspace-view-toggle
+  font-size 12px
+  color var(--accent-color, #A5F3FC)
+  cursor pointer
+  padding 3px 8px
+  border-radius 4px
+  transition background-color 0.15s ease
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+// --- Summary bar ---
+
+.agent-workspace-summary
+  display flex
+  align-items center
+  gap 16px
+  padding 4px 16px
+  background-color var(--bg-secondary, #1e1f26)
+  border-bottom 1px solid var(--border-color, #3a3b44)
+  flex-shrink 0
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+
+.agent-workspace-summary-item
+  white-space nowrap
+
+.agent-workspace-overlay-toggle
+  margin-left auto
+  cursor pointer
+  color var(--accent-color, #A5F3FC)
+  font-size 11px
+  padding 2px 6px
+  border-radius 3px
+  transition background-color 0.15s ease
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+// --- Body (two-panel layout) ---
+
+.agent-workspace-body
+  display flex
+  flex 1
+  overflow hidden
+
+.agent-workspace-empty
+  padding 24px
+  font-size 14px
+  color var(--text-secondary, #8e8f92)
+  text-align center
+
+// --- File list sidebar ---
+
+.agent-workspace-file-list
+  width 240px
+  min-width 180px
+  overflow-y auto
+  border-right 1px solid var(--border-color, #3a3b44)
+  background-color var(--bg-primary, #1a1b22)
+  flex-shrink 0
+
+.agent-workspace-file-item
+  padding 6px 12px
+  cursor pointer
+  border-bottom 1px solid var(--border-color, #2a2b34)
+  transition background-color 0.15s ease
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+  &.selected
+    background-color var(--bg-selected, #333444)
+
+.agent-workspace-file-name
+  font-size 13px
+  color var(--text-primary, #c9c9c9)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.agent-workspace-file-path
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+  margin-top 2px
+
+.agent-workspace-coverage-badge
+  display inline-block
+  margin-top 2px
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  background-color var(--bg-hover, #2a2b34)
+  padding 1px 6px
+  border-radius 3px
+
+.agent-workspace-flow-badge
+  display inline-block
+  margin-top 2px
+  margin-left 6px
+  font-size 10px
+  color rgba(0, 180, 0, 0.8)
+  background-color rgba(0, 180, 0, 0.1)
+  padding 1px 4px
+  border-radius 3px
+
+// --- Editor area ---
+
+.agent-workspace-editor-area
+  flex 1
+  display flex
+  flex-direction column
+  min-width 0
+  overflow hidden
+
+.agent-workspace-editor
+  flex 1
+  min-height 0
