@@ -123,6 +123,16 @@ export function ctEditMode(folderPath: string): void {
   });
 }
 
+/// Launch CodeTracer in DeepReview mode with a JSON export file.
+/// The ``--deepreview <jsonPath>`` flag loads the DeepReview data into
+/// the standalone review view (offline, no debugger connection).
+export function ctDeepReview(jsonPath: string): void {
+  test.beforeAll(async () => {
+    setupLdLibraryPath();
+    await launchDeepReview(jsonPath);
+  });
+}
+
 /// end of exported public functions
 /// ===================================
 
@@ -173,6 +183,38 @@ async function launchEditMode(folderPath: string): Promise<void> {
     executablePath: codetracerPath,
     cwd: codetracerInstallDir,
     args: ["edit", folderPath],
+    env: cleanEnv,
+  });
+
+  const firstWindow = await electronApp.firstWindow();
+  const firstWindowTitle = await firstWindow.title();
+
+  if (firstWindowTitle === "DevTools") {
+    window = electronApp.windows()[EDITOR_WINDOW_INDEX];
+  } else {
+    window = firstWindow;
+  }
+  page = window;
+}
+
+async function launchDeepReview(jsonPath: string): Promise<void> {
+  console.log(`# launching codetracer deepreview mode for ${jsonPath}`);
+
+  // Create a clean env without trace-related vars, same as other modes.
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.CODETRACER_TRACE_ID;
+  delete cleanEnv.CODETRACER_CALLER_PID;
+
+  cleanEnv.CODETRACER_IN_UI_TEST = "1";
+  cleanEnv.CODETRACER_TEST = "1";
+
+  // Launch ct with the --deepreview flag. The frontend reads the JSON file
+  // via ``fs.readFileSync`` and ``JSON.parse``, then activates the
+  // standalone DeepReview component instead of the normal debug layout.
+  electronApp = await electron.launch({
+    executablePath: codetracerPath,
+    cwd: codetracerInstallDir,
+    args: ["--deepreview", jsonPath],
     env: cleanEnv,
   });
 

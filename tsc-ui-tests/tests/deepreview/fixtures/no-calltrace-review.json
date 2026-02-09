@@ -1,0 +1,34 @@
+{
+  "commitSha": "abcdef01abcdef01abcdef01abcdef01abcdef01abcdef01abcdef01abcdef01",
+  "baseCommitSha": "0000000000000000000000000000000000000000000000000000000000000000",
+  "collectionTimeMs": 200,
+  "recordingCount": 1,
+  "files": [
+    {
+      "path": "src/lib.rs",
+      "contentHash": "abababababababababababababababababababababababababababababababab",
+      "symbols": [
+        {
+          "name": "stub_fn",
+          "typeDesc": "fn()",
+          "kind": "function",
+          "visibility": "public",
+          "startLine": 1,
+          "endLine": 3
+        }
+      ],
+      "coverage": [],
+      "functions": [],
+      "loops": [],
+      "flow": [],
+      "flags": {
+        "hasSymbols": true,
+        "hasCoverage": false,
+        "hasFlow": false,
+        "isUnreachable": true,
+        "isPartial": false
+      }
+    }
+  ],
+  "callTrace": null
+}
