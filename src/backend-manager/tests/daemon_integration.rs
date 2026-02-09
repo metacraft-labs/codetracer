@@ -3914,3 +3914,758 @@ async fn m4_stack_trace_returns_frames() {
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+// ===========================================================================
+// M5 Helper functions
+// ===========================================================================
+
+/// Sends `ct/py-add-breakpoint` and returns the response (skipping events).
+async fn py_add_breakpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    source_path: &str,
+    line: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-add-breakpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "path": source_path,
+            "line": line,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-add-breakpoint: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-add-breakpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-add-breakpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-add-breakpoint: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-add-breakpoint: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-add-breakpoint response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-remove-breakpoint` and returns the response (skipping events).
+async fn py_remove_breakpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    bp_id: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-remove-breakpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "breakpointId": bp_id,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-remove-breakpoint: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-remove-breakpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-remove-breakpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-remove-breakpoint: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-remove-breakpoint: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-remove-breakpoint response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-add-watchpoint` and returns the response (skipping events).
+async fn py_add_watchpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    expression: &str,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-add-watchpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "expression": expression,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-add-watchpoint: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-add-watchpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-add-watchpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-add-watchpoint: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-add-watchpoint: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-add-watchpoint response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-remove-watchpoint` and returns the response (skipping events).
+#[allow(dead_code)]
+async fn py_remove_watchpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    wp_id: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-remove-watchpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "watchpointId": wp_id,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-remove-watchpoint: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-remove-watchpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-remove-watchpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-remove-watchpoint: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-remove-watchpoint: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-remove-watchpoint response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+// ===========================================================================
+// M5 Tests
+// ===========================================================================
+
+/// M5-1. Open trace. Add breakpoint at a known line. Call continue_forward().
+/// Verify execution stops at the breakpoint line.
+#[tokio::test]
+async fn m5_breakpoint_stops_execution() {
+    let (test_dir, log_path) = setup_test_dir("m5_bp_stops");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-bp-stop", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.  Mock starts at line 1, file "main.nim".
+        let resp = open_trace(&mut client, 30_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Add breakpoint at line 10 in main.nim.
+        let bp_resp =
+            py_add_breakpoint(&mut client, 30_001, &trace_dir, "main.nim", 10, &log_path).await?;
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-add-breakpoint should succeed, got: {bp_resp}"
+        );
+
+        // continue_forward — should stop at line 10 (the breakpoint).
+        let nav_resp =
+            py_navigate(&mut client, 30_002, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        assert_eq!(
+            nav_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "continue_forward should succeed"
+        );
+
+        let body = nav_resp.get("body").expect("response should have body");
+        let stopped_line = body.get("line").and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("stopped at line: {stopped_line}"));
+
+        assert_eq!(
+            stopped_line, 10,
+            "execution should stop at the breakpoint line (10), got {stopped_line}"
+        );
+
+        // endOfTrace should be false (stopped at breakpoint, not end).
+        let end_of_trace = body.get("endOfTrace").and_then(Value::as_bool).unwrap_or(true);
+        assert!(
+            !end_of_trace,
+            "endOfTrace should be false when stopped at a breakpoint"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m5_breakpoint_stops_execution", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-2. Add breakpoint at line L. Continue to it. Remove breakpoint.
+/// Continue again. Verify execution does NOT stop at line L again.
+#[tokio::test]
+async fn m5_remove_breakpoint_continues_past() {
+    let (test_dir, log_path) = setup_test_dir("m5_remove_bp");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-remove-bp", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace (starts at line 1).
+        let resp = open_trace(&mut client, 31_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Add breakpoint at line 10.
+        let bp_resp =
+            py_add_breakpoint(&mut client, 31_001, &trace_dir, "main.nim", 10, &log_path).await?;
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_breakpoint should succeed"
+        );
+        let bp_id = bp_resp
+            .get("body")
+            .and_then(|b| b.get("breakpointId"))
+            .and_then(Value::as_i64)
+            .ok_or("missing breakpointId")?;
+        log_line(&log_path, &format!("breakpoint id: {bp_id}"));
+
+        // Continue forward — should stop at line 10.
+        let nav1 =
+            py_navigate(&mut client, 31_002, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        let line1 = nav1
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        assert_eq!(line1, 10, "first continue should stop at line 10");
+
+        // Remove the breakpoint.
+        let rm_resp =
+            py_remove_breakpoint(&mut client, 31_003, &trace_dir, bp_id, &log_path).await?;
+        assert_eq!(
+            rm_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "remove_breakpoint should succeed"
+        );
+
+        // Continue forward again — with the breakpoint removed, should
+        // go to end of trace (line 100) instead of stopping at line 10.
+        let nav2 =
+            py_navigate(&mut client, 31_004, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        let line2 = nav2
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(&log_path, &format!("second continue stopped at line: {line2}"));
+
+        assert_ne!(
+            line2, 10,
+            "after removing breakpoint, should NOT stop at line 10 again"
+        );
+        // Should hit end of trace.
+        let end_of_trace = nav2
+            .get("body")
+            .and_then(|b| b.get("endOfTrace"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        assert!(
+            end_of_trace,
+            "should reach end of trace after removing breakpoint"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m5_remove_breakpoint_continues_past", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-3. Add breakpoints at lines L1, L2, L3. Continue forward. Verify stops
+/// at L1. Continue. Verify stops at L2. Continue. Verify stops at L3.
+#[tokio::test]
+async fn m5_multiple_breakpoints() {
+    let (test_dir, log_path) = setup_test_dir("m5_multi_bp");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-multi-bp", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace (starts at line 1).
+        let resp = open_trace(&mut client, 32_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Add three breakpoints at lines 10, 20, 30.
+        let bp1 =
+            py_add_breakpoint(&mut client, 32_001, &trace_dir, "main.nim", 10, &log_path).await?;
+        assert_eq!(
+            bp1.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_breakpoint at 10 should succeed"
+        );
+
+        let bp2 =
+            py_add_breakpoint(&mut client, 32_002, &trace_dir, "main.nim", 20, &log_path).await?;
+        assert_eq!(
+            bp2.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_breakpoint at 20 should succeed"
+        );
+
+        let bp3 =
+            py_add_breakpoint(&mut client, 32_003, &trace_dir, "main.nim", 30, &log_path).await?;
+        assert_eq!(
+            bp3.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_breakpoint at 30 should succeed"
+        );
+
+        // Continue — should stop at line 10.
+        let nav1 =
+            py_navigate(&mut client, 32_004, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        let line1 = nav1
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        assert_eq!(line1, 10, "first continue should stop at line 10, got {line1}");
+
+        // Continue — should stop at line 20.
+        let nav2 =
+            py_navigate(&mut client, 32_005, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        let line2 = nav2
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        assert_eq!(line2, 20, "second continue should stop at line 20, got {line2}");
+
+        // Continue — should stop at line 30.
+        let nav3 =
+            py_navigate(&mut client, 32_006, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        let line3 = nav3
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        assert_eq!(line3, 30, "third continue should stop at line 30, got {line3}");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m5_multiple_breakpoints", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-4. Add breakpoint at a line. Navigate past it. Call continue_reverse().
+/// Verify execution stops at the breakpoint line.
+#[tokio::test]
+async fn m5_reverse_continue_hits_breakpoint() {
+    let (test_dir, log_path) = setup_test_dir("m5_rev_bp");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-rev-bp", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace (starts at line 1).
+        let resp = open_trace(&mut client, 33_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Navigate past line 10 by stepping over several times.
+        // The mock advances +1 line per step_over.  Starting at line 1,
+        // we need 14 steps to get to line 15 (past the breakpoint at 10).
+        for i in 0..14 {
+            let nav = py_navigate(
+                &mut client,
+                33_001 + i,
+                &trace_dir,
+                "step_over",
+                None,
+                &log_path,
+            )
+            .await?;
+            assert_eq!(
+                nav.get("success").and_then(Value::as_bool),
+                Some(true),
+                "step_over {i} should succeed"
+            );
+        }
+
+        // Verify we are now past line 10 (should be at line 15).
+        let current_nav = py_navigate(
+            &mut client,
+            33_020,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
+        let current_line = current_nav
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(&log_path, &format!("current line before reverse: {current_line}"));
+        assert!(
+            current_line > 10,
+            "should be past line 10, at line {current_line}"
+        );
+
+        // Now add a breakpoint at line 10.
+        let bp_resp =
+            py_add_breakpoint(&mut client, 33_021, &trace_dir, "main.nim", 10, &log_path).await?;
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_breakpoint should succeed"
+        );
+
+        // continue_reverse — should stop at line 10 (the breakpoint).
+        let rev_resp =
+            py_navigate(&mut client, 33_022, &trace_dir, "continue_reverse", None, &log_path)
+                .await?;
+        assert_eq!(
+            rev_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "continue_reverse should succeed"
+        );
+
+        let rev_body = rev_resp.get("body").expect("response should have body");
+        let rev_line = rev_body.get("line").and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("reverse stopped at line: {rev_line}"));
+
+        assert_eq!(
+            rev_line, 10,
+            "reverse continue should stop at breakpoint line 10, got {rev_line}"
+        );
+
+        // endOfTrace should be false (stopped at breakpoint).
+        let end_of_trace = rev_body
+            .get("endOfTrace")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        assert!(
+            !end_of_trace,
+            "endOfTrace should be false when stopped at a reverse breakpoint"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m5_reverse_continue_hits_breakpoint", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-5. Add watchpoint on a variable. Call continue_forward(). Verify
+/// execution stops at the point where the variable changed value.
+///
+/// The mock simulates a variable value change at line 5 when a watchpoint
+/// is active: if the current line is < 5 and any watchpoint exists,
+/// `continue` stops at line 5.
+#[tokio::test]
+async fn m5_watchpoint_detects_change() {
+    let (test_dir, log_path) = setup_test_dir("m5_watchpoint");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-watchpoint", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace (starts at line 1).
+        let resp = open_trace(&mut client, 34_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Add a watchpoint on the variable "counter".
+        let wp_resp =
+            py_add_watchpoint(&mut client, 34_001, &trace_dir, "counter", &log_path).await?;
+        assert_eq!(
+            wp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_watchpoint should succeed, got: {wp_resp}"
+        );
+        let wp_id = wp_resp
+            .get("body")
+            .and_then(|b| b.get("watchpointId"))
+            .and_then(Value::as_i64)
+            .ok_or("missing watchpointId")?;
+        assert!(wp_id > 0, "watchpointId should be positive, got {wp_id}");
+
+        // continue_forward — should stop at line 5 (the mock's simulated
+        // variable change point).
+        let nav_resp =
+            py_navigate(&mut client, 34_002, &trace_dir, "continue_forward", None, &log_path)
+                .await?;
+        assert_eq!(
+            nav_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "continue_forward should succeed"
+        );
+
+        let body = nav_resp.get("body").expect("response should have body");
+        let stopped_line = body.get("line").and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("watchpoint stopped at line: {stopped_line}"));
+
+        assert_eq!(
+            stopped_line, 5,
+            "should stop at the variable change point (line 5), got {stopped_line}"
+        );
+
+        let end_of_trace = body.get("endOfTrace").and_then(Value::as_bool).unwrap_or(true);
+        assert!(
+            !end_of_trace,
+            "endOfTrace should be false at watchpoint hit"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m5_watchpoint_detects_change", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-6. Call add_breakpoint(). Verify the return value is a positive integer.
+/// Use it with remove_breakpoint(). Verify no error.
+#[tokio::test]
+async fn m5_add_breakpoint_returns_id() {
+    let (test_dir, log_path) = setup_test_dir("m5_bp_id");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-bp-id", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 35_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call add_breakpoint.
+        let bp_resp =
+            py_add_breakpoint(&mut client, 35_001, &trace_dir, "main.nim", 42, &log_path).await?;
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "add_breakpoint should succeed, got: {bp_resp}"
+        );
+
+        let bp_id = bp_resp
+            .get("body")
+            .and_then(|b| b.get("breakpointId"))
+            .and_then(Value::as_i64)
+            .ok_or("missing breakpointId in response")?;
+
+        log_line(&log_path, &format!("breakpointId: {bp_id}"));
+
+        // Verify the ID is a positive integer.
+        assert!(
+            bp_id > 0,
+            "breakpointId should be a positive integer, got {bp_id}"
+        );
+
+        // Use it with remove_breakpoint — should succeed without error.
+        let rm_resp =
+            py_remove_breakpoint(&mut client, 35_002, &trace_dir, bp_id, &log_path).await?;
+        assert_eq!(
+            rm_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "remove_breakpoint with valid ID should succeed, got: {rm_resp}"
+        );
+
+        let removed = rm_resp
+            .get("body")
+            .and_then(|b| b.get("removed"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        assert!(removed, "removed field should be true");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m5_add_breakpoint_returns_id", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

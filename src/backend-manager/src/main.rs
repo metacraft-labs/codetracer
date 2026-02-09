@@ -348,6 +348,17 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     // Track call depth for step_in / step_out simulation.
     let mut call_depth: i32 = 0;
 
+    // Breakpoint and watchpoint tracking for the mock backend.
+    //
+    // `breakpoints` stores (file, line) pairs received via setBreakpoints.
+    // `watchpoints` stores watched expressions received via setDataBreakpoints.
+    // When `continue` is called, the mock checks for the next breakpoint
+    // line after the current position.  When `reverseContinue` is called,
+    // it checks for the previous breakpoint line.  If a watchpoint is
+    // active, `continue` simulates a variable change at line 5.
+    let mut breakpoints: Vec<(String, i64)> = Vec::new();
+    let mut watchpoints: Vec<String> = Vec::new();
+
     loop {
         let cnt = read_half.read(&mut buf).await?;
         if cnt == 0 {
@@ -522,10 +533,46 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
                 }
                 "continue" => {
-                    // continue_forward: jump to end of trace.
-                    end_of_trace = true;
-                    current_line = 100;
-                    current_ticks = 99999;
+                    // continue_forward: check for breakpoints/watchpoints ahead
+                    // of the current position, otherwise jump to end of trace.
+
+                    // Find the nearest breakpoint line > current_line in the
+                    // current file.
+                    let next_bp = breakpoints.iter()
+                        .filter(|(f, l)| f == &current_file && *l > current_line)
+                        .map(|(_, l)| *l)
+                        .min();
+
+                    // Simulate a watchpoint trigger: if any watchpoint is active
+                    // and we haven't yet reached line 5, the variable "changes"
+                    // at line 5.
+                    let wp_trigger = if !watchpoints.is_empty() && current_line < 5 {
+                        Some(5i64)
+                    } else {
+                        None
+                    };
+
+                    // Pick the nearest stop point.
+                    let stop_line = match (next_bp, wp_trigger) {
+                        (Some(bp), Some(wp)) => bp.min(wp),
+                        (Some(bp), None) => bp,
+                        (None, Some(wp)) => wp,
+                        (None, None) => 100, // end of trace
+                    };
+
+                    let stop_reason;
+                    if stop_line >= 100 && next_bp.is_none() && wp_trigger.is_none() {
+                        // No breakpoint or watchpoint hit; jump to end of trace.
+                        end_of_trace = true;
+                        current_line = 100;
+                        current_ticks = 99999;
+                        stop_reason = "end";
+                    } else {
+                        end_of_trace = false;
+                        current_ticks += (stop_line - current_line) * 10;
+                        current_line = stop_line;
+                        stop_reason = "breakpoint";
+                    }
 
                     let response = json!({
                         "type": "response",
@@ -539,15 +586,34 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     let stopped = json!({
                         "type": "event",
                         "event": "stopped",
-                        "body": {"reason": "end", "threadId": 1}
+                        "body": {"reason": stop_reason, "threadId": 1}
                     });
                     write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
                 }
                 "reverseContinue" => {
-                    // continue_reverse: jump to start of trace.
-                    end_of_trace = true;
-                    current_line = 1;
-                    current_ticks = 100;
+                    // continue_reverse: check for breakpoints behind the
+                    // current position, otherwise jump to start of trace.
+
+                    let prev_bp = breakpoints.iter()
+                        .filter(|(f, l)| f == &current_file && *l < current_line)
+                        .map(|(_, l)| *l)
+                        .max();
+
+                    let stop_reason;
+                    match prev_bp {
+                        Some(line) => {
+                            end_of_trace = false;
+                            current_ticks -= (current_line - line) * 10;
+                            current_line = line;
+                            stop_reason = "breakpoint";
+                        }
+                        None => {
+                            end_of_trace = true;
+                            current_line = 1;
+                            current_ticks = 100;
+                            stop_reason = "start";
+                        }
+                    }
 
                     let response = json!({
                         "type": "response",
@@ -561,7 +627,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     let stopped = json!({
                         "type": "event",
                         "event": "stopped",
-                        "body": {"reason": "start", "threadId": 1}
+                        "body": {"reason": stop_reason, "threadId": 1}
                     });
                     write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
                 }
@@ -734,6 +800,95 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "body": {
                             "stackFrames": frames,
                             "totalFrames": total_frames,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- setBreakpoints: update tracked breakpoints for a file ---
+                //
+                // The DAP `setBreakpoints` command replaces ALL breakpoints
+                // for a single source file.  We extract the source path and
+                // the breakpoint lines, store them, and return verified
+                // breakpoints.
+                "setBreakpoints" => {
+                    let source_path = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("source"))
+                        .and_then(|s| s.get("path"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+
+                    let bp_array = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("breakpoints"))
+                        .and_then(serde_json::Value::as_array);
+
+                    // Remove all existing breakpoints for this file.
+                    breakpoints.retain(|(f, _)| f != &source_path);
+
+                    let mut result_bps = vec![];
+                    if let Some(bps) = bp_array {
+                        for (i, bp) in bps.iter().enumerate() {
+                            let line = bp
+                                .get("line")
+                                .and_then(serde_json::Value::as_i64)
+                                .unwrap_or(0);
+                            breakpoints.push((source_path.clone(), line));
+                            result_bps.push(json!({
+                                "id": i + 1,
+                                "verified": true,
+                                "line": line,
+                            }));
+                        }
+                    }
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "setBreakpoints",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "breakpoints": result_bps,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- setDataBreakpoints: update tracked watchpoints ---
+                //
+                // Replaces all data breakpoints (watchpoints).  Each entry
+                // has a `dataId` field containing the watched expression.
+                "setDataBreakpoints" => {
+                    let bp_array = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("breakpoints"))
+                        .and_then(serde_json::Value::as_array);
+
+                    watchpoints.clear();
+                    let mut result_bps = vec![];
+                    if let Some(bps) = bp_array {
+                        for (i, bp) in bps.iter().enumerate() {
+                            let expr = bp
+                                .get("dataId")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            watchpoints.push(expr.clone());
+                            result_bps.push(json!({
+                                "id": i + 1,
+                                "verified": true,
+                                "dataId": expr,
+                            }));
+                        }
+                    }
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "setDataBreakpoints",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "breakpoints": result_bps,
                         }
                     });
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;
