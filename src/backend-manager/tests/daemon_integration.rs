@@ -3245,3 +3245,672 @@ async fn m3_location_has_all_fields() {
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+// ===========================================================================
+// M4 Helper functions
+// ===========================================================================
+
+/// Sends `ct/py-locals` and returns the response (skipping interleaved events).
+async fn py_locals(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    depth: i64,
+    count_budget: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-locals",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "depth": depth,
+            "countBudget": count_budget,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-locals: {e}"))?;
+
+    // Read messages, skipping events, until we get the response.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-locals response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-locals response".to_string())?
+            .map_err(|e| format!("read ct/py-locals: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-locals: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-locals response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-evaluate` and returns the response (skipping interleaved events).
+async fn py_evaluate(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    expression: &str,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-evaluate",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "expression": expression,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-evaluate: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-evaluate response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-evaluate response".to_string())?
+            .map_err(|e| format!("read ct/py-evaluate: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-evaluate: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-evaluate response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-stack-trace` and returns the response (skipping interleaved events).
+async fn py_stack_trace(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-stack-trace",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-stack-trace: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-stack-trace response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-stack-trace response".to_string())?
+            .map_err(|e| format!("read ct/py-stack-trace: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-stack-trace: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-stack-trace response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+// ===========================================================================
+// M4 Tests
+// ===========================================================================
+
+/// M4-1. Open trace. Call ct/py-locals. Verify a non-empty list of Variables
+/// is returned with name, value, and type fields populated.
+#[tokio::test]
+async fn m4_locals_returns_variables() {
+    let (test_dir, log_path) = setup_test_dir("m4_locals_returns_vars");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-locals", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 20_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-locals with default depth (3).
+        let locals_resp =
+            py_locals(&mut client, 20_001, &trace_dir, 3, 3000, &log_path).await?;
+
+        assert_eq!(
+            locals_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals should succeed, got: {locals_resp}"
+        );
+        assert_eq!(
+            locals_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-locals"),
+            "command should be ct/py-locals"
+        );
+
+        let body = locals_resp.get("body").expect("response should have body");
+        let variables = body
+            .get("variables")
+            .and_then(Value::as_array)
+            .expect("body should have variables array");
+
+        // Verify non-empty list.
+        assert!(
+            !variables.is_empty(),
+            "variables should be non-empty"
+        );
+
+        // Verify each variable has name, value, type fields populated.
+        for var in variables {
+            let name = var.get("name").and_then(Value::as_str);
+            let value = var.get("value").and_then(Value::as_str);
+            let var_type = var.get("type").and_then(Value::as_str);
+
+            assert!(name.is_some(), "variable should have name: {var}");
+            assert!(!name.unwrap().is_empty(), "name should not be empty: {var}");
+            assert!(value.is_some(), "variable should have value: {var}");
+            assert!(var_type.is_some(), "variable should have type: {var}");
+            assert!(!var_type.unwrap().is_empty(), "type should not be empty: {var}");
+        }
+
+        // Verify we got the expected mock variables (x, y, point).
+        let names: Vec<&str> = variables
+            .iter()
+            .filter_map(|v| v.get("name").and_then(Value::as_str))
+            .collect();
+        assert!(names.contains(&"x"), "should contain variable 'x'");
+        assert!(names.contains(&"y"), "should contain variable 'y'");
+        assert!(names.contains(&"point"), "should contain variable 'point'");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m4_locals_returns_variables", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-2. Navigate to a point with nested structures. Call with depth=1
+/// and verify top-level vars but no children. Call with depth=3 and verify
+/// deeper nesting.
+#[tokio::test]
+async fn m4_locals_depth_limit() {
+    let (test_dir, log_path) = setup_test_dir("m4_locals_depth");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-depth", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 21_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call with depth=1 — should have top-level vars but empty children.
+        let locals_d1 =
+            py_locals(&mut client, 21_001, &trace_dir, 1, 3000, &log_path).await?;
+        assert_eq!(
+            locals_d1.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals depth=1 should succeed"
+        );
+
+        let body_d1 = locals_d1.get("body").expect("should have body");
+        let vars_d1 = body_d1
+            .get("variables")
+            .and_then(Value::as_array)
+            .expect("should have variables");
+
+        // Find the "point" variable.
+        let point_d1 = vars_d1
+            .iter()
+            .find(|v| v.get("name").and_then(Value::as_str) == Some("point"))
+            .expect("should have 'point' variable at depth=1");
+
+        // At depth=1, children should be empty.
+        let children_d1 = point_d1
+            .get("children")
+            .and_then(Value::as_array)
+            .expect("point should have children field");
+        assert!(
+            children_d1.is_empty(),
+            "at depth=1, point should have no children, got: {children_d1:?}"
+        );
+
+        // Call with depth=3 — should have nested children.
+        let locals_d3 =
+            py_locals(&mut client, 21_002, &trace_dir, 3, 3000, &log_path).await?;
+        assert_eq!(
+            locals_d3.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals depth=3 should succeed"
+        );
+
+        let body_d3 = locals_d3.get("body").expect("should have body");
+        let vars_d3 = body_d3
+            .get("variables")
+            .and_then(Value::as_array)
+            .expect("should have variables");
+
+        let point_d3 = vars_d3
+            .iter()
+            .find(|v| v.get("name").and_then(Value::as_str) == Some("point"))
+            .expect("should have 'point' variable at depth=3");
+
+        // At depth=3, children should be populated.
+        let children_d3 = point_d3
+            .get("children")
+            .and_then(Value::as_array)
+            .expect("point should have children field");
+        assert!(
+            !children_d3.is_empty(),
+            "at depth=3, point should have children"
+        );
+
+        // Verify children have name/value/type.
+        for child in children_d3 {
+            assert!(
+                child.get("name").and_then(Value::as_str).is_some(),
+                "child should have name: {child}"
+            );
+            assert!(
+                child.get("value").and_then(Value::as_str).is_some(),
+                "child should have value: {child}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m4_locals_depth_limit", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-3. Navigate to a point where x=42. Call evaluate("x"). Verify result
+/// is "42".
+#[tokio::test]
+async fn m4_evaluate_simple_expression() {
+    let (test_dir, log_path) = setup_test_dir("m4_eval_simple");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-eval-simple", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 22_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Evaluate "x" — mock returns 42.
+        let eval_resp =
+            py_evaluate(&mut client, 22_001, &trace_dir, "x", &log_path).await?;
+
+        assert_eq!(
+            eval_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "evaluate('x') should succeed, got: {eval_resp}"
+        );
+        assert_eq!(
+            eval_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-evaluate"),
+            "command should be ct/py-evaluate"
+        );
+
+        let body = eval_resp.get("body").expect("response should have body");
+        assert_eq!(
+            body.get("result").and_then(Value::as_str),
+            Some("42"),
+            "evaluate('x') result should be '42'"
+        );
+        assert_eq!(
+            body.get("type").and_then(Value::as_str),
+            Some("int"),
+            "evaluate('x') type should be 'int'"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m4_evaluate_simple_expression", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-4. Navigate to a point where x=10 and y=20 (mock has x=42, y=20,
+/// x+y=30). Call evaluate("x + y"). Verify result is "30".
+#[tokio::test]
+async fn m4_evaluate_complex_expression() {
+    let (test_dir, log_path) = setup_test_dir("m4_eval_complex");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-eval-complex", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 23_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Evaluate "x + y" — mock returns 30.
+        let eval_resp =
+            py_evaluate(&mut client, 23_001, &trace_dir, "x + y", &log_path).await?;
+
+        assert_eq!(
+            eval_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "evaluate('x + y') should succeed, got: {eval_resp}"
+        );
+
+        let body = eval_resp.get("body").expect("response should have body");
+        assert_eq!(
+            body.get("result").and_then(Value::as_str),
+            Some("30"),
+            "evaluate('x + y') result should be '30'"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m4_evaluate_complex_expression", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-5. Call evaluate("nonexistent_var"). Verify error response (success=false
+/// with error message).
+#[tokio::test]
+async fn m4_evaluate_invalid_expression() {
+    let (test_dir, log_path) = setup_test_dir("m4_eval_invalid");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-eval-invalid", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 24_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Evaluate "nonexistent_var" — mock returns error.
+        let eval_resp =
+            py_evaluate(&mut client, 24_001, &trace_dir, "nonexistent_var", &log_path).await?;
+
+        assert_eq!(
+            eval_resp.get("success").and_then(Value::as_bool),
+            Some(false),
+            "evaluate('nonexistent_var') should fail, got: {eval_resp}"
+        );
+        assert_eq!(
+            eval_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-evaluate"),
+            "command should be ct/py-evaluate"
+        );
+
+        // Verify error message is present and mentions the variable.
+        let message = eval_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .expect("error response should have message");
+        assert!(
+            message.contains("nonexistent_var"),
+            "error message should mention 'nonexistent_var', got: {message}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m4_evaluate_invalid_expression", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-6. Navigate into a nested function call (stepIn). Call stack_trace().
+/// Verify a list of Frame objects with at least 2 entries. Verify each has
+/// name and location.
+#[tokio::test]
+async fn m4_stack_trace_returns_frames() {
+    let (test_dir, log_path) = setup_test_dir("m4_stack_trace_frames");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-stack", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 25_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Step into a function call to increase call_depth in the mock.
+        // This causes the mock's stackTrace to return 2+ frames.
+        let _nav_resp =
+            py_navigate(&mut client, 25_001, &trace_dir, "step_in", None, &log_path).await?;
+
+        // Now call stack_trace.
+        let st_resp =
+            py_stack_trace(&mut client, 25_002, &trace_dir, &log_path).await?;
+
+        assert_eq!(
+            st_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-stack-trace should succeed, got: {st_resp}"
+        );
+        assert_eq!(
+            st_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-stack-trace"),
+            "command should be ct/py-stack-trace"
+        );
+
+        let body = st_resp.get("body").expect("response should have body");
+        let frames = body
+            .get("frames")
+            .and_then(Value::as_array)
+            .expect("body should have frames array");
+
+        // After stepIn, the mock returns at least 2 frames.
+        assert!(
+            frames.len() >= 2,
+            "stack trace should have at least 2 frames, got {}",
+            frames.len()
+        );
+
+        // Verify each frame has name and location.
+        for (i, frame) in frames.iter().enumerate() {
+            let name = frame.get("name").and_then(Value::as_str);
+            assert!(
+                name.is_some(),
+                "frame {i} should have name: {frame}"
+            );
+            assert!(
+                !name.unwrap().is_empty(),
+                "frame {i} name should not be empty"
+            );
+
+            let location = frame.get("location");
+            assert!(
+                location.is_some(),
+                "frame {i} should have location: {frame}"
+            );
+
+            let loc = location.unwrap();
+            let path = loc.get("path").and_then(Value::as_str);
+            assert!(
+                path.is_some(),
+                "frame {i} location should have path: {loc}"
+            );
+            assert!(
+                !path.unwrap().is_empty(),
+                "frame {i} path should not be empty"
+            );
+
+            let line = loc.get("line").and_then(Value::as_i64);
+            assert!(
+                line.is_some(),
+                "frame {i} location should have line: {loc}"
+            );
+            assert!(
+                line.unwrap() > 0,
+                "frame {i} line should be > 0"
+            );
+        }
+
+        // Verify specific frame names: top frame should be "helper" (after stepIn),
+        // and the caller should be "main".
+        assert_eq!(
+            frames[0].get("name").and_then(Value::as_str),
+            Some("helper"),
+            "top frame should be 'helper'"
+        );
+        assert_eq!(
+            frames[1].get("name").and_then(Value::as_str),
+            Some("main"),
+            "caller frame should be 'main'"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m4_stack_trace_returns_frames", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
