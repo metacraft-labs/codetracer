@@ -165,6 +165,51 @@ fn daemon_paths_in(test_dir: &Path) -> PathBuf {
 
 /// Starts the daemon process with the given test directory as its tmp root.
 ///
+/// Extra environment variables can be passed to configure TTL, max sessions, etc.
+///
+/// Returns the child process handle and the path to the daemon socket.
+async fn start_daemon_with_env(
+    test_dir: &Path,
+    log_path: &Path,
+    env_vars: &[(&str, &str)],
+) -> (tokio::process::Child, PathBuf) {
+    let ct_dir = daemon_paths_in(test_dir);
+    std::fs::create_dir_all(&ct_dir).expect("create ct dir");
+
+    let socket_path = ct_dir.join("daemon.sock");
+    let pid_path = ct_dir.join("daemon.pid");
+
+    // Remove any stale files from a previous run.
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(&pid_path);
+
+    log_line(log_path, &format!("starting daemon, TMPDIR={}", test_dir.display()));
+
+    let mut cmd = Command::new(binary_path());
+    cmd.arg("daemon")
+        .arg("start")
+        .env("TMPDIR", test_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    let child = cmd.spawn().expect("cannot spawn daemon");
+
+    // Wait for the socket to appear.
+    wait_for_socket(&socket_path, Duration::from_secs(10))
+        .await
+        .expect("daemon socket did not appear in time");
+
+    log_line(log_path, "daemon socket appeared");
+
+    (child, socket_path)
+}
+
+/// Starts the daemon process with the given test directory as its tmp root.
+///
 /// Returns the child process handle and the path to the daemon socket.
 async fn start_daemon(test_dir: &Path, log_path: &Path) -> (tokio::process::Child, PathBuf) {
     let ct_dir = daemon_paths_in(test_dir);
@@ -832,6 +877,798 @@ async fn test_existing_frontend_mode_unbroken() {
     }
 
     report("test_existing_frontend_mode_unbroken", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M1 Helpers: session creation, daemon-status, etc.
+// ===========================================================================
+
+/// Sends `ct/start-replay` using the `mock-backend` subcommand so that the
+/// daemon's `start_replay` gets a child process that connects back and stays
+/// alive.  Returns the `replayId` from the response.
+///
+/// `trace_name` is an arbitrary identifier used as the "command" argument
+/// (the session manager uses it as the trace path).
+async fn create_mock_session(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_name: &str,
+    log_path: &Path,
+) -> Result<usize, String> {
+    let bin = binary_path();
+    let bin_str = bin.to_string_lossy();
+    let req = json!({
+        "type": "request",
+        "command": "ct/start-replay",
+        "seq": seq,
+        "arguments": [bin_str, "mock-backend", trace_name]
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write start-replay: {e}"))?;
+
+    // The daemon calls start_replay which spawns the mock-backend and waits
+    // for it to connect.  This may take a moment.
+    let resp = timeout(Duration::from_secs(10), dap_read(client))
+        .await
+        .map_err(|_| "timeout waiting for start-replay response".to_string())?
+        .map_err(|e| format!("read start-replay response: {e}"))?;
+
+    log_line(log_path, &format!("start-replay response: {resp}"));
+
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!("start-replay not successful: {resp}"));
+    }
+
+    resp.get("body")
+        .and_then(|b| b.get("replayId"))
+        .and_then(Value::as_u64)
+        .map(|id| id as usize)
+        .ok_or_else(|| format!("missing replayId in response: {resp}"))
+}
+
+/// Sends `ct/daemon-status` and returns the parsed response body.
+async fn query_daemon_status(
+    client: &mut UnixStream,
+    seq: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/daemon-status",
+        "seq": seq,
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write daemon-status: {e}"))?;
+
+    let resp = timeout(Duration::from_secs(5), dap_read(client))
+        .await
+        .map_err(|_| "timeout waiting for daemon-status response".to_string())?
+        .map_err(|e| format!("read daemon-status response: {e}"))?;
+
+    log_line(log_path, &format!("daemon-status response: {resp}"));
+
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!("daemon-status not successful: {resp}"));
+    }
+
+    resp.get("body")
+        .cloned()
+        .ok_or_else(|| format!("missing body in daemon-status response: {resp}"))
+}
+
+// ===========================================================================
+// M1 Tests
+// ===========================================================================
+
+/// M1-1. Auto-start on first query: ensure no daemon socket exists, run
+/// `backend-manager daemon connect`, verify daemon auto-starts and the
+/// connect command succeeds.
+#[tokio::test]
+async fn test_auto_start_on_first_query() {
+    let (test_dir, log_path) = setup_test_dir("auto_start_first_query");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        std::fs::create_dir_all(&ct_dir).map_err(|e| format!("mkdir: {e}"))?;
+
+        let socket_path = ct_dir.join("daemon.sock");
+
+        // Ensure no daemon is running.
+        assert!(!socket_path.exists(), "socket should not exist before test");
+
+        // Run `daemon connect` — should auto-start the daemon.
+        let output = timeout(
+            Duration::from_secs(10),
+            Command::new(binary_path())
+                .arg("daemon")
+                .arg("connect")
+                .env("TMPDIR", &test_dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| "timeout running daemon connect".to_string())?
+        .map_err(|e| format!("daemon connect: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log_line(&log_path, &format!("connect stdout: {stdout}"));
+        log_line(&log_path, &format!("connect stderr: {stderr}"));
+
+        assert!(
+            output.status.success(),
+            "daemon connect exited with {:?}",
+            output.status.code()
+        );
+        assert!(
+            stdout.contains("connected"),
+            "expected 'connected' in output, got: {stdout}"
+        );
+
+        // Socket file should now exist (daemon is running).
+        assert!(
+            socket_path.exists(),
+            "daemon socket should exist after auto-start"
+        );
+
+        // Clean up: stop the daemon.
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("cleanup connect: {e}"))?;
+        let req = json!({"type": "request", "command": "ct/daemon-shutdown", "seq": 1});
+        let _ = client.write_all(&dap_encode(&req)).await;
+        sleep(Duration::from_millis(500)).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_auto_start_on_first_query", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-2. Auto-start detaches from terminal: run `daemon connect`, let it
+/// exit, verify the daemon process is still running (check PID file), then
+/// clean up by stopping the daemon.
+#[tokio::test]
+async fn test_auto_start_detaches_from_terminal() {
+    let (test_dir, log_path) = setup_test_dir("auto_start_detaches");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        std::fs::create_dir_all(&ct_dir).map_err(|e| format!("mkdir: {e}"))?;
+
+        let socket_path = ct_dir.join("daemon.sock");
+        let pid_path = ct_dir.join("daemon.pid");
+
+        // Auto-start via connect.
+        let output = timeout(
+            Duration::from_secs(10),
+            Command::new(binary_path())
+                .arg("daemon")
+                .arg("connect")
+                .env("TMPDIR", &test_dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| "timeout running daemon connect".to_string())?
+        .map_err(|e| format!("daemon connect: {e}"))?;
+
+        assert!(
+            output.status.success(),
+            "daemon connect failed: {:?}",
+            output.status.code()
+        );
+        log_line(&log_path, "connect succeeded");
+
+        // The connect command has exited.  The daemon should still be alive.
+        sleep(Duration::from_millis(200)).await;
+
+        assert!(
+            socket_path.exists(),
+            "daemon socket should still exist after connect exits"
+        );
+        assert!(
+            pid_path.exists(),
+            "PID file should exist after auto-start"
+        );
+
+        // Verify the PID is alive.
+        let pid_str = std::fs::read_to_string(&pid_path)
+            .map_err(|e| format!("read pid: {e}"))?;
+        let pid: u32 = pid_str.trim().parse().map_err(|e| format!("parse pid: {e}"))?;
+        log_line(&log_path, &format!("daemon pid: {pid}"));
+
+        // SAFETY: signal 0 only checks existence.
+        let alive = unsafe { libc::kill(pid as libc::pid_t, 0) == 0 };
+        assert!(alive, "daemon process {pid} is not alive");
+
+        // Clean up: stop the daemon.
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("cleanup connect: {e}"))?;
+        let req = json!({"type": "request", "command": "ct/daemon-shutdown", "seq": 1});
+        let _ = client.write_all(&dap_encode(&req)).await;
+        sleep(Duration::from_millis(500)).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_auto_start_detaches_from_terminal", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-3. Subsequent queries reuse daemon: auto-start via connect, read PID,
+/// run connect again, read PID again, verify same PID (same daemon instance).
+#[tokio::test]
+async fn test_subsequent_queries_reuse_daemon() {
+    let (test_dir, log_path) = setup_test_dir("subsequent_reuse");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        std::fs::create_dir_all(&ct_dir).map_err(|e| format!("mkdir: {e}"))?;
+
+        let socket_path = ct_dir.join("daemon.sock");
+        let pid_path = ct_dir.join("daemon.pid");
+
+        // First connect: auto-starts daemon.
+        let output1 = timeout(
+            Duration::from_secs(10),
+            Command::new(binary_path())
+                .arg("daemon")
+                .arg("connect")
+                .env("TMPDIR", &test_dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| "timeout on first connect".to_string())?
+        .map_err(|e| format!("first connect: {e}"))?;
+        assert!(output1.status.success(), "first connect failed");
+        log_line(&log_path, "first connect succeeded");
+
+        let pid1_str = std::fs::read_to_string(&pid_path)
+            .map_err(|e| format!("read pid 1: {e}"))?;
+        let pid1: u32 = pid1_str.trim().parse().map_err(|e| format!("parse pid 1: {e}"))?;
+        log_line(&log_path, &format!("pid after first connect: {pid1}"));
+
+        // Second connect: should reuse existing daemon.
+        let output2 = timeout(
+            Duration::from_secs(10),
+            Command::new(binary_path())
+                .arg("daemon")
+                .arg("connect")
+                .env("TMPDIR", &test_dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| "timeout on second connect".to_string())?
+        .map_err(|e| format!("second connect: {e}"))?;
+        assert!(output2.status.success(), "second connect failed");
+        log_line(&log_path, "second connect succeeded");
+
+        let pid2_str = std::fs::read_to_string(&pid_path)
+            .map_err(|e| format!("read pid 2: {e}"))?;
+        let pid2: u32 = pid2_str.trim().parse().map_err(|e| format!("parse pid 2: {e}"))?;
+        log_line(&log_path, &format!("pid after second connect: {pid2}"));
+
+        assert_eq!(
+            pid1, pid2,
+            "PID changed between connects ({pid1} vs {pid2}) — daemon was restarted"
+        );
+
+        // Clean up.
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("cleanup connect: {e}"))?;
+        let req = json!({"type": "request", "command": "ct/daemon-shutdown", "seq": 1});
+        let _ = client.write_all(&dap_encode(&req)).await;
+        sleep(Duration::from_millis(500)).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_subsequent_queries_reuse_daemon", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-4. TTL expires and unloads trace: start daemon with TTL=2s, create a
+/// session, verify it's loaded, wait for TTL to expire, verify the session
+/// was unloaded (the daemon auto-shuts down because it was the only session).
+#[tokio::test]
+async fn test_ttl_expires_unloads_trace() {
+    let (test_dir, log_path) = setup_test_dir("ttl_expires_unloads");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        let socket_path = ct_dir.join("daemon.sock");
+        let pid_path = ct_dir.join("daemon.pid");
+
+        // Start daemon with a 2-second TTL.
+        let (mut daemon, _socket_path) = start_daemon_with_env(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_DAEMON_TTL", "2")],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Create a session using mock-backend.
+        let replay_id = create_mock_session(&mut client, 100, "trace-ttl-test", &log_path).await?;
+        log_line(&log_path, &format!("created session with replayId={replay_id}"));
+
+        // Verify session exists via daemon-status.
+        let status1 = query_daemon_status(&mut client, 101, &log_path).await?;
+        let sessions1 = status1.get("sessions").and_then(Value::as_u64).unwrap_or(0);
+        log_line(&log_path, &format!("sessions after create: {sessions1}"));
+        assert_eq!(sessions1, 1, "expected 1 session after create, got {sessions1}");
+
+        // Drop the client so it doesn't keep a broken-pipe when daemon shuts down.
+        drop(client);
+
+        // Wait for TTL to expire and daemon to auto-shutdown (2s TTL + margin).
+        log_line(&log_path, "waiting for TTL and auto-shutdown...");
+        let wait_result = timeout(Duration::from_secs(10), daemon.wait())
+            .await
+            .map_err(|_| "daemon did not exit within 10s".to_string())?
+            .map_err(|e| format!("daemon wait: {e}"))?;
+        log_line(&log_path, &format!("daemon exited with: {wait_result}"));
+
+        // Give filesystem a moment to settle.
+        sleep(Duration::from_millis(500)).await;
+
+        // Verify the daemon shut down (which proves the session's TTL expired
+        // and triggered auto-shutdown because it was the last session).
+        assert!(
+            !socket_path.exists(),
+            "socket file should be removed after TTL-triggered shutdown"
+        );
+        assert!(
+            !pid_path.exists(),
+            "PID file should be removed after TTL-triggered shutdown"
+        );
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_ttl_expires_unloads_trace", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-5. Query resets TTL: start daemon with TTL=3s, create session, wait 2s,
+/// send a message to the session (which resets TTL), wait 2 more seconds
+/// (4 total, but only 2 since reset), verify session is still loaded.
+/// Without the reset, the session would have expired at T=3; with the reset,
+/// it expires at T=5 (2 + 3).
+#[tokio::test]
+async fn test_query_resets_ttl() {
+    let (test_dir, log_path) = setup_test_dir("query_resets_ttl");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        // Start daemon with a 3-second TTL.
+        let (mut daemon, socket_path) = start_daemon_with_env(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_DAEMON_TTL", "3")],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Create a session.
+        let replay_id = create_mock_session(&mut client, 200, "trace-ttl-reset", &log_path).await?;
+        log_line(&log_path, &format!("created session with replayId={replay_id}"));
+
+        // Wait 2 seconds (less than TTL=3s).
+        sleep(Duration::from_secs(2)).await;
+
+        // Send a ct/start-replay with the same trace name — the session
+        // manager will detect it's already loaded and reset the TTL.
+        let bin = binary_path();
+        let bin_str = bin.to_string_lossy();
+        let reset_req = json!({
+            "type": "request",
+            "command": "ct/start-replay",
+            "seq": 201,
+            "arguments": [bin_str, "mock-backend", "trace-ttl-reset"]
+        });
+        client
+            .write_all(&dap_encode(&reset_req))
+            .await
+            .map_err(|e| format!("write reset: {e}"))?;
+
+        let reset_resp = timeout(Duration::from_secs(5), dap_read(&mut client))
+            .await
+            .map_err(|_| "timeout on reset response".to_string())?
+            .map_err(|e| format!("read reset: {e}"))?;
+        log_line(&log_path, &format!("reset response: {reset_resp}"));
+
+        // At this point, T~2.  Without the reset, the session would expire
+        // at T=3.  With the reset, it should expire at T=2+3=5.
+        // Wait 2 more seconds (to T~4).  Session should still be alive.
+        sleep(Duration::from_secs(2)).await;
+
+        // Verify the session is still loaded at T~4.
+        let status = query_daemon_status(&mut client, 202, &log_path).await?;
+        let sessions = status.get("sessions").and_then(Value::as_u64).unwrap_or(0);
+        log_line(&log_path, &format!("sessions at T~4 (after reset): {sessions}"));
+        assert_eq!(sessions, 1, "session should still be loaded (TTL was reset), got {sessions}");
+
+        // Clean up: shut down daemon.
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_query_resets_ttl", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-6. Auto-shutdown on last TTL: start daemon with TTL=2s, create one
+/// session, wait for TTL to expire, verify daemon has shut down (socket and
+/// PID files removed).
+#[tokio::test]
+async fn test_auto_shutdown_on_last_ttl() {
+    let (test_dir, log_path) = setup_test_dir("auto_shutdown_last_ttl");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        let socket_path = ct_dir.join("daemon.sock");
+        let pid_path = ct_dir.join("daemon.pid");
+
+        // Start daemon with a 2-second TTL.
+        let (mut daemon, _socket_path) = start_daemon_with_env(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_DAEMON_TTL", "2")],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Create one session.
+        let _replay_id = create_mock_session(&mut client, 300, "trace-auto-shutdown", &log_path).await?;
+        log_line(&log_path, "session created, waiting for TTL and auto-shutdown...");
+
+        // Drop the client to avoid blocking the daemon's shutdown.
+        drop(client);
+
+        // Wait for the daemon to shut down (TTL 2s + cleanup margin).
+        // The daemon should exit when the last session's TTL fires.
+        let wait_result = timeout(Duration::from_secs(10), daemon.wait())
+            .await
+            .map_err(|_| "daemon did not exit within 10s".to_string())?
+            .map_err(|e| format!("daemon wait: {e}"))?;
+        log_line(&log_path, &format!("daemon exited with: {wait_result}"));
+
+        // Give filesystem a moment to settle.
+        sleep(Duration::from_millis(500)).await;
+
+        // Socket and PID files should be removed.
+        assert!(
+            !socket_path.exists(),
+            "socket file should be removed after auto-shutdown"
+        );
+        assert!(
+            !pid_path.exists(),
+            "PID file should be removed after auto-shutdown"
+        );
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_auto_shutdown_on_last_ttl", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-7. Stale socket recovery: create a stale socket file at the daemon
+/// path, run `daemon connect`, verify the stale socket is removed and a
+/// new daemon starts, verify connection succeeds.
+#[tokio::test]
+async fn test_stale_socket_recovery() {
+    let (test_dir, log_path) = setup_test_dir("stale_socket_recovery");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        std::fs::create_dir_all(&ct_dir).map_err(|e| format!("mkdir: {e}"))?;
+
+        let socket_path = ct_dir.join("daemon.sock");
+
+        // Create a stale socket file (just a regular file, not a real socket).
+        std::fs::write(&socket_path, "stale")
+            .map_err(|e| format!("write stale socket: {e}"))?;
+        assert!(socket_path.exists(), "stale socket file should exist");
+        log_line(&log_path, "created stale socket file");
+
+        // Run `daemon connect` — should detect stale socket, remove it,
+        // start a new daemon, and connect.
+        let output = timeout(
+            Duration::from_secs(10),
+            Command::new(binary_path())
+                .arg("daemon")
+                .arg("connect")
+                .env("TMPDIR", &test_dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| "timeout running daemon connect".to_string())?
+        .map_err(|e| format!("daemon connect: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log_line(&log_path, &format!("connect stdout: {stdout}"));
+        log_line(&log_path, &format!("connect stderr: {stderr}"));
+
+        assert!(
+            output.status.success(),
+            "daemon connect failed after stale socket: {:?}",
+            output.status.code()
+        );
+        assert!(
+            stdout.contains("connected"),
+            "expected 'connected', got: {stdout}"
+        );
+
+        // Verify a real socket is now in place (we can connect to it).
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("post-recovery connect: {e}"))?;
+        log_line(&log_path, "successfully connected after stale recovery");
+
+        // Clean up: stop daemon.
+        let req = json!({"type": "request", "command": "ct/daemon-shutdown", "seq": 1});
+        let _ = client.write_all(&dap_encode(&req)).await;
+        sleep(Duration::from_millis(500)).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_stale_socket_recovery", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-8. Max sessions enforced: start daemon with MAX_SESSIONS=2, create
+/// sessions A and B, try to create session C, verify an error response.
+#[tokio::test]
+async fn test_max_sessions_enforced() {
+    let (test_dir, log_path) = setup_test_dir("max_sessions_enforced");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        // Start daemon with max 2 sessions.
+        let (mut daemon, socket_path) = start_daemon_with_env(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_MAX_SESSIONS", "2")],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Create session A.
+        let id_a = create_mock_session(&mut client, 400, "trace-a", &log_path).await?;
+        log_line(&log_path, &format!("session A: replayId={id_a}"));
+
+        // Create session B.
+        let id_b = create_mock_session(&mut client, 401, "trace-b", &log_path).await?;
+        log_line(&log_path, &format!("session B: replayId={id_b}"));
+
+        // Verify 2 sessions.
+        let status = query_daemon_status(&mut client, 402, &log_path).await?;
+        let sessions = status.get("sessions").and_then(Value::as_u64).unwrap_or(0);
+        assert_eq!(sessions, 2, "expected 2 sessions, got {sessions}");
+
+        // Try to create session C — should fail.
+        let bin = binary_path();
+        let bin_str = bin.to_string_lossy();
+        let req_c = json!({
+            "type": "request",
+            "command": "ct/start-replay",
+            "seq": 403,
+            "arguments": [bin_str, "mock-backend", "trace-c"]
+        });
+        client
+            .write_all(&dap_encode(&req_c))
+            .await
+            .map_err(|e| format!("write start-replay C: {e}"))?;
+
+        let resp_c = timeout(Duration::from_secs(5), dap_read(&mut client))
+            .await
+            .map_err(|_| "timeout on start-replay C response".to_string())?
+            .map_err(|e| format!("read start-replay C: {e}"))?;
+        log_line(&log_path, &format!("start-replay C response: {resp_c}"));
+
+        // Expect failure.
+        let c_success = resp_c.get("success").and_then(Value::as_bool).unwrap_or(true);
+        assert!(
+            !c_success,
+            "session C should have been rejected, but got success=true"
+        );
+
+        // Verify still 2 sessions (no change).
+        let status2 = query_daemon_status(&mut client, 404, &log_path).await?;
+        let sessions2 = status2.get("sessions").and_then(Value::as_u64).unwrap_or(0);
+        assert_eq!(sessions2, 2, "expected 2 sessions after rejected C, got {sessions2}");
+
+        // Shut down.
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_max_sessions_enforced", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M1-9. Config file loaded: create a config file with `default_ttl = 4`,
+/// start daemon with env var pointing to config, verify TTL is 4 (create
+/// session, wait 3s, verify still loaded; then verify it eventually expires
+/// by waiting for daemon auto-shutdown).
+#[tokio::test]
+async fn test_config_file_loaded() {
+    let (test_dir, log_path) = setup_test_dir("config_file_loaded");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let ct_dir = daemon_paths_in(&test_dir);
+        let socket_path = ct_dir.join("daemon.sock");
+        let pid_path = ct_dir.join("daemon.pid");
+
+        // Create a config file with a 4-second TTL.
+        let config_dir = test_dir.join("config");
+        std::fs::create_dir_all(&config_dir).map_err(|e| format!("mkdir config: {e}"))?;
+        let config_path = config_dir.join("daemon.conf");
+        std::fs::write(&config_path, "default_ttl = 4\n")
+            .map_err(|e| format!("write config: {e}"))?;
+        log_line(&log_path, &format!("config file: {}", config_path.display()));
+
+        // Start daemon with the config file.
+        let (mut daemon, _socket_path) = start_daemon_with_env(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_DAEMON_CONFIG", config_path.to_str().unwrap())],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Create a session.
+        let _replay_id = create_mock_session(&mut client, 500, "trace-config", &log_path).await?;
+        log_line(&log_path, "session created");
+
+        // Wait 3 seconds (less than TTL=4).
+        sleep(Duration::from_secs(3)).await;
+
+        // Session should still be loaded (TTL is 4, we're at T=3).
+        let status1 = query_daemon_status(&mut client, 501, &log_path).await?;
+        let sessions1 = status1.get("sessions").and_then(Value::as_u64).unwrap_or(0);
+        log_line(&log_path, &format!("sessions at T=3: {sessions1}"));
+        assert_eq!(sessions1, 1, "session should still be loaded at T=3 (TTL=4), got {sessions1}");
+
+        // Drop the client to allow clean daemon exit.
+        drop(client);
+
+        // Wait for the TTL to expire and daemon to auto-shutdown.
+        // Session was created at T=0 (approx), TTL=4s, so it should expire
+        // around T=4.  We give extra margin.
+        let wait_result = timeout(Duration::from_secs(10), daemon.wait())
+            .await
+            .map_err(|_| "daemon did not auto-shutdown after TTL expiry".to_string())?
+            .map_err(|e| format!("daemon wait: {e}"))?;
+        log_line(&log_path, &format!("daemon exited with: {wait_result}"));
+
+        // Verify cleanup.
+        sleep(Duration::from_millis(500)).await;
+        assert!(
+            !socket_path.exists(),
+            "socket should be removed after config-driven TTL shutdown"
+        );
+        assert!(
+            !pid_path.exists(),
+            "PID file should be removed after config-driven TTL shutdown"
+        );
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_config_file_loaded", &log_path, success);
     assert!(success, "see log at {}", log_path.display());
 
     let _ = std::fs::remove_dir_all(&test_dir);

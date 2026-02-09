@@ -14,9 +14,11 @@ use tokio::{
 };
 
 use crate::{
+    config::DaemonConfig,
     dap_parser::DapParser,
     errors::{InvalidID, SocketPathError},
     paths::CODETRACER_PATHS,
+    session::SessionManager,
 };
 
 /// Write handle for a single connected daemon client, together with its
@@ -39,6 +41,10 @@ pub struct DaemonState {
     request_client_map: HashMap<i64, u64>,
     /// Sender half of the channel used to request a clean daemon shutdown.
     shutdown_tx: Option<UnboundedSender<()>>,
+    /// Per-trace session manager with TTL tracking.
+    session_manager: SessionManager,
+    /// Configuration snapshot taken at daemon startup.
+    config: DaemonConfig,
 }
 
 impl Debug for DaemonState {
@@ -46,6 +52,7 @@ impl Debug for DaemonState {
         f.debug_struct("DaemonState")
             .field("num_clients", &self.clients.len())
             .field("pending_requests", &self.request_client_map.len())
+            .field("session_manager", &self.session_manager)
             .finish()
     }
 }
@@ -208,16 +215,25 @@ impl BackendManager {
     /// - Assign a unique numeric ID to each connecting client.
     /// - Route DAP responses back to the client that originated the request.
     /// - Broadcast DAP events to *all* connected clients.
+    /// - Track per-trace sessions with TTL timers; expired sessions are
+    ///   automatically stopped.
+    /// - Auto-shutdown when the last session expires (if any sessions were
+    ///   ever loaded).
     /// - Shut down cleanly when `ct/daemon-shutdown` is received or a signal
     ///   is caught (see `shutdown_rx`).
     ///
     /// Returns `(Arc<Mutex<BackendManager>>, UnboundedReceiver<()>)`.
-    /// The receiver fires when a `ct/daemon-shutdown` request is received,
-    /// allowing the caller (main.rs) to tear down the process.
+    /// The receiver fires when a `ct/daemon-shutdown` request is received
+    /// (or auto-shutdown triggers), allowing the caller (main.rs) to tear
+    /// down the process.
     pub async fn new_daemon(
         socket_path: PathBuf,
+        config: DaemonConfig,
     ) -> Result<(Arc<Mutex<Self>>, UnboundedReceiver<()>), Box<dyn Error>> {
         let (shutdown_tx, shutdown_rx) = mpsc::unbounded_channel::<()>();
+
+        let (session_manager, ttl_expiry_rx) =
+            SessionManager::new(config.default_ttl, config.max_sessions);
 
         let mgr = Arc::new(Mutex::new(Self {
             children: vec![],
@@ -230,6 +246,8 @@ impl BackendManager {
                 clients: HashMap::new(),
                 request_client_map: HashMap::new(),
                 shutdown_tx: Some(shutdown_tx),
+                session_manager,
+                config,
             }),
         }));
 
@@ -338,6 +356,12 @@ impl BackendManager {
                 }
             }
         });
+
+        // --- TTL expiry loop: receives trace paths whose idle timers
+        //     have fired and stops the corresponding replays.  When
+        //     the last session is removed, triggers auto-shutdown. ---
+        let mgr_ttl = mgr.clone();
+        tokio::spawn(Self::ttl_expiry_loop(mgr_ttl, ttl_expiry_rx));
 
         Ok((mgr, shutdown_rx))
     }
@@ -464,6 +488,62 @@ impl BackendManager {
         for (cid, handle) in &ds.clients {
             if let Err(err) = handle.tx.send(msg.clone()) {
                 error!("Daemon: can't broadcast to client {cid}: {err}");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // TTL expiry and session lifecycle
+    // -----------------------------------------------------------------------
+
+    /// Background loop that receives TTL-expired trace paths and cleans up
+    /// the corresponding replay sessions.
+    ///
+    /// When the last session is removed (and at least one session existed),
+    /// triggers automatic daemon shutdown.
+    async fn ttl_expiry_loop(
+        mgr: Arc<Mutex<Self>>,
+        mut ttl_expiry_rx: UnboundedReceiver<PathBuf>,
+    ) {
+        while let Some(trace_path) = ttl_expiry_rx.recv().await {
+            let mut locked = mgr.lock().await;
+
+            let ds = match locked.daemon_state.as_mut() {
+                Some(ds) => ds,
+                None => continue,
+            };
+
+            // Remove the session (this also aborts its timer, though the
+            // timer already fired in this case).
+            if let Some(backend_id) = ds.session_manager.remove_session(&trace_path) {
+                info!(
+                    "TTL expired for session {} (backend_id={backend_id})",
+                    trace_path.display()
+                );
+
+                // Stop the child replay process.
+                if let Err(e) = locked.stop_replay(backend_id).await {
+                    warn!(
+                        "Failed to stop replay {backend_id} for expired session {}: {e}",
+                        trace_path.display()
+                    );
+                }
+
+                // Re-borrow daemon_state after the mutable borrow from stop_replay.
+                let ds = match locked.daemon_state.as_mut() {
+                    Some(ds) => ds,
+                    None => continue,
+                };
+
+                // Auto-shutdown when the last session expires.
+                // We know at least one session existed (we just removed it),
+                // so if the count is now 0, all sessions are gone.
+                if ds.session_manager.session_count() == 0 {
+                    info!("All sessions expired — initiating auto-shutdown");
+                    if let Some(tx) = ds.shutdown_tx.take() {
+                        let _ = tx.send(());
+                    }
+                }
             }
         }
     }
@@ -714,15 +794,92 @@ impl BackendManager {
                                     return Ok(());
                                 }
                             }
+
+                            // Derive a canonical trace path from the full argument list.
+                            // In the real MCP scenario the first argument is the
+                            // replay tool and subsequent arguments identify the trace.
+                            // We join all arguments into a single key so that
+                            // different sessions are distinguished.
+                            let trace_path = Self::trace_path_from_args(command, &cmd_args);
+
+                            // In daemon mode, check session limits before starting.
+                            if let Some(ds) = self.daemon_state.as_mut() {
+                                if ds.session_manager.has_session(&trace_path) {
+                                    // Session already loaded — return existing ID.
+                                    if let Some(existing_id) =
+                                        ds.session_manager.get_session_backend_id(&trace_path)
+                                    {
+                                        ds.session_manager.reset_ttl(&trace_path);
+                                        let response = json!({
+                                            "type": "response",
+                                            "request_seq": seq,
+                                            "success": true,
+                                            "command": "ct/start-replay",
+                                            "body": {
+                                                "replayId": existing_id
+                                            }
+                                        });
+                                        let client_id = self.lookup_client_for_seq(seq);
+                                        if let Some(cid) = client_id {
+                                            self.send_to_client(cid, response);
+                                        } else {
+                                            self.send_manager_message(response);
+                                        }
+                                        return Ok(());
+                                    }
+                                }
+
+                                // Check max sessions limit.
+                                if ds.session_manager.session_count() >= ds.config.max_sessions {
+                                    let response = json!({
+                                        "type": "response",
+                                        "request_seq": seq,
+                                        "success": false,
+                                        "command": "ct/start-replay",
+                                        "message": format!(
+                                            "maximum number of sessions ({}) reached",
+                                            ds.config.max_sessions
+                                        )
+                                    });
+                                    let client_id = self.lookup_client_for_seq(seq);
+                                    if let Some(cid) = client_id {
+                                        self.send_to_client(cid, response);
+                                    } else {
+                                        self.send_manager_message(response);
+                                    }
+                                    return Ok(());
+                                }
+                            }
+
                             let replay_id = self.start_replay(command, &cmd_args).await?;
-                            self.send_manager_message(json!({
+
+                            // Register the session in the session manager.
+                            if let Some(ds) = self.daemon_state.as_mut()
+                                && let Err(e) =
+                                    ds.session_manager.add_session(trace_path.clone(), replay_id)
+                            {
+                                warn!("Failed to register session for {}: {e}", trace_path.display());
+                            }
+
+                            let response = json!({
                                 "type": "response",
+                                "request_seq": seq,
                                 "success": true,
                                 "command": "ct/start-replay",
                                 "body": {
                                     "replayId": replay_id
                                 }
-                            }));
+                            });
+                            let client_id = self.lookup_client_for_seq(seq);
+                            if self.daemon_state.is_some() {
+                                if let Some(cid) = client_id {
+                                    self.send_to_client(cid, response);
+                                } else {
+                                    self.send_manager_message(response);
+                                }
+                            } else {
+                                self.send_manager_message(response);
+                            }
                             return Ok(());
                         } else {
                             error!("problem with start-replay: can't process {args:?}");
@@ -734,7 +891,17 @@ impl BackendManager {
                         if let Some(Value::Number(num)) = args
                             && let Some(id) = num.as_u64()
                         {
-                            self.stop_replay(id as usize).await?;
+                            let backend_id = id as usize;
+
+                            // Remove the session from the session manager (if tracked).
+                            if let Some(ds) = self.daemon_state.as_mut()
+                                && let Some(path) =
+                                    ds.session_manager.path_for_backend_id(backend_id)
+                            {
+                                ds.session_manager.remove_session(&path);
+                            }
+
+                            self.stop_replay(backend_id).await?;
                             return Ok(());
                         } else {
                             error!("problem with stop-replay: can't process {args:?}");
@@ -805,13 +972,55 @@ impl BackendManager {
                         }
                         Ok(())
                     }
+                    "ct/daemon-status" => {
+                        info!("Received ct/daemon-status request");
+                        let (sessions_count, traces) = if let Some(ds) = &self.daemon_state {
+                            let infos = ds.session_manager.list_sessions();
+                            let count = infos.len();
+                            let paths: Vec<Value> = infos
+                                .iter()
+                                .map(|s| Value::String(s.trace_path.to_string_lossy().to_string()))
+                                .collect();
+                            (count, paths)
+                        } else {
+                            (0, Vec::new())
+                        };
+
+                        let response = json!({
+                            "type": "response",
+                            "request_seq": seq,
+                            "success": true,
+                            "command": "ct/daemon-status",
+                            "body": {
+                                "running": true,
+                                "pid": std::process::id(),
+                                "sessions": sessions_count,
+                                "traces": traces,
+                            }
+                        });
+
+                        let client_id = self.lookup_client_for_seq(seq);
+                        if self.daemon_state.is_some() {
+                            if let Some(cid) = client_id {
+                                self.send_to_client(cid, response);
+                            }
+                        } else {
+                            self.send_manager_message(response);
+                        }
+                        Ok(())
+                    }
                     _ => {
                         if let Some(Value::Object(obj_args)) = args
                             && let Some(Value::Number(id)) = obj_args.get("replay-id")
                             && let Some(id) = id.as_u64()
                         {
-                            return self.message(id as usize, message).await;
+                            let backend_id = id as usize;
+                            // Reset TTL for the session that owns this replay.
+                            self.reset_ttl_for_backend_id(backend_id);
+                            return self.message(backend_id, message).await;
                         }
+                        // Reset TTL for the currently selected replay.
+                        self.reset_ttl_for_backend_id(self.selected);
                         self.message_selected(message).await
                     }
                 }
@@ -827,6 +1036,31 @@ impl BackendManager {
         self.daemon_state
             .as_ref()
             .and_then(|ds| ds.request_client_map.get(&seq).copied())
+    }
+
+    /// Derives a canonical trace path from the `ct/start-replay` arguments.
+    ///
+    /// The first argument is the command (replay tool binary), and subsequent
+    /// arguments identify the trace / flags.  We join them all with spaces
+    /// to form a canonical session key.
+    fn trace_path_from_args(command: &str, args: &[&str]) -> PathBuf {
+        let mut key = command.to_string();
+        for arg in args {
+            key.push(' ');
+            key.push_str(arg);
+        }
+        PathBuf::from(key)
+    }
+
+    /// Resets the TTL timer for the session associated with the given
+    /// backend replay ID.  No-op if not in daemon mode or if no session
+    /// maps to `backend_id`.
+    fn reset_ttl_for_backend_id(&mut self, backend_id: usize) {
+        if let Some(ds) = self.daemon_state.as_mut()
+            && let Some(path) = ds.session_manager.path_for_backend_id(backend_id)
+        {
+            ds.session_manager.reset_ttl(&path);
+        }
     }
 
     pub async fn message(&self, id: usize, message: Value) -> Result<(), Box<dyn Error>> {
