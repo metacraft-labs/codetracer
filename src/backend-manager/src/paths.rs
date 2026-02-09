@@ -6,6 +6,24 @@ pub struct Paths {
     pub tmp_path: PathBuf,
 }
 
+impl Paths {
+    /// Returns the well-known path for the daemon's Unix socket.
+    ///
+    /// Clients connect to this socket when communicating with a daemon-mode
+    /// backend-manager instance.
+    pub fn daemon_socket_path(&self) -> PathBuf {
+        self.tmp_path.join("daemon.sock")
+    }
+
+    /// Returns the path where the daemon writes its PID file.
+    ///
+    /// The PID file is used to detect whether a daemon is already running and
+    /// to implement `daemon stop` / `daemon status` subcommands.
+    pub fn daemon_pid_path(&self) -> PathBuf {
+        self.tmp_path.join("daemon.pid")
+    }
+}
+
 impl Default for Paths {
     fn default() -> Self {
         let tmpdir: PathBuf = if cfg!(target_os = "macos") {

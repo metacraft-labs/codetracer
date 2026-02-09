@@ -103,6 +103,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "flexi_logger",
+ "libc",
  "log",
  "serde",
  "serde_json",
