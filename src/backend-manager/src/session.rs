@@ -47,16 +47,21 @@ pub struct TraceSession {
     /// Aborted and respawned on every [`SessionManager::reset_ttl`] call.
     ttl_handle: Option<JoinHandle<()>>,
 
-    /// Language of the traced program (populated after DAP init; placeholder
-    /// until the MCP server fills it in).
+    /// Language of the traced program (populated by `add_session_with_metadata`
+    /// after reading trace files).
     pub language: String,
 
-    /// Total number of execution events in the trace (placeholder).
+    /// Total number of execution events in the trace.
     pub total_events: u64,
 
-    /// Source files involved in the trace (placeholder for MCP server).
-    #[allow(dead_code)]
+    /// Source files involved in the trace.
     pub source_files: Vec<String>,
+
+    /// The program that was traced (from `trace_metadata.json`).
+    pub program: String,
+
+    /// Working directory at the time of recording (from `trace_metadata.json`).
+    pub workdir: String,
 }
 
 impl std::fmt::Debug for TraceSession {
@@ -107,16 +112,15 @@ impl std::fmt::Debug for SessionManager {
 }
 
 /// Information about a session returned by [`SessionManager::list_sessions`].
-///
-/// Fields beyond `trace_path` are placeholders for MCP server integration
-/// and may appear unused until that layer is wired in.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct SessionInfo {
     pub trace_path: PathBuf,
     pub backend_id: usize,
     pub language: String,
     pub total_events: u64,
+    pub source_files: Vec<String>,
+    pub program: String,
+    pub workdir: String,
 }
 
 impl SessionManager {
@@ -181,6 +185,48 @@ impl SessionManager {
             language: String::new(),
             total_events: 0,
             source_files: Vec::new(),
+            program: String::new(),
+            workdir: String::new(),
+        };
+
+        self.sessions.insert(path, session);
+        Ok(())
+    }
+
+    /// Registers a new trace session with metadata from the trace directory.
+    ///
+    /// Like [`add_session`], but populates the language, event count,
+    /// source files, program, and workdir fields from the provided
+    /// [`TraceMetadata`](crate::trace_metadata::TraceMetadata).
+    pub fn add_session_with_metadata(
+        &mut self,
+        path: PathBuf,
+        backend_id: usize,
+        metadata: &crate::trace_metadata::TraceMetadata,
+    ) -> Result<(), SessionError> {
+        if self.sessions.len() >= self.max_sessions {
+            return Err(SessionError::MaxSessionsReached {
+                max: self.max_sessions,
+            });
+        }
+
+        if self.sessions.contains_key(&path) {
+            return Err(SessionError::AlreadyLoaded {
+                path: path.clone(),
+            });
+        }
+
+        let ttl_handle = self.spawn_ttl_timer(path.clone());
+
+        let session = TraceSession {
+            backend_id,
+            trace_path: path.clone(),
+            ttl_handle: Some(ttl_handle),
+            language: metadata.language.clone(),
+            total_events: metadata.total_events,
+            source_files: metadata.source_files.clone(),
+            program: metadata.program.clone(),
+            workdir: metadata.workdir.clone(),
         };
 
         self.sessions.insert(path, session);
@@ -227,13 +273,15 @@ impl SessionManager {
     }
 
     /// Returns information about a session, or `None` if not loaded.
-    #[allow(dead_code)]
     pub fn get_session(&self, path: &PathBuf) -> Option<SessionInfo> {
         self.sessions.get(path).map(|s| SessionInfo {
             trace_path: s.trace_path.clone(),
             backend_id: s.backend_id,
             language: s.language.clone(),
             total_events: s.total_events,
+            source_files: s.source_files.clone(),
+            program: s.program.clone(),
+            workdir: s.workdir.clone(),
         })
     }
 
@@ -251,6 +299,9 @@ impl SessionManager {
                 backend_id: s.backend_id,
                 language: s.language.clone(),
                 total_events: s.total_events,
+                source_files: s.source_files.clone(),
+                program: s.program.clone(),
+                workdir: s.workdir.clone(),
             })
             .collect()
     }

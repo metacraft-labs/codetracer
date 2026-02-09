@@ -3,10 +3,12 @@ extern crate log;
 
 mod backend_manager;
 mod config;
+mod dap_init;
 mod dap_parser;
 mod errors;
 mod paths;
 mod session;
+mod trace_metadata;
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -54,6 +56,20 @@ enum Commands {
     /// socket path as the final CLI argument).
     #[command(trailing_var_arg = true)]
     MockBackend {
+        /// All positional arguments; the last one is the socket path.
+        args: Vec<String>,
+    },
+    /// Mock DAP-speaking backend for integration tests.
+    ///
+    /// Like `mock-backend`, but speaks the DAP protocol: responds to
+    /// `initialize`, `launch`, and `configurationDone` requests, sends
+    /// a `stopped` event, and then loops responding to further requests
+    /// with generic success responses.
+    ///
+    /// The last positional argument is the socket path (same convention
+    /// as `start_replay`).
+    #[command(trailing_var_arg = true)]
+    MockDapBackend {
         /// All positional arguments; the last one is the socket path.
         args: Vec<String>,
     },
@@ -294,6 +310,120 @@ async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// A DAP-speaking mock backend for integration tests.
+///
+/// Connects to the parent's listener socket, reads DAP messages, and
+/// responds to the standard initialization sequence (`initialize`,
+/// `launch`, `configurationDone`) with success responses plus a
+/// `stopped` event.  After initialization, responds to any further
+/// request with a generic success response.
+///
+/// This enables end-to-end testing of the `ct/open-trace` flow without
+/// needing a real db-backend binary.
+async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
+    use tokio::io::AsyncReadExt as _;
+
+    let stream = UnixStream::connect(socket_path).await?;
+    let (mut read_half, mut write_half) = tokio::io::split(stream);
+
+    let mut parser = DapParser::new();
+    let mut buf = vec![0u8; 8 * 1024];
+    let mut init_done = false;
+
+    loop {
+        let cnt = read_half.read(&mut buf).await?;
+        if cnt == 0 {
+            // EOF — parent closed the connection.
+            break;
+        }
+
+        parser.add_bytes(&buf[..cnt]);
+
+        loop {
+            let msg = match parser.get_message() {
+                Some(Ok(msg)) => msg,
+                Some(Err(e)) => {
+                    warn!("mock-dap-backend: bad DAP message: {e}");
+                    continue;
+                }
+                None => break,
+            };
+
+            let msg_type = msg.get("type").and_then(serde_json::Value::as_str).unwrap_or("");
+            let command = msg.get("command").and_then(serde_json::Value::as_str).unwrap_or("");
+            let seq = msg.get("seq").and_then(serde_json::Value::as_i64).unwrap_or(0);
+
+            if msg_type != "request" {
+                // Ignore non-request messages.
+                continue;
+            }
+
+            match command {
+                "initialize" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "initialize",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "supportsConfigurationDoneRequest": true,
+                            "supportsStepBack": true,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                "launch" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "launch",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                "configurationDone" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "configurationDone",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    // Send the stopped event after configurationDone.
+                    if !init_done {
+                        let stopped = json!({
+                            "type": "event",
+                            "event": "stopped",
+                            "body": {
+                                "reason": "entry",
+                                "threadId": 1,
+                            }
+                        });
+                        write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                        init_done = true;
+                    }
+                }
+                _ => {
+                    // Generic success response for any other command.
+                    let response = json!({
+                        "type": "response",
+                        "command": command,
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Daemon logging
 // ---------------------------------------------------------------------------
@@ -381,6 +511,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .last()
             .ok_or("mock-backend: no arguments provided (expected socket path as last arg)")?;
         return run_mock_backend(socket_path).await;
+    }
+
+    // ------------------------------------------------------------------
+    // MockDapBackend subcommand (used by M2+ integration tests)
+    // ------------------------------------------------------------------
+    if let Some(Commands::MockDapBackend { args }) = &cli.command {
+        flexi_logger::init();
+        let socket_path = args
+            .last()
+            .ok_or("mock-dap-backend: no arguments provided (expected socket path as last arg)")?;
+        return run_mock_dap_backend(socket_path).await;
     }
 
     // ------------------------------------------------------------------

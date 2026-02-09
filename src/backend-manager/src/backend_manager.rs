@@ -15,10 +15,12 @@ use tokio::{
 
 use crate::{
     config::DaemonConfig,
+    dap_init,
     dap_parser::DapParser,
     errors::{InvalidID, SocketPathError},
     paths::CODETRACER_PATHS,
     session::SessionManager,
+    trace_metadata,
 };
 
 /// Write handle for a single connected daemon client, together with its
@@ -363,6 +365,11 @@ impl BackendManager {
         let mgr_ttl = mgr.clone();
         tokio::spawn(Self::ttl_expiry_loop(mgr_ttl, ttl_expiry_rx));
 
+        // --- Crash detection loop: periodically checks if child processes
+        //     have died unexpectedly and cleans up their sessions. ---
+        let mgr_crash = mgr.clone();
+        tokio::spawn(Self::crash_detection_loop(mgr_crash));
+
         Ok((mgr, shutdown_rx))
     }
 
@@ -548,6 +555,86 @@ impl BackendManager {
         }
     }
 
+    /// Background loop that periodically checks if any child backend
+    /// processes have died unexpectedly (e.g. crashed or were killed).
+    ///
+    /// When a dead child is detected, the corresponding session is removed
+    /// from the session manager and the backend slot is cleaned up.  An
+    /// error event is broadcast to all connected clients so they know the
+    /// session is no longer available.
+    async fn crash_detection_loop(mgr: Arc<Mutex<Self>>) {
+        // Check every 2 seconds.  This is a balance between responsiveness
+        // and lock contention.
+        let interval = Duration::from_secs(2);
+
+        loop {
+            sleep(interval).await;
+
+            let mut locked = mgr.lock().await;
+
+            // First pass: collect (path, backend_id) pairs for all sessions.
+            let sessions: Vec<(PathBuf, usize)> = {
+                let ds = match locked.daemon_state.as_ref() {
+                    Some(ds) => ds,
+                    None => continue,
+                };
+                ds.session_manager
+                    .list_sessions()
+                    .iter()
+                    .map(|s| (s.trace_path.clone(), s.backend_id))
+                    .collect()
+            };
+
+            // Second pass: check which backends are dead (only borrows
+            // locked.children, not daemon_state).
+            let mut dead_sessions: Vec<(PathBuf, usize)> = Vec::new();
+            for (path, backend_id) in &sessions {
+                if let Some(true) = locked.is_child_dead(*backend_id) {
+                    dead_sessions.push((path.clone(), *backend_id));
+                }
+            }
+
+            // Third pass: clean up dead sessions.
+            for (path, backend_id) in dead_sessions {
+                warn!(
+                    "Crash detected for backend {backend_id} (trace: {})",
+                    path.display()
+                );
+
+                if let Some(ds) = locked.daemon_state.as_mut() {
+                    ds.session_manager.remove_session(&path);
+
+                    // Broadcast an error event to all clients.
+                    let event = json!({
+                        "type": "event",
+                        "event": "ct/session-crashed",
+                        "body": {
+                            "tracePath": path.to_string_lossy(),
+                            "backendId": backend_id,
+                            "message": "backend process exited unexpectedly",
+                        }
+                    });
+                    Self::broadcast_to_clients(ds, &event);
+                }
+
+                // Clean up the child slot (don't call stop_replay, it's
+                // already dead).
+                if let Some(child_opt) = locked.children.get_mut(backend_id) {
+                    *child_opt = None;
+                }
+                if let Some(rx_opt) = locked.children_receivers.get_mut(backend_id) {
+                    if let Some(rx) = rx_opt {
+                        rx.close();
+                    }
+                    *rx_opt = None;
+                }
+                if let Some(tx_opt) = locked.parent_senders.get_mut(backend_id) {
+                    *tx_opt = None;
+                }
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Shared helpers
     // -----------------------------------------------------------------------
@@ -581,11 +668,19 @@ impl BackendManager {
         }
     }
 
-    pub async fn start_replay(
+    /// Spawns a child process and sets up DAP channels, but does NOT install
+    /// the channels into the `children_receivers` / `parent_senders` vectors.
+    ///
+    /// The caller is responsible for running DAP initialization (or any other
+    /// pre-routing handshake) and then calling [`install_replay_channels`] to
+    /// make the channels available for the daemon's response router.
+    ///
+    /// Returns `(backend_id, sender_to_child, receiver_from_child)`.
+    pub async fn start_replay_raw(
         &mut self,
         cmd: &str,
         args: &[&str],
-    ) -> Result<usize, Box<dyn Error>> {
+    ) -> Result<(usize, UnboundedSender<Value>, UnboundedReceiver<Value>), Box<dyn Error>> {
         let socket_dir: std::path::PathBuf;
         {
             let path = &CODETRACER_PATHS.lock()?.tmp_path;
@@ -596,11 +691,14 @@ impl BackendManager {
 
         create_dir_all(&socket_dir).await?;
 
-
-        // reserve place
+        // Reserve a slot for the child process.
         self.children.push(None);
-        // must be > 0 here!
         let id = self.children.len() - 1;
+
+        // Also reserve placeholder slots in the channel vectors so that
+        // `install_replay_channels` can use indexed assignment later.
+        self.children_receivers.push(None);
+        self.parent_senders.push(None);
 
         let socket_path = socket_dir.join(id.to_string() + ".sock");
         _ = remove_file(&socket_path).await;
@@ -641,7 +739,7 @@ impl BackendManager {
             "Starting replay with id {id}. Command: {cmd:?}",
         );
 
-        let mut socket_read;
+        let socket_read;
         let mut socket_write;
 
         info!("Awaiting connection!");
@@ -653,12 +751,13 @@ impl BackendManager {
 
         info!("Accepted connection!");
 
+        // Create the channel pair for communication with the child process.
+        // `child_tx` feeds into `child_rx` (messages FROM child TO the daemon).
+        // `parent_tx` feeds into `parent_rx` (messages FROM the daemon TO the child).
         let (child_tx, child_rx) = mpsc::unbounded_channel();
-        self.children_receivers.push(Some(child_rx));
-
         let (parent_tx, mut parent_rx) = mpsc::unbounded_channel::<Value>();
-        self.parent_senders.push(Some(parent_tx));
 
+        // Spawn the writer task: drains parent_rx and writes to the child socket.
         tokio::spawn(async move {
             while let Some(message) = parent_rx.recv().await {
                 let write_res = socket_write.write_all(&DapParser::to_bytes(&message)).await;
@@ -673,13 +772,19 @@ impl BackendManager {
             }
         });
 
+        // Spawn the reader task: reads from the child socket and sends to child_tx.
         tokio::spawn(async move {
             let mut parser = DapParser::new();
-
+            let mut read_half = socket_read;
             let mut buff = vec![0; 8 * 1024];
 
             loop {
-                match socket_read.read(&mut buff).await {
+                match read_half.read(&mut buff).await {
+                    Ok(0) => {
+                        // EOF — child closed the connection.
+                        info!("Replay {id}: child connection closed (EOF)");
+                        break;
+                    }
                     Ok(cnt) => {
                         parser.add_bytes(&buff[..cnt]);
 
@@ -709,6 +814,43 @@ impl BackendManager {
             }
         });
 
+        Ok((id, parent_tx, child_rx))
+    }
+
+    /// Installs the DAP channels for a previously-started replay, making it
+    /// available for normal message routing by the daemon's response router.
+    ///
+    /// This is the second half of the split `start_replay` flow.  The
+    /// `backend_id` must have been obtained from a prior [`start_replay_raw`]
+    /// call.
+    pub fn install_replay_channels(
+        &mut self,
+        backend_id: usize,
+        parent_tx: UnboundedSender<Value>,
+        child_rx: UnboundedReceiver<Value>,
+    ) {
+        // The slots were pre-allocated by start_replay_raw.
+        if let Some(slot) = self.children_receivers.get_mut(backend_id) {
+            *slot = Some(child_rx);
+        }
+        if let Some(slot) = self.parent_senders.get_mut(backend_id) {
+            *slot = Some(parent_tx);
+        }
+    }
+
+    /// Spawns a child process, sets up DAP channels, and immediately installs
+    /// them for the daemon's response router.
+    ///
+    /// This is the original `start_replay` behavior, preserved for backward
+    /// compatibility.  It delegates to [`start_replay_raw`] +
+    /// [`install_replay_channels`].
+    pub async fn start_replay(
+        &mut self,
+        cmd: &str,
+        args: &[&str],
+    ) -> Result<usize, Box<dyn Error>> {
+        let (id, parent_tx, child_rx) = self.start_replay_raw(cmd, args).await?;
+        self.install_replay_channels(id, parent_tx, child_rx);
         Ok(id)
     }
 
@@ -1009,6 +1151,15 @@ impl BackendManager {
                         }
                         Ok(())
                     }
+                    "ct/open-trace" => {
+                        self.handle_open_trace(seq, args).await
+                    }
+                    "ct/trace-info" => {
+                        self.handle_trace_info(seq, args)
+                    }
+                    "ct/close-trace" => {
+                        self.handle_close_trace(seq, args).await
+                    }
                     _ => {
                         if let Some(Value::Object(obj_args)) = args
                             && let Some(Value::Number(id)) = obj_args.get("replay-id")
@@ -1060,6 +1211,365 @@ impl BackendManager {
             && let Some(path) = ds.session_manager.path_for_backend_id(backend_id)
         {
             ds.session_manager.reset_ttl(&path);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/open-trace, ct/trace-info, ct/close-trace handlers
+    // -----------------------------------------------------------------------
+
+    /// Sends a response to the client that sent the request with `seq`, or
+    /// falls back to the manager sender (for legacy mode).
+    fn send_response_for_seq(&self, seq: i64, response: Value) {
+        let client_id = self.lookup_client_for_seq(seq);
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
+        }
+    }
+
+    /// Handles `ct/open-trace` requests.
+    ///
+    /// Opens a trace session: reads metadata, spawns the backend, runs DAP
+    /// init, and registers the session.  If the trace is already loaded,
+    /// resets the TTL and returns the existing session info.
+    async fn handle_open_trace(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Extract the trace path from arguments.
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": "missing 'tracePath' in arguments"
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        // Check if already loaded — return existing session and reset TTL.
+        if let Some(ds) = self.daemon_state.as_mut()
+            && ds.session_manager.has_session(&trace_path)
+        {
+            ds.session_manager.reset_ttl(&trace_path);
+            if let Some(info) = ds.session_manager.get_session(&trace_path) {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": true,
+                    "command": "ct/open-trace",
+                    "body": {
+                        "tracePath": trace_path_str,
+                        "backendId": info.backend_id,
+                        "language": info.language,
+                        "totalEvents": info.total_events,
+                        "sourceFiles": info.source_files,
+                        "program": info.program,
+                        "workdir": info.workdir,
+                        "cached": true,
+                    }
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        }
+
+        // Check max sessions limit.
+        if let Some(ds) = self.daemon_state.as_ref()
+            && ds.session_manager.session_count() >= ds.config.max_sessions
+        {
+            let response = json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": "ct/open-trace",
+                "message": format!(
+                    "maximum number of sessions ({}) reached",
+                    ds.config.max_sessions
+                )
+            });
+            self.send_response_for_seq(seq, response);
+            return Ok(());
+        }
+
+        // Read metadata from trace files.
+        let metadata = match trace_metadata::read_trace_metadata(&trace_path) {
+            Ok(m) => m,
+            Err(e) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": format!("cannot read trace metadata: {e}")
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        // Determine which backend command to spawn.
+        // Tests can override via CODETRACER_DB_BACKEND_CMD env var.
+        let backend_cmd = std::env::var("CODETRACER_DB_BACKEND_CMD")
+            .unwrap_or_else(|_| "db-backend".to_string());
+
+        // Build the arguments: the backend command + "dap-server" subcommand.
+        let backend_args_owned: Vec<String> = if backend_cmd.contains("backend-manager") {
+            // For mock-dap-backend, the subcommand is `mock-dap-backend`.
+            vec!["mock-dap-backend".to_string()]
+        } else {
+            vec!["dap-server".to_string()]
+        };
+        let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
+
+        // Spawn the backend process (raw, without installing channels).
+        let (backend_id, sender, mut receiver) = match self
+            .start_replay_raw(&backend_cmd, &backend_args)
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": format!("failed to spawn backend: {e}")
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        // Run DAP init sequence.
+        let dap_timeout = Duration::from_secs(30);
+        match dap_init::run_dap_init(&sender, &mut receiver, &trace_path, dap_timeout).await {
+            Ok(_init_result) => {
+                info!(
+                    "DAP init completed for trace {} (backend_id={backend_id})",
+                    trace_path.display()
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "DAP init failed for trace {}: {e}",
+                    trace_path.display()
+                );
+                // Try to stop the failed backend.
+                let _ = self.stop_replay(backend_id).await;
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": format!("DAP initialization failed: {e}")
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        }
+
+        // Install channels for normal routing.
+        self.install_replay_channels(backend_id, sender, receiver);
+
+        // Register session with metadata.
+        if let Some(ds) = self.daemon_state.as_mut()
+            && let Err(e) = ds.session_manager.add_session_with_metadata(
+                trace_path.clone(),
+                backend_id,
+                &metadata,
+            )
+        {
+            warn!(
+                "Failed to register session for {}: {e}",
+                trace_path.display()
+            );
+        }
+
+        let response = json!({
+            "type": "response",
+            "request_seq": seq,
+            "success": true,
+            "command": "ct/open-trace",
+            "body": {
+                "tracePath": trace_path_str,
+                "backendId": backend_id,
+                "language": metadata.language,
+                "totalEvents": metadata.total_events,
+                "sourceFiles": metadata.source_files,
+                "program": metadata.program,
+                "workdir": metadata.workdir,
+                "cached": false,
+            }
+        });
+        self.send_response_for_seq(seq, response);
+        Ok(())
+    }
+
+    /// Handles `ct/trace-info` requests.
+    ///
+    /// Returns metadata for a loaded trace session.
+    fn handle_trace_info(
+        &self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/trace-info",
+                    "message": "missing 'tracePath' in arguments"
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let session_info = self
+            .daemon_state
+            .as_ref()
+            .and_then(|ds| ds.session_manager.get_session(&trace_path));
+
+        match session_info {
+            Some(info) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": true,
+                    "command": "ct/trace-info",
+                    "body": {
+                        "tracePath": trace_path_str,
+                        "language": info.language,
+                        "totalEvents": info.total_events,
+                        "sourceFiles": info.source_files,
+                        "program": info.program,
+                        "workdir": info.workdir,
+                    }
+                });
+                self.send_response_for_seq(seq, response);
+            }
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/trace-info",
+                    "message": format!("no session loaded for {trace_path_str}")
+                });
+                self.send_response_for_seq(seq, response);
+            }
+        }
+        Ok(())
+    }
+
+    /// Handles `ct/close-trace` requests.
+    ///
+    /// Tears down a session: stops the backend and removes the session from
+    /// the session manager.
+    async fn handle_close_trace(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/close-trace",
+                    "message": "missing 'tracePath' in arguments"
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        // Look up the session and remove it.
+        let backend_id = self
+            .daemon_state
+            .as_mut()
+            .and_then(|ds| ds.session_manager.remove_session(&trace_path));
+
+        match backend_id {
+            Some(bid) => {
+                // Stop the backend process.
+                if let Err(e) = self.stop_replay(bid).await {
+                    warn!("Failed to stop backend {bid} for {trace_path_str}: {e}");
+                }
+
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": true,
+                    "command": "ct/close-trace",
+                    "body": {
+                        "tracePath": trace_path_str,
+                        "closed": true,
+                    }
+                });
+                self.send_response_for_seq(seq, response);
+            }
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/close-trace",
+                    "message": format!("no session loaded for {trace_path_str}")
+                });
+                self.send_response_for_seq(seq, response);
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns `true` if the child process for the given backend ID has exited.
+    ///
+    /// Used by the crash detection loop to identify crashed backends.
+    pub fn is_child_dead(&mut self, backend_id: usize) -> Option<bool> {
+        if let Some(child_opt) = self.children.get_mut(backend_id) {
+            if let Some(child) = child_opt.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(_status)) => Some(true),  // exited
+                    Ok(None) => Some(false),           // still running
+                    Err(_) => Some(true),              // error checking = treat as dead
+                }
+            } else {
+                None // slot is empty (already cleaned up)
+            }
+        } else {
+            None // invalid ID
         }
     }
 
