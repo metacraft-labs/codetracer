@@ -615,24 +615,125 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     });
                     write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
                 }
+                // --- ct/load-locals: returns mock local variables ---
+                //
+                // The response format mirrors the CodeTracer extension that
+                // returns variables already expanded to the requested depth
+                // with children included inline.
+                "ct/load-locals" => {
+                    let depth = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("depth"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(3);
+
+                    // Build the "point" variable with nested children.
+                    // When depth > 1, the children are populated; when
+                    // depth == 1, only top-level variables are returned
+                    // (children are empty).
+                    let point_children = if depth > 1 {
+                        json!([
+                            {"name": "x", "value": "1", "type": "int", "children": []},
+                            {"name": "y", "value": "2", "type": "int", "children": []},
+                        ])
+                    } else {
+                        json!([])
+                    };
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/load-locals",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "variables": [
+                                {"name": "x", "value": "42", "type": "int", "children": []},
+                                {"name": "y", "value": "20", "type": "int", "children": []},
+                                {"name": "point", "value": "Point{x: 1, y: 2}", "type": "Point",
+                                 "children": point_children},
+                            ]
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- evaluate: evaluates expressions against mock state ---
+                "evaluate" => {
+                    let expression = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("expression"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+
+                    let response = match expression {
+                        "x" => json!({
+                            "type": "response",
+                            "command": "evaluate",
+                            "request_seq": seq,
+                            "success": true,
+                            "body": {"result": "42", "type": "int"}
+                        }),
+                        "y" => json!({
+                            "type": "response",
+                            "command": "evaluate",
+                            "request_seq": seq,
+                            "success": true,
+                            "body": {"result": "20", "type": "int"}
+                        }),
+                        "x + y" => json!({
+                            "type": "response",
+                            "command": "evaluate",
+                            "request_seq": seq,
+                            "success": true,
+                            "body": {"result": "30", "type": "int"}
+                        }),
+                        other => json!({
+                            "type": "response",
+                            "command": "evaluate",
+                            "request_seq": seq,
+                            "success": false,
+                            "message": format!("cannot evaluate: {other}")
+                        }),
+                    };
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
                 // --- stackTrace: returns current mock position ---
+                //
+                // When call_depth > 0 (after stepIn), returns multiple frames
+                // to simulate a real call stack.  The top frame is the current
+                // position, and additional frames represent the call chain.
                 "stackTrace" => {
+                    let mut frames = vec![json!({
+                        "id": 0,
+                        "name": if call_depth > 0 { "helper" } else { "main" },
+                        "source": {"path": current_file},
+                        "line": current_line,
+                        "column": current_column,
+                        "ticks": current_ticks,
+                        "endOfTrace": end_of_trace,
+                    })];
+
+                    // Add caller frames when we are inside a function call.
+                    if call_depth > 0 {
+                        frames.push(json!({
+                            "id": 1,
+                            "name": "main",
+                            "source": {"path": "main.nim"},
+                            "line": 5,
+                            "column": 1,
+                            "ticks": current_ticks - 10,
+                            "endOfTrace": false,
+                        }));
+                    }
+
+                    let total_frames = frames.len();
                     let response = json!({
                         "type": "response",
                         "command": "stackTrace",
                         "request_seq": seq,
                         "success": true,
                         "body": {
-                            "stackFrames": [{
-                                "id": 0,
-                                "name": "main",
-                                "source": {"path": current_file},
-                                "line": current_line,
-                                "column": current_column,
-                                "ticks": current_ticks,
-                                "endOfTrace": end_of_trace,
-                            }],
-                            "totalFrames": 1,
+                            "stackFrames": frames,
+                            "totalFrames": total_frames,
                         }
                     });
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;

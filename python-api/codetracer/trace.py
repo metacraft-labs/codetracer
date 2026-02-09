@@ -29,6 +29,7 @@ from codetracer.types import (
     Variable,
 )
 from codetracer.exceptions import (
+    ExpressionError,
     NavigationError,
     TraceError,
     TraceNotFoundError,
@@ -310,23 +311,127 @@ class Trace:
         """
         return self._navigate("goto_ticks", ticks=ticks)
 
-    # --- Inspection (stubs for later milestones) ---
+    # --- Inspection ---
 
     def current_location(self) -> Location:
         """Return the source location at the current execution point."""
         return self._location
 
+    def locals(self, depth: int = 3, count_budget: int = 3000) -> list[Variable]:
+        """Return the local variables at the current execution point.
+
+        Sends ``ct/py-locals`` to the daemon, which translates it to
+        ``ct/load-locals`` on the backend.  Variables are returned with
+        their children expanded up to *depth* levels.
+
+        Parameters:
+            depth: How many levels of nested children to expand.
+                   ``1`` returns top-level variables with empty children;
+                   ``3`` (the default) provides three levels of nesting.
+            count_budget: Maximum total number of variable nodes to return.
+
+        Returns:
+            A list of :class:`Variable` instances.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-locals", {
+            "tracePath": self._path,
+            "depth": depth,
+            "countBudget": count_budget,
+        })
+        if not response.get("success"):
+            raise TraceError(response.get("message", "locals() failed"))
+        body = response.get("body", {})
+        return [self._parse_variable(v) for v in body.get("variables", [])]
+
+    def evaluate(self, expression: str) -> str:
+        """Evaluate *expression* in the current scope.
+
+        Sends ``ct/py-evaluate`` to the daemon, which translates it to
+        the DAP ``evaluate`` command on the backend.
+
+        Parameters:
+            expression: The expression to evaluate (e.g., ``"x + y"``).
+
+        Returns:
+            The string representation of the result.
+
+        Raises:
+            ExpressionError: If the expression cannot be evaluated.
+        """
+        response = self._connection.send_request("ct/py-evaluate", {
+            "tracePath": self._path,
+            "expression": expression,
+        })
+        if not response.get("success"):
+            raise ExpressionError(
+                response.get("message", f"evaluate({expression!r}) failed")
+            )
+        body = response.get("body", {})
+        return body.get("result", "")
+
+    def stack_trace(self) -> list[Frame]:
+        """Return the full call stack at the current execution point.
+
+        Sends ``ct/py-stack-trace`` to the daemon, which translates it to
+        the DAP ``stackTrace`` command on the backend.
+
+        Returns:
+            A list of :class:`Frame` instances, ordered from innermost
+            (current function) to outermost (entry point).
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-stack-trace", {
+            "tracePath": self._path,
+        })
+        if not response.get("success"):
+            raise TraceError(response.get("message", "stack_trace() failed"))
+        body = response.get("body", {})
+        return [self._parse_frame(f) for f in body.get("frames", [])]
+
     def current_frame(self) -> Frame:
         """Return the topmost call frame at the current execution point."""
-        raise NotImplementedError("Will be implemented in a later milestone")
+        frames = self.stack_trace()
+        if frames:
+            return frames[0]
+        return Frame(function_name="", location=self._location)
 
     def backtrace(self) -> list[Frame]:
         """Return the full call stack at the current execution point."""
-        raise NotImplementedError("Will be implemented in a later milestone")
+        return self.stack_trace()
 
-    def evaluate(self, expression: str) -> Variable:
-        """Evaluate *expression* in the current scope."""
-        raise NotImplementedError("Will be implemented in a later milestone")
+    # --- Parse helpers ---
+
+    @staticmethod
+    def _parse_variable(data: dict) -> Variable:
+        """Parse a variable dict from the daemon response into a
+        :class:`Variable` instance, recursively parsing children."""
+        children = [Trace._parse_variable(c) for c in data.get("children", [])]
+        return Variable(
+            name=data.get("name", ""),
+            value=data.get("value", ""),
+            type_name=data.get("type", None),
+            children=children,
+        )
+
+    @staticmethod
+    def _parse_frame(data: dict) -> Frame:
+        """Parse a frame dict from the daemon response into a
+        :class:`Frame` instance."""
+        loc_data = data.get("location", {})
+        location = Location(
+            path=loc_data.get("path", ""),
+            line=loc_data.get("line", 0),
+            column=loc_data.get("column", 0),
+        )
+        return Frame(
+            function_name=data.get("name", ""),
+            location=location,
+        )
 
     # --- Flow / structure (stubs for later milestones) ---
 

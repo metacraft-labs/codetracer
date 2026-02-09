@@ -19,7 +19,9 @@ use crate::{
     dap_parser::DapParser,
     errors::{InvalidID, SocketPathError},
     paths::CODETRACER_PATHS,
-    python_bridge::{self, PendingPyNavState, PyBridgeState},
+    python_bridge::{
+        self, PendingPyNavState, PendingPyRequest, PendingPyRequestKind, PyBridgeState,
+    },
     session::SessionManager,
     trace_metadata,
 };
@@ -579,6 +581,56 @@ impl BackendManager {
                 });
                 self.send_to_client(pending.client_id, py_response);
                 // Don't do normal routing for this bridge-internal response.
+                return;
+            }
+
+            // --- Python bridge: intercept responses for pending py-requests ---
+            //
+            // Simple request-response operations (locals, evaluate, stack trace)
+            // are tracked by `PendingPyRequest`.  When the backend responds with
+            // a matching `request_seq`, we format the response and send it to
+            // the Python client.
+            if let Some(idx) = ds
+                .py_bridge
+                .pending_requests
+                .iter()
+                .position(|p| p.backend_seq == req_seq)
+            {
+                let pending = ds.py_bridge.pending_requests.remove(idx);
+                let (success, body_or_error) = match pending.kind {
+                    PendingPyRequestKind::Locals => {
+                        python_bridge::format_locals_response(msg)
+                    }
+                    PendingPyRequestKind::Evaluate => {
+                        python_bridge::format_evaluate_response(msg)
+                    }
+                    PendingPyRequestKind::StackTrace => {
+                        python_bridge::format_stack_trace_response(msg)
+                    }
+                };
+
+                let py_response = if success {
+                    serde_json::json!({
+                        "type": "response",
+                        "request_seq": pending.original_seq,
+                        "success": true,
+                        "command": pending.response_command,
+                        "body": body_or_error,
+                    })
+                } else {
+                    serde_json::json!({
+                        "type": "response",
+                        "request_seq": pending.original_seq,
+                        "success": false,
+                        "command": pending.response_command,
+                        "message": body_or_error.get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown error"),
+                    })
+                };
+
+                self.send_to_client(pending.client_id, py_response);
+                // Consume this backend response — don't forward to clients.
                 return;
             }
         }
@@ -1279,6 +1331,15 @@ impl BackendManager {
                     "ct/py-navigate" => {
                         self.handle_py_navigate(seq, args).await
                     }
+                    "ct/py-locals" => {
+                        self.handle_py_locals(seq, args).await
+                    }
+                    "ct/py-evaluate" => {
+                        self.handle_py_evaluate(seq, args).await
+                    }
+                    "ct/py-stack-trace" => {
+                        self.handle_py_stack_trace(seq, args).await
+                    }
                     "ct/open-trace" => {
                         self.handle_open_trace(seq, args).await
                     }
@@ -1508,6 +1569,404 @@ impl BackendManager {
         } else {
             self.send_manager_message(response);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-locals, ct/py-evaluate, ct/py-stack-trace handlers
+    // -----------------------------------------------------------------------
+
+    /// Sends a Python bridge error response to the originating client.
+    ///
+    /// Generalized version of `send_py_error` that accepts the command name
+    /// to use in the response.
+    fn send_py_command_error(&self, seq: i64, command: &str, message: &str) {
+        let response = serde_json::json!({
+            "type": "response",
+            "request_seq": seq,
+            "success": false,
+            "command": command,
+            "message": message,
+        });
+        let client_id = self.lookup_client_for_seq(seq);
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
+        }
+    }
+
+    /// Looks up the backend ID for a given trace path from the session
+    /// manager.  Returns `None` if not in daemon mode or the trace has
+    /// no active session.
+    fn backend_id_for_trace(&self, trace_path: &PathBuf) -> Option<usize> {
+        self.daemon_state
+            .as_ref()
+            .and_then(|ds| ds.session_manager.get_session_backend_id(trace_path))
+    }
+
+    /// Handles `ct/py-locals` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/load-locals` DAP command, sends it
+    /// to the backend, and registers a pending request that will be
+    /// completed when the backend responds.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-locals",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "depth": 3,
+    ///     "countBudget": 3000
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-locals",
+    ///   "body": {
+    ///     "variables": [{"name": "x", "value": "42", "type": "int", "children": []}, ...]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_locals(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, "ct/py-locals", "missing 'tracePath' in arguments");
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-locals",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (inspection counts as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Extract depth and countBudget parameters (with sensible defaults).
+        let depth = args
+            .and_then(|a| a.get("depth"))
+            .and_then(Value::as_i64)
+            .unwrap_or(3);
+        let count_budget = args
+            .and_then(|a| a.get("countBudget"))
+            .and_then(Value::as_i64)
+            .unwrap_or(3000);
+
+        // Get a unique seq for the DAP command sent to the backend.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/load-locals command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/load-locals",
+            "seq": dap_seq,
+            "arguments": {
+                "depth": depth,
+                "countBudget": count_budget,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-locals",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Locals,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-locals".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-evaluate` requests from Python clients.
+    ///
+    /// Translates the request into a DAP `evaluate` command, sends it to
+    /// the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-evaluate",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "expression": "x + y"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response (success):**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-evaluate",
+    ///   "body": {"result": "30", "type": "int"}
+    /// }
+    /// ```
+    ///
+    /// **Response (failure):**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": false,
+    ///   "command": "ct/py-evaluate",
+    ///   "message": "cannot evaluate: nonexistent_var"
+    /// }
+    /// ```
+    async fn handle_py_evaluate(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-evaluate",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let expression = match args
+            .and_then(|a| a.get("expression"))
+            .and_then(Value::as_str)
+        {
+            Some(e) => e.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-evaluate",
+                    "missing 'expression' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-evaluate",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace.
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Get a unique seq for the DAP command.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the DAP evaluate command.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "evaluate",
+            "seq": dap_seq,
+            "arguments": {
+                "expression": expression,
+                "context": "repl",
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-evaluate",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Evaluate,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-evaluate".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-stack-trace` requests from Python clients.
+    ///
+    /// Translates the request into a DAP `stackTrace` command, sends it to
+    /// the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-stack-trace",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-stack-trace",
+    ///   "body": {
+    ///     "frames": [
+    ///       {"id": 0, "name": "main", "location": {"path": "main.nim", "line": 42, "column": 1}},
+    ///       ...
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_stack_trace(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-stack-trace",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-stack-trace",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace.
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Get a unique seq for the DAP command.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the DAP stackTrace command.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "stackTrace",
+            "seq": dap_seq,
+            "arguments": {
+                "threadId": 1,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-stack-trace",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::StackTrace,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-stack-trace".to_string(),
+            });
+        }
+
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

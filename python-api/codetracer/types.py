@@ -36,14 +36,17 @@ class Variable:
     """A captured variable value at a specific point in execution.
 
     Attributes:
-        name:  The variable's identifier in the source program.
-        value: The string representation of the variable's value.
+        name:      The variable's identifier in the source program.
+        value:     The string representation of the variable's value.
         type_name: The type of the variable (language-specific, may be None).
+        children:  Nested child variables (e.g. struct fields), expanded
+                   up to the requested depth limit.
     """
 
     name: str
     value: str
     type_name: Optional[str] = None
+    children: list["Variable"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
