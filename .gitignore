@@ -110,7 +110,8 @@ ssh
 src/tests/records
 src/tests/run/example-based/*/*.js
 src/tests/run/quicktests/*/*.js
-codetracer
+/codetracer
+!python-api/codetracer/
 client*
 server
 *.nims
