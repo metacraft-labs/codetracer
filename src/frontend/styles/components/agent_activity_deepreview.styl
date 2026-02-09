@@ -1,0 +1,249 @@
+// Agent Activity DeepReview pane styles (M9).
+//
+// Styles for the collapsible DeepReview data panel that appears within
+// the agent activity view. Displays coverage summary cards, per-file
+// coverage table, test results, and recent notification feed.
+
+.activity-dr-container
+  border 1px solid var(--border-color, #3a3b44)
+  border-radius 4px
+  margin 8px 0
+  background-color var(--bg-primary, #1a1b22)
+  font-family 'SpaceGrotesk', sans-serif
+
+// --- Header ---
+
+.activity-dr-header
+  display flex
+  align-items center
+  gap 8px
+  padding 6px 12px
+  cursor pointer
+  background-color var(--bg-secondary, #1e1f26)
+  border-radius 4px 4px 0 0
+  transition background-color 0.15s ease
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+.activity-dr-chevron
+  font-family monospace
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  min-width 12px
+
+.activity-dr-header-label
+  font-size 13px
+  font-weight bold
+  color var(--text-primary, #c9c9c9)
+
+.activity-dr-header-badge
+  margin-left auto
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  background-color var(--bg-hover, #2a2b34)
+  padding 1px 6px
+  border-radius 3px
+
+// --- Summary cards ---
+
+.activity-dr-summary
+  display flex
+  gap 8px
+  padding 8px 12px
+  border-bottom 1px solid var(--border-color, #3a3b44)
+
+.activity-dr-card
+  flex 1
+  background-color var(--bg-secondary, #1e1f26)
+  border-radius 4px
+  padding 8px
+  text-align center
+
+.activity-dr-card-label
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  margin-bottom 2px
+
+.activity-dr-card-value
+  font-size 18px
+  font-weight bold
+  color var(--text-primary, #c9c9c9)
+
+.activity-dr-card-detail
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  margin-top 2px
+
+.activity-dr-card-warn
+  color rgba(220, 0, 0, 0.8)
+
+// --- File table ---
+
+.activity-dr-files
+  padding 4px 0
+
+.activity-dr-files-empty
+  padding 8px 12px
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  font-style italic
+
+.activity-dr-files-header
+  display flex
+  align-items center
+  padding 4px 12px
+  font-size 11px
+  font-weight bold
+  color var(--text-secondary, #8e8f92)
+  border-bottom 1px solid var(--border-color, #2a2b34)
+
+.activity-dr-files-row
+  display flex
+  align-items center
+  padding 3px 12px
+  font-size 12px
+  color var(--text-primary, #c9c9c9)
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+.activity-dr-files-col-name
+  flex 3
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.activity-dr-files-col-coverage
+  flex 1
+  text-align right
+  min-width 60px
+
+.activity-dr-files-col-bar
+  flex 2
+  padding 0 8px
+
+.activity-dr-files-col-flow
+  flex 0.5
+  text-align center
+  min-width 30px
+
+// Coverage bar within the file table.
+.activity-dr-coverage-bar
+  height 4px
+  background-color var(--bg-secondary, #2a2b34)
+  border-radius 2px
+  overflow hidden
+
+.activity-dr-coverage-bar-fill
+  height 100%
+  border-radius 2px
+  transition width 0.3s ease
+
+// Coverage bar colour coding based on coverage level.
+.coverage-bar-none
+  .activity-dr-coverage-bar-fill
+    background-color var(--text-secondary, #6e6e6e)
+
+.coverage-bar-good
+  .activity-dr-coverage-bar-fill
+    background-color rgba(0, 200, 0, 0.6)
+
+.coverage-bar-moderate
+  .activity-dr-coverage-bar-fill
+    background-color #e09f3e
+
+.coverage-bar-low
+  .activity-dr-coverage-bar-fill
+    background-color rgba(220, 0, 0, 0.6)
+
+// --- Test results ---
+
+.activity-dr-tests
+  padding 4px 0
+  border-top 1px solid var(--border-color, #3a3b44)
+
+.activity-dr-tests-empty
+  padding 8px 12px
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  font-style italic
+
+.activity-dr-tests-header
+  padding 4px 12px
+  font-size 12px
+  font-weight bold
+  color var(--text-primary, #c9c9c9)
+  border-bottom 1px solid var(--border-color, #2a2b34)
+
+.activity-dr-test-item
+  display flex
+  align-items center
+  gap 8px
+  padding 3px 12px
+  font-size 12px
+
+.activity-dr-test-pass
+  .activity-dr-test-status
+    color rgba(0, 200, 0, 0.8)
+
+.activity-dr-test-fail
+  .activity-dr-test-status
+    color rgba(220, 0, 0, 0.8)
+
+.activity-dr-test-status
+  font-weight bold
+  min-width 32px
+  font-family monospace
+
+.activity-dr-test-name
+  flex 1
+  color var(--text-primary, #c9c9c9)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.activity-dr-test-duration
+  color var(--text-secondary, #8e8f92)
+  min-width 50px
+  text-align right
+
+// --- Notification feed ---
+
+.activity-dr-notifs
+  padding 4px 0
+  border-top 1px solid var(--border-color, #3a3b44)
+
+.activity-dr-notifs-empty
+  padding 8px 12px
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  font-style italic
+
+.activity-dr-notifs-header
+  padding 4px 12px
+  font-size 12px
+  font-weight bold
+  color var(--text-primary, #c9c9c9)
+  border-bottom 1px solid var(--border-color, #2a2b34)
+
+.activity-dr-notif-item
+  padding 3px 12px
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  border-bottom 1px solid var(--border-color, #1e1f26)
+
+.activity-dr-notif-coverage
+  border-left 2px solid rgba(0, 180, 0, 0.5)
+
+.activity-dr-notif-flow
+  border-left 2px solid #0E7490
+
+.activity-dr-notif-test-pass
+  border-left 2px solid rgba(0, 200, 0, 0.6)
+
+.activity-dr-notif-test-fail
+  border-left 2px solid rgba(220, 0, 0, 0.6)
+
+.activity-dr-notif-complete
+  border-left 2px solid #e09f3e

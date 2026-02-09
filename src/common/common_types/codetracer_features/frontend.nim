@@ -257,7 +257,10 @@ type
     StepList = 33,
     NoInfo = 34,
     AgentActivity = 35,
-    DeepReview = 36
+    DeepReview = 36,
+    AgentWorkspace = 37,
+    CaptionBarProgress = 38,
+    AgentActivityDeepReview = 39
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

@@ -1,0 +1,216 @@
+// Caption bar progress indicator styles (M9).
+//
+// The progress indicator sits in the caption/title bar area and shows
+// agent milestone progress with an animated fill bar. It expands on
+// hover to display the full milestone checklist.
+
+.caption-progress-container
+  display flex
+  flex-direction column
+  position relative
+  cursor pointer
+  user-select none
+  transition opacity 0.2s ease
+
+  &:not(.caption-progress-active)
+    opacity 0.5
+
+.caption-progress-active
+  opacity 1.0
+
+// --- Compact view (always visible) ---
+
+.caption-progress-compact
+  display flex
+  align-items center
+  gap 8px
+  padding 2px 12px
+  font-size 12px
+  font-family 'SpaceGrotesk', sans-serif
+  min-height 24px
+  border-radius 4px
+  transition background-color 0.15s ease
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+// --- State-dependent colour coding ---
+
+.caption-progress-idle
+  .caption-progress-state
+    color var(--text-secondary, #8e8f92)
+
+.caption-progress-initializing
+  .caption-progress-state
+    color #A5F3FC
+
+  .caption-progress-bar-fill
+    animation caption-progress-pulse 1.5s ease-in-out infinite
+
+.caption-progress-working
+  .caption-progress-state
+    color #A5F3FC
+
+  .caption-progress-bar-fill
+    background-color #0E7490
+
+.caption-progress-waiting
+  .caption-progress-state
+    color #e09f3e
+
+  .caption-progress-bar-fill
+    background-color #e09f3e
+    animation caption-progress-pulse 2s ease-in-out infinite
+
+.caption-progress-paused
+  .caption-progress-state
+    color #8e8f92
+
+  .caption-progress-bar-fill
+    background-color #6e6e6e
+
+.caption-progress-completed
+  .caption-progress-state
+    color rgba(0, 200, 0, 0.8)
+
+  .caption-progress-bar-fill
+    background-color rgba(0, 200, 0, 0.6)
+
+.caption-progress-failed
+  .caption-progress-state
+    color rgba(220, 0, 0, 0.8)
+
+  .caption-progress-bar-fill
+    background-color rgba(220, 0, 0, 0.6)
+
+// --- Progress bar ---
+
+.caption-progress-bar
+  flex 1
+  height 4px
+  background-color var(--bg-secondary, #2a2b34)
+  border-radius 2px
+  overflow hidden
+  min-width 60px
+
+.caption-progress-bar-fill
+  height 100%
+  background-color #0E7490
+  border-radius 2px
+  transition width 0.3s ease
+
+// --- Labels ---
+
+.caption-progress-state
+  font-weight bold
+  white-space nowrap
+  min-width 40px
+
+.caption-progress-task
+  color var(--text-primary, #c9c9c9)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+  max-width 200px
+
+.caption-progress-count
+  color var(--text-secondary, #8e8f92)
+  white-space nowrap
+  min-width 30px
+  text-align right
+
+.caption-progress-current
+  color var(--text-secondary, #8e8f92)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+  max-width 180px
+  font-style italic
+
+// --- Milestone list (expanded on hover) ---
+
+.caption-progress-milestones
+  position absolute
+  top 100%
+  left 0
+  right 0
+  z-index 1000
+  background-color var(--bg-primary, #1a1b22)
+  border 1px solid var(--border-color, #3a3b44)
+  border-radius 4px
+  box-shadow 0 4px 12px rgba(0, 0, 0, 0.3)
+  padding 4px 0
+  max-height 300px
+  overflow-y auto
+
+.caption-progress-milestone-empty
+  padding 8px 12px
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  font-style italic
+
+.caption-progress-milestone-item
+  display flex
+  align-items center
+  gap 8px
+  padding 4px 12px
+  font-size 12px
+  color var(--text-primary, #c9c9c9)
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+.caption-progress-milestone-icon
+  font-family monospace
+  flex-shrink 0
+  min-width 24px
+
+.caption-progress-milestone-content
+  flex 1
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.caption-progress-milestone-priority
+  font-size 10px
+  font-weight bold
+  color #e09f3e
+  background-color rgba(224, 159, 62, 0.1)
+  padding 1px 4px
+  border-radius 2px
+
+// --- Milestone status colours ---
+
+.milestone-pending
+  .caption-progress-milestone-icon
+    color var(--text-secondary, #8e8f92)
+
+.milestone-in-progress
+  .caption-progress-milestone-icon
+    color #A5F3FC
+
+.milestone-completed
+  .caption-progress-milestone-icon
+    color rgba(0, 200, 0, 0.8)
+
+.milestone-failed
+  .caption-progress-milestone-icon
+    color rgba(220, 0, 0, 0.8)
+
+.milestone-skipped
+  .caption-progress-milestone-icon
+    color var(--text-secondary, #6e6e6e)
+
+  .caption-progress-milestone-content
+    text-decoration line-through
+    opacity 0.6
+
+// --- Animation ---
+
+@keyframes caption-progress-pulse
+  0%
+    opacity 1.0
+  50%
+    opacity 0.5
+  100%
+    opacity 1.0

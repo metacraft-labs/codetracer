@@ -661,6 +661,92 @@ proc makeDeepReviewComponent*(data: Data, id: int): DeepReviewComponent =
   )
   data.registerComponent(result, Content.DeepReview)
 
+proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent =
+  ## Create a new AgentWorkspaceComponent.
+  ## The component starts with an empty file list and waits for DeepReview
+  ## notifications from the agent runtime to populate the workspace view.
+  result = AgentWorkspaceComponent(
+    id: id,
+    viewState: WorkspaceViewState(
+      activeView: AgentWorkspace,
+      agentWorkspacePath: cstring"",
+      agentSessionId: cstring""
+    ),
+    progress: AgentProgress(
+      state: AgentIdle,
+      taskName: cstring"",
+      milestonesCompleted: 0,
+      milestonesTotal: 0,
+      currentMilestone: cstring"",
+      milestones: @[]
+    ),
+    drSummary: ActivityDeepReviewSummary(
+      totalLinesCovered: 0,
+      totalLinesUncovered: 0,
+      coveragePercent: 0.0,
+      testsRun: 0,
+      testsPassed: 0,
+      testsFailed: 0,
+      functionsTraced: 0,
+      lastUpdatedMs: 0
+    ),
+    fileEntries: @[],
+    selectedFileIndex: 0,
+    editorInitialized: false,
+    currentDecorationIds: jsNull,
+    notifications: @[],
+    coverageOverlayEnabled: true
+  )
+  data.registerComponent(result, Content.AgentWorkspace)
+
+proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressComponent =
+  ## Create a new CaptionBarProgressComponent.
+  ## Starts in the idle state until the agent runtime sends progress updates.
+  result = CaptionBarProgressComponent(
+    id: id,
+    progress: AgentProgress(
+      state: AgentIdle,
+      taskName: cstring"",
+      milestonesCompleted: 0,
+      milestonesTotal: 0,
+      currentMilestone: cstring"",
+      milestones: @[]
+    ),
+    viewState: WorkspaceViewState(
+      activeView: UserWorkspace,
+      agentWorkspacePath: cstring"",
+      agentSessionId: cstring""
+    ),
+    animationFrame: 0,
+    expanded: false,
+    lastUpdateMs: 0
+  )
+  data.registerComponent(result, Content.CaptionBarProgress)
+
+proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
+  ## Create a new AgentActivityDeepReviewComponent.
+  ## Starts with empty DeepReview data and waits for notifications from
+  ## the agent runtime to populate coverage, test results, and flow data.
+  result = AgentActivityDeepReviewComponent(
+    id: id,
+    sessionId: cstring"",
+    drSummary: ActivityDeepReviewSummary(
+      totalLinesCovered: 0,
+      totalLinesUncovered: 0,
+      coveragePercent: 0.0,
+      testsRun: 0,
+      testsPassed: 0,
+      testsFailed: 0,
+      functionsTraced: 0,
+      lastUpdatedMs: 0
+    ),
+    fileEntries: @[],
+    recentNotifications: @[],
+    testResults: @[],
+    expanded: false
+  )
+  data.registerComponent(result, Content.AgentActivityDeepReview)
+
 data.ui = Components(
   editors: JsAssoc[cstring, EditorViewComponent]{},
   idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
@@ -709,6 +795,9 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.LowLevelCode:    data.makeLowLevelCodeComponent(id)
   of Content.AgentActivity:   data.makeAgentActivityComponent(id)
   of Content.DeepReview:      data.makeDeepReviewComponent(id)
+  of Content.AgentWorkspace:  data.makeAgentWorkspaceComponent(id)
+  of Content.CaptionBarProgress: data.makeCaptionBarProgressComponent(id)
+  of Content.AgentActivityDeepReview: data.makeAgentActivityDeepReviewComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")
