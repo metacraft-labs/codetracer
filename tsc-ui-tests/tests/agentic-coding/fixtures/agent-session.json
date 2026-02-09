@@ -1,0 +1,148 @@
+{
+  "sessionId": "agentic-e2e-test-session-001",
+  "agentWorkspacePath": "/tmp/agent-workspace-e2e",
+  "capability": {
+    "supported": true,
+    "version": "0.1.0",
+    "supportsRealtime": true,
+    "supportedLanguages": ["rust", "python"]
+  },
+  "progress": {
+    "state": "AgentWorking",
+    "taskName": "Implement feature X",
+    "milestonesCompleted": 3,
+    "milestonesTotal": 7,
+    "currentMilestone": "write-tests",
+    "milestones": [
+      {
+        "id": "analyze",
+        "content": "Analyze codebase",
+        "priority": "high",
+        "status": "MilestoneCompleted"
+      },
+      {
+        "id": "plan",
+        "content": "Create implementation plan",
+        "priority": "high",
+        "status": "MilestoneCompleted"
+      },
+      {
+        "id": "implement",
+        "content": "Write implementation",
+        "priority": "high",
+        "status": "MilestoneCompleted"
+      },
+      {
+        "id": "write-tests",
+        "content": "Write tests",
+        "priority": "high",
+        "status": "MilestoneInProgress"
+      },
+      {
+        "id": "run-tests",
+        "content": "Run test suite",
+        "priority": "high",
+        "status": "MilestonePending"
+      },
+      {
+        "id": "review",
+        "content": "Self-review changes",
+        "priority": "medium",
+        "status": "MilestonePending"
+      },
+      {
+        "id": "docs",
+        "content": "Update documentation",
+        "priority": "low",
+        "status": "MilestonePending"
+      }
+    ]
+  },
+  "notifications": [
+    {
+      "kind": "CoverageUpdate",
+      "sessionId": "agentic-e2e-test-session-001",
+      "filePath": "src/feature.rs",
+      "linesCovered": [1, 2, 3, 4, 5, 8, 9, 10, 12, 15, 16, 17, 18, 19, 20],
+      "linesUncovered": [6, 7, 11, 13, 14]
+    },
+    {
+      "kind": "CoverageUpdate",
+      "sessionId": "agentic-e2e-test-session-001",
+      "filePath": "src/helper.rs",
+      "linesCovered": [1, 2, 3, 4, 5, 6, 7, 8],
+      "linesUncovered": [9, 10]
+    },
+    {
+      "kind": "CoverageUpdate",
+      "sessionId": "agentic-e2e-test-session-001",
+      "filePath": "src/config.rs",
+      "linesCovered": [1, 2, 3],
+      "linesUncovered": [4, 5, 6, 7, 8, 9, 10, 11, 12]
+    },
+    {
+      "kind": "FlowUpdate",
+      "sessionId": "agentic-e2e-test-session-001",
+      "flowFilePath": "src/feature.rs",
+      "functionKey": "process_data",
+      "executionIndex": 0,
+      "stepCount": 12
+    },
+    {
+      "kind": "FlowUpdate",
+      "sessionId": "agentic-e2e-test-session-001",
+      "flowFilePath": "src/helper.rs",
+      "functionKey": "validate_input",
+      "executionIndex": 0,
+      "stepCount": 5
+    },
+    {
+      "kind": "FlowUpdate",
+      "sessionId": "agentic-e2e-test-session-001",
+      "flowFilePath": "src/feature.rs",
+      "functionKey": "transform",
+      "executionIndex": 0,
+      "stepCount": 8
+    },
+    {
+      "kind": "TestComplete",
+      "sessionId": "agentic-e2e-test-session-001",
+      "testName": "test_process_data_basic",
+      "passed": true,
+      "durationMs": 42,
+      "traceContextId": "ctx-001"
+    },
+    {
+      "kind": "TestComplete",
+      "sessionId": "agentic-e2e-test-session-001",
+      "testName": "test_process_data_edge_case",
+      "passed": true,
+      "durationMs": 38,
+      "traceContextId": "ctx-002"
+    },
+    {
+      "kind": "TestComplete",
+      "sessionId": "agentic-e2e-test-session-001",
+      "testName": "test_validate_input_empty",
+      "passed": false,
+      "durationMs": 15,
+      "traceContextId": "ctx-003"
+    }
+  ],
+  "stateTransitions": [
+    { "state": "AgentIdle", "timestampMs": 0 },
+    { "state": "AgentInitializing", "timestampMs": 100 },
+    { "state": "AgentWorking", "timestampMs": 500 }
+  ],
+  "expectedSummary": {
+    "totalLinesCovered": 26,
+    "totalLinesUncovered": 16,
+    "coveragePercent": 61.9,
+    "testsRun": 3,
+    "testsPassed": 2,
+    "testsFailed": 1,
+    "functionsTraced": 3,
+    "fileCount": 3,
+    "progressPercent": 42.9
+  }
+}
