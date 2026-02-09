@@ -19,6 +19,7 @@ use crate::{
     dap_parser::DapParser,
     errors::{InvalidID, SocketPathError},
     paths::CODETRACER_PATHS,
+    python_bridge::{self, PendingPyNavState, PyBridgeState},
     session::SessionManager,
     trace_metadata,
 };
@@ -47,6 +48,8 @@ pub struct DaemonState {
     session_manager: SessionManager,
     /// Configuration snapshot taken at daemon startup.
     config: DaemonConfig,
+    /// State for Python bridge navigation operations (ct/py-navigate).
+    py_bridge: PyBridgeState,
 }
 
 impl Debug for DaemonState {
@@ -250,6 +253,7 @@ impl BackendManager {
                 shutdown_tx: Some(shutdown_tx),
                 session_manager,
                 config,
+                py_bridge: PyBridgeState::new(),
             }),
         }));
 
@@ -325,7 +329,9 @@ impl BackendManager {
         });
 
         // --- Response router: polls child receivers and manager_receiver,
-        //     routes responses to the correct client and broadcasts events. ---
+        //     routes responses to the correct client and broadcasts events.
+        //     Each message is tagged with the backend_id it came from so
+        //     the Python bridge can correlate stopped events with backends. ---
         let mgr_router = mgr.clone();
         tokio::spawn(async move {
             loop {
@@ -333,28 +339,30 @@ impl BackendManager {
 
                 let mut locked = mgr_router.lock().await;
 
-                // Collect messages from child receivers.
-                let mut outbound: Vec<Value> = Vec::new();
-                for rx in locked.children_receivers.iter_mut().flatten() {
-                    while !rx.is_empty() {
-                        if let Some(msg) = rx.recv().await {
-                            outbound.push(msg);
+                // Collect messages from child receivers, tagged with backend index.
+                let mut outbound: Vec<(Option<usize>, Value)> = Vec::new();
+                for (idx, rx_opt) in locked.children_receivers.iter_mut().enumerate() {
+                    if let Some(rx) = rx_opt {
+                        while !rx.is_empty() {
+                            if let Some(msg) = rx.recv().await {
+                                outbound.push((Some(idx), msg));
+                            }
                         }
                     }
                 }
 
-                // Collect messages from manager_receiver.
+                // Collect messages from manager_receiver (no backend_id).
                 if let Some(manager_rx) = locked.manager_receiver.as_mut() {
                     while !manager_rx.is_empty() {
                         if let Some(msg) = manager_rx.recv().await {
-                            outbound.push(msg);
+                            outbound.push((None, msg));
                         }
                     }
                 }
 
                 // Route each outbound message to the appropriate client(s).
-                for msg in outbound {
-                    locked.route_daemon_message(&msg);
+                for (backend_id, msg) in outbound {
+                    locked.route_daemon_message(backend_id, &msg);
                 }
             }
         });
@@ -457,13 +465,130 @@ impl BackendManager {
     ///   carries a `request_seq` field that matches the original request's `seq`.
     /// - **Events** (`type == "event"`): Broadcast to ALL connected clients.
     /// - **Other**: Broadcast to all clients as a fallback.
-    fn route_daemon_message(&mut self, msg: &Value) {
+    ///
+    /// The `backend_id` parameter identifies which child backend produced this
+    /// message (`None` for manager-originated messages).  This is used by the
+    /// Python bridge to correlate stopped events and stackTrace responses
+    /// with the correct pending navigation operation.
+    fn route_daemon_message(&mut self, backend_id: Option<usize>, msg: &Value) {
         let ds = match self.daemon_state.as_mut() {
             Some(ds) => ds,
             None => return, // not in daemon mode
         };
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+
+        // --- Python bridge: intercept stopped events for pending navigations ---
+        //
+        // When a navigation command (e.g., `next`) is sent on behalf of a
+        // Python client, the backend responds with a `stopped` event.  We
+        // intercept it here to advance the pending navigation to the
+        // AwaitingStackTrace state and send a stackTrace request.
+        if msg_type == "event" {
+            let event_name = msg.get("event").and_then(Value::as_str).unwrap_or("");
+            if (event_name == "stopped" || event_name == "terminated")
+                && let Some(bid) = backend_id
+            {
+                // Check if any pending navigation is waiting for this stopped event.
+                // We first allocate the seq number, then look for the pending entry,
+                // to avoid borrowing pending_navigations and next_seq simultaneously.
+                let st_seq = ds.py_bridge.next_seq();
+
+                let should_send = if let Some(pending) = ds
+                    .py_bridge
+                    .pending_navigations
+                    .iter_mut()
+                    .find(|p| {
+                        p.backend_id == bid
+                            && p.state == PendingPyNavState::AwaitingStopped
+                    })
+                {
+                    pending.state = PendingPyNavState::AwaitingStackTrace;
+                    pending.stack_trace_seq = Some(st_seq);
+                    true
+                } else {
+                    false
+                };
+
+                if should_send {
+                    // Send a stackTrace request to the backend so we can
+                    // extract the current location for the Python client.
+                    let st_request = serde_json::json!({
+                        "type": "request",
+                        "command": "stackTrace",
+                        "seq": st_seq,
+                        "arguments": {"threadId": 1}
+                    });
+                    if let Some(sender) =
+                        self.parent_senders.get(bid).and_then(|s| s.as_ref())
+                    {
+                        let _ = sender.send(st_request);
+                    }
+                    // Don't return — still do normal routing for the stopped event
+                    // so other clients can observe it.
+                }
+            }
+        }
+
+        // --- Python bridge: intercept responses for pending navigations ---
+        //
+        // Two kinds of bridge-internal responses must be intercepted:
+        //
+        // 1. **Navigation command responses** (e.g., response to `next` with
+        //    seq 1000000): these are the DAP acknowledgement of the navigation
+        //    command.  The bridge does not need them — only the subsequent
+        //    `stopped` event matters.  We silently consume these so they are
+        //    not broadcast to clients.
+        //
+        // 2. **stackTrace responses**: after we send a `stackTrace` request
+        //    in response to a `stopped` event, the backend returns the current
+        //    location.  We extract it, build a simplified response, and send
+        //    it to the Python client.
+        if msg_type == "response"
+            && let Some(req_seq) = msg.get("request_seq").and_then(Value::as_i64)
+        {
+            // Re-borrow daemon_state to check pending navigations.
+            let ds = match self.daemon_state.as_mut() {
+                Some(ds) => ds,
+                None => return,
+            };
+
+            // Check if this response is for a bridge-initiated navigation command
+            // (e.g., the response to our `next`/`stepIn` DAP request).
+            // If so, consume it silently — we only care about the stopped event.
+            if ds.py_bridge.pending_navigations.iter().any(|p| {
+                p.nav_command_seq == Some(req_seq)
+            }) {
+                // Silently consume — don't forward to any client.
+                return;
+            }
+
+            // Check if this is a stackTrace response for a pending navigation.
+            if let Some(idx) = ds.py_bridge.pending_navigations.iter().position(|p| {
+                p.stack_trace_seq == Some(req_seq)
+                    && p.state == PendingPyNavState::AwaitingStackTrace
+            }) {
+                let pending = ds.py_bridge.pending_navigations.remove(idx);
+                let location = python_bridge::extract_location_from_stack_trace(msg);
+                let py_response = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": true,
+                    "command": "ct/py-navigate",
+                    "body": location,
+                });
+                self.send_to_client(pending.client_id, py_response);
+                // Don't do normal routing for this bridge-internal response.
+                return;
+            }
+        }
+
+        // --- Normal routing (existing logic) ---
+        // Re-acquire ds since we may have dropped the previous borrow.
+        let ds = match self.daemon_state.as_mut() {
+            Some(ds) => ds,
+            None => return,
+        };
 
         match msg_type {
             "response" => {
@@ -1151,6 +1276,9 @@ impl BackendManager {
                         }
                         Ok(())
                     }
+                    "ct/py-navigate" => {
+                        self.handle_py_navigate(seq, args).await
+                    }
                     "ct/open-trace" => {
                         self.handle_open_trace(seq, args).await
                     }
@@ -1211,6 +1339,174 @@ impl BackendManager {
             && let Some(path) = ds.session_manager.path_for_backend_id(backend_id)
         {
             ds.session_manager.reset_ttl(&path);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-navigate handler (Python bridge)
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-navigate` requests from Python clients.
+    ///
+    /// Translates the Python navigation method into a DAP command, sends it
+    /// to the appropriate backend, and registers a pending navigation that
+    /// will be completed asynchronously when the backend responds with a
+    /// stopped event followed by a stackTrace response.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-navigate",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "method": "step_over"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response** (sent asynchronously after backend completes):
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-navigate",
+    ///   "body": {
+    ///     "path": "main.nim",
+    ///     "line": 43,
+    ///     "column": 1,
+    ///     "ticks": 12345,
+    ///     "endOfTrace": false
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_navigate(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_error(seq, "missing 'tracePath' in arguments");
+                return Ok(());
+            }
+        };
+
+        let method = match args
+            .and_then(|a| a.get("method"))
+            .and_then(Value::as_str)
+        {
+            Some(m) => m.to_string(),
+            None => {
+                self.send_py_error(seq, "missing 'method' in arguments");
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        // Look up the backend for this trace.
+        let backend_id = match self
+            .daemon_state
+            .as_ref()
+            .and_then(|ds| ds.session_manager.get_session_backend_id(&trace_path))
+        {
+            Some(id) => id,
+            None => {
+                self.send_py_error(seq, &format!("no session loaded for {trace_path_str}"));
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (navigation counts as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Map method to DAP command.
+        let (dap_command, _is_custom) = match python_bridge::method_to_dap_command(&method) {
+            Some(cmd) => cmd,
+            None => {
+                self.send_py_error(seq, &format!("unknown navigation method: {method}"));
+                return Ok(());
+            }
+        };
+
+        // Build DAP request arguments.
+        // For goto_ticks, include the ticks value; for all others, just threadId.
+        let dap_args = if method == "goto_ticks" {
+            let ticks = args
+                .and_then(|a| a.get("ticks"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            serde_json::json!({"threadId": 1, "ticks": ticks})
+        } else {
+            serde_json::json!({"threadId": 1})
+        };
+
+        // Get a unique seq for the DAP command sent to the backend.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the DAP command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": dap_command,
+            "seq": dap_seq,
+            "arguments": dap_args,
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_error(seq, &format!("failed to send command to backend: {e}"));
+            return Ok(());
+        }
+
+        // Look up the client that sent this request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+
+        // Register the pending navigation.  The response router in
+        // `route_daemon_message` will advance this through the state
+        // machine as the backend responds.
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge
+                .pending_navigations
+                .push(python_bridge::PendingPyNavigation {
+                    backend_id,
+                    client_id,
+                    original_seq: seq,
+                    state: PendingPyNavState::AwaitingStopped,
+                    stack_trace_seq: None,
+                    nav_command_seq: Some(dap_seq),
+                });
+        }
+
+        Ok(())
+    }
+
+    /// Sends a Python bridge error response to the originating client.
+    fn send_py_error(&self, seq: i64, message: &str) {
+        let response = serde_json::json!({
+            "type": "response",
+            "request_seq": seq,
+            "success": false,
+            "command": "ct/py-navigate",
+            "message": message,
+        });
+        let client_id = self.lookup_client_for_seq(seq);
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
         }
     }
 
@@ -1384,6 +1680,52 @@ impl BackendManager {
             }
         }
 
+        // After DAP init, query the initial location via stackTrace.
+        // This provides the Python client with the starting position
+        // without requiring a separate navigation call.
+        let initial_location = {
+            let st_request = json!({
+                "type": "request",
+                "command": "stackTrace",
+                "seq": 999_999,
+                "arguments": {"threadId": 1}
+            });
+            let _ = sender.send(st_request);
+
+            // Wait for the stackTrace response with a short timeout.
+            let mut location = json!({"path": "", "line": 0, "column": 0, "ticks": 0, "endOfTrace": false});
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    warn!("Timeout waiting for initial stackTrace");
+                    break;
+                }
+
+                tokio::select! {
+                    msg = receiver.recv() => {
+                        if let Some(msg) = msg {
+                            if msg.get("type").and_then(Value::as_str) == Some("response")
+                                && msg.get("command").and_then(Value::as_str) == Some("stackTrace")
+                            {
+                                location = python_bridge::extract_location_from_stack_trace(&msg);
+                                break;
+                            }
+                            // Not the stackTrace response; discard and keep waiting.
+                        } else {
+                            warn!("Channel closed while waiting for initial stackTrace");
+                            break;
+                        }
+                    }
+                    _ = tokio::time::sleep(remaining) => {
+                        warn!("Timeout waiting for initial stackTrace");
+                        break;
+                    }
+                }
+            }
+            location
+        };
+
         // Install channels for normal routing.
         self.install_replay_channels(backend_id, sender, receiver);
 
@@ -1415,6 +1757,7 @@ impl BackendManager {
                 "program": metadata.program,
                 "workdir": metadata.workdir,
                 "cached": false,
+                "initialLocation": initial_location,
             }
         });
         self.send_response_for_seq(seq, response);

@@ -13,16 +13,22 @@ from typing import Any, Optional
 
 @dataclass(frozen=True)
 class Location:
-    """A source-code location (file, line, optional column)."""
+    """A source-code location (path, line, optional column).
 
-    file: str
+    Attributes:
+        path:   Filesystem path to the source file.
+        line:   1-based line number.
+        column: 1-based column number (0 if unknown).
+    """
+
+    path: str
     line: int
-    column: Optional[int] = None
+    column: int = 0
 
     def __str__(self) -> str:
-        if self.column is not None:
-            return f"{self.file}:{self.line}:{self.column}"
-        return f"{self.file}:{self.line}"
+        if self.column:
+            return f"{self.path}:{self.line}:{self.column}"
+        return f"{self.path}:{self.line}"
 
 
 @dataclass(frozen=True)

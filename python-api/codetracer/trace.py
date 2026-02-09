@@ -4,11 +4,11 @@ The :class:`Trace` class is the primary entry point for interacting with a
 recorded program execution.  Use :func:`open_trace` as a convenient
 constructor.
 
-.. note::
-
-   All query methods in this module are stubs that raise
-   ``NotImplementedError``.  They will be implemented in milestone M3 when
-   the daemon protocol is finalized.
+Navigation methods (``step_over``, ``step_in``, etc.) translate into
+``ct/py-navigate`` requests sent to the daemon, which in turn sends
+DAP commands to the backend replay process.  The daemon handles the
+multi-step DAP interaction (command -> stopped event -> stackTrace)
+and returns a simplified location response.
 """
 
 from __future__ import annotations
@@ -17,7 +17,22 @@ from pathlib import Path
 from typing import Optional, Union
 
 from codetracer.connection import DaemonConnection
-from codetracer.types import Call, Event, Flow, Frame, FlowStep, Location, Loop, Process, Variable
+from codetracer.types import (
+    Call,
+    Event,
+    Flow,
+    FlowStep,
+    Frame,
+    Location,
+    Loop,
+    Process,
+    Variable,
+)
+from codetracer.exceptions import (
+    NavigationError,
+    TraceError,
+    TraceNotFoundError,
+)
 
 
 def open_trace(
@@ -26,6 +41,10 @@ def open_trace(
     daemon_socket: Optional[Union[str, Path]] = None,
 ) -> "Trace":
     """Open a recorded trace for inspection.
+
+    Connects to the daemon, sends ``ct/open-trace``, and returns a
+    :class:`Trace` handle with the initial execution position already
+    populated.
 
     Parameters:
         path: Filesystem path to the trace directory or file.
@@ -37,8 +56,33 @@ def open_trace(
 
     Raises:
         TraceNotFoundError: If *path* does not exist or is not a valid trace.
+        TraceError: If the daemon is not reachable or returns an error.
     """
-    raise NotImplementedError("Will be implemented in M3")
+    conn = DaemonConnection(socket_path=daemon_socket)
+    conn.connect()
+
+    # Resolve the path if it exists on disk; otherwise pass it as-is
+    # (the daemon may resolve it internally).
+    trace_path = str(Path(path).resolve()) if Path(path).exists() else str(path)
+
+    response = conn.send_request("ct/open-trace", {"tracePath": trace_path})
+    if not response.get("success"):
+        conn.close()
+        message = response.get("message", "unknown error")
+        if "not found" in message.lower() or "cannot read" in message.lower():
+            raise TraceNotFoundError(message)
+        raise TraceError(message)
+
+    body = response.get("body", {})
+    return Trace(
+        path=trace_path,
+        connection=conn,
+        language=body.get("language", ""),
+        source_files=body.get("sourceFiles", []),
+        total_events=body.get("totalEvents", 0),
+        initial_location=body.get("initialLocation"),
+        backend_id=body.get("backendId", 0),
+    )
 
 
 class Trace:
@@ -47,127 +91,284 @@ class Trace:
     Instances are normally created via :func:`open_trace` rather than by
     calling the constructor directly.
 
+    The trace maintains a *current position* (file, line, column, ticks)
+    that is updated by navigation methods.  The position is available
+    through the :attr:`location` and :attr:`ticks` properties.
+
     Parameters:
         path: Filesystem path to the trace.
         connection: An established :class:`DaemonConnection` to the backend.
+        language: The detected source language.
+        source_files: List of source files in the trace.
+        total_events: Total number of execution events.
+        initial_location: Initial location from the open-trace response.
+        backend_id: The backend process ID assigned by the daemon.
     """
 
-    def __init__(self, path: Union[str, Path], connection: DaemonConnection) -> None:
-        self._path = Path(path)
+    def __init__(
+        self,
+        path: Union[str, Path],
+        connection: DaemonConnection,
+        language: str = "",
+        source_files: Optional[list[str]] = None,
+        total_events: int = 0,
+        initial_location: Optional[dict] = None,
+        backend_id: int = 0,
+    ) -> None:
+        self._path = str(path)
         self._connection = connection
+        self._language = language
+        self._source_files = source_files or []
+        self._total_events = total_events
+        self._backend_id = backend_id
 
-    # -- Navigation --------------------------------------------------------
+        # Set initial location from open-trace response.
+        if initial_location:
+            self._location = Location(
+                path=initial_location.get("path", ""),
+                line=initial_location.get("line", 0),
+                column=initial_location.get("column", 0),
+            )
+            self._ticks = initial_location.get("ticks", 0)
+        else:
+            self._location = Location(path="", line=0, column=0)
+            self._ticks = 0
 
-    def step_forward(self) -> FlowStep:
-        """Advance one execution step forward.
+    # --- Properties ---
 
-        Returns:
-            The :class:`FlowStep` at the new position.
+    @property
+    def location(self) -> Location:
+        """Current execution location (path, line, column)."""
+        return self._location
 
-        Raises:
-            NavigationError: If the trace is already at the last step.
-        """
-        raise NotImplementedError("Will be implemented in M3")
+    @property
+    def ticks(self) -> int:
+        """Current execution timestamp (rrTicks)."""
+        return self._ticks
 
-    def step_backward(self) -> FlowStep:
-        """Move one execution step backward.
+    @property
+    def source_files(self) -> list[str]:
+        """Source files in the trace."""
+        return self._source_files
 
-        Returns:
-            The :class:`FlowStep` at the new position.
+    @property
+    def total_events(self) -> int:
+        """Total number of events in the trace."""
+        return self._total_events
 
-        Raises:
-            NavigationError: If the trace is already at the first step.
-        """
-        raise NotImplementedError("Will be implemented in M3")
+    @property
+    def language(self) -> str:
+        """Detected source language."""
+        return self._language
 
-    def seek(self, step_index: int) -> FlowStep:
-        """Jump to an absolute step index in the trace.
+    # --- Navigation ---
+
+    def _navigate(self, method: str, **kwargs: object) -> Location:
+        """Send a navigation request to the daemon.
+
+        Builds a ``ct/py-navigate`` request with the given method name
+        and optional extra arguments (e.g., ``ticks=12345``), sends it
+        to the daemon, and updates the trace's current position from
+        the response.
 
         Parameters:
-            step_index: Zero-based global step index.
+            method: The navigation method name (e.g., ``"step_over"``).
+            **kwargs: Extra arguments to include in the request.
 
         Returns:
-            The :class:`FlowStep` at *step_index*.
+            The new :class:`Location` after navigation.
 
         Raises:
-            NavigationError: If *step_index* is out of range.
+            StopIteration: If the navigation reached the end (or start)
+                of the trace.
+            NavigationError: If the daemon reports an error.
         """
-        raise NotImplementedError("Will be implemented in M3")
+        args: dict = {
+            "tracePath": self._path,
+            "method": method,
+        }
+        args.update(kwargs)
 
-    # -- Inspection --------------------------------------------------------
+        response = self._connection.send_request("ct/py-navigate", args)
+
+        if not response.get("success"):
+            message = response.get("message", f"{method} failed")
+            raise NavigationError(message)
+
+        body = response.get("body", {})
+
+        # Update location to the new position.
+        self._location = Location(
+            path=body.get("path", ""),
+            line=body.get("line", 0),
+            column=body.get("column", 0),
+        )
+        self._ticks = body.get("ticks", 0)
+
+        # Check for end-of-trace boundary.
+        if body.get("endOfTrace", False):
+            raise StopIteration("Reached end of trace")
+
+        return self._location
+
+    def step_over(self) -> Location:
+        """Step to the next line (over function calls).
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At end of trace.
+        """
+        return self._navigate("step_over")
+
+    def step_in(self) -> Location:
+        """Step into the next function call.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At end of trace.
+        """
+        return self._navigate("step_in")
+
+    def step_out(self) -> Location:
+        """Step out of the current function.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At end of trace.
+        """
+        return self._navigate("step_out")
+
+    def step_back(self) -> Location:
+        """Step backwards one line.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At start of trace.
+        """
+        return self._navigate("step_back")
+
+    def reverse_step_in(self) -> Location:
+        """Reverse step into.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At start of trace.
+        """
+        return self._navigate("reverse_step_in")
+
+    def reverse_step_out(self) -> Location:
+        """Reverse step out.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At start of trace.
+        """
+        return self._navigate("reverse_step_out")
+
+    def continue_forward(self) -> Location:
+        """Continue forward until breakpoint or end of trace.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At end of trace.
+        """
+        return self._navigate("continue_forward")
+
+    def continue_reverse(self) -> Location:
+        """Continue reverse until breakpoint or start of trace.
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            StopIteration: At start of trace.
+        """
+        return self._navigate("continue_reverse")
+
+    def goto_ticks(self, ticks: int) -> Location:
+        """Jump to a specific execution point by ticks.
+
+        Parameters:
+            ticks: The target rr tick value.
+
+        Returns:
+            The new :class:`Location`.
+        """
+        return self._navigate("goto_ticks", ticks=ticks)
+
+    # --- Inspection (stubs for later milestones) ---
 
     def current_location(self) -> Location:
         """Return the source location at the current execution point."""
-        raise NotImplementedError("Will be implemented in M3")
+        return self._location
 
     def current_frame(self) -> Frame:
         """Return the topmost call frame at the current execution point."""
-        raise NotImplementedError("Will be implemented in M3")
+        raise NotImplementedError("Will be implemented in a later milestone")
 
     def backtrace(self) -> list[Frame]:
         """Return the full call stack at the current execution point."""
-        raise NotImplementedError("Will be implemented in M3")
+        raise NotImplementedError("Will be implemented in a later milestone")
 
     def evaluate(self, expression: str) -> Variable:
-        """Evaluate *expression* in the current scope.
+        """Evaluate *expression* in the current scope."""
+        raise NotImplementedError("Will be implemented in a later milestone")
 
-        Parameters:
-            expression: A source-language expression string.
+    # --- Flow / structure (stubs for later milestones) ---
 
-        Returns:
-            A :class:`Variable` containing the result.
-
-        Raises:
-            ExpressionError: If evaluation fails.
-        """
-        raise NotImplementedError("Will be implemented in M3")
-
-    # -- Flow / structure ---------------------------------------------------
-
-    def flow(self, *, start: Optional[int] = None, end: Optional[int] = None) -> Flow:
-        """Return a slice of the execution flow.
-
-        Parameters:
-            start: First step index (inclusive). Defaults to the beginning.
-            end:   Last step index (exclusive). Defaults to the end.
-
-        Returns:
-            A :class:`Flow` covering the requested range.
-        """
-        raise NotImplementedError("Will be implemented in M3")
+    def flow(
+        self, *, start: Optional[int] = None, end: Optional[int] = None
+    ) -> Flow:
+        """Return a slice of the execution flow."""
+        raise NotImplementedError("Will be implemented in a later milestone")
 
     def loops(self) -> list[Loop]:
         """Return all detected loops in the trace."""
-        raise NotImplementedError("Will be implemented in M3")
+        raise NotImplementedError("Will be implemented in a later milestone")
 
     def calls(self, function_name: Optional[str] = None) -> list[Call]:
-        """Return recorded function calls.
-
-        Parameters:
-            function_name: If given, filter calls to this function.
-
-        Returns:
-            A list of :class:`Call` instances.
-        """
-        raise NotImplementedError("Will be implemented in M3")
+        """Return recorded function calls."""
+        raise NotImplementedError("Will be implemented in a later milestone")
 
     def events(self, kind: Optional[str] = None) -> list[Event]:
-        """Return recorded trace events.
-
-        Parameters:
-            kind: If given, filter events to this kind.
-
-        Returns:
-            A list of :class:`Event` instances.
-        """
-        raise NotImplementedError("Will be implemented in M3")
+        """Return recorded trace events."""
+        raise NotImplementedError("Will be implemented in a later milestone")
 
     def process_info(self) -> Process:
         """Return metadata about the recorded process."""
-        raise NotImplementedError("Will be implemented in M3")
+        raise NotImplementedError("Will be implemented in a later milestone")
 
-    # -- Lifecycle ----------------------------------------------------------
+    # --- Lifecycle ---
 
     def close(self) -> None:
-        """Release resources associated with this trace."""
-        raise NotImplementedError("Will be implemented in M3")
+        """Release resources associated with this trace.
+
+        Sends ``ct/close-trace`` to the daemon and closes the socket.
+        """
+        try:
+            self._connection.send_request(
+                "ct/close-trace", {"tracePath": self._path}
+            )
+        except Exception:
+            pass
+        self._connection.close()
+
+    def __enter__(self) -> "Trace":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()

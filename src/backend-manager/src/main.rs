@@ -7,6 +7,7 @@ mod dap_init;
 mod dap_parser;
 mod errors;
 mod paths;
+mod python_bridge;
 mod session;
 mod trace_metadata;
 
@@ -315,11 +316,14 @@ async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 /// Connects to the parent's listener socket, reads DAP messages, and
 /// responds to the standard initialization sequence (`initialize`,
 /// `launch`, `configurationDone`) with success responses plus a
-/// `stopped` event.  After initialization, responds to any further
-/// request with a generic success response.
+/// `stopped` event.  After initialization, handles navigation commands
+/// (`next`, `stepIn`, `stepOut`, `stepBack`, `continue`,
+/// `reverseContinue`, `ct/goto-ticks`) with stateful tracking: each
+/// command updates the mock's current position (file, line, ticks) and
+/// emits a `stopped` event.  `stackTrace` returns the current position.
 ///
-/// This enables end-to-end testing of the `ct/open-trace` flow without
-/// needing a real db-backend binary.
+/// This enables end-to-end testing of the `ct/open-trace` and
+/// `ct/py-navigate` flows without needing a real db-backend binary.
 async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     use tokio::io::AsyncReadExt as _;
 
@@ -329,6 +333,20 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     let mut parser = DapParser::new();
     let mut buf = vec![0u8; 8 * 1024];
     let mut init_done = false;
+
+    // Stateful mock position for navigation commands.
+    //
+    // The mock simulates a small program across three files:
+    // - "main.nim" (main function, lines 1-100)
+    // - "helpers.nim" (helper function, lines 10-50)
+    // - "process.nim" (process function, lines 20-80)
+    let mut current_file = "main.nim".to_string();
+    let mut current_line: i64 = 1;
+    let current_column: i64 = 1;
+    let mut current_ticks: i64 = 100;
+    let mut end_of_trace = false;
+    // Track call depth for step_in / step_out simulation.
+    let mut call_depth: i32 = 0;
 
     loop {
         let cnt = read_half.read(&mut buf).await?;
@@ -405,6 +423,219 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
                         init_done = true;
                     }
+                }
+                // --- Navigation commands ---
+                // Each navigation command: update state, send success response,
+                // then send a "stopped" event.
+                "next" => {
+                    // step_over: advance one line, increment ticks.
+                    end_of_trace = false;
+                    current_line += 1;
+                    current_ticks += 10;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "next",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "step", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "stepIn" => {
+                    // step_in: dive into a function (change file to helpers.nim).
+                    end_of_trace = false;
+                    call_depth += 1;
+                    current_file = "helpers.nim".to_string();
+                    current_line = 10;
+                    current_ticks += 10;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "stepIn",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "step", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "stepOut" => {
+                    // step_out: return to caller (main.nim).
+                    end_of_trace = false;
+                    if call_depth > 0 {
+                        call_depth -= 1;
+                    }
+                    current_file = "main.nim".to_string();
+                    current_line += 1;
+                    current_ticks += 10;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "stepOut",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "step", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "stepBack" => {
+                    // step_back: go back one line, decrement ticks.
+                    end_of_trace = false;
+                    current_line = (current_line - 1).max(1);
+                    current_ticks = (current_ticks - 10).max(100);
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "stepBack",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "step", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "continue" => {
+                    // continue_forward: jump to end of trace.
+                    end_of_trace = true;
+                    current_line = 100;
+                    current_ticks = 99999;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "continue",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "end", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "reverseContinue" => {
+                    // continue_reverse: jump to start of trace.
+                    end_of_trace = true;
+                    current_line = 1;
+                    current_ticks = 100;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "reverseContinue",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "start", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "ct/goto-ticks" => {
+                    // goto_ticks: jump to a specific ticks value.
+                    end_of_trace = false;
+                    let requested_ticks = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("ticks"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(100);
+                    current_ticks = requested_ticks;
+                    // Derive a line number from ticks for deterministic testing.
+                    current_line = ((requested_ticks - 100) / 10) + 1;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/goto-ticks",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "goto", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                "ct/reverseStepIn" | "ct/reverseStepOut" => {
+                    // Reverse step variants: decrement ticks, adjust position.
+                    end_of_trace = false;
+                    current_line = (current_line - 1).max(1);
+                    current_ticks = (current_ticks - 10).max(100);
+
+                    let response = json!({
+                        "type": "response",
+                        "command": command,
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+
+                    let stopped = json!({
+                        "type": "event",
+                        "event": "stopped",
+                        "body": {"reason": "step", "threadId": 1}
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                }
+                // --- stackTrace: returns current mock position ---
+                "stackTrace" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "stackTrace",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "stackFrames": [{
+                                "id": 0,
+                                "name": "main",
+                                "source": {"path": current_file},
+                                "line": current_line,
+                                "column": current_column,
+                                "ticks": current_ticks,
+                                "endOfTrace": end_of_trace,
+                            }],
+                            "totalFrames": 1,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
                 }
                 _ => {
                     // Generic success response for any other command.
