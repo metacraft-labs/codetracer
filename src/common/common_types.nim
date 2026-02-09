@@ -18,7 +18,7 @@ include
   common_types/utils/constants,
   common_types/language_features/[ tokens, code, "type", "value", value_history, "macro" ],
   common_types/debugger_features/[ breakpoint, call, dap_types, trace, debugger, jumps],
-  common_types/codetracer_features/[ flow, diff, frontend, shell_and_ci, stylus ],
+  common_types/codetracer_features/[ flow, diff, deepreview, frontend, shell_and_ci, stylus ],
   common_types/debugger_features/[ stepping, tracepoints ]
 
 export task_and_event

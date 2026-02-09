@@ -1,0 +1,196 @@
+// DeepReview component styles.
+//
+// Layout: three-panel design with file list sidebar (left),
+// editor area with sliders (center), and call trace panel (right).
+
+.deepreview-container
+  display flex
+  flex-direction column
+  height 100%
+  width 100%
+  overflow hidden
+  font-family 'SpaceGrotesk', sans-serif
+
+// --- Header ---
+
+.deepreview-header
+  display flex
+  justify-content space-between
+  align-items center
+  padding 6px 16px
+  background-color var(--bg-secondary, #1e1f26)
+  border-bottom 1px solid var(--border-color, #3a3b44)
+  flex-shrink 0
+
+.deepreview-commit
+  font-size 13px
+  color var(--text-primary, #c9c9c9)
+
+.deepreview-stats
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+
+.deepreview-error
+  padding 24px
+  font-size 14px
+  color var(--text-secondary, #8e8f92)
+
+// --- Body (three-panel layout) ---
+
+.deepreview-body
+  display flex
+  flex 1
+  overflow hidden
+
+// --- File list sidebar ---
+
+.deepreview-file-list
+  width 250px
+  min-width 180px
+  overflow-y auto
+  border-right 1px solid var(--border-color, #3a3b44)
+  background-color var(--bg-primary, #1a1b22)
+  flex-shrink 0
+
+.deepreview-file-item
+  padding 6px 12px
+  cursor pointer
+  border-bottom 1px solid var(--border-color, #2a2b34)
+  transition background-color 0.15s ease
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+  &.selected
+    background-color var(--bg-selected, #333444)
+
+.deepreview-file-name
+  font-size 13px
+  color var(--text-primary, #c9c9c9)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+
+.deepreview-file-path-full
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+  margin-top 2px
+
+.deepreview-coverage-badge
+  display inline-block
+  margin-top 2px
+  font-size 11px
+  color var(--text-secondary, #8e8f92)
+  background-color var(--bg-hover, #2a2b34)
+  padding 1px 6px
+  border-radius 3px
+
+// --- Editor area ---
+
+.deepreview-editor-area
+  flex 1
+  display flex
+  flex-direction column
+  min-width 0
+  overflow hidden
+
+.deepreview-editor
+  flex 1
+  min-height 0
+
+// --- Sliders ---
+
+.deepreview-slider
+  display flex
+  align-items center
+  gap 8px
+  padding 4px 12px
+  background-color var(--bg-secondary, #1e1f26)
+  border-bottom 1px solid var(--border-color, #3a3b44)
+  flex-shrink 0
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+
+.deepreview-slider-empty
+  opacity 0.5
+
+.deepreview-slider-label
+  flex-shrink 0
+  min-width 70px
+
+.deepreview-slider-input
+  flex 1
+  cursor pointer
+
+.deepreview-slider-info
+  flex-shrink 0
+  min-width 100px
+  text-align right
+
+// --- Call trace panel ---
+
+.deepreview-calltrace
+  width 280px
+  min-width 200px
+  overflow-y auto
+  border-left 1px solid var(--border-color, #3a3b44)
+  background-color var(--bg-primary, #1a1b22)
+  flex-shrink 0
+
+.deepreview-calltrace-header
+  padding 8px 12px
+  font-size 13px
+  font-weight bold
+  color var(--text-primary, #c9c9c9)
+  border-bottom 1px solid var(--border-color, #3a3b44)
+  background-color var(--bg-secondary, #1e1f26)
+
+.deepreview-calltrace-body
+  padding 4px 0
+
+.deepreview-calltrace-empty
+  padding 12px
+  font-size 12px
+  color var(--text-secondary, #8e8f92)
+  font-style italic
+
+.deepreview-calltrace-node
+  font-size 12px
+
+.deepreview-calltrace-entry
+  padding 3px 8px
+  cursor default
+
+  &:hover
+    background-color var(--bg-hover, #2a2b34)
+
+.deepreview-calltrace-name
+  color var(--text-primary, #c9c9c9)
+
+.deepreview-calltrace-count
+  color var(--text-secondary, #8e8f92)
+  font-size 11px
+
+// --- Coverage line highlighting (Monaco decorations) ---
+
+.deepreview-line-executed
+  background-color rgba(0, 180, 0, 0.08)
+  border-left 3px solid rgba(0, 200, 0, 0.5)
+
+.deepreview-line-unreachable
+  background-color rgba(220, 0, 0, 0.08)
+  border-left 3px solid rgba(220, 0, 0, 0.5)
+
+.deepreview-line-partial
+  background-color rgba(220, 180, 0, 0.08)
+  border-left 3px solid rgba(220, 180, 0, 0.5)
+
+// --- Inline variable values (Monaco afterContent decorations) ---
+
+.deepreview-inline-value
+  color var(--text-secondary, #6e7681)
+  font-style italic
+  opacity 0.8

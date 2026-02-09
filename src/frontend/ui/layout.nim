@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
-  state, editor, debug, menu, status, command, search_results, shell,
+  state, editor, debug, menu, status, command, search_results, shell, deepreview,
   ../[ types, renderer, config ],
   ../lib/[ logging, misc_lib, jslib ]
 
@@ -175,6 +175,24 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
   if data.startOptions.shellUi:
     kxiMap["menu"] = setRenderer(proc: VNode = data.ui.menu.render(), "menu", proc = discard)
     data.ui.menu.kxi = kxiMap["menu"]
+    return
+
+  if data.startOptions.withDeepReview:
+    # DeepReview mode: render a standalone review UI without Golden Layout.
+    # Similar to shell-ui mode, we create a single full-page component.
+    clog "initLayout: setting up DeepReview renderer"
+    let drComponent = data.makeDeepReviewComponent(data.generateId(Content.DeepReview))
+    kxiMap["deepreview"] =
+      setRenderer(
+        proc: VNode =
+          if not drComponent.isNil:
+            drComponent.render()
+          else:
+            buildHtml(tdiv()),
+        "deepreview",
+        proc = discard)
+    drComponent.kxi = kxiMap["deepreview"]
+    redrawSync(kxiMap["deepreview"])
     return
 
   if data.startOptions.welcomeScreen and data.trace.isNil:
