@@ -15,7 +15,102 @@
 //! This module contains the data structures and helpers; the actual integration
 //! with the daemon's dispatch and routing logic lives in `backend_manager.rs`.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
 use serde_json::Value;
+
+// ---------------------------------------------------------------------------
+// BreakpointState — per-trace breakpoint and watchpoint tracking
+// ---------------------------------------------------------------------------
+
+/// Per-trace breakpoint and watchpoint state tracked by the daemon.
+///
+/// Needed because the DAP `setBreakpoints` command is per-file: each call
+/// sends ALL breakpoints for a given source file.  The daemon must maintain
+/// a mapping of breakpoint IDs to (file, line) pairs so that it can
+/// reconstruct the full breakpoint list for each file when adding or
+/// removing individual breakpoints.
+///
+/// Similarly, `setDataBreakpoints` replaces all data breakpoints each time,
+/// so the daemon tracks watchpoints in the same structure.
+#[derive(Debug, Default)]
+pub struct BreakpointState {
+    /// Next breakpoint ID to assign (monotonically increasing, starting at 1).
+    next_bp_id: i64,
+    /// Next watchpoint ID to assign (monotonically increasing, starting at 1).
+    next_wp_id: i64,
+    /// Active breakpoints: maps breakpoint_id -> (source_path, line).
+    breakpoints: HashMap<i64, (String, i64)>,
+    /// Active watchpoints: maps watchpoint_id -> expression.
+    watchpoints: HashMap<i64, String>,
+}
+
+impl BreakpointState {
+    /// Adds a breakpoint at the given source location.
+    ///
+    /// Returns `(bp_id, all_breakpoint_lines_for_the_affected_file)`.
+    /// The caller must send a `setBreakpoints` DAP command to the backend
+    /// with the full list of lines for the affected file.
+    pub fn add_breakpoint(&mut self, source_path: &str, line: i64) -> (i64, Vec<i64>) {
+        self.next_bp_id += 1;
+        let bp_id = self.next_bp_id;
+        self.breakpoints
+            .insert(bp_id, (source_path.to_string(), line));
+        let lines = self.breakpoints_for_file(source_path);
+        (bp_id, lines)
+    }
+
+    /// Removes a breakpoint by its ID.
+    ///
+    /// Returns `Some((source_path, remaining_lines_for_file))` if the
+    /// breakpoint existed, or `None` if the ID was unknown.
+    pub fn remove_breakpoint(&mut self, bp_id: i64) -> Option<(String, Vec<i64>)> {
+        if let Some((source_path, _line)) = self.breakpoints.remove(&bp_id) {
+            let remaining = self.breakpoints_for_file(&source_path);
+            Some((source_path, remaining))
+        } else {
+            None
+        }
+    }
+
+    /// Returns all breakpoint lines for a given source file.
+    pub fn breakpoints_for_file(&self, source_path: &str) -> Vec<i64> {
+        self.breakpoints
+            .values()
+            .filter(|(f, _)| f == source_path)
+            .map(|(_, l)| *l)
+            .collect()
+    }
+
+    /// Adds a watchpoint on the given expression.
+    ///
+    /// Returns `(wp_id, all_active_expressions)`.
+    pub fn add_watchpoint(&mut self, expression: &str) -> (i64, Vec<String>) {
+        self.next_wp_id += 1;
+        let wp_id = self.next_wp_id;
+        self.watchpoints.insert(wp_id, expression.to_string());
+        let all = self.all_watchpoint_expressions();
+        (wp_id, all)
+    }
+
+    /// Removes a watchpoint by its ID.
+    ///
+    /// Returns `Some(remaining_expressions)` if the watchpoint existed,
+    /// or `None` if the ID was unknown.
+    pub fn remove_watchpoint(&mut self, wp_id: i64) -> Option<Vec<String>> {
+        if self.watchpoints.remove(&wp_id).is_some() {
+            Some(self.all_watchpoint_expressions())
+        } else {
+            None
+        }
+    }
+
+    /// Returns all active watchpoint expressions.
+    pub fn all_watchpoint_expressions(&self) -> Vec<String> {
+        self.watchpoints.values().cloned().collect()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // PyBridgeState
@@ -43,6 +138,11 @@ pub struct PyBridgeState {
     /// requests (e.g., `stackTrace`).  Starts at 1,000,000 to avoid
     /// conflicts with client-originated seq numbers.
     pub next_seq: i64,
+    /// Per-trace breakpoint and watchpoint state.
+    ///
+    /// Keyed by the canonical trace path (same key used by the session
+    /// manager).  Created lazily on first breakpoint/watchpoint operation.
+    pub breakpoint_states: HashMap<PathBuf, BreakpointState>,
 }
 
 impl PyBridgeState {
@@ -51,6 +151,7 @@ impl PyBridgeState {
             pending_navigations: Vec::new(),
             pending_requests: Vec::new(),
             next_seq: 1_000_000,
+            breakpoint_states: HashMap::new(),
         }
     }
 
@@ -59,6 +160,14 @@ impl PyBridgeState {
         let seq = self.next_seq;
         self.next_seq += 1;
         seq
+    }
+
+    /// Returns the breakpoint state for the given trace path, creating it
+    /// if it does not already exist.
+    pub fn breakpoint_state_mut(&mut self, trace_path: &Path) -> &mut BreakpointState {
+        self.breakpoint_states
+            .entry(trace_path.to_path_buf())
+            .or_default()
     }
 }
 
@@ -123,6 +232,10 @@ pub enum PendingPyRequestKind {
     Evaluate,
     /// `ct/py-stack-trace` -> backend `stackTrace`.
     StackTrace,
+    /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
+    /// whose backend responses should be silently consumed and not forwarded
+    /// to any client.
+    FireAndForget,
 }
 
 /// A pending synchronous Python bridge request waiting for a backend
@@ -655,5 +768,92 @@ mod tests {
         assert!(success);
         let frames = body["frames"].as_array().expect("frames should be array");
         assert!(frames.is_empty());
+    }
+
+    // --- BreakpointState tests ---
+
+    #[test]
+    fn test_breakpoint_state_add_and_remove() {
+        let mut state = BreakpointState::default();
+
+        // Add two breakpoints in the same file.
+        let (bp1, lines1) = state.add_breakpoint("main.nim", 10);
+        assert_eq!(bp1, 1);
+        assert_eq!(lines1, vec![10]);
+
+        let (bp2, lines2) = state.add_breakpoint("main.nim", 20);
+        assert_eq!(bp2, 2);
+        assert!(lines2.contains(&10));
+        assert!(lines2.contains(&20));
+
+        // Remove the first breakpoint.
+        let result = state.remove_breakpoint(bp1);
+        assert!(result.is_some());
+        let (file, remaining) = result.unwrap();
+        assert_eq!(file, "main.nim");
+        assert_eq!(remaining, vec![20]);
+
+        // Removing a nonexistent ID returns None.
+        assert!(state.remove_breakpoint(999).is_none());
+    }
+
+    #[test]
+    fn test_breakpoint_state_multiple_files() {
+        let mut state = BreakpointState::default();
+
+        let (bp1, _) = state.add_breakpoint("main.nim", 10);
+        let (_bp2, _) = state.add_breakpoint("helpers.nim", 5);
+        let (_bp3, _) = state.add_breakpoint("main.nim", 30);
+
+        // Only main.nim lines should be returned.
+        let main_lines = state.breakpoints_for_file("main.nim");
+        assert!(main_lines.contains(&10));
+        assert!(main_lines.contains(&30));
+        assert_eq!(main_lines.len(), 2);
+
+        let helper_lines = state.breakpoints_for_file("helpers.nim");
+        assert_eq!(helper_lines, vec![5]);
+
+        // Remove bp1 (main.nim:10); helpers.nim should be unaffected.
+        state.remove_breakpoint(bp1);
+        assert_eq!(state.breakpoints_for_file("main.nim"), vec![30]);
+        assert_eq!(state.breakpoints_for_file("helpers.nim"), vec![5]);
+    }
+
+    #[test]
+    fn test_watchpoint_state_add_and_remove() {
+        let mut state = BreakpointState::default();
+
+        let (wp1, all1) = state.add_watchpoint("counter");
+        assert_eq!(wp1, 1);
+        assert_eq!(all1, vec!["counter".to_string()]);
+
+        let (wp2, all2) = state.add_watchpoint("total");
+        assert_eq!(wp2, 2);
+        assert!(all2.contains(&"counter".to_string()));
+        assert!(all2.contains(&"total".to_string()));
+
+        // Remove the first watchpoint.
+        let remaining = state.remove_watchpoint(wp1);
+        assert!(remaining.is_some());
+        assert_eq!(remaining.unwrap(), vec!["total".to_string()]);
+
+        // Removing nonexistent ID returns None.
+        assert!(state.remove_watchpoint(999).is_none());
+    }
+
+    #[test]
+    fn test_py_bridge_state_breakpoint_state_lazy_creation() {
+        let mut state = PyBridgeState::new();
+        let trace_path = PathBuf::from("/traces/my-trace");
+
+        // First access creates the state.
+        let bp_state = state.breakpoint_state_mut(&trace_path);
+        let (bp_id, _) = bp_state.add_breakpoint("main.nim", 10);
+        assert_eq!(bp_id, 1);
+
+        // Subsequent access returns the same state.
+        let bp_state2 = state.breakpoint_state_mut(&trace_path);
+        assert_eq!(bp_state2.breakpoints_for_file("main.nim"), vec![10]);
     }
 }

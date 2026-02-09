@@ -433,6 +433,97 @@ class Trace:
             location=location,
         )
 
+    # --- Breakpoints and Watchpoints ---
+
+    def add_breakpoint(self, path: str, line: int) -> int:
+        """Set a breakpoint at the given source location.
+
+        The daemon translates this into a DAP ``setBreakpoints`` command
+        containing all breakpoints for the affected file.
+
+        Parameters:
+            path: The source file path where the breakpoint should be set.
+            line: The line number for the breakpoint.
+
+        Returns:
+            A positive integer breakpoint ID that can be passed to
+            :meth:`remove_breakpoint` to remove this breakpoint later.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-add-breakpoint", {
+            "tracePath": self._path,
+            "path": path,
+            "line": line,
+        })
+        if not response.get("success"):
+            raise TraceError(response.get("message", "add_breakpoint() failed"))
+        return response.get("body", {}).get("breakpointId", 0)
+
+    def remove_breakpoint(self, bp_id: int) -> None:
+        """Remove a previously set breakpoint by its ID.
+
+        Parameters:
+            bp_id: The breakpoint ID returned by :meth:`add_breakpoint`.
+
+        Raises:
+            TraceError: If the daemon reports an error (e.g., unknown ID).
+        """
+        response = self._connection.send_request("ct/py-remove-breakpoint", {
+            "tracePath": self._path,
+            "breakpointId": bp_id,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "remove_breakpoint() failed")
+            )
+
+    def add_watchpoint(self, expression: str) -> int:
+        """Set a watchpoint that triggers when the expression's value changes.
+
+        The daemon translates this into a DAP ``setDataBreakpoints``
+        command.  When execution continues, it will stop at the point
+        where the watched expression's value changes.
+
+        Parameters:
+            expression: The expression to watch (e.g., ``"counter"``).
+
+        Returns:
+            A positive integer watchpoint ID that can be passed to
+            :meth:`remove_watchpoint`.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-add-watchpoint", {
+            "tracePath": self._path,
+            "expression": expression,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "add_watchpoint() failed")
+            )
+        return response.get("body", {}).get("watchpointId", 0)
+
+    def remove_watchpoint(self, wp_id: int) -> None:
+        """Remove a previously set watchpoint by its ID.
+
+        Parameters:
+            wp_id: The watchpoint ID returned by :meth:`add_watchpoint`.
+
+        Raises:
+            TraceError: If the daemon reports an error (e.g., unknown ID).
+        """
+        response = self._connection.send_request("ct/py-remove-watchpoint", {
+            "tracePath": self._path,
+            "watchpointId": wp_id,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "remove_watchpoint() failed")
+            )
+
     # --- Flow / structure (stubs for later milestones) ---
 
     def flow(

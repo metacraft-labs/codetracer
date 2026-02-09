@@ -597,6 +597,15 @@ impl BackendManager {
                 .position(|p| p.backend_seq == req_seq)
             {
                 let pending = ds.py_bridge.pending_requests.remove(idx);
+
+                // Fire-and-forget requests: silently consume the backend
+                // response without forwarding anything to the client.
+                // This is used for setBreakpoints/setDataBreakpoints
+                // commands whose results the client does not need.
+                if pending.kind == PendingPyRequestKind::FireAndForget {
+                    return;
+                }
+
                 let (success, body_or_error) = match pending.kind {
                     PendingPyRequestKind::Locals => {
                         python_bridge::format_locals_response(msg)
@@ -606,6 +615,10 @@ impl BackendManager {
                     }
                     PendingPyRequestKind::StackTrace => {
                         python_bridge::format_stack_trace_response(msg)
+                    }
+                    PendingPyRequestKind::FireAndForget => {
+                        // Already handled above; unreachable.
+                        return;
                     }
                 };
 
@@ -1340,6 +1353,18 @@ impl BackendManager {
                     "ct/py-stack-trace" => {
                         self.handle_py_stack_trace(seq, args).await
                     }
+                    "ct/py-add-breakpoint" => {
+                        self.handle_py_add_breakpoint(seq, args).await
+                    }
+                    "ct/py-remove-breakpoint" => {
+                        self.handle_py_remove_breakpoint(seq, args).await
+                    }
+                    "ct/py-add-watchpoint" => {
+                        self.handle_py_add_watchpoint(seq, args).await
+                    }
+                    "ct/py-remove-watchpoint" => {
+                        self.handle_py_remove_watchpoint(seq, args).await
+                    }
                     "ct/open-trace" => {
                         self.handle_open_trace(seq, args).await
                     }
@@ -1964,6 +1989,583 @@ impl BackendManager {
                 backend_seq: dap_seq,
                 response_command: "ct/py-stack-trace".to_string(),
             });
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-add-breakpoint, ct/py-remove-breakpoint,
+    // ct/py-add-watchpoint, ct/py-remove-watchpoint handlers
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-add-breakpoint` requests from Python clients.
+    ///
+    /// Adds a breakpoint to the per-trace breakpoint state, sends a
+    /// `setBreakpoints` command to the backend (fire-and-forget), and
+    /// immediately returns the assigned breakpoint ID to the client.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-add-breakpoint",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "path": "main.nim",
+    ///     "line": 10
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-add-breakpoint",
+    ///   "body": {"breakpointId": 1}
+    /// }
+    /// ```
+    async fn handle_py_add_breakpoint(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-breakpoint",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let source_path = match args
+            .and_then(|a| a.get("path"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-breakpoint",
+                    "missing 'path' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let line = match args
+            .and_then(|a| a.get("line"))
+            .and_then(Value::as_i64)
+        {
+            Some(l) => l,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-breakpoint",
+                    "missing 'line' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-breakpoint",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Update the breakpoint state and get the full list for the file.
+        let (bp_id, all_lines) = match self.daemon_state.as_mut() {
+            Some(ds) => {
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                bp_state.add_breakpoint(&source_path, line)
+            }
+            None => return Ok(()),
+        };
+
+        // Build the setBreakpoints DAP command with ALL breakpoints for this file.
+        let breakpoints_array: Vec<Value> = all_lines
+            .iter()
+            .map(|l| json!({"line": l}))
+            .collect();
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        let dap_request = json!({
+            "type": "request",
+            "command": "setBreakpoints",
+            "seq": dap_seq,
+            "arguments": {
+                "source": {"path": source_path},
+                "breakpoints": breakpoints_array,
+            }
+        });
+
+        // Fire-and-forget: send the DAP command but register a pending
+        // request so the response router silently consumes the backend's
+        // response instead of forwarding it to the client.
+        let _ = self.message(backend_id, dap_request).await;
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::FireAndForget,
+                client_id: 0,
+                original_seq: 0,
+                backend_seq: dap_seq,
+                response_command: String::new(),
+            });
+        }
+
+        // Respond to the client immediately with the breakpoint ID.
+        let response = json!({
+            "type": "response",
+            "request_seq": seq,
+            "success": true,
+            "command": "ct/py-add-breakpoint",
+            "body": {"breakpointId": bp_id}
+        });
+        self.send_response_for_seq(seq, response);
+        Ok(())
+    }
+
+    /// Handles `ct/py-remove-breakpoint` requests from Python clients.
+    ///
+    /// Removes the breakpoint from the per-trace state, sends an updated
+    /// `setBreakpoints` to the backend (fire-and-forget), and returns
+    /// a success response.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-remove-breakpoint",
+    ///   "seq": 2,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "breakpointId": 1
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 2,
+    ///   "success": true,
+    ///   "command": "ct/py-remove-breakpoint",
+    ///   "body": {"removed": true}
+    /// }
+    /// ```
+    async fn handle_py_remove_breakpoint(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-breakpoint",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let bp_id = match args
+            .and_then(|a| a.get("breakpointId"))
+            .and_then(Value::as_i64)
+        {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-breakpoint",
+                    "missing 'breakpointId' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-breakpoint",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Remove the breakpoint and get remaining lines for the affected file.
+        let removal_result = match self.daemon_state.as_mut() {
+            Some(ds) => {
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                bp_state.remove_breakpoint(bp_id)
+            }
+            None => return Ok(()),
+        };
+
+        match removal_result {
+            Some((source_path, remaining_lines)) => {
+                // Send updated setBreakpoints to backend with remaining lines.
+                let breakpoints_array: Vec<Value> = remaining_lines
+                    .iter()
+                    .map(|l| json!({"line": l}))
+                    .collect();
+
+                let dap_seq = match self.daemon_state.as_mut() {
+                    Some(ds) => ds.py_bridge.next_seq(),
+                    None => return Ok(()),
+                };
+
+                let dap_request = json!({
+                    "type": "request",
+                    "command": "setBreakpoints",
+                    "seq": dap_seq,
+                    "arguments": {
+                        "source": {"path": source_path},
+                        "breakpoints": breakpoints_array,
+                    }
+                });
+                let _ = self.message(backend_id, dap_request).await;
+                if let Some(ds) = self.daemon_state.as_mut() {
+                    ds.py_bridge.pending_requests.push(PendingPyRequest {
+                        kind: PendingPyRequestKind::FireAndForget,
+                        client_id: 0,
+                        original_seq: 0,
+                        backend_seq: dap_seq,
+                        response_command: String::new(),
+                    });
+                }
+
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": true,
+                    "command": "ct/py-remove-breakpoint",
+                    "body": {"removed": true}
+                });
+                self.send_response_for_seq(seq, response);
+            }
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-breakpoint",
+                    &format!("unknown breakpoint ID: {bp_id}"),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-add-watchpoint` requests from Python clients.
+    ///
+    /// Adds a watchpoint on the given expression, sends `setDataBreakpoints`
+    /// to the backend (fire-and-forget), and returns the watchpoint ID.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-add-watchpoint",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "expression": "counter"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-add-watchpoint",
+    ///   "body": {"watchpointId": 1}
+    /// }
+    /// ```
+    async fn handle_py_add_watchpoint(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-watchpoint",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let expression = match args
+            .and_then(|a| a.get("expression"))
+            .and_then(Value::as_str)
+        {
+            Some(e) => e.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-watchpoint",
+                    "missing 'expression' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-watchpoint",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Update the watchpoint state.
+        let (wp_id, all_expressions) = match self.daemon_state.as_mut() {
+            Some(ds) => {
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                bp_state.add_watchpoint(&expression)
+            }
+            None => return Ok(()),
+        };
+
+        // Build the setDataBreakpoints DAP command with ALL watchpoints.
+        let breakpoints_array: Vec<Value> = all_expressions
+            .iter()
+            .map(|e| json!({"dataId": e}))
+            .collect();
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        let dap_request = json!({
+            "type": "request",
+            "command": "setDataBreakpoints",
+            "seq": dap_seq,
+            "arguments": {
+                "breakpoints": breakpoints_array,
+            }
+        });
+
+        let _ = self.message(backend_id, dap_request).await;
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::FireAndForget,
+                client_id: 0,
+                original_seq: 0,
+                backend_seq: dap_seq,
+                response_command: String::new(),
+            });
+        }
+
+        let response = json!({
+            "type": "response",
+            "request_seq": seq,
+            "success": true,
+            "command": "ct/py-add-watchpoint",
+            "body": {"watchpointId": wp_id}
+        });
+        self.send_response_for_seq(seq, response);
+        Ok(())
+    }
+
+    /// Handles `ct/py-remove-watchpoint` requests from Python clients.
+    ///
+    /// Removes the watchpoint, sends an updated `setDataBreakpoints`
+    /// to the backend (fire-and-forget), and returns a success response.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-remove-watchpoint",
+    ///   "seq": 2,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "watchpointId": 1
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 2,
+    ///   "success": true,
+    ///   "command": "ct/py-remove-watchpoint",
+    ///   "body": {"removed": true}
+    /// }
+    /// ```
+    async fn handle_py_remove_watchpoint(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-watchpoint",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let wp_id = match args
+            .and_then(|a| a.get("watchpointId"))
+            .and_then(Value::as_i64)
+        {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-watchpoint",
+                    "missing 'watchpointId' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-watchpoint",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        let removal_result = match self.daemon_state.as_mut() {
+            Some(ds) => {
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                bp_state.remove_watchpoint(wp_id)
+            }
+            None => return Ok(()),
+        };
+
+        match removal_result {
+            Some(remaining_expressions) => {
+                let breakpoints_array: Vec<Value> = remaining_expressions
+                    .iter()
+                    .map(|e| json!({"dataId": e}))
+                    .collect();
+
+                let dap_seq = match self.daemon_state.as_mut() {
+                    Some(ds) => ds.py_bridge.next_seq(),
+                    None => return Ok(()),
+                };
+
+                let dap_request = json!({
+                    "type": "request",
+                    "command": "setDataBreakpoints",
+                    "seq": dap_seq,
+                    "arguments": {
+                        "breakpoints": breakpoints_array,
+                    }
+                });
+                let _ = self.message(backend_id, dap_request).await;
+                if let Some(ds) = self.daemon_state.as_mut() {
+                    ds.py_bridge.pending_requests.push(PendingPyRequest {
+                        kind: PendingPyRequestKind::FireAndForget,
+                        client_id: 0,
+                        original_seq: 0,
+                        backend_seq: dap_seq,
+                        response_command: String::new(),
+                    });
+                }
+
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": true,
+                    "command": "ct/py-remove-watchpoint",
+                    "body": {"removed": true}
+                });
+                self.send_response_for_seq(seq, response);
+            }
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-watchpoint",
+                    &format!("unknown watchpoint ID: {wp_id}"),
+                );
+            }
         }
 
         Ok(())
