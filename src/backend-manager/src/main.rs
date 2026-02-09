@@ -2,12 +2,16 @@
 extern crate log;
 
 mod backend_manager;
+mod config;
 mod dap_parser;
 mod errors;
 mod paths;
+mod session;
 
 use std::error::Error;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use serde_json::json;
@@ -18,9 +22,9 @@ use tokio::{
     signal,
     sync::mpsc,
 };
-// use flexi_logger::{Logger, FileSpec, Duplicate};
 
 use crate::backend_manager::BackendManager;
+use crate::config::DaemonConfig;
 use crate::dap_parser::DapParser;
 use crate::paths::CODETRACER_PATHS;
 
@@ -41,6 +45,18 @@ enum Commands {
         #[command(subcommand)]
         action: DaemonAction,
     },
+    /// Mock backend for testing (connects to a socket and sleeps).
+    ///
+    /// Used by integration tests to simulate a child replay process that
+    /// connects back to the parent's Unix listener.  The last positional
+    /// argument is treated as the socket path; any preceding arguments are
+    /// ignored (this matches `start_replay`'s convention of appending the
+    /// socket path as the final CLI argument).
+    #[command(trailing_var_arg = true)]
+    MockBackend {
+        /// All positional arguments; the last one is the socket path.
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -51,6 +67,8 @@ enum DaemonAction {
     Stop,
     /// Check daemon status
     Status,
+    /// Connect to daemon, auto-starting if needed (used by CLI/MCP clients)
+    Connect,
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +125,7 @@ async fn remove_pid_file(pid_path: &PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
-// Daemon stop / status subcommands
+// Daemon stop / status / connect subcommands
 // ---------------------------------------------------------------------------
 
 /// Connects to the daemon socket and sends a `ct/daemon-shutdown` request.
@@ -175,18 +193,177 @@ async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
     }
 }
 
+/// Auto-daemonization: connects to the daemon, starting it if necessary.
+///
+/// Protocol:
+/// 1. Try to connect to the well-known daemon socket.
+/// 2. If the connection fails (socket missing or stale):
+///    a. Remove the stale socket file if present.
+///    b. Spawn `backend-manager daemon start` as a detached child process.
+///    c. Poll for the socket file and a successful connection (exponential
+///    backoff, up to 5 seconds).
+/// 3. Once connected, print "connected" and exit.
+async fn daemon_connect(
+    socket_path: &PathBuf,
+    pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    // Try to connect to an existing daemon.
+    if socket_path.exists() {
+        if let Ok(stream) = UnixStream::connect(socket_path).await {
+            drop(stream);
+            println!("connected");
+            return Ok(());
+        }
+        // Socket file exists but connection failed — stale.
+        info!("Removing stale socket file: {}", socket_path.display());
+        let _ = remove_file(socket_path).await;
+    }
+
+    // Also clean up a stale PID file if the process is dead.
+    if pid_path.exists() {
+        let contents = read_to_string(pid_path).await.unwrap_or_default();
+        if let Ok(old_pid) = contents.trim().parse::<u32>()
+            && !is_pid_alive(old_pid)
+        {
+            info!("Removing stale PID file for dead process {old_pid}");
+            let _ = remove_file(pid_path).await;
+        }
+    }
+
+    // Ensure the daemon socket directory exists.
+    if let Some(parent) = socket_path.parent() {
+        create_dir_all(parent).await?;
+    }
+
+    // Spawn `backend-manager daemon start` as a detached process.
+    let exe = std::env::current_exe()?;
+    info!(
+        "Auto-starting daemon: {} daemon start",
+        exe.display()
+    );
+
+    // Build the command with the same environment (including TMPDIR) so that
+    // the daemon uses the same paths.
+    let _child = std::process::Command::new(&exe)
+        .arg("daemon")
+        .arg("start")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn daemon: {e}"))?;
+
+    // Poll for the socket file to appear and a successful connection.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut delay = Duration::from_millis(50);
+
+    loop {
+        tokio::time::sleep(delay).await;
+
+        if socket_path.exists()
+            && let Ok(stream) = UnixStream::connect(socket_path).await
+        {
+            drop(stream);
+            println!("connected");
+            return Ok(());
+        }
+
+        if tokio::time::Instant::now() > deadline {
+            return Err("timeout waiting for daemon to start".into());
+        }
+
+        // Exponential backoff: 50ms, 100ms, 200ms, ...
+        delay = (delay * 2).min(Duration::from_millis(500));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mock backend (for integration tests)
+// ---------------------------------------------------------------------------
+
+/// A minimal mock backend that connects to a Unix socket and sleeps.
+///
+/// Used by integration tests to simulate a child replay process.  The real
+/// replay backend connects to a listener socket created by `start_replay`;
+/// this mock does the same but simply sleeps instead of speaking DAP.
+async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
+    let _stream = UnixStream::connect(socket_path).await?;
+    // Keep the connection alive indefinitely (until killed).
+    loop {
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Daemon logging
+// ---------------------------------------------------------------------------
+
+/// Configures logging for daemon mode.
+///
+/// If a log file path is configured (via [`DaemonConfig`]), writes logs to
+/// that file.  Otherwise, writes to `~/.codetracer/daemon.log`.  Falls back
+/// to stderr if file logging cannot be set up.
+fn init_daemon_logging(config: &DaemonConfig) {
+    let log_path = config.log_file.clone().or_else(|| {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| PathBuf::from(home).join(".codetracer").join("daemon.log"))
+    });
+
+    if let Some(path) = log_path {
+        // Ensure the parent directory exists.
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let dir = path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
+        let basename = path
+            .file_stem()
+            .unwrap_or_else(|| std::ffi::OsStr::new("daemon"))
+            .to_string_lossy()
+            .to_string();
+
+        match flexi_logger::Logger::try_with_str("info") {
+            Ok(logger) => {
+                let result = logger
+                    .log_to_file(
+                        flexi_logger::FileSpec::default()
+                            .directory(dir)
+                            .basename(basename),
+                    )
+                    .start();
+                match result {
+                    Ok(_handle) => {
+                        // Logger started, _handle kept alive by being moved
+                        // into main's scope (we leak it intentionally since
+                        // the daemon runs for the entire process lifetime).
+                        std::mem::forget(_handle);
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: could not start file logging: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: could not configure logger: {e}");
+            }
+        }
+    }
+
+    // Fallback: basic stderr logging.
+    flexi_logger::init();
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // let _logger = Logger::try_with_str("info")?
-    //     .log_to_file(FileSpec::default())         // write logs to file
-    //     .duplicate_to_stderr(Duplicate::Warn)     // print warnings and errors also to the console
-    //     .start()?;
-    flexi_logger::init();
-
     let cli = Cli::parse();
 
     // Resolve well-known daemon paths once.
@@ -196,16 +373,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // ------------------------------------------------------------------
+    // MockBackend subcommand (used by integration tests)
+    // ------------------------------------------------------------------
+    if let Some(Commands::MockBackend { args }) = &cli.command {
+        flexi_logger::init();
+        let socket_path = args
+            .last()
+            .ok_or("mock-backend: no arguments provided (expected socket path as last arg)")?;
+        return run_mock_backend(socket_path).await;
+    }
+
+    // ------------------------------------------------------------------
     // Daemon subcommands
     // ------------------------------------------------------------------
     if let Some(Commands::Daemon { action }) = cli.command {
         match action {
             DaemonAction::Start => {
+                // Load configuration from env vars / config file / defaults.
+                let config = DaemonConfig::load();
+
+                // Detach from the controlling terminal (if any) so that the
+                // daemon survives the parent process exiting.
+                // SAFETY: setsid() is safe to call; it creates a new session
+                // if the calling process is not already a process group leader.
+                // If it fails (e.g. when already a session leader), we simply
+                // ignore the error — the daemon still works, just without full
+                // terminal detachment.
+                unsafe {
+                    libc::setsid();
+                }
+
+                // Configure daemon-mode logging (file-based).
+                init_daemon_logging(&config);
+
                 // Write PID file (fails if a daemon is already running).
                 write_pid_file(&daemon_pid_path).await?;
 
                 let (mgr, mut shutdown_rx) =
-                    BackendManager::new_daemon(daemon_socket_path.clone()).await?;
+                    BackendManager::new_daemon(daemon_socket_path.clone(), config).await?;
 
                 // Optionally auto-start a replay if requested.
                 if let Some(cmd) = cli.start {
@@ -213,13 +418,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     locked.start_replay(&cmd, &[]).await?;
                 }
 
-                // Wait for shutdown signal (Ctrl-C or ct/daemon-shutdown).
+                // Wait for shutdown signal (Ctrl-C, ct/daemon-shutdown, or auto-shutdown).
                 tokio::select! {
                     _ = signal::ctrl_c() => {
-                        println!("Ctrl+C detected. Shutting down daemon...");
+                        info!("Ctrl+C detected. Shutting down daemon...");
                     }
                     _ = shutdown_rx.recv() => {
-                        println!("Shutdown request received. Exiting daemon...");
+                        info!("Shutdown request received. Exiting daemon...");
                     }
                 }
 
@@ -227,13 +432,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let _ = remove_file(&daemon_socket_path).await;
                 remove_pid_file(&daemon_pid_path).await;
 
-                println!("Daemon stopped.");
+                info!("Daemon stopped.");
             }
             DaemonAction::Stop => {
+                flexi_logger::init();
                 daemon_stop(&daemon_socket_path).await?;
             }
             DaemonAction::Status => {
+                flexi_logger::init();
                 daemon_status(&daemon_socket_path, &daemon_pid_path).await;
+            }
+            DaemonAction::Connect => {
+                flexi_logger::init();
+                daemon_connect(&daemon_socket_path, &daemon_pid_path).await?;
             }
         }
         return Ok(());
@@ -242,6 +453,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
     // Legacy single-client mode (original behaviour, unchanged)
     // ------------------------------------------------------------------
+    flexi_logger::init();
 
     // TODO: maybe implement shutdown message?
     let (_shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel::<()>();
