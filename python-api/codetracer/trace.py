@@ -524,13 +524,60 @@ class Trace:
                 response.get("message", "remove_watchpoint() failed")
             )
 
-    # --- Flow / structure (stubs for later milestones) ---
+    # --- Flow / structure ---
 
-    def flow(
-        self, *, start: Optional[int] = None, end: Optional[int] = None
-    ) -> Flow:
-        """Return a slice of the execution flow."""
-        raise NotImplementedError("Will be implemented in a later milestone")
+    def flow(self, path: str, line: int, mode: str = "call") -> Flow:
+        """Return flow/omniscience data for a code location.
+
+        Shows all variable values across execution of a function or line.
+        This is CodeTracer's signature feature.
+
+        Parameters:
+            path: Source file path (relative or absolute, as stored in
+                  the trace metadata).
+            line: Line number to query.
+            mode: ``"call"`` to see the full function call containing the
+                  line, or ``"line"`` to see only the specific line's
+                  executions.
+
+        Returns:
+            A :class:`Flow` instance with steps and detected loops.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-flow", {
+            "tracePath": self._path,
+            "path": path,
+            "line": line,
+            "mode": mode,
+        })
+        if not response.get("success"):
+            raise TraceError(response.get("message", "flow() failed"))
+
+        body = response.get("body", {})
+
+        steps = []
+        for s in body.get("steps", []):
+            steps.append(FlowStep(
+                location=Location(path=path, line=s.get("line", 0)),
+                ticks=s.get("ticks", 0),
+                loop_id=s.get("loopId", 0),
+                iteration=s.get("iteration", 0),
+                before_values=s.get("beforeValues", {}),
+                after_values=s.get("afterValues", {}),
+            ))
+
+        loops = []
+        for lp in body.get("loops", []):
+            loops.append(Loop(
+                id=lp.get("id", 0),
+                start_line=lp.get("startLine", 0),
+                end_line=lp.get("endLine", 0),
+                iteration_count=lp.get("iterationCount", 0),
+            ))
+
+        return Flow(steps=steps, loops=loops)
 
     def loops(self) -> list[Loop]:
         """Return all detected loops in the trace."""

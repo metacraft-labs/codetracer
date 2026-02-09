@@ -232,6 +232,8 @@ pub enum PendingPyRequestKind {
     Evaluate,
     /// `ct/py-stack-trace` -> backend `stackTrace`.
     StackTrace,
+    /// `ct/py-flow` -> backend `ct/load-flow`.
+    Flow,
     /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
     /// whose backend responses should be silently consumed and not forwarded
     /// to any client.
@@ -391,6 +393,52 @@ pub fn format_stack_trace_response(backend_response: &Value) -> (bool, Value) {
     };
 
     (true, serde_json::json!({"frames": frames}))
+}
+
+/// Formats a backend `ct/load-flow` response into the simplified
+/// `ct/py-flow` response body.
+///
+/// The backend returns flow/omniscience data containing:
+/// - `steps`: array of execution steps, each with `line`, `ticks`, `loopId`,
+///   `iteration`, `beforeValues` (dict), and `afterValues` (dict).
+/// - `loops`: array of detected loops, each with `id`, `startLine`,
+///   `endLine`, and `iterationCount`.
+///
+/// This function passes through the steps and loops arrays directly,
+/// preserving the backend's field names for the Python client to parse.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"steps": [...], "loops": [...]}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_flow_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("load-flow failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let body = backend_response
+        .get("body")
+        .unwrap_or(&Value::Null);
+
+    let steps = body
+        .get("steps")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    let loops = body
+        .get("loops")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    (true, serde_json::json!({"steps": steps, "loops": loops}))
 }
 
 // ---------------------------------------------------------------------------
@@ -855,5 +903,74 @@ mod tests {
         // Subsequent access returns the same state.
         let bp_state2 = state.breakpoint_state_mut(&trace_path);
         assert_eq!(bp_state2.breakpoints_for_file("main.nim"), vec![10]);
+    }
+
+    // --- format_flow_response tests ---
+
+    #[test]
+    fn test_format_flow_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "steps": [
+                    {
+                        "line": 10, "ticks": 100, "loopId": 1, "iteration": 0,
+                        "beforeValues": {"i": "0"}, "afterValues": {"x": "0"}
+                    },
+                    {
+                        "line": 10, "ticks": 110, "loopId": 1, "iteration": 1,
+                        "beforeValues": {"i": "1"}, "afterValues": {"x": "2"}
+                    },
+                ],
+                "loops": [
+                    {"id": 1, "startLine": 8, "endLine": 12, "iterationCount": 2}
+                ],
+                "finished": true,
+            }
+        });
+
+        let (success, body) = format_flow_response(&backend_resp);
+        assert!(success);
+
+        let steps = body["steps"].as_array().expect("steps should be array");
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["line"], 10);
+        assert_eq!(steps[0]["beforeValues"]["i"], "0");
+        assert_eq!(steps[0]["afterValues"]["x"], "0");
+        assert_eq!(steps[1]["iteration"], 1);
+
+        let loops = body["loops"].as_array().expect("loops should be array");
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0]["id"], 1);
+        assert_eq!(loops[0]["iterationCount"], 2);
+    }
+
+    #[test]
+    fn test_format_flow_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "flow data unavailable"
+        });
+
+        let (success, body) = format_flow_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "flow data unavailable");
+    }
+
+    #[test]
+    fn test_format_flow_response_missing_body() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+        });
+
+        let (success, body) = format_flow_response(&backend_resp);
+        assert!(success);
+        let steps = body["steps"].as_array().expect("steps should be array");
+        assert!(steps.is_empty());
+        let loops = body["loops"].as_array().expect("loops should be array");
+        assert!(loops.is_empty());
     }
 }

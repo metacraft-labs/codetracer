@@ -2563,11 +2563,11 @@ async fn py_navigate(
         "method": method,
     });
     // Merge any extra arguments (e.g., "ticks" for goto_ticks).
-    if let Some(extra) = extra_args {
-        if let (Some(args_obj), Some(extra_obj)) = (args.as_object_mut(), extra.as_object()) {
-            for (k, v) in extra_obj {
-                args_obj.insert(k.clone(), v.clone());
-            }
+    if let Some(extra) = extra_args
+        && let (Some(args_obj), Some(extra_obj)) = (args.as_object_mut(), extra.as_object())
+    {
+        for (k, v) in extra_obj {
+            args_obj.insert(k.clone(), v.clone());
         }
     }
 
@@ -3382,6 +3382,59 @@ async fn py_stack_trace(
         }
 
         log_line(log_path, &format!("ct/py-stack-trace response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-flow` and returns the response (skipping interleaved events).
+///
+/// This helper queries the daemon for flow/omniscience data at a specific
+/// source location and mode.
+async fn py_flow(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    source_path: &str,
+    line: i64,
+    mode: &str,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-flow",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "path": source_path,
+            "line": line,
+            "mode": mode,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-flow: {e}"))?;
+
+    // Read messages, skipping events, until we get the response.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-flow response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-flow response".to_string())?
+            .map_err(|e| format!("read ct/py-flow: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-flow: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-flow response: {msg}"));
         return Ok(msg);
     }
 }
@@ -4666,6 +4719,392 @@ async fn m5_add_breakpoint_returns_id() {
     }
 
     report("m5_add_breakpoint_returns_id", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M6 Tests — Flow / Omniscience
+// ===========================================================================
+
+/// M6-1. Open trace with a function containing a loop. Call
+/// `ct/py-flow` with mode="call". Verify `steps` is non-empty.
+/// Verify each step has `beforeValues` and `afterValues` dictionaries.
+#[tokio::test]
+async fn m6_flow_returns_steps() {
+    let (test_dir, log_path) = setup_test_dir("m6_flow_steps");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-steps", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 40_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-flow with mode="call".
+        let flow_resp =
+            py_flow(&mut client, 40_001, &trace_dir, "main.nim", 10, "call", &log_path).await?;
+
+        assert_eq!(
+            flow_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-flow should succeed, got: {flow_resp}"
+        );
+        assert_eq!(
+            flow_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-flow"),
+            "command should be ct/py-flow"
+        );
+
+        let body = flow_resp.get("body").expect("response should have body");
+        let steps = body
+            .get("steps")
+            .and_then(Value::as_array)
+            .expect("body should have steps array");
+
+        // Verify non-empty list of steps.
+        assert!(
+            !steps.is_empty(),
+            "steps should be non-empty"
+        );
+
+        // Verify each step has beforeValues and afterValues dictionaries.
+        for (i, step) in steps.iter().enumerate() {
+            let before = step.get("beforeValues");
+            assert!(
+                before.is_some() && before.unwrap().is_object(),
+                "step {i} should have beforeValues dict, got: {step}"
+            );
+            let after = step.get("afterValues");
+            assert!(
+                after.is_some() && after.unwrap().is_object(),
+                "step {i} should have afterValues dict, got: {step}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m6_flow_returns_steps", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M6-2. Query flow for a line inside a loop. Verify `loops` is non-empty.
+/// Verify the loop has `iterationCount > 1`.
+#[tokio::test]
+async fn m6_flow_loop_detected() {
+    let (test_dir, log_path) = setup_test_dir("m6_flow_loop");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-loop", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 41_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Query flow for a line inside a loop.
+        let flow_resp =
+            py_flow(&mut client, 41_001, &trace_dir, "main.nim", 10, "call", &log_path).await?;
+
+        assert_eq!(
+            flow_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-flow should succeed, got: {flow_resp}"
+        );
+
+        let body = flow_resp.get("body").expect("response should have body");
+        let loops = body
+            .get("loops")
+            .and_then(Value::as_array)
+            .expect("body should have loops array");
+
+        // Verify loops is non-empty.
+        assert!(
+            !loops.is_empty(),
+            "loops should be non-empty"
+        );
+
+        // Verify the loop has iterationCount > 1.
+        let first_loop = &loops[0];
+        let iteration_count = first_loop
+            .get("iterationCount")
+            .and_then(Value::as_i64)
+            .expect("loop should have iterationCount");
+
+        assert!(
+            iteration_count > 1,
+            "iterationCount should be > 1, got {iteration_count}"
+        );
+
+        // Also verify the loop has structural fields.
+        assert!(
+            first_loop.get("id").and_then(Value::as_i64).is_some(),
+            "loop should have an 'id' field"
+        );
+        assert!(
+            first_loop.get("startLine").and_then(Value::as_i64).is_some(),
+            "loop should have a 'startLine' field"
+        );
+        assert!(
+            first_loop.get("endLine").and_then(Value::as_i64).is_some(),
+            "loop should have an 'endLine' field"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m6_flow_loop_detected", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M6-3. Query flow for a line where `x = i * 2` inside a loop with `i`
+/// from 0 to 4. Verify the step values show `x` changing as expected
+/// across iterations.
+#[tokio::test]
+async fn m6_flow_values_correct() {
+    let (test_dir, log_path) = setup_test_dir("m6_flow_vals");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-vals", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 42_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Query flow in "line" mode — returns only the loop iteration steps
+        // for the specific line (no function entry/exit steps).
+        let flow_resp =
+            py_flow(&mut client, 42_001, &trace_dir, "main.nim", 10, "line", &log_path).await?;
+
+        assert_eq!(
+            flow_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-flow should succeed, got: {flow_resp}"
+        );
+
+        let body = flow_resp.get("body").expect("response should have body");
+        let steps = body
+            .get("steps")
+            .and_then(Value::as_array)
+            .expect("body should have steps array");
+
+        // In line mode, the mock returns exactly 5 steps (i from 0 to 4).
+        assert_eq!(
+            steps.len(),
+            5,
+            "line mode should return 5 steps (one per iteration), got {}",
+            steps.len()
+        );
+
+        // Verify x changes as expected: x = i * 2 for i in 0..5.
+        for (idx, step) in steps.iter().enumerate() {
+            let i_val = idx as i64;
+            let expected_x = (i_val * 2).to_string();
+
+            let after_values = step
+                .get("afterValues")
+                .and_then(Value::as_object)
+                .expect("step should have afterValues dict");
+
+            let actual_x = after_values
+                .get("x")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+
+            assert_eq!(
+                actual_x, expected_x,
+                "step {idx}: afterValues.x should be {expected_x}, got {actual_x}"
+            );
+
+            // Also verify the iteration field matches.
+            let iteration = step
+                .get("iteration")
+                .and_then(Value::as_i64)
+                .unwrap_or(-1);
+            assert_eq!(
+                iteration, i_val,
+                "step {idx}: iteration should be {i_val}, got {iteration}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m6_flow_values_correct", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M6-4. Query the same location with mode="call" and mode="line".
+/// Verify different amounts of data returned (call mode returns more
+/// steps spanning the full function).
+#[tokio::test]
+async fn m6_flow_modes_differ() {
+    let (test_dir, log_path) = setup_test_dir("m6_flow_modes");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-modes", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 43_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Query flow with mode="call" (full function scope).
+        let call_resp =
+            py_flow(&mut client, 43_001, &trace_dir, "main.nim", 10, "call", &log_path).await?;
+        assert_eq!(
+            call_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-flow (call) should succeed, got: {call_resp}"
+        );
+
+        let call_steps = call_resp
+            .get("body")
+            .and_then(|b| b.get("steps"))
+            .and_then(Value::as_array)
+            .expect("call response should have steps");
+        let call_step_count = call_steps.len();
+
+        log_line(&log_path, &format!("call mode steps: {call_step_count}"));
+
+        // Query flow with mode="line" (specific line only).
+        let line_resp =
+            py_flow(&mut client, 43_002, &trace_dir, "main.nim", 10, "line", &log_path).await?;
+        assert_eq!(
+            line_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-flow (line) should succeed, got: {line_resp}"
+        );
+
+        let line_steps = line_resp
+            .get("body")
+            .and_then(|b| b.get("steps"))
+            .and_then(Value::as_array)
+            .expect("line response should have steps");
+        let line_step_count = line_steps.len();
+
+        log_line(&log_path, &format!("line mode steps: {line_step_count}"));
+
+        // Call mode should return more steps than line mode because it
+        // includes function entry and exit steps in addition to the loop
+        // iterations.
+        //
+        // Mock data: call mode = 7 steps (1 entry + 5 loop + 1 exit),
+        //            line mode = 5 steps (5 loop only).
+        assert!(
+            call_step_count > line_step_count,
+            "call mode should return more steps ({call_step_count}) than line mode ({line_step_count})"
+        );
+
+        // Verify call mode has steps outside the queried line (i.e., steps
+        // at different line numbers).
+        let call_lines: Vec<i64> = call_steps
+            .iter()
+            .filter_map(|s| s.get("line").and_then(Value::as_i64))
+            .collect();
+        let has_other_lines = call_lines.iter().any(|l| *l != 10);
+        assert!(
+            has_other_lines,
+            "call mode should include steps at lines other than the queried line 10, got lines: {call_lines:?}"
+        );
+
+        // Verify line mode only has steps at the queried line.
+        let line_lines: Vec<i64> = line_steps
+            .iter()
+            .filter_map(|s| s.get("line").and_then(Value::as_i64))
+            .collect();
+        let all_same_line = line_lines.iter().all(|l| *l == 10);
+        assert!(
+            all_same_line,
+            "line mode should only have steps at line 10, got lines: {line_lines:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m6_flow_modes_differ", &log_path, success);
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }

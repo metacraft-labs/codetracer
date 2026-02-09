@@ -762,6 +762,82 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     };
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;
                 }
+                // --- ct/load-flow: returns mock flow/omniscience data ---
+                //
+                // Simulates a loop body with `i` from 0 to 4 and `x = i * 2`.
+                // In "call" mode, returns additional steps for function entry
+                // and exit (spanning the full function).  In "line" mode,
+                // returns only the steps for the specific queried line.
+                "ct/load-flow" => {
+                    let line = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("line"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(1);
+                    let mode = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("mode"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("call");
+
+                    // Generate mock flow data with a loop (i from 0 to 4, x = i * 2).
+                    let mut steps = vec![];
+
+                    if mode == "call" {
+                        // Call mode: return steps spanning the full function (more steps).
+                        // Include a step at function entry before the loop.
+                        steps.push(json!({
+                            "line": 5, "ticks": 50, "loopId": 0, "iteration": 0,
+                            "beforeValues": {}, "afterValues": {"i": "0", "x": "0"}
+                        }));
+
+                        // Loop iterations: i from 0 to 4, x = i * 2.
+                        for i in 0..5i64 {
+                            let x = i * 2;
+                            let prev_x = if i > 0 { (i - 1) * 2 } else { 0 };
+                            steps.push(json!({
+                                "line": line, "ticks": 100 + i * 10,
+                                "loopId": 1, "iteration": i,
+                                "beforeValues": {"i": format!("{i}"), "x": format!("{prev_x}")},
+                                "afterValues": {"i": format!("{i}"), "x": format!("{x}")}
+                            }));
+                        }
+
+                        // Post-loop step at function exit.
+                        steps.push(json!({
+                            "line": 15, "ticks": 200, "loopId": 0, "iteration": 0,
+                            "beforeValues": {"x": "8"}, "afterValues": {"result": "8"}
+                        }));
+                    } else {
+                        // Line mode: only return steps for the specific line (fewer steps).
+                        for i in 0..5i64 {
+                            let x = i * 2;
+                            steps.push(json!({
+                                "line": line, "ticks": 100 + i * 10,
+                                "loopId": 1, "iteration": i,
+                                "beforeValues": {"i": format!("{i}")},
+                                "afterValues": {"x": format!("{x}")}
+                            }));
+                        }
+                    }
+
+                    let loops = json!([{
+                        "id": 1, "startLine": 8, "endLine": 12, "iterationCount": 5
+                    }]);
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/load-flow",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "steps": steps,
+                            "loops": loops,
+                            "finished": true,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
                 // --- stackTrace: returns current mock position ---
                 //
                 // When call_depth > 0 (after stepIn), returns multiple frames
