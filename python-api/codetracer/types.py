@@ -68,13 +68,27 @@ class Frame:
 class FlowStep:
     """One step in an execution flow (a single executed source line).
 
+    Each step captures the variable state before and after execution of
+    the line, along with loop context (which loop iteration the step
+    belongs to, if any).
+
     Attributes:
-        location:  The source location of this step.
-        variables: Variables captured at this step.
-        step_index: The global step index in the trace.
+        location:      The source location of this step.
+        ticks:         The execution timestamp (rrTicks) for this step.
+        loop_id:       The loop this step belongs to (0 = not in a loop).
+        iteration:     The iteration index within the loop.
+        before_values: Variable values captured before executing this line.
+        after_values:  Variable values captured after executing this line.
+        variables:     Legacy field: variables captured at this step.
+        step_index:    Legacy field: the global step index in the trace.
     """
 
     location: Location
+    ticks: int = 0
+    loop_id: int = 0
+    iteration: int = 0
+    before_values: dict[str, str] = field(default_factory=dict)
+    after_values: dict[str, str] = field(default_factory=dict)
     variables: list[Variable] = field(default_factory=list)
     step_index: Optional[int] = None
 
@@ -83,11 +97,16 @@ class FlowStep:
 class Flow:
     """An execution flow: a contiguous sequence of executed steps.
 
+    Flow (omniscience) is CodeTracer's signature feature: it shows all
+    variable values across execution of a function or a specific line.
+
     Attributes:
         steps: Ordered list of flow steps.
+        loops: Detected loops within the flow.
     """
 
     steps: list[FlowStep] = field(default_factory=list)
+    loops: list["Loop"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -95,12 +114,18 @@ class Loop:
     """A detected loop in the execution trace.
 
     Attributes:
-        location:       Source location of the loop header.
+        id:              Unique loop identifier within the flow response.
+        location:        Source location of the loop header.
+        start_line:      The first line of the loop body.
+        end_line:        The last line of the loop body.
         iteration_count: How many iterations were recorded.
-        body_steps:     Steps that make up one representative iteration.
+        body_steps:      Legacy field: steps that make up one representative iteration.
     """
 
-    location: Location
+    id: int = 0
+    location: Location = field(default_factory=lambda: Location(path="", line=0))
+    start_line: int = 0
+    end_line: int = 0
     iteration_count: int = 0
     body_steps: list[FlowStep] = field(default_factory=list)
 

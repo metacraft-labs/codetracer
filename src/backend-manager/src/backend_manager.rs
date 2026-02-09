@@ -616,6 +616,9 @@ impl BackendManager {
                     PendingPyRequestKind::StackTrace => {
                         python_bridge::format_stack_trace_response(msg)
                     }
+                    PendingPyRequestKind::Flow => {
+                        python_bridge::format_flow_response(msg)
+                    }
                     PendingPyRequestKind::FireAndForget => {
                         // Already handled above; unreachable.
                         return;
@@ -1353,6 +1356,9 @@ impl BackendManager {
                     "ct/py-stack-trace" => {
                         self.handle_py_stack_trace(seq, args).await
                     }
+                    "ct/py-flow" => {
+                        self.handle_py_flow(seq, args).await
+                    }
                     "ct/py-add-breakpoint" => {
                         self.handle_py_add_breakpoint(seq, args).await
                     }
@@ -1988,6 +1994,143 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-stack-trace".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-flow handler
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-flow` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/load-flow` DAP command, sends it
+    /// to the backend, and registers a pending request that will be
+    /// completed when the backend responds.
+    ///
+    /// Flow (omniscience) is CodeTracer's signature feature: it shows all
+    /// variable values across execution of a function or a specific line.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-flow",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "path": "main.nim",
+    ///     "line": 10,
+    ///     "mode": "call"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-flow",
+    ///   "body": {
+    ///     "steps": [
+    ///       {"line": 10, "ticks": 100, "loopId": 1, "iteration": 0,
+    ///        "beforeValues": {"i": "0"}, "afterValues": {"x": "0"}}
+    ///     ],
+    ///     "loops": [
+    ///       {"id": 1, "startLine": 8, "endLine": 12, "iterationCount": 5}
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_flow(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, "ct/py-flow", "missing 'tracePath' in arguments");
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-flow",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (flow query counts as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Extract path, line, and mode parameters.
+        let source_path = args
+            .and_then(|a| a.get("path"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let line = args
+            .and_then(|a| a.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(1);
+        let mode = args
+            .and_then(|a| a.get("mode"))
+            .and_then(Value::as_str)
+            .unwrap_or("call");
+
+        // Get a unique seq for the DAP command sent to the backend.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/load-flow command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/load-flow",
+            "seq": dap_seq,
+            "arguments": {
+                "path": source_path,
+                "line": line,
+                "mode": mode,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-flow",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Flow,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-flow".to_string(),
             });
         }
 
