@@ -2541,3 +2541,707 @@ async fn test_multiple_sessions_independent() {
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+// ===========================================================================
+// M3 Helpers: py-navigate, etc.
+// ===========================================================================
+
+/// Sends `ct/py-navigate` with the given method and returns the response.
+///
+/// Skips any interleaved events that may arrive before the response
+/// (e.g., stopped events broadcast to all clients).
+async fn py_navigate(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    method: &str,
+    extra_args: Option<Value>,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let mut args = json!({
+        "tracePath": trace_path.to_string_lossy().to_string(),
+        "method": method,
+    });
+    // Merge any extra arguments (e.g., "ticks" for goto_ticks).
+    if let Some(extra) = extra_args {
+        if let (Some(args_obj), Some(extra_obj)) = (args.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra_obj {
+                args_obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-navigate",
+        "seq": seq,
+        "arguments": args,
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-navigate: {e}"))?;
+
+    // Read messages, skipping events, until we get the response.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-navigate response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-navigate response".to_string())?
+            .map_err(|e| format!("read ct/py-navigate: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-navigate: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-navigate response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+// ===========================================================================
+// M3 Tests
+// ===========================================================================
+
+/// M3-1. Open trace, verify language and source_files are populated.
+#[tokio::test]
+async fn m3_open_trace_connects() {
+    let (test_dir, log_path) = setup_test_dir("m3_open_trace_connects");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-connect", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 10_000, &trace_dir, &log_path).await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+
+        // Verify language is detected from program extension.
+        assert_eq!(
+            body.get("language").and_then(Value::as_str),
+            Some("nim"),
+            "language should be 'nim'"
+        );
+
+        // Verify source files are populated.
+        let source_files = body
+            .get("sourceFiles")
+            .and_then(Value::as_array)
+            .map(|a| a.len())
+            .unwrap_or(0);
+        assert!(source_files > 0, "sourceFiles should be non-empty");
+
+        // Verify initialLocation is present (from the post-init stackTrace).
+        let init_loc = body.get("initialLocation");
+        assert!(init_loc.is_some(), "initialLocation should be present");
+        let init_loc = init_loc.unwrap();
+        assert!(
+            init_loc.get("path").and_then(Value::as_str).is_some(),
+            "initialLocation should have a path"
+        );
+        assert!(
+            init_loc.get("line").and_then(Value::as_i64).is_some(),
+            "initialLocation should have a line"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_open_trace_connects", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-2. step_over advances location: open trace, step_over, verify
+/// the response has a different line than the initial location.
+#[tokio::test]
+async fn m3_step_over_advances_location() {
+    let (test_dir, log_path) = setup_test_dir("m3_step_over_advances");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-step", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 11_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "open should succeed"
+        );
+
+        let initial_line = open_resp
+            .get("body")
+            .and_then(|b| b.get("initialLocation"))
+            .and_then(|l| l.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(&log_path, &format!("initial line: {initial_line}"));
+
+        // step_over.
+        let nav_resp =
+            py_navigate(&mut client, 11_001, &trace_dir, "step_over", None, &log_path).await?;
+        assert_eq!(
+            nav_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "step_over should succeed"
+        );
+
+        let nav_body = nav_resp.get("body").expect("response should have body");
+        let new_line = nav_body.get("line").and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("new line after step_over: {new_line}"));
+
+        // The mock advances the line by 1 on each step_over.
+        assert!(
+            new_line != initial_line,
+            "line should change after step_over (was {initial_line}, now {new_line})"
+        );
+        assert_eq!(
+            new_line,
+            initial_line + 1,
+            "line should be initial+1 after step_over"
+        );
+
+        // Verify ticks also changed.
+        let new_ticks = nav_body.get("ticks").and_then(Value::as_i64).unwrap_or(0);
+        assert!(new_ticks > 0, "ticks should be > 0 after step_over");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_step_over_advances_location", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-3. step_in enters a different function: open trace, step_in,
+/// verify the response has a different file than the initial location.
+#[tokio::test]
+async fn m3_step_in_enters_function() {
+    let (test_dir, log_path) = setup_test_dir("m3_step_in_enters");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-stepin", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 12_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "open should succeed"
+        );
+
+        let initial_file = open_resp
+            .get("body")
+            .and_then(|b| b.get("initialLocation"))
+            .and_then(|l| l.get("path"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        log_line(&log_path, &format!("initial file: {initial_file}"));
+
+        // step_in — mock changes file to helpers.nim.
+        let nav_resp =
+            py_navigate(&mut client, 12_001, &trace_dir, "step_in", None, &log_path).await?;
+        assert_eq!(
+            nav_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "step_in should succeed"
+        );
+
+        let nav_body = nav_resp.get("body").expect("response should have body");
+        let new_file = nav_body
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        log_line(&log_path, &format!("file after step_in: {new_file}"));
+
+        // The mock changes to helpers.nim on step_in.
+        assert_eq!(
+            new_file, "helpers.nim",
+            "file should be helpers.nim after step_in, got {new_file}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_step_in_enters_function", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-4. step_in then step_out returns to caller: verify back at main.nim.
+#[tokio::test]
+async fn m3_step_out_returns_to_caller() {
+    let (test_dir, log_path) = setup_test_dir("m3_step_out_returns");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-stepout", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 13_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+        );
+
+        // step_in (enters helpers.nim).
+        let nav1 =
+            py_navigate(&mut client, 13_001, &trace_dir, "step_in", None, &log_path).await?;
+        assert_eq!(nav1.get("success").and_then(Value::as_bool), Some(true));
+        let file_after_in = nav1
+            .get("body")
+            .and_then(|b| b.get("path"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_eq!(file_after_in, "helpers.nim", "should be in helpers.nim after step_in");
+
+        // step_out (returns to main.nim).
+        let nav2 =
+            py_navigate(&mut client, 13_002, &trace_dir, "step_out", None, &log_path).await?;
+        assert_eq!(nav2.get("success").and_then(Value::as_bool), Some(true));
+        let file_after_out = nav2
+            .get("body")
+            .and_then(|b| b.get("path"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_eq!(
+            file_after_out, "main.nim",
+            "should be back at main.nim after step_out, got {file_after_out}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_step_out_returns_to_caller", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-5. step_back reverses: step_over twice, step_back, verify
+/// the line matches the first step_over position.
+#[tokio::test]
+async fn m3_step_back_reverses() {
+    let (test_dir, log_path) = setup_test_dir("m3_step_back_reverses");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-stepback", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 14_000, &trace_dir, &log_path).await?;
+        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        // step_over (1st).
+        let nav1 =
+            py_navigate(&mut client, 14_001, &trace_dir, "step_over", None, &log_path).await?;
+        assert_eq!(nav1.get("success").and_then(Value::as_bool), Some(true));
+        let line_after_first =
+            nav1.get("body").and_then(|b| b.get("line")).and_then(Value::as_i64).unwrap_or(0);
+        let ticks_after_first =
+            nav1.get("body").and_then(|b| b.get("ticks")).and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("after 1st step: line={line_after_first}, ticks={ticks_after_first}"));
+
+        // step_over (2nd).
+        let nav2 =
+            py_navigate(&mut client, 14_002, &trace_dir, "step_over", None, &log_path).await?;
+        assert_eq!(nav2.get("success").and_then(Value::as_bool), Some(true));
+        let line_after_second =
+            nav2.get("body").and_then(|b| b.get("line")).and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("after 2nd step: line={line_after_second}"));
+        assert_eq!(
+            line_after_second,
+            line_after_first + 1,
+            "2nd step should be one line ahead of 1st"
+        );
+
+        // step_back (should go back to the first step's position).
+        let nav3 =
+            py_navigate(&mut client, 14_003, &trace_dir, "step_back", None, &log_path).await?;
+        assert_eq!(nav3.get("success").and_then(Value::as_bool), Some(true));
+        let line_after_back =
+            nav3.get("body").and_then(|b| b.get("line")).and_then(Value::as_i64).unwrap_or(0);
+        let ticks_after_back =
+            nav3.get("body").and_then(|b| b.get("ticks")).and_then(Value::as_i64).unwrap_or(0);
+        log_line(&log_path, &format!("after step_back: line={line_after_back}, ticks={ticks_after_back}"));
+
+        // In the mock: step_back decrements line by 1 and ticks by 10.
+        // After 2 step_overs (line=3, ticks=120), step_back => (line=2, ticks=110).
+        assert_eq!(
+            line_after_back, line_after_first,
+            "line after step_back should match first step's line"
+        );
+        assert_eq!(
+            ticks_after_back, ticks_after_first,
+            "ticks after step_back should match first step's ticks"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_step_back_reverses", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-6. continue_forward runs to end: verify endOfTrace flag is true.
+#[tokio::test]
+async fn m3_continue_forward_runs_to_end() {
+    let (test_dir, log_path) = setup_test_dir("m3_continue_fwd_end");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-continue-fwd", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 15_000, &trace_dir, &log_path).await?;
+        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        // continue_forward — mock jumps to line 100 with endOfTrace=true.
+        let nav_resp = py_navigate(
+            &mut client,
+            15_001,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(nav_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        let nav_body = nav_resp.get("body").expect("response should have body");
+        let end_of_trace = nav_body
+            .get("endOfTrace")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        log_line(&log_path, &format!("endOfTrace: {end_of_trace}"));
+
+        assert!(
+            end_of_trace,
+            "endOfTrace should be true after continue_forward"
+        );
+
+        // Verify line jumped to 100 (mock's end).
+        let line = nav_body.get("line").and_then(Value::as_i64).unwrap_or(0);
+        assert_eq!(line, 100, "line should be 100 at end of trace");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_continue_forward_runs_to_end", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-7. continue_reverse runs to start: step forward first, then
+/// continue_reverse, verify endOfTrace flag.
+#[tokio::test]
+async fn m3_continue_reverse_runs_to_start() {
+    let (test_dir, log_path) = setup_test_dir("m3_continue_rev_start");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-continue-rev", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 16_000, &trace_dir, &log_path).await?;
+        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        // Step forward once so we're not at the very start.
+        let _nav1 =
+            py_navigate(&mut client, 16_001, &trace_dir, "step_over", None, &log_path).await?;
+
+        // continue_reverse — mock jumps to line 1 with endOfTrace=true.
+        let nav_resp = py_navigate(
+            &mut client,
+            16_002,
+            &trace_dir,
+            "continue_reverse",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(nav_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        let nav_body = nav_resp.get("body").expect("response should have body");
+        let end_of_trace = nav_body
+            .get("endOfTrace")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let line = nav_body.get("line").and_then(Value::as_i64).unwrap_or(-1);
+        log_line(
+            &log_path,
+            &format!("after continue_reverse: line={line}, endOfTrace={end_of_trace}"),
+        );
+
+        assert!(
+            end_of_trace,
+            "endOfTrace should be true after continue_reverse"
+        );
+        assert_eq!(line, 1, "line should be 1 at start of trace");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_continue_reverse_runs_to_start", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-8. goto_ticks navigates: step to record ticks, navigate away,
+/// then goto_ticks to return, verify ticks match.
+#[tokio::test]
+async fn m3_goto_ticks_navigates() {
+    let (test_dir, log_path) = setup_test_dir("m3_goto_ticks");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-goto", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 17_000, &trace_dir, &log_path).await?;
+        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        // Step forward to get a known ticks value.
+        let nav1 =
+            py_navigate(&mut client, 17_001, &trace_dir, "step_over", None, &log_path).await?;
+        assert_eq!(nav1.get("success").and_then(Value::as_bool), Some(true));
+        let target_ticks = nav1
+            .get("body")
+            .and_then(|b| b.get("ticks"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(&log_path, &format!("target ticks: {target_ticks}"));
+        assert!(target_ticks > 0, "ticks should be > 0 after step_over");
+
+        // Navigate away (step_over again).
+        let _nav2 =
+            py_navigate(&mut client, 17_002, &trace_dir, "step_over", None, &log_path).await?;
+
+        // goto_ticks back to the saved position.
+        let nav3 = py_navigate(
+            &mut client,
+            17_003,
+            &trace_dir,
+            "goto_ticks",
+            Some(json!({"ticks": target_ticks})),
+            &log_path,
+        )
+        .await?;
+        assert_eq!(nav3.get("success").and_then(Value::as_bool), Some(true));
+
+        let arrived_ticks = nav3
+            .get("body")
+            .and_then(|b| b.get("ticks"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(&log_path, &format!("arrived ticks: {arrived_ticks}"));
+
+        assert_eq!(
+            arrived_ticks, target_ticks,
+            "ticks after goto_ticks should match target ({target_ticks}), got {arrived_ticks}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_goto_ticks_navigates", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M3-9. Location has all fields: verify path, line, column are present.
+#[tokio::test]
+async fn m3_location_has_all_fields() {
+    let (test_dir, log_path) = setup_test_dir("m3_location_all_fields");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-fields", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 18_000, &trace_dir, &log_path).await?;
+        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        // Navigate to get a location response.
+        let nav_resp =
+            py_navigate(&mut client, 18_001, &trace_dir, "step_over", None, &log_path).await?;
+        assert_eq!(nav_resp.get("success").and_then(Value::as_bool), Some(true));
+
+        let body = nav_resp.get("body").expect("response should have body");
+
+        // Verify all location fields are present and have appropriate types.
+        let path = body.get("path").and_then(Value::as_str);
+        let line = body.get("line").and_then(Value::as_i64);
+        let column = body.get("column").and_then(Value::as_i64);
+        let ticks = body.get("ticks").and_then(Value::as_i64);
+        let end_of_trace = body.get("endOfTrace").and_then(Value::as_bool);
+
+        log_line(
+            &log_path,
+            &format!(
+                "location: path={path:?}, line={line:?}, column={column:?}, ticks={ticks:?}, endOfTrace={end_of_trace:?}"
+            ),
+        );
+
+        assert!(path.is_some(), "path should be present");
+        assert!(!path.unwrap().is_empty(), "path should not be empty");
+        assert!(line.is_some(), "line should be present");
+        assert!(line.unwrap() > 0, "line should be > 0");
+        assert!(column.is_some(), "column should be present");
+        assert!(ticks.is_some(), "ticks should be present");
+        assert!(ticks.unwrap() > 0, "ticks should be > 0");
+        assert!(end_of_trace.is_some(), "endOfTrace should be present");
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m3_location_has_all_fields", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
