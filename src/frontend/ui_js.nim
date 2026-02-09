@@ -1059,6 +1059,26 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   data.tryInitLayout()
 
 
+proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptions=StartOptions)) =
+  ## Handler for ``CODETRACER::start-deepreview`` IPC message.
+  ## Sets up the frontend for DeepReview offline review mode.
+  data.startOptions.loading = false
+  data.startOptions.withDeepReview = true
+  data.config = response.config
+  # The deepReview data was already parsed in parseArgs on the index side,
+  # but since the renderer runs in a separate Electron process, the
+  # startOptions are forwarded via the IPC message.
+  data.startOptions.deepReview = response.startOptions.deepReview
+  loadTheme(data.config.theme)
+
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.welcomeScreen = false
+    data.ui.welcomeScreen.newRecordScreen = false
+
+  data.ui.initEventReceived = true
+  data.tryInitLayout()
+
+
 proc onFilenamesLoaded(
     sender: js,
     response: jsobject(
@@ -1619,6 +1639,7 @@ proc configureIPC(data: Data) =
     "trace-loaded"
     "update-trace"
     "start-shell-ui"
+    "start-deepreview"
 
     "no-trace"
     "welcome-screen"

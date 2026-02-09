@@ -63,6 +63,19 @@ proc parseArgs* =
         else:
           errorPrint "expected --diff-index <indexDiffJson>"
           break
+      elif arg == cstring"--deepreview":
+        # Load a DeepReview JSON export file for offline review mode.
+        # The JSON structure matches the DeepReviewData type produced
+        # by ct-rr-support's json_export module.
+        if i + 1 < args.len:
+          data.startOptions.deepReview = cast[DeepReviewData](JSON.parse(fs.readFileSync(args[i + 1], cstring"utf8")))
+          data.startOptions.withDeepReview = true
+          data.startOptions.traceID = -1
+          i += 2
+          continue
+        else:
+          errorPrint "expected --deepreview <deepreviewJson>"
+          break
       elif arg == cstring"--no-record":
         data.startOptions.record = false
       elif arg == cstring"--welcome-screen":

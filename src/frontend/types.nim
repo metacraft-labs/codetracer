@@ -826,6 +826,19 @@ type
     # lastScrollFireTime*: int64
     service*: FlowService
 
+  DeepReviewComponent* = ref object of Component
+    ## Standalone DeepReview viewer.
+    ## Displays coverage, inline values, and call trace from a
+    ## DeepReview JSON export without requiring a debugger connection.
+    drData*: DeepReviewData
+    selectedFileIndex*: int
+    selectedExecutionIndex*: int
+    selectedIteration*: int
+    editor*: MonacoEditor
+    editorInitialized*: bool
+    currentDecorationIds*: js
+    fileContentCache*: JsAssoc[cstring, cstring]
+
   LowLevelCodeComponent* = ref object of Component
     editor*: EditorViewComponent
     instructionsMapping*: JsAssoc[int, int]

@@ -216,6 +216,8 @@ type
     diff*: Diff
     withDiff*: bool
     rawDiffIndex*: langstring
+    deepReview*: DeepReviewData
+    withDeepReview*: bool
 
   # The contents of a window in the frontend
   Content* {.pure.} = enum
@@ -254,7 +256,8 @@ type
     CommandPalette = 32,
     StepList = 33,
     NoInfo = 34,
-    AgentActivity = 35
+    AgentActivity = 35,
+    DeepReview = 36
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

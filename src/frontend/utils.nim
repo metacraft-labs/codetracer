@@ -646,6 +646,21 @@ proc makeStepListComponent*(data: Data, id: int): StepListComponent =
     service: data.services.flow)
   data.registerComponent(result, Content.StepList)
 
+proc makeDeepReviewComponent*(data: Data, id: int): DeepReviewComponent =
+  ## Create a new DeepReviewComponent.
+  ## The component is populated from ``data.startOptions.deepReview``.
+  result = DeepReviewComponent(
+    id: id,
+    drData: data.startOptions.deepReview,
+    selectedFileIndex: 0,
+    selectedExecutionIndex: 0,
+    selectedIteration: 0,
+    editorInitialized: false,
+    currentDecorationIds: jsNull,
+    fileContentCache: JsAssoc[cstring, cstring]{}
+  )
+  data.registerComponent(result, Content.DeepReview)
+
 data.ui = Components(
   editors: JsAssoc[cstring, EditorViewComponent]{},
   idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
@@ -693,6 +708,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.StepList:        data.makeStepListComponent(id)
   of Content.LowLevelCode:    data.makeLowLevelCodeComponent(id)
   of Content.AgentActivity:   data.makeAgentActivityComponent(id)
+  of Content.DeepReview:      data.makeDeepReviewComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")

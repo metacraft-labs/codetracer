@@ -10,6 +10,7 @@ const
     cstring"CODETRACER::started",
     cstring"CODETRACER::init",
     cstring"CODETRACER::start-shell-ui",
+    cstring"CODETRACER::start-deepreview",
     cstring"CODETRACER::no-trace",
     cstring"CODETRACER::welcome-screen"
   ]

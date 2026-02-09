@@ -75,6 +75,18 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
     await started()
     return
 
+  if data.startOptions.withDeepReview:
+    # DeepReview mode: skip trace loading and send the startup message
+    # directly to the frontend renderer so it can initialise the
+    # DeepReview component layout.
+    debugPrint "start deepreview mode"
+    await started()
+    mainWindow.webContents.send "CODETRACER::start-deepreview", js{
+      config: data.config,
+      startOptions: data.startOptions
+    }
+    return
+
   # TODO: leave this to backend/DAP if possible
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     if bypass:
