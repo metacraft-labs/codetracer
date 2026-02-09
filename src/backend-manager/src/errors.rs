@@ -32,3 +32,16 @@ impl Display for SocketPathError {
 }
 
 impl Error for SocketPathError {}
+
+/// The daemon is already running (PID file exists and process is alive).
+#[derive(Debug)]
+pub struct DaemonAlreadyRunning(pub u32);
+
+impl Display for DaemonAlreadyRunning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Daemon is already running with PID {}", self.0)
+    }
+}
+
+impl Error for DaemonAlreadyRunning {}
+
