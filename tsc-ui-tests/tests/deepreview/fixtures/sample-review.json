@@ -1,0 +1,386 @@
+{
+  "commitSha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "baseCommitSha": "0000000000000000000000000000000000000000000000000000000000000000",
+  "collectionTimeMs": 1542,
+  "recordingCount": 2,
+  "files": [
+    {
+      "path": "src/main.rs",
+      "contentHash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "symbols": [
+        {
+          "name": "main",
+          "typeDesc": "fn()",
+          "kind": "function",
+          "visibility": "public",
+          "startLine": 1,
+          "endLine": 12
+        },
+        {
+          "name": "compute",
+          "typeDesc": "fn(i32) -> i32",
+          "kind": "function",
+          "visibility": "public",
+          "startLine": 14,
+          "endLine": 25
+        }
+      ],
+      "coverage": [
+        { "line": 1,  "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 2,  "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 3,  "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 4,  "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 5,  "executionCount": 0, "sampleCount": 0, "executed": false, "unreachable": true,  "partial": false },
+        { "line": 6,  "executionCount": 1, "sampleCount": 1, "executed": true,  "unreachable": false, "partial": true  },
+        { "line": 7,  "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 8,  "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 9,  "executionCount": 0, "sampleCount": 0, "executed": false, "unreachable": true,  "partial": false },
+        { "line": 10, "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 14, "executionCount": 4, "sampleCount": 4, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 15, "executionCount": 4, "sampleCount": 4, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 16, "executionCount": 12,"sampleCount": 12,"executed": true,  "unreachable": false, "partial": false },
+        { "line": 17, "executionCount": 12,"sampleCount": 12,"executed": true,  "unreachable": false, "partial": false },
+        { "line": 18, "executionCount": 12,"sampleCount": 12,"executed": true,  "unreachable": false, "partial": false },
+        { "line": 19, "executionCount": 4, "sampleCount": 4, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 25, "executionCount": 4, "sampleCount": 4, "executed": true,  "unreachable": false, "partial": false }
+      ],
+      "functions": [
+        { "name": "main",    "startLine": 1,  "endLine": 12, "callCount": 2, "executionCount": 2 },
+        { "name": "compute", "startLine": 14, "endLine": 25, "callCount": 4, "executionCount": 4 }
+      ],
+      "loops": [
+        { "loopId": 1, "headerLine": 16, "startLine": 16, "endLine": 18, "totalIterations": 6 }
+      ],
+      "flow": [
+        {
+          "functionKey": "main",
+          "executionIndex": 0,
+          "steps": [
+            {
+              "line": 1,
+              "stepCount": 0,
+              "rrTicks": 100000,
+              "loopId": -1,
+              "iteration": 0,
+              "values": []
+            },
+            {
+              "line": 2,
+              "stepCount": 1,
+              "rrTicks": 100010,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "x", "value": "10", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 3,
+              "stepCount": 2,
+              "rrTicks": 100020,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "x", "value": "10", "kind": "int", "truncated": false },
+                { "name": "y", "value": "20", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 4,
+              "stepCount": 3,
+              "rrTicks": 100030,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "result", "value": "55", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 10,
+              "stepCount": 4,
+              "rrTicks": 100090,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "result", "value": "55", "kind": "int", "truncated": false }
+              ]
+            }
+          ]
+        },
+        {
+          "functionKey": "main",
+          "executionIndex": 1,
+          "steps": [
+            {
+              "line": 1,
+              "stepCount": 0,
+              "rrTicks": 200000,
+              "loopId": -1,
+              "iteration": 0,
+              "values": []
+            },
+            {
+              "line": 2,
+              "stepCount": 1,
+              "rrTicks": 200010,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "x", "value": "42", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 3,
+              "stepCount": 2,
+              "rrTicks": 200020,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "x", "value": "42", "kind": "int", "truncated": false },
+                { "name": "y", "value": "84", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 4,
+              "stepCount": 3,
+              "rrTicks": 200030,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "result", "value": "903", "kind": "int", "truncated": false }
+              ]
+            }
+          ]
+        },
+        {
+          "functionKey": "compute",
+          "executionIndex": 0,
+          "steps": [
+            {
+              "line": 14,
+              "stepCount": 0,
+              "rrTicks": 100040,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "n", "value": "10", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 15,
+              "stepCount": 1,
+              "rrTicks": 100050,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "n", "value": "10", "kind": "int", "truncated": false },
+                { "name": "acc", "value": "0", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 16,
+              "stepCount": 2,
+              "rrTicks": 100060,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                { "name": "i", "value": "0", "kind": "int", "truncated": false },
+                { "name": "acc", "value": "0", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 17,
+              "stepCount": 3,
+              "rrTicks": 100061,
+              "loopId": 1,
+              "iteration": 0,
+              "values": [
+                { "name": "acc", "value": "0", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 16,
+              "stepCount": 4,
+              "rrTicks": 100062,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                { "name": "i", "value": "1", "kind": "int", "truncated": false },
+                { "name": "acc", "value": "1", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 17,
+              "stepCount": 5,
+              "rrTicks": 100063,
+              "loopId": 1,
+              "iteration": 1,
+              "values": [
+                { "name": "acc", "value": "1", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 16,
+              "stepCount": 6,
+              "rrTicks": 100064,
+              "loopId": 1,
+              "iteration": 2,
+              "values": [
+                { "name": "i", "value": "2", "kind": "int", "truncated": false },
+                { "name": "acc", "value": "3", "kind": "int", "truncated": false }
+              ]
+            },
+            {
+              "line": 19,
+              "stepCount": 7,
+              "rrTicks": 100080,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "acc", "value": "55", "kind": "int", "truncated": false }
+              ]
+            }
+          ]
+        }
+      ],
+      "flags": {
+        "hasSymbols": true,
+        "hasCoverage": true,
+        "hasFlow": true,
+        "isUnreachable": false,
+        "isPartial": false
+      }
+    },
+    {
+      "path": "src/utils.rs",
+      "contentHash": "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe",
+      "symbols": [
+        {
+          "name": "format_output",
+          "typeDesc": "fn(&str) -> String",
+          "kind": "function",
+          "visibility": "public",
+          "startLine": 1,
+          "endLine": 8
+        }
+      ],
+      "coverage": [
+        { "line": 1, "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 2, "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 3, "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 4, "executionCount": 0, "sampleCount": 0, "executed": false, "unreachable": true,  "partial": false },
+        { "line": 5, "executionCount": 0, "sampleCount": 0, "executed": false, "unreachable": true,  "partial": false },
+        { "line": 6, "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false },
+        { "line": 8, "executionCount": 2, "sampleCount": 2, "executed": true,  "unreachable": false, "partial": false }
+      ],
+      "functions": [
+        { "name": "format_output", "startLine": 1, "endLine": 8, "callCount": 2, "executionCount": 1 }
+      ],
+      "loops": [],
+      "flow": [
+        {
+          "functionKey": "format_output",
+          "executionIndex": 0,
+          "steps": [
+            {
+              "line": 1,
+              "stepCount": 0,
+              "rrTicks": 300000,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "input", "value": "\"hello world, this is a very long string that should be truncated because it exceeds the maximum display width\"", "kind": "string", "truncated": true }
+              ]
+            },
+            {
+              "line": 2,
+              "stepCount": 1,
+              "rrTicks": 300010,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "trimmed", "value": "\"hello world\"", "kind": "string", "truncated": false }
+              ]
+            },
+            {
+              "line": 6,
+              "stepCount": 2,
+              "rrTicks": 300050,
+              "loopId": -1,
+              "iteration": 0,
+              "values": [
+                { "name": "result", "value": "\"[hello world]\"", "kind": "string", "truncated": false }
+              ]
+            }
+          ]
+        }
+      ],
+      "flags": {
+        "hasSymbols": true,
+        "hasCoverage": true,
+        "hasFlow": true,
+        "isUnreachable": false,
+        "isPartial": false
+      }
+    },
+    {
+      "path": "src/config.rs",
+      "contentHash": "1234567812345678123456781234567812345678123456781234567812345678",
+      "symbols": [
+        {
+          "name": "DEFAULT_TIMEOUT",
+          "typeDesc": "u64",
+          "kind": "constant",
+          "visibility": "public",
+          "startLine": 1,
+          "endLine": 1
+        },
+        {
+          "name": "Config",
+          "typeDesc": "struct Config",
+          "kind": "type",
+          "visibility": "public",
+          "startLine": 3,
+          "endLine": 7
+        }
+      ],
+      "coverage": [],
+      "functions": [],
+      "loops": [],
+      "flow": [],
+      "flags": {
+        "hasSymbols": true,
+        "hasCoverage": false,
+        "hasFlow": false,
+        "isUnreachable": true,
+        "isPartial": false
+      }
+    }
+  ],
+  "callTrace": {
+    "nodes": [
+      {
+        "name": "main",
+        "executionCount": 1,
+        "children": [
+          {
+            "name": "compute",
+            "executionCount": 1,
+            "children": []
+          },
+          {
+            "name": "format_output",
+            "executionCount": 1,
+            "children": [
+              {
+                "name": "trim_string",
+                "executionCount": 1,
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
