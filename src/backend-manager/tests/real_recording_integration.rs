@@ -16,6 +16,13 @@
 //! against real traces.  These exercise the full DAP round-trip: navigation
 //! command -> stopped event -> stackTrace -> location response.
 //!
+//! ## M4 — Python API Variables and Expressions
+//!
+//! Tests for `ct/py-locals`, `ct/py-evaluate`, and `ct/py-stack-trace` that
+//! verify variable inspection, expression evaluation, and stack trace
+//! retrieval work correctly against real traces.  These exercise the
+//! request-response DAP round-trip through the daemon's Python bridge.
+//!
 //! ## Test categories
 //!
 //! 1. **RR-based tests**: Build and record a Rust test program via `ct-rr-support`,
@@ -2310,6 +2317,935 @@ async fn test_real_custom_navigate_step_over() {
 
     report(
         "test_real_custom_navigate_step_over",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M4 Variables & Expressions helpers
+// ===========================================================================
+
+/// Sends `ct/py-locals` and waits for the response, skipping any
+/// interleaved events.
+///
+/// Returns the full response JSON on success.  Uses a 30-second timeout
+/// to account for DAP round-trips through a real backend.
+async fn send_py_locals(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    depth: i64,
+    count_budget: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-locals",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+            "depth": depth,
+            "countBudget": count_budget,
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-locals seq={seq} depth={depth} countBudget={count_budget}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-locals: {e}"))?;
+
+    // Read messages, skipping events until we get a response.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-locals response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-locals response".to_string())?
+            .map_err(|e| format!("read ct/py-locals: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-locals: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("<- ct/py-locals response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-evaluate` and waits for the response, skipping any
+/// interleaved events.
+///
+/// Returns the full response JSON on success.  Uses a 30-second timeout.
+async fn send_py_evaluate(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    expression: &str,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-evaluate",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+            "expression": expression,
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-evaluate seq={seq} expression={expression}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-evaluate: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-evaluate response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-evaluate response".to_string())?
+            .map_err(|e| format!("read ct/py-evaluate: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-evaluate: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("<- ct/py-evaluate response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-stack-trace` and waits for the response, skipping any
+/// interleaved events.
+///
+/// Returns the full response JSON on success.  Uses a 30-second timeout.
+async fn send_py_stack_trace(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-stack-trace",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-stack-trace seq={seq}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-stack-trace: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-stack-trace response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-stack-trace response".to_string())?
+            .map_err(|e| format!("read ct/py-stack-trace: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-stack-trace: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("<- ct/py-stack-trace response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+// ===========================================================================
+// M4 RR-based variable inspection tests
+// ===========================================================================
+
+/// M4-RR-1. Open an RR trace (Rust).  Step over a couple of times to reach
+/// a point with local variables in scope.  Send `ct/py-locals`.  Verify the
+/// response contains a non-empty list of variables, each with `name` and
+/// `value` fields.
+///
+/// The test program (`rust_flow_test.rs`) declares variables `x`, `y` in
+/// `main()` and `a`, `b`, `sum`, `doubled`, `final_result` in
+/// `calculate_sum()`.  After a few `step_over` commands we should land on a
+/// line where at least one local variable is in scope.
+#[tokio::test]
+async fn test_real_rr_locals_returns_variables() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_locals_returns_vars");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_locals_returns_variables: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        log_line(
+            &log_path,
+            &format!(
+                "ct-rr-support: {}, db-backend: {}",
+                ct_rr_support.display(),
+                db_backend.display()
+            ),
+        );
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start the daemon with the real db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 12_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step over several times to reach a point inside user code where
+        // local variables are in scope.  We step until we find a line in
+        // `rust_flow_test` with line > 0 (user code with debug info),
+        // then do a few more steps to ensure variables are initialized.
+        let mut seq = 12_001;
+        let mut in_user_code = false;
+        let mut steps_in_user_code = 0;
+
+        for _ in 0..50 {
+            let resp = navigate(
+                &mut client,
+                seq,
+                &trace_dir,
+                "step_over",
+                None,
+                &log_path,
+            )
+            .await?;
+            seq += 1;
+
+            if resp.get("success").and_then(Value::as_bool) != Some(true) {
+                log_line(&log_path, &format!("step_over failed: {resp}"));
+                break;
+            }
+
+            let (path, line, _, _, eot) = extract_nav_location(&resp)?;
+            log_line(
+                &log_path,
+                &format!("step: path={path} line={line} eot={eot}"),
+            );
+
+            if eot {
+                break;
+            }
+
+            if path.contains("rust_flow_test") && line > 0 {
+                in_user_code = true;
+                steps_in_user_code += 1;
+                // After 3 steps in user code, variables should be in scope
+                // (e.g., we should be past `let x = 10; let y = 32;`).
+                if steps_in_user_code >= 3 {
+                    log_line(
+                        &log_path,
+                        &format!(
+                            "reached user code with enough steps: line={line}"
+                        ),
+                    );
+                    break;
+                }
+            }
+        }
+
+        if !in_user_code {
+            log_line(
+                &log_path,
+                "WARNING: never reached user code; locals may be empty",
+            );
+        }
+
+        // Now send ct/py-locals to inspect local variables.
+        let locals_resp = send_py_locals(
+            &mut client,
+            seq,
+            &trace_dir,
+            1,   // depth
+            100, // countBudget
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            locals_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals should succeed, got: {locals_resp}"
+        );
+
+        let body = locals_resp
+            .get("body")
+            .expect("ct/py-locals response should have body");
+
+        let variables = body
+            .get("variables")
+            .and_then(Value::as_array)
+            .expect("body should contain 'variables' array");
+
+        log_line(
+            &log_path,
+            &format!(
+                "variables ({} total): {}",
+                variables.len(),
+                serde_json::to_string_pretty(body).unwrap_or_default()
+            ),
+        );
+
+        // Verify the response contains at least one variable.
+        // When in user code, we expect variables like `x`, `y`, `result`, etc.
+        if in_user_code {
+            assert!(
+                !variables.is_empty(),
+                "ct/py-locals should return at least one variable in user code"
+            );
+        }
+
+        // Verify each variable has `name` and `value` fields.
+        for var in variables {
+            assert!(
+                var.get("name").and_then(Value::as_str).is_some(),
+                "each variable should have a 'name' field, got: {var}"
+            );
+            // The value field may be a string or may not exist for some
+            // backends, but we check it is present.
+            assert!(
+                var.get("value").is_some(),
+                "each variable should have a 'value' field, got: {var}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_locals_returns_variables",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-RR-2. Open an RR trace.  Navigate to a point with variables in scope.
+/// Send `ct/py-evaluate` with a variable name.  Verify the response returns
+/// a non-empty result string.
+///
+/// After stepping into user code of `rust_flow_test.rs`, variables like `x`
+/// (= 10) and `y` (= 32) should be in scope.  We evaluate the first
+/// variable name found via `ct/py-locals` to confirm `ct/py-evaluate` works.
+#[tokio::test]
+async fn test_real_rr_evaluate_expression() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_evaluate_expr");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_evaluate_expression: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        // Start the daemon.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 13_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step into user code (same pattern as the locals test).
+        let mut seq = 13_001;
+        let mut in_user_code = false;
+        let mut steps_in_user_code = 0;
+
+        for _ in 0..50 {
+            let resp = navigate(
+                &mut client,
+                seq,
+                &trace_dir,
+                "step_over",
+                None,
+                &log_path,
+            )
+            .await?;
+            seq += 1;
+
+            if resp.get("success").and_then(Value::as_bool) != Some(true) {
+                break;
+            }
+
+            let (path, line, _, _, eot) = extract_nav_location(&resp)?;
+            if eot {
+                break;
+            }
+
+            if path.contains("rust_flow_test") && line > 0 {
+                in_user_code = true;
+                steps_in_user_code += 1;
+                if steps_in_user_code >= 3 {
+                    log_line(
+                        &log_path,
+                        &format!("reached user code at line={line}"),
+                    );
+                    break;
+                }
+            }
+        }
+
+        if !in_user_code {
+            log_line(
+                &log_path,
+                "WARNING: never reached user code; evaluate may fail",
+            );
+        }
+
+        // First, get locals to find a variable name to evaluate.
+        let locals_resp = send_py_locals(
+            &mut client,
+            seq,
+            &trace_dir,
+            1,
+            100,
+            &log_path,
+        )
+        .await?;
+        seq += 1;
+
+        let var_name = if locals_resp
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            locals_resp
+                .get("body")
+                .and_then(|b| b.get("variables"))
+                .and_then(Value::as_array)
+                .and_then(|vars| vars.first())
+                .and_then(|v| v.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("x")
+                .to_string()
+        } else {
+            // If locals failed, try evaluating "x" directly (a known
+            // variable in the test program).
+            "x".to_string()
+        };
+
+        log_line(
+            &log_path,
+            &format!("evaluating expression: {var_name}"),
+        );
+
+        // Send ct/py-evaluate.
+        let eval_resp = send_py_evaluate(
+            &mut client,
+            seq,
+            &trace_dir,
+            &var_name,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            eval_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-evaluate should succeed, got: {eval_resp}"
+        );
+
+        let body = eval_resp
+            .get("body")
+            .expect("ct/py-evaluate response should have body");
+
+        log_line(
+            &log_path,
+            &format!(
+                "evaluate result: {}",
+                serde_json::to_string_pretty(body).unwrap_or_default()
+            ),
+        );
+
+        // Verify the response contains `result` and `type` fields.
+        assert!(
+            body.get("result").is_some(),
+            "ct/py-evaluate body should contain 'result' field"
+        );
+        assert!(
+            body.get("type").is_some(),
+            "ct/py-evaluate body should contain 'type' field"
+        );
+
+        // The result should be a non-empty string (the variable has a
+        // value in the trace).
+        let result_str = body
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        log_line(
+            &log_path,
+            &format!("evaluate result value: '{result_str}'"),
+        );
+
+        // When in user code, the result should be non-empty.
+        if in_user_code {
+            assert!(
+                !result_str.is_empty(),
+                "ct/py-evaluate should return a non-empty result in user code"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_evaluate_expression",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M4-RR-3. Open an RR trace.  Navigate into the program (step_over to be
+/// inside main or a function).  Send `ct/py-stack-trace`.  Verify the
+/// response contains at least 1 frame with `name` and `location` fields.
+#[tokio::test]
+async fn test_real_rr_stack_trace_returns_frames() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_stack_trace_frames");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_stack_trace_returns_frames: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        // Start the daemon.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 14_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step over a couple of times so we are somewhere in the program
+        // execution (not necessarily in user code — the stack trace should
+        // work anywhere the debugger is stopped).
+        let mut seq = 14_001;
+        for _ in 0..5 {
+            let resp = navigate(
+                &mut client,
+                seq,
+                &trace_dir,
+                "step_over",
+                None,
+                &log_path,
+            )
+            .await?;
+            seq += 1;
+
+            if resp.get("success").and_then(Value::as_bool) != Some(true) {
+                break;
+            }
+            let (path, line, _, _, eot) = extract_nav_location(&resp)?;
+            log_line(
+                &log_path,
+                &format!("pre-step: path={path} line={line} eot={eot}"),
+            );
+            if eot {
+                break;
+            }
+        }
+
+        // Send ct/py-stack-trace.
+        let st_resp = send_py_stack_trace(
+            &mut client,
+            seq,
+            &trace_dir,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            st_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-stack-trace should succeed, got: {st_resp}"
+        );
+
+        let body = st_resp
+            .get("body")
+            .expect("ct/py-stack-trace response should have body");
+
+        let frames = body
+            .get("frames")
+            .and_then(Value::as_array)
+            .expect("body should contain 'frames' array");
+
+        log_line(
+            &log_path,
+            &format!(
+                "stack trace ({} frames): {}",
+                frames.len(),
+                serde_json::to_string_pretty(body).unwrap_or_default()
+            ),
+        );
+
+        // Verify at least one frame is present.
+        assert!(
+            !frames.is_empty(),
+            "ct/py-stack-trace should return at least one frame"
+        );
+
+        // Verify each frame has `name` and `location` fields.
+        for frame in frames {
+            assert!(
+                frame.get("name").is_some(),
+                "each frame should have a 'name' field, got: {frame}"
+            );
+            let location = frame
+                .get("location")
+                .unwrap_or_else(|| panic!(
+                    "each frame should have a 'location' field, got: {frame}"
+                ));
+            // Location should have `path` and `line` fields.
+            assert!(
+                location.get("path").is_some(),
+                "location should have a 'path' field, got: {location}"
+            );
+            assert!(
+                location.get("line").is_some(),
+                "location should have a 'line' field, got: {location}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_stack_trace_returns_frames",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M4 Custom trace format variable inspection tests
+// ===========================================================================
+
+/// M4-Custom-1. Open a custom trace (Ruby).  Step to a point with variables
+/// in scope.  Send `ct/py-locals`.  Verify the response contains variables
+/// from the trace (e.g., `x`, `result`, `y` from the custom trace.json).
+///
+/// The custom trace directory created by `create_custom_trace_dir` simulates
+/// a Ruby program with:
+///   - `x = 10` at line 6
+///   - `y = compute(x)` at line 7 (where compute returns 20)
+///   - `result = a * 2` inside `compute` at line 2
+///
+/// After stepping through these events the db-backend should report the
+/// variables that are in scope at the current trace position.
+#[tokio::test]
+async fn test_real_custom_locals_returns_variables() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_locals_returns_vars");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = match find_db_backend() {
+            Some(path) => path,
+            None => {
+                log_line(&log_path, "SKIP: db-backend not found");
+                println!(
+                    "test_real_custom_locals_returns_variables: SKIP (db-backend not found)"
+                );
+                return Ok(());
+            }
+        };
+
+        log_line(
+            &log_path,
+            &format!("db-backend: {}", db_backend.display()),
+        );
+
+        // Create the custom trace directory.
+        let trace_dir = create_custom_trace_dir(&test_dir, "custom-locals-trace");
+        log_line(
+            &log_path,
+            &format!("custom trace dir: {}", trace_dir.display()),
+        );
+
+        // Start the daemon with the real db-backend.
+        let (mut daemon, socket_path) =
+            start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 15_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed for custom trace, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step over several times to advance through the custom trace
+        // events.  The trace has ~20 events; stepping 5-6 times should
+        // put us past the `x = 10` assignment where `x` is in scope.
+        let mut seq = 15_001;
+        for i in 0..6 {
+            let resp = navigate(
+                &mut client,
+                seq,
+                &trace_dir,
+                "step_over",
+                None,
+                &log_path,
+            )
+            .await?;
+            seq += 1;
+
+            if resp.get("success").and_then(Value::as_bool) != Some(true) {
+                log_line(
+                    &log_path,
+                    &format!("step_over {i} failed: {resp}"),
+                );
+                break;
+            }
+
+            let (path, line, _, _, eot) = extract_nav_location(&resp)?;
+            log_line(
+                &log_path,
+                &format!("custom step {i}: path={path} line={line} eot={eot}"),
+            );
+            if eot {
+                break;
+            }
+        }
+
+        // Send ct/py-locals.
+        let locals_resp = send_py_locals(
+            &mut client,
+            seq,
+            &trace_dir,
+            1,   // depth
+            100, // countBudget
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            locals_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals should succeed for custom trace, got: {locals_resp}"
+        );
+
+        let body = locals_resp
+            .get("body")
+            .expect("ct/py-locals response should have body");
+
+        let variables = body
+            .get("variables")
+            .and_then(Value::as_array)
+            .expect("body should contain 'variables' array");
+
+        log_line(
+            &log_path,
+            &format!(
+                "custom trace variables ({} total): {}",
+                variables.len(),
+                serde_json::to_string_pretty(body).unwrap_or_default()
+            ),
+        );
+
+        // The custom trace should have variables in scope after stepping.
+        // We expect at least one variable (e.g., `x`).
+        assert!(
+            !variables.is_empty(),
+            "ct/py-locals should return at least one variable for custom trace"
+        );
+
+        // Verify each variable has required fields.
+        for var in variables {
+            assert!(
+                var.get("name").and_then(Value::as_str).is_some(),
+                "each variable should have a 'name' field, got: {var}"
+            );
+            assert!(
+                var.get("value").is_some(),
+                "each variable should have a 'value' field, got: {var}"
+            );
+        }
+
+        // Check that at least one of the expected variable names is present.
+        // The custom trace defines variables `x`, `result`, and `y`.
+        let var_names: Vec<&str> = variables
+            .iter()
+            .filter_map(|v| v.get("name").and_then(Value::as_str))
+            .collect();
+        log_line(
+            &log_path,
+            &format!("variable names: {:?}", var_names),
+        );
+
+        let expected_names = ["x", "result", "y", "a"];
+        let has_expected = var_names
+            .iter()
+            .any(|name| expected_names.contains(name));
+        assert!(
+            has_expected,
+            "at least one expected variable ({:?}) should be present, got: {:?}",
+            expected_names, var_names
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_locals_returns_variables",
         &log_path,
         success,
     );
