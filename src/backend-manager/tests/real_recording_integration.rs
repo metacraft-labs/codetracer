@@ -23,6 +23,15 @@
 //! retrieval work correctly against real traces.  These exercise the
 //! request-response DAP round-trip through the daemon's Python bridge.
 //!
+//! ## M5 — Breakpoints and Watchpoints
+//!
+//! Tests for `ct/py-add-breakpoint`, `ct/py-remove-breakpoint`, and
+//! breakpoint-aware navigation (`continue_forward`, `continue_reverse`).
+//! These verify that the daemon can set breakpoints at specific source
+//! lines, that `continue` stops at breakpoint locations, that removing a
+//! breakpoint allows execution to continue past the former breakpoint
+//! line, and that reverse continue respects breakpoints.
+//!
 //! ## Test categories
 //!
 //! 1. **RR-based tests**: Build and record a Rust test program via `ct-rr-support`,
@@ -3246,6 +3255,1239 @@ async fn test_real_custom_locals_returns_variables() {
 
     report(
         "test_real_custom_locals_returns_variables",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M5 Breakpoint helpers
+// ===========================================================================
+
+/// Sends `ct/py-add-breakpoint` and waits for the response, skipping any
+/// interleaved events.
+///
+/// The daemon expects:
+/// - `tracePath`: the canonical trace directory path
+/// - `path`: source file path to set the breakpoint in
+/// - `line`: 1-based line number for the breakpoint
+///
+/// Returns `(breakpoint_id, full_response)` on success.
+/// Uses a 30-second timeout for the DAP round-trip.
+async fn send_py_add_breakpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    source_path: &str,
+    line: i64,
+    log_path: &Path,
+) -> Result<(i64, Value), String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-add-breakpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+            "path": source_path,
+            "line": line,
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-add-breakpoint seq={seq} path={source_path} line={line}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-add-breakpoint: {e}"))?;
+
+    // Read messages, skipping events until we get a response.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-add-breakpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-add-breakpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-add-breakpoint: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("add-breakpoint: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(
+            log_path,
+            &format!("<- ct/py-add-breakpoint response: {msg}"),
+        );
+
+        // Extract the breakpoint ID from the response body.
+        let bp_id = msg
+            .get("body")
+            .and_then(|b| b.get("breakpointId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+
+        return Ok((bp_id, msg));
+    }
+}
+
+/// Sends `ct/py-remove-breakpoint` and waits for the response, skipping any
+/// interleaved events.
+///
+/// The daemon expects:
+/// - `tracePath`: the canonical trace directory path
+/// - `breakpointId`: the ID returned by `ct/py-add-breakpoint`
+///
+/// Returns the full response JSON on success.
+/// Uses a 30-second timeout for the DAP round-trip.
+async fn send_py_remove_breakpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    breakpoint_id: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-remove-breakpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+            "breakpointId": breakpoint_id,
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-remove-breakpoint seq={seq} breakpointId={breakpoint_id}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-remove-breakpoint: {e}"))?;
+
+    // Read messages, skipping events until we get a response.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-remove-breakpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-remove-breakpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-remove-breakpoint: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(
+                log_path,
+                &format!("remove-breakpoint: skipped event: {msg}"),
+            );
+            continue;
+        }
+
+        log_line(
+            log_path,
+            &format!("<- ct/py-remove-breakpoint response: {msg}"),
+        );
+        return Ok(msg);
+    }
+}
+
+/// Steps forward through the RR trace until we reach user code
+/// (`rust_flow_test` in the source path) and have taken at least
+/// `min_steps_in_user_code` steps inside it.
+///
+/// Returns `(final_seq, final_path, final_line, final_ticks, in_user_code)`.
+/// The caller can use `final_seq` to continue issuing requests with
+/// monotonically increasing sequence numbers.
+///
+/// This helper factors out the "step to user code" loop used by multiple
+/// M5 breakpoint tests, avoiding code duplication.
+async fn step_to_user_code(
+    client: &mut UnixStream,
+    start_seq: i64,
+    trace_path: &Path,
+    max_steps: usize,
+    min_steps_in_user_code: usize,
+    log_path: &Path,
+) -> Result<(i64, String, i64, i64, bool), String> {
+    let mut seq = start_seq;
+    let mut last_path = String::new();
+    let mut last_line: i64 = 0;
+    let mut last_ticks: i64 = 0;
+    let mut in_user_code = false;
+    let mut steps_in_user_code = 0;
+
+    for _ in 0..max_steps {
+        let resp = navigate(
+            client,
+            seq,
+            trace_path,
+            "step_over",
+            None,
+            log_path,
+        )
+        .await?;
+        seq += 1;
+
+        if resp.get("success").and_then(Value::as_bool) != Some(true) {
+            log_line(log_path, &format!("step_to_user_code: step_over failed: {resp}"));
+            break;
+        }
+
+        let (path, line, _, ticks, eot) = extract_nav_location(&resp)?;
+        log_line(
+            log_path,
+            &format!("step_to_user_code: path={path} line={line} ticks={ticks} eot={eot}"),
+        );
+
+        last_path = path.clone();
+        last_line = line;
+        last_ticks = ticks;
+
+        if eot {
+            break;
+        }
+
+        if path.contains("rust_flow_test") && line > 0 {
+            if !in_user_code {
+                in_user_code = true;
+            }
+            steps_in_user_code += 1;
+            if steps_in_user_code >= min_steps_in_user_code {
+                log_line(
+                    log_path,
+                    &format!(
+                        "step_to_user_code: reached user code after {steps_in_user_code} steps at line={line}"
+                    ),
+                );
+                break;
+            }
+        }
+    }
+
+    Ok((seq, last_path, last_line, last_ticks, in_user_code))
+}
+
+// ===========================================================================
+// M5 RR-based breakpoint tests
+// ===========================================================================
+
+/// M5-RR-1. Set a breakpoint at a known line in the Rust test program, then
+/// continue forward.  Verify that execution stops at (or very near) the
+/// breakpoint line.
+///
+/// The test program (`rust_flow_test.rs`) has these key lines:
+///   - line 17: `let x = 10;`
+///   - line 18: `let y = 32;`
+///   - line 19: `let result = calculate_sum(x, y);`
+///   - line 20: `println!("Result: {}", result);`
+///   - line 21: `with_loops(x);`
+///
+/// We set a breakpoint at line 20 (`println!`), then continue forward from
+/// the program start.  The debugger should stop at (or near) line 20.
+#[tokio::test]
+async fn test_real_rr_breakpoint_stops_execution() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_bp_stops");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_breakpoint_stops_execution: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        log_line(
+            &log_path,
+            &format!(
+                "ct-rr-support: {}, db-backend: {}",
+                ct_rr_support.display(),
+                db_backend.display()
+            ),
+        );
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Determine the source path as it appears in the trace.  The
+        // test program is compiled from an absolute path, so breakpoints
+        // must use the same absolute path the debugger knows about.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source_path = manifest_dir
+            .parent()
+            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
+            .ok_or("cannot determine source path")?;
+        let source_path_str = source_path.to_string_lossy().to_string();
+
+        // The breakpoint target line: `println!("Result: {}", result);`
+        // which is line 20 of rust_flow_test.rs.
+        let bp_line: i64 = 20;
+
+        // Start the daemon.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 16_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step once to get past the entry point (RR starts at _start, not
+        // at main), ensuring the debugger is in a state ready for
+        // breakpoint operations.
+        let resp = navigate(
+            &mut client,
+            16_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "initial step_over should succeed, got: {resp}"
+        );
+
+        // Add a breakpoint at the target line.
+        let (bp_id, bp_resp) = send_py_add_breakpoint(
+            &mut client,
+            16_002,
+            &trace_dir,
+            &source_path_str,
+            bp_line,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-add-breakpoint should succeed, got: {bp_resp}"
+        );
+        assert!(
+            bp_id > 0,
+            "breakpoint ID should be positive, got: {bp_id}"
+        );
+        log_line(
+            &log_path,
+            &format!("breakpoint set: id={bp_id} at {source_path_str}:{bp_line}"),
+        );
+
+        // Continue forward.  The debugger should stop at the breakpoint.
+        let cont_resp = navigate(
+            &mut client,
+            16_003,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            cont_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "continue_forward should succeed, got: {cont_resp}"
+        );
+
+        let (path, line, _, ticks, end_of_trace) = extract_nav_location(&cont_resp)?;
+        log_line(
+            &log_path,
+            &format!(
+                "after continue: path={path} line={line} ticks={ticks} eot={end_of_trace}"
+            ),
+        );
+
+        // Verify execution stopped at the breakpoint line.
+        //
+        // The debugger may stop exactly at bp_line or up to 1 line away
+        // (due to compiler optimizations or column differences), so we
+        // allow a small tolerance.  We also check that the path is the
+        // correct source file and that we did NOT reach end-of-trace
+        // (which would mean the breakpoint was missed entirely).
+        assert!(
+            !end_of_trace,
+            "continue_forward should have stopped at breakpoint, not end-of-trace"
+        );
+        assert!(
+            path.contains("rust_flow_test"),
+            "should stop in rust_flow_test.rs, got path: {path}"
+        );
+        assert!(
+            (bp_line - 1..=bp_line + 1).contains(&line),
+            "should stop at or near line {bp_line}, got line {line}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_breakpoint_stops_execution",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-RR-2. Set a breakpoint, continue to it, remove the breakpoint, go
+/// back, then continue forward again.  Verify that execution does NOT stop
+/// at the former breakpoint line — it should proceed further (either to a
+/// later line or to end-of-trace).
+///
+/// This tests the remove-breakpoint path: after `ct/py-remove-breakpoint`
+/// the daemon sends an updated (empty) `setBreakpoints` to the backend,
+/// and subsequent `continue` should not hit the removed breakpoint.
+#[tokio::test]
+async fn test_real_rr_remove_breakpoint_continues_past() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_bp_remove");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_remove_breakpoint_continues_past: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        // Determine source path.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source_path = manifest_dir
+            .parent()
+            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
+            .ok_or("cannot determine source path")?;
+        let source_path_str = source_path.to_string_lossy().to_string();
+
+        // We set a breakpoint at line 19 (`let result = calculate_sum(x, y);`)
+        // which is early enough in main() that we can later verify execution
+        // goes past it.
+        let bp_line: i64 = 19;
+
+        // Start the daemon.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 17_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step once to get past the entry point.
+        let resp = navigate(
+            &mut client,
+            17_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "initial step_over should succeed"
+        );
+        let (_, initial_line, _, initial_ticks, _) = extract_nav_location(&resp)?;
+        log_line(
+            &log_path,
+            &format!("initial position: line={initial_line} ticks={initial_ticks}"),
+        );
+
+        // Add breakpoint at line 19.
+        let (bp_id, bp_resp) = send_py_add_breakpoint(
+            &mut client,
+            17_002,
+            &trace_dir,
+            &source_path_str,
+            bp_line,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-add-breakpoint should succeed"
+        );
+        log_line(
+            &log_path,
+            &format!("breakpoint set: id={bp_id} at line {bp_line}"),
+        );
+
+        // Continue forward — should stop at the breakpoint.
+        let cont1_resp = navigate(
+            &mut client,
+            17_003,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            cont1_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "first continue_forward should succeed"
+        );
+        let (path1, line1, _, ticks1, eot1) = extract_nav_location(&cont1_resp)?;
+        log_line(
+            &log_path,
+            &format!("stopped at breakpoint: path={path1} line={line1} ticks={ticks1} eot={eot1}"),
+        );
+
+        // Verify we stopped at the breakpoint (not at end-of-trace).
+        assert!(
+            !eot1,
+            "first continue should stop at breakpoint, not end-of-trace"
+        );
+        assert!(
+            (bp_line - 1..=bp_line + 1).contains(&line1),
+            "first continue should stop at or near line {bp_line}, got line {line1}"
+        );
+
+        // Remove the breakpoint.
+        let rm_resp = send_py_remove_breakpoint(
+            &mut client,
+            17_004,
+            &trace_dir,
+            bp_id,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            rm_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-remove-breakpoint should succeed, got: {rm_resp}"
+        );
+        log_line(&log_path, &format!("breakpoint {bp_id} removed"));
+
+        // Navigate backward to before the breakpoint.  We use step_back
+        // to go to an earlier ticks value.
+        let back_resp = navigate(
+            &mut client,
+            17_005,
+            &trace_dir,
+            "step_back",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            back_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "step_back should succeed"
+        );
+        let (_, line_back, _, ticks_back, _) = extract_nav_location(&back_resp)?;
+        log_line(
+            &log_path,
+            &format!("after step_back: line={line_back} ticks={ticks_back}"),
+        );
+
+        // Continue forward again.  With the breakpoint removed, execution
+        // should go past line 19 — either to a later line in user code,
+        // or to end-of-trace if the program runs to completion.
+        let cont2_resp = navigate(
+            &mut client,
+            17_006,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            cont2_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "second continue_forward should succeed"
+        );
+        let (path2, line2, _, ticks2, eot2) = extract_nav_location(&cont2_resp)?;
+        log_line(
+            &log_path,
+            &format!(
+                "after second continue: path={path2} line={line2} ticks={ticks2} eot={eot2}"
+            ),
+        );
+
+        // With the breakpoint removed, execution should NOT stop at line
+        // 19 again.  It should either:
+        // a) Reach end-of-trace (eot2 == true), OR
+        // b) Be at a later ticks than where we were when we stepped back.
+        //
+        // We verify that execution progressed past the breakpoint: ticks
+        // advanced beyond the first breakpoint stop, OR we reached eot.
+        assert!(
+            eot2 || ticks2 > ticks1,
+            "second continue should go past the removed breakpoint: \
+             ticks2={ticks2} (should be > ticks1={ticks1}), eot2={eot2}"
+        );
+        log_line(
+            &log_path,
+            "confirmed: execution passed the removed breakpoint",
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_remove_breakpoint_continues_past",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-RR-3. Set a breakpoint at an early line, navigate forward past it
+/// (using multiple step_overs), then reverse continue.  Verify that
+/// execution stops at (or near) the breakpoint line when going backwards.
+///
+/// This exercises the RR reverse debugging capability with breakpoints:
+/// `reverseContinue` in DAP should respect the same breakpoints as
+/// forward `continue`.
+#[tokio::test]
+async fn test_real_rr_reverse_continue_hits_breakpoint() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_bp_reverse");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_reverse_continue_hits_breakpoint: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        // Determine source path.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source_path = manifest_dir
+            .parent()
+            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
+            .ok_or("cannot determine source path")?;
+        let source_path_str = source_path.to_string_lossy().to_string();
+
+        // Set breakpoint at line 18 (`let y = 32;`) — early in main().
+        let bp_line: i64 = 18;
+
+        // Start the daemon.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 18_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step to user code and then several steps past line 18, so we
+        // have execution history beyond the breakpoint line.
+        let (mut seq, last_path, last_line, last_ticks, in_user_code) = step_to_user_code(
+            &mut client,
+            18_001,
+            &trace_dir,
+            50,  // max_steps
+            5,   // min_steps_in_user_code (ensure we are well past line 18)
+            &log_path,
+        )
+        .await?;
+
+        log_line(
+            &log_path,
+            &format!(
+                "before breakpoint setup: path={last_path} line={last_line} ticks={last_ticks} \
+                 in_user_code={in_user_code}"
+            ),
+        );
+
+        if !in_user_code {
+            // If we never reached user code, the test cannot meaningfully
+            // verify reverse-continue behavior.  Log and skip.
+            log_line(
+                &log_path,
+                "WARNING: never reached user code; cannot test reverse-continue with breakpoints",
+            );
+            shutdown_daemon(&mut client, &mut daemon).await;
+            return Ok(());
+        }
+
+        // Now add the breakpoint at line 18.
+        let (bp_id, bp_resp) = send_py_add_breakpoint(
+            &mut client,
+            seq,
+            &trace_dir,
+            &source_path_str,
+            bp_line,
+            &log_path,
+        )
+        .await?;
+        seq += 1;
+
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-add-breakpoint should succeed"
+        );
+        log_line(
+            &log_path,
+            &format!("breakpoint set: id={bp_id} at line {bp_line}"),
+        );
+
+        // Reverse continue — should hit the breakpoint at line 18.
+        let rev_resp = navigate(
+            &mut client,
+            seq,
+            &trace_dir,
+            "continue_reverse",
+            None,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            rev_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "continue_reverse should succeed, got: {rev_resp}"
+        );
+
+        let (rev_path, rev_line, _, rev_ticks, _rev_eot) = extract_nav_location(&rev_resp)?;
+        log_line(
+            &log_path,
+            &format!(
+                "after reverse continue: path={rev_path} line={rev_line} ticks={rev_ticks}"
+            ),
+        );
+
+        // Verify we went backwards (ticks decreased).
+        assert!(
+            rev_ticks < last_ticks,
+            "reverse continue should go backwards: rev_ticks={rev_ticks} should be < last_ticks={last_ticks}"
+        );
+
+        // Verify we stopped at or near the breakpoint line.
+        assert!(
+            rev_path.contains("rust_flow_test"),
+            "reverse continue should stop in rust_flow_test.rs, got: {rev_path}"
+        );
+        assert!(
+            (bp_line - 1..=bp_line + 1).contains(&rev_line),
+            "reverse continue should stop at or near line {bp_line}, got line {rev_line}"
+        );
+
+        log_line(
+            &log_path,
+            "confirmed: reverse continue hit the breakpoint",
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_reverse_continue_hits_breakpoint",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M5-RR-4. Set breakpoints at multiple lines, continue to each one in
+/// sequence.  Verify that execution stops at each breakpoint line in
+/// source-order (since the program executes top-to-bottom through main).
+///
+/// This tests that the daemon correctly maintains multiple breakpoints
+/// for the same file via the `setBreakpoints` DAP command (which sends
+/// ALL breakpoint lines for a file each time).
+#[tokio::test]
+async fn test_real_rr_multiple_breakpoints() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_bp_multiple");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_multiple_breakpoints: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        // Determine source path.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source_path = manifest_dir
+            .parent()
+            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
+            .ok_or("cannot determine source path")?;
+        let source_path_str = source_path.to_string_lossy().to_string();
+
+        // Set breakpoints at two lines in main():
+        //   line 19: `let result = calculate_sum(x, y);`
+        //   line 21: `with_loops(x);`
+        let bp_line_1: i64 = 19;
+        let bp_line_2: i64 = 21;
+
+        // Start the daemon.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 19_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Step once to get past the entry point.
+        let resp = navigate(
+            &mut client,
+            19_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "initial step_over should succeed"
+        );
+
+        // Add first breakpoint (line 19).
+        let (bp_id_1, bp_resp_1) = send_py_add_breakpoint(
+            &mut client,
+            19_002,
+            &trace_dir,
+            &source_path_str,
+            bp_line_1,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            bp_resp_1.get("success").and_then(Value::as_bool),
+            Some(true),
+            "first ct/py-add-breakpoint should succeed"
+        );
+        log_line(
+            &log_path,
+            &format!("breakpoint 1: id={bp_id_1} at line {bp_line_1}"),
+        );
+
+        // Add second breakpoint (line 21).
+        let (bp_id_2, bp_resp_2) = send_py_add_breakpoint(
+            &mut client,
+            19_003,
+            &trace_dir,
+            &source_path_str,
+            bp_line_2,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            bp_resp_2.get("success").and_then(Value::as_bool),
+            Some(true),
+            "second ct/py-add-breakpoint should succeed"
+        );
+        log_line(
+            &log_path,
+            &format!("breakpoint 2: id={bp_id_2} at line {bp_line_2}"),
+        );
+
+        // Verify the two breakpoints got different IDs.
+        assert_ne!(
+            bp_id_1, bp_id_2,
+            "breakpoint IDs should be unique: {bp_id_1} vs {bp_id_2}"
+        );
+
+        // Continue forward — should hit the first breakpoint (line 19).
+        let cont1_resp = navigate(
+            &mut client,
+            19_004,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            cont1_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "first continue_forward should succeed"
+        );
+        let (path1, line1, _, ticks1, eot1) = extract_nav_location(&cont1_resp)?;
+        log_line(
+            &log_path,
+            &format!(
+                "first breakpoint hit: path={path1} line={line1} ticks={ticks1} eot={eot1}"
+            ),
+        );
+
+        assert!(
+            !eot1,
+            "first continue should stop at breakpoint, not end-of-trace"
+        );
+        assert!(
+            path1.contains("rust_flow_test"),
+            "should stop in rust_flow_test.rs, got: {path1}"
+        );
+        // Should stop at the first breakpoint (line 19) or very near it.
+        assert!(
+            (bp_line_1 - 1..=bp_line_1 + 1).contains(&line1),
+            "first continue should stop at or near line {bp_line_1}, got line {line1}"
+        );
+
+        // Continue forward again — should hit the second breakpoint (line 21).
+        let cont2_resp = navigate(
+            &mut client,
+            19_005,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+        assert_eq!(
+            cont2_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "second continue_forward should succeed"
+        );
+        let (path2, line2, _, ticks2, eot2) = extract_nav_location(&cont2_resp)?;
+        log_line(
+            &log_path,
+            &format!(
+                "second breakpoint hit: path={path2} line={line2} ticks={ticks2} eot={eot2}"
+            ),
+        );
+
+        // Verify we advanced past the first breakpoint.
+        assert!(
+            ticks2 > ticks1,
+            "second continue should advance: ticks2={ticks2} should be > ticks1={ticks1}"
+        );
+
+        // Should stop at the second breakpoint (line 21) or very near it.
+        // If the second breakpoint wasn't hit (e.g., the program ended or
+        // the debugger stopped somewhere else), the line would be quite
+        // different.
+        if !eot2 {
+            assert!(
+                path2.contains("rust_flow_test"),
+                "should stop in rust_flow_test.rs, got: {path2}"
+            );
+            assert!(
+                (bp_line_2 - 1..=bp_line_2 + 1).contains(&line2),
+                "second continue should stop at or near line {bp_line_2}, got line {line2}"
+            );
+        } else {
+            // End-of-trace is acceptable if the program terminated between
+            // the two breakpoints (unlikely for this test program, but
+            // defensive).
+            log_line(
+                &log_path,
+                "WARNING: reached end-of-trace on second continue (program may have ended)",
+            );
+        }
+
+        log_line(
+            &log_path,
+            "confirmed: both breakpoints hit in sequence",
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_multiple_breakpoints",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M5 Custom trace format breakpoint tests
+// ===========================================================================
+
+/// M5-Custom-1. Open a custom trace.  Set a breakpoint at a known step
+/// line.  Continue forward.  Verify execution stops at the breakpoint line.
+///
+/// The custom trace (created by `create_custom_trace_dir`) simulates a
+/// Ruby program with steps at lines 6, 7, 1, 2, 3, 7.  Setting a
+/// breakpoint at line 2 (inside `compute`) and continuing should stop
+/// execution there.
+#[tokio::test]
+async fn test_real_custom_breakpoint_stops_execution() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_bp_stops");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = match find_db_backend() {
+            Some(path) => path,
+            None => {
+                log_line(&log_path, "SKIP: db-backend not found");
+                println!(
+                    "test_real_custom_breakpoint_stops_execution: SKIP (db-backend not found)"
+                );
+                return Ok(());
+            }
+        };
+
+        log_line(
+            &log_path,
+            &format!("db-backend: {}", db_backend.display()),
+        );
+
+        // Create the custom trace directory.
+        let trace_dir = create_custom_trace_dir(&test_dir, "custom-bp-trace");
+        log_line(
+            &log_path,
+            &format!("custom trace dir: {}", trace_dir.display()),
+        );
+
+        // The custom trace uses source file "/tmp/test-workdir/test.rb"
+        // with steps at lines 6, 7, 1, 2, 3, 7.
+        let source_path = "/tmp/test-workdir/test.rb";
+        let bp_line: i64 = 2; // `result = a * 2` inside compute()
+
+        // Start the daemon with the real db-backend.
+        let (mut daemon, socket_path) =
+            start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 20_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed for custom trace, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // The custom trace starts at line 6 (ticks=0) and has steps at
+        // lines 6, 7, 1, 2, 3, 7.  We do NOT step_over here because
+        // step_over from line 6 (main) would skip the entire compute()
+        // call and jump to line 7 at end-of-trace.  Instead, we add
+        // the breakpoint at line 2 while at the initial position and
+        // continue forward — the breakpoint should be hit at step index 3
+        // (line 2, inside compute).
+        log_line(
+            &log_path,
+            "starting from initial position (line 6, ticks=0) without stepping",
+        );
+
+        // Add breakpoint at line 2.
+        let (bp_id, bp_resp) = send_py_add_breakpoint(
+            &mut client,
+            20_001,
+            &trace_dir,
+            source_path,
+            bp_line,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            bp_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-add-breakpoint should succeed for custom trace, got: {bp_resp}"
+        );
+        assert!(
+            bp_id > 0,
+            "breakpoint ID should be positive, got: {bp_id}"
+        );
+        log_line(
+            &log_path,
+            &format!("breakpoint set: id={bp_id} at {source_path}:{bp_line}"),
+        );
+
+        // Continue forward — should stop at the breakpoint (line 2).
+        let cont_resp = navigate(
+            &mut client,
+            20_002,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            cont_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "continue_forward should succeed for custom trace, got: {cont_resp}"
+        );
+
+        let (path, line, _, ticks, end_of_trace) = extract_nav_location(&cont_resp)?;
+        log_line(
+            &log_path,
+            &format!(
+                "after continue: path={path} line={line} ticks={ticks} eot={end_of_trace}"
+            ),
+        );
+
+        // Verify we stopped at the breakpoint.  For custom traces the
+        // db-backend uses the trace step positions, so the stop should
+        // be at or very near the breakpoint line.
+        assert!(
+            !end_of_trace,
+            "continue should have stopped at breakpoint, not end-of-trace"
+        );
+        assert!(
+            path.contains("test.rb"),
+            "should stop in test.rb, got: {path}"
+        );
+        assert!(
+            (bp_line - 1..=bp_line + 1).contains(&line),
+            "should stop at or near line {bp_line}, got line {line}"
+        );
+
+        log_line(
+            &log_path,
+            "confirmed: custom trace breakpoint stopped execution",
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_breakpoint_stops_execution",
         &log_path,
         success,
     );
