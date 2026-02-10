@@ -683,6 +683,193 @@ impl BackendManager {
                 // If there's no pending flow request, fall through to
                 // normal event routing so other clients can see the event.
             }
+
+            // Intercept ct/updated-calltrace events from the backend.
+            //
+            // The backend's calltrace handler sends a `ct/updated-calltrace`
+            // event (not a DAP response) containing the calltrace data as a
+            // `CallArgsUpdateResults` object.  We intercept this event here,
+            // find the pending Calltrace request, format the data, and send
+            // it back to the Python client as a `ct/py-calltrace` response.
+            //
+            // The event body has the `CallArgsUpdateResults` schema:
+            //   - `callLines`: array of `CallLine` objects
+            //   - `totalCallsCount`: usize
+            //   - `scrollPosition`: usize
+            //   - `startCallLineIndex`: usize
+            //
+            // See: db-backend/src/task.rs — `CallArgsUpdateResults`
+            // See: db-backend/src/dap.rs — `updated_calltrace_event`
+            if event_name == "ct/updated-calltrace"
+                && let Some(idx) = ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .position(|p| p.kind == PendingPyRequestKind::Calltrace)
+            {
+                let pending = ds.py_bridge.pending_requests.remove(idx);
+                let body = msg.get("body").unwrap_or(&Value::Null);
+
+                // Extract the call lines from the body and transform them
+                // into a simplified `calls` array for the Python client.
+                // Each call line has `content.call.rawName` and
+                // `content.call.location` which we expose as top-level
+                // fields.
+                let call_lines = body
+                    .get("callLines")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let mut calls = Vec::new();
+                for cl in &call_lines {
+                    if let Some(content) = cl.get("content")
+                        && let Some(call) = content.get("call")
+                    {
+                        calls.push(call.clone());
+                    }
+                }
+
+                let py_response = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": true,
+                    "command": "ct/py-calltrace",
+                    "body": {
+                        "calls": calls,
+                        "callLines": call_lines,
+                        "totalCallsCount": body.get("totalCallsCount").unwrap_or(&Value::Null),
+                    },
+                });
+                self.send_to_client(pending.client_id, py_response);
+                return;
+            }
+
+            // Intercept ct/calltrace-search-res events from the backend.
+            //
+            // The backend's calltrace search handler sends a
+            // `ct/calltrace-search-res` event (not a DAP response) containing
+            // an array of `Call` objects matching the search query.
+            //
+            // See: db-backend/src/dap.rs — `calltrace_search_event`
+            if event_name == "ct/calltrace-search-res"
+                && let Some(idx) = ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .position(|p| p.kind == PendingPyRequestKind::SearchCalltrace)
+            {
+                let pending = ds.py_bridge.pending_requests.remove(idx);
+                let body = msg.get("body").unwrap_or(&Value::Null);
+
+                // The body is directly an array of Call objects.
+                let calls = if body.is_array() {
+                    body.clone()
+                } else {
+                    serde_json::json!([])
+                };
+
+                let py_response = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": true,
+                    "command": "ct/py-search-calltrace",
+                    "body": {
+                        "calls": calls,
+                    },
+                });
+                self.send_to_client(pending.client_id, py_response);
+                return;
+            }
+
+            // Intercept ct/updated-events from the backend.
+            //
+            // The backend's event_load handler sends a `ct/updated-events`
+            // event containing an array of `ProgramEvent` objects, followed
+            // by a `ct/updated-events-content` event with the raw content.
+            // We intercept the first event here to build the response.
+            //
+            // See: db-backend/src/dap.rs — `updated_events`
+            if event_name == "ct/updated-events"
+                && let Some(idx) = ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .position(|p| p.kind == PendingPyRequestKind::Events)
+            {
+                let pending = ds.py_bridge.pending_requests.remove(idx);
+                let body = msg.get("body").unwrap_or(&Value::Null);
+
+                // The body is directly an array of ProgramEvent objects.
+                let events = if body.is_array() {
+                    body.clone()
+                } else {
+                    serde_json::json!([])
+                };
+
+                let py_response = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": true,
+                    "command": "ct/py-events",
+                    "body": {
+                        "events": events,
+                    },
+                });
+                self.send_to_client(pending.client_id, py_response);
+                return;
+            }
+
+            // Silently consume ct/updated-events-content events — the content
+            // is supplementary and the main events response has already been
+            // sent above when we processed ct/updated-events.
+            if event_name == "ct/updated-events-content" {
+                // Nothing to do — just prevent broadcasting.
+                return;
+            }
+
+            // Intercept ct/loaded-terminal events from the backend.
+            //
+            // The backend's load_terminal handler sends a `ct/loaded-terminal`
+            // event containing an array of `ProgramEvent` objects representing
+            // terminal output (Write events).
+            //
+            // See: db-backend/src/dap.rs — `loaded_terminal_event`
+            if event_name == "ct/loaded-terminal"
+                && let Some(idx) = ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .position(|p| p.kind == PendingPyRequestKind::Terminal)
+            {
+                let pending = ds.py_bridge.pending_requests.remove(idx);
+                let body = msg.get("body").unwrap_or(&Value::Null);
+
+                // The body is an array of ProgramEvent objects.
+                // Extract the content from each event and concatenate
+                // into a single output string.
+                let mut output = String::new();
+                if let Some(events) = body.as_array() {
+                    for event in events {
+                        if let Some(content) = event.get("content").and_then(Value::as_str) {
+                            output.push_str(content);
+                        }
+                    }
+                }
+
+                let py_response = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": true,
+                    "command": "ct/py-terminal",
+                    "body": {
+                        "output": output,
+                        "events": body,
+                    },
+                });
+                self.send_to_client(pending.client_id, py_response);
+                return;
+            }
         }
 
         // --- Python bridge: intercept responses for pending navigations ---
@@ -3099,14 +3286,52 @@ impl BackendManager {
         };
 
         // Build and send the ct/load-calltrace-section command to the backend.
+        //
+        // The backend deserializes the arguments as `CalltraceLoadArgs` which
+        // expects camelCase fields: `location`, `startCallLineIndex`, `depth`,
+        // `height`, `rawIgnorePatterns`, `autoCollapsing`, `optimizeCollapse`,
+        // and `renderCallLineIndex`.  We map the simplified Python bridge
+        // parameters (`start`, `count`, `depth`) onto these fields:
+        //   - `start` -> `startCallLineIndex` (the first call-line index)
+        //   - `count` -> `height` (number of visible call-lines to load)
+        //   - `depth` -> `depth` (maximum call nesting depth)
+        //
+        // See: db-backend/src/task.rs — `CalltraceLoadArgs`
         let dap_request = serde_json::json!({
             "type": "request",
             "command": "ct/load-calltrace-section",
             "seq": dap_seq,
             "arguments": {
-                "start": start,
-                "count": count,
+                "location": {
+                    "path": "",
+                    "line": 0,
+                    "functionName": "",
+                    "highLevelPath": "",
+                    "highLevelLine": 0,
+                    "highLevelFunctionName": "",
+                    "lowLevelPath": "",
+                    "lowLevelLine": 0,
+                    "rrTicks": 0,
+                    "functionFirst": 0,
+                    "functionLast": 0,
+                    "event": 0,
+                    "expression": "",
+                    "offset": 0,
+                    "error": false,
+                    "callstackDepth": 0,
+                    "originatingInstructionAddress": 0,
+                    "key": "",
+                    "globalCallKey": "",
+                    "expansionParents": [],
+                    "missingPath": false,
+                },
+                "startCallLineIndex": start,
                 "depth": depth,
+                "height": count,
+                "rawIgnorePatterns": "",
+                "autoCollapsing": false,
+                "optimizeCollapse": false,
+                "renderCallLineIndex": 0,
             },
         });
 
@@ -3191,7 +3416,10 @@ impl BackendManager {
             .and_then(|a| a.get("query"))
             .and_then(Value::as_str)
             .unwrap_or("");
-        let limit = args
+        // NOTE: The backend's `CallSearchArg` does not have a `limit` field —
+        // it returns all matching calls.  We preserve `_limit` here in case
+        // the backend adds filtering support in the future.
+        let _limit = args
             .and_then(|a| a.get("limit"))
             .and_then(Value::as_i64)
             .unwrap_or(100);
@@ -3220,13 +3448,19 @@ impl BackendManager {
         };
 
         // Build and send the ct/search-calltrace command to the backend.
+        //
+        // The backend deserializes the arguments as `CallSearchArg` which
+        // has a single field `value` (the regex pattern to match function
+        // names against).  The `limit` parameter is not part of the backend
+        // struct — the backend returns all matching calls.
+        //
+        // See: db-backend/src/task.rs — `CallSearchArg`
         let dap_request = serde_json::json!({
             "type": "request",
             "command": "ct/search-calltrace",
             "seq": dap_seq,
             "arguments": {
-                "query": query,
-                "limit": limit,
+                "value": query,
             },
         });
 
