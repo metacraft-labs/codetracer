@@ -1,6 +1,6 @@
 //! Real-recording integration tests for the backend-manager daemon.
 //!
-//! These tests complement the existing mock-based tests in `daemon_integration.rs`
+//! These tests replace the former mock-based tests (daemon_integration.rs, mcp_integration.rs)
 //! by exercising the daemon's flows against real `db-backend` instances processing
 //! real trace recordings.
 //!
@@ -123,6 +123,18 @@
 //! - `read_source_file` returns actual source code content from real traces.
 //! - Both RR-based and custom trace format modes are covered.
 //!
+//! ## M11 — MCP Server Enhancements (real-recording)
+//!
+//! Tests for MCP protocol enhancements: `resources/list`, `resources/read`,
+//! actionable error messages, and response timing metadata.
+//!
+//! These tests verify:
+//! - `resources/list` returns info and source file resources after loading a trace.
+//! - `resources/read` for `trace://<path>/info` returns JSON with trace metadata.
+//! - `resources/read` for `trace://<path>/source/<file>` returns source code.
+//! - Error messages are actionable (mention the path, suggest corrective action).
+//! - Responses include `_meta.duration_ms` timing metadata.
+//!
 //! ## Test categories
 //!
 //! 1. **RR-based tests**: Build and record a Rust test program via `ct-rr-support`,
@@ -155,7 +167,7 @@ use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 
 // ---------------------------------------------------------------------------
-// Shared helpers (duplicated from daemon_integration.rs because integration
+// Shared helpers (previously in daemon_integration.rs; now consolidated here since integration
 // test files cannot share code without a helper crate or `mod` file)
 // ---------------------------------------------------------------------------
 
@@ -7479,7 +7491,7 @@ async fn test_real_rr_query_script_error_traceback() {
 /// Spawns the MCP server process (`backend-manager trace mcp`) with real
 /// backend support.
 ///
-/// Unlike the mock-based MCP tests in `mcp_integration.rs`, this helper
+/// Unlike the former mock-based MCP tests, this helper
 /// starts a real daemon with `db-backend` *first*, then connects the MCP
 /// server to that daemon via `CODETRACER_DAEMON_SOCK`.  This exercises the
 /// full pipeline: MCP JSON-RPC -> daemon DAP -> db-backend -> real trace.
@@ -8195,6 +8207,1265 @@ async fn test_real_custom_mcp_trace_info() {
     }
 
     report("test_real_custom_mcp_trace_info", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M11 — MCP Server Enhancements real-recording tests
+// ===========================================================================
+
+/// M11-RR-1. Start MCP server with real db-backend.  Create RR recording.
+/// Send initialize.  Call trace_info to load the trace.  Then send
+/// `resources/list`.  Verify the response contains an info resource with
+/// the correct URI and `application/json` MIME type, and source file
+/// resources with `text/plain` MIME types.
+#[tokio::test]
+async fn test_real_rr_mcp_resources_list() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_mcp_res_list");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_mcp_resources_list: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start MCP server backed by real daemon + db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // First, load the trace via trace_info to populate the loaded_traces
+        // cache.  resources/list only returns resources for loaded traces.
+        let trace_info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &trace_info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(60), &log_path).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+        assert_eq!(info_resp["jsonrpc"], "2.0");
+        assert_eq!(info_resp["id"], 100);
+
+        // Now send resources/list.
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "resources/list"
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(30), &log_path).await?;
+        log_line(&log_path, &format!("resources/list response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 101);
+
+        let resources = resp["result"]["resources"]
+            .as_array()
+            .expect("resources should be an array");
+        log_line(&log_path, &format!("resources count: {}", resources.len()));
+
+        // Should have at least 1 resource (the info resource).
+        assert!(
+            !resources.is_empty(),
+            "M11-RR-1: resources should not be empty after loading a trace"
+        );
+
+        // Find the info resource.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let expected_info_uri = format!("trace://{}/info", trace_path_str);
+        let info_resource = resources
+            .iter()
+            .find(|r| r["uri"].as_str() == Some(&expected_info_uri));
+        assert!(
+            info_resource.is_some(),
+            "M11-RR-1: should have trace info resource with URI {expected_info_uri}, got: {:?}",
+            resources
+                .iter()
+                .map(|r| r["uri"].as_str())
+                .collect::<Vec<_>>()
+        );
+        let info_res = info_resource.unwrap();
+        assert_eq!(
+            info_res["mimeType"], "application/json",
+            "M11-RR-1: info resource should have application/json MIME type"
+        );
+
+        // Find source file resources.
+        let source_resources: Vec<_> = resources
+            .iter()
+            .filter(|r| r["uri"].as_str().is_some_and(|u| u.contains("/source/")))
+            .collect();
+        assert!(
+            !source_resources.is_empty(),
+            "M11-RR-1: should have source file resources"
+        );
+        for sr in &source_resources {
+            assert_eq!(
+                sr["mimeType"], "text/plain",
+                "M11-RR-1: source file resource should have text/plain MIME type"
+            );
+        }
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_real_rr_mcp_resources_list", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M11-RR-2. Start MCP server with real db-backend.  Create RR recording.
+/// Load the trace via trace_info.  Then send `resources/read` for
+/// `trace://<path>/info`.  Verify the response is JSON containing trace
+/// metadata fields: tracePath, language, totalEvents, sourceFiles, program.
+#[tokio::test]
+async fn test_real_rr_mcp_resource_read_info() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_mcp_res_info");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_mcp_resource_read_info: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start MCP server backed by real daemon + db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // Load the trace via trace_info to populate the loaded_traces cache.
+        let trace_info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 200,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &trace_info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(60), &log_path).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+        assert_eq!(info_resp["jsonrpc"], "2.0");
+        assert_eq!(info_resp["id"], 200);
+
+        // Send resources/read for the info resource.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let info_uri = format!("trace://{}/info", trace_path_str);
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 201,
+            "method": "resources/read",
+            "params": {
+                "uri": info_uri
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(30), &log_path).await?;
+        log_line(
+            &log_path,
+            &format!("resources/read info response: {resp}"),
+        );
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 201);
+
+        // Should not have a JSON-RPC error.
+        assert!(
+            resp.get("error").is_none(),
+            "M11-RR-2: resources/read info should not return an error, got: {:?}",
+            resp.get("error")
+        );
+
+        let contents = resp["result"]["contents"]
+            .as_array()
+            .expect("should have contents array");
+        assert_eq!(
+            contents.len(),
+            1,
+            "M11-RR-2: should have exactly 1 content item"
+        );
+
+        let content = &contents[0];
+        assert_eq!(
+            content["uri"].as_str(),
+            Some(info_uri.as_str()),
+            "M11-RR-2: content URI should match request URI"
+        );
+        assert_eq!(
+            content["mimeType"], "application/json",
+            "M11-RR-2: info resource should be application/json"
+        );
+
+        // Parse the text as JSON and verify metadata fields.
+        let text = content["text"]
+            .as_str()
+            .expect("M11-RR-2: content should have text");
+        log_line(&log_path, &format!("resource info text: {text}"));
+
+        let info: Value = serde_json::from_str(text)
+            .map_err(|e| format!("M11-RR-2: info text should be valid JSON: {e}"))?;
+        assert_eq!(
+            info["tracePath"].as_str(),
+            Some(trace_path_str.as_str()),
+            "M11-RR-2: tracePath should match"
+        );
+        assert!(
+            info.get("language").is_some(),
+            "M11-RR-2: should have language field"
+        );
+        assert!(
+            info.get("totalEvents").is_some(),
+            "M11-RR-2: should have totalEvents field"
+        );
+        assert!(
+            info.get("sourceFiles").is_some(),
+            "M11-RR-2: should have sourceFiles field"
+        );
+        assert!(
+            info.get("program").is_some(),
+            "M11-RR-2: should have program field"
+        );
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_real_rr_mcp_resource_read_info", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M11-RR-3. Start MCP server with real db-backend.  Create RR recording.
+/// Load the trace via trace_info.  List source files.  Then send
+/// `resources/read` for a source file resource URI.  Prefer the test
+/// program's own source (`rust_flow_test`) over stdlib files.  Verify the
+/// response contains actual source code as `text/plain`.
+///
+/// The MCP server uses a filesystem fallback for source reading: it reads
+/// from the trace directory's `files/` subdirectory since `db-backend`
+/// does not support `ct/read-source` directly.
+#[tokio::test]
+async fn test_real_rr_mcp_resource_read_source() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_mcp_res_src");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_mcp_resource_read_source: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start MCP server backed by real daemon + db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // Load the trace via trace_info to populate the loaded_traces cache.
+        let trace_info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 300,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &trace_info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(60), &log_path).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+        assert_eq!(info_resp["jsonrpc"], "2.0");
+        assert_eq!(info_resp["id"], 300);
+
+        // List source files to discover what files are available.
+        let list_req = json!({
+            "jsonrpc": "2.0",
+            "id": 301,
+            "method": "tools/call",
+            "params": {
+                "name": "list_source_files",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &list_req).await?;
+        let list_resp = mcp_read(&mut reader, Duration::from_secs(60), &log_path).await?;
+        log_line(
+            &log_path,
+            &format!("list_source_files response: {list_resp}"),
+        );
+
+        let list_text = list_resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("list_source_files should have text");
+
+        // Parse a suitable file path from the response.
+        // The list is typically newline-separated.  We prefer the test
+        // program's own source file (`rust_flow_test`) over Rust stdlib
+        // files which may not be stored in the trace's `files/` directory.
+        let non_empty_lines: Vec<String> = list_text
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(|l| l.trim().to_string())
+            .collect();
+
+        // Prefer a line containing the test program name.
+        let first_file = non_empty_lines
+            .iter()
+            .find(|l| l.contains("rust_flow_test"))
+            .or_else(|| non_empty_lines.first())
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "M11-RR-3: no source files found in list_source_files response: {list_text}"
+                )
+            })?;
+        log_line(&log_path, &format!("using source file: {first_file}"));
+
+        // Send resources/read for the source file.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let source_uri = format!("trace://{}/source/{}", trace_path_str, first_file);
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 302,
+            "method": "resources/read",
+            "params": {
+                "uri": source_uri
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(30), &log_path).await?;
+        log_line(
+            &log_path,
+            &format!("resources/read source response: {resp}"),
+        );
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 302);
+
+        // Should not have a JSON-RPC error.
+        assert!(
+            resp.get("error").is_none(),
+            "M11-RR-3: resources/read source should not return an error, got: {:?}",
+            resp.get("error")
+        );
+
+        let contents = resp["result"]["contents"]
+            .as_array()
+            .expect("should have contents array");
+        assert_eq!(
+            contents.len(),
+            1,
+            "M11-RR-3: should have exactly 1 content item"
+        );
+
+        let content = &contents[0];
+        assert_eq!(
+            content["uri"].as_str(),
+            Some(source_uri.as_str()),
+            "M11-RR-3: content URI should match request URI"
+        );
+        assert_eq!(
+            content["mimeType"], "text/plain",
+            "M11-RR-3: source resource should be text/plain"
+        );
+
+        let text = content["text"]
+            .as_str()
+            .expect("M11-RR-3: content should have text");
+        log_line(&log_path, &format!("resource source text: {text}"));
+
+        // Verify we got some actual source code content.
+        assert!(
+            !text.is_empty(),
+            "M11-RR-3: source file content should not be empty"
+        );
+        // The test program is a Rust file; it should contain `fn` keyword.
+        assert!(
+            text.contains("fn ") || text.contains("main") || text.contains("let "),
+            "M11-RR-3: source should contain Rust code, got: {text}"
+        );
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_mcp_resource_read_source",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M11-RR-4. Start MCP server with real db-backend (no RR recording needed).
+/// Send initialize.  Send `exec_script` with a non-existent trace path.
+/// Verify the response has `isError: true` and actionable error text.
+/// Also send `resources/read` for an unloaded trace URI and verify a
+/// JSON-RPC error mentioning "not found" with corrective guidance.
+///
+/// This test does not require an actual RR recording because it only tests
+/// error paths.  It does need `db-backend` to start the daemon.
+#[tokio::test]
+async fn test_real_rr_mcp_error_actionable() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_mcp_err_action");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = find_db_backend().ok_or_else(|| {
+            "db-backend not found (skipping MCP error actionable test)".to_string()
+        })?;
+
+        // Start MCP server backed by real daemon + db-backend.
+        // No ct-rr-support or recording needed for error-path tests.
+        let (mut mcp, mut daemon, socket_path) =
+            start_mcp_server_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // Send exec_script with a path that does not exist.
+        let nonexistent_path = test_dir.join("nonexistent-trace");
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 400,
+            "method": "tools/call",
+            "params": {
+                "name": "exec_script",
+                "arguments": {
+                    "trace_path": nonexistent_path.to_string_lossy(),
+                    "script": "print('hello')"
+                }
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(60), &log_path).await?;
+        log_line(&log_path, &format!("exec_script error response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 400);
+
+        // The response should indicate an error.
+        let result_obj = &resp["result"];
+        assert_eq!(
+            result_obj["isError"],
+            Value::Bool(true),
+            "M11-RR-4: should have isError: true for non-existent trace"
+        );
+
+        let text = result_obj["content"][0]["text"]
+            .as_str()
+            .expect("should have error text");
+        log_line(&log_path, &format!("error text: {text}"));
+
+        // Verify the error message is actionable: it should mention the
+        // failure and provide some guidance.
+        assert!(
+            text.contains("not found")
+                || text.contains("failed")
+                || text.contains("error")
+                || text.contains("Failed")
+                || text.contains("Cannot"),
+            "M11-RR-4: error text should indicate the trace was not found or failed, got: {text}"
+        );
+
+        // Also verify enhanced errors via resources/read for an unloaded
+        // trace.  This should return a JSON-RPC error with actionable
+        // guidance.
+        let bad_uri = "trace:///nonexistent/path/info";
+        let res_req = json!({
+            "jsonrpc": "2.0",
+            "id": 401,
+            "method": "resources/read",
+            "params": {
+                "uri": bad_uri
+            }
+        });
+        mcp_send(&mut stdin, &res_req).await?;
+        let res_resp = mcp_read(&mut reader, Duration::from_secs(30), &log_path).await?;
+        log_line(
+            &log_path,
+            &format!("resources/read error response: {res_resp}"),
+        );
+
+        assert_eq!(res_resp["jsonrpc"], "2.0");
+        assert_eq!(res_resp["id"], 401);
+
+        // Should be a JSON-RPC error (not a result).
+        assert!(
+            res_resp.get("error").is_some(),
+            "M11-RR-4: resources/read for unloaded trace should return error"
+        );
+        let error_msg = res_resp["error"]["message"]
+            .as_str()
+            .expect("error should have message");
+        log_line(&log_path, &format!("resource error message: {error_msg}"));
+
+        // The error message should mention "not found" and suggest
+        // loading with trace_info or exec_script.
+        assert!(
+            error_msg.contains("Trace not found") || error_msg.contains("not found"),
+            "M11-RR-4: error should mention 'not found', got: {error_msg}"
+        );
+        assert!(
+            error_msg.contains("trace_info") || error_msg.contains("exec_script"),
+            "M11-RR-4: error should suggest loading via trace_info or exec_script, got: {error_msg}"
+        );
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_real_rr_mcp_error_actionable", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M11-RR-5. Start MCP server with real db-backend.  Create RR recording.
+/// Send initialize.  Send `exec_script` with `print('hello')`.  Verify
+/// the response includes `_meta.duration_ms` as a reasonable number (>= 0
+/// and < 120 seconds).  Also verify timing on `trace_info`.
+#[tokio::test]
+async fn test_real_rr_mcp_response_timing() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_mcp_timing");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_mcp_response_timing: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start MCP server backed by real daemon + db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // Send exec_script with a valid script.
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 500,
+            "method": "tools/call",
+            "params": {
+                "name": "exec_script",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy(),
+                    "script": "print('hello')"
+                }
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(90), &log_path).await?;
+        log_line(&log_path, &format!("exec_script response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 500);
+
+        // Verify _meta.duration_ms is present and non-negative.
+        let meta = &resp["result"]["_meta"];
+        assert!(
+            meta.is_object(),
+            "M11-RR-5: result should have _meta object, got: {:?}",
+            resp["result"]
+        );
+        let duration_ms = meta["duration_ms"]
+            .as_u64()
+            .or_else(|| meta["duration_ms"].as_f64().map(|f| f as u64));
+        assert!(
+            duration_ms.is_some(),
+            "M11-RR-5: _meta.duration_ms should be a number, got: {:?}",
+            meta["duration_ms"]
+        );
+        log_line(
+            &log_path,
+            &format!("exec_script duration_ms: {}", duration_ms.unwrap()),
+        );
+
+        // Duration should be a reasonable value (< 120s sanity check).
+        assert!(
+            duration_ms.unwrap() < 120_000,
+            "M11-RR-5: duration_ms should be less than 120s (sanity check), got: {}",
+            duration_ms.unwrap()
+        );
+
+        // Also verify timing on trace_info tool.
+        let info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 501,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(60), &log_path).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+
+        let info_meta = &info_resp["result"]["_meta"];
+        assert!(
+            info_meta.is_object(),
+            "M11-RR-5: trace_info result should have _meta object"
+        );
+        assert!(
+            info_meta["duration_ms"].as_u64().is_some()
+                || info_meta["duration_ms"].as_f64().is_some(),
+            "M11-RR-5: trace_info _meta.duration_ms should be a number"
+        );
+        log_line(
+            &log_path,
+            &format!(
+                "trace_info duration_ms: {}",
+                info_meta["duration_ms"]
+                    .as_u64()
+                    .or_else(|| info_meta["duration_ms"].as_f64().map(|f| f as u64))
+                    .unwrap_or(0)
+            ),
+        );
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_real_rr_mcp_response_timing", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M12 — Documentation & Agent Skill: real-recording tests
+//
+// These tests validate that the example Python scripts embedded in the MCP
+// skill description (`prompts/get trace_query_api`) actually execute against
+// real trace recordings -- not just mocks.  This is the ultimate end-to-end
+// validation that the documented API examples work.
+// ===========================================================================
+
+/// M12-RR-1. Fetch the MCP skill description, extract all ```python code
+/// blocks, and run each one via `exec_script` against a real RR recording.
+///
+/// This test ensures that every example script in the skill description
+/// produces non-empty output and does not error when executed against a
+/// real RR trace of a Rust program.
+#[tokio::test]
+async fn test_real_rr_example_scripts_execute() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_example_scripts");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_example_scripts_execute: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start MCP server backed by real daemon + db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // Fetch the skill description via prompts/get.
+        let skill_req = json!({
+            "jsonrpc": "2.0",
+            "id": 12000,
+            "method": "prompts/get",
+            "params": {
+                "name": "trace_query_api"
+            }
+        });
+        mcp_send(&mut stdin, &skill_req).await?;
+        let skill_resp = mcp_read(&mut reader, Duration::from_secs(10), &log_path).await?;
+        log_line(
+            &log_path,
+            &format!("prompts/get response: {skill_resp}"),
+        );
+
+        let text = skill_resp["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .ok_or_else(|| {
+                format!(
+                    "M12-RR-1: skill description should have text, got: {skill_resp}"
+                )
+            })?;
+
+        // Extract ```python code blocks from the skill description.
+        let mut examples: Vec<String> = Vec::new();
+        let mut in_code_block = false;
+        let mut current_block = String::new();
+
+        for line in text.lines() {
+            if line.trim().starts_with("```python") {
+                in_code_block = true;
+                current_block.clear();
+                continue;
+            }
+            if line.trim().starts_with("```") && in_code_block {
+                in_code_block = false;
+                if !current_block.trim().is_empty() {
+                    examples.push(current_block.clone());
+                }
+                continue;
+            }
+            if in_code_block {
+                current_block.push_str(line);
+                current_block.push('\n');
+            }
+        }
+
+        log_line(
+            &log_path,
+            &format!(
+                "found {} example scripts in skill description",
+                examples.len()
+            ),
+        );
+        assert!(
+            examples.len() >= 3,
+            "M12-RR-1: should have at least 3 example scripts, found {}",
+            examples.len()
+        );
+
+        // Run each example script via exec_script against the real trace.
+        for (i, example) in examples.iter().enumerate() {
+            log_line(
+                &log_path,
+                &format!("--- running example {} ---\n{example}", i + 1),
+            );
+
+            let exec_req = json!({
+                "jsonrpc": "2.0",
+                "id": 12001 + i as u64,
+                "method": "tools/call",
+                "params": {
+                    "name": "exec_script",
+                    "arguments": {
+                        "trace_path": trace_dir.to_string_lossy(),
+                        "script": example,
+                        "timeout_seconds": 60
+                    }
+                }
+            });
+            mcp_send(&mut stdin, &exec_req).await?;
+            let exec_resp =
+                mcp_read(&mut reader, Duration::from_secs(90), &log_path).await?;
+            log_line(
+                &log_path,
+                &format!("example {} response: {exec_resp}", i + 1),
+            );
+
+            // Verify the response is successful (no isError).
+            let is_error = exec_resp["result"]
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            let result_text = exec_resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("");
+            log_line(
+                &log_path,
+                &format!("example {} output: {result_text}", i + 1),
+            );
+
+            assert!(
+                !is_error,
+                "M12-RR-1: example {} should execute without errors. Output: {result_text}",
+                i + 1
+            );
+
+            // Verify the output is non-empty (meaningful output).
+            assert!(
+                !result_text.trim().is_empty(),
+                "M12-RR-1: example {} should produce non-empty output",
+                i + 1
+            );
+        }
+
+        log_line(
+            &log_path,
+            &format!(
+                "all {} example scripts executed successfully against real RR trace",
+                examples.len()
+            ),
+        );
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_real_rr_example_scripts_execute", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M12-CUSTOM-1. Fetch the MCP skill description, extract all ```python
+/// code blocks, and run each one via `exec_script` against a custom trace
+/// (Ruby).
+///
+/// Custom traces have different capabilities than RR traces: they do not
+/// support navigation commands like `step_over()`, `step_into()`, etc.
+/// Therefore some example scripts may legitimately error.  This test
+/// verifies that **at least one** example script succeeds (e.g., scripts
+/// that only call `trace.info` or `print`), while logging but tolerating
+/// failures from scripts that use unsupported navigation commands.
+#[tokio::test]
+async fn test_real_custom_example_scripts_execute() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_example_scripts");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = find_db_backend().ok_or_else(|| {
+            "db-backend not found (skipping custom MCP example scripts test)".to_string()
+        })?;
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        // Create a custom trace directory (Ruby).
+        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-examples");
+        log_line(
+            &log_path,
+            &format!("custom trace directory: {}", trace_dir.display()),
+        );
+
+        // Start MCP server backed by real daemon + db-backend.
+        // No ct-rr-support needed for custom traces.
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir_str)],
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+
+        // Fetch the skill description via prompts/get.
+        let skill_req = json!({
+            "jsonrpc": "2.0",
+            "id": 12500,
+            "method": "prompts/get",
+            "params": {
+                "name": "trace_query_api"
+            }
+        });
+        mcp_send(&mut stdin, &skill_req).await?;
+        let skill_resp = mcp_read(&mut reader, Duration::from_secs(10), &log_path).await?;
+        log_line(
+            &log_path,
+            &format!("prompts/get response: {skill_resp}"),
+        );
+
+        let text = skill_resp["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .ok_or_else(|| {
+                format!(
+                    "M12-CUSTOM-1: skill description should have text, got: {skill_resp}"
+                )
+            })?;
+
+        // Extract ```python code blocks from the skill description.
+        let mut examples: Vec<String> = Vec::new();
+        let mut in_code_block = false;
+        let mut current_block = String::new();
+
+        for line in text.lines() {
+            if line.trim().starts_with("```python") {
+                in_code_block = true;
+                current_block.clear();
+                continue;
+            }
+            if line.trim().starts_with("```") && in_code_block {
+                in_code_block = false;
+                if !current_block.trim().is_empty() {
+                    examples.push(current_block.clone());
+                }
+                continue;
+            }
+            if in_code_block {
+                current_block.push_str(line);
+                current_block.push('\n');
+            }
+        }
+
+        log_line(
+            &log_path,
+            &format!(
+                "found {} example scripts in skill description",
+                examples.len()
+            ),
+        );
+        assert!(
+            examples.len() >= 3,
+            "M12-CUSTOM-1: should have at least 3 example scripts, found {}",
+            examples.len()
+        );
+
+        // Run each example script via exec_script against the custom trace.
+        // Custom traces don't support navigation (step_over, step_into, etc.),
+        // so some scripts are expected to fail.  We track successes and
+        // failures separately.
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        let mut failure_details: Vec<String> = Vec::new();
+
+        for (i, example) in examples.iter().enumerate() {
+            log_line(
+                &log_path,
+                &format!("--- running example {} ---\n{example}", i + 1),
+            );
+
+            let exec_req = json!({
+                "jsonrpc": "2.0",
+                "id": 12501 + i as u64,
+                "method": "tools/call",
+                "params": {
+                    "name": "exec_script",
+                    "arguments": {
+                        "trace_path": trace_dir.to_string_lossy(),
+                        "script": example,
+                        "timeout_seconds": 60
+                    }
+                }
+            });
+            mcp_send(&mut stdin, &exec_req).await?;
+            let exec_resp =
+                mcp_read(&mut reader, Duration::from_secs(90), &log_path).await?;
+            log_line(
+                &log_path,
+                &format!("example {} response: {exec_resp}", i + 1),
+            );
+
+            let is_error = exec_resp["result"]
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            let result_text = exec_resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("");
+            log_line(
+                &log_path,
+                &format!("example {} output: {result_text}", i + 1),
+            );
+
+            if is_error || result_text.trim().is_empty() {
+                failed += 1;
+                let reason = if is_error {
+                    format!("example {} returned isError: {result_text}", i + 1)
+                } else {
+                    format!("example {} produced empty output", i + 1)
+                };
+                log_line(&log_path, &format!("EXPECTED FAILURE: {reason}"));
+                failure_details.push(reason);
+            } else {
+                succeeded += 1;
+                log_line(
+                    &log_path,
+                    &format!("example {} succeeded with output length {}", i + 1, result_text.len()),
+                );
+            }
+        }
+
+        log_line(
+            &log_path,
+            &format!(
+                "custom trace results: {} succeeded, {} failed (expected) out of {} total",
+                succeeded,
+                failed,
+                examples.len()
+            ),
+        );
+
+        // At least one example script must succeed against the custom trace.
+        // Scripts that only use `trace.info` or `print()` should work.
+        assert!(
+            succeeded >= 1,
+            "M12-CUSTOM-1: at least 1 example script should succeed against custom trace, \
+             but all {} failed. Failures:\n{}",
+            examples.len(),
+            failure_details.join("\n")
+        );
+
+        // Clean up.
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_example_scripts_execute",
+        &log_path,
+        success,
+    );
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }

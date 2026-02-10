@@ -313,18 +313,27 @@ print("x values:", values)
 ## Example 3: Use breakpoints to find a specific state
 
 ```python
-bp = trace.add_breakpoint("main.nim", 42)
-trace.continue_forward()
-print(f"Hit breakpoint at {trace.location}")
-for var in trace.locals():
-    print(f"  {var.name} = {var.value}")
+# Use trace.location.path to reference the current source file
+# (works regardless of language).
+path = trace.location.path
+bp = trace.add_breakpoint(path, trace.location.line + 5)
+try:
+    trace.continue_forward()
+    print(f"Hit breakpoint at {trace.location}")
+    for var in trace.locals():
+        print(f"  {var.name} = {var.value}")
+except StopIteration:
+    print(f"Reached trace boundary before breakpoint")
 trace.remove_breakpoint(bp)
 ```
 
 ## Example 4: Analyze a loop with flow/omniscience
 
 ```python
-flow = trace.flow("main.nim", 10, mode="call")
+# Use trace.location.path to dynamically pick the file
+path = trace.location.path
+line = trace.location.line
+flow = trace.flow(path, line, mode="call")
 for loop in flow.loops:
     print(f"Loop at lines {loop.start_line}-{loop.end_line}: {loop.iteration_count} iterations")
 for step in flow.steps:
@@ -332,14 +341,17 @@ for step in flow.steps:
         print(f"  iter {step.iteration}: {step.after_values}")
 ```
 
-## Example 5: Search calls and inspect the call trace
+## Example 5: List source files and inspect the call stack
 
 ```python
-calls = trace.search_calltrace("process")
-for call in calls:
-    print(f"{call.function_name} at {call.location} -> {call.return_value}")
-output = trace.terminal_output()
-print("Program output:", output)
+files = trace.source_files
+print(f"Trace has {len(files)} source file(s)")
+for f in files[:5]:
+    print(f"  {f}")
+stack = trace.stack_trace()
+print(f"Call stack depth: {len(stack)}")
+for frame in stack:
+    print(f"  {frame.function_name} at {frame.location.path}:{frame.location.line}")
 ```
 "#
 }
