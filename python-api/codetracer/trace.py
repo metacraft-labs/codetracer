@@ -139,27 +139,64 @@ class Trace:
 
     @property
     def location(self) -> Location:
-        """Current execution location (path, line, column)."""
+        """Current execution location (path, line, column).
+
+        Updated automatically by navigation methods such as
+        :meth:`step_over`, :meth:`goto_ticks`, etc.
+
+        Returns:
+            A :class:`Location` representing the current source position.
+        """
         return self._location
 
     @property
     def ticks(self) -> int:
-        """Current execution timestamp (rrTicks)."""
+        """Current execution timestamp (rr ticks).
+
+        The ticks value is a monotonically increasing counter maintained
+        by the rr replay engine.  It uniquely identifies an execution
+        point and can be passed to :meth:`goto_ticks` to return to this
+        position later.
+
+        Returns:
+            An integer tick value.
+        """
         return self._ticks
 
     @property
     def source_files(self) -> list[str]:
-        """Source files in the trace."""
+        """Source files present in the trace.
+
+        Returns the list of source file paths that were captured when
+        the trace was recorded.  These paths can be passed to
+        :meth:`read_source` to retrieve file contents.
+
+        Returns:
+            A list of file path strings.
+        """
         return self._source_files
 
     @property
     def total_events(self) -> int:
-        """Total number of events in the trace."""
+        """Total number of events in the trace.
+
+        Events include I/O operations (stdout/stderr), signals, and
+        other observable side effects.
+
+        Returns:
+            A non-negative integer event count.
+        """
         return self._total_events
 
     @property
     def language(self) -> str:
-        """Detected source language."""
+        """Detected source language of the traced program.
+
+        Examples: ``"nim"``, ``"rust"``, ``"c"``, ``"go"``.
+
+        Returns:
+            A lowercase language identifier string.
+        """
         return self._language
 
     # --- Navigation ---
@@ -314,7 +351,13 @@ class Trace:
     # --- Inspection ---
 
     def current_location(self) -> Location:
-        """Return the source location at the current execution point."""
+        """Return the source location at the current execution point.
+
+        Equivalent to reading the :attr:`location` property.
+
+        Returns:
+            A :class:`Location` representing the current source position.
+        """
         return self._location
 
     def locals(self, depth: int = 3, count_budget: int = 3000) -> list[Variable]:
@@ -394,14 +437,33 @@ class Trace:
         return [self._parse_frame(f) for f in body.get("frames", [])]
 
     def current_frame(self) -> Frame:
-        """Return the topmost call frame at the current execution point."""
+        """Return the topmost call frame at the current execution point.
+
+        This is a convenience method equivalent to ``stack_trace()[0]``.
+
+        Returns:
+            A :class:`Frame` for the currently executing function.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
         frames = self.stack_trace()
         if frames:
             return frames[0]
         return Frame(function_name="", location=self._location)
 
     def backtrace(self) -> list[Frame]:
-        """Return the full call stack at the current execution point."""
+        """Return the full call stack at the current execution point.
+
+        Alias for :meth:`stack_trace`.
+
+        Returns:
+            A list of :class:`Frame` instances, ordered from innermost
+            (current function) to outermost (entry point).
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
         return self.stack_trace()
 
     # --- Parse helpers ---
@@ -700,7 +762,13 @@ class Trace:
         return Flow(steps=steps, loops=loops)
 
     def loops(self) -> list[Loop]:
-        """Return all detected loops in the trace."""
+        """Return all detected loops in the trace.
+
+        .. note:: Not yet implemented -- will be available in a later milestone.
+
+        Raises:
+            NotImplementedError: Always.
+        """
         raise NotImplementedError("Will be implemented in a later milestone")
 
     def calltrace(
@@ -883,7 +951,13 @@ class Trace:
         return self.calltrace()
 
     def process_info(self) -> Process:
-        """Return metadata about the recorded process."""
+        """Return metadata about the recorded process.
+
+        .. note:: Not yet implemented -- will be available in a later milestone.
+
+        Raises:
+            NotImplementedError: Always.
+        """
         raise NotImplementedError("Will be implemented in a later milestone")
 
     # --- Lifecycle ---
@@ -902,7 +976,12 @@ class Trace:
         self._connection.close()
 
     def __enter__(self) -> "Trace":
+        """Enter the context manager; returns *self*.
+
+        Enables the ``with open_trace(...) as t:`` idiom.
+        """
         return self
 
     def __exit__(self, *args: object) -> None:
+        """Exit the context manager; closes the trace via :meth:`close`."""
         self.close()

@@ -34,7 +34,15 @@ use crate::dap_parser::DapParser;
 use crate::paths::CODETRACER_PATHS;
 
 #[derive(Parser, Debug)]
-#[command(version)]
+#[command(
+    version,
+    about = "CodeTracer backend manager -- daemon, trace CLI, and MCP server.",
+    long_about = "CodeTracer backend manager.\n\n\
+        Provides:\n  \
+        - A daemon that manages replay backend processes (ct daemon start)\n  \
+        - A CLI for inspecting recorded traces (ct trace query / ct trace info)\n  \
+        - An MCP server for LLM agent integration (ct trace mcp)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
