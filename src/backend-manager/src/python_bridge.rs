@@ -197,6 +197,23 @@ pub struct PendingPyNavigation {
     /// sent to the backend.  Used to silently consume the backend's response
     /// to this command so it is not broadcast to clients.
     pub nav_command_seq: Option<i64>,
+    /// RR ticks value captured from the `ct/complete-move` event.
+    ///
+    /// The standard DAP `stackTrace` response does not include ticks
+    /// information.  However, the CodeTracer backend emits a
+    /// `ct/complete-move` event (between the `stopped` event and the
+    /// `stackTrace` response) that contains `rrTicks` in its
+    /// `body.location` field.  We capture it here so it can be injected
+    /// into the final `ct/py-navigate` response.
+    pub rr_ticks: Option<i64>,
+    /// Whether the trace has reached its end, captured from `ct/notification`
+    /// events.
+    ///
+    /// The CodeTracer backend emits `ct/notification` events with text
+    /// containing "End of record" or "Limit of record" when the trace
+    /// replay reaches its boundary.  We capture this here so it can be
+    /// injected as `endOfTrace: true` in the final response.
+    pub end_of_trace: bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -659,10 +659,28 @@ fn task_thread(
                 })?;
             }
         } else if handler.initialized {
-            let res = handle_request(&mut handler, request, sender.clone());
+            let res = handle_request(&mut handler, request.clone(), sender.clone());
             if let Err(e) = res {
                 warn!("  handle_request error in thread: {e:?}");
-                // continue with other request; trying to be more robust
+                // Send an error response back to the daemon so it does not
+                // wait indefinitely for events that will never arrive (e.g.,
+                // a `stopped` event after an unrecognized navigation command
+                // like `ct/goto-ticks`).
+                let error_response = DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq: 0, // Will be patched by write_dap_messages
+                        type_: "response".to_string(),
+                    },
+                    request_seq: request.base.seq,
+                    success: false,
+                    command: request.command.clone(),
+                    message: Some(format!("{e}")),
+                    body: json!({}),
+                });
+                if let Err(send_err) = sender.send(error_response) {
+                    error!("failed to send error response for {}: {send_err:?}", request.command);
+                }
+                // continue with other requests; trying to be more robust
                 // assuming it's for individual requests to fail
                 //   TODO: is it possible for some to leave bad state ?
             }

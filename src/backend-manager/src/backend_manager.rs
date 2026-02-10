@@ -534,6 +534,66 @@ impl BackendManager {
                     // so other clients can observe it.
                 }
             }
+
+            // Capture rrTicks from ct/complete-move events for pending navigations.
+            //
+            // The standard DAP stackTrace response does not include ticks
+            // information, but the CodeTracer backend emits a ct/complete-move
+            // event (between the stopped event and the stackTrace response)
+            // that carries the rrTicks value in body.location.rrTicks.  We
+            // capture it here so we can inject it into the final py-navigate
+            // response.
+            if event_name == "ct/complete-move"
+                && let Some(bid) = backend_id
+            {
+                let rr_ticks = msg
+                    .get("body")
+                    .and_then(|b| b.get("location"))
+                    .and_then(|loc| loc.get("rrTicks"))
+                    .and_then(Value::as_i64);
+
+                if let Some(ticks) = rr_ticks {
+                    if let Some(pending) =
+                        ds.py_bridge.pending_navigations.iter_mut().find(|p| {
+                            p.backend_id == bid
+                                && p.state == PendingPyNavState::AwaitingStackTrace
+                        })
+                    {
+                        pending.rr_ticks = Some(ticks);
+                    }
+                }
+                // Don't return — still route the event to clients normally.
+            }
+
+            // Detect end-of-trace from ct/notification events.
+            //
+            // The CodeTracer backend emits ct/notification events with text
+            // like "End of record reached" or "Limit of record at the end
+            // already reached!" when the trace replay cannot advance further.
+            // We capture this as `end_of_trace` in the pending navigation so
+            // it can be included in the final response as `endOfTrace: true`.
+            if event_name == "ct/notification"
+                && let Some(bid) = backend_id
+            {
+                let text = msg
+                    .get("body")
+                    .and_then(|b| b.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+
+                if text.contains("End of record") || text.contains("Limit of record") {
+                    if let Some(pending) =
+                        ds.py_bridge.pending_navigations.iter_mut().find(|p| {
+                            p.backend_id == bid
+                                && (p.state == PendingPyNavState::AwaitingStopped
+                                    || p.state == PendingPyNavState::AwaitingStackTrace)
+                        })
+                    {
+                        pending.end_of_trace = true;
+                    }
+                }
+                // Don't return — still route the event to clients normally.
+            }
         }
 
         // --- Python bridge: intercept responses for pending navigations ---
@@ -561,14 +621,53 @@ impl BackendManager {
 
             // Check if this response is for a bridge-initiated navigation command
             // (e.g., the response to our `next`/`stepIn` DAP request).
-            // If so, consume it silently — we only care about the stopped event.
-            if ds
+            //
+            // On success: consume it silently — we only care about the
+            // subsequent `stopped` event.
+            //
+            // On failure: the backend could not process the navigation
+            // command (e.g., `ct/goto-ticks` is not supported).  In this
+            // case, no `stopped` event will ever arrive, so we must
+            // complete the pending navigation immediately with an error
+            // to avoid the client hanging indefinitely.
+            if let Some(idx) = ds
                 .py_bridge
                 .pending_navigations
                 .iter()
-                .any(|p| p.nav_command_seq == Some(req_seq))
+                .position(|p| p.nav_command_seq == Some(req_seq))
             {
-                // Silently consume — don't forward to any client.
+                let nav_success = msg
+                    .get("success")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+
+                if nav_success {
+                    // Silently consume — don't forward to any client.
+                    // The subsequent `stopped` event will advance the
+                    // state machine.
+                    return;
+                }
+
+                // The backend returned an error for the navigation command.
+                // Remove the pending navigation and send an error response
+                // back to the originating client.
+                let pending = ds.py_bridge.pending_navigations.remove(idx);
+                let error_message = msg
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("navigation command failed");
+                let command_name = msg
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                let py_error = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": false,
+                    "command": "ct/py-navigate",
+                    "message": format!("backend error for {command_name}: {error_message}"),
+                });
+                self.send_to_client(pending.client_id, py_error);
                 return;
             }
 
@@ -578,7 +677,28 @@ impl BackendManager {
                     && p.state == PendingPyNavState::AwaitingStackTrace
             }) {
                 let pending = ds.py_bridge.pending_navigations.remove(idx);
-                let location = python_bridge::extract_location_from_stack_trace(msg);
+                let mut location = python_bridge::extract_location_from_stack_trace(msg);
+
+                // Inject rrTicks captured from the ct/complete-move event if
+                // the stackTrace response did not already include ticks.
+                // The standard DAP stackTrace response does not carry ticks,
+                // but the ct/complete-move event emitted by the CodeTracer
+                // backend does, and we captured it earlier.
+                if let Some(rr_ticks) = pending.rr_ticks {
+                    let current_ticks = location
+                        .get("ticks")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0);
+                    if current_ticks == 0 {
+                        location["ticks"] = serde_json::json!(rr_ticks);
+                    }
+                }
+
+                // Inject endOfTrace if detected from ct/notification events.
+                if pending.end_of_trace {
+                    location["endOfTrace"] = serde_json::json!(true);
+                }
+
                 let py_response = serde_json::json!({
                     "type": "response",
                     "request_seq": pending.original_seq,
@@ -1575,6 +1695,8 @@ impl BackendManager {
                     state: PendingPyNavState::AwaitingStopped,
                     stack_trace_seq: None,
                     nav_command_seq: Some(dap_seq),
+                    rr_ticks: None,
+                    end_of_trace: false,
                 });
         }
 
