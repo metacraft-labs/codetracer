@@ -20,7 +20,7 @@
 //!
 //! - DAP specification: <https://microsoft.github.io/debug-adapter-protocol/specification>
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -43,6 +43,20 @@ pub struct DapInitResult {
 
     /// The `stopped` event sent by the backend after `configurationDone`.
     pub stopped_event: Value,
+}
+
+/// Optional parameters for the DAP `launch` request.
+///
+/// When a trace directory contains an `rr/` subdirectory, the `db-backend`
+/// needs the path to `ct-rr-support` (passed as `ctRRWorkerExe` in the
+/// launch arguments) so it can spawn the RR replay worker.
+///
+/// Callers that don't need RR support can use `Default::default()`.
+#[derive(Debug, Clone, Default)]
+pub struct DapLaunchOptions {
+    /// Path to the `ct-rr-support` binary, included as `ctRRWorkerExe`
+    /// in the launch request when `Some`.
+    pub ct_rr_worker_exe: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +233,11 @@ async fn wait_for_stopped_event(
 /// Waits for: each response and the initial `stopped` event.
 ///
 /// The `trace_folder` is passed to the `launch` request's `arguments`
-/// so the backend knows which trace to load.
+/// so the backend knows which trace to load.  When the trace is an RR
+/// recording, the caller should populate `opts.ct_rr_worker_exe` with
+/// the path to `ct-rr-support` so that the backend can start the RR
+/// replay worker (the db-backend expects `ctRRWorkerExe` in the launch
+/// arguments).
 ///
 /// The `timeout` duration is applied to each individual wait step (not
 /// the total sequence), so the maximum wall-clock time is approximately
@@ -234,6 +252,7 @@ pub async fn run_dap_init(
     receiver: &mut UnboundedReceiver<Value>,
     trace_folder: &Path,
     timeout: Duration,
+    opts: &DapLaunchOptions,
 ) -> Result<DapInitResult, DapInitError> {
     let mut collected_events: Vec<Value> = Vec::new();
 
@@ -257,16 +276,26 @@ pub async fn run_dap_init(
         .unwrap_or(Value::Object(serde_json::Map::new()));
 
     // Step 2: launch
+    //
+    // Build launch arguments.  The db-backend's `LaunchRequestArguments`
+    // struct expects `traceFolder`, `program`, `pid`, and optionally
+    // `ctRRWorkerExe` for RR-based traces.
+    //
+    // Reference: codetracer/src/db-backend/src/dap.rs — `LaunchRequestArguments`
     let trace_folder_str = trace_folder.to_string_lossy().to_string();
+    let mut launch_args = json!({
+        "traceFolder": trace_folder_str,
+        "program": "main",
+        "pid": std::process::id(),
+    });
+    if let Some(worker_exe) = &opts.ct_rr_worker_exe {
+        launch_args["ctRRWorkerExe"] = json!(worker_exe.to_string_lossy());
+    }
     send_request(
         sender,
         "launch",
         2,
-        json!({
-            "traceFolder": trace_folder_str,
-            "program": "main",
-            "pid": std::process::id(),
-        }),
+        launch_args,
         "launch-send",
     )?;
 
@@ -419,6 +448,7 @@ mod tests {
             &mut from_backend_rx,
             Path::new("/tmp/test-trace"),
             Duration::from_secs(5),
+            &DapLaunchOptions::default(),
         )
         .await;
 
@@ -455,6 +485,7 @@ mod tests {
             &mut from_backend_rx,
             Path::new("/tmp/test-trace"),
             Duration::from_millis(100),
+            &DapLaunchOptions::default(),
         )
         .await;
 
@@ -492,6 +523,7 @@ mod tests {
             &mut from_backend_rx,
             Path::new("/tmp/test-trace"),
             Duration::from_secs(5),
+            &DapLaunchOptions::default(),
         )
         .await;
 
@@ -517,6 +549,7 @@ mod tests {
             &mut from_backend_rx,
             Path::new("/tmp/test-trace"),
             Duration::from_secs(5),
+            &DapLaunchOptions::default(),
         )
         .await;
 
