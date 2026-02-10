@@ -91,6 +91,21 @@
 //! - On success: the `body.processes` array is present with at least 1 entry.
 //! - On error: the `message` field is non-empty.
 //!
+//! ## M9 — CLI Interface (exec-script)
+//!
+//! Tests for `ct/exec-script` that verify the daemon can execute Python
+//! scripts against loaded traces.  The daemon spawns a Python subprocess
+//! with the script code, passing the `CODETRACER_PYTHON_API_PATH` env var
+//! so that `from codetracer import Trace` works, and binds the `trace`
+//! variable to the opened trace session.
+//!
+//! These tests verify:
+//! - A simple `print('hello')` script produces "hello" on stdout with exit code 0.
+//! - The `trace` variable is pre-bound and has type `Trace`.
+//! - Inline code can access `trace.location` against a custom trace.
+//! - A script that exceeds the timeout is killed with non-zero exit code.
+//! - A script with a Python error (e.g., `1/0`) reports the traceback on stderr.
+//!
 //! ## Test categories
 //!
 //! 1. **RR-based tests**: Build and record a Rust test program via `ct-rr-support`,
@@ -6811,6 +6826,628 @@ async fn test_real_custom_single_process_trace() {
 
     report(
         "test_real_custom_single_process_trace",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M9 CLI Interface (exec-script) helpers and tests
+// ===========================================================================
+
+/// Returns the path to the `python-api` directory at the repository root.
+///
+/// The `python-api` package provides the `codetracer` module that the
+/// `ct/exec-script` handler imports to bind the `trace` variable in the
+/// spawned Python subprocess.
+fn python_api_dir() -> PathBuf {
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    crate_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|repo_root| repo_root.join("python-api"))
+        .expect("cannot determine python-api directory from CARGO_MANIFEST_DIR")
+}
+
+/// Sends `ct/exec-script` to the daemon and returns the response.
+///
+/// This helper skips any interleaved events (e.g., backend output events)
+/// and returns the first non-event message matching the request.  The
+/// `timeout_secs` parameter controls the script execution timeout passed
+/// in the request arguments; the overall wait deadline is `timeout_secs + 30`
+/// seconds to account for daemon and Python startup overhead.
+async fn exec_script(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    script: &str,
+    timeout_secs: u64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/exec-script",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "script": script,
+            "timeout": timeout_secs,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/exec-script: {e}"))?;
+
+    // The script execution can take a while (spawns Python, connects back
+    // to the daemon, etc.), so use a generous deadline.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs + 30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/exec-script response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/exec-script response".to_string())?
+            .map_err(|e| format!("read ct/exec-script: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("exec-script: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/exec-script response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// M9-RR-1. Create a simple `print('hello')` script, execute via
+/// `ct/exec-script` against a real RR trace.  Verify stdout contains
+/// "hello" and exit_code is 0.
+#[tokio::test]
+async fn test_real_rr_query_prints_hello() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_query_hello");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_query_prints_hello: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        // Create an RR recording of the Rust test program.
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        // Start the daemon with the real db-backend and the python-api path.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 50_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Write a script file and read its content.
+        let script_path = test_dir.join("hello.py");
+        std::fs::write(&script_path, "print('hello')").expect("write script file");
+        let script_content =
+            std::fs::read_to_string(&script_path).map_err(|e| format!("read script: {e}"))?;
+
+        // Execute the script against the trace.
+        let resp = exec_script(
+            &mut client,
+            50_001,
+            &trace_dir,
+            &script_content,
+            30,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/exec-script should succeed, got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(-1);
+
+        assert!(
+            stdout.contains("hello"),
+            "M9-RR-1: stdout should contain 'hello', got: {stdout:?}"
+        );
+        assert_eq!(
+            exit_code, 0,
+            "M9-RR-1: exit code should be 0, got: {exit_code}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("test_real_rr_query_prints_hello", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M9-RR-2. Execute inline code `print(type(trace).__name__)` via
+/// `ct/exec-script` against a real RR trace.  Verify stdout contains
+/// "Trace" (the `trace` variable is pre-bound by the exec-script handler).
+#[tokio::test]
+async fn test_real_rr_query_inline_trace_bound() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_query_trace_bound");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_query_inline_trace_bound: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 51_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Execute inline code that prints the type name of the trace variable.
+        let resp = exec_script(
+            &mut client,
+            51_001,
+            &trace_dir,
+            "print(type(trace).__name__)",
+            30,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/exec-script should succeed, got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+
+        assert!(
+            stdout.contains("Trace"),
+            "M9-RR-2: stdout should contain 'Trace', got: {stdout:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_query_inline_trace_bound",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M9-CUSTOM-1. Execute inline code `print(trace.location)` against a
+/// custom trace.  Verify stdout is non-empty and contains location info.
+#[tokio::test]
+async fn test_real_custom_query_inline_executes() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_query_inline");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = find_db_backend()
+            .ok_or_else(|| "db-backend not found (skipping custom trace test)".to_string())?;
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        log_line(
+            &log_path,
+            &format!("db-backend: {}", db_backend.display()),
+        );
+
+        // Create a custom trace directory.
+        let trace_dir = create_custom_trace_dir(&test_dir, "query_trace");
+        log_line(
+            &log_path,
+            &format!("custom trace directory: {}", trace_dir.display()),
+        );
+
+        // Start the daemon with the real db-backend and the python-api path.
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the custom trace.
+        let open_resp = open_trace(&mut client, 52_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed for custom trace, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Execute inline code that prints the trace location.
+        let resp = exec_script(
+            &mut client,
+            52_001,
+            &trace_dir,
+            "print(trace.location)",
+            30,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/exec-script should succeed, got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(-1);
+
+        // trace.location should produce a non-empty string.  The Location
+        // __str__() format is "path:line" so we check for the colon separator.
+        assert!(
+            !stdout.trim().is_empty(),
+            "M9-CUSTOM-1: stdout should not be empty, got: {stdout:?}"
+        );
+        assert!(
+            stdout.contains(":"),
+            "M9-CUSTOM-1: stdout should contain location with ':' separator, got: {stdout:?}"
+        );
+        assert_eq!(
+            exit_code, 0,
+            "M9-CUSTOM-1: exit code should be 0, got: {exit_code}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_query_inline_executes",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M9-RR-3. Execute `import time; time.sleep(10)` with timeout=1 against
+/// a real RR trace.  Verify it returns exit code != 0 within a reasonable
+/// time bound (~3 seconds).
+#[tokio::test]
+async fn test_real_rr_query_timeout_kills_script() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_query_timeout");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_query_timeout_kills_script: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 53_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        let start_time = tokio::time::Instant::now();
+
+        // Run a script that sleeps for 10 seconds with a 1-second timeout.
+        let resp = exec_script(
+            &mut client,
+            53_001,
+            &trace_dir,
+            "import time; time.sleep(10)",
+            1,
+            &log_path,
+        )
+        .await?;
+
+        let elapsed = start_time.elapsed();
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "M9-RR-3: request itself should succeed (script result is in body), got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(0);
+        let timed_out = body
+            .get("timedOut")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let stderr = body.get("stderr").and_then(Value::as_str).unwrap_or("");
+
+        log_line(
+            &log_path,
+            &format!(
+                "timeout test: exit_code={exit_code}, timed_out={timed_out}, \
+                 elapsed={elapsed:?}, stderr={stderr:?}"
+            ),
+        );
+
+        assert!(
+            timed_out,
+            "M9-RR-3: timedOut should be true, got body: {body}"
+        );
+        assert_ne!(
+            exit_code, 0,
+            "M9-RR-3: exit code should be non-zero, got: {exit_code}"
+        );
+        // The response should arrive well before the 10-second sleep completes.
+        // We use 10s as a generous upper bound to avoid flakiness on slow CI.
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "M9-RR-3: should complete within ~3s, took {:?}",
+            elapsed
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_query_timeout_kills_script",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M9-RR-4. Execute `1/0` against a real RR trace.  Verify exit code != 0
+/// and stderr contains "ZeroDivisionError".
+#[tokio::test]
+async fn test_real_rr_query_script_error_traceback() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_query_error");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_query_script_error_traceback: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 54_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // Execute a script that triggers a ZeroDivisionError.
+        let resp =
+            exec_script(&mut client, 54_001, &trace_dir, "1/0", 30, &log_path).await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "M9-RR-4: request itself should succeed (error is in body), got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(0);
+        let stderr = body.get("stderr").and_then(Value::as_str).unwrap_or("");
+
+        log_line(
+            &log_path,
+            &format!(
+                "error test: exit_code={exit_code}, stderr={stderr:?}"
+            ),
+        );
+
+        assert_ne!(
+            exit_code, 0,
+            "M9-RR-4: exit code should be non-zero for 1/0, got: {exit_code}"
+        );
+        assert!(
+            stderr.contains("ZeroDivisionError"),
+            "M9-RR-4: stderr should contain 'ZeroDivisionError', got: {stderr:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_query_script_error_traceback",
         &log_path,
         success,
     );
