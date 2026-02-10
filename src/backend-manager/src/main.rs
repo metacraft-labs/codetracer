@@ -359,6 +359,15 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     let mut breakpoints: Vec<(String, i64)> = Vec::new();
     let mut watchpoints: Vec<String> = Vec::new();
 
+    // Multi-process simulation state.
+    //
+    // `is_multi_process` is determined by the trace folder path: if it
+    // contains "multi" then the mock simulates a multi-process trace
+    // with two processes.  `selected_process_id` tracks which process
+    // is currently selected (affects locals and other query responses).
+    let mut is_multi_process = false;
+    let mut selected_process_id: i64 = 1;
+
     loop {
         let cnt = read_half.read(&mut buf).await?;
         if cnt == 0 {
@@ -402,6 +411,18 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;
                 }
                 "launch" => {
+                    // Detect multi-process mode from the trace folder path.
+                    // If the traceFolder argument contains "multi", the mock
+                    // simulates a multi-process trace with two processes.
+                    let trace_folder = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("traceFolder"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    if trace_folder.contains("multi") {
+                        is_multi_process = true;
+                    }
+
                     let response = json!({
                         "type": "response",
                         "command": "launch",
@@ -686,6 +707,11 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                 // The response format mirrors the CodeTracer extension that
                 // returns variables already expanded to the requested depth
                 // with children included inline.
+                //
+                // In multi-process mode, the returned variables depend on
+                // the currently selected process:
+                // - Process 1 ("main"): x=42, y=20, point
+                // - Process 2 ("child"): worker_id=7, task_count=3
                 "ct/load-locals" => {
                     let depth = msg
                         .get("arguments")
@@ -693,17 +719,32 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         .and_then(serde_json::Value::as_i64)
                         .unwrap_or(3);
 
-                    // Build the "point" variable with nested children.
-                    // When depth > 1, the children are populated; when
-                    // depth == 1, only top-level variables are returned
-                    // (children are empty).
-                    let point_children = if depth > 1 {
+                    let variables = if is_multi_process && selected_process_id == 2 {
+                        // Process 2 ("child") has different variables.
                         json!([
-                            {"name": "x", "value": "1", "type": "int", "children": []},
-                            {"name": "y", "value": "2", "type": "int", "children": []},
+                            {"name": "worker_id", "value": "7", "type": "int", "children": []},
+                            {"name": "task_count", "value": "3", "type": "int", "children": []},
                         ])
                     } else {
-                        json!([])
+                        // Process 1 ("main") or single-process mode.
+                        // Build the "point" variable with nested children.
+                        // When depth > 1, the children are populated; when
+                        // depth == 1, only top-level variables are returned
+                        // (children are empty).
+                        let point_children = if depth > 1 {
+                            json!([
+                                {"name": "x", "value": "1", "type": "int", "children": []},
+                                {"name": "y", "value": "2", "type": "int", "children": []},
+                            ])
+                        } else {
+                            json!([])
+                        };
+                        json!([
+                            {"name": "x", "value": "42", "type": "int", "children": []},
+                            {"name": "y", "value": "20", "type": "int", "children": []},
+                            {"name": "point", "value": "Point{x: 1, y: 2}", "type": "Point",
+                             "children": point_children},
+                        ])
                     };
 
                     let response = json!({
@@ -712,12 +753,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "request_seq": seq,
                         "success": true,
                         "body": {
-                            "variables": [
-                                {"name": "x", "value": "42", "type": "int", "children": []},
-                                {"name": "y", "value": "20", "type": "int", "children": []},
-                                {"name": "point", "value": "Point{x: 1, y: 2}", "type": "Point",
-                                 "children": point_children},
-                            ]
+                            "variables": variables,
                         }
                     });
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;
@@ -1134,6 +1170,55 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "body": {
                             "content": content,
                         }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- ct/list-processes: returns the list of processes ---
+                //
+                // In multi-process mode (trace folder contains "multi"),
+                // returns two processes.  Otherwise returns a single process.
+                "ct/list-processes" => {
+                    let processes = if is_multi_process {
+                        json!([
+                            {"id": 1, "name": "main", "command": "/usr/bin/prog"},
+                            {"id": 2, "name": "child", "command": "/usr/bin/prog --worker"},
+                        ])
+                    } else {
+                        json!([
+                            {"id": 1, "name": "main", "command": "/usr/bin/prog"},
+                        ])
+                    };
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/list-processes",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "processes": processes,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- ct/select-replay: switches the selected process ---
+                //
+                // Updates the internal `selected_process_id` so that
+                // subsequent queries (locals, evaluate, etc.) return
+                // data from the selected process.
+                "ct/select-replay" => {
+                    let process_id = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("processId"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(1);
+                    selected_process_id = process_id;
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/select-replay",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
                     });
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;
                 }

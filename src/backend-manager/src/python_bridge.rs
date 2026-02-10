@@ -244,6 +244,10 @@ pub enum PendingPyRequestKind {
     Terminal,
     /// `ct/py-read-source` -> backend `ct/read-source`.
     ReadSource,
+    /// `ct/py-processes` -> backend `ct/list-processes`.
+    Processes,
+    /// `ct/py-select-process` -> backend `ct/select-replay`.
+    SelectProcess,
     /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
     /// whose backend responses should be silently consumed and not forwarded
     /// to any client.
@@ -607,6 +611,64 @@ pub fn format_read_source_response(backend_response: &Value) -> (bool, Value) {
         .unwrap_or("");
 
     (true, serde_json::json!({"content": content}))
+}
+
+/// Formats a backend `ct/list-processes` response into the simplified
+/// `ct/py-processes` response body.
+///
+/// Extracts the `processes` array from the response body.  Each process
+/// has `id`, `name`, and `command`.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"processes": [...]}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_processes_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("list-processes failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let processes = backend_response
+        .get("body")
+        .and_then(|b| b.get("processes"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    (true, serde_json::json!({"processes": processes}))
+}
+
+/// Formats a backend `ct/select-replay` response into the simplified
+/// `ct/py-select-process` response body.
+///
+/// This is a simple success pass-through — the response body is empty
+/// on success.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_select_process_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("select-replay failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    (true, serde_json::json!({}))
 }
 
 // ---------------------------------------------------------------------------
@@ -1358,5 +1420,85 @@ mod tests {
         let (success, body) = format_read_source_response(&backend_resp);
         assert!(success);
         assert_eq!(body["content"], "");
+    }
+
+    // --- format_processes_response tests ---
+
+    #[test]
+    fn test_format_processes_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "processes": [
+                    {"id": 1, "name": "main", "command": "/usr/bin/prog"},
+                    {"id": 2, "name": "child", "command": "/usr/bin/prog --worker"},
+                ]
+            }
+        });
+
+        let (success, body) = format_processes_response(&backend_resp);
+        assert!(success);
+        let procs = body["processes"].as_array().expect("processes should be array");
+        assert_eq!(procs.len(), 2);
+        assert_eq!(procs[0]["id"], 1);
+        assert_eq!(procs[0]["name"], "main");
+        assert_eq!(procs[0]["command"], "/usr/bin/prog");
+        assert_eq!(procs[1]["id"], 2);
+        assert_eq!(procs[1]["name"], "child");
+    }
+
+    #[test]
+    fn test_format_processes_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "process list unavailable"
+        });
+
+        let (success, body) = format_processes_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "process list unavailable");
+    }
+
+    #[test]
+    fn test_format_processes_response_missing_body() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+        });
+
+        let (success, body) = format_processes_response(&backend_resp);
+        assert!(success);
+        let procs = body["processes"].as_array().expect("processes should be array");
+        assert!(procs.is_empty());
+    }
+
+    // --- format_select_process_response tests ---
+
+    #[test]
+    fn test_format_select_process_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {}
+        });
+
+        let (success, body) = format_select_process_response(&backend_resp);
+        assert!(success);
+        assert!(body.is_object());
+    }
+
+    #[test]
+    fn test_format_select_process_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "invalid process ID"
+        });
+
+        let (success, body) = format_select_process_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "invalid process ID");
     }
 }

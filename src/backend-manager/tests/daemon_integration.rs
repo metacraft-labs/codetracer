@@ -5842,3 +5842,425 @@ async fn m7_read_source_returns_file_content() {
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+// ===========================================================================
+// M8 Tests — Multi-Process Support
+// ===========================================================================
+
+/// Creates a test trace directory whose folder name contains "multi",
+/// which causes the mock-dap-backend to simulate a multi-process trace.
+fn create_multi_process_trace_dir(parent: &Path, name: &str) -> PathBuf {
+    // The name must contain "multi" so the mock detects multi-process mode
+    // from the traceFolder path passed in the DAP launch arguments.
+    let trace_dir = parent.join(name);
+    std::fs::create_dir_all(trace_dir.join("files")).expect("create trace dir");
+
+    let metadata = serde_json::json!({
+        "workdir": "/tmp/test-workdir",
+        "program": "multi_process_app",
+        "args": []
+    });
+    std::fs::write(
+        trace_dir.join("trace_metadata.json"),
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .expect("write trace_metadata.json");
+
+    let paths = serde_json::json!(["src/main.rs", "src/worker.rs"]);
+    std::fs::write(
+        trace_dir.join("trace_paths.json"),
+        serde_json::to_string(&paths).unwrap(),
+    )
+    .expect("write trace_paths.json");
+
+    let events = serde_json::json!([
+        {"Path": "src/main.rs"},
+        {"Function": {"name": "main", "path_id": 0, "line": 1}},
+        {"Call": {"function_id": 0, "args": []}},
+        {"Step": {"path_id": 0, "line": 1}},
+        {"Step": {"path_id": 0, "line": 2}},
+    ]);
+    std::fs::write(
+        trace_dir.join("trace.json"),
+        serde_json::to_string_pretty(&events).unwrap(),
+    )
+    .expect("write trace.json");
+
+    trace_dir
+}
+
+/// Sends `ct/py-processes` and returns the response (skipping interleaved events).
+async fn py_processes(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-processes",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-processes: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-processes response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-processes response".to_string())?
+            .map_err(|e| format!("read ct/py-processes: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-processes: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-processes response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-select-process` and returns the response (skipping interleaved events).
+async fn py_select_process(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    process_id: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-select-process",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "processId": process_id,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-select-process: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-select-process response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-select-process response".to_string())?
+            .map_err(|e| format!("read ct/py-select-process: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-select-process: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-select-process response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// V-M8-PROCESSES: Open a multi-process trace.  Call `trace.processes()`.
+/// Verify a list with >1 Process objects.  Verify each has `id` and `command`.
+#[tokio::test]
+async fn m8_processes_returns_list() {
+    let (test_dir, log_path) = setup_test_dir("m8_processes_list");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        // The trace directory name must contain "multi" so the mock detects
+        // multi-process mode from the traceFolder launch argument.
+        let trace_dir = create_multi_process_trace_dir(&test_dir, "trace-multi-m8-procs");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the multi-process trace.
+        let resp = open_trace(&mut client, 80_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-processes.
+        let proc_resp = py_processes(&mut client, 80_001, &trace_dir, &log_path).await?;
+
+        assert_eq!(
+            proc_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-processes should succeed, got: {proc_resp}"
+        );
+        assert_eq!(
+            proc_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-processes"),
+            "command should be ct/py-processes"
+        );
+
+        let body = proc_resp.get("body").expect("response should have body");
+        let processes = body
+            .get("processes")
+            .and_then(Value::as_array)
+            .expect("body should have processes array");
+
+        // V-M8-PROCESSES: Verify >1 process.
+        assert!(
+            processes.len() > 1,
+            "multi-process trace should have >1 process, got {}",
+            processes.len()
+        );
+
+        // Verify each process has `id` and `command`.
+        for (i, proc) in processes.iter().enumerate() {
+            let id = proc.get("id").and_then(Value::as_i64);
+            assert!(
+                id.is_some(),
+                "process {i} should have an integer 'id', got: {proc}"
+            );
+
+            let command = proc.get("command").and_then(Value::as_str).unwrap_or("");
+            assert!(
+                !command.is_empty(),
+                "process {i} should have a non-empty 'command', got: {proc}"
+            );
+
+            let name = proc.get("name").and_then(Value::as_str).unwrap_or("");
+            assert!(
+                !name.is_empty(),
+                "process {i} should have a non-empty 'name', got: {proc}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m8_processes_returns_list", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M8-SELECT: Open a multi-process trace.  Get process list.  Select
+/// process B.  Query locals.  Select process A.  Query locals.  Verify
+/// different variables returned.
+#[tokio::test]
+async fn m8_select_process_switches_context() {
+    let (test_dir, log_path) = setup_test_dir("m8_select_process");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_multi_process_trace_dir(&test_dir, "trace-multi-m8-select");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the multi-process trace.
+        let resp = open_trace(&mut client, 81_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Get process list to confirm multi-process.
+        let proc_resp = py_processes(&mut client, 81_001, &trace_dir, &log_path).await?;
+        let processes = proc_resp
+            .get("body")
+            .and_then(|b| b.get("processes"))
+            .and_then(Value::as_array)
+            .expect("should have processes");
+        assert!(
+            processes.len() > 1,
+            "expected multi-process trace with >1 process"
+        );
+
+        // Select process 2 ("child").
+        let sel_resp =
+            py_select_process(&mut client, 81_002, &trace_dir, 2, &log_path).await?;
+        assert_eq!(
+            sel_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-select-process(2) should succeed, got: {sel_resp}"
+        );
+
+        // Query locals for process 2.
+        let locals_b =
+            py_locals(&mut client, 81_003, &trace_dir, 3, 3000, &log_path).await?;
+        assert_eq!(
+            locals_b.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals for process 2 should succeed"
+        );
+        let vars_b = locals_b
+            .get("body")
+            .and_then(|b| b.get("variables"))
+            .and_then(Value::as_array)
+            .expect("should have variables for process 2");
+
+        // Collect variable names for process 2.
+        let names_b: Vec<&str> = vars_b
+            .iter()
+            .filter_map(|v| v.get("name").and_then(Value::as_str))
+            .collect();
+        log_line(&log_path, &format!("process 2 variable names: {names_b:?}"));
+
+        // Select process 1 ("main").
+        let sel_resp2 =
+            py_select_process(&mut client, 81_004, &trace_dir, 1, &log_path).await?;
+        assert_eq!(
+            sel_resp2.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-select-process(1) should succeed"
+        );
+
+        // Query locals for process 1.
+        let locals_a =
+            py_locals(&mut client, 81_005, &trace_dir, 3, 3000, &log_path).await?;
+        assert_eq!(
+            locals_a.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-locals for process 1 should succeed"
+        );
+        let vars_a = locals_a
+            .get("body")
+            .and_then(|b| b.get("variables"))
+            .and_then(Value::as_array)
+            .expect("should have variables for process 1");
+
+        // Collect variable names for process 1.
+        let names_a: Vec<&str> = vars_a
+            .iter()
+            .filter_map(|v| v.get("name").and_then(Value::as_str))
+            .collect();
+        log_line(&log_path, &format!("process 1 variable names: {names_a:?}"));
+
+        // V-M8-SELECT: The two processes must have different variable sets.
+        assert_ne!(
+            names_a, names_b,
+            "process 1 and process 2 should have different variables; \
+             process 1: {names_a:?}, process 2: {names_b:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m8_select_process_switches_context", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M8-SINGLE: Open a single-process trace.  Call `trace.processes()`.
+/// Verify exactly 1 process.
+#[tokio::test]
+async fn m8_single_process_trace_has_one_process() {
+    let (test_dir, log_path) = setup_test_dir("m8_single_process");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        // Use a normal (non-multi) trace directory — no "multi" in the name.
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m8-single", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the single-process trace.
+        let resp = open_trace(&mut client, 82_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-processes.
+        let proc_resp = py_processes(&mut client, 82_001, &trace_dir, &log_path).await?;
+
+        assert_eq!(
+            proc_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-processes should succeed, got: {proc_resp}"
+        );
+
+        let body = proc_resp.get("body").expect("response should have body");
+        let processes = body
+            .get("processes")
+            .and_then(Value::as_array)
+            .expect("body should have processes array");
+
+        // V-M8-SINGLE: Verify exactly 1 process.
+        assert_eq!(
+            processes.len(),
+            1,
+            "single-process trace should have exactly 1 process, got {}",
+            processes.len()
+        );
+
+        // Verify the single process has valid fields.
+        let proc = &processes[0];
+        assert!(
+            proc.get("id").and_then(Value::as_i64).is_some(),
+            "process should have an integer 'id'"
+        );
+        assert!(
+            !proc.get("command").and_then(Value::as_str).unwrap_or("").is_empty(),
+            "process should have a non-empty 'command'"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m8_single_process_trace_has_one_process", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

@@ -634,6 +634,12 @@ impl BackendManager {
                     PendingPyRequestKind::ReadSource => {
                         python_bridge::format_read_source_response(msg)
                     }
+                    PendingPyRequestKind::Processes => {
+                        python_bridge::format_processes_response(msg)
+                    }
+                    PendingPyRequestKind::SelectProcess => {
+                        python_bridge::format_select_process_response(msg)
+                    }
                     PendingPyRequestKind::FireAndForget => {
                         // Already handled above; unreachable.
                         return;
@@ -1400,6 +1406,12 @@ impl BackendManager {
                     }
                     "ct/py-read-source" => {
                         self.handle_py_read_source(seq, args).await
+                    }
+                    "ct/py-processes" => {
+                        self.handle_py_processes(seq, args).await
+                    }
+                    "ct/py-select-process" => {
+                        self.handle_py_select_process(seq, args).await
                     }
                     "ct/open-trace" => {
                         self.handle_open_trace(seq, args).await
@@ -3369,6 +3381,243 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-read-source".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-processes, ct/py-select-process handlers
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-processes` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/list-processes` DAP command, sends
+    /// it to the backend, and registers a pending request that will be
+    /// completed when the backend responds.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-processes",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-processes",
+    ///   "body": {
+    ///     "processes": [
+    ///       {"id": 1, "name": "main", "command": "/usr/bin/prog"},
+    ///       {"id": 2, "name": "child", "command": "/usr/bin/prog --worker"}
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_processes(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-processes",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-processes",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (inspection counts as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Get a unique seq for the DAP command sent to the backend.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/list-processes command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/list-processes",
+            "seq": dap_seq,
+            "arguments": {},
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-processes",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Processes,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-processes".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-select-process` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/select-replay` DAP command, sends
+    /// it to the backend, and registers a pending request that will be
+    /// completed when the backend responds.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-select-process",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "processId": 2
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-select-process",
+    ///   "body": {}
+    /// }
+    /// ```
+    async fn handle_py_select_process(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-select-process",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let process_id = match args
+            .and_then(|a| a.get("processId"))
+            .and_then(Value::as_i64)
+        {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-select-process",
+                    "missing 'processId' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-select-process",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (inspection counts as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Get a unique seq for the DAP command sent to the backend.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/select-replay command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/select-replay",
+            "seq": dap_seq,
+            "arguments": {
+                "processId": process_id,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-select-process",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::SelectProcess,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-select-process".to_string(),
             });
         }
 
