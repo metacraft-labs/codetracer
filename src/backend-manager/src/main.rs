@@ -807,18 +807,24 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                 // - Process 1 ("main"): x=42, y=20, point
                 // - Process 2 ("child"): worker_id=7, task_count=3
                 "ct/load-locals" => {
+                    // The daemon sends `depthLimit` (matching the real
+                    // backend's CtLoadLocalsArguments schema); fall back
+                    // to the legacy `depth` key for older callers.
                     let depth = msg
                         .get("arguments")
-                        .and_then(|a| a.get("depth"))
+                        .and_then(|a| {
+                            a.get("depthLimit")
+                                .or_else(|| a.get("depth"))
+                        })
                         .and_then(serde_json::Value::as_i64)
                         .unwrap_or(3);
 
-                    let variables = if is_multi_process && selected_process_id == 2 {
+                    let mut variables = if is_multi_process && selected_process_id == 2 {
                         // Process 2 ("child") has different variables.
-                        json!([
-                            {"name": "worker_id", "value": "7", "type": "int", "children": []},
-                            {"name": "task_count", "value": "3", "type": "int", "children": []},
-                        ])
+                        vec![
+                            json!({"name": "worker_id", "value": "7", "type": "int", "children": []}),
+                            json!({"name": "task_count", "value": "3", "type": "int", "children": []}),
+                        ]
                     } else {
                         // Process 1 ("main") or single-process mode.
                         // Build the "point" variable with nested children.
@@ -833,13 +839,56 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         } else {
                             json!([])
                         };
-                        json!([
-                            {"name": "x", "value": "42", "type": "int", "children": []},
-                            {"name": "y", "value": "20", "type": "int", "children": []},
-                            {"name": "point", "value": "Point{x: 1, y: 2}", "type": "Point",
-                             "children": point_children},
-                        ])
+                        vec![
+                            json!({"name": "x", "value": "42", "type": "int", "children": []}),
+                            json!({"name": "y", "value": "20", "type": "int", "children": []}),
+                            json!({"name": "point", "value": "Point{x: 1, y: 2}", "type": "Point",
+                             "children": point_children}),
+                        ]
                     };
+
+                    // When the daemon translates ct/py-evaluate into a
+                    // ct/load-locals request, it includes the expression
+                    // in `watchExpressions`.  The mock resolves each
+                    // watch expression and prepends the result to the
+                    // variables list so format_evaluate_response can
+                    // find it as the first entry.
+                    if let Some(watch_arr) = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("watchExpressions"))
+                        .and_then(serde_json::Value::as_array)
+                    {
+                        let mut watch_results: Vec<Value> = Vec::new();
+                        for watch in watch_arr {
+                            let expr = watch.as_str().unwrap_or("");
+                            match expr {
+                                "x" => watch_results.push(json!({
+                                    "name": "x", "value": "42", "type": "int", "children": []
+                                })),
+                                "y" => watch_results.push(json!({
+                                    "name": "y", "value": "20", "type": "int", "children": []
+                                })),
+                                "x + y" => watch_results.push(json!({
+                                    "name": "x + y", "value": "30", "type": "int", "children": []
+                                })),
+                                _ => {
+                                    // Unknown expression — include a
+                                    // sentinel with empty value so the
+                                    // formatter can detect the failure.
+                                    watch_results.push(json!({
+                                        "name": expr,
+                                        "value": "",
+                                        "type": "",
+                                        "children": [],
+                                        "_watch_error": true
+                                    }));
+                                }
+                            }
+                        }
+                        // Prepend watch results so they appear first.
+                        watch_results.append(&mut variables);
+                        variables = watch_results;
+                    }
 
                     let response = json!({
                         "type": "response",
@@ -847,7 +896,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "request_seq": seq,
                         "success": true,
                         "body": {
-                            "variables": variables,
+                            "variables": serde_json::Value::Array(variables),
                         }
                     });
                     write_half

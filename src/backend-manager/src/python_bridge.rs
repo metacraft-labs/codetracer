@@ -297,10 +297,23 @@ pub struct PendingPyRequest {
 /// Formats a backend `ct/load-locals` response into the simplified
 /// `ct/py-locals` response body.
 ///
-/// The backend returns variables in its own format; this function
-/// extracts the `variables` array from the response body and passes
-/// it through directly (the mock and real backend both use the same
-/// `{name, value, type, children}` schema).
+/// The real backend (db-backend) returns locals as `body.locals`, an
+/// array of `{expression, value, address}` objects where `expression`
+/// is the variable name and `value` is a CodeTracer `Value` object
+/// containing `i` (the string representation) and `typ` (with
+/// `langType`).
+///
+/// The mock backend (used in daemon integration tests) returns locals
+/// as `body.variables` with a simpler `{name, value, type, children}`
+/// schema where `value` is already a plain string.
+///
+/// This function normalises each entry into the simplified
+/// `{name, value, type}` schema expected by the Python client,
+/// handling both formats:
+/// - `name`  = backend's `expression` (or `name` for mock)
+/// - `value` = backend's `value.i` (or plain `value` for mock)
+/// - `type`  = backend's `value.typ.langType` (or plain `type` for mock)
+/// - `children` = preserved from the original if present
 ///
 /// Returns `(success, body_or_error)`:
 /// - On success: `(true, json!({"variables": [...]}))`
@@ -319,17 +332,82 @@ pub fn format_locals_response(backend_response: &Value) -> (bool, Value) {
         return (false, serde_json::json!({"message": message}));
     }
 
-    let variables = backend_response
+    // The real backend uses `body.locals`; the mock uses `body.variables`.
+    // Try `locals` first, fall back to `variables`.
+    let locals_raw = backend_response
         .get("body")
-        .and_then(|b| b.get("variables"))
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!([]));
+        .and_then(|b| b.get("locals").or_else(|| b.get("variables")));
+
+    let variables: Vec<Value> = match locals_raw.and_then(Value::as_array) {
+        Some(arr) => arr.iter().map(|local| normalise_variable(local)).collect(),
+        None => Vec::new(),
+    };
 
     (true, serde_json::json!({"variables": variables}))
 }
 
-/// Formats a backend `evaluate` response into the simplified
+/// Normalises a single variable entry from either the real backend
+/// format (`{expression, value: {i, typ: {langType}}, address}`) or
+/// the simplified mock format (`{name, value, type, children}`).
+///
+/// Returns a JSON object with `{name, value, type}` and optionally
+/// `children` (recursively normalised).
+fn normalise_variable(local: &Value) -> Value {
+    // Normalise name: real backend uses `expression`, mock uses `name`.
+    let name = local
+        .get("expression")
+        .or_else(|| local.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    // The real backend's `value` is a complex CodeTracer Value
+    // object with `i` (string repr) and `typ.langType`.
+    // The mock's `value` is a plain string.
+    let val_obj = local.get("value");
+    let value_str = val_obj
+        .and_then(|v| v.get("i"))
+        .and_then(Value::as_str)
+        // Fall back to treating `value` as a plain string (mock format).
+        .or_else(|| val_obj.and_then(Value::as_str))
+        .unwrap_or("");
+    let type_str = val_obj
+        .and_then(|v| v.get("typ"))
+        .and_then(|t| t.get("langType"))
+        .and_then(Value::as_str)
+        // Fall back to `type` if the value is already simplified (mock format).
+        .or_else(|| local.get("type").and_then(Value::as_str))
+        .unwrap_or("");
+
+    // Preserve children if present (used by the depth-limit feature).
+    // Recursively normalise each child variable.
+    let mut result = serde_json::json!({
+        "name": name,
+        "value": value_str,
+        "type": type_str,
+    });
+
+    if let Some(children_arr) = local.get("children").and_then(Value::as_array) {
+        let normalised_children: Vec<Value> =
+            children_arr.iter().map(|c| normalise_variable(c)).collect();
+        result["children"] = serde_json::json!(normalised_children);
+    }
+
+    result
+}
+
+/// Formats a backend `ct/load-locals` response into the simplified
 /// `ct/py-evaluate` response.
+///
+/// Since the backend does not support the standard DAP `evaluate`
+/// command, expression evaluation is implemented by sending a
+/// `ct/load-locals` request with the expression in `watchExpressions`.
+/// The backend returns all locals (and possibly watch results), and
+/// this function extracts the first variable and formats it as
+/// `{result, type}`.
+///
+/// Watch expressions that could not be resolved are marked with an
+/// empty value string; this function treats those as evaluation
+/// failures.
 ///
 /// Returns `(success, body_or_error)`:
 /// - On success: `(true, json!({"result": "...", "type": "..."}))`
@@ -348,15 +426,66 @@ pub fn format_evaluate_response(backend_response: &Value) -> (bool, Value) {
         return (false, serde_json::json!({"message": message}));
     }
 
-    let body = backend_response.get("body").unwrap_or(&Value::Null);
+    // The response is from ct/load-locals, which returns body.locals
+    // (real backend) or body.variables (mock).
+    let locals_raw = backend_response
+        .get("body")
+        .and_then(|b| b.get("locals").or_else(|| b.get("variables")));
 
-    let result = body.get("result").and_then(Value::as_str).unwrap_or("");
-    let type_name = body.get("type").and_then(Value::as_str).unwrap_or("");
+    let first_local = locals_raw
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first());
 
-    (
-        true,
-        serde_json::json!({"result": result, "type": type_name}),
-    )
+    match first_local {
+        Some(local) => {
+            // Check for the watch-error sentinel: the mock backend
+            // marks unresolvable expressions with `_watch_error: true`
+            // and an empty value string.
+            let is_watch_error = local
+                .get("_watch_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if is_watch_error {
+                let expr_name = local
+                    .get("name")
+                    .or_else(|| local.get("expression"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                return (
+                    false,
+                    serde_json::json!({"message": format!("cannot evaluate: {expr_name}")}),
+                );
+            }
+
+            // Extract the string representation.  The real backend
+            // uses a complex CodeTracer Value object with `i` (string
+            // repr) and `typ.langType`.  The mock uses plain strings.
+            let val_obj = local.get("value");
+            let result_str = val_obj
+                .and_then(|v| v.get("i"))
+                .and_then(Value::as_str)
+                .or_else(|| val_obj.and_then(Value::as_str))
+                .unwrap_or("");
+            let type_str = val_obj
+                .and_then(|v| v.get("typ"))
+                .and_then(|t| t.get("langType"))
+                .and_then(Value::as_str)
+                .or_else(|| local.get("type").and_then(Value::as_str))
+                .unwrap_or("");
+
+            (
+                true,
+                serde_json::json!({"result": result_str, "type": type_str}),
+            )
+        }
+        None => {
+            // No locals found — the expression could not be resolved.
+            (
+                false,
+                serde_json::json!({"message": "no variables found at current location"}),
+            )
+        }
+    }
 }
 
 /// Formats a backend `stackTrace` response into the simplified
@@ -900,14 +1029,24 @@ mod tests {
     // --- format_locals_response tests ---
 
     #[test]
-    fn test_format_locals_response_success() {
+    fn test_format_locals_response_success_backend_format() {
+        // The real backend returns `locals` with `expression` and a complex
+        // `value` object containing `i` (string repr) and `typ.langType`.
         let backend_resp = json!({
             "type": "response",
             "success": true,
             "body": {
-                "variables": [
-                    {"name": "x", "value": "42", "type": "int", "children": []},
-                    {"name": "y", "value": "20", "type": "int", "children": []},
+                "locals": [
+                    {
+                        "expression": "x",
+                        "value": {"i": "42", "typ": {"langType": "int"}},
+                        "address": -1,
+                    },
+                    {
+                        "expression": "y",
+                        "value": {"i": "20", "typ": {"langType": "int"}},
+                        "address": -1,
+                    },
                 ]
             }
         });
@@ -920,7 +1059,9 @@ mod tests {
         assert_eq!(vars.len(), 2);
         assert_eq!(vars[0]["name"], "x");
         assert_eq!(vars[0]["value"], "42");
+        assert_eq!(vars[0]["type"], "int");
         assert_eq!(vars[1]["name"], "y");
+        assert_eq!(vars[1]["value"], "20");
     }
 
     #[test]
@@ -951,22 +1092,166 @@ mod tests {
         assert!(vars.is_empty());
     }
 
-    // --- format_evaluate_response tests ---
-
     #[test]
-    fn test_format_evaluate_response_success() {
+    fn test_format_locals_response_fallback_variables_key() {
+        // If a future backend uses `variables` instead of `locals`, the
+        // formatter should still work.
         let backend_resp = json!({
             "type": "response",
             "success": true,
             "body": {
-                "result": "42",
-                "type": "int",
+                "variables": [
+                    {"name": "a", "value": "1", "type": "i32"},
+                ]
+            }
+        });
+
+        let (success, body) = format_locals_response(&backend_resp);
+        assert!(success);
+        let vars = body["variables"]
+            .as_array()
+            .expect("variables should be array");
+        assert_eq!(vars.len(), 1);
+        // When `name` is present (not `expression`), it falls through to the
+        // `name` fallback.
+        assert_eq!(vars[0]["name"], "a");
+        // When `value` is a plain string (not an object), it falls through to
+        // the plain-string fallback.
+        assert_eq!(vars[0]["value"], "1");
+    }
+
+    #[test]
+    fn test_format_locals_response_preserves_children() {
+        // The mock backend returns variables with `children` arrays
+        // for nested structures.  The formatter should preserve them.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "variables": [
+                    {
+                        "name": "point",
+                        "value": "Point{x: 1, y: 2}",
+                        "type": "Point",
+                        "children": [
+                            {"name": "x", "value": "1", "type": "int", "children": []},
+                            {"name": "y", "value": "2", "type": "int", "children": []},
+                        ]
+                    },
+                ]
+            }
+        });
+
+        let (success, body) = format_locals_response(&backend_resp);
+        assert!(success);
+        let vars = body["variables"]
+            .as_array()
+            .expect("variables should be array");
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0]["name"], "point");
+        let children = vars[0]["children"]
+            .as_array()
+            .expect("point should have children");
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0]["name"], "x");
+        assert_eq!(children[0]["value"], "1");
+        assert_eq!(children[1]["name"], "y");
+    }
+
+    // --- format_evaluate_response tests ---
+    //
+    // The evaluate response formatter now handles ct/load-locals
+    // responses (body.locals) rather than DAP evaluate responses,
+    // because the backend does not support the DAP evaluate command.
+
+    #[test]
+    fn test_format_evaluate_response_success_from_locals() {
+        // Simulates a ct/load-locals response with a single local
+        // variable, which is what the daemon sends when handling
+        // ct/py-evaluate.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "locals": [
+                    {
+                        "expression": "x",
+                        "value": {
+                            "i": "42",
+                            "typ": { "langType": "int" }
+                        },
+                        "address": 0
+                    }
+                ]
             }
         });
 
         let (success, body) = format_evaluate_response(&backend_resp);
         assert!(success);
         assert_eq!(body["result"], "42");
+        assert_eq!(body["type"], "int");
+    }
+
+    #[test]
+    fn test_format_evaluate_response_no_locals() {
+        // When no locals are found, the formatter returns failure.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "locals": []
+            }
+        });
+
+        let (success, body) = format_evaluate_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "no variables found at current location");
+    }
+
+    #[test]
+    fn test_format_evaluate_response_watch_error() {
+        // When the mock marks a watch expression as unresolvable
+        // via the `_watch_error` sentinel, the formatter should
+        // return failure.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "variables": [
+                    {
+                        "name": "nonexistent_var",
+                        "value": "",
+                        "type": "",
+                        "children": [],
+                        "_watch_error": true
+                    }
+                ]
+            }
+        });
+
+        let (success, body) = format_evaluate_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "cannot evaluate: nonexistent_var");
+    }
+
+    #[test]
+    fn test_format_evaluate_response_mock_variables() {
+        // The mock backend returns variables in the simplified
+        // {name, value, type, children} format under body.variables.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "variables": [
+                    {"name": "x + y", "value": "30", "type": "int", "children": []},
+                    {"name": "x", "value": "42", "type": "int", "children": []},
+                ]
+            }
+        });
+
+        let (success, body) = format_evaluate_response(&backend_resp);
+        assert!(success);
+        assert_eq!(body["result"], "30");
         assert_eq!(body["type"], "int");
     }
 

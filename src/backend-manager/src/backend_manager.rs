@@ -1824,15 +1824,32 @@ impl BackendManager {
         // Reset TTL for this trace (inspection counts as activity).
         self.reset_ttl_for_backend_id(backend_id);
 
-        // Extract depth and countBudget parameters (with sensible defaults).
-        let depth = args
-            .and_then(|a| a.get("depth"))
-            .and_then(Value::as_i64)
-            .unwrap_or(3);
+        // Extract parameters with sensible defaults.
+        //
+        // The backend's `CtLoadLocalsArguments` struct expects:
+        //   rrTicks, countBudget, minCountLimit, lang, watchExpressions, depthLimit
+        // The Python client may send a simpler set; we fill in defaults for
+        // any missing fields.
         let count_budget = args
             .and_then(|a| a.get("countBudget"))
             .and_then(Value::as_i64)
             .unwrap_or(3000);
+        let depth_limit = args
+            .and_then(|a| a.get("depth"))
+            .and_then(Value::as_i64)
+            .unwrap_or(3);
+        let rr_ticks = args
+            .and_then(|a| a.get("rrTicks"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let min_count_limit = args
+            .and_then(|a| a.get("minCountLimit"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let lang = args
+            .and_then(|a| a.get("lang"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
 
         // Get a unique seq for the DAP command sent to the backend.
         let dap_seq = match self.daemon_state.as_mut() {
@@ -1841,13 +1858,21 @@ impl BackendManager {
         };
 
         // Build and send the ct/load-locals command to the backend.
+        //
+        // The arguments must match the backend's `CtLoadLocalsArguments`
+        // schema (camelCase):
+        //   https://github.com/nicholasgasior/codetracer/blob/main/codetracer/src/db-backend/src/task.rs
         let dap_request = serde_json::json!({
             "type": "request",
             "command": "ct/load-locals",
             "seq": dap_seq,
             "arguments": {
-                "depth": depth,
+                "rrTicks": rr_ticks,
                 "countBudget": count_budget,
+                "minCountLimit": min_count_limit,
+                "lang": lang,
+                "watchExpressions": [],
+                "depthLimit": depth_limit,
             },
         });
 
@@ -1877,8 +1902,12 @@ impl BackendManager {
 
     /// Handles `ct/py-evaluate` requests from Python clients.
     ///
-    /// Translates the request into a DAP `evaluate` command, sends it to
-    /// the backend, and registers a pending request.
+    /// The backend does not support the standard DAP `evaluate` command
+    /// directly, so this handler implements expression evaluation by
+    /// sending a `ct/load-locals` request with the expression included
+    /// in `watchExpressions`.  The backend returns all locals (plus
+    /// any watch expressions it can resolve), and the response formatter
+    /// searches the result for the requested expression.
     ///
     /// # Wire protocol
     ///
@@ -1974,14 +2003,25 @@ impl BackendManager {
             None => return Ok(()),
         };
 
-        // Build and send the DAP evaluate command.
+        // Build and send the ct/load-locals command with the expression
+        // included in watchExpressions.  The backend does not support
+        // the standard DAP `evaluate` command, but `ct/load-locals`
+        // returns all locals at the current execution point.  By
+        // including the expression in watchExpressions, it may also
+        // be explicitly evaluated (for backends that support it).
+        // The response formatter will search the returned locals for
+        // the requested expression.
         let dap_request = serde_json::json!({
             "type": "request",
-            "command": "evaluate",
+            "command": "ct/load-locals",
             "seq": dap_seq,
             "arguments": {
-                "expression": expression,
-                "context": "repl",
+                "rrTicks": 0,
+                "countBudget": 3000,
+                "minCountLimit": 0,
+                "lang": 0,
+                "watchExpressions": [expression],
+                "depthLimit": 3,
             },
         });
 
