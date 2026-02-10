@@ -234,6 +234,16 @@ pub enum PendingPyRequestKind {
     StackTrace,
     /// `ct/py-flow` -> backend `ct/load-flow`.
     Flow,
+    /// `ct/py-calltrace` -> backend `ct/load-calltrace-section`.
+    Calltrace,
+    /// `ct/py-search-calltrace` -> backend `ct/search-calltrace`.
+    SearchCalltrace,
+    /// `ct/py-events` -> backend `ct/event-load`.
+    Events,
+    /// `ct/py-terminal` -> backend `ct/load-terminal`.
+    Terminal,
+    /// `ct/py-read-source` -> backend `ct/read-source`.
+    ReadSource,
     /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
     /// whose backend responses should be silently consumed and not forwarded
     /// to any client.
@@ -439,6 +449,164 @@ pub fn format_flow_response(backend_response: &Value) -> (bool, Value) {
         .unwrap_or_else(|| serde_json::json!([]));
 
     (true, serde_json::json!({"steps": steps, "loops": loops}))
+}
+
+/// Formats a backend `ct/load-calltrace-section` response into the simplified
+/// `ct/py-calltrace` response body.
+///
+/// Extracts the `calls` array from the response body and passes it through.
+/// Each call has `id`, `name`, `location`, `returnValue`, `childrenCount`,
+/// and `depth`.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"calls": [...]}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_calltrace_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("load-calltrace-section failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let calls = backend_response
+        .get("body")
+        .and_then(|b| b.get("calls"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    (true, serde_json::json!({"calls": calls}))
+}
+
+/// Formats a backend `ct/search-calltrace` response into the simplified
+/// `ct/py-search-calltrace` response body.
+///
+/// Same format as `format_calltrace_response` — extracts the `calls` array.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"calls": [...]}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_search_calltrace_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("search-calltrace failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let calls = backend_response
+        .get("body")
+        .and_then(|b| b.get("calls"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    (true, serde_json::json!({"calls": calls}))
+}
+
+/// Formats a backend `ct/event-load` response into the simplified
+/// `ct/py-events` response body.
+///
+/// Extracts the `events` array from the response body. Each event has
+/// `id`, `type`, `ticks`, `content`, and `location`.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"events": [...]}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_events_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("event-load failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let events = backend_response
+        .get("body")
+        .and_then(|b| b.get("events"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    (true, serde_json::json!({"events": events}))
+}
+
+/// Formats a backend `ct/load-terminal` response into the simplified
+/// `ct/py-terminal` response body.
+///
+/// Extracts the `output` string from the response body.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"output": "..."}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_terminal_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("load-terminal failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let output = backend_response
+        .get("body")
+        .and_then(|b| b.get("output"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    (true, serde_json::json!({"output": output}))
+}
+
+/// Formats a backend `ct/read-source` response into the simplified
+/// `ct/py-read-source` response body.
+///
+/// Extracts the `content` string from the response body.
+///
+/// Returns `(success, body_or_error)`:
+/// - On success: `(true, json!({"content": "..."}))`
+/// - On failure: `(false, json!({"message": "..."}))`
+pub fn format_read_source_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("read-source failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let content = backend_response
+        .get("body")
+        .and_then(|b| b.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    (true, serde_json::json!({"content": content}))
 }
 
 // ---------------------------------------------------------------------------
@@ -972,5 +1140,223 @@ mod tests {
         assert!(steps.is_empty());
         let loops = body["loops"].as_array().expect("loops should be array");
         assert!(loops.is_empty());
+    }
+
+    // --- format_calltrace_response tests ---
+
+    #[test]
+    fn test_format_calltrace_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "calls": [
+                    {"id": 0, "name": "main", "location": {"path": "main.nim", "line": 1},
+                     "returnValue": "0", "childrenCount": 2, "depth": 0},
+                    {"id": 1, "name": "helper", "location": {"path": "helpers.nim", "line": 10},
+                     "returnValue": "42", "childrenCount": 0, "depth": 1},
+                ]
+            }
+        });
+
+        let (success, body) = format_calltrace_response(&backend_resp);
+        assert!(success);
+        let calls = body["calls"].as_array().expect("calls should be array");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["name"], "main");
+        assert_eq!(calls[1]["name"], "helper");
+    }
+
+    #[test]
+    fn test_format_calltrace_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "calltrace unavailable"
+        });
+
+        let (success, body) = format_calltrace_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "calltrace unavailable");
+    }
+
+    #[test]
+    fn test_format_calltrace_response_missing_body() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+        });
+
+        let (success, body) = format_calltrace_response(&backend_resp);
+        assert!(success);
+        let calls = body["calls"].as_array().expect("calls should be array");
+        assert!(calls.is_empty());
+    }
+
+    // --- format_search_calltrace_response tests ---
+
+    #[test]
+    fn test_format_search_calltrace_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "calls": [
+                    {"id": 0, "name": "main", "location": {"path": "main.nim", "line": 1}},
+                ]
+            }
+        });
+
+        let (success, body) = format_search_calltrace_response(&backend_resp);
+        assert!(success);
+        let calls = body["calls"].as_array().expect("calls should be array");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "main");
+    }
+
+    #[test]
+    fn test_format_search_calltrace_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "search failed"
+        });
+
+        let (success, body) = format_search_calltrace_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "search failed");
+    }
+
+    // --- format_events_response tests ---
+
+    #[test]
+    fn test_format_events_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "events": [
+                    {"id": 0, "type": "stdout", "ticks": 100, "content": "Hello\n",
+                     "location": {"path": "main.nim", "line": 5, "column": 1}},
+                ]
+            }
+        });
+
+        let (success, body) = format_events_response(&backend_resp);
+        assert!(success);
+        let events = body["events"].as_array().expect("events should be array");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "stdout");
+        assert_eq!(events[0]["content"], "Hello\n");
+    }
+
+    #[test]
+    fn test_format_events_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "events unavailable"
+        });
+
+        let (success, body) = format_events_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "events unavailable");
+    }
+
+    #[test]
+    fn test_format_events_response_missing_body() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+        });
+
+        let (success, body) = format_events_response(&backend_resp);
+        assert!(success);
+        let events = body["events"].as_array().expect("events should be array");
+        assert!(events.is_empty());
+    }
+
+    // --- format_terminal_response tests ---
+
+    #[test]
+    fn test_format_terminal_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "output": "Hello, World!\nDone.\n"
+            }
+        });
+
+        let (success, body) = format_terminal_response(&backend_resp);
+        assert!(success);
+        assert_eq!(body["output"], "Hello, World!\nDone.\n");
+    }
+
+    #[test]
+    fn test_format_terminal_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "terminal unavailable"
+        });
+
+        let (success, body) = format_terminal_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "terminal unavailable");
+    }
+
+    #[test]
+    fn test_format_terminal_response_missing_body() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+        });
+
+        let (success, body) = format_terminal_response(&backend_resp);
+        assert!(success);
+        assert_eq!(body["output"], "");
+    }
+
+    // --- format_read_source_response tests ---
+
+    #[test]
+    fn test_format_read_source_response_success() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "content": "proc main() =\n  echo \"hello\"\n"
+            }
+        });
+
+        let (success, body) = format_read_source_response(&backend_resp);
+        assert!(success);
+        assert_eq!(body["content"], "proc main() =\n  echo \"hello\"\n");
+    }
+
+    #[test]
+    fn test_format_read_source_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "file not found"
+        });
+
+        let (success, body) = format_read_source_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "file not found");
+    }
+
+    #[test]
+    fn test_format_read_source_response_missing_body() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+        });
+
+        let (success, body) = format_read_source_response(&backend_resp);
+        assert!(success);
+        assert_eq!(body["content"], "");
     }
 }

@@ -619,6 +619,21 @@ impl BackendManager {
                     PendingPyRequestKind::Flow => {
                         python_bridge::format_flow_response(msg)
                     }
+                    PendingPyRequestKind::Calltrace => {
+                        python_bridge::format_calltrace_response(msg)
+                    }
+                    PendingPyRequestKind::SearchCalltrace => {
+                        python_bridge::format_search_calltrace_response(msg)
+                    }
+                    PendingPyRequestKind::Events => {
+                        python_bridge::format_events_response(msg)
+                    }
+                    PendingPyRequestKind::Terminal => {
+                        python_bridge::format_terminal_response(msg)
+                    }
+                    PendingPyRequestKind::ReadSource => {
+                        python_bridge::format_read_source_response(msg)
+                    }
                     PendingPyRequestKind::FireAndForget => {
                         // Already handled above; unreachable.
                         return;
@@ -1370,6 +1385,21 @@ impl BackendManager {
                     }
                     "ct/py-remove-watchpoint" => {
                         self.handle_py_remove_watchpoint(seq, args).await
+                    }
+                    "ct/py-calltrace" => {
+                        self.handle_py_calltrace(seq, args).await
+                    }
+                    "ct/py-search-calltrace" => {
+                        self.handle_py_search_calltrace(seq, args).await
+                    }
+                    "ct/py-events" => {
+                        self.handle_py_events(seq, args).await
+                    }
+                    "ct/py-terminal" => {
+                        self.handle_py_terminal(seq, args).await
+                    }
+                    "ct/py-read-source" => {
+                        self.handle_py_read_source(seq, args).await
                     }
                     "ct/open-trace" => {
                         self.handle_open_trace(seq, args).await
@@ -2709,6 +2739,637 @@ impl BackendManager {
                     &format!("unknown watchpoint ID: {wp_id}"),
                 );
             }
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-calltrace, ct/py-search-calltrace, ct/py-events,
+    // ct/py-terminal, ct/py-read-source handlers
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-calltrace` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/load-calltrace-section` DAP command,
+    /// sends it to the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-calltrace",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "start": 0,
+    ///     "count": 20,
+    ///     "depth": 10
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-calltrace",
+    ///   "body": {
+    ///     "calls": [{"id": 0, "name": "main", "location": {...}, ...}, ...]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_calltrace(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-calltrace",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-calltrace",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (calltrace query counts as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Extract start, count, and depth parameters (with sensible defaults).
+        let start = args
+            .and_then(|a| a.get("start"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let count = args
+            .and_then(|a| a.get("count"))
+            .and_then(Value::as_i64)
+            .unwrap_or(20);
+        let depth = args
+            .and_then(|a| a.get("depth"))
+            .and_then(Value::as_i64)
+            .unwrap_or(10);
+
+        // Get a unique seq for the DAP command sent to the backend.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/load-calltrace-section command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/load-calltrace-section",
+            "seq": dap_seq,
+            "arguments": {
+                "start": start,
+                "count": count,
+                "depth": depth,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-calltrace",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Calltrace,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-calltrace".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-search-calltrace` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/search-calltrace` DAP command,
+    /// sends it to the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-search-calltrace",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "query": "main",
+    ///     "limit": 100
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-search-calltrace",
+    ///   "body": {
+    ///     "calls": [{"id": 0, "name": "main", "location": {...}, ...}, ...]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_search_calltrace(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-search-calltrace",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let query = args
+            .and_then(|a| a.get("query"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let limit = args
+            .and_then(|a| a.get("limit"))
+            .and_then(Value::as_i64)
+            .unwrap_or(100);
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-search-calltrace",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace.
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Get a unique seq for the DAP command.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/search-calltrace command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/search-calltrace",
+            "seq": dap_seq,
+            "arguments": {
+                "query": query,
+                "limit": limit,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-search-calltrace",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::SearchCalltrace,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-search-calltrace".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-events` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/event-load` DAP command,
+    /// sends it to the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-events",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "start": 0,
+    ///     "count": 10,
+    ///     "typeFilter": "stdout",
+    ///     "search": null
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-events",
+    ///   "body": {
+    ///     "events": [{"id": 0, "type": "stdout", "ticks": 100, ...}, ...]
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_events(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-events",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-events",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace.
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Extract parameters with sensible defaults.
+        let start = args
+            .and_then(|a| a.get("start"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let count = args
+            .and_then(|a| a.get("count"))
+            .and_then(Value::as_i64)
+            .unwrap_or(100);
+
+        // typeFilter and search are optional — pass them as-is (null if absent).
+        let type_filter = args
+            .and_then(|a| a.get("typeFilter"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let search = args
+            .and_then(|a| a.get("search"))
+            .cloned()
+            .unwrap_or(Value::Null);
+
+        // Get a unique seq for the DAP command.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/event-load command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/event-load",
+            "seq": dap_seq,
+            "arguments": {
+                "start": start,
+                "count": count,
+                "typeFilter": type_filter,
+                "search": search,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-events",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Events,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-events".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-terminal` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/load-terminal` DAP command,
+    /// sends it to the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-terminal",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "startLine": 0,
+    ///     "endLine": -1
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-terminal",
+    ///   "body": {
+    ///     "output": "Hello, World!\nDone.\n"
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_terminal(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-terminal",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-terminal",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace.
+        self.reset_ttl_for_backend_id(backend_id);
+
+        let start_line = args
+            .and_then(|a| a.get("startLine"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let end_line = args
+            .and_then(|a| a.get("endLine"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+
+        // Get a unique seq for the DAP command.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/load-terminal command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/load-terminal",
+            "seq": dap_seq,
+            "arguments": {
+                "startLine": start_line,
+                "endLine": end_line,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-terminal",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::Terminal,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-terminal".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-read-source` requests from Python clients.
+    ///
+    /// Translates the request into a `ct/read-source` DAP command,
+    /// sends it to the backend, and registers a pending request.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-read-source",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "path": "main.nim"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-read-source",
+    ///   "body": {
+    ///     "content": "proc main() =\n  echo \"hello\"\n"
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_read_source(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-read-source",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let source_path = match args
+            .and_then(|a| a.get("path"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-read-source",
+                    "missing 'path' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-read-source",
+                    &format!("no session loaded for {trace_path_str}"),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace.
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Get a unique seq for the DAP command.
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build and send the ct/read-source command to the backend.
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/read-source",
+            "seq": dap_seq,
+            "arguments": {
+                "path": source_path,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-read-source",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register the pending request.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::ReadSource,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-read-source".to_string(),
+            });
         }
 
         Ok(())

@@ -433,6 +433,65 @@ class Trace:
             location=location,
         )
 
+    @staticmethod
+    def _parse_call(data: dict) -> Call:
+        """Parse a call dict from the daemon response into a
+        :class:`Call` instance.
+
+        The wire format uses ``name`` for the function name, ``location``
+        for the source position, ``returnValue`` for the return value
+        string, ``childrenCount`` for the number of child calls, and
+        ``depth`` for the call-tree nesting level.
+        """
+        loc_data = data.get("location", {})
+        location = Location(
+            path=loc_data.get("path", ""),
+            line=loc_data.get("line", 0),
+            column=loc_data.get("column", 0),
+        )
+
+        return_value = None
+        rv = data.get("returnValue")
+        if rv is not None:
+            return_value = Variable(name="return", value=str(rv))
+
+        return Call(
+            function_name=data.get("name", ""),
+            location=location,
+            return_value=return_value,
+            id=data.get("id", 0),
+            children_count=data.get("childrenCount", 0),
+            depth=data.get("depth", 0),
+        )
+
+    @staticmethod
+    def _parse_event(data: dict) -> Event:
+        """Parse an event dict from the daemon response into an
+        :class:`Event` instance.
+
+        The wire format uses ``type`` for the event kind, ``content``
+        for the raw event text, ``ticks`` for the execution timestamp,
+        and ``location`` for the source position.
+        """
+        loc_data = data.get("location")
+        location = None
+        if loc_data:
+            location = Location(
+                path=loc_data.get("path", ""),
+                line=loc_data.get("line", 0),
+                column=loc_data.get("column", 0),
+            )
+
+        content = data.get("content", "")
+        return Event(
+            kind=data.get("type", ""),
+            message=content,
+            location=location,
+            id=data.get("id", 0),
+            ticks=data.get("ticks", 0),
+            content=content,
+        )
+
     # --- Breakpoints and Watchpoints ---
 
     def add_breakpoint(self, path: str, line: int) -> int:
@@ -583,13 +642,184 @@ class Trace:
         """Return all detected loops in the trace."""
         raise NotImplementedError("Will be implemented in a later milestone")
 
-    def calls(self, function_name: Optional[str] = None) -> list[Call]:
-        """Return recorded function calls."""
-        raise NotImplementedError("Will be implemented in a later milestone")
+    def calltrace(
+        self,
+        start: int = 0,
+        count: int = 50,
+        depth: int = 10,
+    ) -> list[Call]:
+        """Return a section of the call trace.
 
-    def events(self, kind: Optional[str] = None) -> list[Event]:
-        """Return recorded trace events."""
-        raise NotImplementedError("Will be implemented in a later milestone")
+        Sends ``ct/py-calltrace`` to the daemon, which translates it to
+        ``ct/load-calltrace-section`` on the backend.
+
+        Parameters:
+            start: Index of the first call to return (0-based).
+            count: Maximum number of calls to return.
+            depth: Maximum nesting depth to include.
+
+        Returns:
+            A list of :class:`Call` instances.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-calltrace", {
+            "tracePath": self._path,
+            "start": start,
+            "count": count,
+            "depth": depth,
+        })
+        if not response.get("success"):
+            raise TraceError(response.get("message", "calltrace() failed"))
+        body = response.get("body", {})
+        return [self._parse_call(c) for c in body.get("calls", [])]
+
+    def search_calltrace(
+        self,
+        query: str,
+        limit: int = 100,
+    ) -> list[Call]:
+        """Search the call trace for functions matching *query*.
+
+        Sends ``ct/py-search-calltrace`` to the daemon, which translates
+        it to ``ct/search-calltrace`` on the backend.
+
+        Parameters:
+            query: Substring to search for in function names.
+            limit: Maximum number of results to return.
+
+        Returns:
+            A list of matching :class:`Call` instances.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-search-calltrace", {
+            "tracePath": self._path,
+            "query": query,
+            "limit": limit,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "search_calltrace() failed")
+            )
+        body = response.get("body", {})
+        return [self._parse_call(c) for c in body.get("calls", [])]
+
+    def events(
+        self,
+        start: int = 0,
+        count: int = 100,
+        type_filter: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> list[Event]:
+        """Return recorded trace events.
+
+        Sends ``ct/py-events`` to the daemon, which translates it to
+        ``ct/event-load`` on the backend.
+
+        Parameters:
+            start: Index of the first event to return (0-based).
+            count: Maximum number of events to return.
+            type_filter: If provided, only return events of this type
+                         (e.g. ``"stdout"``, ``"stderr"``).
+            search: If provided, filter events by content matching.
+
+        Returns:
+            A list of :class:`Event` instances.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        args: dict = {
+            "tracePath": self._path,
+            "start": start,
+            "count": count,
+        }
+        if type_filter is not None:
+            args["typeFilter"] = type_filter
+        if search is not None:
+            args["search"] = search
+
+        response = self._connection.send_request("ct/py-events", args)
+        if not response.get("success"):
+            raise TraceError(response.get("message", "events() failed"))
+        body = response.get("body", {})
+        return [self._parse_event(e) for e in body.get("events", [])]
+
+    def terminal_output(
+        self,
+        start_line: int = 0,
+        end_line: int = -1,
+    ) -> str:
+        """Return the recorded terminal (stdout) output.
+
+        Sends ``ct/py-terminal`` to the daemon, which translates it to
+        ``ct/load-terminal`` on the backend.
+
+        Parameters:
+            start_line: First line of output to return (0-based).
+            end_line: Last line of output to return (-1 = all lines).
+
+        Returns:
+            The terminal output as a string.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-terminal", {
+            "tracePath": self._path,
+            "startLine": start_line,
+            "endLine": end_line,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "terminal_output() failed")
+            )
+        return response.get("body", {}).get("output", "")
+
+    def read_source(self, path: str) -> str:
+        """Read the content of a source file from the trace.
+
+        Sends ``ct/py-read-source`` to the daemon, which translates it
+        to ``ct/read-source`` on the backend.
+
+        Parameters:
+            path: The source file path (as listed in :attr:`source_files`
+                  or in a :class:`Location`).
+
+        Returns:
+            The file content as a string.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-read-source", {
+            "tracePath": self._path,
+            "path": path,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "read_source() failed")
+            )
+        return response.get("body", {}).get("content", "")
+
+    def calls(self, function_name: Optional[str] = None) -> list[Call]:
+        """Return recorded function calls.
+
+        Convenience wrapper around :meth:`calltrace` and
+        :meth:`search_calltrace`.
+
+        Parameters:
+            function_name: If provided, only return calls matching this name.
+
+        Returns:
+            A list of :class:`Call` instances.
+        """
+        if function_name is not None:
+            return self.search_calltrace(function_name)
+        return self.calltrace()
 
     def process_info(self) -> Process:
         """Return metadata about the recorded process."""

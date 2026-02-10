@@ -969,6 +969,174 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     });
                     write_half.write_all(&DapParser::to_bytes(&response)).await?;
                 }
+                // --- ct/load-calltrace-section: returns mock call trace ---
+                //
+                // Returns a deterministic list of calls that can be sliced
+                // by start/count.  The mock simulates three functions:
+                // main, helper, and process.
+                "ct/load-calltrace-section" => {
+                    let args = msg.get("arguments");
+                    let start = args
+                        .and_then(|a| a.get("start"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(0) as usize;
+                    let count = args
+                        .and_then(|a| a.get("count"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(20) as usize;
+
+                    let all_calls = vec![
+                        json!({"id": 0, "name": "main", "location": {"path": "main.nim", "line": 1, "column": 1}, "returnValue": "0", "childrenCount": 2, "depth": 0}),
+                        json!({"id": 1, "name": "helper", "location": {"path": "helpers.nim", "line": 10, "column": 1}, "returnValue": "42", "childrenCount": 0, "depth": 1}),
+                        json!({"id": 2, "name": "process", "location": {"path": "process.nim", "line": 20, "column": 1}, "returnValue": null, "childrenCount": 1, "depth": 1}),
+                    ];
+
+                    let sliced: Vec<_> = all_calls
+                        .into_iter()
+                        .skip(start)
+                        .take(count)
+                        .collect();
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/load-calltrace-section",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "calls": sliced,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- ct/search-calltrace: search mock call trace by name ---
+                "ct/search-calltrace" => {
+                    let args = msg.get("arguments");
+                    let query = args
+                        .and_then(|a| a.get("query"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+
+                    let all_calls = vec![
+                        json!({"id": 0, "name": "main", "location": {"path": "main.nim", "line": 1, "column": 1}, "returnValue": "0", "childrenCount": 2, "depth": 0}),
+                        json!({"id": 1, "name": "helper", "location": {"path": "helpers.nim", "line": 10, "column": 1}, "returnValue": "42", "childrenCount": 0, "depth": 1}),
+                        json!({"id": 2, "name": "process", "location": {"path": "process.nim", "line": 20, "column": 1}, "returnValue": null, "childrenCount": 1, "depth": 1}),
+                    ];
+
+                    let matched: Vec<_> = all_calls
+                        .into_iter()
+                        .filter(|c| {
+                            c["name"]
+                                .as_str()
+                                .unwrap_or("")
+                                .contains(query)
+                        })
+                        .collect();
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/search-calltrace",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "calls": matched,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- ct/event-load: returns mock events with optional filter ---
+                //
+                // Returns a mix of stdout and stderr events.  Supports
+                // typeFilter to return only events of a specific type,
+                // and start/count for pagination.
+                "ct/event-load" => {
+                    let args = msg.get("arguments");
+                    let start = args
+                        .and_then(|a| a.get("start"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(0) as usize;
+                    let count = args
+                        .and_then(|a| a.get("count"))
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(100) as usize;
+                    let type_filter = args
+                        .and_then(|a| a.get("typeFilter"))
+                        .and_then(serde_json::Value::as_str);
+
+                    let all_events = vec![
+                        json!({"id": 0, "type": "stdout", "ticks": 100, "content": "Hello, World!\n", "location": {"path": "main.nim", "line": 5, "column": 1}}),
+                        json!({"id": 1, "type": "stderr", "ticks": 200, "content": "warning: unused var\n", "location": {"path": "main.nim", "line": 8, "column": 1}}),
+                        json!({"id": 2, "type": "stdout", "ticks": 300, "content": "Done.\n", "location": {"path": "main.nim", "line": 12, "column": 1}}),
+                    ];
+
+                    let filtered: Vec<_> = if let Some(tf) = type_filter {
+                        all_events
+                            .into_iter()
+                            .filter(|e| e["type"].as_str().unwrap_or("") == tf)
+                            .collect()
+                    } else {
+                        all_events
+                    };
+
+                    let sliced: Vec<_> = filtered
+                        .into_iter()
+                        .skip(start)
+                        .take(count)
+                        .collect();
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/event-load",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "events": sliced,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- ct/load-terminal: returns mock terminal output ---
+                "ct/load-terminal" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/load-terminal",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "output": "Hello, World!\nDone.\n"
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
+                // --- ct/read-source: returns mock source file content ---
+                //
+                // Returns different content based on the requested path,
+                // simulating a multi-file project.
+                "ct/read-source" => {
+                    let args = msg.get("arguments");
+                    let path = args
+                        .and_then(|a| a.get("path"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("main.nim");
+
+                    let content = if path.contains("main") {
+                        "proc main() =\n  echo \"Hello, World!\"\n  let x = 42\n  echo \"Done.\"\n"
+                    } else if path.contains("helper") {
+                        "proc helper(n: int): int =\n  return n * 2\n"
+                    } else {
+                        "# unknown source\n"
+                    };
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/read-source",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "content": content,
+                        }
+                    });
+                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                }
                 _ => {
                     // Generic success response for any other command.
                     let response = json!({
