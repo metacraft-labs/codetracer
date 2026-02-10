@@ -5105,15 +5105,17 @@ async fn m6_flow_values_correct() {
             "ct/open-trace should succeed"
         );
 
-        // Query flow in "line" mode — returns only the loop iteration steps
+        // Query flow in "diff" mode — returns only the loop iteration steps
         // for the specific line (no function entry/exit steps).
+        // Note: The backend's FlowMode enum has Call (0) and Diff (1).
+        // "diff" mode is mapped to flowMode=1 by the daemon.
         let flow_resp = py_flow(
             &mut client,
             42_001,
             &trace_dir,
             "main.nim",
             10,
-            "line",
+            "diff",
             &log_path,
         )
         .await?;
@@ -5130,11 +5132,11 @@ async fn m6_flow_values_correct() {
             .and_then(Value::as_array)
             .expect("body should have steps array");
 
-        // In line mode, the mock returns exactly 5 steps (i from 0 to 4).
+        // In diff mode, the mock returns exactly 5 steps (i from 0 to 4).
         assert_eq!(
             steps.len(),
             5,
-            "line mode should return 5 steps (one per iteration), got {}",
+            "diff mode should return 5 steps (one per iteration), got {}",
             steps.len()
         );
 
@@ -5223,33 +5225,34 @@ async fn m6_flow_modes_differ() {
 
         log_line(&log_path, &format!("call mode steps: {call_step_count}"));
 
-        // Query flow with mode="line" (specific line only).
-        let line_resp =
-            py_flow(&mut client, 43_002, &trace_dir, "main.nim", 10, "line", &log_path).await?;
+        // Query flow with mode="diff" (diff/line-specific scope).
+        // Note: The backend's FlowMode enum has Call (0) and Diff (1).
+        let diff_resp =
+            py_flow(&mut client, 43_002, &trace_dir, "main.nim", 10, "diff", &log_path).await?;
         assert_eq!(
-            line_resp.get("success").and_then(Value::as_bool),
+            diff_resp.get("success").and_then(Value::as_bool),
             Some(true),
-            "ct/py-flow (line) should succeed, got: {line_resp}"
+            "ct/py-flow (diff) should succeed, got: {diff_resp}"
         );
 
-        let line_steps = line_resp
+        let diff_steps = diff_resp
             .get("body")
             .and_then(|b| b.get("steps"))
             .and_then(Value::as_array)
-            .expect("line response should have steps");
-        let line_step_count = line_steps.len();
+            .expect("diff response should have steps");
+        let diff_step_count = diff_steps.len();
 
-        log_line(&log_path, &format!("line mode steps: {line_step_count}"));
+        log_line(&log_path, &format!("diff mode steps: {diff_step_count}"));
 
-        // Call mode should return more steps than line mode because it
+        // Call mode should return more steps than diff mode because it
         // includes function entry and exit steps in addition to the loop
         // iterations.
         //
         // Mock data: call mode = 7 steps (1 entry + 5 loop + 1 exit),
-        //            line mode = 5 steps (5 loop only).
+        //            diff mode = 5 steps (5 loop only).
         assert!(
-            call_step_count > line_step_count,
-            "call mode should return more steps ({call_step_count}) than line mode ({line_step_count})"
+            call_step_count > diff_step_count,
+            "call mode should return more steps ({call_step_count}) than diff mode ({diff_step_count})"
         );
 
         // Verify call mode has steps outside the queried line (i.e., steps
@@ -5264,15 +5267,15 @@ async fn m6_flow_modes_differ() {
             "call mode should include steps at lines other than the queried line 10, got lines: {call_lines:?}"
         );
 
-        // Verify line mode only has steps at the queried line.
-        let line_lines: Vec<i64> = line_steps
+        // Verify diff mode only has steps at the queried line.
+        let diff_lines: Vec<i64> = diff_steps
             .iter()
             .filter_map(|s| s.get("line").and_then(Value::as_i64))
             .collect();
-        let all_same_line = line_lines.iter().all(|l| *l == 10);
+        let all_same_line = diff_lines.iter().all(|l| *l == 10);
         assert!(
             all_same_line,
-            "line mode should only have steps at line 10, got lines: {line_lines:?}"
+            "diff mode should only have steps at line 10, got lines: {diff_lines:?}"
         );
 
         shutdown_daemon(&mut client, &mut daemon).await;
