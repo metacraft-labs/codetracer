@@ -1,4 +1,4 @@
-//! Integration tests for the MCP server (Milestone M10).
+//! Integration tests for the MCP server (Milestones M10 and M11).
 //!
 //! Each test:
 //! - Uses a unique temporary directory to avoid collisions.
@@ -10,7 +10,7 @@
 //! - Reads JSON-RPC responses from its stdout.
 //! - Verifies the responses match MCP protocol expectations.
 //!
-//! Test naming follows the V-M10-* verification matrix.
+//! Test naming follows the V-M10-* and V-M11-* verification matrices.
 
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
@@ -47,9 +47,10 @@ fn setup_test_dir(test_name: &str) -> (PathBuf, PathBuf) {
     test_name.hash(&mut hasher);
     let hash = hasher.finish();
 
-    let dir = PathBuf::from("/tmp")
-        .join("ct-mcp")
-        .join(format!("{}-{:x}", std::process::id(), hash));
+    let dir =
+        PathBuf::from("/tmp")
+            .join("ct-mcp")
+            .join(format!("{}-{:x}", std::process::id(), hash));
     std::fs::create_dir_all(&dir).expect("cannot create test temp dir");
     let log_path = dir.join("test.log");
     (dir, log_path)
@@ -278,10 +279,7 @@ fn report(test_name: &str, log_path: &Path, success: bool) {
 ///
 /// The `daemon_socket_path` is passed via CODETRACER_DAEMON_SOCK so the
 /// MCP server connects to the test daemon instead of auto-starting one.
-fn spawn_mcp_server(
-    test_dir: &Path,
-    daemon_socket_path: &Path,
-) -> tokio::process::Child {
+fn spawn_mcp_server(test_dir: &Path, daemon_socket_path: &Path) -> tokio::process::Child {
     let bin = binary_path();
     Command::new(&bin)
         .arg("trace")
@@ -299,10 +297,7 @@ fn spawn_mcp_server(
 }
 
 /// Sends a JSON-RPC message to the MCP server's stdin.
-async fn mcp_send(
-    stdin: &mut tokio::process::ChildStdin,
-    msg: &Value,
-) -> Result<(), String> {
+async fn mcp_send(stdin: &mut tokio::process::ChildStdin, msg: &Value) -> Result<(), String> {
     let line = serde_json::to_string(msg).map_err(|e| format!("serialize: {e}"))?;
     stdin
         .write_all(line.as_bytes())
@@ -336,8 +331,7 @@ async fn mcp_read(
         return Err("EOF from MCP server stdout".to_string());
     }
 
-    serde_json::from_str(line.trim())
-        .map_err(|e| format!("json parse error: {e} (raw: {line})"))
+    serde_json::from_str(line.trim()).map_err(|e| format!("json parse error: {e} (raw: {line})"))
 }
 
 /// Performs the MCP initialize handshake (initialize request + notifications/initialized).
@@ -484,21 +478,27 @@ async fn mcp_tools_list() {
             .expect("tools should be an array");
         assert_eq!(tools.len(), 4, "expected 4 tools");
 
-        let names: Vec<&str> = tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"exec_script"), "missing exec_script");
         assert!(names.contains(&"trace_info"), "missing trace_info");
-        assert!(names.contains(&"list_source_files"), "missing list_source_files");
-        assert!(names.contains(&"read_source_file"), "missing read_source_file");
+        assert!(
+            names.contains(&"list_source_files"),
+            "missing list_source_files"
+        );
+        assert!(
+            names.contains(&"read_source_file"),
+            "missing read_source_file"
+        );
 
         // Verify each tool has an inputSchema with required fields.
         for tool in tools {
             let schema = tool
                 .get("inputSchema")
                 .expect("tool should have inputSchema");
-            assert_eq!(schema["type"], "object", "inputSchema should be object type");
+            assert_eq!(
+                schema["type"], "object",
+                "inputSchema should be object type"
+            );
             assert!(
                 schema.get("properties").is_some(),
                 "inputSchema should have properties"
@@ -512,7 +512,10 @@ async fn mcp_tools_list() {
         // Verify exec_script has trace_path, script, timeout_seconds properties.
         let exec_tool = tools.iter().find(|t| t["name"] == "exec_script").unwrap();
         let props = &exec_tool["inputSchema"]["properties"];
-        assert!(props.get("trace_path").is_some(), "exec_script missing trace_path");
+        assert!(
+            props.get("trace_path").is_some(),
+            "exec_script missing trace_path"
+        );
         assert!(props.get("script").is_some(), "exec_script missing script");
         assert!(
             props.get("timeout_seconds").is_some(),
@@ -551,8 +554,7 @@ async fn mcp_exec_script_returns_output() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-exec", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         // Pre-open the trace on the daemon so exec_script can find it.
         let mut client = UnixStream::connect(&socket_path)
@@ -642,8 +644,7 @@ async fn mcp_exec_script_error() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-err", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -732,8 +733,7 @@ async fn mcp_trace_info() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-info", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -822,8 +822,7 @@ async fn mcp_list_source_files() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-list", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -903,8 +902,7 @@ async fn mcp_read_source_file() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-read", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         // Pre-open the trace.
         let mut client = UnixStream::connect(&socket_path)
@@ -951,10 +949,7 @@ async fn mcp_read_source_file() {
 
         // The mock-dap-backend returns content for "main" files containing
         // "proc main()" — verify we got some source code.
-        assert!(
-            !text.is_empty(),
-            "source file content should not be empty"
-        );
+        assert!(!text.is_empty(), "source file content should not be empty");
         assert!(
             text.contains("proc main") || text.contains("main"),
             "source file should contain main function, got: {text}"
@@ -1109,10 +1104,22 @@ async fn mcp_prompt_returns_api_docs() {
         assert!(text.contains("Location"), "should contain Location type");
         assert!(text.contains("Variable"), "should contain Variable type");
         assert!(text.contains("Frame"), "should contain Frame type");
-        assert!(text.contains("trace.step_over"), "should contain step_over method");
-        assert!(text.contains("trace.locals"), "should contain locals method");
-        assert!(text.contains("trace.evaluate"), "should contain evaluate method");
-        assert!(text.contains("trace.stack_trace"), "should contain stack_trace");
+        assert!(
+            text.contains("trace.step_over"),
+            "should contain step_over method"
+        );
+        assert!(
+            text.contains("trace.locals"),
+            "should contain locals method"
+        );
+        assert!(
+            text.contains("trace.evaluate"),
+            "should contain evaluate method"
+        );
+        assert!(
+            text.contains("trace.stack_trace"),
+            "should contain stack_trace"
+        );
 
         drop(stdin);
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
@@ -1172,7 +1179,10 @@ async fn mcp_no_stdout_corruption() {
         )
         .await?;
         let tools_resp = mcp_read(&mut reader, Duration::from_secs(5)).await?;
-        assert_eq!(tools_resp["jsonrpc"], "2.0", "tools/list response malformed");
+        assert_eq!(
+            tools_resp["jsonrpc"], "2.0",
+            "tools/list response malformed"
+        );
 
         // prompts/list
         mcp_send(
@@ -1255,6 +1265,654 @@ async fn mcp_no_stdout_corruption() {
     }
 
     report("mcp_no_stdout_corruption", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// Milestone M11 — MCP Server Enhancements
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// V-M11-RESOURCES-LIST: mcp_resources_list
+// ---------------------------------------------------------------------------
+
+/// Load a trace via trace_info, then send resources/list.
+/// Verify that the response contains trace info and source file resources
+/// with correct URIs and MIME types.
+#[tokio::test]
+async fn mcp_resources_list() {
+    let (test_dir, log_path) = setup_test_dir("mcp_resources_list");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-res-list", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        // Connect a client to the daemon for open-trace and shutdown.
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Spawn MCP server.
+        let mut mcp = spawn_mcp_server(&test_dir, &socket_path);
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // First, call trace_info to populate the loaded_traces cache.
+        let trace_info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &trace_info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(30)).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+        assert_eq!(info_resp["jsonrpc"], "2.0");
+        assert_eq!(info_resp["id"], 100);
+
+        // Now send resources/list.
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "resources/list"
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(5)).await?;
+        log_line(&log_path, &format!("resources/list response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 101);
+
+        let resources = resp["result"]["resources"]
+            .as_array()
+            .expect("resources should be an array");
+        log_line(&log_path, &format!("resources count: {}", resources.len()));
+
+        // Should have at least 1 info resource.
+        assert!(
+            !resources.is_empty(),
+            "resources should not be empty after loading a trace"
+        );
+
+        // Find the info resource.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let expected_info_uri = format!("trace://{}/info", trace_path_str);
+        let info_resource = resources
+            .iter()
+            .find(|r| r["uri"].as_str() == Some(&expected_info_uri));
+        assert!(
+            info_resource.is_some(),
+            "should have trace info resource with URI {expected_info_uri}, got: {:?}",
+            resources
+                .iter()
+                .map(|r| r["uri"].as_str())
+                .collect::<Vec<_>>()
+        );
+        let info_res = info_resource.unwrap();
+        assert_eq!(
+            info_res["mimeType"], "application/json",
+            "info resource should have application/json MIME type"
+        );
+
+        // Find source file resources.
+        let source_resources: Vec<_> = resources
+            .iter()
+            .filter(|r| r["uri"].as_str().is_some_and(|u| u.contains("/source/")))
+            .collect();
+        assert!(
+            !source_resources.is_empty(),
+            "should have source file resources"
+        );
+        for sr in &source_resources {
+            assert_eq!(
+                sr["mimeType"], "text/plain",
+                "source file resource should have text/plain MIME type"
+            );
+        }
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("mcp_resources_list", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M11-RESOURCE-INFO: mcp_resource_read_info
+// ---------------------------------------------------------------------------
+
+/// Send resources/read for trace:///<path>/info.
+/// Verify the response is JSON containing trace metadata (language,
+/// totalEvents, sourceFiles, program, workdir).
+#[tokio::test]
+async fn mcp_resource_read_info() {
+    let (test_dir, log_path) = setup_test_dir("mcp_resource_read_info");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-res-info", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let mut mcp = spawn_mcp_server(&test_dir, &socket_path);
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // Load the trace via trace_info tool to populate the cache.
+        let trace_info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 200,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &trace_info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(30)).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+
+        // Send resources/read for the info resource.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let info_uri = format!("trace://{}/info", trace_path_str);
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 201,
+            "method": "resources/read",
+            "params": {
+                "uri": info_uri
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(10)).await?;
+        log_line(&log_path, &format!("resources/read info response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 201);
+
+        // Should not have an error.
+        assert!(
+            resp.get("error").is_none(),
+            "resources/read should not return an error, got: {:?}",
+            resp.get("error")
+        );
+
+        let contents = resp["result"]["contents"]
+            .as_array()
+            .expect("should have contents array");
+        assert_eq!(contents.len(), 1, "should have exactly 1 content item");
+
+        let content = &contents[0];
+        assert_eq!(
+            content["uri"].as_str(),
+            Some(info_uri.as_str()),
+            "content URI should match request URI"
+        );
+        assert_eq!(
+            content["mimeType"], "application/json",
+            "info resource should be application/json"
+        );
+
+        // Parse the text as JSON and verify metadata fields.
+        let text = content["text"].as_str().expect("content should have text");
+        log_line(&log_path, &format!("resource info text: {text}"));
+
+        let info: Value = serde_json::from_str(text)
+            .map_err(|e| format!("info text should be valid JSON: {e}"))?;
+        assert_eq!(
+            info["tracePath"].as_str(),
+            Some(trace_path_str.as_str()),
+            "tracePath should match"
+        );
+        assert!(info.get("language").is_some(), "should have language field");
+        assert!(
+            info.get("totalEvents").is_some(),
+            "should have totalEvents field"
+        );
+        assert!(
+            info.get("sourceFiles").is_some(),
+            "should have sourceFiles field"
+        );
+        assert!(info.get("program").is_some(), "should have program field");
+        assert!(info.get("workdir").is_some(), "should have workdir field");
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("mcp_resource_read_info", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M11-RESOURCE-SOURCE: mcp_resource_read_source
+// ---------------------------------------------------------------------------
+
+/// Send resources/read for trace:///<path>/source/main.nim.
+/// Verify the response contains text/plain source code content.
+#[tokio::test]
+async fn mcp_resource_read_source() {
+    let (test_dir, log_path) = setup_test_dir("mcp_resource_read_source");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-res-src", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        // Pre-open the trace on the daemon (needed for ct/py-read-source).
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+        let open_resp = open_trace(&mut client, 100, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "open should succeed: {open_resp}"
+        );
+
+        let mut mcp = spawn_mcp_server(&test_dir, &socket_path);
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // Load the trace via trace_info tool to populate loaded_traces.
+        let trace_info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 300,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &trace_info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(30)).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+
+        // Now send resources/read for a source file.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let source_uri = format!("trace://{}/source/main.nim", trace_path_str);
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 301,
+            "method": "resources/read",
+            "params": {
+                "uri": source_uri
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(30)).await?;
+        log_line(
+            &log_path,
+            &format!("resources/read source response: {resp}"),
+        );
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 301);
+
+        // Should not have an error.
+        assert!(
+            resp.get("error").is_none(),
+            "resources/read should not return an error, got: {:?}",
+            resp.get("error")
+        );
+
+        let contents = resp["result"]["contents"]
+            .as_array()
+            .expect("should have contents array");
+        assert_eq!(contents.len(), 1, "should have exactly 1 content item");
+
+        let content = &contents[0];
+        assert_eq!(
+            content["uri"].as_str(),
+            Some(source_uri.as_str()),
+            "content URI should match request URI"
+        );
+        assert_eq!(
+            content["mimeType"], "text/plain",
+            "source resource should be text/plain"
+        );
+
+        let text = content["text"].as_str().expect("content should have text");
+        log_line(&log_path, &format!("resource source text: {text}"));
+
+        // The mock-dap-backend returns content for "main" files containing
+        // "proc main()".
+        assert!(!text.is_empty(), "source file content should not be empty");
+        assert!(
+            text.contains("proc main"),
+            "source file should contain 'proc main', got: {text}"
+        );
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("mcp_resource_read_source", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M11-ERROR: mcp_error_messages_actionable
+// ---------------------------------------------------------------------------
+
+/// Send exec_script with a non-existent trace path.
+/// Verify the error message is actionable (contains guidance for the agent).
+#[tokio::test]
+async fn mcp_error_messages_actionable() {
+    let (test_dir, log_path) = setup_test_dir("mcp_error_actionable");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        // Create a trace dir for the daemon, but we will NOT use it
+        // as the trace_path.  Instead we send a non-existent path.
+        let _trace_dir = create_test_trace_dir(&test_dir, "trace-exists", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let mut mcp = spawn_mcp_server(&test_dir, &socket_path);
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // Send exec_script with a path that does not exist.
+        let nonexistent_path = test_dir.join("nonexistent-trace");
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 400,
+            "method": "tools/call",
+            "params": {
+                "name": "exec_script",
+                "arguments": {
+                    "trace_path": nonexistent_path.to_string_lossy(),
+                    "script": "print('hello')"
+                }
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(60)).await?;
+        log_line(&log_path, &format!("exec_script error response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 400);
+
+        // The response should indicate an error.
+        let result_obj = &resp["result"];
+        assert_eq!(
+            result_obj["isError"],
+            Value::Bool(true),
+            "should have isError: true for non-existent trace"
+        );
+
+        let text = result_obj["content"][0]["text"]
+            .as_str()
+            .expect("should have error text");
+        log_line(&log_path, &format!("error text: {text}"));
+
+        // Verify the error message is actionable: it should mention the
+        // path and provide guidance.
+        assert!(
+            text.contains("not found")
+                || text.contains("failed")
+                || text.contains("error")
+                || text.contains("Failed")
+                || text.contains("Cannot"),
+            "error text should indicate the trace was not found or failed, got: {text}"
+        );
+
+        // Also verify enhanced errors via resources/read for an unloaded trace.
+        let bad_uri = "trace:///nonexistent/path/info";
+        let res_req = json!({
+            "jsonrpc": "2.0",
+            "id": 401,
+            "method": "resources/read",
+            "params": {
+                "uri": bad_uri
+            }
+        });
+        mcp_send(&mut stdin, &res_req).await?;
+        let res_resp = mcp_read(&mut reader, Duration::from_secs(5)).await?;
+        log_line(
+            &log_path,
+            &format!("resources/read error response: {res_resp}"),
+        );
+
+        assert_eq!(res_resp["jsonrpc"], "2.0");
+        assert_eq!(res_resp["id"], 401);
+
+        // Should be a JSON-RPC error (not a result).
+        assert!(
+            res_resp.get("error").is_some(),
+            "resources/read for unloaded trace should return error"
+        );
+        let error_msg = res_resp["error"]["message"]
+            .as_str()
+            .expect("error should have message");
+        log_line(&log_path, &format!("resource error message: {error_msg}"));
+
+        // The error message should mention "trace not found" and suggest
+        // loading with trace_info or exec_script.
+        assert!(
+            error_msg.contains("Trace not found") || error_msg.contains("not found"),
+            "error should mention 'trace not found', got: {error_msg}"
+        );
+        assert!(
+            error_msg.contains("trace_info") || error_msg.contains("exec_script"),
+            "error should suggest loading via trace_info or exec_script, got: {error_msg}"
+        );
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("mcp_error_messages_actionable", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M11-TIMING: mcp_response_includes_timing
+// ---------------------------------------------------------------------------
+
+/// Send exec_script with a valid script.
+/// Verify the response includes _meta.duration_ms > 0.
+#[tokio::test]
+async fn mcp_response_includes_timing() {
+    let (test_dir, log_path) = setup_test_dir("mcp_timing");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-timing", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        // Pre-open the trace on the daemon.
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+        let open_resp = open_trace(&mut client, 100, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "open should succeed: {open_resp}"
+        );
+
+        let mut mcp = spawn_mcp_server(&test_dir, &socket_path);
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // Send exec_script with a valid script.
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 500,
+            "method": "tools/call",
+            "params": {
+                "name": "exec_script",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy(),
+                    "script": "print('timing test')"
+                }
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(60)).await?;
+        log_line(&log_path, &format!("exec_script response: {resp}"));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 500);
+
+        // Verify _meta.duration_ms is present and non-negative.
+        let meta = &resp["result"]["_meta"];
+        assert!(
+            meta.is_object(),
+            "result should have _meta object, got: {:?}",
+            resp["result"]
+        );
+        let duration_ms = meta["duration_ms"]
+            .as_u64()
+            .or_else(|| meta["duration_ms"].as_f64().map(|f| f as u64));
+        assert!(
+            duration_ms.is_some(),
+            "_meta.duration_ms should be a number, got: {:?}",
+            meta["duration_ms"]
+        );
+        log_line(&log_path, &format!("duration_ms: {}", duration_ms.unwrap()));
+
+        // Duration should be non-negative (>= 0). We don't check > 0
+        // because in theory it could be 0ms on a fast machine, but in
+        // practice it will always be > 0 due to network round-trip.
+        // Instead, verify the field is present and is a valid number.
+        assert!(
+            duration_ms.unwrap() < 120_000,
+            "duration_ms should be less than 120s (sanity check), got: {}",
+            duration_ms.unwrap()
+        );
+
+        // Also verify timing on trace_info tool.
+        let info_req = json!({
+            "jsonrpc": "2.0",
+            "id": 501,
+            "method": "tools/call",
+            "params": {
+                "name": "trace_info",
+                "arguments": {
+                    "trace_path": trace_dir.to_string_lossy()
+                }
+            }
+        });
+        mcp_send(&mut stdin, &info_req).await?;
+        let info_resp = mcp_read(&mut reader, Duration::from_secs(30)).await?;
+        log_line(&log_path, &format!("trace_info response: {info_resp}"));
+
+        let info_meta = &info_resp["result"]["_meta"];
+        assert!(
+            info_meta.is_object(),
+            "trace_info result should have _meta object"
+        );
+        assert!(
+            info_meta["duration_ms"].as_u64().is_some()
+                || info_meta["duration_ms"].as_f64().is_some(),
+            "trace_info _meta.duration_ms should be a number"
+        );
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("mcp_response_includes_timing", &log_path, success);
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }

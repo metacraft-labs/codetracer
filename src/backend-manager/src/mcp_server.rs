@@ -14,6 +14,8 @@
 //! - The `initialize` handshake establishes capabilities
 //! - Tools are exposed via `tools/list` and invoked via `tools/call`
 //! - Prompts are exposed via `prompts/list` and fetched via `prompts/get`
+//! - Resources are exposed via `resources/list` and fetched via `resources/read`
+//! - Resource templates are listed via `resources/templates/list`
 //!
 //! # Architecture
 //!
@@ -21,10 +23,24 @@
 //! daemon's Unix socket (auto-starting the daemon if needed) and sends
 //! DAP-framed messages to execute tool operations.  This is the same
 //! communication pattern used by the CLI (`ct trace query`, `ct trace info`).
+//!
+//! # Resource Tracking
+//!
+//! The server tracks which traces have been loaded (via `exec_script` or
+//! `trace_info` tool calls).  Once a trace is loaded, its metadata and
+//! source files become available as MCP resources through `resources/list`
+//! and `resources/read`.
+//!
+//! The trace URI format is: `trace:///<trace_path>/<resource_type>[/<sub_path>]`
+//!
+//! Examples:
+//! - `trace:///home/user/traces/my-program/info` - trace metadata (JSON)
+//! - `trace:///home/user/traces/my-program/source/src/main.nim` - source file
 
+use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -47,6 +63,14 @@ const SERVER_VERSION: &str = "0.1.0";
 
 /// Default script execution timeout in seconds.
 const DEFAULT_SCRIPT_TIMEOUT: u64 = 30;
+
+/// URI scheme prefix for trace resources.
+///
+/// This is `trace://` (scheme + empty authority).  When an absolute trace
+/// path like `/tmp/trace-dir` is appended, the result is
+/// `trace:///tmp/trace-dir/info` (three slashes: two from the prefix, one
+/// from the path's leading `/`).
+const TRACE_URI_PREFIX: &str = "trace://";
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -334,9 +358,7 @@ async fn dap_request(
         // Skip DAP events — we only want the response.
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            eprintln!(
-                "mcp: skipping interleaved DAP event while waiting for {command} response"
-            );
+            eprintln!("mcp: skipping interleaved DAP event while waiting for {command} response");
             continue;
         }
 
@@ -421,9 +443,26 @@ fn jsonrpc_error(id: &Value, code: i64, message: &str) -> Value {
 }
 
 /// Builds an MCP tool result with text content.
+///
+/// Note: Production code currently uses `tool_result_text_with_timing` for
+/// all responses.  This function is retained for completeness and tested
+/// in unit tests.
+#[allow(dead_code)]
 fn tool_result_text(text: &str) -> Value {
     json!({
         "content": [{"type": "text", "text": text}],
+    })
+}
+
+/// Builds an MCP tool result with text content and timing metadata.
+///
+/// The `_meta.duration_ms` field reports how long the tool execution
+/// took in milliseconds.  This helps agents gauge script performance
+/// and detect slow queries.
+fn tool_result_text_with_timing(text: &str, duration_ms: u128) -> Value {
+    json!({
+        "content": [{"type": "text", "text": text}],
+        "_meta": {"duration_ms": duration_ms},
     })
 }
 
@@ -433,6 +472,37 @@ fn tool_result_error(text: &str) -> Value {
         "content": [{"type": "text", "text": text}],
         "isError": true,
     })
+}
+
+/// Builds an MCP tool result indicating an error with timing metadata.
+fn tool_result_error_with_timing(text: &str, duration_ms: u128) -> Value {
+    json!({
+        "content": [{"type": "text", "text": text}],
+        "isError": true,
+        "_meta": {"duration_ms": duration_ms},
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Loaded trace metadata (for MCP resource tracking)
+// ---------------------------------------------------------------------------
+
+/// Metadata for a trace that has been loaded through a tool call.
+///
+/// This is cached in-process so that `resources/list` can enumerate
+/// available resources without re-querying the daemon.
+#[derive(Debug, Clone)]
+struct LoadedTrace {
+    /// Detected programming language (e.g. "nim", "rust").
+    language: String,
+    /// Total number of execution events.
+    total_events: u64,
+    /// Source files within the trace.
+    source_files: Vec<String>,
+    /// The program that was traced.
+    program: String,
+    /// Working directory at recording time.
+    workdir: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -454,10 +524,18 @@ pub struct McpServerConfig {
 /// responses to stdout.  Connects to the daemon on demand for tool
 /// operations.  All logging goes to stderr.
 ///
+/// The server maintains an in-process cache of loaded traces so that
+/// `resources/list` and `resources/read` can serve resource data without
+/// requiring separate daemon queries.
+///
 /// The `config` parameter provides the daemon socket and PID file paths.
 pub async fn run_mcp_server(config: McpServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let reader = stdin.lock();
+
+    // In-process cache of traces loaded during this session.
+    // Populated by handle_exec_script and handle_trace_info on success.
+    let mut loaded_traces: HashMap<String, LoadedTrace> = HashMap::new();
 
     // Process each line from stdin as a JSON-RPC message.
     for line_result in reader.lines() {
@@ -488,10 +566,7 @@ pub async fn run_mcp_server(config: McpServerConfig) -> Result<(), Box<dyn std::
         };
 
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
-        let method = msg
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
 
         // Notifications (no id) do not get responses.
         let is_notification = msg.get("id").is_none();
@@ -511,7 +586,7 @@ pub async fn run_mcp_server(config: McpServerConfig) -> Result<(), Box<dyn std::
             }
             "tools/call" => {
                 let params = msg.get("params");
-                let response = handle_tools_call(&id, params, &config).await;
+                let response = handle_tools_call(&id, params, &config, &mut loaded_traces).await;
                 write_jsonrpc_message(&response);
             }
             "prompts/list" => {
@@ -523,13 +598,23 @@ pub async fn run_mcp_server(config: McpServerConfig) -> Result<(), Box<dyn std::
                 let response = handle_prompts_get(&id, params);
                 write_jsonrpc_message(&response);
             }
+            "resources/list" => {
+                let response = handle_resources_list(&id, &loaded_traces);
+                write_jsonrpc_message(&response);
+            }
+            "resources/read" => {
+                let params = msg.get("params");
+                let response = handle_resources_read(&id, params, &config, &loaded_traces).await;
+                write_jsonrpc_message(&response);
+            }
+            "resources/templates/list" => {
+                let response = handle_resource_templates_list(&id);
+                write_jsonrpc_message(&response);
+            }
             _ => {
                 if !is_notification {
-                    let response = jsonrpc_error(
-                        &id,
-                        -32601,
-                        &format!("Method not found: {method}"),
-                    );
+                    let response =
+                        jsonrpc_error(&id, -32601, &format!("Method not found: {method}"));
                     write_jsonrpc_message(&response);
                 }
                 // Unknown notifications are silently ignored per spec.
@@ -571,6 +656,7 @@ fn write_jsonrpc_message(msg: &Value) {
 /// Handles the `initialize` request.
 ///
 /// Returns server info and capabilities as specified by the MCP protocol.
+/// Advertises `tools`, `prompts`, and `resources` capabilities.
 fn handle_initialize(id: &Value) -> Value {
     jsonrpc_result(
         id,
@@ -583,6 +669,7 @@ fn handle_initialize(id: &Value) -> Value {
             "capabilities": {
                 "tools": {},
                 "prompts": {},
+                "resources": {},
             },
         }),
     )
@@ -608,10 +695,13 @@ fn handle_tools_list(id: &Value) -> Value {
 /// Handles `tools/call` requests.
 ///
 /// Dispatches to the appropriate tool handler based on the tool name.
+/// On successful trace operations, updates `loaded_traces` so that
+/// subsequent `resources/list` calls reflect the newly loaded trace.
 async fn handle_tools_call(
     id: &Value,
     params: Option<&Value>,
     config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
 ) -> Value {
     let tool_name = params
         .and_then(|p| p.get("name"))
@@ -620,15 +710,11 @@ async fn handle_tools_call(
     let arguments = params.and_then(|p| p.get("arguments"));
 
     match tool_name {
-        "exec_script" => handle_exec_script(id, arguments, config).await,
-        "trace_info" => handle_trace_info(id, arguments, config).await,
+        "exec_script" => handle_exec_script(id, arguments, config, loaded_traces).await,
+        "trace_info" => handle_trace_info(id, arguments, config, loaded_traces).await,
         "list_source_files" => handle_list_source_files(id, arguments, config).await,
         "read_source_file" => handle_read_source_file(id, arguments, config).await,
-        _ => jsonrpc_error(
-            id,
-            -32602,
-            &format!("Unknown tool: {tool_name}"),
-        ),
+        _ => jsonrpc_error(id, -32602, &format!("Unknown tool: {tool_name}")),
     }
 }
 
@@ -674,12 +760,271 @@ fn handle_prompts_get(id: &Value, params: Option<&Value>) -> Value {
                 ]
             }),
         ),
-        _ => jsonrpc_error(
-            id,
-            -32602,
-            &format!("Unknown prompt: {prompt_name}"),
-        ),
+        _ => jsonrpc_error(id, -32602, &format!("Unknown prompt: {prompt_name}")),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Resource handlers
+// ---------------------------------------------------------------------------
+
+/// Handles `resources/list` requests.
+///
+/// Returns resources for all traces that have been loaded during this
+/// session.  Each loaded trace produces:
+/// - A `trace:///<path>/info` resource (application/json) for metadata
+/// - A `trace:///<path>/source/<file>` resource (text/plain) for each
+///   source file in the trace
+fn handle_resources_list(id: &Value, loaded_traces: &HashMap<String, LoadedTrace>) -> Value {
+    let mut resources = Vec::new();
+
+    // Sort keys for deterministic output (important for tests).
+    let mut trace_paths: Vec<&String> = loaded_traces.keys().collect();
+    trace_paths.sort();
+
+    for trace_path in trace_paths {
+        let trace = &loaded_traces[trace_path];
+
+        // Trace info resource.
+        resources.push(json!({
+            "uri": format!("{TRACE_URI_PREFIX}{trace_path}/info"),
+            "name": "Trace Info",
+            "description": format!("Metadata about the trace at {trace_path}"),
+            "mimeType": "application/json",
+        }));
+
+        // Source file resources.
+        for file in &trace.source_files {
+            resources.push(json!({
+                "uri": format!("{TRACE_URI_PREFIX}{trace_path}/source/{file}"),
+                "name": file,
+                "description": format!("Source file from trace at {trace_path}"),
+                "mimeType": "text/plain",
+            }));
+        }
+    }
+
+    jsonrpc_result(id, json!({"resources": resources}))
+}
+
+/// Handles `resources/read` requests.
+///
+/// Parses the `trace:///` URI to determine the trace path and resource
+/// type, then returns the appropriate content:
+/// - `/info` suffix: returns JSON metadata about the trace
+/// - `/source/<file>` suffix: returns the source file content from the daemon
+fn handle_resources_read<'a>(
+    id: &'a Value,
+    params: Option<&'a Value>,
+    config: &'a McpServerConfig,
+    loaded_traces: &'a HashMap<String, LoadedTrace>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Value> + 'a>> {
+    Box::pin(async move {
+        let uri = match params.and_then(|p| p.get("uri")).and_then(Value::as_str) {
+            Some(u) => u,
+            None => {
+                return jsonrpc_error(id, -32602, "Missing required parameter: uri");
+            }
+        };
+
+        // Parse the trace:/// URI.
+        let path_part = match uri.strip_prefix(TRACE_URI_PREFIX) {
+            Some(p) => p,
+            None => {
+                return jsonrpc_error(
+                    id,
+                    -32602,
+                    &format!(
+                        "Invalid resource URI: '{uri}'. Expected URI starting with '{TRACE_URI_PREFIX}'."
+                    ),
+                );
+            }
+        };
+
+        // Determine resource type: check for /info suffix or /source/ infix.
+        if let Some(trace_path) = path_part.strip_suffix("/info") {
+            // Trace info resource.
+            if let Some(trace) = loaded_traces.get(trace_path) {
+                let info_json = json!({
+                    "tracePath": trace_path,
+                    "language": trace.language,
+                    "totalEvents": trace.total_events,
+                    "sourceFiles": trace.source_files,
+                    "program": trace.program,
+                    "workdir": trace.workdir,
+                });
+                let text = serde_json::to_string_pretty(&info_json)
+                    .unwrap_or_else(|_| info_json.to_string());
+
+                jsonrpc_result(
+                    id,
+                    json!({
+                        "contents": [{
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": text,
+                        }]
+                    }),
+                )
+            } else {
+                jsonrpc_error(
+                    id,
+                    -32602,
+                    &format!(
+                        "Trace not found at '{trace_path}'. \
+                         Please verify the trace path exists and is a valid CodeTracer \
+                         trace directory. Load the trace first using the trace_info or \
+                         exec_script tool."
+                    ),
+                )
+            }
+        } else if let Some(after_source) = find_source_suffix(path_part) {
+            // Source file resource: trace_path is everything before /source/.
+            let source_idx = path_part.len() - "/source/".len() - after_source.len();
+            let trace_path = &path_part[..source_idx];
+            let file_path = after_source;
+
+            // Verify the trace is loaded.
+            if !loaded_traces.contains_key(trace_path) {
+                return jsonrpc_error(
+                    id,
+                    -32602,
+                    &format!(
+                        "Trace not found at '{trace_path}'. \
+                         Please verify the trace path exists and is a valid CodeTracer \
+                         trace directory. Load the trace first using the trace_info or \
+                         exec_script tool."
+                    ),
+                );
+            }
+
+            // Read the source file from the daemon.
+            let mut stream = match connect_to_daemon(config).await {
+                Ok(s) => s,
+                Err(e) => {
+                    return jsonrpc_error(id, -32603, &format!("Cannot connect to daemon: {e}"));
+                }
+            };
+
+            // Open the trace (idempotent).
+            let open_resp = match dap_request(
+                &mut stream,
+                "ct/open-trace",
+                1,
+                json!({"tracePath": trace_path}),
+                30,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return jsonrpc_error(id, -32603, &format!("Failed to open trace: {e}"));
+                }
+            };
+
+            if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+                let message = open_resp
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error");
+                return jsonrpc_error(id, -32603, &format!("Failed to open trace: {message}"));
+            }
+
+            // Read the source file via ct/py-read-source.  The daemon
+            // handles this command by forwarding it to the backend as
+            // ct/read-source and returning the result.
+            let read_resp = match dap_request(
+                &mut stream,
+                "ct/py-read-source",
+                2,
+                json!({
+                    "tracePath": trace_path,
+                    "path": file_path,
+                }),
+                10,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return jsonrpc_error(id, -32603, &format!("Failed to read source file: {e}"));
+                }
+            };
+
+            if read_resp.get("success").and_then(Value::as_bool) != Some(true) {
+                let message = read_resp
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error");
+                return jsonrpc_error(
+                    id,
+                    -32603,
+                    &format!("Failed to read source file: {message}"),
+                );
+            }
+
+            let body = read_resp.get("body").cloned().unwrap_or(json!({}));
+            let content = body.get("content").and_then(Value::as_str).unwrap_or("");
+
+            jsonrpc_result(
+                id,
+                json!({
+                    "contents": [{
+                        "uri": uri,
+                        "mimeType": "text/plain",
+                        "text": content,
+                    }]
+                }),
+            )
+        } else {
+            jsonrpc_error(
+                id,
+                -32602,
+                &format!(
+                    "Invalid resource URI: '{uri}'. \
+                     Expected URI ending with '/info' or containing '/source/<file_path>'."
+                ),
+            )
+        }
+    })
+}
+
+/// Finds the file path portion after `/source/` in a URI path.
+///
+/// The trace path may itself contain `/source/` as a directory name, so
+/// we search for the last occurrence of `/source/` to split correctly.
+/// Returns `None` if `/source/` is not found.
+fn find_source_suffix(path: &str) -> Option<&str> {
+    // Search for "/source/" from the end to handle trace paths that might
+    // contain "source" as a directory name.
+    let needle = "/source/";
+    path.rfind(needle).map(|idx| &path[idx + needle.len()..])
+}
+
+/// Handles `resources/templates/list` requests.
+///
+/// Returns parameterized URI templates that clients can use to construct
+/// resource URIs for any trace path and source file.
+fn handle_resource_templates_list(id: &Value) -> Value {
+    jsonrpc_result(
+        id,
+        json!({
+            "resourceTemplates": [
+                {
+                    "uriTemplate": "trace:///{trace_path}/info",
+                    "name": "Trace Info",
+                    "description": "Metadata about a trace file",
+                    "mimeType": "application/json",
+                },
+                {
+                    "uriTemplate": "trace:///{trace_path}/source/{file_path}",
+                    "name": "Source File",
+                    "description": "A source file from a trace",
+                    "mimeType": "text/plain",
+                },
+            ]
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -735,8 +1080,8 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
     }
 
     // Spawn the daemon process.
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("cannot determine current executable: {e}"))?;
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
     eprintln!("mcp: auto-starting daemon: {} daemon start", exe.display());
 
     std::process::Command::new(&exe)
@@ -769,17 +1114,118 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
     }
 }
 
+/// Queries trace metadata from the daemon and returns a `LoadedTrace`.
+///
+/// Opens the trace (idempotent) and sends `ct/trace-info` to retrieve
+/// language, event count, source files, program, and workdir.  This is
+/// used by tool handlers to populate the `loaded_traces` cache.
+async fn fetch_trace_metadata(
+    config: &McpServerConfig,
+    trace_path: &str,
+) -> Result<LoadedTrace, String> {
+    let mut stream = connect_to_daemon(config).await?;
+
+    // Open the trace (idempotent if already open).
+    let open_resp = dap_request(
+        &mut stream,
+        "ct/open-trace",
+        1,
+        json!({"tracePath": trace_path}),
+        30,
+    )
+    .await?;
+
+    if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = open_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        return Err(format!("Failed to open trace: {message}"));
+    }
+
+    // Query trace info.
+    let info_resp = dap_request(
+        &mut stream,
+        "ct/trace-info",
+        2,
+        json!({"tracePath": trace_path}),
+        10,
+    )
+    .await?;
+
+    if info_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = info_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        return Err(format!("Failed to get trace info: {message}"));
+    }
+
+    let body = info_resp.get("body").cloned().unwrap_or(json!({}));
+
+    let language = body
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let total_events = body.get("totalEvents").and_then(Value::as_u64).unwrap_or(0);
+    let source_files = body
+        .get("sourceFiles")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let program = body
+        .get("program")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let workdir = body
+        .get("workdir")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    Ok(LoadedTrace {
+        language,
+        total_events,
+        source_files,
+        program,
+        workdir,
+    })
+}
+
 /// Handles the `exec_script` tool.
 ///
 /// Sends a `ct/exec-script` request to the daemon and returns the
 /// script's stdout as the tool result.  Errors and timeouts are
 /// reported via `isError: true` in the MCP response.
+///
+/// On success, also populates the `loaded_traces` cache (if not
+/// already present) so that the trace's resources become available.
+///
+/// Enhanced error messages are designed to be actionable for AI agents:
+/// - Trace not found: suggests checking the path
+/// - Script syntax errors: includes the Python traceback
+/// - Timeout: states the duration and suggests simplification
+///
+/// Includes `_meta.duration_ms` in the response for timing visibility.
 async fn handle_exec_script(
     id: &Value,
     arguments: Option<&Value>,
     config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
 ) -> Value {
-    let trace_path = match arguments.and_then(|a| a.get("trace_path")).and_then(Value::as_str) {
+    let start = Instant::now();
+
+    let trace_path = match arguments
+        .and_then(|a| a.get("trace_path"))
+        .and_then(Value::as_str)
+    {
         Some(p) => p,
         None => {
             return jsonrpc_result(
@@ -789,13 +1235,13 @@ async fn handle_exec_script(
         }
     };
 
-    let script = match arguments.and_then(|a| a.get("script")).and_then(Value::as_str) {
+    let script = match arguments
+        .and_then(|a| a.get("script"))
+        .and_then(Value::as_str)
+    {
         Some(s) => s,
         None => {
-            return jsonrpc_result(
-                id,
-                tool_result_error("Missing required argument: script"),
-            );
+            return jsonrpc_result(id, tool_result_error("Missing required argument: script"));
         }
     };
 
@@ -807,9 +1253,13 @@ async fn handle_exec_script(
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Cannot connect to daemon: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Cannot connect to daemon: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
@@ -831,12 +1281,23 @@ async fn handle_exec_script(
     {
         Ok(r) => r,
         Err(e) => {
-            return jsonrpc_result(
-                id,
-                tool_result_error(&format!("Daemon request failed: {e}")),
-            );
+            let duration_ms = start.elapsed().as_millis();
+            // Enhanced error: check if the error suggests the trace was not found.
+            let error_msg =
+                if e.contains("trace") && (e.contains("not found") || e.contains("No such file")) {
+                    format!(
+                        "Trace not found at '{trace_path}'. \
+                     Please verify the trace path exists and is a valid CodeTracer \
+                     trace directory."
+                    )
+                } else {
+                    format!("Daemon request failed: {e}")
+                };
+            return jsonrpc_result(id, tool_result_error_with_timing(&error_msg, duration_ms));
         }
     };
+
+    let duration_ms = start.elapsed().as_millis();
 
     // Check the daemon response for success/failure.
     if resp.get("success").and_then(Value::as_bool) != Some(true) {
@@ -844,10 +1305,19 @@ async fn handle_exec_script(
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
-        return jsonrpc_result(
-            id,
-            tool_result_error(&format!("Script execution failed: {message}")),
-        );
+        // Enhanced error: detect "trace not found" from daemon message.
+        let error_msg = if message.contains("trace")
+            && (message.contains("not found") || message.contains("No such file"))
+        {
+            format!(
+                "Trace not found at '{trace_path}'. \
+                 Please verify the trace path exists and is a valid CodeTracer \
+                 trace directory."
+            )
+        } else {
+            format!("Script execution failed: {message}")
+        };
+        return jsonrpc_result(id, tool_result_error_with_timing(&error_msg, duration_ms));
     }
 
     let body = resp.get("body").cloned().unwrap_or(json!({}));
@@ -862,15 +1332,19 @@ async fn handle_exec_script(
     if timed_out {
         return jsonrpc_result(
             id,
-            tool_result_error(&format!(
-                "Script execution timed out after {timeout_seconds} seconds"
-            )),
+            tool_result_error_with_timing(
+                &format!(
+                    "Script execution timed out after {timeout_seconds} seconds. \
+                     Consider simplifying the script or increasing the timeout."
+                ),
+                duration_ms,
+            ),
         );
     }
 
     if exit_code != 0 {
         // Script error — include both stderr and stdout so the agent
-        // can see the full error context.
+        // can see the full error context (including Python tracebacks).
         let mut error_text = String::new();
         if !stderr.is_empty() {
             error_text.push_str(&format!("Error: {stderr}"));
@@ -884,23 +1358,49 @@ async fn handle_exec_script(
         if error_text.is_empty() {
             error_text = format!("Script exited with code {exit_code}");
         }
-        return jsonrpc_result(id, tool_result_error(&error_text));
+        return jsonrpc_result(id, tool_result_error_with_timing(&error_text, duration_ms));
     }
 
-    // Success — return stdout as the tool result.
-    jsonrpc_result(id, tool_result_text(stdout))
+    // On success, ensure the trace is in the loaded_traces cache.
+    // This populates resources for subsequent resources/list calls.
+    if !loaded_traces.contains_key(trace_path) {
+        // Best-effort: if fetching metadata fails, we still return the
+        // script output — the trace just won't appear in resources.
+        match fetch_trace_metadata(config, trace_path).await {
+            Ok(meta) => {
+                loaded_traces.insert(trace_path.to_string(), meta);
+            }
+            Err(e) => {
+                eprintln!("mcp: warning: could not cache trace metadata for resources: {e}");
+            }
+        }
+    }
+
+    // Success — return stdout as the tool result with timing.
+    jsonrpc_result(id, tool_result_text_with_timing(stdout, duration_ms))
 }
 
 /// Handles the `trace_info` tool.
 ///
 /// Opens the trace (if not already open) and returns metadata: language,
 /// event count, source files, program, and working directory.
+///
+/// Also populates the `loaded_traces` cache so the trace's resources
+/// become available via `resources/list`.
+///
+/// Includes `_meta.duration_ms` in the response for timing visibility.
 async fn handle_trace_info(
     id: &Value,
     arguments: Option<&Value>,
     config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
 ) -> Value {
-    let trace_path = match arguments.and_then(|a| a.get("trace_path")).and_then(Value::as_str) {
+    let start = Instant::now();
+
+    let trace_path = match arguments
+        .and_then(|a| a.get("trace_path"))
+        .and_then(Value::as_str)
+    {
         Some(p) => p,
         None => {
             return jsonrpc_result(
@@ -913,9 +1413,13 @@ async fn handle_trace_info(
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Cannot connect to daemon: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Cannot connect to daemon: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
@@ -932,21 +1436,23 @@ async fn handle_trace_info(
     {
         Ok(r) => r,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Failed to open trace: {e}")),
+                tool_result_error_with_timing(&format!("Failed to open trace: {e}"), duration_ms),
             );
         }
     };
 
     if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
         let message = open_resp
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
         return jsonrpc_result(
             id,
-            tool_result_error(&format!("Failed to open trace: {message}")),
+            tool_result_error_with_timing(&format!("Failed to open trace: {message}"), duration_ms),
         );
     }
 
@@ -962,25 +1468,72 @@ async fn handle_trace_info(
     {
         Ok(r) => r,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Failed to get trace info: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Failed to get trace info: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
 
     if info_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
         let message = info_resp
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
         return jsonrpc_result(
             id,
-            tool_result_error(&format!("Failed to get trace info: {message}")),
+            tool_result_error_with_timing(
+                &format!("Failed to get trace info: {message}"),
+                duration_ms,
+            ),
         );
     }
 
     let body = info_resp.get("body").cloned().unwrap_or(json!({}));
+
+    // Cache the trace metadata for resource listing.
+    let language = body
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let total_events = body.get("totalEvents").and_then(Value::as_u64).unwrap_or(0);
+    let source_files: Vec<String> = body
+        .get("sourceFiles")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let program = body
+        .get("program")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let workdir = body
+        .get("workdir")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    loaded_traces.insert(
+        trace_path.to_string(),
+        LoadedTrace {
+            language: language.clone(),
+            total_events,
+            source_files: source_files.clone(),
+            program: program.clone(),
+            workdir: workdir.clone(),
+        },
+    );
 
     // Format the trace info as human-readable text for the LLM.
     let mut text = String::new();
@@ -988,28 +1541,23 @@ async fn handle_trace_info(
     if let Some(path) = body.get("tracePath").and_then(Value::as_str) {
         text.push_str(&format!("  Path: {path}\n"));
     }
-    if let Some(lang) = body.get("language").and_then(Value::as_str) {
-        text.push_str(&format!("  Language: {lang}\n"));
-    }
-    if let Some(events) = body.get("totalEvents").and_then(Value::as_u64) {
-        text.push_str(&format!("  Total events: {events}\n"));
-    }
-    if let Some(program) = body.get("program").and_then(Value::as_str) {
+    text.push_str(&format!("  Language: {language}\n"));
+    text.push_str(&format!("  Total events: {total_events}\n"));
+    if !program.is_empty() {
         text.push_str(&format!("  Program: {program}\n"));
     }
-    if let Some(workdir) = body.get("workdir").and_then(Value::as_str) {
+    if !workdir.is_empty() {
         text.push_str(&format!("  Working dir: {workdir}\n"));
     }
-    if let Some(files) = body.get("sourceFiles").and_then(Value::as_array) {
-        text.push_str(&format!("  Source files: ({} files)\n", files.len()));
-        for file in files {
-            if let Some(path) = file.as_str() {
-                text.push_str(&format!("    - {path}\n"));
-            }
+    if !source_files.is_empty() {
+        text.push_str(&format!("  Source files: ({} files)\n", source_files.len()));
+        for file in &source_files {
+            text.push_str(&format!("    - {file}\n"));
         }
     }
 
-    jsonrpc_result(id, tool_result_text(&text))
+    let duration_ms = start.elapsed().as_millis();
+    jsonrpc_result(id, tool_result_text_with_timing(&text, duration_ms))
 }
 
 /// Handles the `list_source_files` tool.
@@ -1021,7 +1569,12 @@ async fn handle_list_source_files(
     arguments: Option<&Value>,
     config: &McpServerConfig,
 ) -> Value {
-    let trace_path = match arguments.and_then(|a| a.get("trace_path")).and_then(Value::as_str) {
+    let start = Instant::now();
+
+    let trace_path = match arguments
+        .and_then(|a| a.get("trace_path"))
+        .and_then(Value::as_str)
+    {
         Some(p) => p,
         None => {
             return jsonrpc_result(
@@ -1034,9 +1587,13 @@ async fn handle_list_source_files(
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Cannot connect to daemon: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Cannot connect to daemon: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
@@ -1053,21 +1610,23 @@ async fn handle_list_source_files(
     {
         Ok(r) => r,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Failed to open trace: {e}")),
+                tool_result_error_with_timing(&format!("Failed to open trace: {e}"), duration_ms),
             );
         }
     };
 
     if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
         let message = open_resp
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
         return jsonrpc_result(
             id,
-            tool_result_error(&format!("Failed to open trace: {message}")),
+            tool_result_error_with_timing(&format!("Failed to open trace: {message}"), duration_ms),
         );
     }
 
@@ -1083,21 +1642,29 @@ async fn handle_list_source_files(
     {
         Ok(r) => r,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Failed to get trace info: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Failed to get trace info: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
 
     if info_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
         let message = info_resp
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
         return jsonrpc_result(
             id,
-            tool_result_error(&format!("Failed to get trace info: {message}")),
+            tool_result_error_with_timing(
+                &format!("Failed to get trace info: {message}"),
+                duration_ms,
+            ),
         );
     }
 
@@ -1117,7 +1684,8 @@ async fn handle_list_source_files(
         }
     }
 
-    jsonrpc_result(id, tool_result_text(&text))
+    let duration_ms = start.elapsed().as_millis();
+    jsonrpc_result(id, tool_result_text_with_timing(&text, duration_ms))
 }
 
 /// Handles the `read_source_file` tool.
@@ -1129,7 +1697,12 @@ async fn handle_read_source_file(
     arguments: Option<&Value>,
     config: &McpServerConfig,
 ) -> Value {
-    let trace_path = match arguments.and_then(|a| a.get("trace_path")).and_then(Value::as_str) {
+    let start = Instant::now();
+
+    let trace_path = match arguments
+        .and_then(|a| a.get("trace_path"))
+        .and_then(Value::as_str)
+    {
         Some(p) => p,
         None => {
             return jsonrpc_result(
@@ -1139,7 +1712,10 @@ async fn handle_read_source_file(
         }
     };
 
-    let file_path = match arguments.and_then(|a| a.get("file_path")).and_then(Value::as_str) {
+    let file_path = match arguments
+        .and_then(|a| a.get("file_path"))
+        .and_then(Value::as_str)
+    {
         Some(p) => p,
         None => {
             return jsonrpc_result(
@@ -1152,9 +1728,13 @@ async fn handle_read_source_file(
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Cannot connect to daemon: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Cannot connect to daemon: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
@@ -1171,21 +1751,23 @@ async fn handle_read_source_file(
     {
         Ok(r) => r,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Failed to open trace: {e}")),
+                tool_result_error_with_timing(&format!("Failed to open trace: {e}"), duration_ms),
             );
         }
     };
 
     if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
         let message = open_resp
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
         return jsonrpc_result(
             id,
-            tool_result_error(&format!("Failed to open trace: {message}")),
+            tool_result_error_with_timing(&format!("Failed to open trace: {message}"), duration_ms),
         );
     }
 
@@ -1204,31 +1786,37 @@ async fn handle_read_source_file(
     {
         Ok(r) => r,
         Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(
                 id,
-                tool_result_error(&format!("Failed to read source file: {e}")),
+                tool_result_error_with_timing(
+                    &format!("Failed to read source file: {e}"),
+                    duration_ms,
+                ),
             );
         }
     };
 
     if read_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
         let message = read_resp
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("unknown error");
         return jsonrpc_result(
             id,
-            tool_result_error(&format!("Failed to read source file: {message}")),
+            tool_result_error_with_timing(
+                &format!("Failed to read source file: {message}"),
+                duration_ms,
+            ),
         );
     }
 
     let body = read_resp.get("body").cloned().unwrap_or(json!({}));
-    let content = body
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let content = body.get("content").and_then(Value::as_str).unwrap_or("");
 
-    jsonrpc_result(id, tool_result_text(content))
+    let duration_ms = start.elapsed().as_millis();
+    jsonrpc_result(id, tool_result_text_with_timing(content, duration_ms))
 }
 
 // ---------------------------------------------------------------------------
@@ -1265,11 +1853,29 @@ mod tests {
     }
 
     #[test]
+    fn test_tool_result_text_with_timing() {
+        let result = tool_result_text_with_timing("hello", 42);
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(result["content"][0]["text"], "hello");
+        assert_eq!(result["_meta"]["duration_ms"], 42);
+        assert!(result.get("isError").is_none());
+    }
+
+    #[test]
     fn test_tool_result_error() {
         let result = tool_result_error("something went wrong");
         assert_eq!(result["content"][0]["type"], "text");
         assert_eq!(result["content"][0]["text"], "something went wrong");
         assert_eq!(result["isError"], true);
+    }
+
+    #[test]
+    fn test_tool_result_error_with_timing() {
+        let result = tool_result_error_with_timing("something went wrong", 100);
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(result["content"][0]["text"], "something went wrong");
+        assert_eq!(result["isError"], true);
+        assert_eq!(result["_meta"]["duration_ms"], 100);
     }
 
     #[test]
@@ -1282,6 +1888,7 @@ mod tests {
         assert_eq!(result["serverInfo"]["version"], SERVER_VERSION);
         assert!(result["capabilities"]["tools"].is_object());
         assert!(result["capabilities"]["prompts"].is_object());
+        assert!(result["capabilities"]["resources"].is_object());
     }
 
     #[test]
@@ -1290,10 +1897,7 @@ mod tests {
         let tools = resp["result"]["tools"].as_array().expect("tools array");
         assert_eq!(tools.len(), 4);
 
-        let names: Vec<&str> = tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"exec_script"));
         assert!(names.contains(&"trace_info"));
         assert!(names.contains(&"list_source_files"));
@@ -1301,7 +1905,10 @@ mod tests {
 
         // Verify each tool has an inputSchema.
         for tool in tools {
-            assert!(tool.get("inputSchema").is_some(), "tool missing inputSchema");
+            assert!(
+                tool.get("inputSchema").is_some(),
+                "tool missing inputSchema"
+            );
         }
     }
 
@@ -1315,10 +1922,7 @@ mod tests {
 
     #[test]
     fn test_handle_prompts_get_known() {
-        let resp = handle_prompts_get(
-            &json!(4),
-            Some(&json!({"name": "trace_query_api"})),
-        );
+        let resp = handle_prompts_get(&json!(4), Some(&json!({"name": "trace_query_api"})));
         let messages = resp["result"]["messages"]
             .as_array()
             .expect("messages array");
@@ -1352,6 +1956,96 @@ mod tests {
         assert!(
             lines < 300,
             "API reference is {lines} lines, should be under 300",
+        );
+    }
+
+    #[test]
+    fn test_handle_resources_list_empty() {
+        let loaded = HashMap::new();
+        let resp = handle_resources_list(&json!(10), &loaded);
+        let resources = resp["result"]["resources"]
+            .as_array()
+            .expect("resources array");
+        assert!(resources.is_empty());
+    }
+
+    #[test]
+    fn test_handle_resources_list_with_loaded_trace() {
+        let mut loaded = HashMap::new();
+        loaded.insert(
+            "/tmp/test-trace".to_string(),
+            LoadedTrace {
+                language: "nim".to_string(),
+                total_events: 42,
+                source_files: vec!["src/main.nim".to_string(), "src/lib.nim".to_string()],
+                program: "main.nim".to_string(),
+                workdir: "/tmp/work".to_string(),
+            },
+        );
+
+        let resp = handle_resources_list(&json!(11), &loaded);
+        let resources = resp["result"]["resources"]
+            .as_array()
+            .expect("resources array");
+
+        // Should have 1 info resource + 2 source file resources = 3 total.
+        assert_eq!(resources.len(), 3);
+
+        // Verify the info resource.
+        assert_eq!(resources[0]["uri"], "trace:///tmp/test-trace/info");
+        assert_eq!(resources[0]["mimeType"], "application/json");
+
+        // Verify source file resources.
+        assert_eq!(
+            resources[1]["uri"],
+            "trace:///tmp/test-trace/source/src/main.nim"
+        );
+        assert_eq!(resources[1]["mimeType"], "text/plain");
+        assert_eq!(
+            resources[2]["uri"],
+            "trace:///tmp/test-trace/source/src/lib.nim"
+        );
+    }
+
+    #[test]
+    fn test_handle_resource_templates_list() {
+        let resp = handle_resource_templates_list(&json!(12));
+        let templates = resp["result"]["resourceTemplates"]
+            .as_array()
+            .expect("resourceTemplates array");
+        assert_eq!(templates.len(), 2);
+
+        assert_eq!(templates[0]["uriTemplate"], "trace:///{trace_path}/info");
+        assert_eq!(templates[0]["mimeType"], "application/json");
+
+        assert_eq!(
+            templates[1]["uriTemplate"],
+            "trace:///{trace_path}/source/{file_path}"
+        );
+        assert_eq!(templates[1]["mimeType"], "text/plain");
+    }
+
+    #[test]
+    fn test_find_source_suffix() {
+        // Normal case.
+        assert_eq!(
+            find_source_suffix("/tmp/trace/source/main.nim"),
+            Some("main.nim")
+        );
+
+        // Nested path after /source/.
+        assert_eq!(
+            find_source_suffix("/tmp/trace/source/src/lib.nim"),
+            Some("src/lib.nim")
+        );
+
+        // No /source/ present.
+        assert_eq!(find_source_suffix("/tmp/trace/info"), None);
+
+        // Trace path containing "source" directory.
+        assert_eq!(
+            find_source_suffix("/home/source/project/trace/source/main.nim"),
+            Some("main.nim")
         );
     }
 }
