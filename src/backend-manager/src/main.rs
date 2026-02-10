@@ -8,6 +8,7 @@ mod dap_parser;
 mod errors;
 mod paths;
 mod python_bridge;
+mod script_executor;
 mod session;
 mod trace_metadata;
 
@@ -17,7 +18,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::{
     fs::{create_dir_all, read_to_string, remove_file, write},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -73,6 +74,48 @@ enum Commands {
     MockDapBackend {
         /// All positional arguments; the last one is the socket path.
         args: Vec<String>,
+    },
+    /// Trace inspection and scripting commands.
+    ///
+    /// Connects to the daemon (auto-starting if needed) and provides CLI
+    /// access to trace data.
+    Trace {
+        #[command(subcommand)]
+        action: TraceAction,
+    },
+}
+
+/// Subcommands under `ct trace`.
+#[derive(Subcommand, Debug)]
+enum TraceAction {
+    /// Execute a Python script against a trace.
+    ///
+    /// The script has access to a pre-bound `trace` variable (a
+    /// `codetracer.Trace` instance) connected to the daemon.  Script
+    /// stdout is printed to the terminal.
+    ///
+    /// Examples:
+    ///   ct trace query /path/to/trace script.py
+    ///   ct trace query /path/to/trace -c "print(trace.location)"
+    Query {
+        /// Path to the trace directory.
+        trace_path: PathBuf,
+
+        /// Python script file to execute (omit when using `-c`).
+        script_file: Option<PathBuf>,
+
+        /// Inline Python code to execute.
+        #[arg(short = 'c', long = "code")]
+        code: Option<String>,
+
+        /// Execution timeout in seconds.
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+    },
+    /// Print trace metadata (language, events, source files).
+    Info {
+        /// Path to the trace directory.
+        trace_path: PathBuf,
     },
 }
 
@@ -152,7 +195,10 @@ async fn daemon_stop(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let mut stream = match UnixStream::connect(socket_path).await {
         Ok(s) => s,
         Err(err) => {
-            eprintln!("Cannot connect to daemon at {}: {err}", socket_path.display());
+            eprintln!(
+                "Cannot connect to daemon at {}: {err}",
+                socket_path.display()
+            );
             eprintln!("Daemon is not running.");
             return Err(Box::new(err));
         }
@@ -220,10 +266,7 @@ async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
 ///    c. Poll for the socket file and a successful connection (exponential
 ///    backoff, up to 5 seconds).
 /// 3. Once connected, print "connected" and exit.
-async fn daemon_connect(
-    socket_path: &PathBuf,
-    pid_path: &PathBuf,
-) -> Result<(), Box<dyn Error>> {
+async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     // Try to connect to an existing daemon.
     if socket_path.exists() {
         if let Ok(stream) = UnixStream::connect(socket_path).await {
@@ -254,10 +297,7 @@ async fn daemon_connect(
 
     // Spawn `backend-manager daemon start` as a detached process.
     let exe = std::env::current_exe()?;
-    info!(
-        "Auto-starting daemon: {} daemon start",
-        exe.display()
-    );
+    info!("Auto-starting daemon: {} daemon start", exe.display());
 
     // Build the command with the same environment (including TMPDIR) so that
     // the daemon uses the same paths.
@@ -387,9 +427,18 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                 None => break,
             };
 
-            let msg_type = msg.get("type").and_then(serde_json::Value::as_str).unwrap_or("");
-            let command = msg.get("command").and_then(serde_json::Value::as_str).unwrap_or("");
-            let seq = msg.get("seq").and_then(serde_json::Value::as_i64).unwrap_or(0);
+            let msg_type = msg
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let command = msg
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let seq = msg
+                .get("seq")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
 
             if msg_type != "request" {
                 // Ignore non-request messages.
@@ -408,7 +457,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "supportsStepBack": true,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 "launch" => {
                     // Detect multi-process mode from the trace folder path.
@@ -430,7 +481,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 "configurationDone" => {
                     let response = json!({
@@ -440,7 +493,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     // Send the stopped event after configurationDone.
                     if !init_done {
@@ -472,7 +527,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -496,7 +553,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -522,7 +581,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -544,7 +605,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -559,7 +622,8 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 
                     // Find the nearest breakpoint line > current_line in the
                     // current file.
-                    let next_bp = breakpoints.iter()
+                    let next_bp = breakpoints
+                        .iter()
                         .filter(|(f, l)| f == &current_file && *l > current_line)
                         .map(|(_, l)| *l)
                         .min();
@@ -602,7 +666,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -615,7 +681,8 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     // continue_reverse: check for breakpoints behind the
                     // current position, otherwise jump to start of trace.
 
-                    let prev_bp = breakpoints.iter()
+                    let prev_bp = breakpoints
+                        .iter()
                         .filter(|(f, l)| f == &current_file && *l < current_line)
                         .map(|(_, l)| *l)
                         .max();
@@ -643,7 +710,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -671,7 +740,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -693,7 +764,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
 
                     let stopped = json!({
                         "type": "event",
@@ -756,7 +829,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "variables": variables,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- evaluate: evaluates expressions against mock state ---
                 "evaluate" => {
@@ -796,7 +871,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "message": format!("cannot evaluate: {other}")
                         }),
                     };
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/load-flow: returns mock flow/omniscience data ---
                 //
@@ -872,7 +949,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "finished": true,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- stackTrace: returns current mock position ---
                 //
@@ -914,7 +993,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "totalFrames": total_frames,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- setBreakpoints: update tracked breakpoints for a file ---
                 //
@@ -964,7 +1045,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "breakpoints": result_bps,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- setDataBreakpoints: update tracked watchpoints ---
                 //
@@ -1003,7 +1086,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "breakpoints": result_bps,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/load-calltrace-section: returns mock call trace ---
                 //
@@ -1027,11 +1112,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         json!({"id": 2, "name": "process", "location": {"path": "process.nim", "line": 20, "column": 1}, "returnValue": null, "childrenCount": 1, "depth": 1}),
                     ];
 
-                    let sliced: Vec<_> = all_calls
-                        .into_iter()
-                        .skip(start)
-                        .take(count)
-                        .collect();
+                    let sliced: Vec<_> = all_calls.into_iter().skip(start).take(count).collect();
 
                     let response = json!({
                         "type": "response",
@@ -1042,7 +1123,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "calls": sliced,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/search-calltrace: search mock call trace by name ---
                 "ct/search-calltrace" => {
@@ -1060,12 +1143,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 
                     let matched: Vec<_> = all_calls
                         .into_iter()
-                        .filter(|c| {
-                            c["name"]
-                                .as_str()
-                                .unwrap_or("")
-                                .contains(query)
-                        })
+                        .filter(|c| c["name"].as_str().unwrap_or("").contains(query))
                         .collect();
 
                     let response = json!({
@@ -1077,7 +1155,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "calls": matched,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/event-load: returns mock events with optional filter ---
                 //
@@ -1113,11 +1193,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         all_events
                     };
 
-                    let sliced: Vec<_> = filtered
-                        .into_iter()
-                        .skip(start)
-                        .take(count)
-                        .collect();
+                    let sliced: Vec<_> = filtered.into_iter().skip(start).take(count).collect();
 
                     let response = json!({
                         "type": "response",
@@ -1128,7 +1204,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "events": sliced,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/load-terminal: returns mock terminal output ---
                 "ct/load-terminal" => {
@@ -1141,7 +1219,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "output": "Hello, World!\nDone.\n"
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/read-source: returns mock source file content ---
                 //
@@ -1171,7 +1251,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "content": content,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/list-processes: returns the list of processes ---
                 //
@@ -1198,7 +1280,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                             "processes": processes,
                         }
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/select-replay: switches the selected process ---
                 //
@@ -1220,7 +1304,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 _ => {
                     // Generic success response for any other command.
@@ -1231,7 +1317,9 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         "success": true,
                         "body": {}
                     });
-                    write_half.write_all(&DapParser::to_bytes(&response)).await?;
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
             }
         }
@@ -1305,6 +1393,321 @@ fn init_daemon_logging(config: &DaemonConfig) {
 }
 
 // ---------------------------------------------------------------------------
+// CLI helpers: DAP communication from the CLI client
+// ---------------------------------------------------------------------------
+
+/// Sends a DAP request over `stream` and reads the response.
+///
+/// Returns the parsed JSON response.  Times out after `deadline` seconds.
+async fn cli_dap_request(
+    stream: &mut UnixStream,
+    command: &str,
+    seq: i64,
+    arguments: serde_json::Value,
+    deadline_secs: u64,
+) -> Result<serde_json::Value, Box<dyn Error>> {
+    let request = json!({
+        "type": "request",
+        "command": command,
+        "seq": seq,
+        "arguments": arguments,
+    });
+    let bytes = DapParser::to_bytes(&request);
+    stream.write_all(&bytes).await?;
+
+    // Read the response with timeout.
+    let resp = tokio::time::timeout(Duration::from_secs(deadline_secs), cli_dap_read(stream))
+        .await
+        .map_err(|_| format!("timeout waiting for {command} response"))??;
+
+    Ok(resp)
+}
+
+/// Reads a single DAP-framed JSON message from `stream`.
+///
+/// Minimal parser: reads `Content-Length` header, then the JSON body.
+async fn cli_dap_read(stream: &mut UnixStream) -> Result<serde_json::Value, Box<dyn Error>> {
+    let mut header_buf = Vec::with_capacity(256);
+    let mut single = [0u8; 1];
+
+    loop {
+        let n = stream.read(&mut single).await?;
+        if n == 0 {
+            return Err("EOF while reading DAP header".into());
+        }
+        header_buf.push(single[0]);
+        if header_buf.len() >= 4 && header_buf.ends_with(b"\r\n\r\n") {
+            break;
+        }
+        if header_buf.len() > 8192 {
+            return Err("DAP header too large".into());
+        }
+    }
+
+    let header_str = String::from_utf8_lossy(&header_buf);
+    let prefix = "Content-Length: ";
+    let line = header_str
+        .lines()
+        .find(|l| l.starts_with(prefix))
+        .ok_or("missing Content-Length in DAP header")?;
+    let content_length: usize = line[prefix.len()..]
+        .trim()
+        .parse()
+        .map_err(|e| format!("bad Content-Length: {e}"))?;
+
+    let mut body_buf = vec![0u8; content_length];
+    stream.read_exact(&mut body_buf).await?;
+
+    Ok(serde_json::from_slice(&body_buf)?)
+}
+
+/// Ensures the daemon is running and returns a connected socket.
+///
+/// If the daemon socket does not exist or a connection attempt fails, this
+/// function auto-starts the daemon by spawning `backend-manager daemon start`
+/// as a background process and polling for the socket.
+async fn ensure_daemon_connected(
+    socket_path: &PathBuf,
+    pid_path: &PathBuf,
+) -> Result<UnixStream, Box<dyn Error>> {
+    // First try to connect to an already-running daemon.
+    if socket_path.exists() {
+        if let Ok(stream) = UnixStream::connect(socket_path).await {
+            return Ok(stream);
+        }
+        // Socket file exists but connection failed — stale.
+        let _ = remove_file(socket_path).await;
+    }
+
+    // Clean up stale PID file if the process is dead.
+    if pid_path.exists() {
+        let contents = read_to_string(pid_path).await.unwrap_or_default();
+        if let Ok(old_pid) = contents.trim().parse::<u32>()
+            && !is_pid_alive(old_pid)
+        {
+            let _ = remove_file(pid_path).await;
+        }
+    }
+
+    // Ensure the parent directory exists.
+    if let Some(parent) = socket_path.parent() {
+        create_dir_all(parent).await?;
+    }
+
+    // Spawn the daemon.
+    let exe = std::env::current_exe()?;
+    let _child = std::process::Command::new(&exe)
+        .arg("daemon")
+        .arg("start")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn daemon: {e}"))?;
+
+    // Poll for the socket with exponential backoff.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut delay = Duration::from_millis(50);
+
+    loop {
+        tokio::time::sleep(delay).await;
+
+        if socket_path.exists()
+            && let Ok(stream) = UnixStream::connect(socket_path).await
+        {
+            return Ok(stream);
+        }
+
+        if tokio::time::Instant::now() > deadline {
+            return Err("timeout waiting for daemon to start".into());
+        }
+
+        delay = (delay * 2).min(Duration::from_millis(500));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trace CLI implementations
+// ---------------------------------------------------------------------------
+
+/// Implements `ct trace query`.
+///
+/// Reads the script (from a file or inline `-c`), connects to the daemon,
+/// sends `ct/exec-script`, and prints the result.
+async fn run_trace_query(
+    trace_path: &std::path::Path,
+    script_file: Option<&std::path::Path>,
+    code: Option<&str>,
+    timeout_secs: u64,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    // Determine the script content.
+    let script = match (script_file, code) {
+        (_, Some(inline)) => inline.to_string(),
+        (Some(path), None) => std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read script file '{}': {e}", path.display()))?,
+        (None, None) => {
+            eprintln!("error: provide either a script file or -c '<code>'");
+            std::process::exit(1);
+        }
+    };
+
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    // Send ct/exec-script request.
+    //
+    // Use a generous timeout for the DAP-level response — the script
+    // timeout is enforced by the daemon, and we need to wait at least
+    // that long plus overhead for trace opening.
+    let resp = cli_dap_request(
+        &mut stream,
+        "ct/exec-script",
+        1,
+        json!({
+            "tracePath": trace_path_str,
+            "script": script,
+            "timeout": timeout_secs,
+        }),
+        timeout_secs + 30, // daemon-side timeout + overhead for open-trace
+    )
+    .await?;
+
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let body = resp.get("body").cloned().unwrap_or(json!({}));
+    let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+    let stderr = body.get("stderr").and_then(Value::as_str).unwrap_or("");
+    let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(0);
+    let timed_out = body
+        .get("timedOut")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    // Print stdout to the terminal.
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
+
+    // Print stderr to the terminal's stderr.
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
+
+    if timed_out {
+        eprintln!("error: script execution timed out after {timeout_secs} seconds");
+    }
+
+    if exit_code != 0 {
+        std::process::exit(exit_code as i32);
+    }
+
+    Ok(())
+}
+
+/// Implements `ct trace info`.
+///
+/// Connects to the daemon, opens the trace (if not already open), sends
+/// `ct/trace-info`, and pretty-prints the metadata.
+async fn run_trace_info(
+    trace_path: &std::path::Path,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    // First, open the trace so that trace-info has session data to return.
+    let open_resp = cli_dap_request(
+        &mut stream,
+        "ct/open-trace",
+        1,
+        json!({"tracePath": trace_path_str}),
+        30,
+    )
+    .await?;
+
+    if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = open_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("failed to open trace");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    // Now query trace-info.
+    let info_resp = cli_dap_request(
+        &mut stream,
+        "ct/trace-info",
+        2,
+        json!({"tracePath": trace_path_str}),
+        10,
+    )
+    .await?;
+
+    if info_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = info_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("failed to get trace info");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let body = info_resp.get("body").cloned().unwrap_or(json!({}));
+
+    // Pretty-print in table format.
+    println!("Trace Information");
+    println!("=================");
+    println!();
+    if let Some(path) = body.get("tracePath").and_then(Value::as_str) {
+        println!("  Path:          {path}");
+    }
+    if let Some(lang) = body.get("language").and_then(Value::as_str) {
+        println!("  Language:      {lang}");
+    }
+    if let Some(events) = body.get("totalEvents").and_then(Value::as_u64) {
+        println!("  Total events:  {events}");
+    }
+    if let Some(program) = body.get("program").and_then(Value::as_str) {
+        println!("  Program:       {program}");
+    }
+    if let Some(workdir) = body.get("workdir").and_then(Value::as_str) {
+        println!("  Working dir:   {workdir}");
+    }
+    if let Some(files) = body.get("sourceFiles").and_then(Value::as_array) {
+        println!("  Source files:  ({} files)", files.len());
+        for file in files {
+            if let Some(path) = file.as_str() {
+                println!("    - {path}");
+            }
+        }
+    }
+    println!();
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -1338,6 +1741,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .last()
             .ok_or("mock-dap-backend: no arguments provided (expected socket path as last arg)")?;
         return run_mock_dap_backend(socket_path).await;
+    }
+
+    // ------------------------------------------------------------------
+    // Trace subcommands (ct trace query / ct trace info)
+    // ------------------------------------------------------------------
+    if let Some(Commands::Trace { action }) = &cli.command {
+        flexi_logger::init();
+        match action {
+            TraceAction::Query {
+                trace_path,
+                script_file,
+                code,
+                timeout,
+            } => {
+                return run_trace_query(
+                    trace_path,
+                    script_file.as_deref(),
+                    code.as_deref(),
+                    *timeout,
+                    &daemon_socket_path,
+                    &daemon_pid_path,
+                )
+                .await;
+            }
+            TraceAction::Info { trace_path } => {
+                return run_trace_info(trace_path, &daemon_socket_path, &daemon_pid_path).await;
+            }
+        }
     }
 
     // ------------------------------------------------------------------

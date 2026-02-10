@@ -159,11 +159,7 @@ impl SessionManager {
     /// The caller is responsible for invoking `start_replay` on the
     /// `BackendManager` *before* calling this method, so that `backend_id`
     /// is valid.
-    pub fn add_session(
-        &mut self,
-        path: PathBuf,
-        backend_id: usize,
-    ) -> Result<(), SessionError> {
+    pub fn add_session(&mut self, path: PathBuf, backend_id: usize) -> Result<(), SessionError> {
         if self.sessions.len() >= self.max_sessions {
             return Err(SessionError::MaxSessionsReached {
                 max: self.max_sessions,
@@ -171,9 +167,7 @@ impl SessionManager {
         }
 
         if self.sessions.contains_key(&path) {
-            return Err(SessionError::AlreadyLoaded {
-                path: path.clone(),
-            });
+            return Err(SessionError::AlreadyLoaded { path: path.clone() });
         }
 
         let ttl_handle = self.spawn_ttl_timer(path.clone());
@@ -211,9 +205,7 @@ impl SessionManager {
         }
 
         if self.sessions.contains_key(&path) {
-            return Err(SessionError::AlreadyLoaded {
-                path: path.clone(),
-            });
+            return Err(SessionError::AlreadyLoaded { path: path.clone() });
         }
 
         let ttl_handle = self.spawn_ttl_timer(path.clone());
@@ -538,7 +530,10 @@ mod tests {
             Err(_) => { /* timeout — expected */ }
             Ok(None) => { /* channel closed — also fine */ }
             Ok(Some(path)) => {
-                panic!("unexpected TTL expiry for removed session: {}", path.display());
+                panic!(
+                    "unexpected TTL expiry for removed session: {}",
+                    path.display()
+                );
             }
         }
     }
