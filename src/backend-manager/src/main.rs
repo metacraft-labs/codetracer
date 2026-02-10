@@ -952,21 +952,26 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                 // and exit (spanning the full function).  In "line" mode,
                 // returns only the steps for the specific queried line.
                 "ct/load-flow" => {
-                    let line = msg
-                        .get("arguments")
-                        .and_then(|a| a.get("line"))
+                    let args = msg.get("arguments");
+                    // The daemon now sends `location.line` instead of top-level `line`.
+                    let line = args
+                        .and_then(|a| a.get("location"))
+                        .and_then(|loc| loc.get("line"))
                         .and_then(serde_json::Value::as_i64)
+                        .or_else(|| args.and_then(|a| a.get("line")).and_then(serde_json::Value::as_i64))
                         .unwrap_or(1);
-                    let mode = msg
-                        .get("arguments")
-                        .and_then(|a| a.get("mode"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("call");
+                    // The daemon now sends `flowMode` as an integer (0=Call, 1=Diff)
+                    // instead of a string `mode`.
+                    let flow_mode = args
+                        .and_then(|a| a.get("flowMode"))
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0); // default to Call
+                    let is_call_mode = flow_mode == 0;
 
                     // Generate mock flow data with a loop (i from 0 to 4, x = i * 2).
                     let mut steps = vec![];
 
-                    if mode == "call" {
+                    if is_call_mode {
                         // Call mode: return steps spanning the full function (more steps).
                         // Include a step at function entry before the loop.
                         steps.push(json!({

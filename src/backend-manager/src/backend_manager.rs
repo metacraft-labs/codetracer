@@ -594,6 +594,95 @@ impl BackendManager {
                 }
                 // Don't return — still route the event to clients normally.
             }
+
+            // Intercept ct/updated-flow events from the backend.
+            //
+            // The backend's flow handler does NOT send a DAP response.
+            // Instead, it emits a `ct/updated-flow` event containing the
+            // flow data as a `FlowUpdate` object.  We intercept this event
+            // here, find the pending Flow request, format the data, and
+            // send it back to the Python client as a `ct/py-flow` response.
+            //
+            // The event body has the `FlowUpdate` schema:
+            //   - `viewUpdates`: array of `FlowViewUpdate` objects, each
+            //     containing `steps` and `loops`.
+            //   - `error`: bool
+            //   - `errorMessage`: string
+            //   - `finished`: bool
+            //
+            // See: db-backend/src/task.rs — `FlowUpdate`, `FlowViewUpdate`
+            if event_name == "ct/updated-flow" {
+                // Find the pending Flow request for this backend.
+                if let Some(idx) = ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .position(|p| p.kind == PendingPyRequestKind::Flow)
+                {
+                    let pending = ds.py_bridge.pending_requests.remove(idx);
+
+                    let body = msg.get("body").unwrap_or(&Value::Null);
+                    let is_error = body
+                        .get("error")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+
+                    if is_error {
+                        let error_message = body
+                            .get("errorMessage")
+                            .and_then(Value::as_str)
+                            .unwrap_or("flow error");
+                        let py_response = serde_json::json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": false,
+                            "command": "ct/py-flow",
+                            "message": error_message,
+                        });
+                        self.send_to_client(pending.client_id, py_response);
+                    } else {
+                        // Extract steps and loops from viewUpdates.
+                        let view_updates = body
+                            .get("viewUpdates")
+                            .and_then(Value::as_array);
+
+                        let mut all_steps = serde_json::json!([]);
+                        let mut all_loops = serde_json::json!([]);
+
+                        if let Some(updates) = view_updates {
+                            let mut steps_vec: Vec<Value> = Vec::new();
+                            let mut loops_vec: Vec<Value> = Vec::new();
+                            for vu in updates {
+                                if let Some(steps) = vu.get("steps").and_then(Value::as_array) {
+                                    steps_vec.extend(steps.iter().cloned());
+                                }
+                                if let Some(loops) = vu.get("loops").and_then(Value::as_array) {
+                                    loops_vec.extend(loops.iter().cloned());
+                                }
+                            }
+                            all_steps = serde_json::json!(steps_vec);
+                            all_loops = serde_json::json!(loops_vec);
+                        }
+
+                        let py_response = serde_json::json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": true,
+                            "command": "ct/py-flow",
+                            "body": {
+                                "steps": all_steps,
+                                "loops": all_loops,
+                            },
+                        });
+                        self.send_to_client(pending.client_id, py_response);
+                    }
+
+                    // Don't broadcast — this is a bridge-internal event.
+                    return;
+                }
+                // If there's no pending flow request, fall through to
+                // normal event routing so other clients can see the event.
+            }
         }
 
         // --- Python bridge: intercept responses for pending navigations ---
@@ -2166,9 +2255,14 @@ impl BackendManager {
 
     /// Handles `ct/py-flow` requests from Python clients.
     ///
-    /// Translates the request into a `ct/load-flow` DAP command, sends it
-    /// to the backend, and registers a pending request that will be
-    /// completed when the backend responds.
+    /// Translates the simplified Python request into a `ct/load-flow` DAP
+    /// command with proper `CtLoadFlowArguments` format (`flowMode` integer
+    /// + `location` object), then sends it to the backend.
+    ///
+    /// Unlike most DAP commands, the backend's flow handler does NOT send
+    /// a response.  Instead, it emits a `ct/updated-flow` event containing
+    /// the flow data.  The daemon intercepts this event in
+    /// `route_daemon_message` and converts it into a `ct/py-flow` response.
     ///
     /// Flow (omniscience) is CodeTracer's signature feature: it shows all
     /// variable values across execution of a function or a specific line.
@@ -2185,12 +2279,13 @@ impl BackendManager {
     ///     "tracePath": "/path/to/trace",
     ///     "path": "main.nim",
     ///     "line": 10,
-    ///     "mode": "call"
+    ///     "mode": "call",
+    ///     "rrTicks": 12345
     ///   }
     /// }
     /// ```
     ///
-    /// **Response:**
+    /// **Response** (converted from backend's `ct/updated-flow` event):
     /// ```json
     /// {
     ///   "type": "response",
@@ -2199,11 +2294,11 @@ impl BackendManager {
     ///   "command": "ct/py-flow",
     ///   "body": {
     ///     "steps": [
-    ///       {"line": 10, "ticks": 100, "loopId": 1, "iteration": 0,
+    ///       {"position": 10, "rrTicks": 100, "loop": 1, "iteration": 0,
     ///        "beforeValues": {"i": "0"}, "afterValues": {"x": "0"}}
     ///     ],
     ///     "loops": [
-    ///       {"id": 1, "startLine": 8, "endLine": 12, "iterationCount": 5}
+    ///       {"base": 0, "first": 8, "last": 12, "iteration": 5, ...}
     ///     ]
     ///   }
     /// }
@@ -2241,7 +2336,8 @@ impl BackendManager {
         // Reset TTL for this trace (flow query counts as activity).
         self.reset_ttl_for_backend_id(backend_id);
 
-        // Extract path, line, and mode parameters.
+        // Extract path, line, mode, and rrTicks parameters from the Python
+        // client's simplified request format.
         let source_path = args
             .and_then(|a| a.get("path"))
             .and_then(Value::as_str)
@@ -2254,6 +2350,19 @@ impl BackendManager {
             .and_then(|a| a.get("mode"))
             .and_then(Value::as_str)
             .unwrap_or("call");
+        let rr_ticks = args
+            .and_then(|a| a.get("rrTicks"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        // Map the string mode to the integer FlowMode expected by the
+        // backend's CtLoadFlowArguments.  FlowMode is serialized as a
+        // repr(u8) integer: 0 = Call, 1 = Diff.
+        // See: db-backend/src/task.rs — `enum FlowMode`
+        let flow_mode: u8 = match mode {
+            "diff" => 1,
+            _ => 0, // "call" or any unrecognized mode defaults to Call
+        };
 
         // Get a unique seq for the DAP command sent to the backend.
         let dap_seq = match self.daemon_state.as_mut() {
@@ -2261,15 +2370,45 @@ impl BackendManager {
             None => return Ok(()),
         };
 
-        // Build and send the ct/load-flow command to the backend.
+        // Build the ct/load-flow command with the correct
+        // `CtLoadFlowArguments` schema that the backend expects:
+        //   - `flowMode`: integer (0=Call, 1=Diff)
+        //   - `location`: a Location object with at minimum `path`, `line`,
+        //     and `rrTicks`.  All other Location fields use defaults.
+        //
+        // The backend deserializes these via `req.load_args::<CtLoadFlowArguments>()`
+        // with `#[serde(rename_all = "camelCase")]`.
+        //
+        // See: db-backend/src/task.rs — `CtLoadFlowArguments`, `Location`
         let dap_request = serde_json::json!({
             "type": "request",
             "command": "ct/load-flow",
             "seq": dap_seq,
             "arguments": {
-                "path": source_path,
-                "line": line,
-                "mode": mode,
+                "flowMode": flow_mode,
+                "location": {
+                    "path": source_path,
+                    "line": line,
+                    "functionName": "",
+                    "highLevelPath": "",
+                    "highLevelLine": 0,
+                    "highLevelFunctionName": "",
+                    "lowLevelPath": "",
+                    "lowLevelLine": 0,
+                    "rrTicks": rr_ticks,
+                    "functionFirst": 0,
+                    "functionLast": 0,
+                    "event": 0,
+                    "expression": "",
+                    "offset": 0,
+                    "error": false,
+                    "callstackDepth": 0,
+                    "originatingInstructionAddress": 0,
+                    "key": "",
+                    "globalCallKey": "",
+                    "expansionParents": [],
+                    "missingPath": false,
+                },
             },
         });
 
