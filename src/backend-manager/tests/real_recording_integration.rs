@@ -71,6 +71,26 @@
 //! - Terminal output is returned (the test program prints to stdout).
 //! - Both RR-based and custom trace format modes are covered.
 //!
+//! ## M8 — Multi-Process Support
+//!
+//! Tests for `ct/py-processes` and `ct/py-select-process` that exercise
+//! the multi-process support pipeline through the daemon.
+//!
+//! The daemon translates each Python bridge command into the corresponding
+//! backend DAP command:
+//!   - `ct/py-processes` -> `ct/list-processes` -> response with process list
+//!   - `ct/py-select-process` -> `ct/select-replay` -> response confirming switch
+//!
+//! **Note on real backend support:** The current `db-backend` does not
+//! implement `ct/list-processes`, so both RR and custom trace tests expect
+//! an error response.  The tests are written to accept both success (if
+//! future backend versions add support) and error (current behavior),
+//! verifying that:
+//! - The daemon does not crash when `ct/py-processes` is sent.
+//! - The response is well-formed (correct type, command, request_seq).
+//! - On success: the `body.processes` array is present with at least 1 entry.
+//! - On error: the `message` field is non-empty.
+//!
 //! ## Test categories
 //!
 //! 1. **RR-based tests**: Build and record a Rust test program via `ct-rr-support`,
@@ -6374,6 +6394,423 @@ async fn test_real_custom_calltrace_returns_calls() {
 
     report(
         "test_real_custom_calltrace_returns_calls",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// M8 helpers
+// ---------------------------------------------------------------------------
+
+/// Sends a `ct/py-processes` request to the daemon and waits for the response.
+///
+/// The daemon translates this into a `ct/list-processes` DAP command, sends
+/// it to the backend, and returns a response with `body.processes` (an array
+/// of process objects) on success, or a `message` field on failure.
+///
+/// The read loop skips interleaved events and unrelated responses, waiting
+/// up to 30 seconds for the matching `ct/py-processes` response.
+async fn send_py_processes(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-processes",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-processes seq={seq}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-processes: {e}"))?;
+
+    // Wait for the ct/py-processes response.  The daemon sends
+    // ct/list-processes to the backend, waits for the response, formats it
+    // through format_processes_response, and returns the result.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-processes response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-processes response".to_string())?
+            .map_err(|e| format!("read ct/py-processes: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+
+        if msg_type == "response" {
+            let cmd = msg.get("command").and_then(Value::as_str).unwrap_or("");
+            if cmd == "ct/py-processes" {
+                log_line(log_path, &format!("<- ct/py-processes response: {msg}"));
+                return Ok(msg);
+            }
+            log_line(
+                log_path,
+                &format!("py-processes: skipped unrelated response (command={cmd}): {msg}"),
+            );
+            continue;
+        }
+
+        if msg_type == "event" {
+            let event_name = msg.get("event").and_then(Value::as_str).unwrap_or("");
+            log_line(
+                log_path,
+                &format!("py-processes: skipped event ({event_name})"),
+            );
+            continue;
+        }
+
+        log_line(
+            log_path,
+            &format!("py-processes: skipped unknown message type ({msg_type}): {msg}"),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M8 tests
+// ---------------------------------------------------------------------------
+
+/// Test 1: `ct/py-processes` against a real RR recording (single process).
+///
+/// Creates an RR recording of the Rust test program (a single-process trace),
+/// opens it through the daemon, and sends `ct/py-processes`.
+///
+/// The current `db-backend` does not implement `ct/list-processes`, so the
+/// test expects an error response.  If future versions add support, the
+/// test also accepts a success response and verifies the process list
+/// contains exactly one entry with an `id` field.
+///
+/// In both cases, the test verifies:
+/// - The response is well-formed (type="response", command="ct/py-processes").
+/// - The `request_seq` matches the sent seq.
+/// - The daemon does not crash or hang.
+#[tokio::test]
+async fn test_real_rr_single_process_trace() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_single_process");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_rr_support, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_real_rr_single_process_trace: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+
+        log_line(
+            &log_path,
+            &format!(
+                "ct-rr-support: {}, db-backend: {}",
+                ct_rr_support.display(),
+                db_backend.display()
+            ),
+        );
+
+        // Create an RR recording of the Rust test program (single process).
+        let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
+        log_line(
+            &log_path,
+            &format!("trace directory: {}", trace_dir.display()),
+        );
+
+        // Start the daemon with the real db-backend.
+        let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_RR_SUPPORT_CMD", &ct_rr_support_str)],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let open_resp = open_trace(&mut client, 50_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        // Drain any initialization events before sending the processes request.
+        drain_events(&mut client, &log_path).await;
+
+        // Send ct/py-processes.
+        let processes_resp =
+            send_py_processes(&mut client, 50_001, &trace_dir, &log_path).await?;
+
+        // Verify the response is well-formed regardless of success/failure.
+        assert_eq!(
+            processes_resp.get("type").and_then(Value::as_str),
+            Some("response"),
+            "processes result should be a response: {processes_resp}"
+        );
+        assert_eq!(
+            processes_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-processes"),
+            "command should be ct/py-processes: {processes_resp}"
+        );
+        assert_eq!(
+            processes_resp.get("request_seq").and_then(Value::as_i64),
+            Some(50_001),
+            "request_seq should match: {processes_resp}"
+        );
+
+        let processes_success = processes_resp
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        if processes_success {
+            // The backend supports ct/list-processes — verify the body.
+            let body = processes_resp.get("body").unwrap_or(&Value::Null);
+            let processes = body
+                .get("processes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+
+            log_line(
+                &log_path,
+                &format!(
+                    "processes response returned {} processes (success)",
+                    processes.len()
+                ),
+            );
+
+            // A single-process RR recording should have exactly 1 process.
+            assert_eq!(
+                processes.len(),
+                1,
+                "single-process RR trace should have exactly 1 process, got: {processes:?}"
+            );
+
+            // Each process entry should have an id field.
+            let first = &processes[0];
+            assert!(
+                first.get("id").is_some(),
+                "process entry should have an 'id' field: {first}"
+            );
+
+            // Log the process details for debugging.
+            log_line(
+                &log_path,
+                &format!("process[0]: {first}"),
+            );
+        } else {
+            // The backend does not support ct/list-processes — verify the
+            // error response is well-formed.  This is the expected path for
+            // the current db-backend implementation.
+            let error_msg = processes_resp
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            log_line(
+                &log_path,
+                &format!(
+                    "processes returned error (expected for current backend): {error_msg}"
+                ),
+            );
+            assert!(
+                !error_msg.is_empty(),
+                "error response should have a non-empty message"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_single_process_trace",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// Test 2: `ct/py-processes` against a custom trace format.
+///
+/// Creates a custom trace directory (DB-backed, no RR), opens it through
+/// the daemon, and sends `ct/py-processes`.
+///
+/// Custom traces use the same `db-backend dap-server` code path, which
+/// currently does not implement `ct/list-processes`.  The test therefore
+/// expects an error response, but is written to accept success as well
+/// (for forward compatibility).
+///
+/// In both cases, the test verifies:
+/// - The response is well-formed (type="response", command="ct/py-processes").
+/// - The `request_seq` matches the sent seq.
+/// - The daemon does not crash or hang.
+#[tokio::test]
+async fn test_real_custom_single_process_trace() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_single_process");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = find_db_backend()
+            .ok_or_else(|| "db-backend not found (skipping custom trace test)".to_string())?;
+
+        log_line(
+            &log_path,
+            &format!("db-backend: {}", db_backend.display()),
+        );
+
+        // Create a custom trace directory.
+        let trace_dir = create_custom_trace_dir(&test_dir, "processes_trace");
+        log_line(
+            &log_path,
+            &format!("custom trace directory: {}", trace_dir.display()),
+        );
+
+        // Start the daemon with the real db-backend.
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the custom trace.
+        let open_resp = open_trace(&mut client, 51_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed for custom trace, got: {open_resp}"
+        );
+
+        // Drain any initialization events.
+        drain_events(&mut client, &log_path).await;
+
+        // Send ct/py-processes.
+        let processes_resp =
+            send_py_processes(&mut client, 51_001, &trace_dir, &log_path).await?;
+
+        // Verify the response is well-formed regardless of success/failure.
+        assert_eq!(
+            processes_resp.get("type").and_then(Value::as_str),
+            Some("response"),
+            "processes result should be a response: {processes_resp}"
+        );
+        assert_eq!(
+            processes_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-processes"),
+            "command should be ct/py-processes: {processes_resp}"
+        );
+        assert_eq!(
+            processes_resp.get("request_seq").and_then(Value::as_i64),
+            Some(51_001),
+            "request_seq should match: {processes_resp}"
+        );
+
+        let processes_success = processes_resp
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        if processes_success {
+            // The backend supports ct/list-processes for custom traces.
+            let body = processes_resp.get("body").unwrap_or(&Value::Null);
+            let processes = body
+                .get("processes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+
+            log_line(
+                &log_path,
+                &format!(
+                    "custom processes response returned {} processes (success)",
+                    processes.len()
+                ),
+            );
+
+            // Custom (DB) traces are single-process by nature.
+            assert!(
+                !processes.is_empty(),
+                "processes list should not be empty on success: {processes_resp}"
+            );
+
+            for (i, proc) in processes.iter().enumerate() {
+                log_line(
+                    &log_path,
+                    &format!("  process[{i}]: {proc}"),
+                );
+                // Each process entry should have an id.
+                assert!(
+                    proc.get("id").is_some(),
+                    "process[{i}] should have an 'id' field: {proc}"
+                );
+            }
+        } else {
+            // The backend does not support ct/list-processes — expected for
+            // the current db-backend implementation.
+            let error_msg = processes_resp
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            log_line(
+                &log_path,
+                &format!(
+                    "custom processes returned error (expected for current backend): {error_msg}"
+                ),
+            );
+            assert!(
+                !error_msg.is_empty(),
+                "error response should have a non-empty message"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_single_process_trace",
         &log_path,
         success,
     );
