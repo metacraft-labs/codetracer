@@ -1789,6 +1789,712 @@ async fn mcp_error_messages_actionable() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+// ===========================================================================
+// Milestone M12 — Documentation and Agent Skill Packaging
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Python API path helper
+// ---------------------------------------------------------------------------
+
+/// Returns the path to the `python-api` directory relative to this crate.
+///
+/// The backend-manager crate lives at `<repo>/src/backend-manager/`, so the
+/// python-api directory is at `<repo>/python-api/`.
+fn python_api_dir() -> PathBuf {
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    crate_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|repo_root| repo_root.join("python-api"))
+        .expect("cannot determine python-api directory from CARGO_MANIFEST_DIR")
+}
+
+// ---------------------------------------------------------------------------
+// V-M12-DOCSTRINGS: api_reference_complete
+// ---------------------------------------------------------------------------
+
+/// Verify every public method on Trace class has a docstring.
+/// Verify every dataclass field has a type annotation.
+///
+/// Runs a Python script that:
+/// 1. Inspects the Trace class for methods without docstrings.
+/// 2. Inspects the dataclass types for fields without type annotations.
+#[tokio::test]
+async fn api_reference_complete() {
+    let (test_dir, log_path) = setup_test_dir("api_reference_complete");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+        log_line(&log_path, &format!("python-api dir: {}", api_dir.display()));
+
+        // Run a Python script to check docstrings and type annotations.
+        let check_script = r#"
+import sys
+sys.path.insert(0, sys.argv[1])
+
+import inspect
+import dataclasses
+from codetracer.trace import Trace, open_trace
+from codetracer import types as T
+
+errors = []
+
+# Check Trace class: every public method/property must have a docstring.
+# The __init__ method is excluded because its intent is documented by
+# the class-level docstring (which is the standard Python convention).
+for name in sorted(dir(Trace)):
+    if name.startswith('_'):
+        # Check __enter__ and __exit__ (context manager protocol).
+        if name not in ('__enter__', '__exit__'):
+            continue
+    attr = getattr(Trace, name)
+    if callable(attr) or isinstance(attr, property):
+        doc = None
+        if isinstance(attr, property):
+            doc = attr.fget.__doc__ if attr.fget else None
+        else:
+            doc = attr.__doc__
+        if not doc or not doc.strip():
+            errors.append(f"Trace.{name} has no docstring")
+
+# Check open_trace function.
+if not open_trace.__doc__ or not open_trace.__doc__.strip():
+    errors.append("open_trace() has no docstring")
+
+# Check all dataclass types have type annotations on every field.
+dataclass_types = [
+    T.Location, T.Variable, T.Frame, T.FlowStep, T.Flow,
+    T.Loop, T.Call, T.Event, T.Process,
+]
+for cls in dataclass_types:
+    if not dataclasses.is_dataclass(cls):
+        errors.append(f"{cls.__name__} is not a dataclass")
+        continue
+    for field in dataclasses.fields(cls):
+        if field.type is dataclasses.MISSING:
+            errors.append(f"{cls.__name__}.{field.name} has no type annotation")
+    if not cls.__doc__ or not cls.__doc__.strip():
+        errors.append(f"{cls.__name__} has no docstring")
+
+if errors:
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    sys.exit(1)
+
+print("OK: all public methods have docstrings, all fields have type annotations")
+"#;
+
+        let script_path = test_dir.join("check_docstrings.py");
+        std::fs::write(&script_path, check_script).map_err(|e| format!("write script: {e}"))?;
+
+        let output = tokio::process::Command::new("python3")
+            .arg(&script_path)
+            .arg(api_dir.to_string_lossy().to_string())
+            .output()
+            .await
+            .map_err(|e| format!("run python3: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        log_line(&log_path, &format!("stdout: {stdout}"));
+        log_line(&log_path, &format!("stderr: {stderr}"));
+
+        if !output.status.success() {
+            return Err(format!("docstring check failed:\n{stderr}\n{stdout}"));
+        }
+
+        assert!(
+            stdout.contains("OK"),
+            "docstring check should report OK, got: {stdout}"
+        );
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("api_reference_complete", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M12-SKILL: skill_description_fits_context
+// ---------------------------------------------------------------------------
+
+/// Verify the agent skill description (MCP prompt response) is under
+/// 300 lines / 10KB.  Verify it contains: data types, Trace class methods,
+/// example scripts.
+#[tokio::test]
+async fn skill_description_fits_context() {
+    let (test_dir, log_path) = setup_test_dir("skill_description_fits_context");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let mut mcp = {
+            let bin = binary_path();
+            Command::new(&bin)
+                .arg("trace")
+                .arg("mcp")
+                .env("TMPDIR", &test_dir)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("cannot spawn MCP server")
+        };
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // Fetch the prompt.
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 1000,
+            "method": "prompts/get",
+            "params": {
+                "name": "trace_query_api"
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(5)).await?;
+        log_line(&log_path, &format!("prompts/get response id: {}", resp["id"]));
+
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 1000);
+
+        let messages = resp["result"]["messages"]
+            .as_array()
+            .expect("should have messages array");
+        assert!(!messages.is_empty(), "should have at least one message");
+
+        let text = messages[0]["content"]["text"]
+            .as_str()
+            .expect("should have text");
+
+        // Verify size constraints.
+        let byte_count = text.len();
+        let line_count = text.lines().count();
+        log_line(
+            &log_path,
+            &format!("skill desc: {byte_count} bytes, {line_count} lines"),
+        );
+
+        assert!(
+            byte_count < 10 * 1024,
+            "Skill description should be under 10KB, got {byte_count} bytes"
+        );
+        assert!(
+            line_count < 300,
+            "Skill description should be under 300 lines, got {line_count}"
+        );
+
+        // Verify it contains data types.
+        assert!(text.contains("Location"), "should contain Location type");
+        assert!(text.contains("Variable"), "should contain Variable type");
+        assert!(text.contains("Frame"), "should contain Frame type");
+        assert!(text.contains("FlowStep"), "should contain FlowStep type");
+        assert!(text.contains("Flow"), "should contain Flow type");
+        assert!(text.contains("Loop"), "should contain Loop type");
+        assert!(text.contains("Call"), "should contain Call type");
+        assert!(text.contains("Event"), "should contain Event type");
+        assert!(text.contains("Process"), "should contain Process type");
+
+        // Verify it contains Trace class methods.
+        assert!(
+            text.contains("trace.step_over"),
+            "should contain step_over method"
+        );
+        assert!(
+            text.contains("trace.step_in"),
+            "should contain step_in method"
+        );
+        assert!(
+            text.contains("trace.locals"),
+            "should contain locals method"
+        );
+        assert!(
+            text.contains("trace.evaluate"),
+            "should contain evaluate method"
+        );
+        assert!(
+            text.contains("trace.flow"),
+            "should contain flow method"
+        );
+        assert!(
+            text.contains("trace.calltrace"),
+            "should contain calltrace method"
+        );
+        assert!(
+            text.contains("trace.add_breakpoint"),
+            "should contain add_breakpoint method"
+        );
+
+        // Verify it contains example scripts (code blocks).
+        let code_block_count = text.matches("```python").count();
+        assert!(
+            code_block_count >= 3,
+            "should contain at least 3 example scripts (```python blocks), got {code_block_count}"
+        );
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("skill_description_fits_context", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M12-STUBS: type_stubs_valid
+// ---------------------------------------------------------------------------
+
+/// Verify .pyi stub files exist and are syntactically valid Python.
+///
+/// Since mypy may not be available in the nix dev shell, we verify stubs
+/// by parsing them with Python's `ast.parse()`.  We also verify the
+/// `py.typed` PEP 561 marker file exists.
+#[tokio::test]
+async fn type_stubs_valid() {
+    let (test_dir, log_path) = setup_test_dir("type_stubs_valid");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let codetracer_dir = api_dir.join("codetracer");
+
+        // Verify py.typed marker exists (PEP 561).
+        let py_typed_path = codetracer_dir.join("py.typed");
+        assert!(
+            py_typed_path.exists(),
+            "py.typed marker file should exist at {}",
+            py_typed_path.display()
+        );
+        log_line(&log_path, "py.typed marker exists");
+
+        // List of expected stub files.
+        let stub_files = [
+            "__init__.pyi",
+            "trace.pyi",
+            "types.pyi",
+            "exceptions.pyi",
+            "connection.pyi",
+        ];
+
+        for stub_file in &stub_files {
+            let stub_path = codetracer_dir.join(stub_file);
+            assert!(
+                stub_path.exists(),
+                "stub file should exist: {}",
+                stub_path.display()
+            );
+
+            // Verify syntactic validity by parsing with ast.parse().
+            let output = tokio::process::Command::new("python3")
+                .arg("-c")
+                .arg(format!(
+                    "import ast; ast.parse(open('{}').read()); print('OK')",
+                    stub_path.display()
+                ))
+                .output()
+                .await
+                .map_err(|e| format!("run python3 for {stub_file}: {e}"))?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            log_line(
+                &log_path,
+                &format!("{stub_file}: stdout={stdout} stderr={stderr}"),
+            );
+
+            if !output.status.success() {
+                return Err(format!(
+                    "stub file {stub_file} is not valid Python:\n{stderr}"
+                ));
+            }
+            assert!(
+                stdout.contains("OK"),
+                "{stub_file} should parse successfully"
+            );
+        }
+
+        // Verify stubs contain key type declarations by running a Python script
+        // that imports the stubs-related module and checks for expected names.
+        let check_script = format!(
+            r#"
+import sys
+sys.path.insert(0, "{api_dir}")
+
+# Verify the package can be imported.
+import codetracer
+from codetracer.trace import Trace, open_trace
+from codetracer.types import Location, Variable, Frame, FlowStep, Flow, Loop, Call, Event, Process
+from codetracer.exceptions import TraceError, TraceNotFoundError, NavigationError, ExpressionError
+from codetracer.connection import DaemonConnection
+
+print("OK: all imports succeeded")
+"#,
+            api_dir = api_dir.display()
+        );
+
+        let output = tokio::process::Command::new("python3")
+            .arg("-c")
+            .arg(&check_script)
+            .output()
+            .await
+            .map_err(|e| format!("run import check: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        log_line(&log_path, &format!("import check: {stdout} {stderr}"));
+
+        if !output.status.success() {
+            return Err(format!("import check failed:\n{stderr}\n{stdout}"));
+        }
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("type_stubs_valid", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M12-CLI: cli_help_complete
+// ---------------------------------------------------------------------------
+
+/// Run `backend-manager trace --help`.  Verify all subcommands are documented.
+/// Run `backend-manager trace query --help`.  Verify all flags (--timeout, -c)
+/// are documented.
+#[tokio::test]
+async fn cli_help_complete() {
+    let (test_dir, log_path) = setup_test_dir("cli_help_complete");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let bin = binary_path();
+
+        // Test `backend-manager trace --help`.
+        let trace_help = tokio::process::Command::new(&bin)
+            .arg("trace")
+            .arg("--help")
+            .output()
+            .await
+            .map_err(|e| format!("run trace --help: {e}"))?;
+
+        let trace_out = String::from_utf8_lossy(&trace_help.stdout).to_string();
+        let trace_err = String::from_utf8_lossy(&trace_help.stderr).to_string();
+        log_line(&log_path, &format!("trace --help stdout:\n{trace_out}"));
+        log_line(&log_path, &format!("trace --help stderr:\n{trace_err}"));
+
+        // Clap may exit with code 0 or 2 for --help depending on version;
+        // check that we got output.
+        assert!(
+            !trace_out.is_empty(),
+            "trace --help should produce output"
+        );
+
+        // Verify all subcommands are listed.
+        assert!(
+            trace_out.contains("query"),
+            "trace --help should list 'query' subcommand"
+        );
+        assert!(
+            trace_out.contains("info"),
+            "trace --help should list 'info' subcommand"
+        );
+        assert!(
+            trace_out.contains("mcp"),
+            "trace --help should list 'mcp' subcommand"
+        );
+
+        // Test `backend-manager trace query --help`.
+        let query_help = tokio::process::Command::new(&bin)
+            .arg("trace")
+            .arg("query")
+            .arg("--help")
+            .output()
+            .await
+            .map_err(|e| format!("run trace query --help: {e}"))?;
+
+        let query_out = String::from_utf8_lossy(&query_help.stdout).to_string();
+        let query_err = String::from_utf8_lossy(&query_help.stderr).to_string();
+        log_line(&log_path, &format!("trace query --help stdout:\n{query_out}"));
+        log_line(&log_path, &format!("trace query --help stderr:\n{query_err}"));
+
+        assert!(
+            !query_out.is_empty(),
+            "trace query --help should produce output"
+        );
+
+        // Verify all flags are documented.
+        assert!(
+            query_out.contains("--timeout"),
+            "trace query --help should document --timeout flag"
+        );
+        assert!(
+            query_out.contains("-c") || query_out.contains("--code"),
+            "trace query --help should document -c/--code flag"
+        );
+        assert!(
+            query_out.contains("trace_path") || query_out.contains("TRACE_PATH"),
+            "trace query --help should document trace_path argument"
+        );
+
+        // Test `backend-manager --help` (top-level).
+        let top_help = tokio::process::Command::new(&bin)
+            .arg("--help")
+            .output()
+            .await
+            .map_err(|e| format!("run --help: {e}"))?;
+
+        let top_out = String::from_utf8_lossy(&top_help.stdout).to_string();
+        log_line(&log_path, &format!("--help stdout:\n{top_out}"));
+
+        assert!(
+            !top_out.is_empty(),
+            "--help should produce output"
+        );
+        assert!(
+            top_out.contains("daemon"),
+            "--help should list 'daemon' subcommand"
+        );
+        assert!(
+            top_out.contains("trace"),
+            "--help should list 'trace' subcommand"
+        );
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("cli_help_complete", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// V-M12-EXAMPLES: example_scripts_execute
+// ---------------------------------------------------------------------------
+
+/// Extract example scripts from the skill description and run each via
+/// exec_script against the mock trace.  Verify all execute without errors
+/// and produce meaningful output.
+#[tokio::test]
+async fn example_scripts_execute() {
+    let (test_dir, log_path) = setup_test_dir("example_scripts_execute");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-examples", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir.to_string_lossy())],
+        )
+        .await;
+
+        // Pre-open the trace on the daemon.
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+        let open_resp = open_trace(&mut client, 100, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "open should succeed: {open_resp}"
+        );
+
+        // Spawn MCP server (to get the skill description).
+        let mut mcp = spawn_mcp_server(&test_dir, &socket_path);
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        mcp_initialize(&mut stdin, &mut reader).await?;
+
+        // Fetch the skill description to extract example scripts.
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 2000,
+            "method": "prompts/get",
+            "params": {
+                "name": "trace_query_api"
+            }
+        });
+        mcp_send(&mut stdin, &req).await?;
+        let resp = mcp_read(&mut reader, Duration::from_secs(5)).await?;
+
+        let text = resp["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .expect("should have text");
+
+        // Extract Python code blocks from the skill description.
+        let mut examples: Vec<String> = Vec::new();
+        let mut in_code_block = false;
+        let mut current_block = String::new();
+
+        for line in text.lines() {
+            if line.trim().starts_with("```python") {
+                in_code_block = true;
+                current_block.clear();
+                continue;
+            }
+            if line.trim().starts_with("```") && in_code_block {
+                in_code_block = false;
+                if !current_block.trim().is_empty() {
+                    examples.push(current_block.clone());
+                }
+                continue;
+            }
+            if in_code_block {
+                current_block.push_str(line);
+                current_block.push('\n');
+            }
+        }
+
+        log_line(
+            &log_path,
+            &format!("found {} example scripts in skill description", examples.len()),
+        );
+        assert!(
+            examples.len() >= 3,
+            "should have at least 3 example scripts, found {}",
+            examples.len()
+        );
+
+        // Run each example script via the MCP exec_script tool.
+        for (i, example) in examples.iter().enumerate() {
+            log_line(
+                &log_path,
+                &format!("--- running example {} ---\n{example}", i + 1),
+            );
+
+            let exec_req = json!({
+                "jsonrpc": "2.0",
+                "id": 2001 + i as u64,
+                "method": "tools/call",
+                "params": {
+                    "name": "exec_script",
+                    "arguments": {
+                        "trace_path": trace_dir.to_string_lossy(),
+                        "script": example,
+                        "timeout_seconds": 30
+                    }
+                }
+            });
+            mcp_send(&mut stdin, &exec_req).await?;
+            let exec_resp = mcp_read(&mut reader, Duration::from_secs(60)).await?;
+            log_line(
+                &log_path,
+                &format!("example {} response: {exec_resp}", i + 1),
+            );
+
+            // Verify the response is successful (no isError).
+            let is_error = exec_resp["result"]
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            let result_text = exec_resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("");
+            log_line(
+                &log_path,
+                &format!("example {} output: {result_text}", i + 1),
+            );
+
+            assert!(
+                !is_error,
+                "example {} should execute without errors. Output: {result_text}",
+                i + 1
+            );
+
+            // Verify the output is non-empty (meaningful output).
+            assert!(
+                !result_text.trim().is_empty(),
+                "example {} should produce non-empty output",
+                i + 1
+            );
+        }
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("example_scripts_execute", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// End Milestone M12
+// ===========================================================================
+
 // ---------------------------------------------------------------------------
 // V-M11-TIMING: mcp_response_includes_timing
 // ---------------------------------------------------------------------------

@@ -177,29 +177,28 @@ fn trace_query_api_reference() -> &'static str {
 
 The Trace Query API allows you to programmatically navigate and inspect
 recorded program executions.  A `trace` variable is pre-bound to the
-opened trace in every script.
+opened trace in every script.  All navigation methods return a `Location`
+and raise `StopIteration` at trace boundaries.
 
 ## Data Types
 
 ### Location
 - `path: str` - Source file path
 - `line: int` - Line number (1-based)
-- `column: int` - Column number (1-based)
-- `ticks: int` - Execution timestamp (monotonic)
+- `column: int` - Column number (0 = unknown)
 
 ### Variable
 - `name: str` - Variable name
 - `value: str` - String representation of the value
-- `type: str` - Type name
+- `type_name: str | None` - Type name (language-specific)
 - `children: list[Variable]` - Nested fields/elements
 
 ### Frame
-- `name: str` - Function name
+- `function_name: str` - Function name
 - `location: Location` - Source location
-- `index: int` - Frame index (0 = top)
 
 ### FlowStep
-- `line: int` - Source line
+- `location: Location` - Source location of this step
 - `ticks: int` - Execution timestamp
 - `loop_id: int` - Loop identifier (0 = not in loop)
 - `iteration: int` - Loop iteration index
@@ -209,7 +208,6 @@ opened trace in every script.
 ### Flow
 - `steps: list[FlowStep]` - Execution steps
 - `loops: list[Loop]` - Loop information
-- `finished: bool` - Whether flow collection completed
 
 ### Loop
 - `id: int` - Loop identifier
@@ -218,19 +216,19 @@ opened trace in every script.
 - `iteration_count: int` - Total iterations
 
 ### Call
-- `id: int` - Call identifier
-- `name: str` - Function name
+- `function_name: str` - Function name
 - `location: Location` - Call site location
-- `return_value: str | None` - Return value (if available)
+- `return_value: Variable | None` - Return value (if available)
+- `id: int` - Call identifier
 - `children_count: int` - Number of child calls
 - `depth: int` - Call tree depth
 
 ### Event
-- `id: int` - Event identifier
-- `type: str` - Event type ("stdout", "stderr", etc.)
+- `kind: str` - Event type ("stdout", "stderr", etc.)
+- `message: str` - Human-readable description
+- `content: str` - Raw event content
 - `ticks: int` - Execution timestamp
-- `content: str` - Event content
-- `location: Location` - Source location
+- `location: Location | None` - Source location
 
 ### Process
 - `id: int` - Process identifier
@@ -241,12 +239,12 @@ opened trace in every script.
 
 ### Properties
 - `trace.location -> Location` - Current execution position
-- `trace.ticks -> int` - Current execution timestamp
+- `trace.ticks -> int` - Current execution timestamp (rr ticks)
 - `trace.source_files -> list[str]` - All source file paths
 - `trace.total_events -> int` - Total number of trace events
 - `trace.language -> str` - Programming language of the traced program
 
-### Navigation
+### Navigation (all return Location, raise StopIteration at boundaries)
 - `trace.step_over()` - Step to the next line (same scope)
 - `trace.step_in()` - Step into function call
 - `trace.step_out()` - Step out of current function
@@ -258,59 +256,90 @@ opened trace in every script.
 - `trace.reverse_step_out()` - Reverse step out
 
 ### Inspection
-- `trace.locals(depth: int = 3) -> list[Variable]` - Get local variables
-- `trace.evaluate(expr: str) -> Variable` - Evaluate an expression
-- `trace.stack_trace() -> list[Frame]` - Get the current call stack
+- `trace.locals(depth=3, count_budget=3000) -> list[Variable]` - Local variables
+- `trace.evaluate(expr: str) -> str` - Evaluate an expression, returns string result
+- `trace.stack_trace() -> list[Frame]` - Current call stack
+- `trace.current_frame() -> Frame` - Topmost call frame
 
 ### Breakpoints
-- `trace.set_breakpoint(file: str, line: int)` - Set a line breakpoint
-- `trace.clear_breakpoints(file: str)` - Remove all breakpoints in a file
-- `trace.set_watchpoint(expr: str)` - Watch for variable changes
-- `trace.clear_watchpoints()` - Remove all watchpoints
+- `trace.add_breakpoint(path: str, line: int) -> int` - Set a breakpoint, returns ID
+- `trace.remove_breakpoint(bp_id: int)` - Remove a breakpoint by ID
+- `trace.add_watchpoint(expression: str) -> int` - Watch for value changes, returns ID
+- `trace.remove_watchpoint(wp_id: int)` - Remove a watchpoint by ID
 
 ### Flow (Omniscience)
-- `trace.flow(file: str, line: int, mode: str = "call") -> Flow`
+- `trace.flow(path: str, line: int, mode="call") -> Flow`
   - Get execution flow data for a line.
   - `mode="call"`: full function scope.  `mode="line"`: single line.
 
 ### Call Trace
-- `trace.calltrace(start: int = 0, count: int = 20) -> list[Call]`
-  - Get a slice of the call trace.
-- `trace.search_calltrace(query: str) -> list[Call]`
-  - Search calls by function name.
+- `trace.calltrace(start=0, count=50, depth=10) -> list[Call]`
+- `trace.search_calltrace(query: str, limit=100) -> list[Call]`
+- `trace.calls(function_name: str | None = None) -> list[Call]`
 
 ### Events
-- `trace.events(start: int = 0, count: int = 100, type_filter: str | None = None) -> list[Event]`
-  - Get I/O and other events.  Optional `type_filter`: "stdout", "stderr".
-- `trace.terminal_output() -> str`
-  - Get the full terminal output.
+- `trace.events(start=0, count=100, type_filter=None, search=None) -> list[Event]`
+- `trace.terminal_output(start_line=0, end_line=-1) -> str`
 
 ### Multi-process
 - `trace.processes() -> list[Process]` - List all processes in the trace.
 - `trace.select_process(process_id: int)` - Switch to a different process.
 
 ### Source Files
-- `trace.read_source(file_path: str) -> str` - Read a source file's content.
+- `trace.read_source(path: str) -> str` - Read a source file's content.
 
-## Usage Example
+## Example 1: Print location and local variables
 
 ```python
-# Print current location
 print(f"At {trace.location.path}:{trace.location.line}")
-
-# Navigate and inspect
-trace.step_over()
 for var in trace.locals():
     print(f"  {var.name} = {var.value}")
+```
 
-# Set breakpoint and continue
-trace.set_breakpoint("main.py", 42)
+## Example 2: Step through code and collect variable values
+
+```python
+values = []
+for _ in range(10):
+    try:
+        trace.step_over()
+    except StopIteration:
+        break
+    result = trace.evaluate("x")
+    values.append(result)
+print("x values:", values)
+```
+
+## Example 3: Use breakpoints to find a specific state
+
+```python
+bp = trace.add_breakpoint("main.nim", 42)
 trace.continue_forward()
+print(f"Hit breakpoint at {trace.location}")
+for var in trace.locals():
+    print(f"  {var.name} = {var.value}")
+trace.remove_breakpoint(bp)
+```
 
-# Get flow data for a line
-flow = trace.flow("main.py", 10)
+## Example 4: Analyze a loop with flow/omniscience
+
+```python
+flow = trace.flow("main.nim", 10, mode="call")
+for loop in flow.loops:
+    print(f"Loop at lines {loop.start_line}-{loop.end_line}: {loop.iteration_count} iterations")
 for step in flow.steps:
-    print(f"  ticks={step.ticks} {step.after_values}")
+    if step.loop_id > 0:
+        print(f"  iter {step.iteration}: {step.after_values}")
+```
+
+## Example 5: Search calls and inspect the call trace
+
+```python
+calls = trace.search_calltrace("process")
+for call in calls:
+    print(f"{call.function_name} at {call.location} -> {call.return_value}")
+output = trace.terminal_output()
+print("Program output:", output)
 ```
 "#
 }
