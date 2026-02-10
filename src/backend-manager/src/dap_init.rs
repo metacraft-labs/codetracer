@@ -58,18 +58,11 @@ pub enum DapInitError {
         step: &'static str,
     },
     /// The backend channel was closed unexpectedly.
-    ChannelClosed {
-        step: &'static str,
-    },
+    ChannelClosed { step: &'static str },
     /// The backend returned an error response.
-    BackendError {
-        step: &'static str,
-        message: String,
-    },
+    BackendError { step: &'static str, message: String },
     /// Failed to send a message to the backend.
-    SendFailed {
-        step: &'static str,
-    },
+    SendFailed { step: &'static str },
 }
 
 impl std::fmt::Display for DapInitError {
@@ -245,13 +238,7 @@ pub async fn run_dap_init(
     let mut collected_events: Vec<Value> = Vec::new();
 
     // Step 1: initialize
-    send_request(
-        sender,
-        "initialize",
-        1,
-        json!({}),
-        "initialize-send",
-    )?;
+    send_request(sender, "initialize", 1, json!({}), "initialize-send")?;
 
     let init_response = wait_for_response(
         receiver,
@@ -329,13 +316,8 @@ pub async fn run_dap_init(
         match found {
             Some(ev) => ev,
             None => {
-                wait_for_stopped_event(
-                    receiver,
-                    timeout,
-                    "stopped-event",
-                    &mut collected_events,
-                )
-                .await?
+                wait_for_stopped_event(receiver, timeout, "stopped-event", &mut collected_events)
+                    .await?
             }
         }
     };
@@ -365,14 +347,16 @@ mod tests {
     ) {
         let (to_backend_tx, to_backend_rx) = mpsc::unbounded_channel();
         let (from_backend_tx, from_backend_rx) = mpsc::unbounded_channel();
-        (to_backend_tx, from_backend_rx, from_backend_tx, to_backend_rx)
+        (
+            to_backend_tx,
+            from_backend_rx,
+            from_backend_tx,
+            to_backend_rx,
+        )
     }
 
     /// Simulates a backend that responds to the DAP init sequence.
-    async fn mock_backend_responder(
-        mut rx: UnboundedReceiver<Value>,
-        tx: UnboundedSender<Value>,
-    ) {
+    async fn mock_backend_responder(mut rx: UnboundedReceiver<Value>, tx: UnboundedSender<Value>) {
         // Wait for initialize request.
         let init_req = rx.recv().await.expect("init request");
         let init_seq = init_req.get("seq").and_then(Value::as_i64).unwrap_or(0);
@@ -523,8 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_dap_init_channel_closed() {
-        let (to_backend_tx, mut from_backend_rx, from_backend_tx, _to_backend_rx) =
-            make_channels();
+        let (to_backend_tx, mut from_backend_rx, from_backend_tx, _to_backend_rx) = make_channels();
 
         // Drop the sender immediately to simulate channel closure.
         drop(from_backend_tx);

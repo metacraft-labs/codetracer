@@ -183,7 +183,10 @@ async fn start_daemon_with_env(
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&pid_path);
 
-    log_line(log_path, &format!("starting daemon, TMPDIR={}", test_dir.display()));
+    log_line(
+        log_path,
+        &format!("starting daemon, TMPDIR={}", test_dir.display()),
+    );
 
     let mut cmd = Command::new(binary_path());
     cmd.arg("daemon")
@@ -222,7 +225,10 @@ async fn start_daemon(test_dir: &Path, log_path: &Path) -> (tokio::process::Chil
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&pid_path);
 
-    log_line(log_path, &format!("starting daemon, TMPDIR={}", test_dir.display()));
+    log_line(
+        log_path,
+        &format!("starting daemon, TMPDIR={}", test_dir.display()),
+    );
 
     let child = Command::new(binary_path())
         .arg("daemon")
@@ -258,9 +264,7 @@ fn report(test_name: &str, log_path: &Path, success: bool) {
     if success {
         println!("{test_name}: PASS");
     } else {
-        let size = std::fs::metadata(log_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let size = std::fs::metadata(log_path).map(|m| m.len()).unwrap_or(0);
         eprintln!(
             "{test_name}: FAIL  (log: {} [{size} bytes])",
             log_path.display()
@@ -462,8 +466,8 @@ async fn test_daemon_pid_file_created() {
         );
 
         // Read PID file and verify it matches the daemon process's PID.
-        let pid_contents = std::fs::read_to_string(&pid_file)
-            .map_err(|e| format!("read pid file: {e}"))?;
+        let pid_contents =
+            std::fs::read_to_string(&pid_file).map_err(|e| format!("read pid file: {e}"))?;
         let pid_from_file: u32 = pid_contents
             .trim()
             .parse()
@@ -1102,15 +1106,14 @@ async fn test_auto_start_detaches_from_terminal() {
             socket_path.exists(),
             "daemon socket should still exist after connect exits"
         );
-        assert!(
-            pid_path.exists(),
-            "PID file should exist after auto-start"
-        );
+        assert!(pid_path.exists(), "PID file should exist after auto-start");
 
         // Verify the PID is alive.
-        let pid_str = std::fs::read_to_string(&pid_path)
-            .map_err(|e| format!("read pid: {e}"))?;
-        let pid: u32 = pid_str.trim().parse().map_err(|e| format!("parse pid: {e}"))?;
+        let pid_str = std::fs::read_to_string(&pid_path).map_err(|e| format!("read pid: {e}"))?;
+        let pid: u32 = pid_str
+            .trim()
+            .parse()
+            .map_err(|e| format!("parse pid: {e}"))?;
         log_line(&log_path, &format!("daemon pid: {pid}"));
 
         // SAFETY: signal 0 only checks existence.
@@ -1169,9 +1172,12 @@ async fn test_subsequent_queries_reuse_daemon() {
         assert!(output1.status.success(), "first connect failed");
         log_line(&log_path, "first connect succeeded");
 
-        let pid1_str = std::fs::read_to_string(&pid_path)
-            .map_err(|e| format!("read pid 1: {e}"))?;
-        let pid1: u32 = pid1_str.trim().parse().map_err(|e| format!("parse pid 1: {e}"))?;
+        let pid1_str =
+            std::fs::read_to_string(&pid_path).map_err(|e| format!("read pid 1: {e}"))?;
+        let pid1: u32 = pid1_str
+            .trim()
+            .parse()
+            .map_err(|e| format!("parse pid 1: {e}"))?;
         log_line(&log_path, &format!("pid after first connect: {pid1}"));
 
         // Second connect: should reuse existing daemon.
@@ -1189,9 +1195,12 @@ async fn test_subsequent_queries_reuse_daemon() {
         assert!(output2.status.success(), "second connect failed");
         log_line(&log_path, "second connect succeeded");
 
-        let pid2_str = std::fs::read_to_string(&pid_path)
-            .map_err(|e| format!("read pid 2: {e}"))?;
-        let pid2: u32 = pid2_str.trim().parse().map_err(|e| format!("parse pid 2: {e}"))?;
+        let pid2_str =
+            std::fs::read_to_string(&pid_path).map_err(|e| format!("read pid 2: {e}"))?;
+        let pid2: u32 = pid2_str
+            .trim()
+            .parse()
+            .map_err(|e| format!("parse pid 2: {e}"))?;
         log_line(&log_path, &format!("pid after second connect: {pid2}"));
 
         assert_eq!(
@@ -1236,12 +1245,8 @@ async fn test_ttl_expires_unloads_trace() {
         let pid_path = ct_dir.join("daemon.pid");
 
         // Start daemon with a 2-second TTL.
-        let (mut daemon, _socket_path) = start_daemon_with_env(
-            &test_dir,
-            &log_path,
-            &[("CODETRACER_DAEMON_TTL", "2")],
-        )
-        .await;
+        let (mut daemon, _socket_path) =
+            start_daemon_with_env(&test_dir, &log_path, &[("CODETRACER_DAEMON_TTL", "2")]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -1250,13 +1255,19 @@ async fn test_ttl_expires_unloads_trace() {
 
         // Create a session using mock-backend.
         let replay_id = create_mock_session(&mut client, 100, "trace-ttl-test", &log_path).await?;
-        log_line(&log_path, &format!("created session with replayId={replay_id}"));
+        log_line(
+            &log_path,
+            &format!("created session with replayId={replay_id}"),
+        );
 
         // Verify session exists via daemon-status.
         let status1 = query_daemon_status(&mut client, 101, &log_path).await?;
         let sessions1 = status1.get("sessions").and_then(Value::as_u64).unwrap_or(0);
         log_line(&log_path, &format!("sessions after create: {sessions1}"));
-        assert_eq!(sessions1, 1, "expected 1 session after create, got {sessions1}");
+        assert_eq!(
+            sessions1, 1,
+            "expected 1 session after create, got {sessions1}"
+        );
 
         // Drop the client so it doesn't keep a broken-pipe when daemon shuts down.
         drop(client);
@@ -1310,12 +1321,8 @@ async fn test_query_resets_ttl() {
 
     let result: Result<(), String> = async {
         // Start daemon with a 3-second TTL.
-        let (mut daemon, socket_path) = start_daemon_with_env(
-            &test_dir,
-            &log_path,
-            &[("CODETRACER_DAEMON_TTL", "3")],
-        )
-        .await;
+        let (mut daemon, socket_path) =
+            start_daemon_with_env(&test_dir, &log_path, &[("CODETRACER_DAEMON_TTL", "3")]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -1324,7 +1331,10 @@ async fn test_query_resets_ttl() {
 
         // Create a session.
         let replay_id = create_mock_session(&mut client, 200, "trace-ttl-reset", &log_path).await?;
-        log_line(&log_path, &format!("created session with replayId={replay_id}"));
+        log_line(
+            &log_path,
+            &format!("created session with replayId={replay_id}"),
+        );
 
         // Wait 2 seconds (less than TTL=3s).
         sleep(Duration::from_secs(2)).await;
@@ -1358,8 +1368,14 @@ async fn test_query_resets_ttl() {
         // Verify the session is still loaded at T~4.
         let status = query_daemon_status(&mut client, 202, &log_path).await?;
         let sessions = status.get("sessions").and_then(Value::as_u64).unwrap_or(0);
-        log_line(&log_path, &format!("sessions at T~4 (after reset): {sessions}"));
-        assert_eq!(sessions, 1, "session should still be loaded (TTL was reset), got {sessions}");
+        log_line(
+            &log_path,
+            &format!("sessions at T~4 (after reset): {sessions}"),
+        );
+        assert_eq!(
+            sessions, 1,
+            "session should still be loaded (TTL was reset), got {sessions}"
+        );
 
         // Clean up: shut down daemon.
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -1393,12 +1409,8 @@ async fn test_auto_shutdown_on_last_ttl() {
         let pid_path = ct_dir.join("daemon.pid");
 
         // Start daemon with a 2-second TTL.
-        let (mut daemon, _socket_path) = start_daemon_with_env(
-            &test_dir,
-            &log_path,
-            &[("CODETRACER_DAEMON_TTL", "2")],
-        )
-        .await;
+        let (mut daemon, _socket_path) =
+            start_daemon_with_env(&test_dir, &log_path, &[("CODETRACER_DAEMON_TTL", "2")]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -1406,8 +1418,12 @@ async fn test_auto_shutdown_on_last_ttl() {
         sleep(Duration::from_millis(200)).await;
 
         // Create one session.
-        let _replay_id = create_mock_session(&mut client, 300, "trace-auto-shutdown", &log_path).await?;
-        log_line(&log_path, "session created, waiting for TTL and auto-shutdown...");
+        let _replay_id =
+            create_mock_session(&mut client, 300, "trace-auto-shutdown", &log_path).await?;
+        log_line(
+            &log_path,
+            "session created, waiting for TTL and auto-shutdown...",
+        );
 
         // Drop the client to avoid blocking the daemon's shutdown.
         drop(client);
@@ -1463,8 +1479,7 @@ async fn test_stale_socket_recovery() {
         let socket_path = ct_dir.join("daemon.sock");
 
         // Create a stale socket file (just a regular file, not a real socket).
-        std::fs::write(&socket_path, "stale")
-            .map_err(|e| format!("write stale socket: {e}"))?;
+        std::fs::write(&socket_path, "stale").map_err(|e| format!("write stale socket: {e}"))?;
         assert!(socket_path.exists(), "stale socket file should exist");
         log_line(&log_path, "created stale socket file");
 
@@ -1532,12 +1547,8 @@ async fn test_max_sessions_enforced() {
 
     let result: Result<(), String> = async {
         // Start daemon with max 2 sessions.
-        let (mut daemon, socket_path) = start_daemon_with_env(
-            &test_dir,
-            &log_path,
-            &[("CODETRACER_MAX_SESSIONS", "2")],
-        )
-        .await;
+        let (mut daemon, socket_path) =
+            start_daemon_with_env(&test_dir, &log_path, &[("CODETRACER_MAX_SESSIONS", "2")]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -1578,7 +1589,10 @@ async fn test_max_sessions_enforced() {
         log_line(&log_path, &format!("start-replay C response: {resp_c}"));
 
         // Expect failure.
-        let c_success = resp_c.get("success").and_then(Value::as_bool).unwrap_or(true);
+        let c_success = resp_c
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         assert!(
             !c_success,
             "session C should have been rejected, but got success=true"
@@ -1587,7 +1601,10 @@ async fn test_max_sessions_enforced() {
         // Verify still 2 sessions (no change).
         let status2 = query_daemon_status(&mut client, 404, &log_path).await?;
         let sessions2 = status2.get("sessions").and_then(Value::as_u64).unwrap_or(0);
-        assert_eq!(sessions2, 2, "expected 2 sessions after rejected C, got {sessions2}");
+        assert_eq!(
+            sessions2, 2,
+            "expected 2 sessions after rejected C, got {sessions2}"
+        );
 
         // Shut down.
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -1627,7 +1644,10 @@ async fn test_config_file_loaded() {
         let config_path = config_dir.join("daemon.conf");
         std::fs::write(&config_path, "default_ttl = 4\n")
             .map_err(|e| format!("write config: {e}"))?;
-        log_line(&log_path, &format!("config file: {}", config_path.display()));
+        log_line(
+            &log_path,
+            &format!("config file: {}", config_path.display()),
+        );
 
         // Start daemon with the config file.
         let (mut daemon, _socket_path) = start_daemon_with_env(
@@ -1653,7 +1673,10 @@ async fn test_config_file_loaded() {
         let status1 = query_daemon_status(&mut client, 501, &log_path).await?;
         let sessions1 = status1.get("sessions").and_then(Value::as_u64).unwrap_or(0);
         log_line(&log_path, &format!("sessions at T=3: {sessions1}"));
-        assert_eq!(sessions1, 1, "session should still be loaded at T=3 (TTL=4), got {sessions1}");
+        assert_eq!(
+            sessions1, 1,
+            "session should still be loaded at T=3 (TTL=4), got {sessions1}"
+        );
 
         // Drop the client to allow clean daemon exit.
         drop(client);
@@ -1877,8 +1900,7 @@ async fn test_session_launches_db_backend() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-a", "main.rs");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -1912,10 +1934,7 @@ async fn test_session_launches_db_backend() {
                 .unwrap_or(false),
             "sourceFiles should be non-empty"
         );
-        assert_eq!(
-            body.get("program").and_then(Value::as_str),
-            Some("main.rs"),
-        );
+        assert_eq!(body.get("program").and_then(Value::as_str), Some("main.rs"),);
         assert_eq!(
             body.get("workdir").and_then(Value::as_str),
             Some("/tmp/test-workdir"),
@@ -1957,8 +1976,7 @@ async fn test_session_reuses_existing() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-reuse", "main.rs");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2035,8 +2053,7 @@ async fn test_session_teardown_stops_backend() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-teardown", "main.rs");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2101,8 +2118,7 @@ async fn test_session_handles_backend_crash() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-crash", "main.rs");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2180,13 +2196,15 @@ async fn test_session_handles_backend_crash() {
         // List children of the daemon.  On Linux, /proc/<pid>/task/<pid>/children
         // gives the PIDs of child processes.
         let children_path = format!("/proc/{daemon_pid}/task/{daemon_pid}/children");
-        let children_str = std::fs::read_to_string(&children_path)
-            .unwrap_or_default();
+        let children_str = std::fs::read_to_string(&children_path).unwrap_or_default();
         let child_pids: Vec<u32> = children_str
             .split_whitespace()
             .filter_map(|s| s.parse().ok())
             .collect();
-        log_line(&log_path, &format!("daemon children from proc: {child_pids:?}"));
+        log_line(
+            &log_path,
+            &format!("daemon children from proc: {child_pids:?}"),
+        );
 
         if child_pids.is_empty() {
             // Fallback: try to find children via /proc by scanning for processes
@@ -2209,10 +2227,16 @@ async fn test_session_handles_backend_crash() {
                     }
                 }
             }
-            log_line(&log_path, &format!("daemon children from ppid scan: {found_pids:?}"));
+            log_line(
+                &log_path,
+                &format!("daemon children from ppid scan: {found_pids:?}"),
+            );
 
             for pid in &found_pids {
-                log_line(&log_path, &format!("killing child pid {pid} (from ppid scan)"));
+                log_line(
+                    &log_path,
+                    &format!("killing child pid {pid} (from ppid scan)"),
+                );
                 // SAFETY: SIGKILL (9) kills the process.
                 unsafe {
                     libc::kill(*pid as libc::pid_t, libc::SIGKILL);
@@ -2234,7 +2258,10 @@ async fn test_session_handles_backend_crash() {
 
         // Verify session is cleaned up.
         let status2 = query_daemon_status(&mut client, 4002, &log_path).await?;
-        let sessions2 = status2.get("sessions").and_then(Value::as_u64).unwrap_or(999);
+        let sessions2 = status2
+            .get("sessions")
+            .and_then(Value::as_u64)
+            .unwrap_or(999);
         log_line(&log_path, &format!("sessions after crash: {sessions2}"));
         assert_eq!(sessions2, 0, "session should be cleaned up after crash");
 
@@ -2273,8 +2300,7 @@ async fn test_trace_info_returns_metadata() {
         // Use .nim to test language detection.
         let trace_dir = create_test_trace_dir(&test_dir, "trace-nim", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2359,8 +2385,7 @@ async fn test_dap_initialization_sequence() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-dap-init", "main.rs");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2427,8 +2452,7 @@ async fn test_multiple_sessions_independent() {
         let trace_a = create_test_trace_dir(&test_dir, "trace-multi-a", "main.rs");
         let trace_b = create_test_trace_dir(&test_dir, "trace-multi-b", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2517,7 +2541,10 @@ async fn test_multiple_sessions_independent() {
 
         let status2 = query_daemon_status(&mut client, 7005, &log_path).await?;
         let sessions2 = status2.get("sessions").and_then(Value::as_u64).unwrap_or(0);
-        assert_eq!(sessions2, 1, "expected 1 session after closing A, got {sessions2}");
+        assert_eq!(
+            sessions2, 1,
+            "expected 1 session after closing A, got {sessions2}"
+        );
 
         // Trace B should still be queryable.
         let info_b = query_trace_info(&mut client, 7006, &trace_b, &log_path).await?;
@@ -2619,8 +2646,7 @@ async fn m3_open_trace_connects() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-connect", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2691,8 +2717,7 @@ async fn m3_step_over_advances_location() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-step", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2716,8 +2741,15 @@ async fn m3_step_over_advances_location() {
         log_line(&log_path, &format!("initial line: {initial_line}"));
 
         // step_over.
-        let nav_resp =
-            py_navigate(&mut client, 11_001, &trace_dir, "step_over", None, &log_path).await?;
+        let nav_resp = py_navigate(
+            &mut client,
+            11_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(
             nav_resp.get("success").and_then(Value::as_bool),
             Some(true),
@@ -2768,8 +2800,7 @@ async fn m3_step_in_enters_function() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-stepin", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2802,10 +2833,7 @@ async fn m3_step_in_enters_function() {
         );
 
         let nav_body = nav_resp.get("body").expect("response should have body");
-        let new_file = nav_body
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let new_file = nav_body.get("path").and_then(Value::as_str).unwrap_or("");
         log_line(&log_path, &format!("file after step_in: {new_file}"));
 
         // The mock changes to helpers.nim on step_in.
@@ -2838,8 +2866,7 @@ async fn m3_step_out_returns_to_caller() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-stepout", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2854,15 +2881,17 @@ async fn m3_step_out_returns_to_caller() {
         );
 
         // step_in (enters helpers.nim).
-        let nav1 =
-            py_navigate(&mut client, 13_001, &trace_dir, "step_in", None, &log_path).await?;
+        let nav1 = py_navigate(&mut client, 13_001, &trace_dir, "step_in", None, &log_path).await?;
         assert_eq!(nav1.get("success").and_then(Value::as_bool), Some(true));
         let file_after_in = nav1
             .get("body")
             .and_then(|b| b.get("path"))
             .and_then(Value::as_str)
             .unwrap_or("");
-        assert_eq!(file_after_in, "helpers.nim", "should be in helpers.nim after step_in");
+        assert_eq!(
+            file_after_in, "helpers.nim",
+            "should be in helpers.nim after step_in"
+        );
 
         // step_out (returns to main.nim).
         let nav2 =
@@ -2903,8 +2932,7 @@ async fn m3_step_back_reverses() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-stepback", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2912,25 +2940,57 @@ async fn m3_step_back_reverses() {
         sleep(Duration::from_millis(200)).await;
 
         let open_resp = open_trace(&mut client, 14_000, &trace_dir, &log_path).await?;
-        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true)
+        );
 
         // step_over (1st).
-        let nav1 =
-            py_navigate(&mut client, 14_001, &trace_dir, "step_over", None, &log_path).await?;
+        let nav1 = py_navigate(
+            &mut client,
+            14_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(nav1.get("success").and_then(Value::as_bool), Some(true));
-        let line_after_first =
-            nav1.get("body").and_then(|b| b.get("line")).and_then(Value::as_i64).unwrap_or(0);
-        let ticks_after_first =
-            nav1.get("body").and_then(|b| b.get("ticks")).and_then(Value::as_i64).unwrap_or(0);
-        log_line(&log_path, &format!("after 1st step: line={line_after_first}, ticks={ticks_after_first}"));
+        let line_after_first = nav1
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let ticks_after_first = nav1
+            .get("body")
+            .and_then(|b| b.get("ticks"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(
+            &log_path,
+            &format!("after 1st step: line={line_after_first}, ticks={ticks_after_first}"),
+        );
 
         // step_over (2nd).
-        let nav2 =
-            py_navigate(&mut client, 14_002, &trace_dir, "step_over", None, &log_path).await?;
+        let nav2 = py_navigate(
+            &mut client,
+            14_002,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(nav2.get("success").and_then(Value::as_bool), Some(true));
-        let line_after_second =
-            nav2.get("body").and_then(|b| b.get("line")).and_then(Value::as_i64).unwrap_or(0);
-        log_line(&log_path, &format!("after 2nd step: line={line_after_second}"));
+        let line_after_second = nav2
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(
+            &log_path,
+            &format!("after 2nd step: line={line_after_second}"),
+        );
         assert_eq!(
             line_after_second,
             line_after_first + 1,
@@ -2938,14 +2998,30 @@ async fn m3_step_back_reverses() {
         );
 
         // step_back (should go back to the first step's position).
-        let nav3 =
-            py_navigate(&mut client, 14_003, &trace_dir, "step_back", None, &log_path).await?;
+        let nav3 = py_navigate(
+            &mut client,
+            14_003,
+            &trace_dir,
+            "step_back",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(nav3.get("success").and_then(Value::as_bool), Some(true));
-        let line_after_back =
-            nav3.get("body").and_then(|b| b.get("line")).and_then(Value::as_i64).unwrap_or(0);
-        let ticks_after_back =
-            nav3.get("body").and_then(|b| b.get("ticks")).and_then(Value::as_i64).unwrap_or(0);
-        log_line(&log_path, &format!("after step_back: line={line_after_back}, ticks={ticks_after_back}"));
+        let line_after_back = nav3
+            .get("body")
+            .and_then(|b| b.get("line"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let ticks_after_back = nav3
+            .get("body")
+            .and_then(|b| b.get("ticks"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        log_line(
+            &log_path,
+            &format!("after step_back: line={line_after_back}, ticks={ticks_after_back}"),
+        );
 
         // In the mock: step_back decrements line by 1 and ticks by 10.
         // After 2 step_overs (line=3, ticks=120), step_back => (line=2, ticks=110).
@@ -2982,8 +3058,7 @@ async fn m3_continue_forward_runs_to_end() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-continue-fwd", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -2991,7 +3066,10 @@ async fn m3_continue_forward_runs_to_end() {
         sleep(Duration::from_millis(200)).await;
 
         let open_resp = open_trace(&mut client, 15_000, &trace_dir, &log_path).await?;
-        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true)
+        );
 
         // continue_forward — mock jumps to line 100 with endOfTrace=true.
         let nav_resp = py_navigate(
@@ -3046,8 +3124,7 @@ async fn m3_continue_reverse_runs_to_start() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-continue-rev", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3055,11 +3132,21 @@ async fn m3_continue_reverse_runs_to_start() {
         sleep(Duration::from_millis(200)).await;
 
         let open_resp = open_trace(&mut client, 16_000, &trace_dir, &log_path).await?;
-        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true)
+        );
 
         // Step forward once so we're not at the very start.
-        let _nav1 =
-            py_navigate(&mut client, 16_001, &trace_dir, "step_over", None, &log_path).await?;
+        let _nav1 = py_navigate(
+            &mut client,
+            16_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
 
         // continue_reverse — mock jumps to line 1 with endOfTrace=true.
         let nav_resp = py_navigate(
@@ -3115,8 +3202,7 @@ async fn m3_goto_ticks_navigates() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m3-goto", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3124,11 +3210,21 @@ async fn m3_goto_ticks_navigates() {
         sleep(Duration::from_millis(200)).await;
 
         let open_resp = open_trace(&mut client, 17_000, &trace_dir, &log_path).await?;
-        assert_eq!(open_resp.get("success").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true)
+        );
 
         // Step forward to get a known ticks value.
-        let nav1 =
-            py_navigate(&mut client, 17_001, &trace_dir, "step_over", None, &log_path).await?;
+        let nav1 = py_navigate(
+            &mut client,
+            17_001,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(nav1.get("success").and_then(Value::as_bool), Some(true));
         let target_ticks = nav1
             .get("body")
@@ -3139,8 +3235,15 @@ async fn m3_goto_ticks_navigates() {
         assert!(target_ticks > 0, "ticks should be > 0 after step_over");
 
         // Navigate away (step_over again).
-        let _nav2 =
-            py_navigate(&mut client, 17_002, &trace_dir, "step_over", None, &log_path).await?;
+        let _nav2 = py_navigate(
+            &mut client,
+            17_002,
+            &trace_dir,
+            "step_over",
+            None,
+            &log_path,
+        )
+        .await?;
 
         // goto_ticks back to the saved position.
         let nav3 = py_navigate(
@@ -3453,8 +3556,7 @@ async fn m4_locals_returns_variables() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-locals", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3470,8 +3572,7 @@ async fn m4_locals_returns_variables() {
         );
 
         // Call ct/py-locals with default depth (3).
-        let locals_resp =
-            py_locals(&mut client, 20_001, &trace_dir, 3, 3000, &log_path).await?;
+        let locals_resp = py_locals(&mut client, 20_001, &trace_dir, 3, 3000, &log_path).await?;
 
         assert_eq!(
             locals_resp.get("success").and_then(Value::as_bool),
@@ -3491,10 +3592,7 @@ async fn m4_locals_returns_variables() {
             .expect("body should have variables array");
 
         // Verify non-empty list.
-        assert!(
-            !variables.is_empty(),
-            "variables should be non-empty"
-        );
+        assert!(!variables.is_empty(), "variables should be non-empty");
 
         // Verify each variable has name, value, type fields populated.
         for var in variables {
@@ -3506,7 +3604,10 @@ async fn m4_locals_returns_variables() {
             assert!(!name.unwrap().is_empty(), "name should not be empty: {var}");
             assert!(value.is_some(), "variable should have value: {var}");
             assert!(var_type.is_some(), "variable should have type: {var}");
-            assert!(!var_type.unwrap().is_empty(), "type should not be empty: {var}");
+            assert!(
+                !var_type.unwrap().is_empty(),
+                "type should not be empty: {var}"
+            );
         }
 
         // Verify we got the expected mock variables (x, y, point).
@@ -3544,8 +3645,7 @@ async fn m4_locals_depth_limit() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-depth", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3561,8 +3661,7 @@ async fn m4_locals_depth_limit() {
         );
 
         // Call with depth=1 — should have top-level vars but empty children.
-        let locals_d1 =
-            py_locals(&mut client, 21_001, &trace_dir, 1, 3000, &log_path).await?;
+        let locals_d1 = py_locals(&mut client, 21_001, &trace_dir, 1, 3000, &log_path).await?;
         assert_eq!(
             locals_d1.get("success").and_then(Value::as_bool),
             Some(true),
@@ -3592,8 +3691,7 @@ async fn m4_locals_depth_limit() {
         );
 
         // Call with depth=3 — should have nested children.
-        let locals_d3 =
-            py_locals(&mut client, 21_002, &trace_dir, 3, 3000, &log_path).await?;
+        let locals_d3 = py_locals(&mut client, 21_002, &trace_dir, 3, 3000, &log_path).await?;
         assert_eq!(
             locals_d3.get("success").and_then(Value::as_bool),
             Some(true),
@@ -3658,8 +3756,7 @@ async fn m4_evaluate_simple_expression() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-eval-simple", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3675,8 +3772,7 @@ async fn m4_evaluate_simple_expression() {
         );
 
         // Evaluate "x" — mock returns 42.
-        let eval_resp =
-            py_evaluate(&mut client, 22_001, &trace_dir, "x", &log_path).await?;
+        let eval_resp = py_evaluate(&mut client, 22_001, &trace_dir, "x", &log_path).await?;
 
         assert_eq!(
             eval_resp.get("success").and_then(Value::as_bool),
@@ -3726,8 +3822,7 @@ async fn m4_evaluate_complex_expression() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-eval-complex", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3743,8 +3838,7 @@ async fn m4_evaluate_complex_expression() {
         );
 
         // Evaluate "x + y" — mock returns 30.
-        let eval_resp =
-            py_evaluate(&mut client, 23_001, &trace_dir, "x + y", &log_path).await?;
+        let eval_resp = py_evaluate(&mut client, 23_001, &trace_dir, "x + y", &log_path).await?;
 
         assert_eq!(
             eval_resp.get("success").and_then(Value::as_bool),
@@ -3784,8 +3878,7 @@ async fn m4_evaluate_invalid_expression() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-eval-invalid", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3801,8 +3894,14 @@ async fn m4_evaluate_invalid_expression() {
         );
 
         // Evaluate "nonexistent_var" — mock returns error.
-        let eval_resp =
-            py_evaluate(&mut client, 24_001, &trace_dir, "nonexistent_var", &log_path).await?;
+        let eval_resp = py_evaluate(
+            &mut client,
+            24_001,
+            &trace_dir,
+            "nonexistent_var",
+            &log_path,
+        )
+        .await?;
 
         assert_eq!(
             eval_resp.get("success").and_then(Value::as_bool),
@@ -3851,8 +3950,7 @@ async fn m4_stack_trace_returns_frames() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m4-stack", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -3873,8 +3971,7 @@ async fn m4_stack_trace_returns_frames() {
             py_navigate(&mut client, 25_001, &trace_dir, "step_in", None, &log_path).await?;
 
         // Now call stack_trace.
-        let st_resp =
-            py_stack_trace(&mut client, 25_002, &trace_dir, &log_path).await?;
+        let st_resp = py_stack_trace(&mut client, 25_002, &trace_dir, &log_path).await?;
 
         assert_eq!(
             st_resp.get("success").and_then(Value::as_bool),
@@ -3903,10 +4000,7 @@ async fn m4_stack_trace_returns_frames() {
         // Verify each frame has name and location.
         for (i, frame) in frames.iter().enumerate() {
             let name = frame.get("name").and_then(Value::as_str);
-            assert!(
-                name.is_some(),
-                "frame {i} should have name: {frame}"
-            );
+            assert!(name.is_some(), "frame {i} should have name: {frame}");
             assert!(
                 !name.unwrap().is_empty(),
                 "frame {i} name should not be empty"
@@ -3920,24 +4014,15 @@ async fn m4_stack_trace_returns_frames() {
 
             let loc = location.unwrap();
             let path = loc.get("path").and_then(Value::as_str);
-            assert!(
-                path.is_some(),
-                "frame {i} location should have path: {loc}"
-            );
+            assert!(path.is_some(), "frame {i} location should have path: {loc}");
             assert!(
                 !path.unwrap().is_empty(),
                 "frame {i} path should not be empty"
             );
 
             let line = loc.get("line").and_then(Value::as_i64);
-            assert!(
-                line.is_some(),
-                "frame {i} location should have line: {loc}"
-            );
-            assert!(
-                line.unwrap() > 0,
-                "frame {i} line should be > 0"
-            );
+            assert!(line.is_some(), "frame {i} location should have line: {loc}");
+            assert!(line.unwrap() > 0, "frame {i} line should be > 0");
         }
 
         // Verify specific frame names: top frame should be "helper" (after stepIn),
@@ -4010,7 +4095,10 @@ async fn py_add_breakpoint(
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            log_line(log_path, &format!("py-add-breakpoint: skipped event: {msg}"));
+            log_line(
+                log_path,
+                &format!("py-add-breakpoint: skipped event: {msg}"),
+            );
             continue;
         }
 
@@ -4055,11 +4143,17 @@ async fn py_remove_breakpoint(
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            log_line(log_path, &format!("py-remove-breakpoint: skipped event: {msg}"));
+            log_line(
+                log_path,
+                &format!("py-remove-breakpoint: skipped event: {msg}"),
+            );
             continue;
         }
 
-        log_line(log_path, &format!("ct/py-remove-breakpoint response: {msg}"));
+        log_line(
+            log_path,
+            &format!("ct/py-remove-breakpoint response: {msg}"),
+        );
         return Ok(msg);
     }
 }
@@ -4100,7 +4194,10 @@ async fn py_add_watchpoint(
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            log_line(log_path, &format!("py-add-watchpoint: skipped event: {msg}"));
+            log_line(
+                log_path,
+                &format!("py-add-watchpoint: skipped event: {msg}"),
+            );
             continue;
         }
 
@@ -4146,11 +4243,17 @@ async fn py_remove_watchpoint(
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            log_line(log_path, &format!("py-remove-watchpoint: skipped event: {msg}"));
+            log_line(
+                log_path,
+                &format!("py-remove-watchpoint: skipped event: {msg}"),
+            );
             continue;
         }
 
-        log_line(log_path, &format!("ct/py-remove-watchpoint response: {msg}"));
+        log_line(
+            log_path,
+            &format!("ct/py-remove-watchpoint response: {msg}"),
+        );
         return Ok(msg);
     }
 }
@@ -4169,8 +4272,7 @@ async fn m5_breakpoint_stops_execution() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-bp-stop", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4195,9 +4297,15 @@ async fn m5_breakpoint_stops_execution() {
         );
 
         // continue_forward — should stop at line 10 (the breakpoint).
-        let nav_resp =
-            py_navigate(&mut client, 30_002, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav_resp = py_navigate(
+            &mut client,
+            30_002,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(
             nav_resp.get("success").and_then(Value::as_bool),
             Some(true),
@@ -4214,7 +4322,10 @@ async fn m5_breakpoint_stops_execution() {
         );
 
         // endOfTrace should be false (stopped at breakpoint, not end).
-        let end_of_trace = body.get("endOfTrace").and_then(Value::as_bool).unwrap_or(true);
+        let end_of_trace = body
+            .get("endOfTrace")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         assert!(
             !end_of_trace,
             "endOfTrace should be false when stopped at a breakpoint"
@@ -4245,8 +4356,7 @@ async fn m5_remove_breakpoint_continues_past() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-remove-bp", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4277,9 +4387,15 @@ async fn m5_remove_breakpoint_continues_past() {
         log_line(&log_path, &format!("breakpoint id: {bp_id}"));
 
         // Continue forward — should stop at line 10.
-        let nav1 =
-            py_navigate(&mut client, 31_002, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav1 = py_navigate(
+            &mut client,
+            31_002,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         let line1 = nav1
             .get("body")
             .and_then(|b| b.get("line"))
@@ -4298,15 +4414,24 @@ async fn m5_remove_breakpoint_continues_past() {
 
         // Continue forward again — with the breakpoint removed, should
         // go to end of trace (line 100) instead of stopping at line 10.
-        let nav2 =
-            py_navigate(&mut client, 31_004, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav2 = py_navigate(
+            &mut client,
+            31_004,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         let line2 = nav2
             .get("body")
             .and_then(|b| b.get("line"))
             .and_then(Value::as_i64)
             .unwrap_or(0);
-        log_line(&log_path, &format!("second continue stopped at line: {line2}"));
+        log_line(
+            &log_path,
+            &format!("second continue stopped at line: {line2}"),
+        );
 
         assert_ne!(
             line2, 10,
@@ -4348,8 +4473,7 @@ async fn m5_multiple_breakpoints() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-multi-bp", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4390,37 +4514,64 @@ async fn m5_multiple_breakpoints() {
         );
 
         // Continue — should stop at line 10.
-        let nav1 =
-            py_navigate(&mut client, 32_004, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav1 = py_navigate(
+            &mut client,
+            32_004,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         let line1 = nav1
             .get("body")
             .and_then(|b| b.get("line"))
             .and_then(Value::as_i64)
             .unwrap_or(0);
-        assert_eq!(line1, 10, "first continue should stop at line 10, got {line1}");
+        assert_eq!(
+            line1, 10,
+            "first continue should stop at line 10, got {line1}"
+        );
 
         // Continue — should stop at line 20.
-        let nav2 =
-            py_navigate(&mut client, 32_005, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav2 = py_navigate(
+            &mut client,
+            32_005,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         let line2 = nav2
             .get("body")
             .and_then(|b| b.get("line"))
             .and_then(Value::as_i64)
             .unwrap_or(0);
-        assert_eq!(line2, 20, "second continue should stop at line 20, got {line2}");
+        assert_eq!(
+            line2, 20,
+            "second continue should stop at line 20, got {line2}"
+        );
 
         // Continue — should stop at line 30.
-        let nav3 =
-            py_navigate(&mut client, 32_006, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav3 = py_navigate(
+            &mut client,
+            32_006,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         let line3 = nav3
             .get("body")
             .and_then(|b| b.get("line"))
             .and_then(Value::as_i64)
             .unwrap_or(0);
-        assert_eq!(line3, 30, "third continue should stop at line 30, got {line3}");
+        assert_eq!(
+            line3, 30,
+            "third continue should stop at line 30, got {line3}"
+        );
 
         shutdown_daemon(&mut client, &mut daemon).await;
         Ok(())
@@ -4447,8 +4598,7 @@ async fn m5_reverse_continue_hits_breakpoint() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-rev-bp", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4498,7 +4648,10 @@ async fn m5_reverse_continue_hits_breakpoint() {
             .and_then(|b| b.get("line"))
             .and_then(Value::as_i64)
             .unwrap_or(0);
-        log_line(&log_path, &format!("current line before reverse: {current_line}"));
+        log_line(
+            &log_path,
+            &format!("current line before reverse: {current_line}"),
+        );
         assert!(
             current_line > 10,
             "should be past line 10, at line {current_line}"
@@ -4514,9 +4667,15 @@ async fn m5_reverse_continue_hits_breakpoint() {
         );
 
         // continue_reverse — should stop at line 10 (the breakpoint).
-        let rev_resp =
-            py_navigate(&mut client, 33_022, &trace_dir, "continue_reverse", None, &log_path)
-                .await?;
+        let rev_resp = py_navigate(
+            &mut client,
+            33_022,
+            &trace_dir,
+            "continue_reverse",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(
             rev_resp.get("success").and_then(Value::as_bool),
             Some(true),
@@ -4571,8 +4730,7 @@ async fn m5_watchpoint_detects_change() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-watchpoint", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4604,9 +4762,15 @@ async fn m5_watchpoint_detects_change() {
 
         // continue_forward — should stop at line 5 (the mock's simulated
         // variable change point).
-        let nav_resp =
-            py_navigate(&mut client, 34_002, &trace_dir, "continue_forward", None, &log_path)
-                .await?;
+        let nav_resp = py_navigate(
+            &mut client,
+            34_002,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
         assert_eq!(
             nav_resp.get("success").and_then(Value::as_bool),
             Some(true),
@@ -4615,14 +4779,20 @@ async fn m5_watchpoint_detects_change() {
 
         let body = nav_resp.get("body").expect("response should have body");
         let stopped_line = body.get("line").and_then(Value::as_i64).unwrap_or(0);
-        log_line(&log_path, &format!("watchpoint stopped at line: {stopped_line}"));
+        log_line(
+            &log_path,
+            &format!("watchpoint stopped at line: {stopped_line}"),
+        );
 
         assert_eq!(
             stopped_line, 5,
             "should stop at the variable change point (line 5), got {stopped_line}"
         );
 
-        let end_of_trace = body.get("endOfTrace").and_then(Value::as_bool).unwrap_or(true);
+        let end_of_trace = body
+            .get("endOfTrace")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         assert!(
             !end_of_trace,
             "endOfTrace should be false at watchpoint hit"
@@ -4653,8 +4823,7 @@ async fn m5_add_breakpoint_returns_id() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m5-bp-id", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4738,8 +4907,7 @@ async fn m6_flow_returns_steps() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-steps", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4755,8 +4923,16 @@ async fn m6_flow_returns_steps() {
         );
 
         // Call ct/py-flow with mode="call".
-        let flow_resp =
-            py_flow(&mut client, 40_001, &trace_dir, "main.nim", 10, "call", &log_path).await?;
+        let flow_resp = py_flow(
+            &mut client,
+            40_001,
+            &trace_dir,
+            "main.nim",
+            10,
+            "call",
+            &log_path,
+        )
+        .await?;
 
         assert_eq!(
             flow_resp.get("success").and_then(Value::as_bool),
@@ -4776,10 +4952,7 @@ async fn m6_flow_returns_steps() {
             .expect("body should have steps array");
 
         // Verify non-empty list of steps.
-        assert!(
-            !steps.is_empty(),
-            "steps should be non-empty"
-        );
+        assert!(!steps.is_empty(), "steps should be non-empty");
 
         // Verify each step has beforeValues and afterValues dictionaries.
         for (i, step) in steps.iter().enumerate() {
@@ -4820,8 +4993,7 @@ async fn m6_flow_loop_detected() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-loop", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4837,8 +5009,16 @@ async fn m6_flow_loop_detected() {
         );
 
         // Query flow for a line inside a loop.
-        let flow_resp =
-            py_flow(&mut client, 41_001, &trace_dir, "main.nim", 10, "call", &log_path).await?;
+        let flow_resp = py_flow(
+            &mut client,
+            41_001,
+            &trace_dir,
+            "main.nim",
+            10,
+            "call",
+            &log_path,
+        )
+        .await?;
 
         assert_eq!(
             flow_resp.get("success").and_then(Value::as_bool),
@@ -4853,10 +5033,7 @@ async fn m6_flow_loop_detected() {
             .expect("body should have loops array");
 
         // Verify loops is non-empty.
-        assert!(
-            !loops.is_empty(),
-            "loops should be non-empty"
-        );
+        assert!(!loops.is_empty(), "loops should be non-empty");
 
         // Verify the loop has iterationCount > 1.
         let first_loop = &loops[0];
@@ -4876,7 +5053,10 @@ async fn m6_flow_loop_detected() {
             "loop should have an 'id' field"
         );
         assert!(
-            first_loop.get("startLine").and_then(Value::as_i64).is_some(),
+            first_loop
+                .get("startLine")
+                .and_then(Value::as_i64)
+                .is_some(),
             "loop should have a 'startLine' field"
         );
         assert!(
@@ -4910,8 +5090,7 @@ async fn m6_flow_values_correct() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m6-vals", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -4928,8 +5107,16 @@ async fn m6_flow_values_correct() {
 
         // Query flow in "line" mode — returns only the loop iteration steps
         // for the specific line (no function entry/exit steps).
-        let flow_resp =
-            py_flow(&mut client, 42_001, &trace_dir, "main.nim", 10, "line", &log_path).await?;
+        let flow_resp = py_flow(
+            &mut client,
+            42_001,
+            &trace_dir,
+            "main.nim",
+            10,
+            "line",
+            &log_path,
+        )
+        .await?;
 
         assert_eq!(
             flow_resp.get("success").and_then(Value::as_bool),
@@ -4961,10 +5148,7 @@ async fn m6_flow_values_correct() {
                 .and_then(Value::as_object)
                 .expect("step should have afterValues dict");
 
-            let actual_x = after_values
-                .get("x")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let actual_x = after_values.get("x").and_then(Value::as_str).unwrap_or("");
 
             assert_eq!(
                 actual_x, expected_x,
@@ -4972,10 +5156,7 @@ async fn m6_flow_values_correct() {
             );
 
             // Also verify the iteration field matches.
-            let iteration = step
-                .get("iteration")
-                .and_then(Value::as_i64)
-                .unwrap_or(-1);
+            let iteration = step.get("iteration").and_then(Value::as_i64).unwrap_or(-1);
             assert_eq!(
                 iteration, i_val,
                 "step {idx}: iteration should be {i_val}, got {iteration}"
@@ -5200,7 +5381,10 @@ async fn py_search_calltrace(
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            log_line(log_path, &format!("py-search-calltrace: skipped event: {msg}"));
+            log_line(
+                log_path,
+                &format!("py-search-calltrace: skipped event: {msg}"),
+            );
             continue;
         }
 
@@ -5367,8 +5551,7 @@ async fn m7_calltrace_returns_calls() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-calltrace", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -5384,8 +5567,7 @@ async fn m7_calltrace_returns_calls() {
         );
 
         // Call ct/py-calltrace with start=0, count=20.
-        let ct_resp =
-            py_calltrace(&mut client, 70_001, &trace_dir, 0, 20, 10, &log_path).await?;
+        let ct_resp = py_calltrace(&mut client, 70_001, &trace_dir, 0, 20, 10, &log_path).await?;
 
         assert_eq!(
             ct_resp.get("success").and_then(Value::as_bool),
@@ -5405,10 +5587,7 @@ async fn m7_calltrace_returns_calls() {
             .expect("body should have calls array");
 
         // Verify non-empty list of calls.
-        assert!(
-            !calls.is_empty(),
-            "calls should be non-empty"
-        );
+        assert!(!calls.is_empty(), "calls should be non-empty");
 
         // Verify each call has a non-empty name and a populated location.
         for (i, call) in calls.iter().enumerate() {
@@ -5424,7 +5603,11 @@ async fn m7_calltrace_returns_calls() {
                 "call {i} should have a location object, got: {call}"
             );
 
-            let path = location.unwrap().get("path").and_then(Value::as_str).unwrap_or("");
+            let path = location
+                .unwrap()
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             assert!(
                 !path.is_empty(),
                 "call {i} location should have a non-empty path, got: {call}"
@@ -5456,8 +5639,7 @@ async fn m7_search_calltrace_finds_function() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-search", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -5525,8 +5707,7 @@ async fn m7_events_returns_events() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-events", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -5563,10 +5744,7 @@ async fn m7_events_returns_events() {
             .expect("body should have events array");
 
         // Verify non-empty list of events.
-        assert!(
-            !events.is_empty(),
-            "events should be non-empty"
-        );
+        assert!(!events.is_empty(), "events should be non-empty");
 
         // Verify each event has id, type, and ticks.
         for (i, event) in events.iter().enumerate() {
@@ -5612,8 +5790,7 @@ async fn m7_events_filter_by_type() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-filter", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -5629,8 +5806,16 @@ async fn m7_events_filter_by_type() {
         );
 
         // Call ct/py-events with typeFilter="stdout".
-        let events_resp =
-            py_events(&mut client, 73_001, &trace_dir, 0, 100, Some("stdout"), &log_path).await?;
+        let events_resp = py_events(
+            &mut client,
+            73_001,
+            &trace_dir,
+            0,
+            100,
+            Some("stdout"),
+            &log_path,
+        )
+        .await?;
 
         assert_eq!(
             events_resp.get("success").and_then(Value::as_bool),
@@ -5645,10 +5830,7 @@ async fn m7_events_filter_by_type() {
             .expect("body should have events array");
 
         // Verify non-empty (the mock has 2 stdout events).
-        assert!(
-            !events.is_empty(),
-            "filtered events should be non-empty"
-        );
+        assert!(!events.is_empty(), "filtered events should be non-empty");
 
         // Verify all returned events have type "stdout".
         for (i, event) in events.iter().enumerate() {
@@ -5684,8 +5866,7 @@ async fn m7_terminal_output_returns_text() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-terminal", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -5721,10 +5902,7 @@ async fn m7_terminal_output_returns_text() {
             .expect("body should have 'output' string");
 
         // Verify non-empty string containing the program's stdout.
-        assert!(
-            !output.is_empty(),
-            "terminal output should be non-empty"
-        );
+        assert!(!output.is_empty(), "terminal output should be non-empty");
         assert!(
             output.contains("Hello, World!"),
             "terminal output should contain 'Hello, World!', got: '{output}'"
@@ -5756,8 +5934,7 @@ async fn m7_read_source_returns_file_content() {
     let result: Result<(), String> = async {
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-source", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -5772,15 +5949,14 @@ async fn m7_read_source_returns_file_content() {
             "ct/open-trace should succeed"
         );
 
-        let body = resp.get("body").expect("open-trace response should have body");
+        let body = resp
+            .get("body")
+            .expect("open-trace response should have body");
         let source_files = body
             .get("sourceFiles")
             .and_then(Value::as_array)
             .expect("body should have sourceFiles array");
-        assert!(
-            !source_files.is_empty(),
-            "sourceFiles should be non-empty"
-        );
+        assert!(!source_files.is_empty(), "sourceFiles should be non-empty");
 
         // Use the first source file path. The mock returns source based
         // on the path content (contains "main" -> returns nim source).
@@ -5813,18 +5989,18 @@ async fn m7_read_source_returns_file_content() {
             .expect("body should have 'content' string");
 
         // Verify non-empty string containing source code.
-        assert!(
-            !content.is_empty(),
-            "source content should be non-empty"
-        );
+        assert!(!content.is_empty(), "source content should be non-empty");
 
         log_line(&log_path, &format!("source content: {content}"));
 
         // Verify the content looks like source code (the mock returns
         // nim-like source for paths containing "main").
         assert!(
-            content.contains("proc") || content.contains("echo") || content.contains("fn")
-                || content.contains("def") || content.contains("main"),
+            content.contains("proc")
+                || content.contains("echo")
+                || content.contains("fn")
+                || content.contains("def")
+                || content.contains("main"),
             "source content should contain recognizable code, got: '{content}'"
         );
 
@@ -5968,7 +6144,10 @@ async fn py_select_process(
 
         let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
         if msg_type == "event" {
-            log_line(log_path, &format!("py-select-process: skipped event: {msg}"));
+            log_line(
+                log_path,
+                &format!("py-select-process: skipped event: {msg}"),
+            );
             continue;
         }
 
@@ -5989,8 +6168,7 @@ async fn m8_processes_returns_list() {
         // multi-process mode from the traceFolder launch argument.
         let trace_dir = create_multi_process_trace_dir(&test_dir, "trace-multi-m8-procs");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -6079,8 +6257,7 @@ async fn m8_select_process_switches_context() {
     let result: Result<(), String> = async {
         let trace_dir = create_multi_process_trace_dir(&test_dir, "trace-multi-m8-select");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -6108,8 +6285,7 @@ async fn m8_select_process_switches_context() {
         );
 
         // Select process 2 ("child").
-        let sel_resp =
-            py_select_process(&mut client, 81_002, &trace_dir, 2, &log_path).await?;
+        let sel_resp = py_select_process(&mut client, 81_002, &trace_dir, 2, &log_path).await?;
         assert_eq!(
             sel_resp.get("success").and_then(Value::as_bool),
             Some(true),
@@ -6117,8 +6293,7 @@ async fn m8_select_process_switches_context() {
         );
 
         // Query locals for process 2.
-        let locals_b =
-            py_locals(&mut client, 81_003, &trace_dir, 3, 3000, &log_path).await?;
+        let locals_b = py_locals(&mut client, 81_003, &trace_dir, 3, 3000, &log_path).await?;
         assert_eq!(
             locals_b.get("success").and_then(Value::as_bool),
             Some(true),
@@ -6138,8 +6313,7 @@ async fn m8_select_process_switches_context() {
         log_line(&log_path, &format!("process 2 variable names: {names_b:?}"));
 
         // Select process 1 ("main").
-        let sel_resp2 =
-            py_select_process(&mut client, 81_004, &trace_dir, 1, &log_path).await?;
+        let sel_resp2 = py_select_process(&mut client, 81_004, &trace_dir, 1, &log_path).await?;
         assert_eq!(
             sel_resp2.get("success").and_then(Value::as_bool),
             Some(true),
@@ -6147,8 +6321,7 @@ async fn m8_select_process_switches_context() {
         );
 
         // Query locals for process 1.
-        let locals_a =
-            py_locals(&mut client, 81_005, &trace_dir, 3, 3000, &log_path).await?;
+        let locals_a = py_locals(&mut client, 81_005, &trace_dir, 3, 3000, &log_path).await?;
         assert_eq!(
             locals_a.get("success").and_then(Value::as_bool),
             Some(true),
@@ -6200,8 +6373,7 @@ async fn m8_single_process_trace_has_one_process() {
         // Use a normal (non-multi) trace directory — no "multi" in the name.
         let trace_dir = create_test_trace_dir(&test_dir, "trace-m8-single", "main.nim");
 
-        let (mut daemon, socket_path) =
-            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
 
         let mut client = UnixStream::connect(&socket_path)
             .await
@@ -6246,7 +6418,11 @@ async fn m8_single_process_trace_has_one_process() {
             "process should have an integer 'id'"
         );
         assert!(
-            !proc.get("command").and_then(Value::as_str).unwrap_or("").is_empty(),
+            !proc
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .is_empty(),
             "process should have a non-empty 'command'"
         );
 
@@ -6260,7 +6436,667 @@ async fn m8_single_process_trace_has_one_process() {
         Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
     }
 
-    report("m8_single_process_trace_has_one_process", &log_path, success);
+    report(
+        "m8_single_process_trace_has_one_process",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// M9 Tests — CLI Interface (ct trace query / ct trace info)
+// ===========================================================================
+
+/// Returns the path to the `python-api` directory relative to this crate.
+///
+/// The backend-manager crate lives at `<repo>/src/backend-manager/`, so the
+/// python-api directory is at `<repo>/python-api/`.
+fn python_api_dir() -> PathBuf {
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    crate_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|repo_root| repo_root.join("python-api"))
+        .expect("cannot determine python-api directory from CARGO_MANIFEST_DIR")
+}
+
+/// Sends `ct/exec-script` to the daemon and returns the response.
+///
+/// This helper is used by multiple M9 tests.  The `timeout` parameter
+/// controls the script execution timeout (in seconds).
+async fn exec_script(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    script: &str,
+    timeout_secs: u64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/exec-script",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "script": script,
+            "timeout": timeout_secs,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/exec-script: {e}"))?;
+
+    // The script execution can take a while (spawns Python, connects back
+    // to the daemon, etc.), so use a generous deadline.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs + 30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/exec-script response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/exec-script response".to_string())?
+            .map_err(|e| format!("read ct/exec-script: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("exec-script: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/exec-script response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// V-M9-QUERY-FILE: Create a script file that prints "hello".  Run
+/// `ct/exec-script` with the file content.  Verify stdout contains "hello".
+#[tokio::test]
+async fn m9_query_file_executes_script() {
+    let (test_dir, log_path) = setup_test_dir("m9_query_file");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-qf", "main.nim");
+        let api_dir = python_api_dir();
+
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir.to_string_lossy())],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Write a script file.
+        let script_path = test_dir.join("hello.py");
+        std::fs::write(&script_path, "print('hello')").expect("write script file");
+
+        // Read the file content (the daemon's ct/exec-script takes script text,
+        // not a file path, so the CLI reads the file and sends the content).
+        let script_content =
+            std::fs::read_to_string(&script_path).map_err(|e| format!("read script: {e}"))?;
+
+        let resp = exec_script(
+            &mut client,
+            90_001,
+            &trace_dir,
+            &script_content,
+            30,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/exec-script should succeed, got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(-1);
+
+        assert!(
+            stdout.contains("hello"),
+            "V-M9-QUERY-FILE: stdout should contain 'hello', got: {stdout:?}"
+        );
+        assert_eq!(
+            exit_code, 0,
+            "V-M9-QUERY-FILE: exit code should be 0, got: {exit_code}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m9_query_file_executes_script", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M9-QUERY-INLINE: Run `ct/exec-script` with inline code
+/// `print(trace.location)`.  Verify stdout contains a valid location
+/// (path:line format).
+#[tokio::test]
+async fn m9_query_inline_executes_code() {
+    let (test_dir, log_path) = setup_test_dir("m9_query_inline");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-qi", "main.nim");
+        let api_dir = python_api_dir();
+
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir.to_string_lossy())],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let resp = exec_script(
+            &mut client,
+            90_002,
+            &trace_dir,
+            "print(trace.location)",
+            30,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/exec-script should succeed, got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+
+        // The mock backend returns main.nim:1 as the initial location.
+        // Location.__str__() outputs "path:line" format.
+        assert!(
+            stdout.contains(":"),
+            "V-M9-QUERY-INLINE: stdout should contain a location with ':' separator, got: {stdout:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m9_query_inline_executes_code", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M9-QUERY-TRACE: Run `ct/exec-script` with `print(type(trace))`.
+/// Verify output contains "Trace" (the trace variable is pre-bound).
+#[tokio::test]
+async fn m9_query_inline_has_trace_bound() {
+    let (test_dir, log_path) = setup_test_dir("m9_query_trace_bound");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-tb", "main.nim");
+        let api_dir = python_api_dir();
+
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir.to_string_lossy())],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let resp = exec_script(
+            &mut client,
+            90_003,
+            &trace_dir,
+            "print(type(trace))",
+            30,
+            &log_path,
+        )
+        .await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/exec-script should succeed, got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+
+        assert!(
+            stdout.contains("Trace"),
+            "V-M9-QUERY-TRACE: stdout should contain 'Trace', got: {stdout:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m9_query_inline_has_trace_bound", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M9-INFO: Run `ct/trace-info`.  Verify output includes language name,
+/// event count, and source file list.
+#[tokio::test]
+async fn m9_info_shows_metadata() {
+    let (test_dir, log_path) = setup_test_dir("m9_info_metadata");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-info", "main.nim");
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // First open the trace so a session exists.
+        let open_resp = open_trace(&mut client, 90_010, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed, got: {open_resp}"
+        );
+
+        // Now query trace-info.
+        let info_req = json!({
+            "type": "request",
+            "command": "ct/trace-info",
+            "seq": 90_011,
+            "arguments": {
+                "tracePath": trace_dir.to_string_lossy().to_string(),
+            }
+        });
+        client
+            .write_all(&dap_encode(&info_req))
+            .await
+            .map_err(|e| format!("write ct/trace-info: {e}"))?;
+
+        let info_resp = timeout(Duration::from_secs(10), dap_read(&mut client))
+            .await
+            .map_err(|_| "timeout reading ct/trace-info response".to_string())?
+            .map_err(|e| format!("read ct/trace-info: {e}"))?;
+
+        log_line(&log_path, &format!("ct/trace-info response: {info_resp}"));
+
+        assert_eq!(
+            info_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "V-M9-INFO: ct/trace-info should succeed, got: {info_resp}"
+        );
+
+        let body = info_resp.get("body").expect("response should have body");
+
+        // Verify language is present (create_test_trace_dir uses "main.nim" -> "nim").
+        let language = body.get("language").and_then(Value::as_str).unwrap_or("");
+        assert!(
+            !language.is_empty(),
+            "V-M9-INFO: language should not be empty"
+        );
+        assert_eq!(
+            language, "nim",
+            "V-M9-INFO: language should be 'nim', got: {language:?}"
+        );
+
+        // Verify event count is present.
+        let events = body.get("totalEvents").and_then(Value::as_u64);
+        assert!(events.is_some(), "V-M9-INFO: totalEvents should be present");
+        assert!(
+            events.unwrap() > 0,
+            "V-M9-INFO: totalEvents should be > 0, got: {events:?}"
+        );
+
+        // Verify source files list is present and non-empty.
+        let files = body.get("sourceFiles").and_then(Value::as_array);
+        assert!(files.is_some(), "V-M9-INFO: sourceFiles should be present");
+        assert!(
+            !files.unwrap().is_empty(),
+            "V-M9-INFO: sourceFiles should not be empty"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m9_info_shows_metadata", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M9-TIMEOUT: Run `ct/exec-script` with a script that sleeps for 10
+/// seconds and a timeout of 1 second.  Verify the command exits with
+/// non-zero code within ~2 seconds and the error message mentions timeout.
+#[tokio::test]
+async fn m9_query_timeout_kills_script() {
+    let (test_dir, log_path) = setup_test_dir("m9_query_timeout");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-to", "main.nim");
+        let api_dir = python_api_dir();
+
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir.to_string_lossy())],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let start_time = tokio::time::Instant::now();
+
+        // Run a script that sleeps for 10 seconds with a 1-second timeout.
+        let resp = exec_script(
+            &mut client,
+            90_020,
+            &trace_dir,
+            "import time; time.sleep(10)",
+            1,
+            &log_path,
+        )
+        .await?;
+
+        let elapsed = start_time.elapsed();
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "V-M9-TIMEOUT: request itself should succeed (script result is in body), got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(0);
+        let timed_out = body
+            .get("timedOut")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let stderr = body.get("stderr").and_then(Value::as_str).unwrap_or("");
+
+        assert!(timed_out, "V-M9-TIMEOUT: timedOut should be true");
+        assert_ne!(
+            exit_code, 0,
+            "V-M9-TIMEOUT: exit code should be non-zero, got: {exit_code}"
+        );
+        assert!(
+            stderr.to_lowercase().contains("timed out")
+                || stderr.to_lowercase().contains("timeout"),
+            "V-M9-TIMEOUT: stderr should mention timeout, got: {stderr:?}"
+        );
+        // The response should arrive within ~5 seconds (1s timeout + overhead).
+        // We use 10s as a generous upper bound to avoid flakiness.
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "V-M9-TIMEOUT: should complete within ~2s, took {:?}",
+            elapsed
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m9_query_timeout_kills_script", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M9-ERROR: Run `ct/exec-script` with `1/0`.  Verify non-zero exit
+/// code and stderr contains "ZeroDivisionError".
+#[tokio::test]
+async fn m9_query_script_error_reports_traceback() {
+    let (test_dir, log_path) = setup_test_dir("m9_query_error");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-err", "main.nim");
+        let api_dir = python_api_dir();
+
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let (mut daemon, socket_path) = start_daemon_with_mock_dap(
+            &test_dir,
+            &log_path,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir.to_string_lossy())],
+        )
+        .await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let resp = exec_script(&mut client, 90_030, &trace_dir, "1/0", 30, &log_path).await?;
+
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "V-M9-ERROR: request itself should succeed (error is in body), got: {resp}"
+        );
+
+        let body = resp.get("body").expect("response should have body");
+        let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(0);
+        let stderr = body.get("stderr").and_then(Value::as_str).unwrap_or("");
+
+        assert_ne!(
+            exit_code, 0,
+            "V-M9-ERROR: exit code should be non-zero for 1/0, got: {exit_code}"
+        );
+        assert!(
+            stderr.contains("ZeroDivisionError"),
+            "V-M9-ERROR: stderr should contain 'ZeroDivisionError', got: {stderr:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "m9_query_script_error_reports_traceback",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// V-M9-AUTO: Ensure no daemon running.  Run `ct trace query` via the CLI
+/// binary.  Verify daemon was auto-started (socket exists after command).
+/// Verify output is "ok".
+#[tokio::test]
+async fn m9_query_auto_starts_daemon() {
+    let (test_dir, log_path) = setup_test_dir("m9_query_auto");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m9-auto", "main.nim");
+        let api_dir = python_api_dir();
+
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let ct_dir = daemon_paths_in(&test_dir);
+        std::fs::create_dir_all(&ct_dir).expect("create ct dir");
+        let socket_path = ct_dir.join("daemon.sock");
+        let pid_path = ct_dir.join("daemon.pid");
+
+        // Ensure no daemon is running.
+        let _ = std::fs::remove_file(&socket_path);
+        let _ = std::fs::remove_file(&pid_path);
+
+        assert!(
+            !socket_path.exists(),
+            "socket should not exist before the test"
+        );
+
+        // Run `ct trace query <trace> -c "print('ok')"` via the CLI binary.
+        // This should auto-start the daemon.
+        let bin = binary_path();
+        let output = Command::new(&bin)
+            .arg("trace")
+            .arg("query")
+            .arg(trace_dir.to_string_lossy().as_ref())
+            .arg("-c")
+            .arg("print('ok')")
+            .env("TMPDIR", &test_dir)
+            .env(
+                "CODETRACER_PYTHON_API_PATH",
+                api_dir.to_string_lossy().as_ref(),
+            )
+            .env("CODETRACER_DB_BACKEND_CMD", bin.to_string_lossy().as_ref())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("failed to run ct trace query: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log_line(&log_path, &format!("ct trace query stdout: {stdout}"));
+        log_line(&log_path, &format!("ct trace query stderr: {stderr}"));
+        log_line(
+            &log_path,
+            &format!("ct trace query exit code: {:?}", output.status.code()),
+        );
+
+        // V-M9-AUTO: Verify daemon was auto-started (socket exists).
+        assert!(
+            socket_path.exists(),
+            "V-M9-AUTO: daemon socket should exist after auto-start, \
+             stderr: {stderr}"
+        );
+
+        // V-M9-AUTO: Verify output is "ok".
+        assert!(
+            stdout.trim().contains("ok"),
+            "V-M9-AUTO: stdout should contain 'ok', got: {stdout:?}, \
+             stderr: {stderr}"
+        );
+
+        // Clean up the daemon.
+        if socket_path.exists()
+            && let Ok(mut stream) = UnixStream::connect(&socket_path).await
+        {
+            let shutdown_req = json!({
+                "type": "request",
+                "command": "ct/daemon-shutdown",
+                "seq": 9999
+            });
+            let _ = stream.write_all(&dap_encode(&shutdown_req)).await;
+            sleep(Duration::from_millis(500)).await;
+        }
+
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m9_query_auto_starts_daemon", &log_path, success);
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }

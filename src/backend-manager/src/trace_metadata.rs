@@ -116,12 +116,11 @@ fn detect_language(program: &str) -> String {
 /// would be preferable, but this is sufficient for the current use-case
 /// where metadata extraction happens once per session open.
 fn count_events(trace_json_path: &Path) -> Result<u64, TraceMetadataError> {
-    let contents = std::fs::read_to_string(trace_json_path).map_err(|e| {
-        TraceMetadataError::Io {
+    let contents =
+        std::fs::read_to_string(trace_json_path).map_err(|e| TraceMetadataError::Io {
             file: trace_json_path.to_path_buf(),
             source: e,
-        }
-    })?;
+        })?;
 
     let events: Vec<serde_json::Value> =
         serde_json::from_str(&contents).map_err(|e| TraceMetadataError::Json {
@@ -187,10 +186,7 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
     let total_events = match count_events(&trace_path) {
         Ok(n) => n,
         Err(e) => {
-            log::warn!(
-                "Could not count events in {}: {e}",
-                trace_path.display()
-            );
+            log::warn!("Could not count events in {}: {e}", trace_path.display());
             0
         }
     };
@@ -330,7 +326,9 @@ mod tests {
             "complete",
             r#"{"workdir":"/home/user/project","program":"main.rs","args":[]}"#,
             Some(r#"["src/main.rs","src/lib.rs"]"#),
-            Some(r#"[{"Step":{"path_id":0,"line":1}},{"Step":{"path_id":0,"line":2}},{"Step":{"path_id":0,"line":3}}]"#),
+            Some(
+                r#"[{"Step":{"path_id":0,"line":1}},{"Step":{"path_id":0,"line":2}},{"Step":{"path_id":0,"line":3}}]"#,
+            ),
         );
 
         let meta = read_trace_metadata(&dir).expect("read metadata");

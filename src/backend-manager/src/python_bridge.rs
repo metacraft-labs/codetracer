@@ -331,20 +331,15 @@ pub fn format_evaluate_response(backend_response: &Value) -> (bool, Value) {
         return (false, serde_json::json!({"message": message}));
     }
 
-    let body = backend_response
-        .get("body")
-        .unwrap_or(&Value::Null);
+    let body = backend_response.get("body").unwrap_or(&Value::Null);
 
-    let result = body
-        .get("result")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let type_name = body
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let result = body.get("result").and_then(Value::as_str).unwrap_or("");
+    let type_name = body.get("type").and_then(Value::as_str).unwrap_or("");
 
-    (true, serde_json::json!({"result": result, "type": type_name}))
+    (
+        true,
+        serde_json::json!({"result": result, "type": type_name}),
+    )
 }
 
 /// Formats a backend `stackTrace` response into the simplified
@@ -368,22 +363,15 @@ pub fn format_stack_trace_response(backend_response: &Value) -> (bool, Value) {
         return (false, serde_json::json!({"message": message}));
     }
 
-    let body = backend_response
-        .get("body")
-        .unwrap_or(&Value::Null);
-    let frames_raw = body
-        .get("stackFrames")
-        .and_then(Value::as_array);
+    let body = backend_response.get("body").unwrap_or(&Value::Null);
+    let frames_raw = body.get("stackFrames").and_then(Value::as_array);
 
     let frames: Vec<Value> = match frames_raw {
         Some(arr) => arr
             .iter()
             .map(|frame| {
                 let id = frame.get("id").and_then(Value::as_i64).unwrap_or(0);
-                let name = frame
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
+                let name = frame.get("name").and_then(Value::as_str).unwrap_or("");
                 let path = frame
                     .get("source")
                     .and_then(|s| s.get("path"))
@@ -438,9 +426,7 @@ pub fn format_flow_response(backend_response: &Value) -> (bool, Value) {
         return (false, serde_json::json!({"message": message}));
     }
 
-    let body = backend_response
-        .get("body")
-        .unwrap_or(&Value::Null);
+    let body = backend_response.get("body").unwrap_or(&Value::Null);
 
     let steps = body
         .get("steps")
@@ -736,14 +722,8 @@ pub fn extract_location_from_stack_trace(msg: &Value) -> Value {
             .and_then(Value::as_str)
             .unwrap_or("");
         let line = top_frame.get("line").and_then(Value::as_i64).unwrap_or(0);
-        let column = top_frame
-            .get("column")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let ticks = top_frame
-            .get("ticks")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
+        let column = top_frame.get("column").and_then(Value::as_i64).unwrap_or(0);
+        let ticks = top_frame.get("ticks").and_then(Value::as_i64).unwrap_or(0);
         let end_of_trace = top_frame
             .get("endOfTrace")
             .and_then(Value::as_bool)
@@ -782,7 +762,10 @@ mod tests {
         assert_eq!(method_to_dap_command("step_over"), Some(("next", false)));
         assert_eq!(method_to_dap_command("step_in"), Some(("stepIn", false)));
         assert_eq!(method_to_dap_command("step_out"), Some(("stepOut", false)));
-        assert_eq!(method_to_dap_command("step_back"), Some(("stepBack", false)));
+        assert_eq!(
+            method_to_dap_command("step_back"),
+            Some(("stepBack", false))
+        );
         assert_eq!(
             method_to_dap_command("reverse_step_in"),
             Some(("ct/reverseStepIn", true))
@@ -914,7 +897,9 @@ mod tests {
 
         let (success, body) = format_locals_response(&backend_resp);
         assert!(success);
-        let vars = body["variables"].as_array().expect("variables should be array");
+        let vars = body["variables"]
+            .as_array()
+            .expect("variables should be array");
         assert_eq!(vars.len(), 2);
         assert_eq!(vars[0]["name"], "x");
         assert_eq!(vars[0]["value"], "42");
@@ -943,7 +928,9 @@ mod tests {
 
         let (success, body) = format_locals_response(&backend_resp);
         assert!(success);
-        let vars = body["variables"].as_array().expect("variables should be array");
+        let vars = body["variables"]
+            .as_array()
+            .expect("variables should be array");
         assert!(vars.is_empty());
     }
 
@@ -1439,7 +1426,9 @@ mod tests {
 
         let (success, body) = format_processes_response(&backend_resp);
         assert!(success);
-        let procs = body["processes"].as_array().expect("processes should be array");
+        let procs = body["processes"]
+            .as_array()
+            .expect("processes should be array");
         assert_eq!(procs.len(), 2);
         assert_eq!(procs[0]["id"], 1);
         assert_eq!(procs[0]["name"], "main");
@@ -1470,7 +1459,9 @@ mod tests {
 
         let (success, body) = format_processes_response(&backend_resp);
         assert!(success);
-        let procs = body["processes"].as_array().expect("processes should be array");
+        let procs = body["processes"]
+            .as_array()
+            .expect("processes should be array");
         assert!(procs.is_empty());
     }
 

@@ -1,4 +1,6 @@
-use std::{collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
+};
 
 use serde_json::{Value, json};
 use tokio::{
@@ -22,6 +24,7 @@ use crate::{
     python_bridge::{
         self, PendingPyNavState, PendingPyRequest, PendingPyRequestKind, PyBridgeState,
     },
+    script_executor,
     session::SessionManager,
     trace_metadata,
 };
@@ -301,7 +304,12 @@ impl BackendManager {
                         Self::spawn_client_writer(client_id, write_half, client_rx);
 
                         // Spawn reader task for this client.
-                        Self::spawn_client_reader(client_id, read_half, inbound_tx.clone(), mgr_accept.clone());
+                        Self::spawn_client_reader(
+                            client_id,
+                            read_half,
+                            inbound_tx.clone(),
+                            mgr_accept.clone(),
+                        );
                     }
                     Err(e) => {
                         error!("Daemon accept error: {e}");
@@ -455,7 +463,10 @@ impl BackendManager {
             ds.clients.remove(&client_id);
             // Also clean up any pending request mappings for this client.
             ds.request_client_map.retain(|_seq, cid| *cid != client_id);
-            info!("Daemon: removed client {client_id}, {} remaining", ds.clients.len());
+            info!(
+                "Daemon: removed client {client_id}, {} remaining",
+                ds.clients.len()
+            );
         }
     }
 
@@ -496,15 +507,10 @@ impl BackendManager {
                 // to avoid borrowing pending_navigations and next_seq simultaneously.
                 let st_seq = ds.py_bridge.next_seq();
 
-                let should_send = if let Some(pending) = ds
-                    .py_bridge
-                    .pending_navigations
-                    .iter_mut()
-                    .find(|p| {
-                        p.backend_id == bid
-                            && p.state == PendingPyNavState::AwaitingStopped
-                    })
-                {
+                let should_send = if let Some(pending) =
+                    ds.py_bridge.pending_navigations.iter_mut().find(|p| {
+                        p.backend_id == bid && p.state == PendingPyNavState::AwaitingStopped
+                    }) {
                     pending.state = PendingPyNavState::AwaitingStackTrace;
                     pending.stack_trace_seq = Some(st_seq);
                     true
@@ -521,9 +527,7 @@ impl BackendManager {
                         "seq": st_seq,
                         "arguments": {"threadId": 1}
                     });
-                    if let Some(sender) =
-                        self.parent_senders.get(bid).and_then(|s| s.as_ref())
-                    {
+                    if let Some(sender) = self.parent_senders.get(bid).and_then(|s| s.as_ref()) {
                         let _ = sender.send(st_request);
                     }
                     // Don't return — still do normal routing for the stopped event
@@ -558,9 +562,12 @@ impl BackendManager {
             // Check if this response is for a bridge-initiated navigation command
             // (e.g., the response to our `next`/`stepIn` DAP request).
             // If so, consume it silently — we only care about the stopped event.
-            if ds.py_bridge.pending_navigations.iter().any(|p| {
-                p.nav_command_seq == Some(req_seq)
-            }) {
+            if ds
+                .py_bridge
+                .pending_navigations
+                .iter()
+                .any(|p| p.nav_command_seq == Some(req_seq))
+            {
                 // Silently consume — don't forward to any client.
                 return;
             }
@@ -607,30 +614,20 @@ impl BackendManager {
                 }
 
                 let (success, body_or_error) = match pending.kind {
-                    PendingPyRequestKind::Locals => {
-                        python_bridge::format_locals_response(msg)
-                    }
-                    PendingPyRequestKind::Evaluate => {
-                        python_bridge::format_evaluate_response(msg)
-                    }
+                    PendingPyRequestKind::Locals => python_bridge::format_locals_response(msg),
+                    PendingPyRequestKind::Evaluate => python_bridge::format_evaluate_response(msg),
                     PendingPyRequestKind::StackTrace => {
                         python_bridge::format_stack_trace_response(msg)
                     }
-                    PendingPyRequestKind::Flow => {
-                        python_bridge::format_flow_response(msg)
-                    }
+                    PendingPyRequestKind::Flow => python_bridge::format_flow_response(msg),
                     PendingPyRequestKind::Calltrace => {
                         python_bridge::format_calltrace_response(msg)
                     }
                     PendingPyRequestKind::SearchCalltrace => {
                         python_bridge::format_search_calltrace_response(msg)
                     }
-                    PendingPyRequestKind::Events => {
-                        python_bridge::format_events_response(msg)
-                    }
-                    PendingPyRequestKind::Terminal => {
-                        python_bridge::format_terminal_response(msg)
-                    }
+                    PendingPyRequestKind::Events => python_bridge::format_events_response(msg),
+                    PendingPyRequestKind::Terminal => python_bridge::format_terminal_response(msg),
                     PendingPyRequestKind::ReadSource => {
                         python_bridge::format_read_source_response(msg)
                     }
@@ -722,10 +719,7 @@ impl BackendManager {
     ///
     /// When the last session is removed (and at least one session existed),
     /// triggers automatic daemon shutdown.
-    async fn ttl_expiry_loop(
-        mgr: Arc<Mutex<Self>>,
-        mut ttl_expiry_rx: UnboundedReceiver<PathBuf>,
-    ) {
+    async fn ttl_expiry_loop(mgr: Arc<Mutex<Self>>, mut ttl_expiry_rx: UnboundedReceiver<PathBuf>) {
         while let Some(trace_path) = ttl_expiry_rx.recv().await {
             let mut locked = mgr.lock().await;
 
@@ -949,9 +943,7 @@ impl BackendManager {
 
         self.children[id] = Some(child);
 
-        info!(
-            "Starting replay with id {id}. Command: {cmd:?}",
-        );
+        info!("Starting replay with id {id}. Command: {cmd:?}",);
 
         let socket_read;
         let mut socket_write;
@@ -1211,10 +1203,14 @@ impl BackendManager {
 
                             // Register the session in the session manager.
                             if let Some(ds) = self.daemon_state.as_mut()
-                                && let Err(e) =
-                                    ds.session_manager.add_session(trace_path.clone(), replay_id)
+                                && let Err(e) = ds
+                                    .session_manager
+                                    .add_session(trace_path.clone(), replay_id)
                             {
-                                warn!("Failed to register session for {}: {e}", trace_path.display());
+                                warn!(
+                                    "Failed to register session for {}: {e}",
+                                    trace_path.display()
+                                );
                             }
 
                             let response = json!({
@@ -1365,63 +1361,26 @@ impl BackendManager {
                         }
                         Ok(())
                     }
-                    "ct/py-navigate" => {
-                        self.handle_py_navigate(seq, args).await
-                    }
-                    "ct/py-locals" => {
-                        self.handle_py_locals(seq, args).await
-                    }
-                    "ct/py-evaluate" => {
-                        self.handle_py_evaluate(seq, args).await
-                    }
-                    "ct/py-stack-trace" => {
-                        self.handle_py_stack_trace(seq, args).await
-                    }
-                    "ct/py-flow" => {
-                        self.handle_py_flow(seq, args).await
-                    }
-                    "ct/py-add-breakpoint" => {
-                        self.handle_py_add_breakpoint(seq, args).await
-                    }
-                    "ct/py-remove-breakpoint" => {
-                        self.handle_py_remove_breakpoint(seq, args).await
-                    }
-                    "ct/py-add-watchpoint" => {
-                        self.handle_py_add_watchpoint(seq, args).await
-                    }
-                    "ct/py-remove-watchpoint" => {
-                        self.handle_py_remove_watchpoint(seq, args).await
-                    }
-                    "ct/py-calltrace" => {
-                        self.handle_py_calltrace(seq, args).await
-                    }
-                    "ct/py-search-calltrace" => {
-                        self.handle_py_search_calltrace(seq, args).await
-                    }
-                    "ct/py-events" => {
-                        self.handle_py_events(seq, args).await
-                    }
-                    "ct/py-terminal" => {
-                        self.handle_py_terminal(seq, args).await
-                    }
-                    "ct/py-read-source" => {
-                        self.handle_py_read_source(seq, args).await
-                    }
-                    "ct/py-processes" => {
-                        self.handle_py_processes(seq, args).await
-                    }
-                    "ct/py-select-process" => {
-                        self.handle_py_select_process(seq, args).await
-                    }
-                    "ct/open-trace" => {
-                        self.handle_open_trace(seq, args).await
-                    }
-                    "ct/trace-info" => {
-                        self.handle_trace_info(seq, args)
-                    }
-                    "ct/close-trace" => {
-                        self.handle_close_trace(seq, args).await
-                    }
+                    "ct/py-navigate" => self.handle_py_navigate(seq, args).await,
+                    "ct/py-locals" => self.handle_py_locals(seq, args).await,
+                    "ct/py-evaluate" => self.handle_py_evaluate(seq, args).await,
+                    "ct/py-stack-trace" => self.handle_py_stack_trace(seq, args).await,
+                    "ct/py-flow" => self.handle_py_flow(seq, args).await,
+                    "ct/py-add-breakpoint" => self.handle_py_add_breakpoint(seq, args).await,
+                    "ct/py-remove-breakpoint" => self.handle_py_remove_breakpoint(seq, args).await,
+                    "ct/py-add-watchpoint" => self.handle_py_add_watchpoint(seq, args).await,
+                    "ct/py-remove-watchpoint" => self.handle_py_remove_watchpoint(seq, args).await,
+                    "ct/py-calltrace" => self.handle_py_calltrace(seq, args).await,
+                    "ct/py-search-calltrace" => self.handle_py_search_calltrace(seq, args).await,
+                    "ct/py-events" => self.handle_py_events(seq, args).await,
+                    "ct/py-terminal" => self.handle_py_terminal(seq, args).await,
+                    "ct/py-read-source" => self.handle_py_read_source(seq, args).await,
+                    "ct/py-processes" => self.handle_py_processes(seq, args).await,
+                    "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
+                    "ct/open-trace" => self.handle_open_trace(seq, args).await,
+                    "ct/trace-info" => self.handle_trace_info(seq, args),
+                    "ct/exec-script" => self.handle_exec_script(seq, args),
+                    "ct/close-trace" => self.handle_close_trace(seq, args).await,
                     _ => {
                         if let Some(Value::Object(obj_args)) = args
                             && let Some(Value::Number(id)) = obj_args.get("replay-id")
@@ -1534,10 +1493,7 @@ impl BackendManager {
             }
         };
 
-        let method = match args
-            .and_then(|a| a.get("method"))
-            .and_then(Value::as_str)
-        {
+        let method = match args.and_then(|a| a.get("method")).and_then(Value::as_str) {
             Some(m) => m.to_string(),
             None => {
                 self.send_py_error(seq, "missing 'method' in arguments");
@@ -2236,10 +2192,7 @@ impl BackendManager {
             }
         };
 
-        let source_path = match args
-            .and_then(|a| a.get("path"))
-            .and_then(Value::as_str)
-        {
+        let source_path = match args.and_then(|a| a.get("path")).and_then(Value::as_str) {
             Some(p) => p.to_string(),
             None => {
                 self.send_py_command_error(
@@ -2251,10 +2204,7 @@ impl BackendManager {
             }
         };
 
-        let line = match args
-            .and_then(|a| a.get("line"))
-            .and_then(Value::as_i64)
-        {
+        let line = match args.and_then(|a| a.get("line")).and_then(Value::as_i64) {
             Some(l) => l,
             None => {
                 self.send_py_command_error(
@@ -2292,10 +2242,7 @@ impl BackendManager {
         };
 
         // Build the setBreakpoints DAP command with ALL breakpoints for this file.
-        let breakpoints_array: Vec<Value> = all_lines
-            .iter()
-            .map(|l| json!({"line": l}))
-            .collect();
+        let breakpoints_array: Vec<Value> = all_lines.iter().map(|l| json!({"line": l})).collect();
 
         let dap_seq = match self.daemon_state.as_mut() {
             Some(ds) => ds.py_bridge.next_seq(),
@@ -2432,10 +2379,8 @@ impl BackendManager {
         match removal_result {
             Some((source_path, remaining_lines)) => {
                 // Send updated setBreakpoints to backend with remaining lines.
-                let breakpoints_array: Vec<Value> = remaining_lines
-                    .iter()
-                    .map(|l| json!({"line": l}))
-                    .collect();
+                let breakpoints_array: Vec<Value> =
+                    remaining_lines.iter().map(|l| json!({"line": l})).collect();
 
                 let dap_seq = match self.daemon_state.as_mut() {
                     Some(ds) => ds.py_bridge.next_seq(),
@@ -3054,11 +2999,7 @@ impl BackendManager {
         {
             Some(p) => p.to_string(),
             None => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-events",
-                    "missing 'tracePath' in arguments",
-                );
+                self.send_py_command_error(seq, "ct/py-events", "missing 'tracePath' in arguments");
                 return Ok(());
             }
         };
@@ -3315,17 +3256,10 @@ impl BackendManager {
             }
         };
 
-        let source_path = match args
-            .and_then(|a| a.get("path"))
-            .and_then(Value::as_str)
-        {
+        let source_path = match args.and_then(|a| a.get("path")).and_then(Value::as_str) {
             Some(p) => p.to_string(),
             None => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-read-source",
-                    "missing 'path' in arguments",
-                );
+                self.send_py_command_error(seq, "ct/py-read-source", "missing 'path' in arguments");
                 return Ok(());
             }
         };
@@ -3735,8 +3669,8 @@ impl BackendManager {
 
         // Determine which backend command to spawn.
         // Tests can override via CODETRACER_DB_BACKEND_CMD env var.
-        let backend_cmd = std::env::var("CODETRACER_DB_BACKEND_CMD")
-            .unwrap_or_else(|_| "db-backend".to_string());
+        let backend_cmd =
+            std::env::var("CODETRACER_DB_BACKEND_CMD").unwrap_or_else(|_| "db-backend".to_string());
 
         // Build the arguments: the backend command + "dap-server" subcommand.
         let backend_args_owned: Vec<String> = if backend_cmd.contains("backend-manager") {
@@ -3748,23 +3682,21 @@ impl BackendManager {
         let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
 
         // Spawn the backend process (raw, without installing channels).
-        let (backend_id, sender, mut receiver) = match self
-            .start_replay_raw(&backend_cmd, &backend_args)
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                let response = json!({
-                    "type": "response",
-                    "request_seq": seq,
-                    "success": false,
-                    "command": "ct/open-trace",
-                    "message": format!("failed to spawn backend: {e}")
-                });
-                self.send_response_for_seq(seq, response);
-                return Ok(());
-            }
-        };
+        let (backend_id, sender, mut receiver) =
+            match self.start_replay_raw(&backend_cmd, &backend_args).await {
+                Ok(result) => result,
+                Err(e) => {
+                    let response = json!({
+                        "type": "response",
+                        "request_seq": seq,
+                        "success": false,
+                        "command": "ct/open-trace",
+                        "message": format!("failed to spawn backend: {e}")
+                    });
+                    self.send_response_for_seq(seq, response);
+                    return Ok(());
+                }
+            };
 
         // Run DAP init sequence.
         let dap_timeout = Duration::from_secs(30);
@@ -3776,10 +3708,7 @@ impl BackendManager {
                 );
             }
             Err(e) => {
-                warn!(
-                    "DAP init failed for trace {}: {e}",
-                    trace_path.display()
-                );
+                warn!("DAP init failed for trace {}: {e}", trace_path.display());
                 // Try to stop the failed backend.
                 let _ = self.stop_replay(backend_id).await;
                 let response = json!({
@@ -3807,7 +3736,8 @@ impl BackendManager {
             let _ = sender.send(st_request);
 
             // Wait for the stackTrace response with a short timeout.
-            let mut location = json!({"path": "", "line": 0, "column": 0, "ticks": 0, "endOfTrace": false});
+            let mut location =
+                json!({"path": "", "line": 0, "column": 0, "ticks": 0, "endOfTrace": false});
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
             loop {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -3881,11 +3811,7 @@ impl BackendManager {
     /// Handles `ct/trace-info` requests.
     ///
     /// Returns metadata for a loaded trace session.
-    fn handle_trace_info(
-        &self,
-        seq: i64,
-        args: Option<&Value>,
-    ) -> Result<(), Box<dyn Error>> {
+    fn handle_trace_info(&self, seq: i64, args: Option<&Value>) -> Result<(), Box<dyn Error>> {
         let trace_path_str = match args
             .and_then(|a| a.get("tracePath"))
             .and_then(Value::as_str)
@@ -3940,6 +3866,196 @@ impl BackendManager {
                 self.send_response_for_seq(seq, response);
             }
         }
+        Ok(())
+    }
+
+    /// Handles `ct/exec-script` requests.
+    ///
+    /// Spawns a Python subprocess that connects back to the daemon, opens
+    /// the specified trace, and executes the provided script.  The daemon
+    /// captures stdout/stderr and returns the result to the requesting client.
+    ///
+    /// **Important**: The Python subprocess connects back to the daemon via
+    /// the Unix socket and sends `ct/open-trace`.  If we held the
+    /// `BackendManager` mutex while waiting for the subprocess, the dispatch
+    /// loop would deadlock trying to acquire the same mutex for the incoming
+    /// `ct/open-trace` request.  To avoid this we extract all necessary data
+    /// synchronously (while we still hold the lock), clone the response
+    /// sender, and spawn a **detached** tokio task that runs the subprocess
+    /// and sends the response independently.  The method returns immediately,
+    /// releasing the mutex so the dispatch loop can continue processing
+    /// messages from the Python subprocess.
+    ///
+    /// Expected arguments:
+    /// - `tracePath` (string, required): path to the trace directory.
+    /// - `script` (string, required): Python code to execute.
+    /// - `timeout` (integer, optional): execution timeout in seconds
+    ///   (defaults to [`script_executor::DEFAULT_TIMEOUT_SECS`]).
+    ///
+    /// The response body contains `stdout`, `stderr`, `exitCode`, and
+    /// `timedOut` fields.
+    fn handle_exec_script(&self, seq: i64, args: Option<&Value>) -> Result<(), Box<dyn Error>> {
+        // --- Extract trace path ---
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/exec-script",
+                    "message": "missing 'tracePath' in arguments"
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        // --- Extract script ---
+        let script = match args.and_then(|a| a.get("script")).and_then(Value::as_str) {
+            Some(s) => s.to_string(),
+            None => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/exec-script",
+                    "message": "missing 'script' in arguments"
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+
+        // --- Extract optional timeout ---
+        let timeout_secs = args
+            .and_then(|a| a.get("timeout"))
+            .and_then(Value::as_u64)
+            .unwrap_or(script_executor::DEFAULT_TIMEOUT_SECS);
+
+        // --- Determine the daemon socket path ---
+        //
+        // The Python subprocess connects back to the daemon using this socket.
+        // In daemon mode we use the socket path from the daemon state config;
+        // otherwise fall back to the well-known default.
+        let socket_path = self
+            .daemon_state
+            .as_ref()
+            .and_then(|ds| ds.config.socket_path.as_ref())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                CODETRACER_PATHS
+                    .lock()
+                    .map(|p| p.daemon_socket_path().to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "/tmp/codetracer/daemon.sock".to_string())
+            });
+
+        // --- Determine the Python API path ---
+        //
+        // The `CODETRACER_PYTHON_API_PATH` environment variable points to the
+        // directory containing the `codetracer` Python package.  If not set we
+        // try a relative path from the backend-manager binary that works in
+        // the standard repository layout.
+        let python_api_path = std::env::var("CODETRACER_PYTHON_API_PATH").unwrap_or_else(|_| {
+            // Attempt to resolve from the binary location:
+            // <repo>/src/backend-manager/target/<profile>/backend-manager
+            //  -> <repo>/python-api/
+            if let Ok(exe) = std::env::current_exe()
+                && let Some(repo) = exe
+                    .parent() // target/<profile>/
+                    .and_then(|p| p.parent()) // target/
+                    .and_then(|p| p.parent()) // src/backend-manager/
+                    .and_then(|p| p.parent()) // src/
+                    .and_then(|p| p.parent())
+            // <repo>/
+            {
+                let api = repo.join("python-api");
+                if api.exists() {
+                    return api.to_string_lossy().to_string();
+                }
+            }
+            // Last resort: assume it is installed or on PYTHONPATH already.
+            String::new()
+        });
+
+        info!(
+            "Executing script for trace={trace_path_str}, timeout={timeout_secs}s, \
+             socket={socket_path}, python_api={python_api_path}"
+        );
+
+        // --- Clone the response sender so the spawned task can send the
+        //     result without holding the BackendManager mutex. ---
+        //
+        // In daemon mode we clone the client's `UnboundedSender<Value>`.
+        // In legacy (single-client) mode we clone the `manager_sender`.
+        let client_id = self.lookup_client_for_seq(seq);
+        let response_tx: Option<UnboundedSender<Value>> = if self.daemon_state.is_some() {
+            client_id.and_then(|cid| {
+                self.daemon_state
+                    .as_ref()
+                    .and_then(|ds| ds.clients.get(&cid))
+                    .map(|handle| handle.tx.clone())
+            })
+        } else {
+            self.manager_sender.clone()
+        };
+
+        // --- Spawn a detached task that runs the script and sends the
+        //     response.  This returns immediately, releasing the mutex. ---
+        tokio::spawn(async move {
+            let send_response = |response: Value| {
+                if let Some(tx) = &response_tx {
+                    if let Err(err) = tx.send(response) {
+                        error!("ct/exec-script: failed to send response for seq {seq}: {err}");
+                    }
+                } else {
+                    error!(
+                        "ct/exec-script: no response channel for seq {seq} \
+                         (client may have disconnected)"
+                    );
+                }
+            };
+
+            match script_executor::execute_script(
+                &script,
+                &trace_path_str,
+                &socket_path,
+                &python_api_path,
+                timeout_secs,
+            )
+            .await
+            {
+                Ok(result) => {
+                    let response = json!({
+                        "type": "response",
+                        "request_seq": seq,
+                        "success": true,
+                        "command": "ct/exec-script",
+                        "body": {
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                            "exitCode": result.exit_code,
+                            "timedOut": result.timed_out,
+                        }
+                    });
+                    send_response(response);
+                }
+                Err(e) => {
+                    let response = json!({
+                        "type": "response",
+                        "request_seq": seq,
+                        "success": false,
+                        "command": "ct/exec-script",
+                        "message": format!("script execution failed: {e}")
+                    });
+                    send_response(response);
+                }
+            }
+        });
+
         Ok(())
     }
 
@@ -4018,9 +4134,9 @@ impl BackendManager {
         if let Some(child_opt) = self.children.get_mut(backend_id) {
             if let Some(child) = child_opt.as_mut() {
                 match child.try_wait() {
-                    Ok(Some(_status)) => Some(true),  // exited
-                    Ok(None) => Some(false),           // still running
-                    Err(_) => Some(true),              // error checking = treat as dead
+                    Ok(Some(_status)) => Some(true), // exited
+                    Ok(None) => Some(false),         // still running
+                    Err(_) => Some(true),            // error checking = treat as dead
                 }
             } else {
                 None // slot is empty (already cleaned up)
