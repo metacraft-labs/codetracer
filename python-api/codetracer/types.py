@@ -178,16 +178,18 @@ class Event:
 
 @dataclass(frozen=True)
 class Process:
-    """Metadata about the recorded process.
+    """A process in a multi-process trace.
+
+    Multi-process traces contain multiple recorded processes that can be
+    individually selected and queried.  Single-process traces expose
+    exactly one ``Process`` entry.
 
     Attributes:
-        pid:        The process ID of the recorded execution.
-        executable: Path to the executable that was recorded.
-        arguments:  Command-line arguments passed to the executable.
-        exit_code:  Exit code of the process (None if still running or unknown).
+        id:      Unique process identifier within the trace.
+        name:    Short display name for the process (e.g. ``"main"``).
+        command: The command line that was executed.
     """
 
-    pid: int
-    executable: str
-    arguments: list[str] = field(default_factory=list)
-    exit_code: Optional[int] = None
+    id: int
+    name: str
+    command: str

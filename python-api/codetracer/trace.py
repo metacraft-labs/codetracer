@@ -492,6 +492,67 @@ class Trace:
             content=content,
         )
 
+    # --- Multi-process support ---
+
+    def processes(self) -> list[Process]:
+        """List processes in the trace.
+
+        Multi-process traces contain multiple recorded processes.
+        Single-process traces return a list with exactly one entry.
+
+        Sends ``ct/py-processes`` to the daemon, which queries the
+        backend for the list of recorded processes.
+
+        Returns:
+            A list of :class:`Process` instances.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-processes", {
+            "tracePath": self._path,
+        })
+        if not response.get("success"):
+            raise TraceError(response.get("message", "processes() failed"))
+        body = response.get("body", {})
+        procs = body.get("processes", [])
+        return [
+            Process(
+                id=p["id"],
+                name=p.get("name", ""),
+                command=p.get("command", ""),
+            )
+            for p in procs
+        ]
+
+    def select_process(self, process_id: int) -> None:
+        """Switch to a different process in a multi-process trace.
+
+        After calling this method, all subsequent navigation and query
+        methods (``step_over``, ``locals``, ``evaluate``, etc.) operate
+        on the selected process.
+
+        For single-process traces this is a no-op: the only process is
+        already selected.
+
+        Sends ``ct/py-select-process`` to the daemon, which issues a
+        ``ct/select-replay`` command to the backend.
+
+        Parameters:
+            process_id: The :attr:`Process.id` of the process to select.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-select-process", {
+            "tracePath": self._path,
+            "processId": process_id,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "select_process() failed")
+            )
+
     # --- Breakpoints and Watchpoints ---
 
     def add_breakpoint(self, path: str, line: int) -> int:
