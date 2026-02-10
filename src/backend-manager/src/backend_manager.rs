@@ -3698,9 +3698,54 @@ impl BackendManager {
                 }
             };
 
+        // Build DAP launch options.  If the trace directory contains an `rr/`
+        // subdirectory, we need to tell db-backend where `ct-rr-support` is so
+        // it can spawn the RR replay worker.
+        //
+        // The `ct-rr-support` path is resolved from (in priority order):
+        //   1. `CODETRACER_CT_RR_SUPPORT_CMD` environment variable
+        //   2. `ct-rr-support` on PATH
+        //
+        // Reference: db-backend/src/dap.rs — `LaunchRequestArguments.ctRRWorkerExe`
+        let dap_launch_opts = {
+            let mut opts = dap_init::DapLaunchOptions::default();
+            if trace_path.join("rr").is_dir() {
+                let rr_support_cmd = std::env::var("CODETRACER_CT_RR_SUPPORT_CMD")
+                    .ok()
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        // Try to find ct-rr-support on PATH.
+                        std::process::Command::new("which")
+                            .arg("ct-rr-support")
+                            .output()
+                            .ok()
+                            .filter(|o| o.status.success())
+                            .and_then(|o| {
+                                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                if s.is_empty() { None } else { Some(PathBuf::from(s)) }
+                            })
+                    });
+
+                if let Some(ref exe) = rr_support_cmd {
+                    info!(
+                        "RR trace detected, using ct-rr-support: {}",
+                        exe.display()
+                    );
+                    opts.ct_rr_worker_exe = rr_support_cmd;
+                } else {
+                    warn!(
+                        "RR trace detected at {} but ct-rr-support not found; \
+                         DAP init may fail",
+                        trace_path.display()
+                    );
+                }
+            }
+            opts
+        };
+
         // Run DAP init sequence.
         let dap_timeout = Duration::from_secs(30);
-        match dap_init::run_dap_init(&sender, &mut receiver, &trace_path, dap_timeout).await {
+        match dap_init::run_dap_init(&sender, &mut receiver, &trace_path, dap_timeout, &dap_launch_opts).await {
             Ok(_init_result) => {
                 info!(
                     "DAP init completed for trace {} (backend_id={backend_id})",
