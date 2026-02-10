@@ -961,8 +961,10 @@ fn handle_resources_read<'a>(
 
             // Read the source file via ct/py-read-source.  The daemon
             // handles this command by forwarding it to the backend as
-            // ct/read-source and returning the result.
-            let read_resp = match dap_request(
+            // ct/read-source and returning the result.  If the backend
+            // does not support ct/read-source, fall back to reading
+            // from the trace directory's `files/` subdirectory.
+            let read_resp = dap_request(
                 &mut stream,
                 "ct/py-read-source",
                 2,
@@ -972,28 +974,45 @@ fn handle_resources_read<'a>(
                 }),
                 10,
             )
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    return jsonrpc_error(id, -32603, &format!("Failed to read source file: {e}"));
+            .await;
+
+            let daemon_content = match &read_resp {
+                Ok(r) if r.get("success").and_then(Value::as_bool) == Some(true) => {
+                    let body = r.get("body").cloned().unwrap_or(json!({}));
+                    Some(
+                        body.get("content")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                    )
                 }
+                _ => None,
             };
 
-            if read_resp.get("success").and_then(Value::as_bool) != Some(true) {
-                let message = read_resp
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error");
-                return jsonrpc_error(
-                    id,
-                    -32603,
-                    &format!("Failed to read source file: {message}"),
-                );
-            }
-
-            let body = read_resp.get("body").cloned().unwrap_or(json!({}));
-            let content = body.get("content").and_then(Value::as_str).unwrap_or("");
+            let content = match daemon_content {
+                Some(c) => c,
+                None => match read_source_from_trace_dir(trace_path, file_path) {
+                    Ok(c) => c,
+                    Err(fs_err) => {
+                        let daemon_err = match &read_resp {
+                            Err(e) => e.to_string(),
+                            Ok(r) => r
+                                .get("message")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown error")
+                                .to_string(),
+                        };
+                        return jsonrpc_error(
+                            id,
+                            -32603,
+                            &format!(
+                                "Failed to read source file: daemon: {daemon_err}; \
+                                 filesystem fallback: {fs_err}"
+                            ),
+                        );
+                    }
+                },
+            };
 
             jsonrpc_result(
                 id,
@@ -1800,8 +1819,12 @@ async fn handle_read_source_file(
         );
     }
 
-    // Send ct/py-read-source to the daemon.
-    let read_resp = match dap_request(
+    // Send ct/py-read-source to the daemon.  If the backend does not
+    // support the ct/read-source command (e.g. the db-backend for RR
+    // traces), fall back to reading the file directly from the trace
+    // directory's `files/` subdirectory, where CodeTracer stores copies
+    // of all source files at recording time.
+    let read_resp = dap_request(
         &mut stream,
         "ct/py-read-source",
         2,
@@ -1811,41 +1834,94 @@ async fn handle_read_source_file(
         }),
         10,
     )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            let duration_ms = start.elapsed().as_millis();
-            return jsonrpc_result(
-                id,
-                tool_result_error_with_timing(
-                    &format!("Failed to read source file: {e}"),
-                    duration_ms,
-                ),
-            );
+    .await;
+
+    let daemon_content = match &read_resp {
+        Ok(r) if r.get("success").and_then(Value::as_bool) == Some(true) => {
+            let body = r.get("body").cloned().unwrap_or(json!({}));
+            Some(
+                body.get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        }
+        _ => None,
+    };
+
+    let content = match daemon_content {
+        Some(c) => c,
+        None => {
+            // Fallback: read directly from the trace directory.
+            // CodeTracer traces store source files under
+            // `<trace_dir>/files/<absolute_path>`, stripping any leading `/`.
+            match read_source_from_trace_dir(trace_path, file_path) {
+                Ok(c) => c,
+                Err(fs_err) => {
+                    // Both the daemon and the filesystem fallback failed.
+                    let daemon_err = match &read_resp {
+                        Err(e) => e.to_string(),
+                        Ok(r) => r
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown error")
+                            .to_string(),
+                    };
+                    let duration_ms = start.elapsed().as_millis();
+                    return jsonrpc_result(
+                        id,
+                        tool_result_error_with_timing(
+                            &format!(
+                                "Failed to read source file: daemon: {daemon_err}; \
+                                 filesystem fallback: {fs_err}"
+                            ),
+                            duration_ms,
+                        ),
+                    );
+                }
+            }
         }
     };
 
-    if read_resp.get("success").and_then(Value::as_bool) != Some(true) {
-        let duration_ms = start.elapsed().as_millis();
-        let message = read_resp
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown error");
-        return jsonrpc_result(
-            id,
-            tool_result_error_with_timing(
-                &format!("Failed to read source file: {message}"),
-                duration_ms,
-            ),
-        );
+    let duration_ms = start.elapsed().as_millis();
+    jsonrpc_result(id, tool_result_text_with_timing(&content, duration_ms))
+}
+
+// ---------------------------------------------------------------------------
+// Filesystem fallback for source file reading
+// ---------------------------------------------------------------------------
+
+/// Reads a source file directly from the trace directory's `files/`
+/// subdirectory.
+///
+/// CodeTracer traces store copies of all source files at recording time
+/// under `<trace_dir>/files/<absolute_path>`.  For example, a file
+/// originally at `/home/user/project/main.rs` is stored at
+/// `<trace_dir>/files/home/user/project/main.rs`.
+///
+/// This function serves as a fallback when the daemon's `ct/read-source`
+/// command is not supported by the backend (e.g. db-backend for RR traces).
+fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
+    let trace_dir = std::path::Path::new(trace_path);
+    let files_dir = trace_dir.join("files");
+
+    // Strip the leading `/` from absolute paths so the join works correctly.
+    let relative = file_path.strip_prefix('/').unwrap_or(file_path);
+    let full_path = files_dir.join(relative);
+
+    if !full_path.exists() {
+        return Err(format!(
+            "source file not found at {}",
+            full_path.display()
+        ));
     }
 
-    let body = read_resp.get("body").cloned().unwrap_or(json!({}));
-    let content = body.get("content").and_then(Value::as_str).unwrap_or("");
-
-    let duration_ms = start.elapsed().as_millis();
-    jsonrpc_result(id, tool_result_text_with_timing(content, duration_ms))
+    std::fs::read_to_string(&full_path).map_err(|e| {
+        format!(
+            "failed to read {}: {e}",
+            full_path.display()
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2076,5 +2152,55 @@ mod tests {
             find_source_suffix("/home/source/project/trace/source/main.nim"),
             Some("main.nim")
         );
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_success() {
+        // Create a temporary trace directory with a source file.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-success");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("files/home/user")).unwrap();
+        std::fs::write(tmp.join("files/home/user/main.rs"), "fn main() {}").unwrap();
+
+        let result =
+            read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "fn main() {}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_strips_leading_slash() {
+        // Verify that both "/home/user/main.rs" and "home/user/main.rs"
+        // resolve to the same file under `files/`.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-slash");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("files/home/user")).unwrap();
+        std::fs::write(tmp.join("files/home/user/main.rs"), "fn main() {}").unwrap();
+
+        let with_slash =
+            read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
+        let without_slash =
+            read_source_from_trace_dir(tmp.to_str().unwrap(), "home/user/main.rs");
+
+        assert_eq!(with_slash.unwrap(), "fn main() {}");
+        assert_eq!(without_slash.unwrap(), "fn main() {}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_missing_file() {
+        let tmp = std::env::temp_dir().join("ct-test-read-source-missing");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("files")).unwrap();
+
+        let result =
+            read_source_from_trace_dir(tmp.to_str().unwrap(), "/nonexistent/file.rs");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
