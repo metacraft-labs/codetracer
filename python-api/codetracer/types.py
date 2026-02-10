@@ -135,33 +135,45 @@ class Call:
     """A recorded function/method call.
 
     Attributes:
-        function_name: The callee's name.
-        location:      Source location of the call site.
-        arguments:     Captured argument values.
-        return_value:  The return value (None if the call has not returned yet).
+        function_name:  The callee's name.
+        location:       Source location of the call site.
+        arguments:      Captured argument values.
+        return_value:   The return value (None if the call has not returned yet).
+        id:             Unique call identifier within the call trace.
+        children_count: Number of direct child calls made by this function.
+        depth:          Nesting depth in the call tree (0 = top-level).
     """
 
     function_name: str
     location: Location
     arguments: list[Variable] = field(default_factory=list)
     return_value: Optional[Variable] = None
+    id: int = 0
+    children_count: int = 0
+    depth: int = 0
 
 
 @dataclass(frozen=True)
 class Event:
-    """A trace event (e.g. breakpoint hit, exception, signal).
+    """A trace event (e.g. stdout output, stderr output, signal).
 
     Attributes:
-        kind:     A short string classifying the event (e.g. "breakpoint").
+        kind:     A short string classifying the event (e.g. "stdout", "stderr").
         message:  Human-readable description.
         location: Where in the source the event occurred.
         data:     Arbitrary event-specific payload.
+        id:       Unique event identifier within the trace.
+        ticks:    Execution timestamp (rrTicks) when the event occurred.
+        content:  Raw content of the event (e.g. the actual stdout text).
     """
 
     kind: str
     message: str
     location: Optional[Location] = None
     data: Optional[dict[str, Any]] = None
+    id: int = 0
+    ticks: int = 0
+    content: str = ""
 
 
 @dataclass(frozen=True)

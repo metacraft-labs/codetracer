@@ -5108,3 +5108,737 @@ async fn m6_flow_modes_differ() {
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+// ===========================================================================
+// M7 Helper functions
+// ===========================================================================
+
+/// Sends `ct/py-calltrace` and returns the response (skipping interleaved events).
+async fn py_calltrace(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    start: i64,
+    count: i64,
+    depth: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-calltrace",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "start": start,
+            "count": count,
+            "depth": depth,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-calltrace: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-calltrace response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-calltrace response".to_string())?
+            .map_err(|e| format!("read ct/py-calltrace: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-calltrace: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-calltrace response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-search-calltrace` and returns the response (skipping interleaved events).
+async fn py_search_calltrace(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    query: &str,
+    limit: i64,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-search-calltrace",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "query": query,
+            "limit": limit,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-search-calltrace: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-search-calltrace response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-search-calltrace response".to_string())?
+            .map_err(|e| format!("read ct/py-search-calltrace: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-search-calltrace: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-search-calltrace response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-events` and returns the response (skipping interleaved events).
+async fn py_events(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    start: i64,
+    count: i64,
+    type_filter: Option<&str>,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let mut args = json!({
+        "tracePath": trace_path.to_string_lossy().to_string(),
+        "start": start,
+        "count": count,
+    });
+    if let Some(tf) = type_filter {
+        args["typeFilter"] = json!(tf);
+    }
+
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-events",
+        "seq": seq,
+        "arguments": args,
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-events: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-events response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-events response".to_string())?
+            .map_err(|e| format!("read ct/py-events: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-events: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-events response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-terminal` and returns the response (skipping interleaved events).
+async fn py_terminal(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-terminal",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "startLine": 0,
+            "endLine": -1,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-terminal: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-terminal response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-terminal response".to_string())?
+            .map_err(|e| format!("read ct/py-terminal: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-terminal: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-terminal response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+/// Sends `ct/py-read-source` and returns the response (skipping interleaved events).
+async fn py_read_source(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    source_path: &str,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-read-source",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy().to_string(),
+            "path": source_path,
+        }
+    });
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-read-source: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-read-source response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-read-source response".to_string())?
+            .map_err(|e| format!("read ct/py-read-source: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("py-read-source: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(log_path, &format!("ct/py-read-source response: {msg}"));
+        return Ok(msg);
+    }
+}
+
+// ===========================================================================
+// M7 Tests — Call Trace, Events, and Terminal
+// ===========================================================================
+
+/// M7-1. Open trace. Call ct/py-calltrace with start=0, count=20. Verify
+/// non-empty list of Call objects. Verify each has name (non-empty) and
+/// location populated.
+#[tokio::test]
+async fn m7_calltrace_returns_calls() {
+    let (test_dir, log_path) = setup_test_dir("m7_calltrace_calls");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-calltrace", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 70_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-calltrace with start=0, count=20.
+        let ct_resp =
+            py_calltrace(&mut client, 70_001, &trace_dir, 0, 20, 10, &log_path).await?;
+
+        assert_eq!(
+            ct_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-calltrace should succeed, got: {ct_resp}"
+        );
+        assert_eq!(
+            ct_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-calltrace"),
+            "command should be ct/py-calltrace"
+        );
+
+        let body = ct_resp.get("body").expect("response should have body");
+        let calls = body
+            .get("calls")
+            .and_then(Value::as_array)
+            .expect("body should have calls array");
+
+        // Verify non-empty list of calls.
+        assert!(
+            !calls.is_empty(),
+            "calls should be non-empty"
+        );
+
+        // Verify each call has a non-empty name and a populated location.
+        for (i, call) in calls.iter().enumerate() {
+            let name = call.get("name").and_then(Value::as_str).unwrap_or("");
+            assert!(
+                !name.is_empty(),
+                "call {i} should have a non-empty name, got: {call}"
+            );
+
+            let location = call.get("location");
+            assert!(
+                location.is_some() && location.unwrap().is_object(),
+                "call {i} should have a location object, got: {call}"
+            );
+
+            let path = location.unwrap().get("path").and_then(Value::as_str).unwrap_or("");
+            assert!(
+                !path.is_empty(),
+                "call {i} location should have a non-empty path, got: {call}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m7_calltrace_returns_calls", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M7-2. Call ct/py-search-calltrace with query="main". Verify results
+/// contain a call with "main" in the name.
+#[tokio::test]
+async fn m7_search_calltrace_finds_function() {
+    let (test_dir, log_path) = setup_test_dir("m7_search_calltrace");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-search", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 71_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Search for "main" in the calltrace.
+        let search_resp =
+            py_search_calltrace(&mut client, 71_001, &trace_dir, "main", 100, &log_path).await?;
+
+        assert_eq!(
+            search_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-search-calltrace should succeed, got: {search_resp}"
+        );
+
+        let body = search_resp.get("body").expect("response should have body");
+        let calls = body
+            .get("calls")
+            .and_then(Value::as_array)
+            .expect("body should have calls array");
+
+        // Verify results contain a call with "main" in the name.
+        let has_main = calls.iter().any(|c| {
+            c.get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .contains("main")
+        });
+        assert!(
+            has_main,
+            "search results should contain a call with 'main' in the name, got: {calls:?}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m7_search_calltrace_finds_function", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M7-3. Call ct/py-events with start=0, count=10. Verify non-empty list
+/// of Event objects. Verify each has id, type, and ticks.
+#[tokio::test]
+async fn m7_events_returns_events() {
+    let (test_dir, log_path) = setup_test_dir("m7_events");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-events", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 72_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-events with start=0, count=10, no type filter.
+        let events_resp =
+            py_events(&mut client, 72_001, &trace_dir, 0, 10, None, &log_path).await?;
+
+        assert_eq!(
+            events_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-events should succeed, got: {events_resp}"
+        );
+        assert_eq!(
+            events_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-events"),
+            "command should be ct/py-events"
+        );
+
+        let body = events_resp.get("body").expect("response should have body");
+        let events = body
+            .get("events")
+            .and_then(Value::as_array)
+            .expect("body should have events array");
+
+        // Verify non-empty list of events.
+        assert!(
+            !events.is_empty(),
+            "events should be non-empty"
+        );
+
+        // Verify each event has id, type, and ticks.
+        for (i, event) in events.iter().enumerate() {
+            assert!(
+                event.get("id").is_some(),
+                "event {i} should have 'id', got: {event}"
+            );
+
+            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
+            assert!(
+                !event_type.is_empty(),
+                "event {i} should have a non-empty 'type', got: {event}"
+            );
+
+            assert!(
+                event.get("ticks").is_some(),
+                "event {i} should have 'ticks', got: {event}"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m7_events_returns_events", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M7-4. Call ct/py-events with typeFilter="stdout". Verify all returned
+/// events have type "stdout".
+#[tokio::test]
+async fn m7_events_filter_by_type() {
+    let (test_dir, log_path) = setup_test_dir("m7_events_filter");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-filter", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 73_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-events with typeFilter="stdout".
+        let events_resp =
+            py_events(&mut client, 73_001, &trace_dir, 0, 100, Some("stdout"), &log_path).await?;
+
+        assert_eq!(
+            events_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-events (filtered) should succeed, got: {events_resp}"
+        );
+
+        let body = events_resp.get("body").expect("response should have body");
+        let events = body
+            .get("events")
+            .and_then(Value::as_array)
+            .expect("body should have events array");
+
+        // Verify non-empty (the mock has 2 stdout events).
+        assert!(
+            !events.is_empty(),
+            "filtered events should be non-empty"
+        );
+
+        // Verify all returned events have type "stdout".
+        for (i, event) in events.iter().enumerate() {
+            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
+            assert_eq!(
+                event_type, "stdout",
+                "event {i} should have type 'stdout', got '{event_type}'"
+            );
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m7_events_filter_by_type", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M7-5. Call ct/py-terminal. Verify non-empty string containing the
+/// program's stdout output.
+#[tokio::test]
+async fn m7_terminal_output_returns_text() {
+    let (test_dir, log_path) = setup_test_dir("m7_terminal");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-terminal", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace.
+        let resp = open_trace(&mut client, 74_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        // Call ct/py-terminal.
+        let term_resp = py_terminal(&mut client, 74_001, &trace_dir, &log_path).await?;
+
+        assert_eq!(
+            term_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-terminal should succeed, got: {term_resp}"
+        );
+        assert_eq!(
+            term_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-terminal"),
+            "command should be ct/py-terminal"
+        );
+
+        let body = term_resp.get("body").expect("response should have body");
+        let output = body
+            .get("output")
+            .and_then(Value::as_str)
+            .expect("body should have 'output' string");
+
+        // Verify non-empty string containing the program's stdout.
+        assert!(
+            !output.is_empty(),
+            "terminal output should be non-empty"
+        );
+        assert!(
+            output.contains("Hello, World!"),
+            "terminal output should contain 'Hello, World!', got: '{output}'"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m7_terminal_output_returns_text", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M7-6. Get a file path from trace.source_files (via ct/open-trace
+/// response). Call ct/py-read-source with that path. Verify non-empty
+/// string containing source code.
+#[tokio::test]
+async fn m7_read_source_returns_file_content() {
+    let (test_dir, log_path) = setup_test_dir("m7_read_source");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let trace_dir = create_test_trace_dir(&test_dir, "trace-m7-source", "main.nim");
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_mock_dap(&test_dir, &log_path, &[]).await;
+
+        let mut client = UnixStream::connect(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        // Open the trace and get source files list.
+        let resp = open_trace(&mut client, 75_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed"
+        );
+
+        let body = resp.get("body").expect("open-trace response should have body");
+        let source_files = body
+            .get("sourceFiles")
+            .and_then(Value::as_array)
+            .expect("body should have sourceFiles array");
+        assert!(
+            !source_files.is_empty(),
+            "sourceFiles should be non-empty"
+        );
+
+        // Use the first source file path. The mock returns source based
+        // on the path content (contains "main" -> returns nim source).
+        // The test trace_paths.json has "src/main.rs" which contains "main".
+        let first_source = source_files[0]
+            .as_str()
+            .expect("source file should be a string");
+
+        log_line(&log_path, &format!("reading source file: {first_source}"));
+
+        // Call ct/py-read-source with the path.
+        let source_resp =
+            py_read_source(&mut client, 75_001, &trace_dir, first_source, &log_path).await?;
+
+        assert_eq!(
+            source_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-read-source should succeed, got: {source_resp}"
+        );
+        assert_eq!(
+            source_resp.get("command").and_then(Value::as_str),
+            Some("ct/py-read-source"),
+            "command should be ct/py-read-source"
+        );
+
+        let src_body = source_resp.get("body").expect("response should have body");
+        let content = src_body
+            .get("content")
+            .and_then(Value::as_str)
+            .expect("body should have 'content' string");
+
+        // Verify non-empty string containing source code.
+        assert!(
+            !content.is_empty(),
+            "source content should be non-empty"
+        );
+
+        log_line(&log_path, &format!("source content: {content}"));
+
+        // Verify the content looks like source code (the mock returns
+        // nim-like source for paths containing "main").
+        assert!(
+            content.contains("proc") || content.contains("echo") || content.contains("fn")
+                || content.contains("def") || content.contains("main"),
+            "source content should contain recognizable code, got: '{content}'"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report("m7_read_source_returns_file_content", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
