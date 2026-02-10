@@ -6,6 +6,7 @@ mod config;
 mod dap_init;
 mod dap_parser;
 mod errors;
+pub mod mcp_server;
 mod paths;
 mod python_bridge;
 mod script_executor;
@@ -117,6 +118,18 @@ enum TraceAction {
         /// Path to the trace directory.
         trace_path: PathBuf,
     },
+    /// Start the MCP (Model Context Protocol) server on stdio.
+    ///
+    /// The MCP server exposes CodeTracer trace querying as tools for
+    /// LLM agents.  It communicates via JSON-RPC 2.0 over stdin/stdout,
+    /// following the Model Context Protocol specification.
+    ///
+    /// All diagnostic logging goes to stderr; stdout is reserved
+    /// exclusively for JSON-RPC messages.
+    ///
+    /// The server connects to the daemon (auto-starting if needed) to
+    /// execute tool operations.
+    Mcp,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1767,6 +1780,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             TraceAction::Info { trace_path } => {
                 return run_trace_info(trace_path, &daemon_socket_path, &daemon_pid_path).await;
+            }
+            TraceAction::Mcp => {
+                // MCP server: redirect all logging to stderr only.
+                // stdout is reserved exclusively for JSON-RPC transport.
+                if let Err(e) = flexi_logger::Logger::try_with_str("info")
+                    .and_then(|l| l.log_to_stderr().start())
+                {
+                    eprintln!("Warning: could not configure MCP logging: {e}");
+                }
+                let config = mcp_server::McpServerConfig {
+                    daemon_socket_path: daemon_socket_path.clone(),
+                    daemon_pid_path: daemon_pid_path.clone(),
+                };
+                return mcp_server::run_mcp_server(config).await;
             }
         }
     }
