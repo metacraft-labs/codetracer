@@ -66,6 +66,14 @@ pub struct Handler {
     pub tracepoint_rr_worker_index: usize,
 
     pub initialized: bool,
+
+    /// Cached list of all program events loaded from the trace.
+    ///
+    /// Populated on the first `ct/event-load` request and reused for
+    /// subsequent paginated requests so that `replay.load_events()` is
+    /// only called once.  This avoids the >30s timeout that occurs when
+    /// every `ct/py-events` request re-reads all events from disk.
+    cached_events: Option<Vec<ProgramEvent>>,
 }
 
 // two choices:
@@ -128,6 +136,7 @@ impl Handler {
             resulting_dap_messages: vec![],
             raw_diff_index: None,
             initialized: false,
+            cached_events: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -720,20 +729,83 @@ impl Handler {
         Ok(())
     }
 
-    pub fn event_load(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        let events_data = self.replay.load_events()?;
+    /// Loads program events with optional pagination.
+    ///
+    /// On the first call, events are loaded from the replay backend and
+    /// cached in `self.cached_events`.  Subsequent calls reuse the cache.
+    /// The DAP request arguments may contain `start` (0-based offset) and
+    /// `count` (max events to return).  When both are absent or zero, the
+    /// first 20 events are returned for backwards compatibility.
+    ///
+    /// The daemon (`handle_py_events`) already forwards `start`/`count`
+    /// from the Python API to this handler as part of the
+    /// `ct/event-load` arguments.
+    pub fn event_load(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        // Parse optional pagination parameters from the request.
+        let start = req
+            .arguments
+            .get("start")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            .max(0) as usize;
+        let count = req
+            .arguments
+            .get("count")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            .max(0) as usize;
 
-        let events = events_data.events;
-        let first_events = events_data.first_events;
-        let contents = events_data.contents;
+        // Load and cache events on first request.
+        if self.cached_events.is_none() {
+            let events_data = self.replay.load_events()?;
 
-        self.event_db.register_events(DbEventKind::Record, &events, vec![-1]);
-        self.event_db.refresh_global();
+            // Register all events in the event database (needed by
+            // tracepoints, terminal output, etc.).
+            self.event_db
+                .register_events(DbEventKind::Record, &events_data.events, vec![-1]);
+            self.event_db.refresh_global();
 
-        let raw_event = self.dap_client.updated_events(first_events)?;
+            self.cached_events = Some(events_data.events);
+        }
+
+        // Safety: `cached_events` was just populated in the block above, so
+        // `None` here indicates a logic error.
+        let all_events = match self.cached_events.as_ref() {
+            Some(events) => events,
+            None => {
+                return Err("internal error: cached_events is None after population".into());
+            }
+        };
+
+        // Determine the slice to return.
+        let (page_events, page_contents) = if count > 0 {
+            // Explicit pagination: return the requested window.
+            let clamped_start = start.min(all_events.len());
+            let clamped_end = (clamped_start + count).min(all_events.len());
+            let slice = &all_events[clamped_start..clamped_end];
+            let contents = slice
+                .iter()
+                .map(|e| e.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (slice.to_vec(), contents)
+        } else {
+            // Legacy behaviour: return the first 20 events (matches
+            // the original `first_events` semantics).
+            let n = all_events.len().min(20);
+            let slice = &all_events[..n];
+            let contents = slice
+                .iter()
+                .map(|e| e.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (slice.to_vec(), contents)
+        };
+
+        let raw_event = self.dap_client.updated_events(page_events)?;
         sender.send(raw_event)?;
 
-        let raw_event_content = self.dap_client.updated_events_content(contents)?;
+        let raw_event_content = self.dap_client.updated_events_content(page_contents)?;
         sender.send(raw_event_content)?;
 
         Ok(())
