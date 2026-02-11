@@ -62,7 +62,11 @@ const SERVER_NAME: &str = "codetracer-trace-query";
 const SERVER_VERSION: &str = "0.1.0";
 
 /// Default script execution timeout in seconds.
-const DEFAULT_SCRIPT_TIMEOUT: u64 = 30;
+///
+/// 120 s is generous enough for large Python DB traces (which can be
+/// 50–100 MB and require loading the full event table before answering
+/// calltrace / terminal_output queries).
+const DEFAULT_SCRIPT_TIMEOUT: u64 = 120;
 
 /// URI scheme prefix for trace resources.
 ///

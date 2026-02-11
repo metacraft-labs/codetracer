@@ -692,6 +692,8 @@ fn task_thread(
                 // assuming it's for individual requests to fail
                 //   TODO: is it possible for some to leave bad state ?
             }
+        } else {
+            warn!("  handler NOT initialized, dropping {:?}", request.command);
         }
     }
     // Ok(())

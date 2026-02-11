@@ -33,7 +33,11 @@ use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
 /// Default timeout for script execution in seconds.
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+///
+/// 120 s is generous enough for large Python DB traces (which can be
+/// 50–100 MB and require loading the full event table before answering
+/// calltrace / terminal_output queries).
+pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Exit code returned when a script exceeds its timeout.
 ///
