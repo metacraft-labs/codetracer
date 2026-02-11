@@ -4264,7 +4264,10 @@ impl BackendManager {
         };
 
         // Run DAP init sequence.
-        let dap_timeout = Duration::from_secs(30);
+        // Large DB traces (e.g. 96 MB Python traces) can take significant
+        // time to parse and post-process.  Use a generous per-step timeout
+        // so that `setup()` in db-backend has time to complete.
+        let dap_timeout = Duration::from_secs(120);
         match dap_init::run_dap_init(
             &sender,
             &mut receiver,

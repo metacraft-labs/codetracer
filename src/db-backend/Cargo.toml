@@ -30,7 +30,7 @@ schemars-zod = "0.1.5"
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
-runtime_tracing = "0.14.1"
+runtime_tracing = { path = "../../libs/runtime_tracing/runtime_tracing" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
 

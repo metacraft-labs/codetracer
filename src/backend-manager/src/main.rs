@@ -1829,12 +1829,15 @@ async fn run_trace_info(
         .to_string();
 
     // First, open the trace so that trace-info has session data to return.
+    // Large traces (e.g. 96 MB Python traces) may take a while to load,
+    // so we use a generous timeout.  The daemon's internal DAP init can
+    // take up to 4 * 30 s = 120 s, and trace processing adds more time.
     let open_resp = cli_dap_request(
         &mut stream,
         "ct/open-trace",
         1,
         json!({"tracePath": trace_path_str}),
-        30,
+        180,
     )
     .await?;
 
