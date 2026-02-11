@@ -186,6 +186,11 @@ and raise `StopIteration` at trace boundaries.
 
 ## Data Types
 
+All data types support both attribute access (`var.name`) and dict-style
+access (`var['name']`).  Common aliases: `call['function']` for
+`call.function_name`, `var['type']` for `var.type_name`.  Use
+`obj.get('key', default)` for safe access with a fallback.
+
 ### Location
 - `path: str` - Source file path
 - `line: int` - Line number (1-based)
@@ -194,7 +199,7 @@ and raise `StopIteration` at trace boundaries.
 ### Variable
 - `name: str` - Variable name
 - `value: str` - String representation of the value
-- `type_name: str | None` - Type name (language-specific)
+- `type_name: str | None` - Type name (also accessible as `var['type']`)
 - `children: list[Variable]` - Nested fields/elements
 
 ### Frame
@@ -220,12 +225,12 @@ and raise `StopIteration` at trace boundaries.
 - `iteration_count: int` - Total iterations
 
 ### Call
-- `function_name: str` - Function name
+- `function_name: str` - Function name (also accessible as `call['function']`)
 - `location: Location` - Call site location
 - `return_value: Variable | None` - Return value (if available)
 - `id: int` - Call identifier
 - `children_count: int` - Number of child calls
-- `depth: int` - Call tree depth
+- `depth: int` - Call tree depth (0 = top-level)
 
 ### Event
 - `kind: str` - Event type ("stdout", "stderr", etc.)
@@ -394,6 +399,35 @@ print(f"Now at {trace.location.path}:{trace.location.line}")
 for v in trace.locals():
     print(f"  {v.name} = {v.value}")
 ```
+
+## Example 7: Explore the call trace
+
+```python
+# List all function calls recorded in the trace
+for call in trace.calltrace():
+    indent = "  " * call.depth
+    print(f"{indent}{call.function_name} at {call.location.path}:{call.location.line}")
+
+# Search for specific function calls
+for call in trace.search_calltrace("process"):
+    print(f"{call.function_name}: {call.children_count} child calls")
+```
+
+## Example 8: Read program output
+
+```python
+# Get everything the program printed to stdout/stderr
+output = trace.terminal_output()
+print(output)
+```
+
+## Tips
+
+- All data types support both attribute and dict-style access:
+  `var.name` and `var['name']` are equivalent.
+- Common aliases: `call['function']` for `call.function_name`,
+  `var['type']` for `var.type_name`.
+- Use `var.get('field', default)` for safe access with a fallback.
 "#
 }
 

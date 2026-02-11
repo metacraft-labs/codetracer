@@ -3,16 +3,75 @@
 These dataclasses represent the core entities that a recorded program
 execution exposes: source locations, variables, call frames, control-flow
 steps, and high-level constructs such as loops and function calls.
+
+All types support both attribute and dictionary-style access, so that
+``var.name`` and ``var['name']`` are interchangeable.  Common short
+aliases are also supported (e.g. ``call['function']`` resolves to
+``call.function_name``, ``var['type']`` resolves to ``var.type_name``).
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
+class DictAccessMixin:
+    """Mixin providing dict-like access to frozen dataclass fields.
+
+    LLM agents frequently try dictionary-style access on dataclass
+    instances (``call['function']``, ``var.get('type')``).  This mixin
+    makes both patterns work transparently.
+
+    Subclasses may define ``_ALIASES`` as a class-level dict mapping
+    short names to the actual field names.  For example::
+
+        _ALIASES = {'function': 'function_name'}
+
+    allows ``call['function']`` to resolve to ``call.function_name``.
+    """
+
+    _ALIASES: dict[str, str] = {}
+
+    def _resolve_key(self, key: str) -> str:
+        """Map *key* through ``_ALIASES``, falling back to *key* itself."""
+        aliases = getattr(self.__class__, "_ALIASES", {})
+        return aliases.get(key, key)
+
+    def __getitem__(self, key: str) -> Any:
+        resolved = self._resolve_key(key)
+        try:
+            return getattr(self, resolved)
+        except AttributeError:
+            raise KeyError(key) from None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Return ``self[key]`` if *key* exists, else *default*."""
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: str) -> bool:
+        resolved = self._resolve_key(key)
+        return hasattr(self, resolved)
+
+    def keys(self) -> list[str]:
+        """Return the list of field names (like ``dict.keys()``)."""
+        return [f.name for f in dataclasses.fields(self)]
+
+    def values(self) -> list[Any]:
+        """Return the list of field values (like ``dict.values()``)."""
+        return [getattr(self, f.name) for f in dataclasses.fields(self)]
+
+    def items(self) -> list[tuple[str, Any]]:
+        """Return ``(name, value)`` pairs (like ``dict.items()``)."""
+        return [(f.name, getattr(self, f.name)) for f in dataclasses.fields(self)]
+
+
 @dataclass(frozen=True)
-class Location:
+class Location(DictAccessMixin):
     """A source-code location (path, line, optional column).
 
     Attributes:
@@ -32,7 +91,7 @@ class Location:
 
 
 @dataclass(frozen=True)
-class Variable:
+class Variable(DictAccessMixin):
     """A captured variable value at a specific point in execution.
 
     Attributes:
@@ -43,6 +102,9 @@ class Variable:
                    up to the requested depth limit.
     """
 
+    # Allow ``var['type']`` as shorthand for ``var.type_name``.
+    _ALIASES = {"type": "type_name"}
+
     name: str
     value: str
     type_name: Optional[str] = None
@@ -50,7 +112,7 @@ class Variable:
 
 
 @dataclass(frozen=True)
-class Frame:
+class Frame(DictAccessMixin):
     """A single call-frame on the execution stack.
 
     Attributes:
@@ -59,13 +121,16 @@ class Frame:
         variables:     Variables visible in this frame's scope.
     """
 
+    # Allow ``frame['function']`` as shorthand for ``frame.function_name``.
+    _ALIASES = {"function": "function_name"}
+
     function_name: str
     location: Location
     variables: list[Variable] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
-class FlowStep:
+class FlowStep(DictAccessMixin):
     """One step in a value trace (a single executed source line).
 
     Each step captures the variable state before and after execution of
@@ -99,7 +164,7 @@ ValueTraceStep = FlowStep
 
 
 @dataclass(frozen=True)
-class Flow:
+class Flow(DictAccessMixin):
     """A value trace: a contiguous sequence of executed steps with variable values.
 
     Value trace (omniscience) is CodeTracer's signature feature: it shows all
@@ -120,7 +185,7 @@ ValueTrace = Flow
 
 
 @dataclass(frozen=True)
-class Loop:
+class Loop(DictAccessMixin):
     """A detected loop in the execution trace.
 
     Attributes:
@@ -141,7 +206,7 @@ class Loop:
 
 
 @dataclass(frozen=True)
-class Call:
+class Call(DictAccessMixin):
     """A recorded function/method call.
 
     Attributes:
@@ -154,6 +219,9 @@ class Call:
         depth:          Nesting depth in the call tree (0 = top-level).
     """
 
+    # Allow ``call['function']`` as shorthand for ``call.function_name``.
+    _ALIASES = {"function": "function_name"}
+
     function_name: str
     location: Location
     arguments: list[Variable] = field(default_factory=list)
@@ -164,7 +232,7 @@ class Call:
 
 
 @dataclass(frozen=True)
-class Event:
+class Event(DictAccessMixin):
     """A trace event (e.g. stdout output, stderr output, signal).
 
     Attributes:
@@ -187,7 +255,7 @@ class Event:
 
 
 @dataclass(frozen=True)
-class Process:
+class Process(DictAccessMixin):
     """A process in a multi-process trace.
 
     Multi-process traces contain multiple recorded processes that can be

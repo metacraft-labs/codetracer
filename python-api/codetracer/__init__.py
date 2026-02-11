@@ -4,6 +4,7 @@ Navigate, inspect, and analyze recorded program executions.
 """
 from codetracer.trace import Trace, open_trace
 from codetracer.types import (
+    DictAccessMixin,
     Location,
     Variable,
     Frame,
@@ -27,6 +28,7 @@ __version__ = "0.1.0"
 __all__ = [
     "Trace",
     "open_trace",
+    "DictAccessMixin",
     "Location",
     "Variable",
     "Frame",
