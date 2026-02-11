@@ -80,7 +80,7 @@ const TRACE_URI_PREFIX: &str = "trace://";
 fn exec_script_tool() -> Value {
     json!({
         "name": "exec_script",
-        "description": "Execute a Python script against a CodeTracer trace file. The script uses the CodeTracer Trace Query API to navigate, inspect, and analyze the recorded program execution. The `trace` variable is pre-bound to the opened trace.",
+        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Flow: trace.flow(path, line, mode='call') -> Flow with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -96,6 +96,10 @@ fn exec_script_tool() -> Value {
                     "type": "number",
                     "description": "Maximum execution time in seconds (default: 30)",
                     "default": 30
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session identifier.  When provided, execution state (breakpoints, current position) is preserved between calls with the same session_id.  Omit for one-shot scripts.  Use a descriptive name like 'debug-1'."
                 }
             },
             "required": ["trace_path", "script"]
@@ -288,6 +292,19 @@ and raise `StopIteration` at trace boundaries.
 ### Source Files
 - `trace.read_source(path: str) -> str` - Read a source file's content.
 
+## Sessions
+
+Use the `session_id` parameter in `exec_script` to maintain execution state
+(breakpoints, current position) across multiple calls.  This enables
+incremental debugging — set a breakpoint in one call, step through code
+in the next, inspect variables in a third.
+
+Without `session_id`, each `exec_script` call starts a fresh trace session
+that is discarded when the script ends.
+
+**Tip**: Prefer short, focused scripts with sessions over long monolithic
+scripts.  If one step fails, you can adjust without losing prior state.
+
 ## Example 1: Print location and local variables
 
 ```python
@@ -352,6 +369,29 @@ stack = trace.stack_trace()
 print(f"Call stack depth: {len(stack)}")
 for frame in stack:
     print(f"  {frame.function_name} at {frame.location.path}:{frame.location.line}")
+```
+
+## Example 6: Incremental debugging with sessions
+
+Use `session_id` to preserve state across multiple `exec_script` calls:
+
+**Call 1** (session_id="dbg"):
+```python
+# Set a breakpoint and run to it
+bp = trace.add_breakpoint(trace.source_files[0], 42)
+trace.continue_forward()
+print(f"Stopped at {trace.location.path}:{trace.location.line}")
+for v in trace.locals():
+    print(f"  {v.name} = {v.value}")
+```
+
+**Call 2** (same session_id="dbg"):
+```python
+# Breakpoint and position are preserved — step forward
+trace.step_over()
+print(f"Now at {trace.location.path}:{trace.location.line}")
+for v in trace.locals():
+    print(f"  {v.name} = {v.value}")
 ```
 "#
 }
@@ -1310,6 +1350,12 @@ async fn handle_exec_script(
         .and_then(Value::as_u64)
         .unwrap_or(DEFAULT_SCRIPT_TIMEOUT);
 
+    // Optional session ID for persistent debugging sessions.  When provided,
+    // execution state (breakpoints, position) is preserved across calls.
+    let session_id = arguments
+        .and_then(|a| a.get("session_id"))
+        .and_then(Value::as_str);
+
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
         Err(e) => {
@@ -1326,15 +1372,19 @@ async fn handle_exec_script(
 
     // Send ct/exec-script to the daemon.
     // Use a generous deadline: script timeout + overhead for trace opening.
+    let mut exec_args = json!({
+        "tracePath": trace_path,
+        "script": script,
+        "timeout": timeout_seconds,
+    });
+    if let Some(sid) = session_id {
+        exec_args["sessionId"] = json!(sid);
+    }
     let resp = match dap_request(
         &mut stream,
         "ct/exec-script",
         1,
-        json!({
-            "tracePath": trace_path,
-            "script": script,
-            "timeout": timeout_seconds,
-        }),
+        exec_args,
         timeout_seconds + 30,
     )
     .await
@@ -1922,18 +1972,11 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
     let full_path = files_dir.join(relative);
 
     if !full_path.exists() {
-        return Err(format!(
-            "source file not found at {}",
-            full_path.display()
-        ));
+        return Err(format!("source file not found at {}", full_path.display()));
     }
 
-    std::fs::read_to_string(&full_path).map_err(|e| {
-        format!(
-            "failed to read {}: {e}",
-            full_path.display()
-        )
-    })
+    std::fs::read_to_string(&full_path)
+        .map_err(|e| format!("failed to read {}: {e}", full_path.display()))
 }
 
 // ---------------------------------------------------------------------------
@@ -2174,8 +2217,7 @@ mod tests {
         std::fs::create_dir_all(tmp.join("files/home/user")).unwrap();
         std::fs::write(tmp.join("files/home/user/main.rs"), "fn main() {}").unwrap();
 
-        let result =
-            read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
+        let result = read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "fn main() {}");
 
@@ -2191,10 +2233,8 @@ mod tests {
         std::fs::create_dir_all(tmp.join("files/home/user")).unwrap();
         std::fs::write(tmp.join("files/home/user/main.rs"), "fn main() {}").unwrap();
 
-        let with_slash =
-            read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
-        let without_slash =
-            read_source_from_trace_dir(tmp.to_str().unwrap(), "home/user/main.rs");
+        let with_slash = read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
+        let without_slash = read_source_from_trace_dir(tmp.to_str().unwrap(), "home/user/main.rs");
 
         assert_eq!(with_slash.unwrap(), "fn main() {}");
         assert_eq!(without_slash.unwrap(), "fn main() {}");
@@ -2208,8 +2248,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("files")).unwrap();
 
-        let result =
-            read_source_from_trace_dir(tmp.to_str().unwrap(), "/nonexistent/file.rs");
+        let result = read_source_from_trace_dir(tmp.to_str().unwrap(), "/nonexistent/file.rs");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
 

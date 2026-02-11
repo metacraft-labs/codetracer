@@ -19,8 +19,8 @@ use crate::paths::CODETRACER_PATHS;
 use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
-    FunctionLocation, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg, SourceCallJumpTarget,
-    SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
+    FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
+    SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
@@ -314,6 +314,7 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/source-call-jump" => {
             handler.source_call_jump(req.clone(), req.load_args::<SourceCallJumpTarget>()?, sender.clone())?
         }
+        "ct/goto-ticks" => handler.goto_ticks(req.clone(), req.load_args::<GoToTicksArguments>()?, sender.clone())?,
         "ct/local-step-jump" => {
             handler.local_step_jump(req.clone(), req.load_args::<LocalStepJump>()?, sender.clone())?
         }

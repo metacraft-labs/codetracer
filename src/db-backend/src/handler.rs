@@ -28,10 +28,10 @@ use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAn
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CalltraceLoadArgs,
     CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
-    FrameInfo, FunctionLocation, HistoryUpdate, Instruction, Instructions, LoadHistoryArg, LoadStepLinesArg,
-    LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind, ProgramEvent,
-    RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
-    Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_ADDRESS,
+    FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
+    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
+    ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
+    StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_ADDRESS,
     NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
@@ -1527,6 +1527,22 @@ impl Handler {
         //     false,
         // ))?;
         // self.return_void(task)?;
+        Ok(())
+    }
+
+    /// Jump the replay to a specific execution timestamp (RR ticks / step ID).
+    ///
+    /// Used by the Python API `trace.goto_ticks(n)` to navigate directly to
+    /// a known point in the execution trace.
+    pub fn goto_ticks(
+        &mut self,
+        _req: dap::Request,
+        arg: GoToTicksArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.replay.jump_to(StepId(arg.ticks))?;
+        self.step_id = self.replay.current_step_id();
+        self.complete_move(false, sender)?;
         Ok(())
     }
 
