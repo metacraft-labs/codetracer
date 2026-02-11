@@ -729,6 +729,29 @@ impl Handler {
         Ok(())
     }
 
+    /// Ensure program events are loaded and cached.
+    ///
+    /// On the first call, events are loaded from the replay backend,
+    /// registered in the event database, and cached in `self.cached_events`.
+    /// Subsequent calls are no-ops (the cache is already populated).
+    ///
+    /// Both `event_load()` and `load_terminal()` call this to share
+    /// the same cached event data.
+    fn ensure_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.cached_events.is_none() {
+            let events_data = self.replay.load_events()?;
+
+            // Register all events in the event database (needed by
+            // tracepoints, terminal output, etc.).
+            self.event_db
+                .register_events(DbEventKind::Record, &events_data.events, vec![-1]);
+            self.event_db.refresh_global();
+
+            self.cached_events = Some(events_data.events);
+        }
+        Ok(())
+    }
+
     /// Loads program events with optional pagination.
     ///
     /// On the first call, events are loaded from the replay backend and
@@ -755,21 +778,9 @@ impl Handler {
             .unwrap_or(0)
             .max(0) as usize;
 
-        // Load and cache events on first request.
-        if self.cached_events.is_none() {
-            let events_data = self.replay.load_events()?;
+        self.ensure_events_loaded()?;
 
-            // Register all events in the event database (needed by
-            // tracepoints, terminal output, etc.).
-            self.event_db
-                .register_events(DbEventKind::Record, &events_data.events, vec![-1]);
-            self.event_db.refresh_global();
-
-            self.cached_events = Some(events_data.events);
-        }
-
-        // Safety: `cached_events` was just populated in the block above, so
-        // `None` here indicates a logic error.
+        // Safety: `ensure_events_loaded` guarantees `cached_events` is Some.
         let all_events = match self.cached_events.as_ref() {
             Some(events) => events,
             None => {
@@ -1828,18 +1839,53 @@ impl Handler {
         }
     }
 
-    pub fn load_terminal(&mut self, _req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        let mut events_list: Vec<ProgramEvent> = vec![];
-        if !self.event_db.single_tables.is_empty() {
-            for event_record in self.event_db.single_tables[0].events.iter() {
-                if event_record.kind == EventLogKind::Write {
-                    events_list.push(event_record.clone());
-                }
-            }
+    /// Loads terminal output (stdout/stderr Write events) from the trace.
+    ///
+    /// Ensures events are loaded via the shared cache, then filters for
+    /// `EventLogKind::Write` events and returns them as a
+    /// `ct/loaded-terminal` event.
+    ///
+    /// The request may include `startLine` and `endLine` parameters for
+    /// pagination (forwarded by the daemon from the Python API).
+    pub fn load_terminal(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        self.ensure_events_loaded()?;
 
-            let raw_event = self.dap_client.loaded_terminal_event(events_list)?;
-            sender.send(raw_event)?;
-        }
+        let empty: Vec<ProgramEvent> = vec![];
+        let all_events = self.cached_events.as_ref().unwrap_or(&empty);
+
+        // Collect Write events (terminal output).
+        let write_events: Vec<ProgramEvent> = all_events
+            .iter()
+            .filter(|e| e.kind == EventLogKind::Write)
+            .cloned()
+            .collect();
+
+        // Apply optional line-based pagination (startLine / endLine).
+        let start_line = req
+            .arguments
+            .get("startLine")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            .max(0) as usize;
+        let end_line = req
+            .arguments
+            .get("endLine")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(-1);
+
+        let page = if end_line >= 0 {
+            let end = (end_line as usize + 1).min(write_events.len());
+            let start = start_line.min(end);
+            write_events[start..end].to_vec()
+        } else {
+            // No end_line specified (-1): return all Write events from
+            // start_line onward.
+            let start = start_line.min(write_events.len());
+            write_events[start..].to_vec()
+        };
+
+        let raw_event = self.dap_client.loaded_terminal_event(page)?;
+        sender.send(raw_event)?;
 
         Ok(())
     }
