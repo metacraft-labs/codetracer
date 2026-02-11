@@ -281,10 +281,24 @@ pub async fn run_dap_init(
     // struct expects `traceFolder`, `program`, `pid`, and optionally
     // `ctRRWorkerExe` for RR-based traces.
     //
+    // The `trace_file` field tells db-backend which events file to load.
+    // Python/Ruby/WASM recorders produce `trace.bin` (binary CBOR+zstd),
+    // while some older or test fixtures use `trace.json`.  We probe the
+    // trace directory and prefer `.bin` when present.
+    //
     // Reference: codetracer/src/db-backend/src/dap.rs — `LaunchRequestArguments`
     let trace_folder_str = trace_folder.to_string_lossy().to_string();
+
+    // Detect the trace events file: prefer trace.bin over trace.json.
+    let trace_file = if trace_folder.join("trace.bin").is_file() {
+        "trace.bin"
+    } else {
+        "trace.json"
+    };
+
     let mut launch_args = json!({
         "traceFolder": trace_folder_str,
+        "trace_file": trace_file,
         "program": "main",
         "pid": std::process::id(),
     });

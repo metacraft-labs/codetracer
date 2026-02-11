@@ -479,7 +479,14 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 if let Some(trace_file) = &args.trace_file {
                     ctx.launch_trace_file = trace_file.clone();
                 } else {
-                    ctx.launch_trace_file = "trace.json".into();
+                    // Auto-detect: prefer trace.bin (binary CBOR+zstd from
+                    // Python/Ruby/WASM recorders) over trace.json.
+                    let bin_path = folder.join("trace.bin");
+                    if bin_path.is_file() {
+                        ctx.launch_trace_file = "trace.bin".into();
+                    } else {
+                        ctx.launch_trace_file = "trace.json".into();
+                    }
                 }
 
                 // TODO: log this when logging logic is properly abstracted
