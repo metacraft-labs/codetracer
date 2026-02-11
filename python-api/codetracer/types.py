@@ -66,7 +66,7 @@ class Frame:
 
 @dataclass(frozen=True)
 class FlowStep:
-    """One step in an execution flow (a single executed source line).
+    """One step in a value trace (a single executed source line).
 
     Each step captures the variable state before and after execution of
     the line, along with loop context (which loop iteration the step
@@ -93,20 +93,30 @@ class FlowStep:
     step_index: Optional[int] = None
 
 
+# ValueTraceStep is the preferred name; FlowStep is retained for
+# backwards compatibility.
+ValueTraceStep = FlowStep
+
+
 @dataclass(frozen=True)
 class Flow:
-    """An execution flow: a contiguous sequence of executed steps.
+    """A value trace: a contiguous sequence of executed steps with variable values.
 
-    Flow (omniscience) is CodeTracer's signature feature: it shows all
+    Value trace (omniscience) is CodeTracer's signature feature: it shows all
     variable values across execution of a function or a specific line.
 
     Attributes:
-        steps: Ordered list of flow steps.
-        loops: Detected loops within the flow.
+        steps: Ordered list of value trace steps.
+        loops: Detected loops within the value trace.
     """
 
     steps: list[FlowStep] = field(default_factory=list)
     loops: list["Loop"] = field(default_factory=list)
+
+
+# ValueTrace is the preferred name; Flow is retained for backwards
+# compatibility.
+ValueTrace = Flow
 
 
 @dataclass(frozen=True)

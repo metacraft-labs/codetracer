@@ -80,7 +80,7 @@ const TRACE_URI_PREFIX: &str = "trace://";
 fn exec_script_tool() -> Value {
     json!({
         "name": "exec_script",
-        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Flow: trace.flow(path, line, mode='call') -> Flow with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
+        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -201,7 +201,7 @@ and raise `StopIteration` at trace boundaries.
 - `function_name: str` - Function name
 - `location: Location` - Source location
 
-### FlowStep
+### FlowStep (also available as ValueTraceStep)
 - `location: Location` - Source location of this step
 - `ticks: int` - Execution timestamp
 - `loop_id: int` - Loop identifier (0 = not in loop)
@@ -209,7 +209,7 @@ and raise `StopIteration` at trace boundaries.
 - `before_values: dict[str, str]` - Variable values before step
 - `after_values: dict[str, str]` - Variable values after step
 
-### Flow
+### Flow (also available as ValueTrace)
 - `steps: list[FlowStep]` - Execution steps
 - `loops: list[Loop]` - Loop information
 
@@ -271,10 +271,11 @@ and raise `StopIteration` at trace boundaries.
 - `trace.add_watchpoint(expression: str) -> int` - Watch for value changes, returns ID
 - `trace.remove_watchpoint(wp_id: int)` - Remove a watchpoint by ID
 
-### Flow (Omniscience)
-- `trace.flow(path: str, line: int, mode="call") -> Flow`
-  - Get execution flow data for a line.
+### Value Trace (Omniscience)
+- `trace.value_trace(path: str, line: int, mode="call") -> ValueTrace`
+  - Get value-trace (omniscience) data for a line: all variable values across execution.
   - `mode="call"`: full function scope.  `mode="line"`: single line.
+  - `trace.flow(...)` is a deprecated alias for `trace.value_trace(...)`.
 
 ### Call Trace
 - `trace.calltrace(start=0, count=50, depth=10) -> list[Call]`
@@ -344,16 +345,16 @@ except StopIteration:
 trace.remove_breakpoint(bp)
 ```
 
-## Example 4: Analyze a loop with flow/omniscience
+## Example 4: Analyze a loop with value trace (omniscience)
 
 ```python
 # Use trace.location.path to dynamically pick the file
 path = trace.location.path
 line = trace.location.line
-flow = trace.flow(path, line, mode="call")
-for loop in flow.loops:
+vt = trace.value_trace(path, line, mode="call")
+for loop in vt.loops:
     print(f"Loop at lines {loop.start_line}-{loop.end_line}: {loop.iteration_count} iterations")
-for step in flow.steps:
+for step in vt.steps:
     if step.loop_id > 0:
         print(f"  iter {step.iteration}: {step.after_values}")
 ```
