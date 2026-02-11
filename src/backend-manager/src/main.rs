@@ -121,8 +121,8 @@ enum TraceAction {
         #[arg(short = 'c', long = "code")]
         code: Option<String>,
 
-        /// Execution timeout in seconds.
-        #[arg(long, default_value_t = 30)]
+        /// Execution timeout in seconds (default: 120).
+        #[arg(long, default_value_t = 120)]
         timeout: u64,
 
         /// Reusable session identifier for stateful debugging.
