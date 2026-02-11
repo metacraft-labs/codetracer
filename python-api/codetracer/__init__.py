@@ -13,6 +13,8 @@ from codetracer.types import (
     Call,
     Event,
     Process,
+    ValueTrace,
+    ValueTraceStep,
 )
 from codetracer.exceptions import (
     TraceError,
@@ -30,6 +32,8 @@ __all__ = [
     "Frame",
     "FlowStep",
     "Flow",
+    "ValueTrace",
+    "ValueTraceStep",
     "Loop",
     "Call",
     "Event",

@@ -26,6 +26,7 @@ from codetracer.types import (
     Location,
     Loop,
     Process,
+    ValueTrace,
     Variable,
 )
 from codetracer.exceptions import (
@@ -706,10 +707,10 @@ class Trace:
                 response.get("message", "remove_watchpoint() failed")
             )
 
-    # --- Flow / structure ---
+    # --- Value Trace (formerly "flow") / structure ---
 
-    def flow(self, path: str, line: int, mode: str = "call") -> Flow:
-        """Return flow/omniscience data for a code location.
+    def value_trace(self, path: str, line: int, mode: str = "call") -> ValueTrace:
+        """Return value-trace (omniscience) data for a code location.
 
         Shows all variable values across execution of a function or line.
         This is CodeTracer's signature feature.
@@ -723,7 +724,7 @@ class Trace:
                   executions.
 
         Returns:
-            A :class:`Flow` instance with steps and detected loops.
+            A :class:`ValueTrace` instance with steps and detected loops.
 
         Raises:
             TraceError: If the daemon reports an error.
@@ -735,7 +736,7 @@ class Trace:
             "mode": mode,
         })
         if not response.get("success"):
-            raise TraceError(response.get("message", "flow() failed"))
+            raise TraceError(response.get("message", "value_trace() failed"))
 
         body = response.get("body", {})
 
@@ -759,7 +760,24 @@ class Trace:
                 iteration_count=lp.get("iterationCount", 0),
             ))
 
-        return Flow(steps=steps, loops=loops)
+        return ValueTrace(steps=steps, loops=loops)
+
+    def flow(self, path: str, line: int, mode: str = "call") -> ValueTrace:
+        """Return value-trace data for a code location.
+
+        .. deprecated::
+            Use :meth:`value_trace` instead.  This method is retained as
+            an alias for backwards compatibility and will be removed in a
+            future release.
+        """
+        import warnings
+
+        warnings.warn(
+            "Trace.flow() is deprecated; use Trace.value_trace() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.value_trace(path, line, mode)
 
     def loops(self) -> list[Loop]:
         """Return all detected loops in the trace.
