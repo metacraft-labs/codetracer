@@ -3,7 +3,9 @@
 //! A CodeTracer trace directory contains several JSON files that describe
 //! the recorded execution:
 //!
-//! - `trace_metadata.json` — `{"workdir":"...","program":"...","args":[...]}`
+//! - `trace_metadata.json` — simple format: `{"workdir":"...","program":"...","args":[...]}`
+//! - `trace_db_metadata.json` — extended format written by `ct-rr-support record`
+//!   (camelCase keys, ~20 fields including `lang`, `rrPid`, `sourceFolders`, etc.)
 //! - `trace_paths.json` — JSON array of source file paths
 //! - `trace.json` — JSON array of execution events (Path, Function, Call,
 //!   Step, Value, etc.)
@@ -11,6 +13,15 @@
 //! This module reads those files and produces a [`TraceMetadata`] struct
 //! that the daemon uses to populate session information returned by the
 //! `ct/open-trace` and `ct/trace-info` MCP commands.
+//!
+//! ## Metadata format fallback
+//!
+//! The primary metadata source is `trace_metadata.json` (the simple format).
+//! When that file is absent — which is the common case for traces produced by
+//! `ct-rr-support record` — this module falls back to reading
+//! `trace_db_metadata.json`.  See the spec in
+//! `codetracer-specs/Trace-Files/RR-Trace-Folders.md` for full details on both
+//! formats and their producers/consumers.
 
 use std::path::Path;
 
@@ -46,13 +57,41 @@ pub struct TraceMetadata {
 // Internal deserialization helpers
 // ---------------------------------------------------------------------------
 
-/// Schema for `trace_metadata.json`.
+/// Schema for `trace_metadata.json` (the simple format).
 #[derive(Deserialize)]
 struct RawTraceMetadata {
     workdir: String,
     program: String,
     #[allow(dead_code)]
     args: Vec<String>,
+}
+
+/// Schema for `trace_db_metadata.json` (the extended format written by
+/// `ct-rr-support record`).  Only the fields needed by backend-manager are
+/// deserialized; the rest are ignored via `deny_unknown_fields = false`
+/// (the serde default).
+///
+/// The full schema is defined in `codetracer-rr-backend/src/trace.rs` as the
+/// `Trace` struct.  See also:
+/// `codetracer-specs/Trace-Files/RR-Trace-Folders.md#trace_db_metadatajson`
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawTraceDbMetadata {
+    /// Absolute path to the recorded executable.
+    program: String,
+    /// Working directory at recording time.
+    workdir: String,
+    /// Command-line arguments (may be absent in older traces).
+    #[serde(default)]
+    #[allow(dead_code)]
+    args: Vec<String>,
+    /// Language enum value as defined in `codetracer-rr-backend/src/lang.rs`.
+    /// Serialized as an integer by `serde_repr` (0=C, 1=Cpp, 2=Rust, 3=Nim,
+    /// 4=Go, 5=Pascal, …).  Used as a fallback when `detect_language` cannot
+    /// determine the language from the program's file extension (e.g. for
+    /// compiled binaries without an extension).
+    #[serde(default)]
+    lang: u8,
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +143,40 @@ fn detect_language(program: &str) -> String {
     .to_string()
 }
 
+/// Converts a `Lang` enum integer (as serialized by `ct-rr-support` via
+/// `serde_repr`) to a language name string.
+///
+/// This must stay in sync with the `Lang` enum defined in
+/// `codetracer-rr-backend/src/lang.rs`.  Only languages that can appear in
+/// RR-recorded traces are mapped; the rest fall through to `"unknown"`.
+fn lang_id_to_name(id: u8) -> &'static str {
+    match id {
+        0 => "c",
+        1 => "cpp",
+        2 => "rust",
+        3 => "nim",
+        4 => "go",
+        5 => "pascal",
+        6 => "fortran",
+        7 => "d",
+        8 => "crystal",
+        9 => "lean",
+        10 => "julia",
+        11 => "ada",
+        12 => "python",
+        13 => "ruby",
+        // 14 = RubyDb (internal, same language as Ruby)
+        15 => "javascript",
+        16 => "lua",
+        17 => "asm",
+        18 => "noir",
+        19 => "wasm", // RustWasm
+        20 => "wasm", // CppWasm
+        // 21 = Small, 22 = PythonDb, 23 = Unknown
+        _ => "unknown",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Event counting
 // ---------------------------------------------------------------------------
@@ -137,29 +210,37 @@ fn count_events(trace_json_path: &Path) -> Result<u64, TraceMetadataError> {
 
 /// Reads metadata from a trace directory's JSON files.
 ///
-/// The `trace_dir` must contain at minimum `trace_metadata.json`.  Missing
-/// `trace_paths.json` or `trace.json` are tolerated (the corresponding
-/// fields default to empty / zero), but a warning is logged.
+/// The directory must contain at least one of:
+///
+/// 1. `trace_metadata.json` — the simple format (preferred)
+/// 2. `trace_db_metadata.json` — the extended format written by `ct-rr-support record`
+///
+/// When `trace_metadata.json` is present, it is used.  Otherwise the function
+/// falls back to `trace_db_metadata.json`.  If neither file exists the
+/// function returns an error.
+///
+/// Missing `trace_paths.json` or `trace.json` are tolerated (the
+/// corresponding fields default to empty / zero), but a warning is logged.
 ///
 /// # Errors
 ///
-/// Returns [`TraceMetadataError`] if `trace_metadata.json` cannot be read
-/// or parsed.
+/// Returns [`TraceMetadataError`] if neither metadata file can be read or
+/// parsed.
 pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetadataError> {
-    // --- trace_metadata.json (required) ---
-    let meta_path = trace_dir.join("trace_metadata.json");
-    let meta_contents =
-        std::fs::read_to_string(&meta_path).map_err(|e| TraceMetadataError::Io {
-            file: meta_path.clone(),
-            source: e,
-        })?;
-    let raw: RawTraceMetadata =
-        serde_json::from_str(&meta_contents).map_err(|e| TraceMetadataError::Json {
-            file: meta_path.clone(),
-            source: e,
-        })?;
+    // --- Primary: trace_metadata.json / Fallback: trace_db_metadata.json ---
+    let (program, workdir, lang_hint) = read_primary_metadata(trace_dir)?;
 
-    let language = detect_language(&raw.program);
+    // Detect language from the program's file extension.  When the extension
+    // is unrecognized (compiled binaries often have no extension), use the
+    // integer `lang` field from `trace_db_metadata.json` as a fallback.
+    let language = {
+        let from_ext = detect_language(&program);
+        if from_ext == "unknown" {
+            lang_hint.unwrap_or(from_ext)
+        } else {
+            from_ext
+        }
+    };
 
     // --- trace_paths.json (optional) ---
     let paths_path = trace_dir.join("trace_paths.json");
@@ -195,9 +276,72 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
         language,
         total_events,
         source_files,
-        program: raw.program,
-        workdir: raw.workdir,
+        program,
+        workdir,
     })
+}
+
+/// Reads the primary metadata (program path, workdir, optional language hint)
+/// from whichever metadata file is available in the trace directory.
+///
+/// Resolution order:
+/// 1. `trace_metadata.json` (simple format)
+/// 2. `trace_db_metadata.json` (extended format from `ct-rr-support record`)
+///
+/// Returns `(program, workdir, lang_hint)` where `lang_hint` is `Some` only
+/// when the metadata came from `trace_db_metadata.json` and contained a
+/// recognized `lang` integer.
+fn read_primary_metadata(
+    trace_dir: &Path,
+) -> Result<(String, String, Option<String>), TraceMetadataError> {
+    let simple_path = trace_dir.join("trace_metadata.json");
+
+    match std::fs::read_to_string(&simple_path) {
+        Ok(contents) => {
+            // Successfully read trace_metadata.json — use it.
+            let raw: RawTraceMetadata =
+                serde_json::from_str(&contents).map_err(|e| TraceMetadataError::Json {
+                    file: simple_path,
+                    source: e,
+                })?;
+            Ok((raw.program, raw.workdir, None))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // trace_metadata.json missing — fall back to trace_db_metadata.json.
+            log::info!(
+                "trace_metadata.json not found, trying trace_db_metadata.json in {}",
+                trace_dir.display()
+            );
+            let db_path = trace_dir.join("trace_db_metadata.json");
+            let contents =
+                std::fs::read_to_string(&db_path).map_err(|e| TraceMetadataError::Io {
+                    file: db_path.clone(),
+                    source: e,
+                })?;
+            let raw: RawTraceDbMetadata =
+                serde_json::from_str(&contents).map_err(|e| TraceMetadataError::Json {
+                    file: db_path,
+                    source: e,
+                })?;
+
+            // Convert the integer lang field to a language name string.
+            let lang_name = lang_id_to_name(raw.lang);
+            let lang_hint = if lang_name != "unknown" {
+                Some(lang_name.to_string())
+            } else {
+                None
+            };
+
+            Ok((raw.program, raw.workdir, lang_hint))
+        }
+        Err(e) => {
+            // Some other I/O error (permission denied, etc.) — propagate it.
+            Err(TraceMetadataError::Io {
+                file: simple_path,
+                source: e,
+            })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +394,8 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// Helper: creates a temporary trace directory with the given files.
+    /// Helper: creates a temporary trace directory with `trace_metadata.json`
+    /// (the simple format) and optional supplementary files.
     fn create_test_trace_dir(
         test_name: &str,
         metadata_json: &str,
@@ -276,6 +421,35 @@ mod tests {
         std::fs::create_dir_all(dir.join("files")).expect("create files dir");
         dir
     }
+
+    /// Helper: creates a temporary trace directory with only
+    /// `trace_db_metadata.json` (the extended format from `ct-rr-support
+    /// record`), without a `trace_metadata.json`.  This simulates the
+    /// common case for real RR-recorded traces.
+    fn create_test_trace_dir_db_format(
+        test_name: &str,
+        db_metadata_json: &str,
+        paths_json: Option<&str>,
+    ) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join("ct-trace-meta-test")
+            .join(format!("{}-{}", test_name, std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+
+        std::fs::write(dir.join("trace_db_metadata.json"), db_metadata_json)
+            .expect("write trace_db_metadata.json");
+
+        if let Some(paths) = paths_json {
+            std::fs::write(dir.join("trace_paths.json"), paths).expect("write trace_paths.json");
+        }
+
+        std::fs::create_dir_all(dir.join("files")).expect("create files dir");
+        dir
+    }
+
+    // -----------------------------------------------------------------------
+    // detect_language tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_detect_language_rust() {
@@ -319,6 +493,34 @@ mod tests {
         assert_eq!(detect_language("binary"), "unknown");
         assert_eq!(detect_language(""), "unknown");
     }
+
+    // -----------------------------------------------------------------------
+    // lang_id_to_name tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_lang_id_to_name_known_languages() {
+        assert_eq!(lang_id_to_name(0), "c");
+        assert_eq!(lang_id_to_name(1), "cpp");
+        assert_eq!(lang_id_to_name(2), "rust");
+        assert_eq!(lang_id_to_name(3), "nim");
+        assert_eq!(lang_id_to_name(4), "go");
+        assert_eq!(lang_id_to_name(5), "pascal");
+        assert_eq!(lang_id_to_name(12), "python");
+        assert_eq!(lang_id_to_name(13), "ruby");
+        assert_eq!(lang_id_to_name(15), "javascript");
+        assert_eq!(lang_id_to_name(18), "noir");
+    }
+
+    #[test]
+    fn test_lang_id_to_name_unknown() {
+        assert_eq!(lang_id_to_name(255), "unknown");
+        assert_eq!(lang_id_to_name(23), "unknown"); // Lang::Unknown in the enum
+    }
+
+    // -----------------------------------------------------------------------
+    // read_trace_metadata with trace_metadata.json (simple format)
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_read_trace_metadata_complete() {
@@ -366,6 +568,171 @@ mod tests {
         let result = read_trace_metadata(Path::new("/nonexistent/path"));
         assert!(result.is_err());
     }
+
+    // -----------------------------------------------------------------------
+    // read_trace_metadata fallback to trace_db_metadata.json
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_fallback_to_trace_db_metadata() {
+        // Simulate a trace produced by `ct-rr-support record` which writes
+        // only `trace_db_metadata.json` (the extended format).  The binary
+        // has no extension, so detect_language would return "unknown" — the
+        // integer `lang` field (0 = C) should be used instead.
+        let dir = create_test_trace_dir_db_format(
+            "fallback-c",
+            r#"{
+                "id": 0,
+                "program": "/tmp/build/config-parser",
+                "args": [],
+                "env": "",
+                "workdir": "/home/user/project",
+                "output": "",
+                "sourceFolders": ["/home/user/project/src"],
+                "lowLevelFolder": "",
+                "compileCommand": "",
+                "outputFolder": "/tmp/trace-42",
+                "date": "",
+                "duration": "",
+                "lang": 0,
+                "imported": false,
+                "calltrace": true,
+                "events": true,
+                "test": false,
+                "archiveServerID": -1,
+                "shellID": -1,
+                "teamID": -1,
+                "rrPid": 12345,
+                "exitCode": 0,
+                "calltraceMode": 0,
+                "downloadKey": "",
+                "controlId": "",
+                "onlineExpireTime": -1
+            }"#,
+            Some(r#"["src/config_parser.c"]"#),
+        );
+
+        let meta = read_trace_metadata(&dir).expect("read metadata via fallback");
+        assert_eq!(meta.language, "c", "lang=0 should resolve to 'c'");
+        assert_eq!(meta.program, "/tmp/build/config-parser");
+        assert_eq!(meta.workdir, "/home/user/project");
+        assert_eq!(meta.source_files, vec!["src/config_parser.c"]);
+        assert_eq!(meta.total_events, 0); // no trace.json
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fallback_rust_binary_no_extension() {
+        // Rust binary without extension, lang=2 (Rust).
+        let dir = create_test_trace_dir_db_format(
+            "fallback-rust",
+            r#"{
+                "id": 0,
+                "program": "/home/user/target/debug/myapp",
+                "args": ["--test"],
+                "workdir": "/home/user/myapp",
+                "sourceFolders": [],
+                "outputFolder": "/tmp/trace-99",
+                "lang": 2,
+                "rrPid": 99999,
+                "exitCode": 0,
+                "calltraceMode": 0
+            }"#,
+            None,
+        );
+
+        let meta = read_trace_metadata(&dir).expect("read metadata via fallback");
+        assert_eq!(meta.language, "rust", "lang=2 should resolve to 'rust'");
+        assert_eq!(meta.program, "/home/user/target/debug/myapp");
+        assert_eq!(meta.workdir, "/home/user/myapp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_fallback_with_extension_overrides_lang_field() {
+        // Program has a .nim extension — detect_language should take
+        // priority over the lang integer, even in the fallback path.
+        let dir = create_test_trace_dir_db_format(
+            "fallback-ext-wins",
+            r#"{
+                "id": 0,
+                "program": "/home/user/test.nim",
+                "args": [],
+                "workdir": "/home/user",
+                "sourceFolders": [],
+                "outputFolder": "/tmp/trace-77",
+                "lang": 3,
+                "rrPid": 55555,
+                "exitCode": 0,
+                "calltraceMode": 0
+            }"#,
+            None,
+        );
+
+        let meta = read_trace_metadata(&dir).expect("read metadata via fallback");
+        assert_eq!(
+            meta.language, "nim",
+            "file extension should take priority over lang field"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_neither_metadata_file_exists() {
+        // A directory with no metadata files at all should produce an error.
+        let dir = std::env::temp_dir()
+            .join("ct-trace-meta-test")
+            .join(format!("no-meta-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+
+        let result = read_trace_metadata(&dir);
+        assert!(
+            result.is_err(),
+            "should error when neither metadata file exists"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_simple_format_preferred_over_db_format() {
+        // When both files exist, trace_metadata.json should be used.
+        let dir = std::env::temp_dir()
+            .join("ct-trace-meta-test")
+            .join(format!("both-meta-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+
+        // trace_metadata.json says program is "main.rs" (detects as Rust)
+        std::fs::write(
+            dir.join("trace_metadata.json"),
+            r#"{"workdir":"/tmp","program":"main.rs","args":[]}"#,
+        )
+        .expect("write trace_metadata.json");
+
+        // trace_db_metadata.json says program is a binary, lang=0 (C)
+        std::fs::write(
+            dir.join("trace_db_metadata.json"),
+            r#"{"id":0,"program":"/tmp/binary","args":[],"workdir":"/other","sourceFolders":[],"outputFolder":"/tmp","lang":0,"rrPid":1,"exitCode":0,"calltraceMode":0}"#,
+        )
+        .expect("write trace_db_metadata.json");
+
+        let meta = read_trace_metadata(&dir).expect("read metadata");
+        assert_eq!(
+            meta.program, "main.rs",
+            "trace_metadata.json should be preferred"
+        );
+        assert_eq!(meta.language, "rust");
+        assert_eq!(meta.workdir, "/tmp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Real trace test (only runs when the test trace directory is available)
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_read_real_trace() {

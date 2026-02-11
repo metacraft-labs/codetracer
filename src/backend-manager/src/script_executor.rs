@@ -88,8 +88,10 @@ pub async fn execute_script(
     socket_path: &str,
     python_api_path: &str,
     timeout_seconds: u64,
+    session_id: Option<&str>,
 ) -> Result<ScriptResult, String> {
-    let wrapper = build_wrapper_script(script, trace_path, socket_path, python_api_path);
+    let wrapper =
+        build_wrapper_script(script, trace_path, socket_path, python_api_path, session_id);
 
     let mut child = Command::new("python3")
         .arg("-c")
@@ -174,6 +176,7 @@ fn build_wrapper_script(
     trace_path: &str,
     socket_path: &str,
     python_api_path: &str,
+    session_id: Option<&str>,
 ) -> String {
     // Escape backslashes and quotes in the path strings so they are safe inside
     // Python string literals.  This prevents injection when paths contain
@@ -182,6 +185,15 @@ fn build_wrapper_script(
     let sock_escaped = escape_for_python(socket_path);
     let trace_escaped = escape_for_python(trace_path);
     let indented = indent_script(script);
+
+    let finally_block = if session_id.is_some() {
+        // Stateful session: do NOT send ct/close-trace.
+        // The socket closes when the subprocess exits, but the daemon
+        // keeps the backend alive via TTL for the next call.
+        "    pass  # stateful session: trace kept alive for next call"
+    } else {
+        "    trace.close()"
+    };
 
     format!(
         r#"import sys, os
@@ -193,7 +205,7 @@ trace = open_trace("{trace_escaped}", daemon_socket="{sock_escaped}")
 try:
 {indented}
 finally:
-    trace.close()
+{finally_block}
 "#
     )
 }
@@ -276,7 +288,13 @@ mod tests {
 
     #[test]
     fn test_build_wrapper_contains_imports() {
-        let wrapper = build_wrapper_script("print('hello')", "/tmp/trace", "/tmp/sock", "/tmp/api");
+        let wrapper = build_wrapper_script(
+            "print('hello')",
+            "/tmp/trace",
+            "/tmp/sock",
+            "/tmp/api",
+            None,
+        );
         assert!(wrapper.contains("import sys, os"));
         assert!(wrapper.contains("from codetracer import open_trace"));
         assert!(wrapper.contains("trace = open_trace("));
@@ -291,7 +309,34 @@ mod tests {
             "/tmp/trace with \"quotes\"",
             "/tmp/sock",
             "/tmp/api",
+            None,
         );
         assert!(wrapper.contains(r#"/tmp/trace with \"quotes\""#));
+    }
+
+    #[test]
+    fn test_build_wrapper_stateless_closes_trace() {
+        let wrapper = build_wrapper_script(
+            "print('hello')",
+            "/tmp/trace",
+            "/tmp/sock",
+            "/tmp/api",
+            None,
+        );
+        assert!(wrapper.contains("trace.close()"));
+        assert!(!wrapper.contains("stateful session"));
+    }
+
+    #[test]
+    fn test_build_wrapper_session_keeps_trace_alive() {
+        let wrapper = build_wrapper_script(
+            "print('hello')",
+            "/tmp/trace",
+            "/tmp/sock",
+            "/tmp/api",
+            Some("debug-1"),
+        );
+        assert!(!wrapper.contains("trace.close()"));
+        assert!(wrapper.contains("stateful session"));
     }
 }

@@ -552,15 +552,12 @@ impl BackendManager {
                     .and_then(|loc| loc.get("rrTicks"))
                     .and_then(Value::as_i64);
 
-                if let Some(ticks) = rr_ticks {
-                    if let Some(pending) =
-                        ds.py_bridge.pending_navigations.iter_mut().find(|p| {
-                            p.backend_id == bid
-                                && p.state == PendingPyNavState::AwaitingStackTrace
-                        })
-                    {
-                        pending.rr_ticks = Some(ticks);
-                    }
+                if let Some(ticks) = rr_ticks
+                    && let Some(pending) = ds.py_bridge.pending_navigations.iter_mut().find(|p| {
+                        p.backend_id == bid && p.state == PendingPyNavState::AwaitingStackTrace
+                    })
+                {
+                    pending.rr_ticks = Some(ticks);
                 }
                 // Don't return — still route the event to clients normally.
             }
@@ -581,16 +578,14 @@ impl BackendManager {
                     .and_then(Value::as_str)
                     .unwrap_or("");
 
-                if text.contains("End of record") || text.contains("Limit of record") {
-                    if let Some(pending) =
-                        ds.py_bridge.pending_navigations.iter_mut().find(|p| {
-                            p.backend_id == bid
-                                && (p.state == PendingPyNavState::AwaitingStopped
-                                    || p.state == PendingPyNavState::AwaitingStackTrace)
-                        })
-                    {
-                        pending.end_of_trace = true;
-                    }
+                if (text.contains("End of record") || text.contains("Limit of record"))
+                    && let Some(pending) = ds.py_bridge.pending_navigations.iter_mut().find(|p| {
+                        p.backend_id == bid
+                            && (p.state == PendingPyNavState::AwaitingStopped
+                                || p.state == PendingPyNavState::AwaitingStackTrace)
+                    })
+                {
+                    pending.end_of_trace = true;
                 }
                 // Don't return — still route the event to clients normally.
             }
@@ -622,10 +617,7 @@ impl BackendManager {
                     let pending = ds.py_bridge.pending_requests.remove(idx);
 
                     let body = msg.get("body").unwrap_or(&Value::Null);
-                    let is_error = body
-                        .get("error")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false);
+                    let is_error = body.get("error").and_then(Value::as_bool).unwrap_or(false);
 
                     if is_error {
                         let error_message = body
@@ -642,9 +634,7 @@ impl BackendManager {
                         self.send_to_client(pending.client_id, py_response);
                     } else {
                         // Extract steps and loops from viewUpdates.
-                        let view_updates = body
-                            .get("viewUpdates")
-                            .and_then(Value::as_array);
+                        let view_updates = body.get("viewUpdates").and_then(Value::as_array);
 
                         let mut all_steps = serde_json::json!([]);
                         let mut all_loops = serde_json::json!([]);
@@ -912,10 +902,7 @@ impl BackendManager {
                 .iter()
                 .position(|p| p.nav_command_seq == Some(req_seq))
             {
-                let nav_success = msg
-                    .get("success")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
+                let nav_success = msg.get("success").and_then(Value::as_bool).unwrap_or(true);
 
                 if nav_success {
                     // Silently consume — don't forward to any client.
@@ -961,10 +948,7 @@ impl BackendManager {
                 // but the ct/complete-move event emitted by the CodeTracer
                 // backend does, and we captured it earlier.
                 if let Some(rr_ticks) = pending.rr_ticks {
-                    let current_ticks = location
-                        .get("ticks")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(0);
+                    let current_ticks = location.get("ticks").and_then(Value::as_i64).unwrap_or(0);
                     if current_ticks == 0 {
                         location["ticks"] = serde_json::json!(rr_ticks);
                     }
@@ -4257,15 +4241,16 @@ impl BackendManager {
                             .filter(|o| o.status.success())
                             .and_then(|o| {
                                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                                if s.is_empty() { None } else { Some(PathBuf::from(s)) }
+                                if s.is_empty() {
+                                    None
+                                } else {
+                                    Some(PathBuf::from(s))
+                                }
                             })
                     });
 
                 if let Some(ref exe) = rr_support_cmd {
-                    info!(
-                        "RR trace detected, using ct-rr-support: {}",
-                        exe.display()
-                    );
+                    info!("RR trace detected, using ct-rr-support: {}", exe.display());
                     opts.ct_rr_worker_exe = rr_support_cmd;
                 } else {
                     warn!(
@@ -4280,7 +4265,15 @@ impl BackendManager {
 
         // Run DAP init sequence.
         let dap_timeout = Duration::from_secs(30);
-        match dap_init::run_dap_init(&sender, &mut receiver, &trace_path, dap_timeout, &dap_launch_opts).await {
+        match dap_init::run_dap_init(
+            &sender,
+            &mut receiver,
+            &trace_path,
+            dap_timeout,
+            &dap_launch_opts,
+        )
+        .await
+        {
             Ok(_init_result) => {
                 info!(
                     "DAP init completed for trace {} (backend_id={backend_id})",
@@ -4516,6 +4509,12 @@ impl BackendManager {
             .and_then(Value::as_u64)
             .unwrap_or(script_executor::DEFAULT_TIMEOUT_SECS);
 
+        // --- Extract optional session ID ---
+        let session_id = args
+            .and_then(|a| a.get("sessionId"))
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+
         // --- Determine the daemon socket path ---
         //
         // The Python subprocess connects back to the daemon using this socket.
@@ -4605,6 +4604,7 @@ impl BackendManager {
                 &socket_path,
                 &python_api_path,
                 timeout_secs,
+                session_id.as_deref(),
             )
             .await
             {

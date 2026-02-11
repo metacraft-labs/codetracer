@@ -1646,6 +1646,18 @@ pub struct LocalStepJump {
     pub active_iteration: i64,
 }
 
+/// Arguments for the `ct/goto-ticks` DAP command.
+///
+/// Jumps the replay to a specific execution timestamp (RR ticks / step ID).
+/// Used by the Python API `trace.goto_ticks(n)` and by the GUI when jumping
+/// to log output events.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct GoToTicksArguments {
+    pub thread_id: i64,
+    pub ticks: i64,
+}
+
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
 #[repr(u8)]
 pub enum DbEventKind {

@@ -339,16 +339,73 @@ pub fn format_locals_response(backend_response: &Value) -> (bool, Value) {
         .and_then(|b| b.get("locals").or_else(|| b.get("variables")));
 
     let variables: Vec<Value> = match locals_raw.and_then(Value::as_array) {
-        Some(arr) => arr.iter().map(|local| normalise_variable(local)).collect(),
+        Some(arr) => arr.iter().map(normalise_variable).collect(),
         None => Vec::new(),
     };
 
     (true, serde_json::json!({"variables": variables}))
 }
 
+/// Extracts the string representation from a CodeTracer Value JSON object.
+///
+/// The Value struct (defined in `db-backend/src/value.rs`) stores typed data
+/// in different fields depending on `kind` (a `TypeKind` enum serialized as u8):
+///   - Int (7):     `i` field (string)
+///   - Float (8):   `f` field (string)
+///   - String (9):  `text` field
+///   - CString (10): `cText` field (camelCase from `c_text`)
+///   - Char (11):   `c` field
+///   - Bool (12):   `b` field (JSON bool)
+///   - Raw (16):    `r` field
+///
+/// If `val_obj` is a plain JSON string (mock format), returns that directly.
+fn extract_value_str(val_obj: Option<&Value>) -> String {
+    let v = match val_obj {
+        Some(v) if v.is_object() => v,
+        // Plain string value (mock format).
+        Some(v) => return v.as_str().unwrap_or("").to_string(),
+        None => return String::new(),
+    };
+
+    let kind = v.get("kind").and_then(Value::as_u64).unwrap_or(u64::MAX);
+    match kind {
+        7 => str_field(v, "i"),      // Int
+        8 => str_field(v, "f"),      // Float
+        9 => str_field(v, "text"),   // String
+        10 => str_field(v, "cText"), // CString
+        11 => str_field(v, "c"),     // Char
+        12 => {
+            // Bool: the `b` field is a JSON bool, not a string.
+            match v.get("b").and_then(Value::as_bool) {
+                Some(true) => "true".to_string(),
+                _ => "false".to_string(),
+            }
+        }
+        16 => str_field(v, "r"), // Raw
+        _ => {
+            // Unknown or composite kind: try common value fields as fallback.
+            for field in &["i", "f", "text", "r"] {
+                let s = str_field(v, field);
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+            String::new()
+        }
+    }
+}
+
+/// Helper: extracts a string field from a JSON object, returning "" if absent.
+fn str_field(v: &Value, field: &str) -> String {
+    v.get(field)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
 /// Normalises a single variable entry from either the real backend
-/// format (`{expression, value: {i, typ: {langType}}, address}`) or
-/// the simplified mock format (`{name, value, type, children}`).
+/// format (`{expression, value: {kind, i, f, ..., typ: {langType}}, address}`)
+/// or the simplified mock format (`{name, value, type, children}`).
 ///
 /// Returns a JSON object with `{name, value, type}` and optionally
 /// `children` (recursively normalised).
@@ -360,16 +417,11 @@ fn normalise_variable(local: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or("");
 
-    // The real backend's `value` is a complex CodeTracer Value
-    // object with `i` (string repr) and `typ.langType`.
+    // The real backend's `value` is a complex CodeTracer Value object
+    // with typed fields (`i`, `f`, `b`, `text`, etc.) and `typ.langType`.
     // The mock's `value` is a plain string.
     let val_obj = local.get("value");
-    let value_str = val_obj
-        .and_then(|v| v.get("i"))
-        .and_then(Value::as_str)
-        // Fall back to treating `value` as a plain string (mock format).
-        .or_else(|| val_obj.and_then(Value::as_str))
-        .unwrap_or("");
+    let value_str = extract_value_str(val_obj);
     let type_str = val_obj
         .and_then(|v| v.get("typ"))
         .and_then(|t| t.get("langType"))
@@ -387,8 +439,7 @@ fn normalise_variable(local: &Value) -> Value {
     });
 
     if let Some(children_arr) = local.get("children").and_then(Value::as_array) {
-        let normalised_children: Vec<Value> =
-            children_arr.iter().map(|c| normalise_variable(c)).collect();
+        let normalised_children: Vec<Value> = children_arr.iter().map(normalise_variable).collect();
         result["children"] = serde_json::json!(normalised_children);
     }
 
@@ -458,14 +509,11 @@ pub fn format_evaluate_response(backend_response: &Value) -> (bool, Value) {
             }
 
             // Extract the string representation.  The real backend
-            // uses a complex CodeTracer Value object with `i` (string
-            // repr) and `typ.langType`.  The mock uses plain strings.
+            // uses a complex CodeTracer Value object with typed fields
+            // (`i`, `f`, `b`, `text`, etc.) and `typ.langType`.
+            // The mock uses plain strings.
             let val_obj = local.get("value");
-            let result_str = val_obj
-                .and_then(|v| v.get("i"))
-                .and_then(Value::as_str)
-                .or_else(|| val_obj.and_then(Value::as_str))
-                .unwrap_or("");
+            let result_str = extract_value_str(val_obj);
             let type_str = val_obj
                 .and_then(|v| v.get("typ"))
                 .and_then(|t| t.get("langType"))

@@ -45,7 +45,11 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     let c_node_names = NodeNames {
         if_conditions: vec!["if_statement".to_string()],
         else_conditions: vec!["else_clause".to_string()],
-        loops: vec!["for_statement".to_string()],
+        loops: vec![
+            "for_statement".to_string(),
+            "while_statement".to_string(),
+            "do_statement".to_string(),
+        ],
         branches_body: vec!["compound_statement".to_string()],
         branches: vec!["compound_statement".to_string()],
         functions: vec!["function_definition".to_string()],
@@ -57,7 +61,11 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     let cpp_node_names = NodeNames {
         if_conditions: vec!["if_statement".to_string()],
         else_conditions: vec!["else_clause".to_string()],
-        loops: vec!["for_statement".to_string()],
+        loops: vec![
+            "for_statement".to_string(),
+            "while_statement".to_string(),
+            "do_statement".to_string(),
+        ],
         branches_body: vec!["compound_statement".to_string()],
         branches: vec!["compound_statement".to_string()],
         functions: vec!["function_definition".to_string()],
@@ -713,6 +721,89 @@ impl ExprLoader {
                 if parent_kind == "parameter_declaration" {
                     if let Some(field_name) = field_name_in_parent(node) {
                         if field_name == "type" {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }
+            Lang::C | Lang::Cpp => {
+                // Filter out non-variable identifiers in C/C++ code.
+                //
+                // In tree-sitter-c/cpp, variable references use the `identifier` node type,
+                // while type names use `type_identifier`, struct fields use `field_identifier`,
+                // and labels use `statement_identifier`. These are distinct node types, so we
+                // only need to filter `identifier` nodes that appear in non-variable contexts
+                // such as function names, macro names, and enum constant names.
+                //
+                // Without this filtering, the flow preloader would try to evaluate ALL
+                // identifiers (including function names like `printf`, `malloc`, etc.) as
+                // variables at every step, causing excessive GDB load_value() calls and
+                // timeouts on programs with many function calls.
+                //
+                // References:
+                //   - tree-sitter-c node types: https://github.com/tree-sitter/tree-sitter-c/blob/master/src/node-types.json
+                //   - tree-sitter-cpp node types: https://github.com/tree-sitter/tree-sitter-cpp/blob/master/src/node-types.json
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out function names in function/method definitions.
+                // AST: function_definition > function_declarator > identifier (declarator field)
+                if parent_kind == "function_declarator" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "declarator" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out function names in call expressions.
+                // AST: call_expression > identifier (function field)
+                // Example: `printf("hello")` — `printf` is the `function` field.
+                if parent_kind == "call_expression" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "function" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out macro names in preprocessor definitions.
+                // AST: preproc_def > identifier (name field) — e.g. `#define MAX 100`
+                //      preproc_function_def > identifier (name field) — e.g. `#define ADD(a,b) ...`
+                if parent_kind == "preproc_def" || parent_kind == "preproc_function_def" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out macro parameter names in function-like macro definitions.
+                // AST: preproc_function_def > preproc_params > identifier
+                if parent_kind == "preproc_params" {
+                    return false;
+                }
+
+                // Filter out identifiers in #include directives.
+                if parent_kind == "preproc_include" {
+                    return false;
+                }
+
+                // Filter out enumerator constant names in enum declarations.
+                // AST: enumerator > identifier (name field) — e.g. `enum { RED, GREEN }`
+                // Enum constants are compile-time values, not runtime variables.
+                if parent_kind == "enumerator" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
                             return false;
                         }
                     }

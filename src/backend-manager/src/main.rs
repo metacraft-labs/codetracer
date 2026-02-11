@@ -103,9 +103,13 @@ enum TraceAction {
     /// `codetracer.Trace` instance) connected to the daemon.  Script
     /// stdout is printed to the terminal.
     ///
-    /// Examples:
-    ///   ct trace query /path/to/trace script.py
-    ///   ct trace query /path/to/trace -c "print(trace.location)"
+    /// Scripts can be provided in three ways:
+    ///   ct trace query /path script.py          # from file
+    ///   ct trace query /path -c "print('hi')"   # inline code
+    ///   ct trace query /path <<'PYEOF'          # from stdin (HEREDOC)
+    ///   trace.step_over()
+    ///   print(trace.location)
+    ///   PYEOF
     Query {
         /// Path to the trace directory.
         trace_path: PathBuf,
@@ -120,6 +124,23 @@ enum TraceAction {
         /// Execution timeout in seconds.
         #[arg(long, default_value_t = 30)]
         timeout: u64,
+
+        /// Reusable session identifier for stateful debugging.
+        ///
+        /// When provided, the trace session is kept alive after the script
+        /// finishes so that subsequent calls with the same session ID
+        /// continue from the same execution position (breakpoints, ticks).
+        /// Without this flag, each call creates and destroys its own session.
+        #[arg(long)]
+        session: Option<String>,
+
+        /// Close a named session without running a script.
+        ///
+        /// Explicitly tears down the session and kills the backend process.
+        /// Without this, sessions are cleaned up automatically by the
+        /// daemon's TTL timer after an idle period.
+        #[arg(long)]
+        session_close: Option<String>,
     },
     /// Print trace metadata (language, events, source files).
     Info {
@@ -812,10 +833,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     // to the legacy `depth` key for older callers.
                     let depth = msg
                         .get("arguments")
-                        .and_then(|a| {
-                            a.get("depthLimit")
-                                .or_else(|| a.get("depth"))
-                        })
+                        .and_then(|a| a.get("depthLimit").or_else(|| a.get("depth")))
                         .and_then(serde_json::Value::as_i64)
                         .unwrap_or(3);
 
@@ -958,7 +976,10 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         .and_then(|a| a.get("location"))
                         .and_then(|loc| loc.get("line"))
                         .and_then(serde_json::Value::as_i64)
-                        .or_else(|| args.and_then(|a| a.get("line")).and_then(serde_json::Value::as_i64))
+                        .or_else(|| {
+                            args.and_then(|a| a.get("line"))
+                                .and_then(serde_json::Value::as_i64)
+                        })
                         .unwrap_or(1);
                     // The daemon now sends `flowMode` as an integer (0=Call, 1=Diff)
                     // instead of a string `mode`.
@@ -1490,12 +1511,41 @@ async fn cli_dap_request(
     let bytes = DapParser::to_bytes(&request);
     stream.write_all(&bytes).await?;
 
-    // Read the response with timeout.
-    let resp = tokio::time::timeout(Duration::from_secs(deadline_secs), cli_dap_read(stream))
-        .await
-        .map_err(|_| format!("timeout waiting for {command} response"))??;
+    // Read messages until we find the response matching our request.
+    //
+    // The daemon broadcasts events (e.g., "stopped", "initialized") to ALL
+    // connected clients.  When `ct/exec-script` spawns a Python subprocess
+    // that opens a trace on a new connection, the resulting backend events
+    // may arrive on the CLI's connection before the actual exec-script
+    // response.  We must skip those interleaved events/unrelated responses.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(deadline_secs);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("timeout waiting for {command} response").into());
+        }
 
-    Ok(resp)
+        let msg = tokio::time::timeout(remaining, cli_dap_read(stream))
+            .await
+            .map_err(|_| format!("timeout waiting for {command} response"))??;
+
+        // Skip events — we only want the response to our request.
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            continue;
+        }
+
+        // Match on request_seq to ensure this is the response to OUR request,
+        // not a stale response from a previous interaction.
+        if msg_type == "response" {
+            let resp_seq = msg.get("request_seq").and_then(Value::as_i64).unwrap_or(-1);
+            if resp_seq != seq {
+                continue;
+            }
+        }
+
+        return Ok(msg);
+    }
 }
 
 /// Reads a single DAP-framed JSON message from `stream`.
@@ -1614,6 +1664,7 @@ async fn run_trace_query(
     script_file: Option<&std::path::Path>,
     code: Option<&str>,
     timeout_secs: u64,
+    session_id: Option<&str>,
     daemon_socket_path: &PathBuf,
     daemon_pid_path: &PathBuf,
 ) -> Result<(), Box<dyn Error>> {
@@ -1623,8 +1674,35 @@ async fn run_trace_query(
         (Some(path), None) => std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read script file '{}': {e}", path.display()))?,
         (None, None) => {
-            eprintln!("error: provide either a script file or -c '<code>'");
-            std::process::exit(1);
+            // No script file or inline code — read from stdin.
+            // This enables shell HEREDOC syntax:
+            //   ct trace query /path <<'PYEOF'
+            //   trace.step_over()
+            //   print(trace.location)
+            //   PYEOF
+            use std::io::{IsTerminal, Read};
+            if std::io::stdin().is_terminal() {
+                eprintln!(
+                    "error: no script provided.\n\n\
+                     Usage:\n  \
+                     ct trace query <trace> script.py\n  \
+                     ct trace query <trace> -c 'print(trace.location)'\n  \
+                     ct trace query <trace> <<'PYEOF'\n  \
+                     trace.step_over()\n  \
+                     print(trace.location)\n  \
+                     PYEOF"
+                );
+                std::process::exit(1);
+            }
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| format!("failed to read script from stdin: {e}"))?;
+            if buf.trim().is_empty() {
+                eprintln!("error: stdin was empty (no script to execute)");
+                std::process::exit(1);
+            }
+            buf
         }
     };
 
@@ -1649,6 +1727,7 @@ async fn run_trace_query(
             "tracePath": trace_path_str,
             "script": script,
             "timeout": timeout_secs,
+            "sessionId": session_id,
         }),
         timeout_secs + 30, // daemon-side timeout + overhead for open-trace
     )
@@ -1690,6 +1769,45 @@ async fn run_trace_query(
         std::process::exit(exit_code as i32);
     }
 
+    Ok(())
+}
+
+/// Implements `ct trace query --session-close`.
+///
+/// Connects to the daemon and sends `ct/close-trace` to explicitly
+/// tear down a session and kill the backend process.
+async fn run_session_close(
+    trace_path: &std::path::Path,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    let resp = cli_dap_request(
+        &mut stream,
+        "ct/close-trace",
+        1,
+        json!({"tracePath": trace_path_str}),
+        10,
+    )
+    .await?;
+
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    eprintln!("Session closed.");
     Ok(())
 }
 
@@ -1829,12 +1947,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 script_file,
                 code,
                 timeout,
+                session,
+                session_close,
             } => {
+                if let Some(_close_id) = session_close {
+                    return run_session_close(trace_path, &daemon_socket_path, &daemon_pid_path)
+                        .await;
+                }
                 return run_trace_query(
                     trace_path,
                     script_file.as_deref(),
                     code.as_deref(),
                     *timeout,
+                    session.as_deref(),
                     &daemon_socket_path,
                     &daemon_pid_path,
                 )

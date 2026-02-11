@@ -291,13 +291,7 @@ pub async fn run_dap_init(
     if let Some(worker_exe) = &opts.ct_rr_worker_exe {
         launch_args["ctRRWorkerExe"] = json!(worker_exe.to_string_lossy());
     }
-    send_request(
-        sender,
-        "launch",
-        2,
-        launch_args,
-        "launch-send",
-    )?;
+    send_request(sender, "launch", 2, launch_args, "launch-send")?;
 
     wait_for_response(
         receiver,
