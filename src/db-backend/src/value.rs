@@ -197,6 +197,10 @@ pub enum ValueRecordWithType {
         negative: bool,
         typ: TypeRecord,
     },
+    Char {
+        c: char,
+        typ: TypeRecord,
+    },
 }
 
 impl ValueRecordWithType {
@@ -317,6 +321,11 @@ pub fn to_ct_value(v: &ValueRecordWithType) -> Value {
 
             let mut res = Value::new(TypeKind::Int, to_ct_type(typ));
             res.i = num.to_string();
+            res
+        }
+        ValueRecordWithType::Char { c, typ } => {
+            let mut res = Value::new(TypeKind::Char, to_ct_type(typ));
+            res.c = c.to_string();
             res
         }
     }
