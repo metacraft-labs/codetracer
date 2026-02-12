@@ -74,6 +74,16 @@ pub struct Handler {
     /// only called once.  This avoids the >30s timeout that occurs when
     /// every `ct/py-events` request re-reads all events from disk.
     cached_events: Option<Vec<ProgramEvent>>,
+
+    /// Cached list of terminal-output (Write) events, populated lazily by
+    /// `load_terminal()`.
+    ///
+    /// When `load_terminal()` is called before `ensure_events_loaded()`,
+    /// this cache is filled by scanning `self.db.events` for Write records
+    /// only -- much faster than loading all events into memory first.
+    /// When `cached_events` is already populated, Write events are extracted
+    /// from it instead.
+    cached_terminal_events: Option<Vec<ProgramEvent>>,
 }
 
 // two choices:
@@ -137,6 +147,7 @@ impl Handler {
             raw_diff_index: None,
             initialized: false,
             cached_events: None,
+            cached_terminal_events: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -469,7 +480,17 @@ impl Handler {
         let call_key = self.db.call_key_for_step(self.step_id);
         self.calltrace.optimize_collapse = args.optimize_collapse;
         if call_key != self.calltrace.start_call_key {
-            self.calltrace.jump_to(self.step_id, args.auto_collapsing, &self.db);
+            // When not auto-collapsing (e.g. Python API bridge), pass the
+            // requested depth so calls are expanded up to that level.
+            // The GUI uses auto_collapsing=true and handles expand/collapse
+            // interactively, so it does not need this.
+            let max_depth = if args.auto_collapsing {
+                None
+            } else {
+                Some(args.depth)
+            };
+            self.calltrace
+                .jump_to_with_depth(self.step_id, args.auto_collapsing, max_depth, &self.db);
         }
         self.calltrace
             .load_lines(args.start_call_line_index, args.height, &self.db, &mut self.expr_loader)
@@ -624,6 +645,9 @@ impl Handler {
     }
 
     fn on_step_id_limit(&self, step_index: usize, forward: bool) -> bool {
+        if self.db.steps.is_empty() {
+            return true;
+        }
         if forward {
             // moving forward
             step_index >= self.db.steps.len() - 1 // we're on the last one
@@ -635,6 +659,9 @@ impl Handler {
 
     fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
         // taking note of db.lines limits: returning a valid step id always
+        if self.db.steps.is_empty() {
+            return step_index;
+        }
         if forward {
             if step_index < self.db.steps.len() - 1 {
                 step_index + 1
@@ -735,8 +762,9 @@ impl Handler {
     /// registered in the event database, and cached in `self.cached_events`.
     /// Subsequent calls are no-ops (the cache is already populated).
     ///
-    /// Both `event_load()` and `load_terminal()` call this to share
-    /// the same cached event data.
+    /// Used by `event_load()` and other handlers that need the full set of
+    /// events.  `load_terminal()` uses a separate fast path
+    /// (`ensure_terminal_events_loaded`) that avoids loading all events.
     fn ensure_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
         if self.cached_events.is_none() {
             let events_data = self.replay.load_events()?;
@@ -794,22 +822,14 @@ impl Handler {
             let clamped_start = start.min(all_events.len());
             let clamped_end = (clamped_start + count).min(all_events.len());
             let slice = &all_events[clamped_start..clamped_end];
-            let contents = slice
-                .iter()
-                .map(|e| e.content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
+            let contents = slice.iter().map(|e| e.content.as_str()).collect::<Vec<_>>().join("\n");
             (slice.to_vec(), contents)
         } else {
             // Legacy behaviour: return the first 20 events (matches
             // the original `first_events` semantics).
             let n = all_events.len().min(20);
             let slice = &all_events[..n];
-            let contents = slice
-                .iter()
-                .map(|e| e.content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
+            let contents = slice.iter().map(|e| e.content.as_str()).collect::<Vec<_>>().join("\n");
             (slice.to_vec(), contents)
         };
 
@@ -1129,10 +1149,12 @@ impl Handler {
             };
 
             for line in lines {
-                let _ = self.add_breakpoint(SourceLocation {
+                if let Err(e) = self.add_breakpoint(SourceLocation {
                     path: path.clone(),
                     line: line as usize,
-                });
+                }) {
+                    warn!("failed to set breakpoint at {}:{}: {}", path, line, e);
+                }
                 results.push(dap_types::Breakpoint {
                     id: None,
                     verified: true,
@@ -1841,24 +1863,28 @@ impl Handler {
 
     /// Loads terminal output (stdout/stderr Write events) from the trace.
     ///
-    /// Ensures events are loaded via the shared cache, then filters for
-    /// `EventLogKind::Write` events and returns them as a
-    /// `ct/loaded-terminal` event.
+    /// Uses a dedicated fast path that only loads Write events from the
+    /// database, avoiding the overhead of `ensure_events_loaded()` which
+    /// loads ALL events into memory. On large traces with thousands of
+    /// non-terminal events this makes a significant difference and prevents
+    /// timeouts when `terminal_output()` is called as the first operation.
+    ///
+    /// If the full event cache is already populated (e.g. by a prior
+    /// `ct/event-load` request), Write events are extracted from it instead.
     ///
     /// The request may include `startLine` and `endLine` parameters for
     /// pagination (forwarded by the daemon from the Python API).
     pub fn load_terminal(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        self.ensure_events_loaded()?;
+        // Ensure terminal events are cached.
+        self.ensure_terminal_events_loaded();
 
-        let empty: Vec<ProgramEvent> = vec![];
-        let all_events = self.cached_events.as_ref().unwrap_or(&empty);
-
-        // Collect Write events (terminal output).
-        let write_events: Vec<ProgramEvent> = all_events
-            .iter()
-            .filter(|e| e.kind == EventLogKind::Write)
-            .cloned()
-            .collect();
+        // Safety: `ensure_terminal_events_loaded` guarantees the cache is Some.
+        let write_events = match self.cached_terminal_events.as_ref() {
+            Some(events) => events,
+            None => {
+                return Err("internal error: cached_terminal_events is None after population".into());
+            }
+        };
 
         // Apply optional line-based pagination (startLine / endLine).
         let start_line = req
@@ -1888,6 +1914,40 @@ impl Handler {
         sender.send(raw_event)?;
 
         Ok(())
+    }
+
+    /// Populate the terminal-events cache if it is not already filled.
+    ///
+    /// When the full event cache (`cached_events`) has already been loaded
+    /// (e.g. by a prior `ct/event-load` call), the Write events are
+    /// extracted from it.  Otherwise the database's event records are
+    /// scanned directly for `EventLogKind::Write` entries, which is much
+    /// faster than loading every event type into memory first.
+    fn ensure_terminal_events_loaded(&mut self) {
+        if self.cached_terminal_events.is_some() {
+            return;
+        }
+
+        let write_events: Vec<ProgramEvent> = if let Some(ref all_events) = self.cached_events {
+            // Full cache already populated -- extract Write events from it.
+            all_events
+                .iter()
+                .filter(|e| e.kind == EventLogKind::Write)
+                .cloned()
+                .collect()
+        } else {
+            // Fast path: scan the db event records for Write events only,
+            // skipping the expensive full load_events() pipeline.
+            self.db
+                .events
+                .iter()
+                .enumerate()
+                .filter(|(_, record)| record.kind == EventLogKind::Write)
+                .map(|(i, record)| self.to_program_event(record, i))
+                .collect()
+        };
+
+        self.cached_terminal_events = Some(write_events);
     }
 
     fn send_notification(

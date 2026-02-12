@@ -110,6 +110,19 @@ impl BreakpointState {
     pub fn all_watchpoint_expressions(&self) -> Vec<String> {
         self.watchpoints.values().cloned().collect()
     }
+
+    /// Removes all breakpoints and watchpoints, resetting the state to empty.
+    ///
+    /// Called when a trace session is reused (e.g. a new `ct/open-trace`
+    /// arrives for an already-loaded trace) so that stale breakpoints from
+    /// the previous script execution do not accumulate.
+    pub fn clear_all(&mut self) {
+        self.breakpoints.clear();
+        self.watchpoints.clear();
+        // Keep next_bp_id / next_wp_id as-is: monotonically increasing IDs
+        // should never be reused, even after a clear, to avoid confusion
+        // with stale IDs held by a previous script.
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +305,16 @@ pub struct PendingPyRequest {
     pub backend_seq: i64,
     /// The command name to use in the response (e.g., `"ct/py-locals"`).
     pub response_command: String,
+    /// The expression being evaluated (only used for `Evaluate` requests).
+    ///
+    /// When the daemon handles `ct/py-evaluate`, the backend does not support
+    /// the standard DAP `evaluate` command, so the expression is sent via
+    /// `ct/load-locals` with `watchExpressions`.  The backend returns ALL
+    /// locals, not just the requested expression.  This field stores the
+    /// original expression so that the response formatter can search for
+    /// the matching local variable by name instead of blindly taking the
+    /// first entry.
+    pub expression: String,
 }
 
 /// Formats a backend `ct/load-locals` response into the simplified
@@ -383,14 +406,20 @@ fn extract_value_str(val_obj: Option<&Value>) -> String {
         }
         16 => str_field(v, "r"), // Raw
         _ => {
-            // Unknown or composite kind: try common value fields as fallback.
+            // Unknown or composite kind (e.g., Seq=1, Struct=2, Tuple=3,
+            // Variant=4, Table=5, Set=6, EnumVal=13, Pointer=14, Error=15):
+            // try common value fields as fallback.
             for field in &["i", "f", "text", "r"] {
                 let s = str_field(v, field);
                 if !s.is_empty() {
                     return s;
                 }
             }
-            String::new()
+            // If no simple field found, return a compact JSON representation
+            // of the value object.  This ensures that composite types
+            // (sequences, structs, tuples, etc.) produce a non-empty string
+            // rather than silently returning "".
+            serde_json::to_string(v).unwrap_or_default()
         }
     }
 }
@@ -453,8 +482,14 @@ fn normalise_variable(local: &Value) -> Value {
 /// command, expression evaluation is implemented by sending a
 /// `ct/load-locals` request with the expression in `watchExpressions`.
 /// The backend returns all locals (and possibly watch results), and
-/// this function extracts the first variable and formats it as
-/// `{result, type}`.
+/// this function searches for the local whose name matches `expression`.
+///
+/// The `expression` parameter is the original expression string from
+/// the `ct/py-evaluate` request.  The function searches the locals
+/// array for an entry whose `expression` (or `name`) field matches.
+/// If no match is found it falls back to the first entry, which
+/// preserves backward compatibility with mock backends that prepend
+/// watch results to the front of the list.
 ///
 /// Watch expressions that could not be resolved are marked with an
 /// empty value string; this function treats those as evaluation
@@ -463,7 +498,7 @@ fn normalise_variable(local: &Value) -> Value {
 /// Returns `(success, body_or_error)`:
 /// - On success: `(true, json!({"result": "...", "type": "..."}))`
 /// - On failure: `(false, json!({"message": "..."}))`
-pub fn format_evaluate_response(backend_response: &Value) -> (bool, Value) {
+pub fn format_evaluate_response(backend_response: &Value, expression: &str) -> (bool, Value) {
     let success = backend_response
         .get("success")
         .and_then(Value::as_bool)
@@ -483,11 +518,33 @@ pub fn format_evaluate_response(backend_response: &Value) -> (bool, Value) {
         .get("body")
         .and_then(|b| b.get("locals").or_else(|| b.get("variables")));
 
-    let first_local = locals_raw
+    // Search for the local matching the requested expression by name.
+    // The real backend uses `expression` as the field name; the mock
+    // backend uses `name`.  Try an exact match first, then fall back
+    // to the first entry for backward compatibility (e.g., mock
+    // backends that prepend watch results).
+    let matching_local = locals_raw
         .and_then(Value::as_array)
-        .and_then(|arr| arr.first());
+        .and_then(|arr| {
+            if expression.is_empty() {
+                // No expression specified — take the first entry.
+                return arr.first();
+            }
+            arr.iter()
+                .find(|local| {
+                    let name = local
+                        .get("expression")
+                        .or_else(|| local.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    name == expression
+                })
+                // Fall back to first local if no match found (e.g., mock
+                // backend that already prepends the watch result).
+                .or_else(|| arr.first())
+        });
 
-    match first_local {
+    match matching_local {
         Some(local) => {
             // Check for the watch-error sentinel: the mock backend
             // marks unresolvable expressions with `_watch_error: true`
@@ -1234,7 +1291,7 @@ mod tests {
             }
         });
 
-        let (success, body) = format_evaluate_response(&backend_resp);
+        let (success, body) = format_evaluate_response(&backend_resp, "x");
         assert!(success);
         assert_eq!(body["result"], "42");
         assert_eq!(body["type"], "int");
@@ -1251,7 +1308,7 @@ mod tests {
             }
         });
 
-        let (success, body) = format_evaluate_response(&backend_resp);
+        let (success, body) = format_evaluate_response(&backend_resp, "x");
         assert!(!success);
         assert_eq!(body["message"], "no variables found at current location");
     }
@@ -1277,7 +1334,7 @@ mod tests {
             }
         });
 
-        let (success, body) = format_evaluate_response(&backend_resp);
+        let (success, body) = format_evaluate_response(&backend_resp, "nonexistent_var");
         assert!(!success);
         assert_eq!(body["message"], "cannot evaluate: nonexistent_var");
     }
@@ -1297,7 +1354,7 @@ mod tests {
             }
         });
 
-        let (success, body) = format_evaluate_response(&backend_resp);
+        let (success, body) = format_evaluate_response(&backend_resp, "x + y");
         assert!(success);
         assert_eq!(body["result"], "30");
         assert_eq!(body["type"], "int");
@@ -1311,9 +1368,114 @@ mod tests {
             "message": "cannot evaluate: foo"
         });
 
-        let (success, body) = format_evaluate_response(&backend_resp);
+        let (success, body) = format_evaluate_response(&backend_resp, "foo");
         assert!(!success);
         assert_eq!(body["message"], "cannot evaluate: foo");
+    }
+
+    #[test]
+    fn test_format_evaluate_response_matches_by_expression_name() {
+        // When the backend returns ALL locals (not just the requested
+        // expression), the formatter should match by expression name
+        // instead of blindly taking the first entry.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "locals": [
+                    {
+                        "expression": "a",
+                        "value": {"i": "1", "typ": {"langType": "int"}},
+                        "address": 0
+                    },
+                    {
+                        "expression": "b",
+                        "value": {"i": "2", "typ": {"langType": "int"}},
+                        "address": 0
+                    },
+                    {
+                        "expression": "x",
+                        "value": {"i": "42", "typ": {"langType": "int"}},
+                        "address": 0
+                    },
+                    {
+                        "expression": "z",
+                        "value": {"i": "99", "typ": {"langType": "int"}},
+                        "address": 0
+                    },
+                ]
+            }
+        });
+
+        // Requesting "x" should find the matching local, not "a" (first).
+        let (success, body) = format_evaluate_response(&backend_resp, "x");
+        assert!(success);
+        assert_eq!(body["result"], "42");
+        assert_eq!(body["type"], "int");
+
+        // Requesting "b" should find "b".
+        let (success, body) = format_evaluate_response(&backend_resp, "b");
+        assert!(success);
+        assert_eq!(body["result"], "2");
+
+        // Requesting an unknown expression falls back to first local.
+        let (success, body) = format_evaluate_response(&backend_resp, "unknown_var");
+        assert!(success);
+        assert_eq!(body["result"], "1"); // "a" is the first local
+    }
+
+    #[test]
+    fn test_format_evaluate_response_empty_expression_uses_first() {
+        // When the expression is empty, the formatter should take the
+        // first local (backward compatibility).
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "locals": [
+                    {
+                        "expression": "first_var",
+                        "value": {"i": "100", "typ": {"langType": "int"}},
+                        "address": 0
+                    },
+                    {
+                        "expression": "second_var",
+                        "value": {"i": "200", "typ": {"langType": "int"}},
+                        "address": 0
+                    },
+                ]
+            }
+        });
+
+        let (success, body) = format_evaluate_response(&backend_resp, "");
+        assert!(success);
+        assert_eq!(body["result"], "100");
+    }
+
+    #[test]
+    fn test_extract_value_str_composite_type_json_fallback() {
+        // Composite types (e.g., Seq kind=1) without simple string
+        // fields should return a JSON representation instead of "".
+        let composite_val = json!({
+            "kind": 1,
+            "elements": [1, 2, 3]
+        });
+        let result = extract_value_str(Some(&composite_val));
+        assert!(!result.is_empty(), "composite types should not return empty string");
+        // The result should be a valid JSON representation.
+        let parsed: Result<Value, _> = serde_json::from_str(&result);
+        assert!(parsed.is_ok(), "result should be valid JSON");
+    }
+
+    #[test]
+    fn test_extract_value_str_composite_with_r_field() {
+        // Composite types that have a `r` (raw) field should use it.
+        let val_with_raw = json!({
+            "kind": 2,
+            "r": "Point(x=1, y=2)"
+        });
+        let result = extract_value_str(Some(&val_with_raw));
+        assert_eq!(result, "Point(x=1, y=2)");
     }
 
     // --- format_stack_trace_response tests ---

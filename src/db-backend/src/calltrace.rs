@@ -65,18 +65,48 @@ impl Calltrace {
     }
 
     pub fn jump_to(&mut self, step_id: StepId, auto_collapsing: bool, db: &Db) {
+        self.jump_to_with_depth(step_id, auto_collapsing, None, db);
+    }
+
+    /// Jump to the call containing `step_id` and rebuild the global call-line
+    /// index.
+    ///
+    /// When `auto_collapsing` is true the existing smart-collapse heuristic
+    /// is used (collapsing siblings before the active call on each stack
+    /// level).  When it is false **and** `max_depth` is provided, all calls
+    /// up to `max_depth` are expanded so that the full tree is visible —
+    /// this is the path taken by the Python API bridge which does not use
+    /// the GUI's collapsing behaviour.
+    pub fn jump_to_with_depth(
+        &mut self,
+        step_id: StepId,
+        auto_collapsing: bool,
+        max_depth: Option<usize>,
+        db: &Db,
+    ) {
         let call_key = db.call_key_for_step(step_id);
         if auto_collapsing {
             self.autocollapse_callstack(step_id, call_key, db);
+        } else if let Some(depth_limit) = max_depth {
+            // Expand all calls up to the requested depth so the Python API
+            // (and other non-GUI callers) can see the full call tree.
+            self.expand_all_up_to_depth(depth_limit, db);
         }
-        // TODO: maybe not need when autocollapsing/global lines ready
-        // then we will just send global indices
-        // also.. keep in mind current actually visible calls
-        // and dont auto-collapse/expand anything if in visible area
-        // how: preserve last sent lines and directly check their call keys?
-        // or directly preserve call keys of last send list
         self.start_call_key = call_key;
         self.rebuild_global_call_lines();
+    }
+
+    /// Mark all calls at depth <= `max_depth` as expanded so they appear
+    /// in the global call-line index built by [`rebuild_global_call_lines`].
+    fn expand_all_up_to_depth(&mut self, max_depth: usize, db: &Db) {
+        for call_key_int in 0..self.call_states.len() {
+            let call_key = CallKey(call_key_int as i64);
+            let call = &db.calls[call_key];
+            if call.depth <= max_depth {
+                self.call_states[call_key].expanded = true;
+                self.call_states[call_key].hidden_children = call.depth == max_depth;
+            }
+        }
     }
 
     pub fn change_expand_state(&mut self, call_key: CallKey, showing_children: bool) {
