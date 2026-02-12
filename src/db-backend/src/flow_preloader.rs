@@ -312,8 +312,49 @@ impl<'a> CallFlowPreloader<'a> {
             FlowMode::Diff => self.next_diff_flow_step(StepId(0), true, replay),
         };
         if self.trace_kind == TraceKind::DB {
-            // for now assume it can't fail: `?` only because of more general api
-            replay.jump_to(step_id)?;
+            // For DB traces the Python API typically sends rrTicks=0 because
+            // it does not know the step_id — only the source path and line.
+            // When step_id is 0 and a specific line was requested, we need to
+            // navigate to the first step *inside the function* that contains
+            // that line, rather than starting from the very first step in the
+            // trace (which is usually a module-level statement in a different
+            // call).
+            //
+            // Strategy: set a temporary breakpoint at the requested line,
+            // continue from step 0 to reach it, then jump_to_call to get to
+            // the function entry point.
+            if step_id.0 == 0 && self.mode == FlowMode::Call && self.location.line > 0 {
+                replay.jump_to(StepId(0))?;
+                let bp = replay.add_breakpoint(&self.location.path, self.location.line as i64)?;
+                let hit = replay.step(Action::Continue, true)?;
+                let _ = replay.delete_breakpoint(&bp);
+                if hit {
+                    // We are now at the requested line. Jump to the start of
+                    // its enclosing function call so the flow loop covers
+                    // the entire call.
+                    let mut expr_loader = ExprLoader::new(CoreTrace::default());
+                    let at_line_loc = replay.load_location(&mut expr_loader)?;
+                    match replay.jump_to_call(&at_line_loc) {
+                        Ok(call_start_loc) => {
+                            step_id = StepId(call_start_loc.rr_ticks.0);
+                            info!(
+                                "  flow: navigated to function call entry at step {} (line {})",
+                                step_id.0, call_start_loc.line
+                            );
+                        }
+                        Err(e) => {
+                            warn!("  flow: jump_to_call failed after breakpoint hit: {e:?}");
+                            // Fall back to the step at the breakpoint line itself.
+                            step_id = replay.current_step_id();
+                        }
+                    }
+                } else {
+                    warn!("  flow: breakpoint at line {} was never hit", self.location.line);
+                    move_error = true;
+                }
+            } else {
+                replay.jump_to(step_id)?;
+            }
         } else {
             // For RR traces: if we already have a valid location (e.g., from a breakpoint),
             // jump to that location instead of using jump_to_call which may not work correctly.

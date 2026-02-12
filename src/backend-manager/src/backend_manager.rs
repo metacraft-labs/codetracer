@@ -716,7 +716,24 @@ impl BackendManager {
                     if let Some(content) = cl.get("content")
                         && let Some(call) = content.get("call")
                     {
-                        calls.push(call.clone());
+                        // Bridge naming differences between the Rust
+                        // `Call` struct and the Python API:
+                        //   rawName -> name (function name)
+                        //   content.count -> childrenCount
+                        let mut enriched = call.clone();
+                        if let Some(obj) = enriched.as_object_mut() {
+                            if let Some(raw_name) = call.get("rawName") {
+                                obj.insert("name".to_string(), raw_name.clone());
+                            }
+                        }
+                        // Propagate children count from the enclosing
+                        // CallLine content into the call object.
+                        if let Some(count) = content.get("count") {
+                            enriched
+                                .as_object_mut()
+                                .map(|obj| obj.insert("childrenCount".to_string(), count.clone()));
+                        }
+                        calls.push(enriched);
                     }
                 }
 
@@ -995,7 +1012,9 @@ impl BackendManager {
 
                 let (success, body_or_error) = match pending.kind {
                     PendingPyRequestKind::Locals => python_bridge::format_locals_response(msg),
-                    PendingPyRequestKind::Evaluate => python_bridge::format_evaluate_response(msg),
+                    PendingPyRequestKind::Evaluate => {
+                        python_bridge::format_evaluate_response(msg, &pending.expression)
+                    }
                     PendingPyRequestKind::StackTrace => {
                         python_bridge::format_stack_trace_response(msg)
                     }
@@ -1891,7 +1910,7 @@ impl BackendManager {
         {
             Some(id) => id,
             None => {
-                self.send_py_error(seq, &format!("no session loaded for {trace_path_str}"));
+                self.send_py_error(seq, &self.no_session_error_message(&trace_path_str));
                 return Ok(());
             }
         };
@@ -2017,6 +2036,25 @@ impl BackendManager {
             .and_then(|ds| ds.session_manager.get_session_backend_id(trace_path))
     }
 
+    /// Builds an actionable error message for "no session loaded" errors.
+    ///
+    /// Instead of a bare "no session loaded" string, this includes the
+    /// configured idle timeout and a hint to call `open_trace()` again.
+    /// This helps automated agents (and humans) understand *why* the
+    /// session is gone and what to do about it (issue #455).
+    fn no_session_error_message(&self, trace_path: &str) -> String {
+        let ttl_secs = self
+            .daemon_state
+            .as_ref()
+            .map(|ds| ds.session_manager.default_ttl().as_secs())
+            .unwrap_or(300);
+        format!(
+            "no session loaded for {trace_path}. \
+             The session may have expired (idle timeout: {ttl_secs}s). \
+             Call open_trace() to start a new session."
+        )
+    }
+
     /// Handles `ct/py-locals` requests from Python clients.
     ///
     /// Translates the request into a `ct/load-locals` DAP command, sends it
@@ -2075,7 +2113,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-locals",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -2154,6 +2192,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-locals".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -2248,7 +2287,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-evaluate",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -2303,6 +2342,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-evaluate".to_string(),
+                expression: expression.clone(),
             });
         }
 
@@ -2371,7 +2411,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-stack-trace",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -2414,6 +2454,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-stack-trace".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -2498,7 +2539,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-flow",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -2601,6 +2642,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-flow".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -2696,7 +2738,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-add-breakpoint",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -2742,6 +2784,7 @@ impl BackendManager {
                 original_seq: 0,
                 backend_seq: dap_seq,
                 response_command: String::new(),
+                expression: String::new(),
             });
         }
 
@@ -2831,7 +2874,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-remove-breakpoint",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -2876,6 +2919,7 @@ impl BackendManager {
                         original_seq: 0,
                         backend_seq: dap_seq,
                         response_command: String::new(),
+                        expression: String::new(),
                     });
                 }
 
@@ -2973,7 +3017,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-add-watchpoint",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3018,6 +3062,7 @@ impl BackendManager {
                 original_seq: 0,
                 backend_seq: dap_seq,
                 response_command: String::new(),
+                expression: String::new(),
             });
         }
 
@@ -3105,7 +3150,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-remove-watchpoint",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3149,6 +3194,7 @@ impl BackendManager {
                         original_seq: 0,
                         backend_seq: dap_seq,
                         response_command: String::new(),
+                        expression: String::new(),
                     });
                 }
 
@@ -3240,7 +3286,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-calltrace",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3337,6 +3383,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-calltrace".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -3416,7 +3463,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-search-calltrace",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3466,6 +3513,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-search-calltrace".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -3531,7 +3579,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-events",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3597,6 +3645,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-events".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -3664,7 +3713,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-terminal",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3717,6 +3766,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-terminal".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -3791,7 +3841,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-read-source",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3834,6 +3884,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-read-source".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -3907,7 +3958,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-processes",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -3948,6 +3999,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-processes".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -4028,7 +4080,7 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     "ct/py-select-process",
-                    &format!("no session loaded for {trace_path_str}"),
+                    &self.no_session_error_message(&trace_path_str),
                 );
                 return Ok(());
             }
@@ -4071,6 +4123,7 @@ impl BackendManager {
                 original_seq: seq,
                 backend_seq: dap_seq,
                 response_command: "ct/py-select-process".to_string(),
+                expression: String::new(),
             });
         }
 
@@ -4126,11 +4179,71 @@ impl BackendManager {
         let trace_path = PathBuf::from(&trace_path_str);
 
         // Check if already loaded — return existing session and reset TTL.
+        //
+        // When reusing a cached session we must clear stale breakpoint/
+        // watchpoint state from any previous script execution, and reset
+        // the backend replay position to the beginning.  Without this,
+        // breakpoints accumulate across `ct/exec-script` invocations and
+        // the `setBreakpoints` DAP command sends ALL accumulated
+        // breakpoints, causing `continue` to hit unexpected locations.
         if let Some(ds) = self.daemon_state.as_mut()
             && ds.session_manager.has_session(&trace_path)
         {
             ds.session_manager.reset_ttl(&trace_path);
+
+            // Clear accumulated breakpoint/watchpoint state from previous
+            // script runs so the new script starts with a clean slate.
+            ds.py_bridge
+                .breakpoint_state_mut(&trace_path)
+                .clear_all();
+
             if let Some(info) = ds.session_manager.get_session(&trace_path) {
+                let backend_id = info.backend_id;
+
+                // Send an empty setBreakpoints to the backend so its
+                // replay.breakpoint_list is also cleared.  We use an
+                // empty source path; the handler calls clear_breakpoints()
+                // unconditionally.
+                let clear_bp_seq = ds.py_bridge.next_seq();
+                let clear_bp_request = json!({
+                    "type": "request",
+                    "command": "setBreakpoints",
+                    "seq": clear_bp_seq,
+                    "arguments": {
+                        "source": {"path": ""},
+                        "breakpoints": [],
+                    }
+                });
+                // Also reset the replay position to the start so each
+                // script begins at the same position.
+                let reset_seq = ds.py_bridge.next_seq();
+                let reset_request = json!({
+                    "type": "request",
+                    "command": "ct/run-to-entry",
+                    "seq": reset_seq,
+                    "arguments": {}
+                });
+                // Fire-and-forget: consume the responses silently.
+                ds.py_bridge.pending_requests.push(PendingPyRequest {
+                    kind: PendingPyRequestKind::FireAndForget,
+                    client_id: 0,
+                    original_seq: 0,
+                    backend_seq: clear_bp_seq,
+                    response_command: String::new(),
+                    expression: String::new(),
+                });
+                ds.py_bridge.pending_requests.push(PendingPyRequest {
+                    kind: PendingPyRequestKind::FireAndForget,
+                    client_id: 0,
+                    original_seq: 0,
+                    backend_seq: reset_seq,
+                    response_command: String::new(),
+                    expression: String::new(),
+                });
+
+                let _ = self.message(backend_id, clear_bp_request).await;
+                let _ = self.message(backend_id, reset_request).await;
+
                 let response = json!({
                     "type": "response",
                     "request_seq": seq,
@@ -4437,7 +4550,7 @@ impl BackendManager {
                     "request_seq": seq,
                     "success": false,
                     "command": "ct/trace-info",
-                    "message": format!("no session loaded for {trace_path_str}")
+                    "message": self.no_session_error_message(&trace_path_str)
                 });
                 self.send_response_for_seq(seq, response);
             }
@@ -4702,7 +4815,7 @@ impl BackendManager {
                     "request_seq": seq,
                     "success": false,
                     "command": "ct/close-trace",
-                    "message": format!("no session loaded for {trace_path_str}")
+                    "message": self.no_session_error_message(&trace_path_str)
                 });
                 self.send_response_for_seq(seq, response);
             }
