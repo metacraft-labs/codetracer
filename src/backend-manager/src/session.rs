@@ -148,6 +148,14 @@ impl SessionManager {
         self.sessions.len()
     }
 
+    /// Returns the default TTL duration for new sessions.
+    ///
+    /// This is used in error messages to inform callers how long idle
+    /// sessions are kept alive before automatic expiry.
+    pub fn default_ttl(&self) -> Duration {
+        self.default_ttl
+    }
+
     /// Returns `true` if a session for the given trace path exists.
     pub fn has_session(&self, path: &PathBuf) -> bool {
         self.sessions.contains_key(path)
