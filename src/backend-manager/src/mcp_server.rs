@@ -98,12 +98,12 @@ fn exec_script_tool() -> Value {
                 },
                 "timeout_seconds": {
                     "type": "number",
-                    "description": "Maximum execution time in seconds (default: 30)",
-                    "default": 30
+                    "description": "Maximum execution time in seconds (default: 120)",
+                    "default": 120
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "Optional session identifier.  When provided, execution state (breakpoints, current position) is preserved between calls with the same session_id.  Omit for one-shot scripts.  Use a descriptive name like 'debug-1'."
+                    "description": "Optional session identifier.  When provided, execution state (breakpoints, current position) is preserved between calls with the same session_id.  Sessions expire after 5 minutes of inactivity; if you get a 'no session loaded' error, the session has expired and you should start a new one.  Omit for one-shot scripts.  Use a descriptive name like 'debug-1'."
                 }
             },
             "required": ["trace_path", "script"]
@@ -188,6 +188,18 @@ recorded program executions.  A `trace` variable is pre-bound to the
 opened trace in every script.  All navigation methods return a `Location`
 and raise `StopIteration` at trace boundaries.
 
+## Exceptions
+
+All exceptions inherit from `TraceError`:
+- `TraceError` - Base exception for all trace operations
+- `TraceNotFoundError` - Trace does not exist or cannot be opened
+- `NavigationError` - Navigation operation failed (distinct from StopIteration at boundaries)
+- `ExpressionError` - Expression evaluation failed (raised by evaluate())
+- `TimeoutError` - Backend operation timed out
+
+Navigation methods raise `NavigationError` on general failure and `StopIteration`
+specifically at trace boundaries (start/end of trace).
+
 ## Data Types
 
 All data types support both attribute access (`var.name`) and dict-style
@@ -207,10 +219,11 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `children: list[Variable]` - Nested fields/elements
 
 ### Frame
-- `function_name: str` - Function name
+- `function_name: str` - Function name (also accessible as `frame['function']`)
 - `location: Location` - Source location
+- `variables: list[Variable]` - Variables in this frame's scope (may be empty)
 
-### FlowStep (also available as ValueTraceStep)
+### FlowStep
 - `location: Location` - Source location of this step
 - `ticks: int` - Execution timestamp
 - `loop_id: int` - Loop identifier (0 = not in loop)
@@ -218,12 +231,13 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `before_values: dict[str, str]` - Variable values before step
 - `after_values: dict[str, str]` - Variable values after step
 
-### Flow (also available as ValueTrace)
+### ValueTrace
 - `steps: list[FlowStep]` - Execution steps
 - `loops: list[Loop]` - Loop information
 
 ### Loop
 - `id: int` - Loop identifier
+- `location: Location` - Source location of the loop header
 - `start_line: int` - First line of the loop
 - `end_line: int` - Last line of the loop
 - `iteration_count: int` - Total iterations
@@ -231,6 +245,7 @@ access (`var['name']`).  Common aliases: `call['function']` for
 ### Call
 - `function_name: str` - Function name (also accessible as `call['function']`)
 - `location: Location` - Call site location
+- `arguments: list[Variable]` - Captured argument values
 - `return_value: Variable | None` - Return value (if available)
 - `id: int` - Call identifier
 - `children_count: int` - Number of child calls
@@ -242,6 +257,8 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `content: str` - Raw event content
 - `ticks: int` - Execution timestamp
 - `location: Location | None` - Source location
+- `id: int` - Unique event identifier
+- `data: dict | None` - Arbitrary event-specific payload
 
 ### Process
 - `id: int` - Process identifier
@@ -257,7 +274,7 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `trace.total_events -> int` - Total number of trace events
 - `trace.language -> str` - Programming language of the traced program
 
-### Navigation (all return Location, raise StopIteration at boundaries)
+### Navigation (all return Location; raise StopIteration at boundaries, NavigationError on failure)
 - `trace.step_over()` - Step to the next line (same scope)
 - `trace.step_in()` - Step into function call
 - `trace.step_out()` - Step out of current function
@@ -270,7 +287,9 @@ access (`var['name']`).  Common aliases: `call['function']` for
 
 ### Inspection
 - `trace.locals(depth=3, count_budget=3000) -> list[Variable]` - Local variables
-- `trace.evaluate(expr: str) -> str` - Evaluate an expression, returns string result
+- `trace.evaluate(expr: str) -> str` - Evaluate an expression, returns string result.
+  Raises `ExpressionError` if evaluation fails.
+  - **Note**: On DB traces (Python), only matches local variable names. Use `trace.locals()` for available variables.
 - `trace.stack_trace() -> list[Frame]` - Current call stack
 - `trace.current_frame() -> Frame` - Topmost call frame
 
@@ -284,7 +303,7 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `trace.value_trace(path: str, line: int, mode="call") -> ValueTrace`
   - Get value-trace (omniscience) data for a line: all variable values across execution.
   - `mode="call"`: full function scope.  `mode="line"`: single line.
-  - `trace.flow(...)` is a deprecated alias for `trace.value_trace(...)`.
+
 
 ### Call Trace
 - `trace.calltrace(start=0, count=50, depth=10) -> list[Call]`
@@ -311,6 +330,10 @@ in the next, inspect variables in a third.
 
 Without `session_id`, each `exec_script` call starts a fresh trace session
 that is discarded when the script ends.
+
+**Important**: Sessions expire after 5 minutes of inactivity.  If you receive
+a "no session loaded" error, the session has timed out — call `open_trace()`
+again or start a new `exec_script` call to create a fresh session.
 
 **Tip**: Prefer short, focused scripts with sessions over long monolithic
 scripts.  If one step fails, you can adjust without losing prior state.
@@ -365,7 +388,7 @@ for loop in vt.loops:
     print(f"Loop at lines {loop.start_line}-{loop.end_line}: {loop.iteration_count} iterations")
 for step in vt.steps:
     if step.loop_id > 0:
-        print(f"  iter {step.iteration}: {step.after_values}")
+        print(f"  line {step.location.line} iter {step.iteration}: {step.after_values}")
 ```
 
 ## Example 5: List source files and inspect the call stack
@@ -422,7 +445,10 @@ for call in trace.search_calltrace("process"):
 ```python
 # Get everything the program printed to stdout/stderr
 output = trace.terminal_output()
-print(output)
+if output.strip():
+    print(output)
+else:
+    print("(no terminal output captured)")
 ```
 
 ## Tips
@@ -432,6 +458,8 @@ print(output)
 - Common aliases: `call['function']` for `call.function_name`,
   `var['type']` for `var.type_name`.
 - Use `var.get('field', default)` for safe access with a fallback.
+- `evaluate()` returns a **string**, not a typed value — use `int(trace.evaluate("x"))` for arithmetic.
+- FlowStep has no `.line` — use `step.location.line` (location is a nested Location object).
 "#
 }
 
@@ -1992,30 +2020,80 @@ async fn handle_read_source_file(
 // Filesystem fallback for source file reading
 // ---------------------------------------------------------------------------
 
-/// Reads a source file directly from the trace directory's `files/`
-/// subdirectory.
-///
-/// CodeTracer traces store copies of all source files at recording time
-/// under `<trace_dir>/files/<absolute_path>`.  For example, a file
-/// originally at `/home/user/project/main.rs` is stored at
-/// `<trace_dir>/files/home/user/project/main.rs`.
+/// Reads a source file from a trace, trying multiple resolution strategies.
 ///
 /// This function serves as a fallback when the daemon's `ct/read-source`
-/// command is not supported by the backend (e.g. db-backend for RR traces).
+/// command is not supported by the backend (e.g. db-backend for Python traces).
+///
+/// Resolution strategies (tried in order):
+///
+/// 1. **Embedded files**: Check `<trace_dir>/files/<path>`.  RR traces store
+///    copies of all source files at recording time under this directory.
+///    For example, `/home/user/project/main.rs` is stored at
+///    `<trace_dir>/files/home/user/project/main.rs`.
+///
+/// 2. **Absolute path on disk**: If `file_path` is absolute and exists on disk,
+///    read it directly.  This is the common case for DB traces (Python) where
+///    sources are still at their original recording-time locations.
+///
+/// 3. **Workdir-relative**: Resolve `file_path` against the `workdir` field
+///    from `trace_metadata.json` in the trace directory.
+///
+/// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
+///    parent (e.g. trace at `/tmp/foo/trace/`, source at
+///    `/tmp/foo/program/src/main.py`).
 fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
     let trace_dir = std::path::Path::new(trace_path);
-    let files_dir = trace_dir.join("files");
 
     // Strip the leading `/` from absolute paths so the join works correctly.
     let relative = file_path.strip_prefix('/').unwrap_or(file_path);
-    let full_path = files_dir.join(relative);
 
-    if !full_path.exists() {
-        return Err(format!("source file not found at {}", full_path.display()));
+    // Strategy 1: Check the trace's files/ subdirectory (RR traces embed source copies here).
+    let files_dir = trace_dir.join("files");
+    let embedded_path = files_dir.join(relative);
+    if embedded_path.exists() {
+        return std::fs::read_to_string(&embedded_path)
+            .map_err(|e| format!("failed to read {}: {e}", embedded_path.display()));
     }
 
-    std::fs::read_to_string(&full_path)
-        .map_err(|e| format!("failed to read {}: {e}", full_path.display()))
+    // Strategy 2: If the path is absolute and the file exists on disk, read it directly.
+    // This is the common case for DB traces (Python) where sources are still at their
+    // original recording-time locations.
+    let file_path_buf = std::path::Path::new(file_path);
+    if file_path_buf.is_absolute() && file_path_buf.exists() {
+        return std::fs::read_to_string(file_path_buf)
+            .map_err(|e| format!("failed to read {}: {e}", file_path_buf.display()));
+    }
+
+    // Strategy 3: Try resolving against the workdir from trace_metadata.json.
+    let metadata_path = trace_dir.join("trace_metadata.json");
+    if metadata_path.exists()
+        && let Ok(metadata_str) = std::fs::read_to_string(&metadata_path)
+        && let Ok(metadata) = serde_json::from_str::<Value>(&metadata_str)
+        && let Some(workdir) = metadata.get("workdir").and_then(Value::as_str)
+    {
+        let workdir_resolved = std::path::Path::new(workdir).join(relative);
+        if workdir_resolved.exists() {
+            return std::fs::read_to_string(&workdir_resolved).map_err(|e| {
+                format!("failed to read {}: {e}", workdir_resolved.display())
+            });
+        }
+    }
+
+    // Strategy 4: Try the trace directory's parent (e.g. trace at /tmp/foo/trace/,
+    // source at /tmp/foo/program/src/main.py).
+    if let Some(parent) = trace_dir.parent() {
+        let parent_resolved = parent.join(relative);
+        if parent_resolved.exists() {
+            return std::fs::read_to_string(&parent_resolved)
+                .map_err(|e| format!("failed to read {}: {e}", parent_resolved.display()));
+        }
+    }
+
+    Err(format!(
+        "source file not found: tried {}, absolute path, workdir, and parent dir",
+        embedded_path.display()
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -2289,7 +2367,127 @@ mod tests {
 
         let result = read_source_from_trace_dir(tmp.to_str().unwrap(), "/nonexistent/file.rs");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not found"));
+        let err_msg = result.unwrap_err();
+        assert!(
+            err_msg.contains("not found"),
+            "error should mention 'not found', got: {err_msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_absolute_path_fallback() {
+        // Strategy 2: If the file_path is absolute and exists on disk, read it directly.
+        // This simulates a DB trace (Python) where source files are at their original
+        // locations.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-absolute");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let trace_dir = tmp.join("trace");
+        std::fs::create_dir_all(&trace_dir).unwrap();
+
+        // Create a source file at an absolute path outside the trace dir.
+        let source_dir = tmp.join("project");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(source_dir.join("main.py"), "print('hello')").unwrap();
+
+        let source_path = source_dir.join("main.py");
+        let result = read_source_from_trace_dir(
+            trace_dir.to_str().unwrap(),
+            source_path.to_str().unwrap(),
+        );
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), "print('hello')");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_workdir_fallback() {
+        // Strategy 3: Resolve relative paths against the workdir from trace_metadata.json.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-workdir");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let trace_dir = tmp.join("trace");
+        std::fs::create_dir_all(&trace_dir).unwrap();
+
+        // Create the source file under a separate workdir.
+        let workdir = tmp.join("workdir");
+        std::fs::create_dir_all(workdir.join("src")).unwrap();
+        std::fs::write(workdir.join("src/app.py"), "import os").unwrap();
+
+        // Write trace_metadata.json with the workdir field.
+        let metadata = serde_json::json!({
+            "workdir": workdir.to_str().unwrap(),
+            "language": "python"
+        });
+        std::fs::write(
+            trace_dir.join("trace_metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "src/app.py");
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), "import os");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_parent_fallback() {
+        // Strategy 4: Resolve relative paths against the trace directory's parent.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-parent");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let trace_dir = tmp.join("trace");
+        std::fs::create_dir_all(&trace_dir).unwrap();
+
+        // Create a source file next to the trace dir, under the parent.
+        std::fs::create_dir_all(tmp.join("program/src")).unwrap();
+        std::fs::write(tmp.join("program/src/main.py"), "x = 1").unwrap();
+
+        let result =
+            read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/src/main.py");
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), "x = 1");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_strategy_priority() {
+        // When a file exists both in files/ and at its absolute path, the embedded
+        // copy (strategy 1) should win.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-priority");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let trace_dir = tmp.join("trace");
+        std::fs::create_dir_all(&trace_dir).unwrap();
+
+        // Create the "real" source file on disk.
+        let source_dir = tmp.join("src");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(source_dir.join("lib.py"), "# disk version").unwrap();
+
+        // Also embed it under files/.
+        let abs_source = source_dir.join("lib.py");
+        let relative = abs_source
+            .to_str()
+            .unwrap()
+            .strip_prefix('/')
+            .unwrap();
+        let embedded = trace_dir.join("files").join(relative);
+        std::fs::create_dir_all(embedded.parent().unwrap()).unwrap();
+        std::fs::write(&embedded, "# embedded version").unwrap();
+
+        let result = read_source_from_trace_dir(
+            trace_dir.to_str().unwrap(),
+            abs_source.to_str().unwrap(),
+        );
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(
+            result.unwrap(),
+            "# embedded version",
+            "strategy 1 (embedded) should take priority over strategy 2 (absolute)"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
