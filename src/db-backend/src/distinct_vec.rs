@@ -20,6 +20,13 @@ impl<IndexType: Into<usize>, ValueType: fmt::Debug> DistinctVec<IndexType, Value
         self.items.get(index.into())
     }
 
+    /// Try to access a mutable element by index, returning `None` for
+    /// out-of-bounds or negative indices (which wrap to very large usize values
+    /// when the inner id type is a signed integer like `i64`).
+    pub fn get_mut(&mut self, index: IndexType) -> Option<&mut ValueType> {
+        self.items.get_mut(index.into())
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -122,5 +129,40 @@ mod tests {
         distinct_vec.clear();
 
         assert_eq!(distinct_vec.len(), 0);
+    }
+
+    #[test]
+    fn test_get_returns_none_for_out_of_bounds() {
+        let mut distinct_vec = DistinctVec::<Width, String>::new();
+        distinct_vec.push("a".to_string());
+
+        // Valid index returns Some.
+        assert_eq!(distinct_vec.get(Width(0)), Some(&"a".to_string()));
+        // Out-of-bounds index returns None instead of panicking.
+        assert_eq!(distinct_vec.get(Width(999)), None);
+        // Very large index (simulating a wrapped negative i64) returns None.
+        assert_eq!(distinct_vec.get(Width(u64::MAX)), None);
+    }
+
+    #[test]
+    fn test_get_mut_returns_none_for_out_of_bounds() {
+        let mut distinct_vec = DistinctVec::<Width, String>::new();
+        distinct_vec.push("a".to_string());
+
+        // Valid index returns Some and allows mutation.
+        if let Some(val) = distinct_vec.get_mut(Width(0)) {
+            *val = "b".to_string();
+        }
+        assert_eq!(distinct_vec[Width(0)], "b".to_string());
+        // Out-of-bounds index returns None instead of panicking.
+        assert!(distinct_vec.get_mut(Width(999)).is_none());
+        // Very large index (simulating a wrapped negative i64) returns None.
+        assert!(distinct_vec.get_mut(Width(u64::MAX)).is_none());
+    }
+
+    #[test]
+    fn test_get_on_empty_vec() {
+        let distinct_vec = DistinctVec::<Width, String>::new();
+        assert!(distinct_vec.get(Width(0)).is_none());
     }
 }

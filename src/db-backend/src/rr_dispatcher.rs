@@ -145,6 +145,15 @@ impl CtRRWorker {
 
         debug!("res: `{res}`");
 
+        if res.is_empty() {
+            // EOF — the replay worker crashed or disconnected. Mark the
+            // worker as inactive so that the next query attempt can restart it,
+            // and return a clear error rather than an empty string that would
+            // fail JSON parsing downstream.
+            self.active = false;
+            return Err("ct-rr-support replay worker disconnected (EOF on response)".into());
+        }
+
         if !res.starts_with("error:") {
             Ok(res)
         } else {

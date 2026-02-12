@@ -174,7 +174,16 @@ impl Db {
         step_to_different_line: bool,
     ) -> (StepId, bool) {
         let mut last_step_id = step_id;
-        let original_step = self.steps[step_id];
+        // Bounds-check: if step_id is invalid return it unchanged (no move happened).
+        let Some(original_step) = self.steps.get(step_id) else {
+            warn!(
+                "next_step_id_relative_to: step_id {:?} is out of bounds (steps len {})",
+                step_id,
+                self.steps.len()
+            );
+            return (step_id, false);
+        };
+        let original_step = *original_step;
         let (original_path_id, original_line, original_call_key) =
             (original_step.path_id, original_step.line, original_step.call_key);
         let mut count = 0;
@@ -191,8 +200,7 @@ impl Db {
             }
             if !step_to_different_line {
                 break;
-            } else {
-                let current_step = self.steps[current_step_id];
+            } else if let Some(current_step) = self.steps.get(current_step_id) {
                 if original_path_id != current_step.path_id
                     || original_line != current_step.line
                     || original_call_key != current_step.call_key
@@ -200,9 +208,18 @@ impl Db {
                     // this is a different line: or even if the same line, it's in a different call!
                     break;
                 }
+            } else {
+                // current_step_id is out of bounds - stop iterating.
+                warn!(
+                    "next_step_id_relative_to: current_step_id {:?} out of bounds during line check",
+                    current_step_id
+                );
+                break;
             }
         }
-        info!("next step id: {:?}", self.steps[last_step_id]);
+        if let Some(last_step) = self.steps.get(last_step_id) {
+            info!("next step id: {:?}", last_step);
+        }
         (last_step_id, step_id != last_step_id)
     }
 
@@ -214,8 +231,25 @@ impl Db {
     }
 
     pub fn step_over_depths_step_id(&self, start_step_id: StepId, forward: bool, delta: usize) -> StepId {
-        let initial_step = &self.steps[start_step_id];
-        let initial_call = &self.calls[initial_step.call_key];
+        // Bounds-check: if the step_id is out of range (e.g. negative sentinel
+        // or past the end), return it unchanged to avoid a panic.
+        let Some(initial_step) = self.steps.get(start_step_id) else {
+            warn!(
+                "step_over_depths_step_id: start_step_id {:?} is out of bounds (steps len {})",
+                start_step_id,
+                self.steps.len()
+            );
+            return start_step_id;
+        };
+        let Some(initial_call) = self.calls.get(initial_step.call_key) else {
+            warn!(
+                "step_over_depths_step_id: call_key {:?} for step {:?} is out of bounds (calls len {})",
+                initial_step.call_key,
+                start_step_id,
+                self.calls.len()
+            );
+            return start_step_id;
+        };
         let initial_call_depth = initial_call.depth;
         let mut current_step_id = start_step_id;
 
@@ -226,7 +260,15 @@ impl Db {
             // let new_step = &self.db.steps[i];
             let new_call_key = new_step.call_key;
             current_step_id = new_step.step_id;
-            let new_call = &self.calls[new_call_key];
+            let Some(new_call) = self.calls.get(new_call_key) else {
+                warn!(
+                    "step_over_depths_step_id: call_key {:?} for step {:?} is out of bounds (calls len {})",
+                    new_call_key,
+                    current_step_id,
+                    self.calls.len()
+                );
+                break;
+            };
 
             info!("for returned: {:?} with depth: {:?}", new_step, new_call.depth);
 
@@ -388,6 +430,11 @@ impl Db {
 
                 let mut res = Value::new(TypeKind::Int, self.to_ct_type(type_id));
                 res.i = num.to_string();
+                res
+            }
+            ValueRecord::Char { c, type_id } => {
+                let mut res = Value::new(TypeKind::Char, self.to_ct_type(type_id));
+                res.c = c.to_string();
                 res
             }
         }
@@ -613,17 +660,20 @@ impl Db {
         // and to filter for that group
         let mut last_step_id_for_line = step_id;
         if !exact {
-            let original_step = self.steps[step_id];
-            let original_path_id = original_step.path_id;
-            let original_line = original_step.line;
-            let mut current_step_id = step_id + 1;
-            while (current_step_id.0 as usize) < self.steps.len() {
-                let step = self.steps[current_step_id];
-                if step.path_id != original_path_id || step.line != original_line {
-                    break;
-                } else {
-                    last_step_id_for_line = current_step_id;
-                    current_step_id = current_step_id + 1;
+            if let Some(original_step) = self.steps.get(step_id) {
+                let original_path_id = original_step.path_id;
+                let original_line = original_step.line;
+                let mut current_step_id = step_id + 1;
+                // Guard against negative step_id wrapping: only iterate when
+                // the next id is non-negative and within bounds.
+                while current_step_id.0 >= 0 && (current_step_id.0 as usize) < self.steps.len() {
+                    let step = self.steps[current_step_id];
+                    if step.path_id != original_path_id || step.line != original_line {
+                        break;
+                    } else {
+                        last_step_id_for_line = current_step_id;
+                        current_step_id = current_step_id + 1;
+                    }
                 }
             }
         }
@@ -694,22 +744,44 @@ pub struct StepIterator<'a> {
 
 impl StepIterator<'_> {
     fn on_step_id_limit(&self) -> bool {
+        // Guard against negative step IDs (e.g. StepId(-1) / NO_STEP_ID) and
+        // empty step vectors.  A negative i64 cast to usize wraps to a huge
+        // value, so we must check the sign first.
+        if self.db.steps.is_empty() || self.step_id.0 < 0 {
+            return true;
+        }
+        let idx = self.step_id.0 as usize;
         if self.forward {
-            // moving forward
-            self.step_id.0 as usize >= self.db.steps.len() - 1 // we're on the last one
+            // moving forward: we're at (or past) the last step
+            idx >= self.db.steps.len() - 1
         } else {
-            // moving backwards
-            self.step_id.0 as usize == 0
+            // moving backwards: we're at the first step
+            idx == 0
         }
     }
 
     fn single_step_line(&self) -> StepId {
-        // taking note of db.lines limits: returning a valid step id always
+        // Caller (`Iterator::next`) must call `on_step_id_limit` first, so
+        // these conditions should always hold.  We still avoid a hard panic
+        // and clamp to the boundary instead, logging the unexpected situation.
         if self.forward {
-            assert!((self.step_id.0 as usize) < self.db.steps.len() - 1);
+            if self.step_id.0 < 0 || (self.step_id.0 as usize) >= self.db.steps.len().saturating_sub(1) {
+                warn!(
+                    "single_step_line: forward step from {:?} is at or beyond limit (steps len {})",
+                    self.step_id,
+                    self.db.steps.len()
+                );
+                return self.step_id;
+            }
             self.step_id + 1
         } else {
-            assert!(self.step_id.0 as usize > 0);
+            if self.step_id.0 <= 0 {
+                warn!(
+                    "single_step_line: backward step from {:?} is at or beyond limit",
+                    self.step_id
+                );
+                return self.step_id;
+            }
             self.step_id - 1
         }
     }
@@ -908,6 +980,10 @@ impl DbReplay {
                 let type_id = self.register_type(typ);
                 ValueRecord::BigInt { b, negative, type_id }
             }
+            ValueRecordWithType::Char { c, typ } => {
+                let type_id = self.register_type(typ);
+                ValueRecord::Char { c, type_id }
+            }
         }
     }
 
@@ -983,6 +1059,10 @@ impl DbReplay {
                 negative: *negative,
                 typ: self.db.types[*type_id].clone(),
             },
+            ValueRecord::Char { c, type_id } => ValueRecordWithType::Char {
+                c: *c,
+                typ: self.db.types[*type_id].clone(),
+            },
         }
     }
 
@@ -1039,6 +1119,9 @@ impl DbReplay {
 
     fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
         // taking note of db.lines limits: returning a valid step id always
+        if self.db.steps.is_empty() {
+            return step_index;
+        }
         if forward {
             if step_index < self.db.steps.len() - 1 {
                 step_index + 1
@@ -1054,7 +1137,14 @@ impl DbReplay {
     }
 
     fn step_in(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
-        self.step_id = StepId(self.single_step_line(self.step_id.0 as usize, forward) as i64);
+        // Guard against negative step IDs (e.g. NO_STEP_ID = -1) which would
+        // wrap to usize::MAX and cause an out-of-bounds panic.
+        let step_index = if self.step_id.0 < 0 {
+            0usize
+        } else {
+            self.step_id.0 as usize
+        };
+        self.step_id = StepId(self.single_step_line(step_index, forward) as i64);
         Ok(true)
     }
 
@@ -1113,8 +1203,45 @@ impl DbReplay {
         Ok(false)
     }
 
+    /// Resolves a source path to its `PathId` in the trace database.
+    ///
+    /// The path_map in the DB typically stores *relative* paths (e.g. `src/main.py`),
+    /// but callers (such as the Python API or DAP clients) often provide *absolute*
+    /// paths (e.g. `/tmp/workdir/src/main.py`). To bridge this mismatch we try
+    /// three strategies in order:
+    ///
+    /// 1. **Exact match** - the path is already in the map as-is.
+    /// 2. **Workdir-stripped match** - strip the trace workdir prefix from the
+    ///    absolute path and look up the resulting relative path.
+    /// 3. **Suffix match** - iterate over all stored paths and return the first
+    ///    one where the requested path ends with the stored relative path
+    ///    (compared as whole path components via `std::path::Path::ends_with`).
     fn load_path_id(&self, path: &str) -> Option<PathId> {
-        self.db.path_map.get(path).copied()
+        // 1. Exact match (fast path).
+        if let Some(&id) = self.db.path_map.get(path) {
+            return Some(id);
+        }
+
+        let abs_path = std::path::Path::new(path);
+
+        // 2. Try stripping the workdir prefix to obtain a relative path.
+        if let Ok(relative) = abs_path.strip_prefix(&self.db.workdir) {
+            if let Some(rel_str) = relative.to_str() {
+                if let Some(&id) = self.db.path_map.get(rel_str) {
+                    return Some(id);
+                }
+            }
+        }
+
+        // 3. Suffix match: check if the absolute path ends with any stored
+        //    relative path (compared component-wise).
+        for (stored_path, &id) in &self.db.path_map {
+            if abs_path.ends_with(stored_path) {
+                return Some(id);
+            }
+        }
+
+        None
     }
 
     fn id_to_name(&self, variable_id: VariableId) -> &String {
@@ -1250,8 +1377,28 @@ impl Replay for DbReplay {
     }
 
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
-        warn!("load_callstack not implemented for db traces currently");
-        Ok(vec![])
+        // Walk the call chain from the current step upward to the root
+        // call, producing a CallLine for each frame.
+        let mut callstack = vec![];
+        let step_id = self.step_id;
+        if step_id.0 >= 0 && (step_id.0 as usize) < self.db.steps.len() {
+            let current_step = self.db.steps[step_id];
+            let mut call_key = current_step.call_key;
+            let mut expr_loader = ExprLoader::new(CoreTrace::default());
+
+            while call_key != NO_KEY {
+                let call_record = self.db.calls[call_key].clone();
+                let call = self.db.to_call(&call_record, &mut expr_loader);
+                callstack.push(CallLine::call(
+                    call,
+                    /* hidden_children */ false,
+                    /* count */ 0,
+                    call_record.depth,
+                ));
+                call_key = call_record.parent_key;
+            }
+        }
+        Ok(callstack)
     }
 
     #[allow(clippy::expect_used)] // now >= UNIX_EPOCH is always true
