@@ -24,7 +24,6 @@ import
   ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole]
 
-from dom import Node, document, getElementById
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers (similar to deepreview.nim but prefixed to avoid

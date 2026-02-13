@@ -16,8 +16,6 @@ import
   ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole]
 
-from dom import Node, document, getElementById
-
 type langstring = cstring
 
 # ---------------------------------------------------------------------------

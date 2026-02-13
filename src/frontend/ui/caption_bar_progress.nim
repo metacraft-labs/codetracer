@@ -15,10 +15,9 @@
 ## Reference: codetracer-specs/DeepReview/Agentic-Coding-Integration.md
 
 import
-  ui_imports, ../utils,
+  ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole, math]
 
-from dom import Node, document, getElementById
 
 # ---------------------------------------------------------------------------
 # Helpers
