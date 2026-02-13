@@ -877,6 +877,110 @@ impl BackendManager {
                 self.send_to_client(pending.client_id, py_response);
                 return;
             }
+
+            // Intercept ct/tracepoint-results events from the backend.
+            //
+            // After `ct/run-tracepoints` finishes, the backend emits a
+            // `ct/tracepoint-results` event carrying all tracepoint hits
+            // as `TracepointResultsAggregate`.  We intercept it here to
+            // build the `ct/py-run-tracepoints` response for the Python
+            // client.
+            //
+            // See: db-backend/src/handler.rs — `run_tracepoints()`
+            // See: db-backend/src/dap.rs — `tracepoint_results_event()`
+            if event_name == "ct/tracepoint-results"
+                && let Some(idx) = ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .position(|p| p.kind == PendingPyRequestKind::RunTracepoints)
+            {
+                let pending = ds.py_bridge.pending_requests.remove(idx);
+                let body = msg.get("body").unwrap_or(&Value::Null);
+
+                // Extract Stop objects from the results array and convert
+                // each into the simplified Python-facing schema.
+                let results_raw = body
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let results: Vec<Value> = results_raw
+                    .iter()
+                    .map(|stop| {
+                        // Extract values from the Stop's `locals` array.
+                        // Each local is a StringAndValueTuple with fields
+                        // `first` (name) and `second` (Value object).
+                        let values: Vec<Value> = stop
+                            .get("locals")
+                            .and_then(Value::as_array)
+                            .map(|locals| {
+                                locals
+                                    .iter()
+                                    .map(|local| {
+                                        let name = local
+                                            .get("first")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("");
+                                        let value = python_bridge::extract_value_str(
+                                            local.get("second"),
+                                        );
+                                        json!({"name": name, "value": value})
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        json!({
+                            "tracepointId": stop.get("tracepointId")
+                                .and_then(Value::as_i64).unwrap_or(0),
+                            "path": stop.get("path")
+                                .and_then(Value::as_str).unwrap_or(""),
+                            "line": stop.get("line")
+                                .and_then(Value::as_i64).unwrap_or(0),
+                            "ticks": stop.get("rrTicks")
+                                .and_then(Value::as_i64).unwrap_or(0),
+                            "iteration": stop.get("resultIndex")
+                                .and_then(Value::as_i64).unwrap_or(0),
+                            "values": values,
+                        })
+                    })
+                    .collect();
+
+                let errors = body
+                    .get("errors")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+
+                let py_response = serde_json::json!({
+                    "type": "response",
+                    "request_seq": pending.original_seq,
+                    "success": true,
+                    "command": "ct/py-run-tracepoints",
+                    "body": {
+                        "results": results,
+                        "errors": errors,
+                    },
+                });
+                self.send_to_client(pending.client_id, py_response);
+                return;
+            }
+
+            // Silently consume ct/updated-trace events when a
+            // RunTracepoints request is pending — these per-tracepoint
+            // updates are internal to the tracepoint run and should not
+            // be broadcast while a Python client is waiting for the
+            // aggregate ct/tracepoint-results event.
+            if event_name == "ct/updated-trace"
+                && ds
+                    .py_bridge
+                    .pending_requests
+                    .iter()
+                    .any(|p| p.kind == PendingPyRequestKind::RunTracepoints)
+            {
+                return;
+            }
         }
 
         // --- Python bridge: intercept responses for pending navigations ---
@@ -1035,6 +1139,12 @@ impl BackendManager {
                     }
                     PendingPyRequestKind::SelectProcess => {
                         python_bridge::format_select_process_response(msg)
+                    }
+                    PendingPyRequestKind::RunTracepoints => {
+                        // RunTracepoints is resolved via event interception
+                        // (ct/tracepoint-results), not via a DAP response.
+                        // If we reach here, silently consume.
+                        return;
                     }
                     PendingPyRequestKind::FireAndForget => {
                         // Already handled above; unreachable.
@@ -1769,6 +1879,9 @@ impl BackendManager {
                     "ct/py-remove-breakpoint" => self.handle_py_remove_breakpoint(seq, args).await,
                     "ct/py-add-watchpoint" => self.handle_py_add_watchpoint(seq, args).await,
                     "ct/py-remove-watchpoint" => self.handle_py_remove_watchpoint(seq, args).await,
+                    "ct/py-add-tracepoint" => self.handle_py_add_tracepoint(seq, args).await,
+                    "ct/py-remove-tracepoint" => self.handle_py_remove_tracepoint(seq, args).await,
+                    "ct/py-run-tracepoints" => self.handle_py_run_tracepoints(seq, args).await,
                     "ct/py-calltrace" => self.handle_py_calltrace(seq, args).await,
                     "ct/py-search-calltrace" => self.handle_py_search_calltrace(seq, args).await,
                     "ct/py-events" => self.handle_py_events(seq, args).await,
@@ -3214,6 +3327,418 @@ impl BackendManager {
                     &format!("unknown watchpoint ID: {wp_id}"),
                 );
             }
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-add-tracepoint, ct/py-remove-tracepoint,
+    // ct/py-run-tracepoints handlers
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-add-tracepoint` requests from Python clients.
+    ///
+    /// Stores the tracepoint in the daemon's per-trace state.  No DAP
+    /// command is sent to the backend until `ct/py-run-tracepoints` is
+    /// called.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-add-tracepoint",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "path": "main.c",
+    ///     "line": 42,
+    ///     "expression": "log(x, y)"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": true,
+    ///   "command": "ct/py-add-tracepoint",
+    ///   "body": {"tracepointId": 1}
+    /// }
+    /// ```
+    async fn handle_py_add_tracepoint(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-tracepoint",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let source_path = match args
+            .and_then(|a| a.get("path"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-tracepoint",
+                    "missing 'path' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let line = match args
+            .and_then(|a| a.get("line"))
+            .and_then(Value::as_i64)
+        {
+            Some(l) => l,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-tracepoint",
+                    "missing 'line' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let expression = match args
+            .and_then(|a| a.get("expression"))
+            .and_then(Value::as_str)
+        {
+            Some(e) => e.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-add-tracepoint",
+                    "missing 'expression' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        // Validate that a session exists for this trace (but no DAP
+        // command is sent — tracepoints are stored daemon-side until
+        // ct/py-run-tracepoints).
+        if self.backend_id_for_trace(&trace_path).is_none() {
+            self.send_py_command_error(
+                seq,
+                "ct/py-add-tracepoint",
+                &self.no_session_error_message(&trace_path_str),
+            );
+            return Ok(());
+        }
+
+        let tp_id = match self.daemon_state.as_mut() {
+            Some(ds) => {
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let (tp_id, _entry) = bp_state.add_tracepoint(&source_path, line, &expression);
+                tp_id
+            }
+            None => return Ok(()),
+        };
+
+        let response = json!({
+            "type": "response",
+            "request_seq": seq,
+            "success": true,
+            "command": "ct/py-add-tracepoint",
+            "body": {"tracepointId": tp_id}
+        });
+        self.send_response_for_seq(seq, response);
+        Ok(())
+    }
+
+    /// Handles `ct/py-remove-tracepoint` requests from Python clients.
+    ///
+    /// Removes the tracepoint from daemon-side state.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-remove-tracepoint",
+    ///   "seq": 2,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "tracepointId": 1
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:**
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 2,
+    ///   "success": true,
+    ///   "command": "ct/py-remove-tracepoint",
+    ///   "body": {"removed": true}
+    /// }
+    /// ```
+    async fn handle_py_remove_tracepoint(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-tracepoint",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let tp_id = match args
+            .and_then(|a| a.get("tracepointId"))
+            .and_then(Value::as_i64)
+        {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-remove-tracepoint",
+                    "missing 'tracepointId' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let removed = match self.daemon_state.as_mut() {
+            Some(ds) => {
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                bp_state.remove_tracepoint(tp_id)
+            }
+            None => return Ok(()),
+        };
+
+        if removed {
+            let response = json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": true,
+                "command": "ct/py-remove-tracepoint",
+                "body": {"removed": true}
+            });
+            self.send_response_for_seq(seq, response);
+        } else {
+            self.send_py_command_error(
+                seq,
+                "ct/py-remove-tracepoint",
+                &format!("unknown tracepoint ID: {tp_id}"),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-run-tracepoints` requests from Python clients.
+    ///
+    /// Builds a `ct/run-tracepoints` DAP command from all stored tracepoints
+    /// and sends it to the backend's tracepoint thread.  Registers a pending
+    /// request that is resolved when the backend emits a
+    /// `ct/tracepoint-results` event.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request:**
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-run-tracepoints",
+    ///   "seq": 3,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "stopAfter": -1
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response** (async, after `ct/tracepoint-results` event):
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 3,
+    ///   "success": true,
+    ///   "command": "ct/py-run-tracepoints",
+    ///   "body": {
+    ///     "results": [
+    ///       {
+    ///         "tracepointId": 1,
+    ///         "path": "main.c",
+    ///         "line": 42,
+    ///         "ticks": 12345,
+    ///         "iteration": 0,
+    ///         "values": [{"name": "x", "value": "42"}]
+    ///       }
+    ///     ],
+    ///     "errors": {}
+    ///   }
+    /// }
+    /// ```
+    async fn handle_py_run_tracepoints(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-run-tracepoints",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let stop_after = args
+            .and_then(|a| a.get("stopAfter"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-run-tracepoints",
+                    &self.no_session_error_message(&trace_path_str),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Build the tracepoints array from daemon-side state.
+        let tracepoints_json: Vec<Value> = match self.daemon_state.as_ref() {
+            Some(ds) => {
+                let bp_state = ds
+                    .py_bridge
+                    .breakpoint_states
+                    .get(&trace_path)
+                    .map(|s| s.all_tracepoints())
+                    .unwrap_or_default();
+                bp_state
+                    .into_iter()
+                    .map(|(tp_id, entry)| {
+                        json!({
+                            "tracepointId": tp_id,
+                            "mode": 0, // TracepointMode::Log
+                            "line": entry.line,
+                            "offset": 0,
+                            "name": entry.source_path,
+                            "expression": entry.expression,
+                            "lastRender": 0,
+                            "isDisabled": false,
+                            "isChanged": false,
+                            "lang": 0,
+                            "results": [],
+                            "tracepointError": ""
+                        })
+                    })
+                    .collect()
+            }
+            None => return Ok(()),
+        };
+
+        if tracepoints_json.is_empty() {
+            // No tracepoints registered — return empty results immediately.
+            let response = json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": true,
+                "command": "ct/py-run-tracepoints",
+                "body": {
+                    "results": [],
+                    "errors": {}
+                }
+            });
+            self.send_response_for_seq(seq, response);
+            return Ok(());
+        }
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // Build the RunTracepointsArg-shaped DAP command.
+        let dap_request = json!({
+            "type": "request",
+            "command": "ct/run-tracepoints",
+            "seq": dap_seq,
+            "arguments": {
+                "session": {
+                    "id": 1,
+                    "tracepoints": tracepoints_json,
+                    "found": [],
+                    "lastCount": 0,
+                    "results": {}
+                },
+                "stopAfter": stop_after
+            }
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-run-tracepoints",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        // Register a pending request to be resolved when the backend
+        // emits the `ct/tracepoint-results` event.
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::RunTracepoints,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-run-tracepoints".to_string(),
+                expression: String::new(),
+            });
         }
 
         Ok(())

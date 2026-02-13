@@ -707,6 +707,98 @@ class Trace:
                 response.get("message", "remove_watchpoint() failed")
             )
 
+    # --- Tracepoints (printf debugging without recompilation) ---
+
+    def add_tracepoint(self, path: str, line: int, expression: str) -> int:
+        """Add a tracepoint that evaluates an expression each time
+        execution passes through the given line.
+
+        Tracepoints provide printf-style debugging without recompilation:
+        evaluate custom expressions at any line across the entire recorded
+        execution.  The expression language supports ``log(expr, ...)``,
+        variables, field access, arithmetic, and conditionals.
+
+        No evaluation happens until :meth:`run_tracepoints` is called.
+
+        Parameters:
+            path: Source file path (as stored in the trace).
+            line: Line number to set the tracepoint at.
+            expression: Expression to evaluate at each hit
+                (e.g., ``"log(x, y)"``).
+
+        Returns:
+            A positive integer tracepoint ID that can be passed to
+            :meth:`remove_tracepoint`.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-add-tracepoint", {
+            "tracePath": self._path,
+            "path": path,
+            "line": line,
+            "expression": expression,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "add_tracepoint() failed")
+            )
+        return response.get("body", {}).get("tracepointId", 0)
+
+    def remove_tracepoint(self, tp_id: int) -> None:
+        """Remove a previously set tracepoint by its ID.
+
+        Parameters:
+            tp_id: The tracepoint ID returned by :meth:`add_tracepoint`.
+
+        Raises:
+            TraceError: If the daemon reports an error (e.g., unknown ID).
+        """
+        response = self._connection.send_request("ct/py-remove-tracepoint", {
+            "tracePath": self._path,
+            "tracepointId": tp_id,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "remove_tracepoint() failed")
+            )
+
+    def run_tracepoints(self, stop_after: int = -1) -> list:
+        """Execute all active tracepoints across the trace.
+
+        Replays the entire recorded execution (or up to *stop_after*
+        hits), evaluating every active tracepoint at each matching line.
+        Returns a list of result dicts, one per hit.
+
+        Parameters:
+            stop_after: Maximum number of hits to collect.  ``-1`` means
+                no limit (process the entire trace).
+
+        Returns:
+            A list of dicts, each with keys:
+
+            - ``tracepointId`` (int): Which tracepoint produced this hit.
+            - ``path`` (str): Source file path.
+            - ``line`` (int): Line number.
+            - ``ticks`` (int): Execution timestamp.
+            - ``iteration`` (int): Visit index (0 for first hit, etc.).
+            - ``values`` (list[dict]): Evaluated expression results,
+              each ``{"name": str, "value": str}``.
+
+        Raises:
+            TraceError: If the daemon reports an error.
+        """
+        response = self._connection.send_request("ct/py-run-tracepoints", {
+            "tracePath": self._path,
+            "stopAfter": stop_after,
+        })
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "run_tracepoints() failed")
+            )
+        body = response.get("body", {})
+        return body.get("results", [])
+
     # --- Value Trace (formerly "flow") / structure ---
 
     def value_trace(self, path: str, line: int, mode: str = "call") -> ValueTrace:

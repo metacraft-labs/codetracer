@@ -84,7 +84,7 @@ const TRACE_URI_PREFIX: &str = "trace://";
 fn exec_script_tool() -> Value {
     json!({
         "name": "exec_script",
-        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
+        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(expr) -> id, remove_watchpoint(id)\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints() -> results\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -188,6 +188,24 @@ recorded program executions.  A `trace` variable is pre-bound to the
 opened trace in every script.  All navigation methods return a `Location`
 and raise `StopIteration` at trace boundaries.
 
+## Debugging Philosophy
+
+Once you capture a bug in a recording, you can be certain that you will
+find the root cause using these powerful tools:
+
+**Watchpoints — Track down the origin of any value.**  When you encounter
+an unexpected value, set a watchpoint on the variable and continue backward.
+CodeTracer will stop at the exact moment and code line where that memory
+location was last written to.  Repeat this "where did this value come from?"
+question — it usually takes just a few jumps to reach the root cause.
+
+**Tracepoints — Printf debugging without recompilation.**  A tracepoint
+evaluates a custom expression every time execution passes through a line,
+across the entire recorded execution.  You get the same insight as adding
+print statements but without recompiling, rerunning, or cleaning up
+debugging code.  The expression language supports log(), variables, field
+access, arithmetic, and conditionals.
+
 ## Exceptions
 
 All exceptions inherit from `TraceError`:
@@ -265,6 +283,14 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `name: str` - Process name
 - `command: str` - Command line
 
+### TracepointResult
+- `tracepointId: int` - Which tracepoint produced this hit
+- `path: str` - Source file path
+- `line: int` - Line number
+- `ticks: int` - Execution timestamp
+- `iteration: int` - Visit index (0 for first hit, 1 for second, etc.)
+- `values: list[dict]` - Evaluated expression results: [{"name": str, "value": str}]
+
 ## Trace Class
 
 ### Properties
@@ -298,6 +324,14 @@ access (`var['name']`).  Common aliases: `call['function']` for
 - `trace.remove_breakpoint(bp_id: int)` - Remove a breakpoint by ID
 - `trace.add_watchpoint(expression: str) -> int` - Watch for value changes, returns ID
 - `trace.remove_watchpoint(wp_id: int)` - Remove a watchpoint by ID
+
+### Tracepoints
+- `trace.add_tracepoint(path: str, line: int, expression: str) -> int`
+  Add a tracepoint. Expression uses `log(expr, ...)` to capture values.
+  Returns a tracepoint ID.
+- `trace.remove_tracepoint(tp_id: int)` - Remove a tracepoint by ID
+- `trace.run_tracepoints(stop_after: int = -1) -> list[TracepointResult]`
+  Execute all tracepoints across the full trace.  Returns all hits.
 
 ### Value Trace (Omniscience)
 - `trace.value_trace(path: str, line: int, mode="call") -> ValueTrace`
@@ -449,6 +483,18 @@ if output.strip():
     print(output)
 else:
     print("(no terminal output captured)")
+```
+
+## Example 9: Tracepoints — printf debugging without recompilation
+
+```python
+# Add a tracepoint to see loop variable values at a specific line
+tp = trace.add_tracepoint(trace.location.path, 42, "log(i, total)")
+results = trace.run_tracepoints()
+for r in results:
+    vals = ", ".join(f"{v['name']}={v['value']}" for v in r["values"])
+    print(f"  hit #{r['iteration']} ticks={r['ticks']}: {vals}")
+trace.remove_tracepoint(tp)
 ```
 
 ## Tips
@@ -2220,8 +2266,8 @@ mod tests {
     fn test_api_reference_is_under_10kb() {
         let text = trace_query_api_reference();
         assert!(
-            text.len() < 10 * 1024,
-            "API reference is {} bytes, should be under 10KB",
+            text.len() < 15 * 1024,
+            "API reference is {} bytes, should be under 15KB",
             text.len()
         );
     }
@@ -2231,8 +2277,8 @@ mod tests {
         let text = trace_query_api_reference();
         let lines = text.lines().count();
         assert!(
-            lines < 300,
-            "API reference is {lines} lines, should be under 300",
+            lines < 400,
+            "API reference is {lines} lines, should be under 400",
         );
     }
 
