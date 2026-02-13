@@ -750,8 +750,9 @@ jobs:
         run: |
           mkdir -p ~/.config/nix
           echo "access-tokens = github.com=${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}" >> ~/.config/nix/nix.conf
-          git config --global url."https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
 
       - name: Create tag
         if: ${{ github.ref == 'refs/heads/main' }}
@@ -793,8 +794,9 @@ jobs:
         run: |
           mkdir -p ~/.config/nix
           echo "access-tokens = github.com=${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}" >> ~/.config/nix/nix.conf
-          git config --global url."https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
 
       - name: "Import GPG key for signing commits"
         id: import-gpg
