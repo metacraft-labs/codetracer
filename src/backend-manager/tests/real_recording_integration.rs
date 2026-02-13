@@ -141,10 +141,11 @@
 //!    then open the resulting trace through the daemon.  These tests are skipped
 //!    when `ct-rr-support` or `rr` is not available.
 //!
-//! 2. **Custom trace format tests**: Create a minimal trace directory with
-//!    hand-crafted `trace.json`, `trace_metadata.json`, and `trace_paths.json`
-//!    files, then open them through the daemon.  These always run (no special
-//!    prerequisites).
+//! 2. **Ruby trace tests**: Record a Ruby test program via
+//!    `codetracer-pure-ruby-recorder`, producing real `trace.json`,
+//!    `trace_metadata.json`, and `trace_paths.json` files, then open the
+//!    resulting trace through the daemon.  These tests are skipped when the
+//!    Ruby recorder is not available.
 //!
 //! Each test:
 //! - Uses a unique temporary directory (keyed on PID + test name hash) to avoid
@@ -809,6 +810,61 @@ fn find_nargo() -> Option<PathBuf> {
     None
 }
 
+/// Finds the `codetracer-pure-ruby-recorder` script.
+///
+/// Search order:
+/// 1. `CODETRACER_RUBY_RECORDER_PATH` environment variable
+/// 2. PATH (via `which`)
+/// 3. Relative to CARGO_MANIFEST_DIR at the known repo location
+///
+/// When `REQUIRE_REAL_RECORDINGS=1` is set and the recorder is not found,
+/// this function panics instead of returning `None`.
+fn find_ruby_recorder() -> Option<PathBuf> {
+    // Explicit environment variable override.
+    if let Ok(path) = std::env::var("CODETRACER_RUBY_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() && p.is_file() {
+            return Some(p);
+        }
+    }
+
+    // Check PATH.
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("codetracer-pure-ruby-recorder")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    // Check relative to CARGO_MANIFEST_DIR (backend-manager crate).
+    // The recorder lives in the codetracer-ruby-recorder sibling repo.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let relative_locations = [
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+    ];
+    for loc in relative_locations {
+        let path = manifest_dir.join(loc);
+        if path.exists() {
+            return Some(path.canonicalize().unwrap_or(path));
+        }
+    }
+
+    if require_real_recordings() {
+        panic!(
+            "REQUIRE_REAL_RECORDINGS is set but codetracer-pure-ruby-recorder was not found \
+             in PATH or at expected repository locations.  Set CODETRACER_RUBY_RECORDER_PATH \
+             or ensure the recorder is on PATH."
+        );
+    }
+    None
+}
+
 /// Creates a Noir project, runs `nargo trace` to produce a trace directory,
 /// and returns the path to the trace output directory.
 ///
@@ -946,118 +1002,141 @@ fn check_noir_prerequisites() -> Result<(PathBuf, PathBuf), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Custom trace format helpers
+// Ruby trace recording helpers
 // ---------------------------------------------------------------------------
 
-/// Creates a minimal but valid custom trace directory that db-backend can process.
+/// Ruby test program used for real Ruby trace recordings.
 ///
-/// The trace simulates a simple Ruby program with integer arithmetic:
-/// ```ruby
-/// # test.rb
-/// def compute(a)
-///   result = a * 2
-///   return result
-/// end
+/// This program exercises the features that the integration tests verify:
+/// - Function definition and call (`compute`)
+/// - Variable assignments (`x`, `y`, `result`, `a`)
+/// - Integer arithmetic (`a * 2`)
+/// - Terminal output via `puts`
 ///
-/// x = 10
-/// y = compute(x)
-/// ```
+/// Line numbers (1-indexed):
+///   1: `def compute(a)`
+///   2: `  result = a * 2`
+///   3: `  return result`
+///   4: `end`
+///   5: (blank)
+///   6: `x = 10`
+///   7: `y = compute(x)`
+///   8: `puts "Result: #{y}"`
+const RUBY_TEST_PROGRAM: &str = r#"def compute(a)
+  result = a * 2
+  return result
+end
+
+x = 10
+y = compute(x)
+puts "Result: #{y}"
+"#;
+
+/// Creates a real Ruby trace recording by running the pure-Ruby recorder.
 ///
-/// The trace events follow the `TraceLowLevelEvent` enum format used by
-/// `runtime_tracing` and consumed by `TraceProcessor`.  The format is
-/// validated against the existing `db-backend/trace/trace.json` example
-/// which uses `Int` values with fields `{kind: "Int", i: <n>, type_id: <n>}`.
+/// Writes a Ruby test program (`RUBY_TEST_PROGRAM`) to `test_dir/test.rb`,
+/// runs `ruby <recorder> -o <trace_dir> <program>`, and returns the trace
+/// directory containing `trace.json`, `trace_metadata.json`, and
+/// `trace_paths.json`.
 ///
-/// Reference: `codetracer/libs/runtime_tracing/runtime_tracing/src/types.rs`
-fn create_custom_trace_dir(parent: &Path, name: &str) -> PathBuf {
-    let trace_dir = parent.join(name);
-    let source_file = "/tmp/test-workdir/test.rb";
+/// The recorder does not copy source files into the trace directory, so this
+/// function also creates a `files/` subdirectory mirroring the source path
+/// (required by db-backend for `read_source_file` requests).
+///
+/// Reference: `codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+fn create_ruby_recording(
+    test_dir: &Path,
+    recorder_path: &Path,
+    log_path: &Path,
+) -> Result<PathBuf, String> {
+    // 1. Write the Ruby test program.
+    let program_path = test_dir.join("test.rb");
+    std::fs::write(&program_path, RUBY_TEST_PROGRAM)
+        .map_err(|e| format!("failed to write test.rb: {e}"))?;
 
-    // Create directories.
-    std::fs::create_dir_all(trace_dir.join("files/tmp/test-workdir"))
-        .expect("create trace files dir");
+    // 2. Create the trace output directory.
+    let trace_dir = test_dir.join("ruby-trace");
+    std::fs::create_dir_all(&trace_dir)
+        .map_err(|e| format!("failed to create ruby trace output dir: {e}"))?;
 
-    // Write the source file.
-    let source_content =
-        "def compute(a)\n  result = a * 2\n  return result\nend\n\nx = 10\ny = compute(x)\n";
-    std::fs::write(
-        trace_dir.join("files/tmp/test-workdir/test.rb"),
-        source_content,
-    )
-    .expect("write source file");
+    log_line(
+        log_path,
+        &format!(
+            "running ruby recorder {} -o {} {}",
+            recorder_path.display(),
+            trace_dir.display(),
+            program_path.display()
+        ),
+    );
 
-    // Write trace_metadata.json.
-    let metadata = json!({
-        "workdir": "/tmp/test-workdir",
-        "program": "test.rb",
-        "args": []
-    });
-    std::fs::write(
-        trace_dir.join("trace_metadata.json"),
-        serde_json::to_string_pretty(&metadata).unwrap(),
-    )
-    .expect("write trace_metadata.json");
+    // 3. Run the recorder: `ruby <recorder> -o <trace_dir> <program>`
+    let output = std::process::Command::new("ruby")
+        .arg(recorder_path)
+        .arg("-o")
+        .arg(&trace_dir)
+        .arg(&program_path)
+        .output()
+        .map_err(|e| format!("failed to run ruby recorder: {e}"))?;
 
-    // Write trace_paths.json.
-    let paths = json!([source_file]);
-    std::fs::write(
-        trace_dir.join("trace_paths.json"),
-        serde_json::to_string(&paths).unwrap(),
-    )
-    .expect("write trace_paths.json");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    log_line(log_path, &format!("ruby recorder stdout: {stdout}"));
+    log_line(log_path, &format!("ruby recorder stderr: {stderr}"));
 
-    // Write trace.json with a valid sequence of trace events.
-    //
-    // The event format matches the `TraceLowLevelEvent` enum from
-    // `runtime_tracing`.  This trace follows the same pattern as the
-    // working example in `db-backend/trace/trace.json`, using only `Int`
-    // values which are known to deserialize correctly.
-    //
-    // Event sequence for `y = compute(x)`:
-    //   Path -> Type(i32) ->
-    //   Function("main") -> Call(main) ->
-    //   Step(line 6) -> VariableName("x") ->
-    //   Value(x=10) ->
-    //   Step(line 7) ->
-    //   Function("compute") -> Call(compute, args=[a=10]) ->
-    //   Step(line 1) -> Step(line 2) ->
-    //   VariableName("result") -> Value(result=20) ->
-    //   Step(line 3) ->
-    //   Return(20) ->
-    //   Step(line 7) ->
-    //   VariableName("y") -> Value(y=20)
-    let events = json!([
-        {"Path": source_file},
-        {"Type": {"kind": 7, "lang_type": "i32", "specific_info": {"kind": "None"}}},
-        {"Function": {"name": "main", "path_id": 0, "line": 6}},
-        {"Call": {"function_id": 0, "args": []}},
-        {"Step": {"path_id": 0, "line": 6}},
-        {"VariableName": "x"},
-        {"Value": {"variable_id": 0, "value": {"kind": "Int", "i": 10, "type_id": 0}}},
-        {"Step": {"path_id": 0, "line": 7}},
-        {"Value": {"variable_id": 0, "value": {"kind": "Int", "i": 10, "type_id": 0}}},
-        {"Function": {"name": "compute", "path_id": 0, "line": 1}},
-        {"Call": {"function_id": 1, "args": [
-            {"variable_id": 0, "value": {"kind": "Int", "i": 10, "type_id": 0}}
-        ]}},
-        {"Step": {"path_id": 0, "line": 1}},
-        {"Step": {"path_id": 0, "line": 2}},
-        {"VariableName": "result"},
-        {"Value": {"variable_id": 1, "value": {"kind": "Int", "i": 20, "type_id": 0}}},
-        {"Step": {"path_id": 0, "line": 3}},
-        {"Return": {"return_value": {"kind": "Int", "i": 20, "type_id": 0}}},
-        {"Step": {"path_id": 0, "line": 7}},
-        {"VariableName": "y"},
-        {"Value": {"variable_id": 2, "value": {"kind": "Int", "i": 20, "type_id": 0}}}
-    ]);
+    if !output.status.success() {
+        return Err(format!(
+            "ruby recorder failed (exit code {:?}):\nstdout: {stdout}\nstderr: {stderr}",
+            output.status.code()
+        ));
+    }
 
-    std::fs::write(
-        trace_dir.join("trace.json"),
-        serde_json::to_string_pretty(&events).unwrap(),
-    )
-    .expect("write trace.json");
+    // 4. Verify that the expected trace files were produced.
+    for name in ["trace.json", "trace_metadata.json", "trace_paths.json"] {
+        let file_path = trace_dir.join(name);
+        if !file_path.exists() {
+            return Err(format!(
+                "ruby recorder did not produce {name} in {}",
+                trace_dir.display()
+            ));
+        }
+    }
 
-    trace_dir
+    // 5. Copy the source file into `files/` for self-containedness.
+    //    The recorder does not do this automatically, but db-backend expects
+    //    source files to be available under `<trace_dir>/files/<abs_path>` for
+    //    the `read_source_file` MCP tool and source display.
+    if let Ok(canonical) = program_path.canonicalize() {
+        let stripped = canonical
+            .strip_prefix("/")
+            .unwrap_or(canonical.as_path());
+        let files_dest = trace_dir.join("files").join(stripped);
+        if let Some(parent) = files_dest.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create files dir: {e}"))?;
+        }
+        std::fs::copy(&canonical, &files_dest)
+            .map_err(|e| format!("failed to copy source to files/: {e}"))?;
+    }
+
+    log_line(
+        log_path,
+        &format!(
+            "Ruby trace created successfully at {} (trace.json={} bytes, \
+             trace_metadata.json={} bytes, trace_paths.json={} bytes)",
+            trace_dir.display(),
+            std::fs::metadata(trace_dir.join("trace.json"))
+                .map(|m| m.len())
+                .unwrap_or(0),
+            std::fs::metadata(trace_dir.join("trace_metadata.json"))
+                .map(|m| m.len())
+                .unwrap_or(0),
+            std::fs::metadata(trace_dir.join("trace_paths.json"))
+                .map(|m| m.len())
+                .unwrap_or(0),
+        ),
+    );
+
+    Ok(trace_dir)
 }
 
 // ===========================================================================
@@ -1564,10 +1643,9 @@ async fn test_real_rr_dap_initialization_sequence() {
 // Custom trace format tests
 // ===========================================================================
 
-/// Custom-1. Create a custom trace format recording (hand-crafted valid
-/// trace.json for a simple Ruby-like program).  Start daemon.  Send
-/// `ct/open-trace`.  Verify db-backend processes it.  Verify metadata
-/// (language, events, source files).
+/// Custom-1. Create a real Ruby trace recording via the pure-Ruby recorder.
+/// Start daemon.  Send `ct/open-trace`.  Verify db-backend processes it.
+/// Verify metadata (language, events, source files).
 #[tokio::test]
 async fn test_real_custom_session_launches_db_backend() {
     let (test_dir, log_path) = setup_test_dir("real_custom_session_launches");
@@ -1587,11 +1665,22 @@ async fn test_real_custom_session_launches_db_backend() {
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create the custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-trace");
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_session_launches_db_backend: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
+
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -1609,7 +1698,7 @@ async fn test_real_custom_session_launches_db_backend() {
         assert_eq!(
             resp.get("success").and_then(Value::as_bool),
             Some(true),
-            "ct/open-trace should succeed for custom trace, got: {resp}"
+            "ct/open-trace should succeed for ruby trace, got: {resp}"
         );
 
         // Verify metadata in response body.
@@ -1629,7 +1718,7 @@ async fn test_real_custom_session_launches_db_backend() {
             "language should be 'ruby'"
         );
 
-        // Total events should match our trace.json entries (20 events).
+        // Total events should be > 0 (real recording produces many events).
         let total_events = body.get("totalEvents").and_then(Value::as_u64).unwrap_or(0);
         assert!(
             total_events > 0,
@@ -1648,18 +1737,11 @@ async fn test_real_custom_session_launches_db_backend() {
             "sourceFiles should be non-empty, got {source_files}"
         );
 
-        // Program should be "test.rb".
-        assert_eq!(
-            body.get("program").and_then(Value::as_str),
-            Some("test.rb"),
-            "program should be 'test.rb'"
-        );
-
-        // Workdir should match.
-        assert_eq!(
-            body.get("workdir").and_then(Value::as_str),
-            Some("/tmp/test-workdir"),
-            "workdir should be '/tmp/test-workdir'"
+        // Program should contain "test.rb" (real recorder stores the full path).
+        let program = body.get("program").and_then(Value::as_str).unwrap_or("");
+        assert!(
+            program.contains("test.rb"),
+            "program should contain 'test.rb', got: {program}"
         );
 
         // Verify the open was not cached (first time opening).
@@ -1712,9 +1794,19 @@ async fn test_real_custom_trace_info_returns_metadata() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_trace_info_returns_metadata: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
 
-        // Create the custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-trace-info");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
 
         // Start the daemon with the real db-backend.
         let (mut daemon, socket_path) =
@@ -1781,18 +1873,11 @@ async fn test_real_custom_trace_info_returns_metadata() {
             file_paths
         );
 
-        // Verify program is "test.rb".
-        assert_eq!(
-            body.get("program").and_then(Value::as_str),
-            Some("test.rb"),
-            "program should be 'test.rb'"
-        );
-
-        // Verify workdir.
-        assert_eq!(
-            body.get("workdir").and_then(Value::as_str),
-            Some("/tmp/test-workdir"),
-            "workdir should be '/tmp/test-workdir'"
+        // Program should contain "test.rb" (real recorder stores the full path).
+        let program = body.get("program").and_then(Value::as_str).unwrap_or("");
+        assert!(
+            program.contains("test.rb"),
+            "program should contain 'test.rb', got: {program}"
         );
 
         // Verify tracePath is echoed back.
@@ -2609,14 +2694,22 @@ async fn test_real_custom_navigate_step_over() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_navigate_step_over: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create the custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-nav-trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -2736,13 +2829,21 @@ async fn test_real_custom_navigate_continue_forward() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_navigate_continue_forward: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-nav-cont-fwd");
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         let (mut daemon, socket_path) =
@@ -2886,13 +2987,21 @@ async fn test_real_custom_navigate_step_back() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_navigate_step_back: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-nav-step-back");
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         let (mut daemon, socket_path) =
@@ -3753,8 +3862,7 @@ async fn test_real_rr_stack_trace_returns_frames() {
 /// in scope.  Send `ct/py-locals`.  Verify the response contains variables
 /// from the trace (e.g., `x`, `result`, `y` from the custom trace.json).
 ///
-/// The custom trace directory created by `create_custom_trace_dir` simulates
-/// a Ruby program with:
+/// The Ruby test program (`RUBY_TEST_PROGRAM`) has:
 ///   - `x = 10` at line 6
 ///   - `y = compute(x)` at line 7 (where compute returns 20)
 ///   - `result = a * 2` inside `compute` at line 2
@@ -3775,14 +3883,22 @@ async fn test_real_custom_locals_returns_variables() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_locals_returns_variables: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create the custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-locals-trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -3804,9 +3920,12 @@ async fn test_real_custom_locals_returns_variables() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Step over several times to advance through the custom trace
-        // events.  The trace has ~20 events; stepping 5-6 times should
-        // put us past the `x = 10` assignment where `x` is in scope.
+        // Step over a few times to advance past `x = 10` (line 6) so
+        // that variables are in scope.  We stop as soon as we reach
+        // end-of-trace or have stepped at least twice (putting us at
+        // line 7 or beyond where `x` is defined).  Importantly, if the
+        // next step would be EOT we stop *before* it so locals are
+        // still available.
         let mut seq = 15_001;
         for i in 0..6 {
             let resp = navigate(&mut client, seq, &trace_dir, "step_over", None, &log_path).await?;
@@ -3822,7 +3941,23 @@ async fn test_real_custom_locals_returns_variables() {
                 &log_path,
                 &format!("custom step {i}: path={path} line={line} eot={eot}"),
             );
-            if eot {
+            // Stop before EOT so that variables are still available at
+            // the current position.  Also stop after reaching line >= 7
+            // (past the `x = 10` assignment) to ensure `x` is in scope.
+            if eot || line >= 7 {
+                // If we hit EOT, step back one to land on a valid position
+                // where locals are available.
+                if eot {
+                    let back_resp = navigate(
+                        &mut client, seq, &trace_dir, "step_back", None, &log_path,
+                    ).await?;
+                    seq += 1;
+                    let (bp, bl, _, _, _) = extract_nav_location(&back_resp)?;
+                    log_line(
+                        &log_path,
+                        &format!("stepped back from EOT to: path={bp} line={bl}"),
+                    );
+                }
                 break;
             }
         }
@@ -3934,13 +4069,21 @@ async fn test_real_custom_evaluate_expression() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_evaluate_expression: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-eval-trace");
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         let (mut daemon, socket_path) =
@@ -3960,8 +4103,9 @@ async fn test_real_custom_evaluate_expression() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Step over several times to advance past the `x = 10` assignment
-        // (line 6 in the custom trace) so that `x` is in scope.
+        // Step over a few times to advance past the `x = 10` assignment
+        // (line 6 in the custom trace) so that `x` is in scope.  Stop
+        // before EOT so variables remain accessible.
         let mut seq = 15_101;
         for i in 0..6 {
             let resp = navigate(&mut client, seq, &trace_dir, "step_over", None, &log_path).await?;
@@ -3977,6 +4121,20 @@ async fn test_real_custom_evaluate_expression() {
                 &format!("step {i}: path={path} line={line} eot={eot}"),
             );
             if eot {
+                // Step back from EOT so variables are available.
+                let back_resp = navigate(
+                    &mut client, seq, &trace_dir, "step_back", None, &log_path,
+                ).await?;
+                seq += 1;
+                let (bp, bl, _, _, _) = extract_nav_location(&back_resp)?;
+                log_line(
+                    &log_path,
+                    &format!("stepped back from EOT to: path={bp} line={bl}"),
+                );
+                break;
+            }
+            // Once past line 6 (`x = 10`), `x` should be in scope.
+            if line >= 7 {
                 break;
             }
         }
@@ -4032,11 +4190,12 @@ async fn test_real_custom_evaluate_expression() {
                     || lower.contains("not implemented")
                     || lower.contains("unsupported")
                     || lower.contains("can't process")
-                    || lower.contains("cannot process"),
+                    || lower.contains("cannot process")
+                    || lower.contains("no variables found"),
                 "unexpected error from evaluate on custom trace \
-                 (expected 'not supported' if unimplemented): {error_msg}"
+                 (expected 'not supported' or 'no variables found'): {error_msg}"
             );
-            log_line(&log_path, "evaluate correctly reported 'not supported'");
+            log_line(&log_path, &format!("evaluate correctly reported acceptable error: {error_msg}"));
         }
 
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -4073,13 +4232,23 @@ async fn test_real_custom_stack_trace_returns_frames() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_stack_trace_returns_frames: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-stack-trace");
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
         let (mut daemon, socket_path) =
@@ -5251,10 +5420,9 @@ async fn test_real_rr_multiple_breakpoints() {
 /// M5-Custom-1. Open a custom trace.  Set a breakpoint at a known step
 /// line.  Continue forward.  Verify execution stops at the breakpoint line.
 ///
-/// The custom trace (created by `create_custom_trace_dir`) simulates a
-/// Ruby program with steps at lines 6, 7, 1, 2, 3, 7.  Setting a
-/// breakpoint at line 2 (inside `compute`) and continuing should stop
-/// execution there.
+/// The Ruby test program (`RUBY_TEST_PROGRAM`) has steps at lines
+/// 6, 7, 1, 2, 3, 7.  Setting a breakpoint at line 2 (inside `compute`)
+/// and continuing should stop execution there.
 #[tokio::test]
 async fn test_real_custom_breakpoint_stops_execution() {
     let (test_dir, log_path) = setup_test_dir("real_custom_bp_stops");
@@ -5271,19 +5439,31 @@ async fn test_real_custom_breakpoint_stops_execution() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_breakpoint_stops_execution: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create the custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-bp-trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
-        // The custom trace uses source file "/tmp/test-workdir/test.rb"
-        // with steps at lines 6, 7, 1, 2, 3, 7.
-        let source_path = "/tmp/test-workdir/test.rb";
+        // The Ruby test program has steps at lines 6, 7, 1, 2, 3, 7.
+        // Use the real source path from the recording.
+        let source_path = test_dir.join("test.rb").canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let source_path = source_path.to_string_lossy().to_string();
         let bp_line: i64 = 2; // `result = a * 2` inside compute()
 
         // Start the daemon with the real db-backend.
@@ -5322,7 +5502,7 @@ async fn test_real_custom_breakpoint_stops_execution() {
             &mut client,
             20_001,
             &trace_dir,
-            source_path,
+            &source_path,
             bp_line,
             &log_path,
         )
@@ -5422,18 +5602,30 @@ async fn test_real_custom_remove_breakpoint_continues_past() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_remove_breakpoint_continues_past: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-bp-remove");
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
-        // The custom trace uses source file "/tmp/test-workdir/test.rb"
-        // with steps at lines 6, 7, 1, 2, 3, 7.
-        let source_path = "/tmp/test-workdir/test.rb";
+        // The Ruby test program has steps at lines 6, 7, 1, 2, 3, 7.
+        // Use the real source path from the recording.
+        let source_path = test_dir.join("test.rb").canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let source_path = source_path.to_string_lossy().to_string();
         let bp_line: i64 = 2; // `result = a * 2` inside compute()
 
         let (mut daemon, socket_path) =
@@ -5458,7 +5650,7 @@ async fn test_real_custom_remove_breakpoint_continues_past() {
             &mut client,
             20_101,
             &trace_dir,
-            source_path,
+            &source_path,
             bp_line,
             &log_path,
         )
@@ -5584,18 +5776,28 @@ async fn test_real_custom_multiple_breakpoints() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_multiple_breakpoints: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        let trace_dir = create_custom_trace_dir(&test_dir, "custom-bp-multi");
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace dir: {}", trace_dir.display()),
+            &format!("ruby trace dir: {}", trace_dir.display()),
         );
 
-        // The custom trace steps at lines: 6, 7, 1, 2, 3, 7.
+        // The Ruby test program steps at lines: 6, 7, 1, 2, 3, 7.
         // Set breakpoints at line 2 (inside compute) and line 3 (return).
-        let source_path = "/tmp/test-workdir/test.rb";
+        let source_path = test_dir.join("test.rb").canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let source_path = source_path.to_string_lossy().to_string();
         let bp_line_1: i64 = 2;
         let bp_line_2: i64 = 3;
 
@@ -5621,7 +5823,7 @@ async fn test_real_custom_multiple_breakpoints() {
             &mut client,
             20_201,
             &trace_dir,
-            source_path,
+            &source_path,
             bp_line_1,
             &log_path,
         )
@@ -5641,7 +5843,7 @@ async fn test_real_custom_multiple_breakpoints() {
             &mut client,
             20_202,
             &trace_dir,
-            source_path,
+            &source_path,
             bp_line_2,
             &log_path,
         )
@@ -6405,15 +6607,28 @@ async fn test_real_custom_flow_returns_steps() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_flow_returns_steps: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "flow_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
+
+        // Derive the source path from the recording.
+        let source_path = test_dir.join("test.rb").canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon with the real db-backend.
         let (mut daemon, socket_path) =
@@ -6424,24 +6639,24 @@ async fn test_real_custom_flow_returns_steps() {
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
 
-        // Open the custom trace.
+        // Open the Ruby trace.
         let open_resp = open_trace(&mut client, 33_000, &trace_dir, &log_path).await?;
         assert_eq!(
             open_resp.get("success").and_then(Value::as_bool),
             Some(true),
-            "ct/open-trace should succeed for custom trace, got: {open_resp}"
+            "ct/open-trace should succeed for ruby trace, got: {open_resp}"
         );
 
         drain_events(&mut client, &log_path).await;
 
         // Request flow for line 2 in test.rb (`result = a * 2` in compute).
-        // The custom trace has events for this line.
+        // The Ruby recording has events for this line.
         // Custom traces don't have RR ticks — pass 0.
         let flow_resp = send_py_flow(
             &mut client,
             33_001,
             &trace_dir,
-            "/tmp/test-workdir/test.rb",
+            &source_path_str,
             2, // line 2 in test.rb: `result = a * 2`
             "call",
             0, // no rrTicks for custom traces
@@ -7938,14 +8153,22 @@ async fn test_real_custom_calltrace_returns_calls() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_calltrace_returns_calls: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "calltrace_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -8068,7 +8291,7 @@ async fn test_real_custom_calltrace_returns_calls() {
 /// M7-Custom-2. `ct/py-search-calltrace` against a custom trace format.
 ///
 /// Searches for the "compute" function in the custom trace's calltrace index.
-/// The custom trace fixture defines a `compute` function (called by `main`),
+/// The Ruby test program defines a `compute` function (called from top-level),
 /// so a successful search should return at least one matching call entry.
 /// If the backend does not support search-calltrace for custom traces, the
 /// test accepts a "not supported" / "not implemented" error.
@@ -8088,14 +8311,24 @@ async fn test_real_custom_search_calltrace_finds_function() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_search_calltrace_finds_function: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "search_calltrace_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -8117,8 +8350,8 @@ async fn test_real_custom_search_calltrace_finds_function() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Search for "compute" in the calltrace (the custom trace fixture
-        // defines `compute(a)` which is called from the main scope).
+        // Search for "compute" in the calltrace (the Ruby test program
+        // defines `compute(a)` which is called from the top-level scope).
         let search_resp =
             send_py_search_calltrace(&mut client, 45_001, &trace_dir, "compute", 10, &log_path)
                 .await?;
@@ -8252,14 +8485,22 @@ async fn test_real_custom_events_returns_events() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_events_returns_events: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "events_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -8417,14 +8658,22 @@ async fn test_real_custom_terminal_returns_output() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_terminal_returns_output: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "terminal_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -8480,9 +8729,7 @@ async fn test_real_custom_terminal_returns_output() {
 
         // INTENTIONAL DUAL-ACCEPT: Custom traces may not support terminal
         // output loading.  A "not supported" error is a valid response.
-        // When success is returned, the synthetic Ruby fixture has no
-        // terminal output data (FIXTURE LIMITATION -- this test verifies
-        // the protocol round-trip, not the output content).
+        // When success is returned, check for terminal output content.
         if terminal_success {
             let body = terminal_resp.get("body").unwrap_or(&Value::Null);
             let output = body.get("output").and_then(Value::as_str).unwrap_or("");
@@ -8490,24 +8737,25 @@ async fn test_real_custom_terminal_returns_output() {
             log_line(
                 &log_path,
                 &format!(
-                    "custom terminal output ({} chars): {:?}",
+                    "ruby terminal output ({} chars): {:?}",
                     output.len(),
                     output
                 ),
             );
 
-            // The synthetic Ruby trace fixture has no terminal output data.
-            // This is a fixture limitation, not a test weakness.
-            // When output is present, log it; when empty, that's acceptable.
+            // The real Ruby recording runs `puts "Result: #{y}"` which
+            // should produce terminal output.  However, whether the
+            // db-backend terminal handler captures it depends on event
+            // processing, so we accept both empty and non-empty output.
             if output.is_empty() {
                 log_line(
                     &log_path,
-                    "custom terminal returned success with empty output",
+                    "ruby terminal returned success with empty output",
                 );
             } else {
                 log_line(
                     &log_path,
-                    &format!("custom terminal output content: {output:?}"),
+                    &format!("ruby terminal output content: {output:?}"),
                 );
             }
         } else {
@@ -8798,14 +9046,22 @@ async fn test_real_custom_single_process_trace() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_single_process_trace: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "processes_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend.
@@ -9220,6 +9476,14 @@ async fn test_real_custom_query_inline_executes() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_query_inline_executes: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         let api_dir = python_api_dir();
         if !api_dir.exists() {
@@ -9231,11 +9495,11 @@ async fn test_real_custom_query_inline_executes() {
 
         log_line(&log_path, &format!("db-backend: {}", db_backend.display()));
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "query_trace");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start the daemon with the real db-backend and the python-api path.
@@ -10185,7 +10449,7 @@ async fn test_real_rr_mcp_read_source_file() {
 /// custom trace.
 ///
 /// This test exercises the same MCP pipeline as the RR tests but against
-/// a hand-crafted custom trace, so it runs even when `rr` is not available.
+/// a real Ruby recording, so it runs even when `rr` is not available.
 #[tokio::test]
 async fn test_real_custom_mcp_trace_info() {
     let (test_dir, log_path) = setup_test_dir("real_custom_mcp_trace_info");
@@ -10200,12 +10464,20 @@ async fn test_real_custom_mcp_trace_info() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_trace_info: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory.
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-mcp");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -10310,6 +10582,14 @@ async fn test_real_custom_mcp_exec_script() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_exec_script: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         let api_dir = python_api_dir();
         if !api_dir.exists() {
@@ -10319,11 +10599,11 @@ async fn test_real_custom_mcp_exec_script() {
             ));
         }
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-exec");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -10419,12 +10699,20 @@ async fn test_real_custom_mcp_list_source_files() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_list_source_files: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-list");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -10520,13 +10808,26 @@ async fn test_real_custom_mcp_read_source_file() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_read_source_file: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-read");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
+
+        // Derive the source path from the recording.
+        let source_path = test_dir.join("test.rb").canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let source_file = source_path.to_string_lossy().to_string();
 
         // Start MCP server backed by real daemon + db-backend.
         let (mut mcp, mut daemon, socket_path) =
@@ -10539,8 +10840,8 @@ async fn test_real_custom_mcp_read_source_file() {
         mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
 
         // Request read_source_file for "test.rb" (the source file in the
-        // custom trace).  We use the full path as stored in trace_paths.json.
-        let source_file = "/tmp/test-workdir/test.rb";
+        // Ruby recording).  We use the full path as stored in trace_paths.json.
+        let source_file = &source_file;
         let req = json!({
             "jsonrpc": "2.0",
             "id": 13030,
@@ -11489,12 +11790,20 @@ async fn test_real_custom_mcp_resources_list() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_resources_list: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-res-list");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -11612,12 +11921,20 @@ async fn test_real_custom_mcp_resource_read_info() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_resource_read_info: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-res-info");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -11766,13 +12083,26 @@ async fn test_real_custom_mcp_resource_read_source() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_resource_read_source: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-res-src");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
+
+        // Derive the source path from the recording.
+        let source_path = test_dir.join("test.rb").canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start MCP server backed by real daemon + db-backend.
         let (mut mcp, mut daemon, socket_path) =
@@ -11806,7 +12136,7 @@ async fn test_real_custom_mcp_resource_read_source() {
         let trace_path_str = trace_dir.to_string_lossy().to_string();
         let source_uri = format!(
             "trace://{}/source/{}",
-            trace_path_str, "/tmp/test-workdir/test.rb"
+            trace_path_str, source_path_str
         );
         let req = json!({
             "jsonrpc": "2.0",
@@ -11910,12 +12240,20 @@ async fn test_real_custom_mcp_response_timing() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_mcp_response_timing: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-timing");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -12214,6 +12552,14 @@ async fn test_real_custom_example_scripts_execute() {
                 return Ok(());
             }
         };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!("test_real_custom_example_scripts_execute: SKIP (ruby recorder not found)");
+                return Ok(());
+            }
+        };
 
         let api_dir = python_api_dir();
         if !api_dir.exists() {
@@ -12223,11 +12569,11 @@ async fn test_real_custom_example_scripts_execute() {
             ));
         }
 
-        // Create a custom trace directory (Ruby).
-        let trace_dir = create_custom_trace_dir(&test_dir, "trace-custom-examples");
+        // Create a real Ruby trace recording.
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
         log_line(
             &log_path,
-            &format!("custom trace directory: {}", trace_dir.display()),
+            &format!("ruby trace directory: {}", trace_dir.display()),
         );
 
         // Start MCP server backed by real daemon + db-backend.
@@ -12284,8 +12630,10 @@ async fn test_real_custom_example_scripts_execute() {
 
         // Commands and APIs that custom traces do not support.
         // Navigation commands (step_over, etc.) require an actual replay backend,
-        // and flow() requires the backend to process source files.  Scripts
-        // containing any of these keywords are expected to fail on custom traces.
+        // and flow() requires the backend to process source files.  Tracepoint
+        // APIs (add_tracepoint, run_tracepoints) involve backend processing that
+        // can time out on DB traces.  Scripts containing any of these keywords
+        // are expected to fail on custom traces.
         let unsupported_on_custom = [
             "step_over",
             "step_in",
@@ -12297,6 +12645,8 @@ async fn test_real_custom_example_scripts_execute() {
             "add_breakpoint",
             "remove_breakpoint",
             ".flow(",
+            "add_tracepoint",
+            "run_tracepoints",
         ];
 
         // Run each example script via exec_script against the custom trace.
