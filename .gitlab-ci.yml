@@ -94,13 +94,13 @@ appimage-build:
   #  paths:
   #    - CodeTracer.AppImage
 
-test:rust:
+test:non-gui:
   stage: test
   only:
     - master
     - merge_requests
   script:
-    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/rust.sh
+    - nix develop .#devShells.x86_64-linux.default --command just test
 
 test:ui-tests:
   stage: test
@@ -110,15 +110,7 @@ test:ui-tests:
   variables:
     DISPLAY: ":99"
   script:
-    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh
-
-test:frontend-js:
-  stage: test
-  only:
-    - master
-    - merge_requests
-  script:
-    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/frontend-js.sh
+    - nix develop .#ui-tests --command ./ci/test/ui-tests.sh
 
 push-to-cachix:
   stage: deploy
