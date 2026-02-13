@@ -138,7 +138,7 @@ proc renderCompactView(self: CaptionBarProgressComponent): VNode =
       span(class = "caption-progress-task"):
         text $self.progress.taskName
 
-    self.renderProgressBar()
+    renderProgressBar(self)
 
     span(class = "caption-progress-count"):
       text progressText
@@ -178,9 +178,9 @@ method render*(self: CaptionBarProgressComponent): VNode =
       self.expanded = false
       redrawAll()
   )):
-    self.renderCompactView()
+    renderCompactView(self)
     if self.expanded and self.progress.milestones.len > 0:
-      self.renderMilestoneList()
+      renderMilestoneList(self)
 
 # ---------------------------------------------------------------------------
 # IPC handler

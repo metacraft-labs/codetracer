@@ -457,16 +457,16 @@ method render*(self: DeepReviewComponent): VNode =
 
     tdiv(class = "deepreview-body"):
       # Left sidebar: file list.
-      self.renderFileList()
+      renderFileList(self)
 
       # Center: editor area with sliders.
       tdiv(class = "deepreview-editor-area"):
-        self.renderExecutionSlider()
-        self.renderLoopSlider()
+        renderExecutionSlider(self)
+        renderLoopSlider(self)
         tdiv(
           class = "deepreview-editor",
           id = cstring(fmt"deepreview-editor-{self.id}")
         )
 
       # Right sidebar: call trace panel.
-      self.renderCallTrace()
+      renderCallTrace(self)

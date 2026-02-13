@@ -288,10 +288,10 @@ method render*(self: AgentActivityDeepReviewComponent): VNode =
           text cstring(fmt"{self.drSummary.coveragePercent:.1f}%")
 
     if self.expanded:
-      self.renderSummaryCards()
-      self.renderFileTable()
-      self.renderTestResults()
-      self.renderRecentNotifications()
+      renderSummaryCards(self)
+      renderFileTable(self)
+      renderTestResults(self)
+      renderRecentNotifications(self)
 
 # ---------------------------------------------------------------------------
 # IPC handler
