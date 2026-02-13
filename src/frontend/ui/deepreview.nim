@@ -13,7 +13,7 @@
 ## It operates in a read-only, offline mode without a debugger connection.
 
 import
-  ui_imports, ../utils,
+  ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole]
 
 from dom import Node, document, getElementById

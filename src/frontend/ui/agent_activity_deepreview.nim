@@ -20,7 +20,7 @@
 ## Reference: codetracer-specs/DeepReview/Agentic-Coding-Integration.md
 
 import
-  ui_imports, ../utils,
+  ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole]
 
 from dom import Node, document, getElementById
