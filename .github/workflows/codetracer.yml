@@ -110,26 +110,6 @@ jobs:
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/ui-tests.sh"
 
-  test-frontend-js:
-    runs-on: [self-hosted, nixos]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/test/frontend-js.sh"
-
   push-gpg-public-key:
     runs-on: [self-hosted, nixos]
     steps:
@@ -610,7 +590,7 @@ jobs:
           chmod +x ./CodeTracer.AppImage
           ./CodeTracer.AppImage --version
 
-  test-rust:
+  test-non-gui:
     runs-on: [self-hosted, nixos]
     needs:
       - dev-build
@@ -634,33 +614,7 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/rust.sh"
-
-  test-python-recorder:
-    runs-on: [self-hosted, nixos]
-    needs:
-      - dev-build
-      - nix-build
-      - appimage-build
-      - dmg-build
-      - build-python-packages
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/python-recorder-smoke.sh"
+      - run: "nix develop .#devShells.x86_64-linux.default --command just test"
 
   test-ui-tests:
     runs-on: [self-hosted, nixos]
@@ -691,8 +645,7 @@ jobs:
   publish-pypi:
     needs:
       - build-python-packages
-      - test-rust
-      - test-python-recorder
+      - test-non-gui
       - test-ui-tests
       - create-release
     if: startsWith(github.ref, 'refs/tags/')
@@ -718,8 +671,7 @@ jobs:
   push-to-cachix:
     runs-on: [self-hosted, nixos]
     needs:
-      - test-rust
-      - test-python-recorder
+      - test-non-gui
       - test-ui-tests
       - appimage-lib-check
       - dmg-lib-check

@@ -115,11 +115,26 @@ test-ui headless="0":
     xvfb-run {{tester}} ui
   fi
 
-test headless="0":
-  {{tester}} build
-  just test-ui {{headless}}
-  {{tester}} rr-gdb-scripts
-  {{tester}} core
+# Run all Rust tests (db-backend + backend-manager).
+# Mirrors the logic in ci/test/rust.sh.
+test-rust:
+  #!/usr/bin/env bash
+  set -e
+  pushd src/db-backend
+  cargo test --release --bin db-backend
+  cargo test --release --bin db-backend -- --ignored
+  popd
+  pushd src/backend-manager
+  cargo test --release
+  popd
+
+# Run all non-GUI tests (Rust, frontend JS, Python recorder).
+test:
+  #!/usr/bin/env bash
+  set -e
+  just test-rust
+  just test-frontend-js
+  just test-python-recorder
 
 # Build the C# UI tests (requires the ui-tests nix shell)
 build-csharp-ui:
@@ -171,6 +186,14 @@ test-csharp-ui display="default" *args:
       exit 1
       ;;
   esac
+
+# Run stable Electron UI tests with xvfb (requires the ui-tests nix shell).
+# Matches what CI runs. For local visible display, use: just test-csharp-ui default
+ui-tests:
+  #!/usr/bin/env bash
+  set -e
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  just test-csharp-ui xvfb --mode Electron --suite stable-tests --retries 2
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
