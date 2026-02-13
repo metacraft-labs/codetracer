@@ -129,7 +129,7 @@ proc handleDeepReviewNotification*(self: AgentWorkspaceComponent, notification: 
       if totalLines > 0: (totalCovered.float / totalLines.float) * 100.0
       else: 0.0
 
-  of FlowUpdate:
+  of FlowTraceUpdate:
     # Update the file entry's flow flag.
     for i in 0 ..< self.fileEntries.len:
       if self.fileEntries[i].path == notification.flowFilePath:

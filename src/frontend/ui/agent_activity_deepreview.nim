@@ -61,7 +61,7 @@ proc notificationLabel(notif: DeepReviewNotification): cstring =
   case notif.kind
   of CoverageUpdate:
     result = cstring(fmt"Coverage: {notif.filePath}")
-  of FlowUpdate:
+  of FlowTraceUpdate:
     result = cstring(fmt"Flow: {notif.functionKey} (exec {notif.executionIndex})")
   of TestComplete:
     let status = if notif.passed: "PASS" else: "FAIL"
@@ -73,7 +73,7 @@ proc notificationCssClass(notif: DeepReviewNotification): cstring =
   ## CSS class for notification colour coding.
   case notif.kind
   of CoverageUpdate: cstring"activity-dr-notif-coverage"
-  of FlowUpdate: cstring"activity-dr-notif-flow"
+  of FlowTraceUpdate: cstring"activity-dr-notif-flow"
   of TestComplete:
     if notif.passed: cstring"activity-dr-notif-test-pass"
     else: cstring"activity-dr-notif-test-fail"
@@ -124,7 +124,7 @@ proc handleNotification*(self: AgentActivityDeepReviewComponent, notification: D
       if totalLines > 0: (totalCovered.float / totalLines.float) * 100.0
       else: 0.0
 
-  of FlowUpdate:
+  of FlowTraceUpdate:
     for i in 0 ..< self.fileEntries.len:
       if self.fileEntries[i].path == notification.flowFilePath:
         self.fileEntries[i].hasFlow = true
@@ -335,7 +335,7 @@ proc onActivityDeepReviewNotification*(sender: js, response: JsObject) {.async.}
       of "FlowUpdate":
         let notification = DeepReviewNotification(
           sessionId: sessionId,
-          kind: FlowUpdate,
+          kind: FlowTraceUpdate,
           flowFilePath: response[cstring"flowFilePath"].to(cstring),
           functionKey: response[cstring"functionKey"].to(cstring),
           executionIndex: response[cstring"executionIndex"].to(int),

@@ -28,7 +28,7 @@ type
     ## The kind of real-time notification the agent runtime sends to the GUI
     ## as DeepReview data is collected during an agent work session.
     CoverageUpdate    ## Per-file line coverage has been (re-)computed.
-    FlowUpdate        ## A function execution flow trace is available.
+    FlowTraceUpdate   ## A function execution flow trace is available.
     TestComplete      ## A single test run has finished.
     CollectionComplete ## All DeepReview data collection is done.
 
@@ -44,7 +44,7 @@ type
       filePath*: cstring
       linesCovered*: seq[int]
       linesUncovered*: seq[int]
-    of FlowUpdate:
+    of FlowTraceUpdate:
       ## A new or updated function execution flow trace.
       flowFilePath*: cstring
       functionKey*: cstring
