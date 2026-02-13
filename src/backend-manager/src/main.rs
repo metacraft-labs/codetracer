@@ -963,6 +963,117 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         .write_all(&DapParser::to_bytes(&response))
                         .await?;
                 }
+                // --- ct/run-tracepoints: simulate tracepoint execution ---
+                //
+                // When the daemon sends ct/run-tracepoints, the mock backend
+                // emits per-tracepoint ct/updated-trace events followed by a
+                // single ct/tracepoint-results event containing simulated
+                // Stop results.  This mirrors the real db-backend's behavior
+                // in handler.rs::run_tracepoints().
+                "ct/run-tracepoints" => {
+                    let args = msg.get("arguments");
+                    let session = args.and_then(|a| a.get("session"));
+                    let tracepoints = session
+                        .and_then(|s| s.get("tracepoints"))
+                        .and_then(serde_json::Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let session_id = session
+                        .and_then(|s| s.get("id"))
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(1) as usize;
+
+                    // Emit per-tracepoint ct/updated-trace events (same as
+                    // the real backend).
+                    for tp in &tracepoints {
+                        let tp_id = tp
+                            .get("tracepointId")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0) as usize;
+                        let updated_trace = json!({
+                            "type": "event",
+                            "event": "ct/updated-trace",
+                            "seq": 0,
+                            "body": {
+                                "updateID": tp_id,
+                                "firstUpdate": true,
+                                "sessionID": session_id,
+                                "tracepointErrors": {},
+                                "count": 0,
+                                "totalCount": 0,
+                                "refreshEventLog": false
+                            }
+                        });
+                        write_half
+                            .write_all(&DapParser::to_bytes(&updated_trace))
+                            .await?;
+                    }
+
+                    // Build simulated Stop results — two hits per tracepoint.
+                    let mut results = Vec::new();
+                    for tp in &tracepoints {
+                        let tp_id = tp
+                            .get("tracepointId")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0);
+                        let tp_line = tp
+                            .get("line")
+                            .and_then(serde_json::Value::as_i64)
+                            .unwrap_or(1);
+                        let tp_path = tp
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("main.nim");
+
+                        for iteration in 0..2u64 {
+                            results.push(json!({
+                                "tracepointId": tp_id,
+                                "time": 0,
+                                "line": tp_line,
+                                "path": tp_path,
+                                "offset": 0,
+                                "address": format!("{tp_path}:{tp_line}"),
+                                "resultIndex": iteration,
+                                "event": 0,
+                                "mode": 0,
+                                "locals": [
+                                    {
+                                        "first": "x",
+                                        "second": format!("{}", 10 + iteration * 5)
+                                    },
+                                    {
+                                        "first": "y",
+                                        "second": format!("{}", 20 + iteration * 5)
+                                    }
+                                ],
+                                "whenMax": 0,
+                                "whenMin": 0,
+                                "errorMessage": "",
+                                "eventType": 0,
+                                "description": "",
+                                "rrTicks": 100 + iteration * 50,
+                                "functionName": "main",
+                                "key": "",
+                                "lang": 0
+                            }));
+                        }
+                    }
+
+                    // Emit the aggregate ct/tracepoint-results event.
+                    let results_event = json!({
+                        "type": "event",
+                        "event": "ct/tracepoint-results",
+                        "seq": 0,
+                        "body": {
+                            "sessionId": session_id,
+                            "results": results,
+                            "errors": {}
+                        }
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&results_event))
+                        .await?;
+                }
                 // --- ct/load-flow: returns mock flow/omniscience data ---
                 //
                 // Simulates a loop body with `i` from 0 to 4 and `x = i * 2`.

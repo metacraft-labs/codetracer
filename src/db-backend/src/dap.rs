@@ -175,6 +175,25 @@ impl DapClient {
         }))
     }
 
+    /// Emits a `ct/tracepoint-results` event carrying all tracepoint hits
+    /// collected during a `ct/run-tracepoints` session.
+    ///
+    /// The daemon's Python bridge waits for this event to build the
+    /// `ct/py-run-tracepoints` response.
+    pub fn tracepoint_results_event(
+        &mut self,
+        args: task::TracepointResultsAggregate,
+    ) -> DapResult<DapMessage> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/tracepoint-results".to_string(),
+            body: serde_json::to_value(args)?,
+        }))
+    }
+
     pub fn stopped_event(&mut self, reason: &str) -> DapResult<DapMessage> {
         let body = StoppedEventBody {
             reason: reason.to_string(),

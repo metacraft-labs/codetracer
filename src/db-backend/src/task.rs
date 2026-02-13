@@ -1685,6 +1685,22 @@ pub struct TracepointResults {
     pub first_update: bool,
 }
 
+/// Aggregate tracepoint results emitted as a single `ct/tracepoint-results`
+/// event after all tracepoints in a session have been evaluated.
+///
+/// The daemon's Python bridge waits for this event to build the response
+/// for `ct/py-run-tracepoints`.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct TracepointResultsAggregate {
+    /// Session that produced these results.
+    pub session_id: usize,
+    /// All tracepoint hits collected during the run.
+    pub results: Vec<Stop>,
+    /// Per-tracepoint parse/evaluation errors (tracepoint_id → message).
+    pub errors: HashMap<usize, String>,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Breakpoint {

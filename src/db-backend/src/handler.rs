@@ -31,7 +31,8 @@ use crate::task::{
     FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
     LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
     ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
-    StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, UpdateTableArgs, Variable, NO_ADDRESS,
+    StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
+    TracepointResultsAggregate, UpdateTableArgs, Variable, NO_ADDRESS,
     NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
@@ -1247,7 +1248,7 @@ impl Handler {
         Ok(())
     }
 
-    fn handle_trace_steps(&mut self, args: &RunTracepointsArg) -> Result<(), Box<dyn Error>> {
+    fn handle_trace_steps(&mut self, args: &RunTracepointsArg) -> Result<Vec<Stop>, Box<dyn Error>> {
         let tracepoints = args.session.tracepoints.clone();
         let mut registered = vec![false; tracepoints.len()];
         let mut tracepoint_locations: HashMap<String, HashMap<usize, Vec<usize>>> = HashMap::new();
@@ -1461,9 +1462,9 @@ impl Handler {
             return Err(err);
         }
 
-        self.event_db.tracepoint_errors = tracepoint_errors.clone();
+        self.event_db.tracepoint_errors = tracepoint_errors;
         self.event_db.register_tracepoint_results(&results);
-        Ok(())
+        Ok(results)
     }
 
     fn evaluate_tracepoint(
@@ -1530,11 +1531,15 @@ impl Handler {
         let tracepoints = &args.session.tracepoints;
         let is_empty = false; // TODO: check if there is at least one enabled non-empty log?
 
-        if !is_empty {
+        let results = if !is_empty {
             // Handle id_table and results for the TraceUpdate
-            self.handle_trace_steps(&args)?;
+            let results = self.handle_trace_steps(&args)?;
             info!("{:?}", self.event_db);
-        }
+            results
+        } else {
+            Vec::new()
+        };
+
         for trace in tracepoints.iter() {
             let trace_update = TraceUpdate::new(
                 args.session.id,
@@ -1545,6 +1550,17 @@ impl Handler {
             let raw_event = self.dap_client.updated_trace_event(trace_update)?;
             sender.send(raw_event)?;
         }
+
+        // Emit the aggregate results event so the daemon's Python bridge
+        // can build a single `ct/py-run-tracepoints` response.
+        let aggregate = TracepointResultsAggregate {
+            session_id: args.session.id,
+            results,
+            errors: self.event_db.tracepoint_errors.clone(),
+        };
+        let results_event = self.dap_client.tracepoint_results_event(aggregate)?;
+        sender.send(results_event)?;
+
         Ok(())
     }
 

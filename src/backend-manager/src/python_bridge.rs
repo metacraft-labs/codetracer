@@ -24,7 +24,22 @@ use serde_json::Value;
 // BreakpointState — per-trace breakpoint and watchpoint tracking
 // ---------------------------------------------------------------------------
 
-/// Per-trace breakpoint and watchpoint state tracked by the daemon.
+/// A tracepoint entry tracked by the daemon.
+///
+/// Stored per trace in [`BreakpointState`] until the client calls
+/// `ct/py-run-tracepoints`, at which point all entries are converted
+/// into a `RunTracepointsArg` DAP command.
+#[derive(Debug, Clone)]
+pub struct TracepointEntry {
+    /// Source file where the tracepoint is set.
+    pub source_path: String,
+    /// Line number within `source_path`.
+    pub line: i64,
+    /// Expression to evaluate at each hit (e.g., `"log(x, y)"`).
+    pub expression: String,
+}
+
+/// Per-trace breakpoint, watchpoint, and tracepoint state tracked by the daemon.
 ///
 /// Needed because the DAP `setBreakpoints` command is per-file: each call
 /// sends ALL breakpoints for a given source file.  The daemon must maintain
@@ -34,16 +49,23 @@ use serde_json::Value;
 ///
 /// Similarly, `setDataBreakpoints` replaces all data breakpoints each time,
 /// so the daemon tracks watchpoints in the same structure.
+///
+/// Tracepoints are managed purely daemon-side: added/removed individually,
+/// then sent to the backend as a batch via `ct/run-tracepoints`.
 #[derive(Debug, Default)]
 pub struct BreakpointState {
     /// Next breakpoint ID to assign (monotonically increasing, starting at 1).
     next_bp_id: i64,
     /// Next watchpoint ID to assign (monotonically increasing, starting at 1).
     next_wp_id: i64,
+    /// Next tracepoint ID to assign (monotonically increasing, starting at 1).
+    next_tp_id: i64,
     /// Active breakpoints: maps breakpoint_id -> (source_path, line).
     breakpoints: HashMap<i64, (String, i64)>,
     /// Active watchpoints: maps watchpoint_id -> expression.
     watchpoints: HashMap<i64, String>,
+    /// Active tracepoints: maps tracepoint_id -> entry.
+    tracepoints: HashMap<i64, TracepointEntry>,
 }
 
 impl BreakpointState {
@@ -111,7 +133,42 @@ impl BreakpointState {
         self.watchpoints.values().cloned().collect()
     }
 
-    /// Removes all breakpoints and watchpoints, resetting the state to empty.
+    /// Adds a tracepoint at the given source location with the given expression.
+    ///
+    /// Returns `(tp_id, &TracepointEntry)`.
+    pub fn add_tracepoint(
+        &mut self,
+        source_path: &str,
+        line: i64,
+        expression: &str,
+    ) -> (i64, &TracepointEntry) {
+        self.next_tp_id += 1;
+        let tp_id = self.next_tp_id;
+        self.tracepoints.insert(
+            tp_id,
+            TracepointEntry {
+                source_path: source_path.to_string(),
+                line,
+                expression: expression.to_string(),
+            },
+        );
+        (tp_id, &self.tracepoints[&tp_id])
+    }
+
+    /// Removes a tracepoint by its ID.
+    ///
+    /// Returns `true` if the tracepoint existed, `false` otherwise.
+    pub fn remove_tracepoint(&mut self, tp_id: i64) -> bool {
+        self.tracepoints.remove(&tp_id).is_some()
+    }
+
+    /// Returns all active tracepoints as `(tp_id, &TracepointEntry)` pairs.
+    pub fn all_tracepoints(&self) -> Vec<(i64, &TracepointEntry)> {
+        self.tracepoints.iter().map(|(&id, e)| (id, e)).collect()
+    }
+
+    /// Removes all breakpoints, watchpoints, and tracepoints, resetting
+    /// the state to empty.
     ///
     /// Called when a trace session is reused (e.g. a new `ct/open-trace`
     /// arrives for an already-loaded trace) so that stale breakpoints from
@@ -119,9 +176,10 @@ impl BreakpointState {
     pub fn clear_all(&mut self) {
         self.breakpoints.clear();
         self.watchpoints.clear();
-        // Keep next_bp_id / next_wp_id as-is: monotonically increasing IDs
-        // should never be reused, even after a clear, to avoid confusion
-        // with stale IDs held by a previous script.
+        self.tracepoints.clear();
+        // Keep next_bp_id / next_wp_id / next_tp_id as-is: monotonically
+        // increasing IDs should never be reused, even after a clear, to
+        // avoid confusion with stale IDs held by a previous script.
     }
 }
 
@@ -278,6 +336,12 @@ pub enum PendingPyRequestKind {
     Processes,
     /// `ct/py-select-process` -> backend `ct/select-replay`.
     SelectProcess,
+    /// `ct/py-run-tracepoints` -> backend `ct/run-tracepoints`.
+    ///
+    /// The backend does not send a DAP response; instead it emits a
+    /// `ct/tracepoint-results` event.  The event interception in
+    /// `backend_manager.rs` resolves this pending request.
+    RunTracepoints,
     /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
     /// whose backend responses should be silently consumed and not forwarded
     /// to any client.
@@ -382,7 +446,7 @@ pub fn format_locals_response(backend_response: &Value) -> (bool, Value) {
 ///   - Raw (16):    `r` field
 ///
 /// If `val_obj` is a plain JSON string (mock format), returns that directly.
-fn extract_value_str(val_obj: Option<&Value>) -> String {
+pub fn extract_value_str(val_obj: Option<&Value>) -> String {
     let v = match val_obj {
         Some(v) if v.is_object() => v,
         // Plain string value (mock format).
@@ -1617,6 +1681,60 @@ mod tests {
 
         // Removing nonexistent ID returns None.
         assert!(state.remove_watchpoint(999).is_none());
+    }
+
+    #[test]
+    fn test_tracepoint_state_add_and_remove() {
+        let mut state = BreakpointState::default();
+
+        let (tp1, entry1) = state.add_tracepoint("main.c", 42, "log(x, y)");
+        assert_eq!(tp1, 1);
+        assert_eq!(entry1.source_path, "main.c");
+        assert_eq!(entry1.line, 42);
+        assert_eq!(entry1.expression, "log(x, y)");
+
+        let (tp2, entry2) = state.add_tracepoint("helper.c", 10, "log(a)");
+        assert_eq!(tp2, 2);
+        assert_eq!(entry2.source_path, "helper.c");
+
+        // All tracepoints should be returned.
+        let all = state.all_tracepoints();
+        assert_eq!(all.len(), 2);
+
+        // Remove the first tracepoint.
+        assert!(state.remove_tracepoint(tp1));
+        let remaining = state.all_tracepoints();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, tp2);
+
+        // Removing nonexistent ID returns false.
+        assert!(!state.remove_tracepoint(999));
+    }
+
+    #[test]
+    fn test_tracepoint_state_clear_all_includes_tracepoints() {
+        let mut state = BreakpointState::default();
+
+        state.add_breakpoint("main.nim", 10);
+        state.add_watchpoint("counter");
+        state.add_tracepoint("main.c", 42, "log(x)");
+
+        assert_eq!(state.all_tracepoints().len(), 1);
+
+        state.clear_all();
+
+        // All three kinds should be cleared.
+        assert!(state.breakpoints_for_file("main.nim").is_empty());
+        assert!(state.all_watchpoint_expressions().is_empty());
+        assert!(state.all_tracepoints().is_empty());
+
+        // IDs should not be reused after clear.
+        let (bp_id, _) = state.add_breakpoint("main.nim", 10);
+        assert!(bp_id > 1, "breakpoint ID should not be reused");
+        let (wp_id, _) = state.add_watchpoint("counter");
+        assert!(wp_id > 1, "watchpoint ID should not be reused");
+        let (tp_id, _) = state.add_tracepoint("main.c", 42, "log(x)");
+        assert!(tp_id > 1, "tracepoint ID should not be reused");
     }
 
     #[test]
