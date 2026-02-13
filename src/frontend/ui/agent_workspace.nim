@@ -383,10 +383,10 @@ method render*(self: AgentWorkspaceComponent): VNode =
         text "No agent workspace available. Start an agent session to see workspace files."
 
   result = buildHtml(tdiv(class = "agent-workspace-container")):
-    self.renderWorkspaceHeader()
-    self.renderSummaryBar()
+    renderWorkspaceHeader(self)
+    renderSummaryBar(self)
     tdiv(class = "agent-workspace-body"):
-      self.renderFileList()
+      renderFileList(self)
       tdiv(class = "agent-workspace-editor-area"):
         tdiv(
           class = "agent-workspace-editor",
