@@ -18,6 +18,8 @@ import
 
 from dom import Node, document, getElementById
 
+type langstring = cstring
+
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers
 # ---------------------------------------------------------------------------
