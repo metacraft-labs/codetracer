@@ -721,10 +721,10 @@ impl BackendManager {
                         //   rawName -> name (function name)
                         //   content.count -> childrenCount
                         let mut enriched = call.clone();
-                        if let Some(obj) = enriched.as_object_mut() {
-                            if let Some(raw_name) = call.get("rawName") {
-                                obj.insert("name".to_string(), raw_name.clone());
-                            }
+                        if let Some(obj) = enriched.as_object_mut()
+                            && let Some(raw_name) = call.get("rawName")
+                        {
+                            obj.insert("name".to_string(), raw_name.clone());
                         }
                         // Propagate children count from the enclosing
                         // CallLine content into the call object.
