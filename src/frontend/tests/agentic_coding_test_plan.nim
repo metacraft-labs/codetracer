@@ -34,7 +34,7 @@ type
   # In the full build, these come from the common_types include chain.
   TestDeepReviewNotificationKind = enum
     CoverageUpdate
-    FlowUpdate
+    FlowTraceUpdate
     TestComplete
     CollectionComplete
 
@@ -128,7 +128,7 @@ proc updateSummaryFromTest(
 # =========================================================================
 # Verifies that the ACP protocol correctly handles DeepReview messages:
 # - CoverageUpdate notifications are parsed and update per-file coverage
-# - FlowUpdate notifications are parsed and track function traces
+# - FlowTraceUpdate notifications are parsed and track function traces
 # - TestComplete notifications are parsed and record test results
 # - CollectionComplete notifications are parsed and summarize totals
 # - Invalid/unknown notification kinds are rejected gracefully
@@ -348,7 +348,7 @@ suite "test_activity_pane_deepreview":
   test "Functions traced counter increments":
     var summary = TestActivityDeepReviewSummary()
     summary.functionsTraced = 0
-    # Simulate FlowUpdate notifications.
+    # Simulate FlowTraceUpdate notifications.
     summary.functionsTraced += 1
     summary.functionsTraced += 1
     summary.functionsTraced += 1
