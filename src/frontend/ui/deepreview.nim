@@ -405,7 +405,7 @@ proc renderCallTraceNode(node: DeepReviewCallNode, depth: int): VNode =
     ):
       span(class = "deepreview-calltrace-name"): text $node.name
       span(class = "deepreview-calltrace-count"): text fmt" x{node.executionCount}"
-    if not node.children.isNil:
+    if node.children.len > 0:
       for child in node.children:
         renderCallTraceNode(child, depth + 1)
 
