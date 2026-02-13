@@ -45,9 +45,14 @@ runs:
           machine github.com login x-access-token password ${{inputs.gh-token}}
         EOF
 
-        # Rewrite SSH URLs to HTTPS with token for submodule cloning
-        git config --global url."https://oauth2:${{inputs.gh-token}}@github.com/".insteadOf "git@github.com:"
-        git config --global url."https://oauth2:${{inputs.gh-token}}@github.com/".insteadOf "ssh://git@github.com/"
+        # Rewrite all GitHub URLs to authenticated HTTPS for submodule cloning.
+        # Submodules may use SSH or HTTPS URLs in .gitmodules, so we cover all styles:
+        #   git@github.com:org/repo.git    -> https://token@github.com/org/repo.git
+        #   ssh://git@github.com/org/repo  -> https://token@github.com/org/repo
+        #   https://github.com/org/repo    -> https://token@github.com/org/repo
+        git config --global url."https://x-access-token:${{inputs.gh-token}}@github.com/".insteadOf "git@github.com:"
+        git config --global url."https://x-access-token:${{inputs.gh-token}}@github.com/".insteadOf "ssh://git@github.com/"
+        git config --global url."https://x-access-token:${{inputs.gh-token}}@github.com/".insteadOf "https://github.com/"
 
     - uses: cachix/cachix-action@v15
       with:

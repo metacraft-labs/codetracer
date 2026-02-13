@@ -12,10 +12,11 @@ default:
         echo "access-tokens = ${CI_SERVER_HOST}=PAT:${CI_GROUP_TOKEN} github.com=${GH_READ_METACRAFT_PRIVATE_REPOS}"
       } > "$NIX_CONFIG_FILE"
 
-      # Rewrite SSH URLs to HTTPS with token for submodule cloning
+      # Rewrite all GitHub URL styles to authenticated HTTPS for submodule cloning
       # (e.g. tree-sitter-nim uses SSH URL in .gitmodules)
-      git config --global url."https://oauth2:${GH_READ_METACRAFT_PRIVATE_REPOS}@github.com/".insteadOf "git@github.com:"
-      git config --global url."https://oauth2:${GH_READ_METACRAFT_PRIVATE_REPOS}@github.com/".insteadOf "ssh://git@github.com/"
+      git config --global url."https://x-access-token:${GH_READ_METACRAFT_PRIVATE_REPOS}@github.com/".insteadOf "git@github.com:"
+      git config --global url."https://x-access-token:${GH_READ_METACRAFT_PRIVATE_REPOS}@github.com/".insteadOf "ssh://git@github.com/"
+      git config --global url."https://x-access-token:${GH_READ_METACRAFT_PRIVATE_REPOS}@github.com/".insteadOf "https://github.com/"
 
 stages:
   - lint

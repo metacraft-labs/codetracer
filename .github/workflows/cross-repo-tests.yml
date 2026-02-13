@@ -61,14 +61,35 @@ jobs:
         run: |
           REF="${{ steps.resolve-ref.outputs.ref }}"
           echo "Cloning codetracer-rr-backend at ref: $REF"
-          # Ensure SSH→HTTPS rewrite is active for submodule cloning
-          git config --global url."https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
-          git clone --recursive \
-            "https://oauth2:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-rr-backend.git" \
+
+          # Rewrite all GitHub URL styles to authenticated HTTPS.
+          # Submodules may use SSH or HTTPS URLs in .gitmodules, so we cover all:
+          #   git@github.com:org/repo.git    -> https://token@github.com/org/repo.git
+          #   ssh://git@github.com/org/repo  -> https://token@github.com/org/repo
+          #   https://github.com/org/repo    -> https://token@github.com/org/repo
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
+
+          git clone \
+            "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-rr-backend.git" \
             target/rr-backend-clone
           cd target/rr-backend-clone
           git checkout "$REF"
-          git submodule update --init --recursive
+
+          # Initialize submodules and explicitly rewrite their URLs to include the
+          # access token. The url.insteadOf config may not always apply to submodule
+          # URLs already written to .git/config.
+          git submodule init
+          for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
+            old_url=$(git config --get "$url")
+            new_url=$(echo "$old_url" \
+              | sed "s|git@github.com:|https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/|" \
+              | sed "s|https://github.com/|https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/|")
+            echo "Rewriting submodule URL: $url"
+            git config "$url" "$new_url"
+          done
+          git submodule update --recursive
 
       - name: Build ct-rr-support
         run: |
