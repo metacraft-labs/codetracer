@@ -84,3 +84,6 @@
 [submodule "libs/tree-sitter-nim"]
 	path = libs/tree-sitter-nim
 	url = https://github.com/metacraft-labs/tree-sitter-nim.git
+[submodule "examples/recordings"]
+	path = examples/recordings
+	url = https://github.com/metacraft-labs/codetracer-example-recordings.git
