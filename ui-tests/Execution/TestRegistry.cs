@@ -203,35 +203,35 @@ internal sealed class TestRegistry : ITestRegistry
                 "PythonSudoku.EditorLoadsMainPy",
                 "Python Sudoku / Editor Loads main.py",
                 async context => await PythonSudokuTests.EditorLoadsMainPy(context.Page),
-                "py_sudoku_solver"));
+                "py_sudoku_solver/main.py"));
 
         Register(
             new UiTestDescriptor(
                 "PythonSudoku.EventLogPopulated",
                 "Python Sudoku / Event Log Populated",
                 async context => await PythonSudokuTests.EventLogPopulated(context.Page),
-                "py_sudoku_solver"));
+                "py_sudoku_solver/main.py"));
 
         Register(
             new UiTestDescriptor(
                 "PythonSudoku.CallTraceNavigationToIsValidMove",
                 "Python Sudoku / Call Trace Navigation To is_valid_move",
                 async context => await PythonSudokuTests.CallTraceNavigationToIsValidMove(context.Page),
-                "py_sudoku_solver"));
+                "py_sudoku_solver/main.py"));
 
         Register(
             new UiTestDescriptor(
                 "PythonSudoku.VariableInspectionInSolveSudoku",
                 "Python Sudoku / Variable Inspection In solve_sudoku",
                 async context => await PythonSudokuTests.VariableInspectionInSolveSudoku(context.Page),
-                "py_sudoku_solver"));
+                "py_sudoku_solver/main.py"));
 
         Register(
             new UiTestDescriptor(
                 "PythonSudoku.TerminalOutputShowsSolvedBoard",
                 "Python Sudoku / Terminal Output Shows Solved Board",
                 async context => await PythonSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
-                "py_sudoku_solver"));
+                "py_sudoku_solver/main.py"));
 
         // Ruby Sudoku Solver smoke tests
         Register(
@@ -239,35 +239,35 @@ internal sealed class TestRegistry : ITestRegistry
                 "RubySudoku.EditorLoadsSudokuSolverRb",
                 "Ruby Sudoku / Editor Loads sudoku_solver.rb",
                 async context => await RubySudokuTests.EditorLoadsSudokuSolverRb(context.Page),
-                "rb_sudoku_solver"));
+                "rb_sudoku_solver/sudoku_solver.rb"));
 
         Register(
             new UiTestDescriptor(
                 "RubySudoku.EventLogPopulated",
                 "Ruby Sudoku / Event Log Populated",
                 async context => await RubySudokuTests.EventLogPopulated(context.Page),
-                "rb_sudoku_solver"));
+                "rb_sudoku_solver/sudoku_solver.rb"));
 
         Register(
             new UiTestDescriptor(
                 "RubySudoku.CallTraceNavigationToSolve",
                 "Ruby Sudoku / Call Trace Navigation To solve",
                 async context => await RubySudokuTests.CallTraceNavigationToSolve(context.Page),
-                "rb_sudoku_solver"));
+                "rb_sudoku_solver/sudoku_solver.rb"));
 
         Register(
             new UiTestDescriptor(
                 "RubySudoku.VariableInspectionBoard",
                 "Ruby Sudoku / Variable Inspection board",
                 async context => await RubySudokuTests.VariableInspectionBoard(context.Page),
-                "rb_sudoku_solver"));
+                "rb_sudoku_solver/sudoku_solver.rb"));
 
         Register(
             new UiTestDescriptor(
                 "RubySudoku.TerminalOutputShowsSolvedBoard",
                 "Ruby Sudoku / Terminal Output Shows Solved Board",
                 async context => await RubySudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
-                "rb_sudoku_solver"));
+                "rb_sudoku_solver/sudoku_solver.rb"));
 
         // C Sudoku Solver smoke tests
         Register(
@@ -275,35 +275,35 @@ internal sealed class TestRegistry : ITestRegistry
                 "CSudoku.EditorLoadsMainC",
                 "C Sudoku / Editor Loads main.c",
                 async context => await CSudokuTests.EditorLoadsMainC(context.Page),
-                "c_sudoku_solver"));
+                "c_sudoku_solver/main.c"));
 
         Register(
             new UiTestDescriptor(
                 "CSudoku.EventLogPopulated",
                 "C Sudoku / Event Log Populated",
                 async context => await CSudokuTests.EventLogPopulated(context.Page),
-                "c_sudoku_solver"));
+                "c_sudoku_solver/main.c"));
 
         Register(
             new UiTestDescriptor(
                 "CSudoku.CallTraceNavigationToSolve",
                 "C Sudoku / Call Trace Navigation To solve",
                 async context => await CSudokuTests.CallTraceNavigationToSolve(context.Page),
-                "c_sudoku_solver"));
+                "c_sudoku_solver/main.c"));
 
         Register(
             new UiTestDescriptor(
                 "CSudoku.VariableInspectionBoard",
                 "C Sudoku / Variable Inspection board",
                 async context => await CSudokuTests.VariableInspectionBoard(context.Page),
-                "c_sudoku_solver"));
+                "c_sudoku_solver/main.c"));
 
         Register(
             new UiTestDescriptor(
                 "CSudoku.TerminalOutputShowsSolvedBoard",
                 "C Sudoku / Terminal Output Shows Solved Board",
                 async context => await CSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
-                "c_sudoku_solver"));
+                "c_sudoku_solver/main.c"));
 
         // Rust Sudoku Solver smoke tests
         Register(
@@ -311,35 +311,35 @@ internal sealed class TestRegistry : ITestRegistry
                 "RustSudoku.EditorLoadsMainRs",
                 "Rust Sudoku / Editor Loads main.rs",
                 async context => await RustSudokuTests.EditorLoadsMainRs(context.Page),
-                "rs_sudoku_solver"));
+                "rs_sudoku_solver/main.rs"));
 
         Register(
             new UiTestDescriptor(
                 "RustSudoku.EventLogPopulated",
                 "Rust Sudoku / Event Log Populated",
                 async context => await RustSudokuTests.EventLogPopulated(context.Page),
-                "rs_sudoku_solver"));
+                "rs_sudoku_solver/main.rs"));
 
         Register(
             new UiTestDescriptor(
                 "RustSudoku.CallTraceNavigationToSolve",
                 "Rust Sudoku / Call Trace Navigation To solve",
                 async context => await RustSudokuTests.CallTraceNavigationToSolve(context.Page),
-                "rs_sudoku_solver"));
+                "rs_sudoku_solver/main.rs"));
 
         Register(
             new UiTestDescriptor(
                 "RustSudoku.VariableInspectionBoard",
                 "Rust Sudoku / Variable Inspection board",
                 async context => await RustSudokuTests.VariableInspectionBoard(context.Page),
-                "rs_sudoku_solver"));
+                "rs_sudoku_solver/main.rs"));
 
         Register(
             new UiTestDescriptor(
                 "RustSudoku.TerminalOutputShowsSolvedBoard",
                 "Rust Sudoku / Terminal Output Shows Solved Board",
                 async context => await RustSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
-                "rs_sudoku_solver"));
+                "rs_sudoku_solver/main.rs"));
 
         // Go Sudoku Solver smoke tests
         Register(
@@ -347,35 +347,35 @@ internal sealed class TestRegistry : ITestRegistry
                 "GoSudoku.EditorLoadsSudokuGo",
                 "Go Sudoku / Editor Loads sudoku.go",
                 async context => await GoSudokuTests.EditorLoadsSudokuGo(context.Page),
-                "go_sudoku_solver"));
+                "go_sudoku_solver/sudoku.go"));
 
         Register(
             new UiTestDescriptor(
                 "GoSudoku.EventLogPopulated",
                 "Go Sudoku / Event Log Populated",
                 async context => await GoSudokuTests.EventLogPopulated(context.Page),
-                "go_sudoku_solver"));
+                "go_sudoku_solver/sudoku.go"));
 
         Register(
             new UiTestDescriptor(
                 "GoSudoku.CallTraceNavigationToSolve",
                 "Go Sudoku / Call Trace Navigation To solve",
                 async context => await GoSudokuTests.CallTraceNavigationToSolve(context.Page),
-                "go_sudoku_solver"));
+                "go_sudoku_solver/sudoku.go"));
 
         Register(
             new UiTestDescriptor(
                 "GoSudoku.VariableInspectionBoard",
                 "Go Sudoku / Variable Inspection board",
                 async context => await GoSudokuTests.VariableInspectionBoard(context.Page),
-                "go_sudoku_solver"));
+                "go_sudoku_solver/sudoku.go"));
 
         Register(
             new UiTestDescriptor(
                 "GoSudoku.TerminalOutputShowsSolvedBoard",
                 "Go Sudoku / Terminal Output Shows Solved Board",
                 async context => await GoSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
-                "go_sudoku_solver"));
+                "go_sudoku_solver/sudoku.go"));
 
         // Nim Sudoku Solver smoke tests
         Register(
@@ -383,35 +383,287 @@ internal sealed class TestRegistry : ITestRegistry
                 "NimSudoku.EditorLoadsMainNim",
                 "Nim Sudoku / Editor Loads main.nim",
                 async context => await NimSudokuTests.EditorLoadsMainNim(context.Page),
-                "nim_sudoku_solver"));
+                "nim_sudoku_solver/main.nim"));
 
         Register(
             new UiTestDescriptor(
                 "NimSudoku.EventLogPopulated",
                 "Nim Sudoku / Event Log Populated",
                 async context => await NimSudokuTests.EventLogPopulated(context.Page),
-                "nim_sudoku_solver"));
+                "nim_sudoku_solver/main.nim"));
 
         Register(
             new UiTestDescriptor(
                 "NimSudoku.CallTraceNavigationToSolveSudoku",
                 "Nim Sudoku / Call Trace Navigation To solveSudoku",
                 async context => await NimSudokuTests.CallTraceNavigationToSolveSudoku(context.Page),
-                "nim_sudoku_solver"));
+                "nim_sudoku_solver/main.nim"));
 
         Register(
             new UiTestDescriptor(
                 "NimSudoku.VariableInspectionBoard",
                 "Nim Sudoku / Variable Inspection board",
                 async context => await NimSudokuTests.VariableInspectionBoard(context.Page),
-                "nim_sudoku_solver"));
+                "nim_sudoku_solver/main.nim"));
 
         Register(
             new UiTestDescriptor(
                 "NimSudoku.TerminalOutputShowsSolvedBoard",
                 "Nim Sudoku / Terminal Output Shows Solved Board",
                 async context => await NimSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
-                "nim_sudoku_solver"));
+                "nim_sudoku_solver/main.nim"));
+
+        // C++ Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "CppSudoku.EditorLoadsMainCpp",
+                "C++ Sudoku / Editor Loads main.cpp",
+                async context => await CppSudokuTests.EditorLoadsMainCpp(context.Page),
+                "cpp_sudoku_solver/main.cpp"));
+
+        Register(
+            new UiTestDescriptor(
+                "CppSudoku.EventLogPopulated",
+                "C++ Sudoku / Event Log Populated",
+                async context => await CppSudokuTests.EventLogPopulated(context.Page),
+                "cpp_sudoku_solver/main.cpp"));
+
+        Register(
+            new UiTestDescriptor(
+                "CppSudoku.CallTraceNavigationToSolveSudoku",
+                "C++ Sudoku / Call Trace Navigation To solve_sudoku",
+                async context => await CppSudokuTests.CallTraceNavigationToSolveSudoku(context.Page),
+                "cpp_sudoku_solver/main.cpp"));
+
+        Register(
+            new UiTestDescriptor(
+                "CppSudoku.VariableInspectionBoard",
+                "C++ Sudoku / Variable Inspection board",
+                async context => await CppSudokuTests.VariableInspectionBoard(context.Page),
+                "cpp_sudoku_solver/main.cpp"));
+
+        Register(
+            new UiTestDescriptor(
+                "CppSudoku.TerminalOutputShowsSolvedBoard",
+                "C++ Sudoku / Terminal Output Shows Solved Board",
+                async context => await CppSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "cpp_sudoku_solver/main.cpp"));
+
+        // Pascal Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "PascalSudoku.EditorLoadsSudokuPas",
+                "Pascal Sudoku / Editor Loads sudoku.pas",
+                async context => await PascalSudokuTests.EditorLoadsSudokuPas(context.Page),
+                "pascal_sudoku_solver/sudoku.pas"));
+
+        Register(
+            new UiTestDescriptor(
+                "PascalSudoku.EventLogPopulated",
+                "Pascal Sudoku / Event Log Populated",
+                async context => await PascalSudokuTests.EventLogPopulated(context.Page),
+                "pascal_sudoku_solver/sudoku.pas"));
+
+        Register(
+            new UiTestDescriptor(
+                "PascalSudoku.CallTraceNavigationToSolve",
+                "Pascal Sudoku / Call Trace Navigation To Solve",
+                async context => await PascalSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "pascal_sudoku_solver/sudoku.pas"));
+
+        Register(
+            new UiTestDescriptor(
+                "PascalSudoku.VariableInspectionBoard",
+                "Pascal Sudoku / Variable Inspection board",
+                async context => await PascalSudokuTests.VariableInspectionBoard(context.Page),
+                "pascal_sudoku_solver/sudoku.pas"));
+
+        Register(
+            new UiTestDescriptor(
+                "PascalSudoku.TerminalOutputShowsSolvedBoard",
+                "Pascal Sudoku / Terminal Output Shows Solved Board",
+                async context => await PascalSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "pascal_sudoku_solver/sudoku.pas"));
+
+        // Fortran Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "FortranSudoku.EditorLoadsSudokuF90",
+                "Fortran Sudoku / Editor Loads sudoku.f90",
+                async context => await FortranSudokuTests.EditorLoadsSudokuF90(context.Page),
+                "fortran_sudoku_solver/sudoku.f90"));
+
+        Register(
+            new UiTestDescriptor(
+                "FortranSudoku.EventLogPopulated",
+                "Fortran Sudoku / Event Log Populated",
+                async context => await FortranSudokuTests.EventLogPopulated(context.Page),
+                "fortran_sudoku_solver/sudoku.f90"));
+
+        Register(
+            new UiTestDescriptor(
+                "FortranSudoku.CallTraceNavigationToSolve",
+                "Fortran Sudoku / Call Trace Navigation To solve",
+                async context => await FortranSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "fortran_sudoku_solver/sudoku.f90"));
+
+        Register(
+            new UiTestDescriptor(
+                "FortranSudoku.VariableInspectionBoard",
+                "Fortran Sudoku / Variable Inspection board",
+                async context => await FortranSudokuTests.VariableInspectionBoard(context.Page),
+                "fortran_sudoku_solver/sudoku.f90"));
+
+        Register(
+            new UiTestDescriptor(
+                "FortranSudoku.TerminalOutputShowsSolvedBoard",
+                "Fortran Sudoku / Terminal Output Shows Solved Board",
+                async context => await FortranSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "fortran_sudoku_solver/sudoku.f90"));
+
+        // D Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "DSudoku.EditorLoadsSudokuD",
+                "D Sudoku / Editor Loads sudoku.d",
+                async context => await DSudokuTests.EditorLoadsSudokuD(context.Page),
+                "d_sudoku_solver/sudoku.d"));
+
+        Register(
+            new UiTestDescriptor(
+                "DSudoku.EventLogPopulated",
+                "D Sudoku / Event Log Populated",
+                async context => await DSudokuTests.EventLogPopulated(context.Page),
+                "d_sudoku_solver/sudoku.d"));
+
+        Register(
+            new UiTestDescriptor(
+                "DSudoku.CallTraceNavigationToSolve",
+                "D Sudoku / Call Trace Navigation To solve",
+                async context => await DSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "d_sudoku_solver/sudoku.d"));
+
+        Register(
+            new UiTestDescriptor(
+                "DSudoku.VariableInspectionBoard",
+                "D Sudoku / Variable Inspection board",
+                async context => await DSudokuTests.VariableInspectionBoard(context.Page),
+                "d_sudoku_solver/sudoku.d"));
+
+        Register(
+            new UiTestDescriptor(
+                "DSudoku.TerminalOutputShowsSolvedBoard",
+                "D Sudoku / Terminal Output Shows Solved Board",
+                async context => await DSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "d_sudoku_solver/sudoku.d"));
+
+        // Crystal Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "CrystalSudoku.EditorLoadsSudokuCr",
+                "Crystal Sudoku / Editor Loads sudoku.cr",
+                async context => await CrystalSudokuTests.EditorLoadsSudokuCr(context.Page),
+                "crystal_sudoku_solver/sudoku.cr"));
+
+        Register(
+            new UiTestDescriptor(
+                "CrystalSudoku.EventLogPopulated",
+                "Crystal Sudoku / Event Log Populated",
+                async context => await CrystalSudokuTests.EventLogPopulated(context.Page),
+                "crystal_sudoku_solver/sudoku.cr"));
+
+        Register(
+            new UiTestDescriptor(
+                "CrystalSudoku.CallTraceNavigationToSolve",
+                "Crystal Sudoku / Call Trace Navigation To solve",
+                async context => await CrystalSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "crystal_sudoku_solver/sudoku.cr"));
+
+        Register(
+            new UiTestDescriptor(
+                "CrystalSudoku.VariableInspectionBoard",
+                "Crystal Sudoku / Variable Inspection board",
+                async context => await CrystalSudokuTests.VariableInspectionBoard(context.Page),
+                "crystal_sudoku_solver/sudoku.cr"));
+
+        Register(
+            new UiTestDescriptor(
+                "CrystalSudoku.TerminalOutputShowsSolvedBoard",
+                "Crystal Sudoku / Terminal Output Shows Solved Board",
+                async context => await CrystalSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "crystal_sudoku_solver/sudoku.cr"));
+
+        // Lean Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "LeanSudoku.EditorLoadsMainLean",
+                "Lean Sudoku / Editor Loads Main.lean",
+                async context => await LeanSudokuTests.EditorLoadsMainLean(context.Page),
+                "lean_sudoku_solver/Main.lean"));
+
+        Register(
+            new UiTestDescriptor(
+                "LeanSudoku.EventLogPopulated",
+                "Lean Sudoku / Event Log Populated",
+                async context => await LeanSudokuTests.EventLogPopulated(context.Page),
+                "lean_sudoku_solver/Main.lean"));
+
+        Register(
+            new UiTestDescriptor(
+                "LeanSudoku.CallTraceNavigationToSolve",
+                "Lean Sudoku / Call Trace Navigation To solve",
+                async context => await LeanSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "lean_sudoku_solver/Main.lean"));
+
+        Register(
+            new UiTestDescriptor(
+                "LeanSudoku.VariableInspectionBoard",
+                "Lean Sudoku / Variable Inspection board",
+                async context => await LeanSudokuTests.VariableInspectionBoard(context.Page),
+                "lean_sudoku_solver/Main.lean"));
+
+        Register(
+            new UiTestDescriptor(
+                "LeanSudoku.TerminalOutputShowsSolvedBoard",
+                "Lean Sudoku / Terminal Output Shows Solved Board",
+                async context => await LeanSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "lean_sudoku_solver/Main.lean"));
+
+        // Ada Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "AdaSudoku.EditorLoadsSudokuAdb",
+                "Ada Sudoku / Editor Loads sudoku.adb",
+                async context => await AdaSudokuTests.EditorLoadsSudokuAdb(context.Page),
+                "ada_sudoku_solver/sudoku.adb"));
+
+        Register(
+            new UiTestDescriptor(
+                "AdaSudoku.EventLogPopulated",
+                "Ada Sudoku / Event Log Populated",
+                async context => await AdaSudokuTests.EventLogPopulated(context.Page),
+                "ada_sudoku_solver/sudoku.adb"));
+
+        Register(
+            new UiTestDescriptor(
+                "AdaSudoku.CallTraceNavigationToSolve",
+                "Ada Sudoku / Call Trace Navigation To Solve",
+                async context => await AdaSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "ada_sudoku_solver/sudoku.adb"));
+
+        Register(
+            new UiTestDescriptor(
+                "AdaSudoku.VariableInspectionBoard",
+                "Ada Sudoku / Variable Inspection board",
+                async context => await AdaSudokuTests.VariableInspectionBoard(context.Page),
+                "ada_sudoku_solver/sudoku.adb"));
+
+        Register(
+            new UiTestDescriptor(
+                "AdaSudoku.TerminalOutputShowsSolvedBoard",
+                "Ada Sudoku / Terminal Output Shows Solved Board",
+                async context => await AdaSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "ada_sudoku_solver/sudoku.adb"));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();
