@@ -340,6 +340,78 @@ internal sealed class TestRegistry : ITestRegistry
                 "Rust Sudoku / Terminal Output Shows Solved Board",
                 async context => await RustSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
                 "rs_sudoku_solver"));
+
+        // Go Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "GoSudoku.EditorLoadsSudokuGo",
+                "Go Sudoku / Editor Loads sudoku.go",
+                async context => await GoSudokuTests.EditorLoadsSudokuGo(context.Page),
+                "go_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "GoSudoku.EventLogPopulated",
+                "Go Sudoku / Event Log Populated",
+                async context => await GoSudokuTests.EventLogPopulated(context.Page),
+                "go_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "GoSudoku.CallTraceNavigationToSolve",
+                "Go Sudoku / Call Trace Navigation To solve",
+                async context => await GoSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "go_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "GoSudoku.VariableInspectionBoard",
+                "Go Sudoku / Variable Inspection board",
+                async context => await GoSudokuTests.VariableInspectionBoard(context.Page),
+                "go_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "GoSudoku.TerminalOutputShowsSolvedBoard",
+                "Go Sudoku / Terminal Output Shows Solved Board",
+                async context => await GoSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "go_sudoku_solver"));
+
+        // Nim Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "NimSudoku.EditorLoadsMainNim",
+                "Nim Sudoku / Editor Loads main.nim",
+                async context => await NimSudokuTests.EditorLoadsMainNim(context.Page),
+                "nim_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "NimSudoku.EventLogPopulated",
+                "Nim Sudoku / Event Log Populated",
+                async context => await NimSudokuTests.EventLogPopulated(context.Page),
+                "nim_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "NimSudoku.CallTraceNavigationToSolveSudoku",
+                "Nim Sudoku / Call Trace Navigation To solveSudoku",
+                async context => await NimSudokuTests.CallTraceNavigationToSolveSudoku(context.Page),
+                "nim_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "NimSudoku.VariableInspectionBoard",
+                "Nim Sudoku / Variable Inspection board",
+                async context => await NimSudokuTests.VariableInspectionBoard(context.Page),
+                "nim_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "NimSudoku.TerminalOutputShowsSolvedBoard",
+                "Nim Sudoku / Terminal Output Shows Solved Board",
+                async context => await NimSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "nim_sudoku_solver"));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();
