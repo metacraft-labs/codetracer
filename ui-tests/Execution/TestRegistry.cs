@@ -268,6 +268,42 @@ internal sealed class TestRegistry : ITestRegistry
                 "Ruby Sudoku / Terminal Output Shows Solved Board",
                 async context => await RubySudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
                 "rb_sudoku_solver"));
+
+        // C Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "CSudoku.EditorLoadsMainC",
+                "C Sudoku / Editor Loads main.c",
+                async context => await CSudokuTests.EditorLoadsMainC(context.Page),
+                "c_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "CSudoku.EventLogPopulated",
+                "C Sudoku / Event Log Populated",
+                async context => await CSudokuTests.EventLogPopulated(context.Page),
+                "c_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "CSudoku.CallTraceNavigationToSolve",
+                "C Sudoku / Call Trace Navigation To solve",
+                async context => await CSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "c_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "CSudoku.VariableInspectionBoard",
+                "C Sudoku / Variable Inspection board",
+                async context => await CSudokuTests.VariableInspectionBoard(context.Page),
+                "c_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "CSudoku.TerminalOutputShowsSolvedBoard",
+                "C Sudoku / Terminal Output Shows Solved Board",
+                async context => await CSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "c_sudoku_solver"));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();
