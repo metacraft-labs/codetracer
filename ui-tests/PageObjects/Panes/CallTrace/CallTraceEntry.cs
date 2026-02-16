@@ -50,22 +50,50 @@ public class CallTraceEntry
 
     /// <summary>
     /// Function name portion extracted from the call text.
+    ///
+    /// The call text format is <c>"functionName #N"</c> where <c>#N</c> is the call
+    /// identifier. For Ruby, function names include a <c>#</c> separator between class
+    /// and method (e.g. <c>"SudokuSolver#solve #3"</c>). To handle this correctly we
+    /// look for the <b>last</b> occurrence of <c>" #"</c> followed by a digit, which
+    /// identifies the call counter suffix.
     /// </summary>
     public async Task<string> FunctionNameAsync()
     {
         var callText = await CallTextAsync();
-        var hashIndex = callText.IndexOf('#');
-        return hashIndex >= 0 ? callText[..hashIndex].Trim() : callText;
+        // Scan backwards for the call identifier pattern " #N" (space, hash, digit).
+        // This correctly handles Ruby-style names like "Class#method #3".
+        for (var i = callText.Length - 1; i >= 2; i--)
+        {
+            if (callText[i - 1] == '#'
+                && callText[i - 2] == ' '
+                && char.IsDigit(callText[i]))
+            {
+                return callText[..(i - 2)].Trim();
+            }
+        }
+
+        // Fallback: no call identifier found, return the full text.
+        return callText;
     }
 
     /// <summary>
-    /// Call identifier (the suffix after '#', if present).
+    /// Call identifier (the suffix after the last '#', if present).
     /// </summary>
     public async Task<string> CallIdentifierAsync()
     {
         var callText = await CallTextAsync();
-        var hashIndex = callText.IndexOf('#');
-        return hashIndex >= 0 ? callText[(hashIndex + 1)..].Trim() : string.Empty;
+        // Scan backwards for the call identifier pattern " #N".
+        for (var i = callText.Length - 1; i >= 2; i--)
+        {
+            if (callText[i - 1] == '#'
+                && callText[i - 2] == ' '
+                && char.IsDigit(callText[i]))
+            {
+                return callText[(i)..].Trim();
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>
