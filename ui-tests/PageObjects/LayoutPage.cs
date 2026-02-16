@@ -147,6 +147,28 @@ public class LayoutPage : BasePage
         return Task.WhenAll(waits);
     }
 
+    /// <summary>
+    /// Waits for the base layout components that are always present in the default
+    /// layout configuration. Excludes the editor component because it is added
+    /// dynamically when the backend sends a <c>CtCompleteMove</c> event (which may
+    /// take significant time for RR-based traces that need to start a replay session).
+    /// Use this in tests that do not require the editor to be loaded upfront.
+    /// </summary>
+    public Task WaitForBaseComponentsLoadedAsync()
+    {
+        DebugLogger.Log("LayoutPage: waiting for base components (excluding editor)");
+        var waits = new[]
+        {
+            WaitForFilesystemLoadedAsync(),
+            WaitForStateLoadedAsync(),
+            WaitForCallTraceLoadedAsync(),
+            WaitForEventLogLoadedAsync(),
+            WaitForTerminalLoadedAsync(),
+            WaitForScratchpadLoadedAsync()
+        };
+        return Task.WhenAll(waits);
+    }
+
     #region Debug Buttons
     public ILocator RunToEntryButton() => Page.Locator("#run-to-entry-debug");
     public ILocator ContinueButton() => Page.Locator("#continue-debug");

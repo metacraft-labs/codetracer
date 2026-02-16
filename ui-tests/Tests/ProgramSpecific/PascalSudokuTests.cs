@@ -4,30 +4,25 @@ using Microsoft.Playwright;
 namespace UiTests.Tests.ProgramSpecific;
 
 /// <summary>
-/// Smoke tests for the Rust Sudoku Solver test program (<c>rs_sudoku_solver</c>).
+/// Smoke tests for the Pascal Sudoku Solver test program (<c>pascal_sudoku_solver</c>).
 ///
-/// This is an RR-based trace (compiled Rust recorded with <c>rr</c>), which may be
+/// This is an RR-based trace (compiled Pascal recorded with <c>rr</c>), which may be
 /// slower than DB-based traces. Each test is a thin wrapper that delegates to the
 /// shared <see cref="LanguageSmokeTestHelpers"/> so the assertions remain
-/// language-agnostic while the parameters are specific to the Rust program under test.
+/// language-agnostic while the parameters are specific to the Pascal program under test.
 ///
-/// For RR traces the initial position is the program entry point (<c>main::main</c>).
+/// For RR traces the initial position is the program entry point (<c>main</c>).
 /// The call trace only shows the current call stack at this position, so tests
 /// verify the entry-point function rather than deeper call targets. The terminal
 /// output test navigates forward to a position where output has been produced.
-///
-/// Rust uses module-qualified names in the debugger, so the entry function appears
-/// as <c>main::main</c> (the <c>main</c> function in the <c>main</c> crate root).
-/// Variables are not visible at the very start of a Rust function (before the first
-/// <c>let</c> binding executes), so the variable test steps forward first.
 /// </summary>
-public static class RustSudokuTests
+public static class PascalSudokuTests
 {
     /// <summary>
-    /// Verify the editor opens a tab for the main Rust source file.
+    /// Verify the editor opens a tab for the Pascal source file.
     /// </summary>
-    public static async Task EditorLoadsMainRs(IPage page)
-        => await LanguageSmokeTestHelpers.AssertEditorLoadsFileAsync(page, "main.rs");
+    public static async Task EditorLoadsSudokuPas(IPage page)
+        => await LanguageSmokeTestHelpers.AssertEditorLoadsFileAsync(page, "sudoku.pas");
 
     /// <summary>
     /// Verify the event log contains at least one recorded event.
@@ -36,26 +31,25 @@ public static class RustSudokuTests
         => await LanguageSmokeTestHelpers.AssertEventLogPopulatedAsync(page);
 
     /// <summary>
-    /// Verify the call trace shows the entry-point function (<c>main::main</c>) and
+    /// Verify the call trace shows the entry-point function (<c>$main</c>) and
     /// that activating it keeps the editor on the expected source file.
     ///
-    /// Rust uses module-qualified names, so the entry function is <c>main::main</c>.
+    /// For RR traces at the initial position, the call trace shows the current
+    /// call stack (just <c>$main</c>), not the full execution tree.
+    /// Free Pascal prefixes the main program entry with <c>$</c> in the debugger.
     /// </summary>
     public static async Task CallTraceNavigationToSolve(IPage page)
-        => await LanguageSmokeTestHelpers.AssertCallTraceNavigationAsync(page, "main::main", "main.rs");
+        => await LanguageSmokeTestHelpers.AssertCallTraceNavigationAsync(page, "$main", "sudoku.pas");
 
     /// <summary>
-    /// Verify that the <c>test_boards</c> variable is visible as a flow value
+    /// Verify that the <c>boards</c> variable is visible as a flow value
     /// annotation in the editor.
     ///
-    /// Rust local variables are not visible in the debugger state pane at the
-    /// very start of a function (before the first <c>let</c> binding executes).
-    /// However, the CodeTracer flow system computes and displays variable values
-    /// inline in the editor regardless of debugger state, so we check for the
-    /// flow value annotation instead.
+    /// RR traces may not show variables in the Program State pane at the entry
+    /// point, so flow value annotations in the editor are more reliable.
     /// </summary>
     public static async Task VariableInspectionBoard(IPage page)
-        => await LanguageSmokeTestHelpers.AssertFlowValueVisibleAsync(page, "test_boards");
+        => await LanguageSmokeTestHelpers.AssertFlowValueVisibleAsync(page, "boards");
 
     /// <summary>
     /// Verify the program produced stdout output containing "Solved".

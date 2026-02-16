@@ -136,14 +136,14 @@ test:
   just test-frontend-js
   just test-python-recorder
 
-# Build the C# UI tests (requires the ui-tests nix shell)
+# Build the C# UI tests
 build-csharp-ui:
   #!/usr/bin/env bash
   set -e
   cd ui-tests
   ./dotnet_build.sh
 
-# Run C# UI tests (requires the ui-tests nix shell)
+# Run C# UI tests
 #
 # display: controls how the graphical display is handled
 #   "default"  - use the current display, showing the Electron window
@@ -187,13 +187,24 @@ test-csharp-ui display="default" *args:
       ;;
   esac
 
-# Run stable Electron UI tests with xvfb (requires the ui-tests nix shell).
+# Run stable Electron UI tests with xvfb.
+# Matches what CI runs. For local visible display, use: just test-csharp-ui default
+# Run stable Electron UI tests with xvfb.
 # Matches what CI runs. For local visible display, use: just test-csharp-ui default
 ui-tests:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   just test-csharp-ui xvfb --mode Electron --suite stable-tests --retries 2
+
+# Run all language smoke tests (requires ct record + compilers on PATH).
+# This records fresh traces for each language, so it needs ct-rr-support and
+# the full compiler toolchain available in the nix shell.
+test-all-language-smoke:
+  #!/usr/bin/env bash
+  set -e
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  just test-csharp-ui xvfb --mode Electron --suite all-language-smoke --retries 2
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
@@ -618,6 +629,31 @@ cross-test-rust-flow:
 
 cross-test-go-flow:
   bash scripts/run-cross-repo-tests.sh go-flow
+
+# ====
+# Per-language smoke test targets
+# Run individual language UI smoke tests via Electron + xvfb
+
+test-cpp-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite cpp-smoke
+
+test-pascal-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite pascal-smoke
+
+test-fortran-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite fortran-smoke
+
+test-d-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite d-smoke
+
+test-crystal-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite crystal-smoke
+
+test-lean-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite lean-smoke
+
+test-ada-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite ada-smoke
 
 show-rr-backend-pin:
   @cat .github/rr-backend-pin.txt 2>/dev/null || echo "main (default)"
