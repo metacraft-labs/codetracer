@@ -37,6 +37,8 @@ pub enum Language {
     C,
     Cpp,
     Go,
+    Python,
+    Ruby,
 }
 
 impl Language {
@@ -47,7 +49,14 @@ impl Language {
             Language::C => "c",
             Language::Cpp => "cpp",
             Language::Go => "go",
+            Language::Python => "py",
+            Language::Ruby => "rb",
         }
+    }
+
+    /// Returns true for DB-based trace languages (Python, Ruby) that don't use rr.
+    pub fn is_db_trace(&self) -> bool {
+        matches!(self, Language::Python | Language::Ruby)
     }
 }
 
@@ -561,7 +570,248 @@ fn accept_with_timeout(
     }
 }
 
-/// Run a flow integration test with the given configuration
+/// Find the pure-Python recorder script (`trace.py`) via CARGO_MANIFEST_DIR.
+///
+/// The recorder is a git submodule at `libs/codetracer-python-recorder/` relative to
+/// the top-level `codetracer/` directory. This function resolves the path from the
+/// db-backend crate manifest directory: `../../libs/codetracer-python-recorder/
+/// codetracer-pure-python-recorder/src/trace.py`.
+///
+/// Panics if the recorder is not found (it's a required submodule).
+pub fn find_python_recorder() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let recorder = manifest_dir.join(
+        "../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py",
+    );
+    assert!(
+        recorder.exists(),
+        "Python recorder not found at {}. Did you check out the codetracer-python-recorder submodule?",
+        recorder.display()
+    );
+    recorder.canonicalize().unwrap_or(recorder)
+}
+
+/// Find the pure-Ruby recorder script via CARGO_MANIFEST_DIR.
+///
+/// The recorder is a git submodule at `libs/codetracer-ruby-recorder/` relative to
+/// the top-level `codetracer/` directory. Same relative path as used by
+/// `tracepoint_interpreter/tests.rs`.
+///
+/// Panics if the recorder is not found (it's a required submodule).
+pub fn find_ruby_recorder() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let recorder = manifest_dir.join(
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+    );
+    assert!(
+        recorder.exists(),
+        "Ruby recorder not found at {}. Did you check out the codetracer-ruby-recorder submodule?",
+        recorder.display()
+    );
+    recorder.canonicalize().unwrap_or(recorder)
+}
+
+/// Record a Python trace by running the pure-Python recorder.
+///
+/// The recorder writes `trace.json`, `trace_metadata.json`, `trace_paths.json` to CWD,
+/// so we set `current_dir` to `trace_dir`.
+///
+/// The recorder stores source paths as relative filenames (e.g. `python_flow_test.py`)
+/// and sets `workdir` to CWD. The DAP server's ExprLoader resolves source files relative
+/// to workdir, so we must copy the source file into the trace_dir to make it findable.
+fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let recorder = find_python_recorder();
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let output = Command::new("python")
+        .args([recorder.to_str().unwrap(), source_path.to_str().unwrap()])
+        .current_dir(trace_dir)
+        .output()
+        .map_err(|e| format!("failed to run Python recorder: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Python recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // Copy source file into trace_dir so the DAP server can find it.
+    // The recorder stores relative paths in trace_paths.json, and the server
+    // resolves them against `workdir` (which is trace_dir).
+    if let Some(filename) = source_path.file_name() {
+        let dest = trace_dir.join(filename);
+        if !dest.exists() {
+            fs::copy(source_path, &dest)
+                .map_err(|e| format!("failed to copy source to trace dir: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Record a Ruby trace by running the pure-Ruby recorder.
+///
+/// Uses the same invocation pattern as `tracepoint_interpreter/tests.rs`:
+/// `ruby <recorder> --out-dir <trace_dir> <source>` with `CODETRACER_DB_TRACE_PATH`.
+fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let recorder = find_ruby_recorder();
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let trace_path = trace_dir.join("trace.json");
+    let output = Command::new("ruby")
+        .args([
+            recorder.to_str().unwrap(),
+            "--out-dir",
+            trace_dir.to_str().unwrap(),
+            source_path.to_str().unwrap(),
+        ])
+        .env("CODETRACER_DB_TRACE_PATH", trace_path.to_str().unwrap())
+        .output()
+        .map_err(|e| format!("failed to run Ruby recorder: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Ruby recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+impl TestRecording {
+    /// Create a new DB-based test recording (Python/Ruby) without rr or ct-rr-support.
+    ///
+    /// For interpreted languages, the "binary_path" is the source path itself.
+    pub fn create_db_trace(
+        source_path: &Path,
+        language: Language,
+        version_label: &str,
+    ) -> Result<Self, String> {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "flow_test_{}_{}_{}",
+            language.extension(),
+            version_label.replace('.', "_"),
+            std::process::id()
+        ));
+
+        // Clean up any existing temp directory
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir).map_err(|e| format!("failed to clean temp dir: {}", e))?;
+        }
+        fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
+
+        let trace_dir = temp_dir.join("trace");
+
+        // Record trace using the appropriate language recorder
+        match language {
+            Language::Python => record_python_trace(source_path, &trace_dir)?,
+            Language::Ruby => record_ruby_trace(source_path, &trace_dir)?,
+            _ => return Err(format!("{:?} is not a DB-based language", language)),
+        }
+
+        // Verify the essential trace files were produced
+        let trace_json = trace_dir.join("trace.json");
+        let trace_metadata = trace_dir.join("trace_metadata.json");
+        if !trace_json.exists() {
+            return Err(format!(
+                "trace.json not produced at {}",
+                trace_json.display()
+            ));
+        }
+        if !trace_metadata.exists() {
+            return Err(format!(
+                "trace_metadata.json not produced at {}",
+                trace_metadata.display()
+            ));
+        }
+
+        Ok(TestRecording {
+            trace_dir,
+            source_path: source_path.to_path_buf(),
+            binary_path: source_path.to_path_buf(), // interpreted langs have no binary
+            temp_dir,
+            language,
+            version_label: version_label.to_string(),
+        })
+    }
+}
+
+/// Run a flow integration test for a DB-based language (Python/Ruby).
+///
+/// Similar to `run_flow_test()` but does not require ct-rr-support or rr.
+/// Uses `create_db_trace()` for recording and passes an empty path for
+/// `ct_rr_worker_exe` (unused by DB traces).
+///
+/// For Python traces, the source file is copied into the trace_dir and paths
+/// in the trace are relative to workdir (= trace_dir). We use the trace_dir
+/// copy path for breakpoints so the path matches what the DB lookup expects.
+/// For Ruby traces, paths are relative to the recorder's CWD, which is the
+/// codetracer repo root, so the original source path matches via suffix match.
+pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
+    println!("Source: {}", config.source_path.display());
+    println!("Language: {:?}", config.language);
+    println!("Version: {}", version_label);
+
+    // Create DB-based recording (no rr needed)
+    println!("Recording trace...");
+    let recording = TestRecording::create_db_trace(
+        &config.source_path,
+        config.language,
+        version_label,
+    )?;
+    println!("Recording created at: {}", recording.trace_dir.display());
+
+    // Start DAP client — ct_rr_support path is unused for DB traces, pass empty path
+    let dummy_ct_rr = PathBuf::from("");
+    println!("Starting DAP client...");
+    let mut client = DapTestClient::start(&recording.temp_dir, &dummy_ct_rr)?;
+
+    // Initialize and launch — pass empty path for ct_rr_worker_exe
+    println!("Initializing DAP session...");
+    client.initialize_and_launch(&recording, &dummy_ct_rr)?;
+
+    // Determine the breakpoint path. For DB traces, the trace stores relative
+    // paths and the DAP server resolves them against the trace's workdir.
+    // We use the trace-dir copy of the source file so path lookup succeeds.
+    let breakpoint_source = if config.language == Language::Python {
+        // Python recorder sets workdir = trace_dir, stores just the filename.
+        // The source was copied into trace_dir by record_python_trace().
+        let filename = config.source_path.file_name().unwrap();
+        recording.trace_dir.join(filename)
+    } else {
+        // Ruby recorder sets workdir = CWD (codetracer repo root) and stores
+        // the relative path from CWD. The suffix-match in load_path_id
+        // should handle the original absolute path.
+        config.source_path.clone()
+    };
+
+    // Set breakpoint
+    println!(
+        "Setting breakpoint at {}:{}...",
+        breakpoint_source.display(),
+        config.breakpoint_line
+    );
+    client.set_breakpoint(&breakpoint_source, config.breakpoint_line)?;
+
+    // Continue to breakpoint
+    println!("Continuing to breakpoint...");
+    let location = client.continue_to_breakpoint()?;
+    println!("Stopped at: {}:{}", location.path, location.line);
+
+    // Request flow data
+    println!("Requesting flow data...");
+    let flow = client.request_flow(location)?;
+    println!("Flow has {} steps", flow.steps.len());
+
+    // Verify results — shared logic with run_flow_test()
+    verify_flow_results(config, &flow)
+}
+
+/// Run a flow integration test with the given configuration (RR-based languages)
 pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
     // Find ct-rr-support
     let ct_rr_support =
@@ -603,6 +853,13 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
     println!("Flow has {} steps", flow.steps.len());
 
     // Verify results
+    verify_flow_results(config, &flow)
+}
+
+/// Verify flow results: check excluded identifiers, expected variables, and values.
+///
+/// Shared between `run_flow_test()` (RR-based) and `run_db_flow_test()` (DB-based).
+fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), String> {
     println!("\nVerifying flow data...");
 
     // Check excluded identifiers are NOT in the list
@@ -614,7 +871,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
             ));
         }
     }
-    println!("✓ Function call filtering PASSED");
+    println!("Function call filtering PASSED");
 
     // Check expected variables ARE in the list
     let found_expected: Vec<&String> = config
@@ -630,7 +887,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
             config.expected_variables
         ));
     }
-    println!("✓ Variable extraction PASSED");
+    println!("Variable extraction PASSED");
 
     // Check value loading
     let (loaded, not_loaded) = flow.count_loaded();
@@ -646,7 +903,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
                     if actual != *expected_value {
                         return Err(format!("{} should be {}, got {}", var_name, expected_value, actual));
                     }
-                    println!("  {} = {} ✓", var_name, actual);
+                    println!("  {} = {} (correct)", var_name, actual);
                 }
             } else {
                 println!("  {} = <NONE>", var_name);
@@ -657,7 +914,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
     if loaded == 0 {
         return Err("No values were loaded - local variables should be loadable".to_string());
     }
-    println!("✓ Value loading PASSED for {} variables", loaded);
+    println!("Value loading PASSED for {} variables", loaded);
 
     println!("\nTest completed successfully!");
     Ok(())
