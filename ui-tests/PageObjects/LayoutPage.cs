@@ -82,6 +82,9 @@ public class LayoutPage : BasePage
         var loadingCell = Page.Locator("div[id^='eventLogComponent'] td.dt-empty").Filter(new() { HasTextString = "Loading..." });
         try
         {
+            // DB-based traces (Python, Ruby) can take longer to populate the event
+            // log than RR traces, so use a generous retry count (30 × 1s = 30s on
+            // top of the grace period).
             await RetryHelpers.RetryAsync(async () =>
             {
                 var count = await loadingCell.CountAsync();
@@ -93,7 +96,7 @@ public class LayoutPage : BasePage
 
                 DebugLogger.Log($"LayoutPage: event-log still loading (placeholder count={count}); waiting.");
                 return false;
-            });
+            }, maxAttempts: 30);
         }
         catch (TimeoutException ex)
         {

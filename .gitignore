@@ -9,6 +9,7 @@ node_modules/
 nimcache/
 .tup/
 .venv/
+.python-recorder-venv/
 build-*/
 
 !build-python
@@ -218,6 +219,14 @@ csources_v1/
 .aider*
 .claude/
 .mcp.json
+
+# Compiled test program binaries and build artifacts
+test-programs/*/main
+test-programs/*/sudoku
+test-programs/lean_sudoku_solver/.lake/
+test-programs/lean_sudoku_solver/lake-manifest.json
+# GNAT Ada build intermediaries
+test-programs/ada_sudoku_solver/b~*
 
 # Temporary .patch file, used to coppy results from codex and applied using git apply <file name>.patch
 *.patch

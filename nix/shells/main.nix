@@ -7,6 +7,15 @@
 let
   ourPkgs = self'.packages;
   preCommit = config.pre-commit;
+
+  # Import toolchains from the codetracer-toolchains flake for multi-language support.
+  # These provide compilers needed by `ct record` → `ct-rr-support build` for new languages.
+  toolchainsPkgs = inputs'."codetracer-toolchains".packages;
+  # .NET SDK + runtime for C# UI tests (dotnet build)
+  dotnet-full = pkgs.dotnetCorePackages.combinePackages [
+    pkgs.dotnetCorePackages.sdk_8_0
+    pkgs.dotnetCorePackages.runtime_8_0
+  ];
 in
 with pkgs;
 mkShell {
@@ -133,6 +142,30 @@ mkShell {
     ruby
     ruby-lsp
 
+    # ============================================
+    # Compilers for new language support (ct record)
+    # Using toolchains from codetracer-toolchains
+    # ============================================
+
+    # Pascal
+    toolchainsPkgs.fpc
+
+    # Fortran
+    toolchainsPkgs.gfortran
+
+    # D language (includes ldmd2)
+    toolchainsPkgs.ldc
+
+    # Crystal
+    toolchainsPkgs.crystal
+
+    # Lean 4 - theorem prover and functional programming language
+    lean4
+
+    # Ada
+    toolchainsPkgs.gnat
+    toolchainsPkgs.gprbuild
+
     # testing shell
     tmux
     vim
@@ -171,6 +204,9 @@ mkShell {
     # ui-test dependencies
     playwright-driver.browsers
     playwright
+    dotnet-full
+    xvfb-run
+    xorg.xorgserver # provides Xephyr for visible virtual X11
 
     # runtime_tracing build dependency
     capnproto
@@ -293,6 +329,9 @@ mkShell {
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 
+    # used in ui-tests/dotnet_build.sh
+    export NIX_NODE=${pkgs.nodejs_22.outPath}/bin/node
+
     # workaround to reuse devshell node_modules for tup build
     # make sure it's always updated
     rm -rf $ROOT_PATH/node_modules
@@ -305,6 +344,27 @@ mkShell {
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
     export CODETRACER_DEV_TOOLS=0
     export CODETRACER_LOG_LEVEL=INFO
+
+    # ==== Python recorder for ct record (DB-based Python tracing)
+    # Build the Rust-backed codetracer_python_recorder module into a venv
+    # so that `ct record` can use it for Python tracing. This is only done
+    # once (cached in .python-recorder-venv/) and re-triggered if the module
+    # becomes un-importable (e.g. after Rust source changes).
+    RECORDER_VENV="$ROOT_PATH/.python-recorder-venv"
+    RECORDER_SRC="$ROOT_PATH/libs/codetracer-python-recorder/codetracer-python-recorder"
+    if [ -d "$RECORDER_SRC" ]; then
+      if [ ! -d "$RECORDER_VENV" ] || ! "$RECORDER_VENV/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
+        echo "Setting up Python recorder venv (first time or module needs rebuild)..."
+        python3 -m venv "$RECORDER_VENV"
+        "$RECORDER_VENV/bin/pip" install --quiet "$RECORDER_SRC" 2>&1 | tail -5
+        if "$RECORDER_VENV/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
+          echo "Python recorder installed successfully."
+        else
+          echo "WARNING: Failed to install codetracer_python_recorder. Python tracing may not work."
+        fi
+      fi
+      export CODETRACER_PYTHON_INTERPRETER="$RECORDER_VENV/bin/python"
+    fi
 
     # Ensure tree-sitter-nim parser is generated (cached - only regenerates if needed)
     if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
