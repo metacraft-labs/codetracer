@@ -728,6 +728,195 @@ impl ExprLoader {
 
                 true
             }
+            Lang::PythonDb => {
+                // Filter out non-variable identifiers in Python code.
+                //
+                // In tree-sitter-python, we want only actual variable references.
+                // We filter out:
+                //   - Function definition names (`function_definition` → `name` field)
+                //   - Class definition names (`class_definition` → `name` field)
+                //   - Function names in call expressions (`call` → `function` field)
+                //   - Attribute names in attribute access (`attribute` → `attribute` field)
+                //   - Object names when used as receiver of a method call
+                //   - Decorator identifiers (`decorator` parent)
+                //   - Import identifiers (`import_statement`, `import_from_statement`, etc.)
+                //   - Type annotation identifiers (`type` parent)
+                //   - Parameter definition site identifiers (`parameters` parent)
+                //
+                // tree-sitter-python node types reference:
+                //   https://github.com/tree-sitter/tree-sitter-python/blob/master/src/node-types.json
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out function definition names.
+                // AST: function_definition { name: identifier "foo", parameters: ..., body: ... }
+                if parent_kind == "function_definition" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out class definition names.
+                // AST: class_definition { name: identifier "MyClass", body: ... }
+                if parent_kind == "class_definition" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out function names in call expressions.
+                // AST: call { function: identifier "print", arguments: argument_list { ... } }
+                if parent_kind == "call" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "function" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out attribute names in attribute access.
+                // AST: attribute { object: identifier, attribute: identifier }
+                // The `attribute` field (right side of the dot) is not a variable reference.
+                if parent_kind == "attribute" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "attribute" {
+                            return false;
+                        }
+                        // Filter out the object when the attribute is used as a call function.
+                        // E.g., `math.sqrt(x)` — `math` is not a local variable reference.
+                        if field_name == "object" {
+                            if let Some(grandparent) = parent.parent() {
+                                if grandparent.kind() == "call" {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter out decorator identifiers.
+                // AST: decorator { @ identifier }
+                if parent_kind == "decorator" {
+                    return false;
+                }
+
+                // Filter out import identifiers.
+                // `import os` → import_statement > dotted_name > identifier
+                // `from os import path` → import_from_statement > dotted_name/identifier
+                // `import os as operating_system` → aliased_import > identifier
+                if matches!(
+                    parent_kind,
+                    "import_statement"
+                        | "import_from_statement"
+                        | "dotted_name"
+                        | "aliased_import"
+                ) {
+                    return false;
+                }
+
+                // Filter out type annotation identifiers.
+                // `x: int = 5` → the `int` identifier has parent with field "type"
+                if parent_kind == "type" {
+                    return false;
+                }
+
+                // Filter out parameter definition identifiers.
+                // `def foo(a, b):` → parameters > identifier
+                if parent_kind == "parameters"
+                    || parent_kind == "typed_parameter"
+                    || parent_kind == "default_parameter"
+                    || parent_kind == "typed_default_parameter"
+                    || parent_kind == "list_splat_pattern"
+                    || parent_kind == "dictionary_splat_pattern"
+                {
+                    return false;
+                }
+
+                true
+            }
+            Lang::Ruby | Lang::RubyDb => {
+                // Filter out non-variable identifiers in Ruby code.
+                //
+                // In tree-sitter-ruby, we want only actual variable references.
+                // We filter out:
+                //   - Method definition names (`method` → `name` field)
+                //   - Method names in call expressions (`call` → `method` field)
+                //   - Class definition names (`class` → `name` field)
+                //   - Module definition names (`module` → `name` field)
+                //
+                // tree-sitter-ruby node types reference:
+                //   https://github.com/tree-sitter/tree-sitter-ruby/blob/master/src/node-types.json
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out method definition names.
+                // AST: method { name: identifier "foo", parameters: ..., body: ... }
+                if parent_kind == "method" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out method names in call expressions.
+                // AST: call { method: identifier "puts", arguments: argument_list { ... } }
+                // Bare calls like `puts x` have method field but no receiver.
+                if parent_kind == "call" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "method" {
+                            return false;
+                        }
+                        // Filter out the receiver when it's part of a method call.
+                        // E.g., `obj.method(x)` — `obj` is the receiver, not a
+                        // standalone variable reference in this call context.
+                        if field_name == "receiver" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out class definition names.
+                // AST: class { name: constant "MyClass" }
+                // (Class names are typically `constant` nodes, not `identifier`,
+                // but handle it defensively.)
+                if parent_kind == "class" || parent_kind == "module" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out method parameter identifiers.
+                // `def foo(a, b)` → method_parameters > identifier
+                if parent_kind == "method_parameters"
+                    || parent_kind == "block_parameters"
+                    || parent_kind == "lambda_parameters"
+                {
+                    return false;
+                }
+
+                true
+            }
             Lang::C | Lang::Cpp => {
                 // Filter out non-variable identifiers in C/C++ code.
                 //
@@ -1413,6 +1602,274 @@ func main() {
         assert!(
             all_vars.contains(&"result".to_string()),
             "result should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
+mod python_tests {
+    use super::*;
+
+    /// Test that Python function calls are correctly filtered out of the variable list
+    /// while actual variables are preserved.
+    #[test]
+    fn test_python_excludes_function_calls_from_variables() {
+        use std::fs;
+
+        // Python code with function calls that should NOT be extracted as variables
+        let code = r#"def calculate_sum(a, b):
+    sum_val = a + b
+    doubled = sum_val * 2
+    final_result = doubled + 10
+    print("Sum:", sum_val)
+    return final_result
+
+x = 10
+y = 32
+result = calculate_sum(x, y)
+print("Result:", result)
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("python_func_test.py");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Print all extracted variables by line for debugging
+        println!("\n=== Python Variables by line ===");
+        for (pos, vars) in &info.variables {
+            println!("  Line {}: {:?}", pos.0, vars);
+        }
+
+        // Collect all extracted variables
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+        println!("\nAll variables: {:?}", all_vars);
+
+        // Function calls should NOT be in the variables list
+        assert!(
+            !all_vars.contains(&"print".to_string()),
+            "print() should not be a variable"
+        );
+        assert!(
+            !all_vars.contains(&"calculate_sum".to_string()),
+            "calculate_sum() should not be a variable"
+        );
+
+        // But actual variables SHOULD be in the list
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"sum_val".to_string()),
+            "sum_val should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"doubled".to_string()),
+            "doubled should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"result".to_string()),
+            "result should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that Python import identifiers are filtered out
+    #[test]
+    fn test_python_excludes_imports() {
+        use std::fs;
+
+        let code = r#"import os
+from sys import argv
+x = 10
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("python_import_test.py");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+
+        assert!(
+            !all_vars.contains(&"os".to_string()),
+            "os should not be a variable (import)"
+        );
+        assert!(
+            !all_vars.contains(&"sys".to_string()),
+            "sys should not be a variable (import)"
+        );
+        assert!(
+            !all_vars.contains(&"argv".to_string()),
+            "argv should not be a variable (import)"
+        );
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that Python class definition names are filtered out
+    #[test]
+    fn test_python_excludes_class_names() {
+        use std::fs;
+
+        let code = r#"class MyClass:
+    x = 10
+y = 20
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("python_class_test.py");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+
+        assert!(
+            !all_vars.contains(&"MyClass".to_string()),
+            "MyClass should not be a variable (class definition)"
+        );
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"y".to_string()),
+            "y should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
+mod ruby_tests {
+    use super::*;
+
+    /// Test that Ruby method calls are correctly filtered out of the variable list
+    /// while actual variables are preserved.
+    #[test]
+    fn test_ruby_excludes_method_calls_from_variables() {
+        use std::fs;
+
+        // Ruby code with method calls that should NOT be extracted as variables
+        let code = r#"def calculate_sum(a, b)
+  sum_val = a + b
+  doubled = sum_val * 2
+  final_result = doubled + 10
+  puts "Sum: #{sum_val}"
+  return final_result
+end
+
+x = 10
+y = 32
+result = calculate_sum(x, y)
+puts "Result: #{result}"
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("ruby_func_test.rb");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Print all extracted variables by line for debugging
+        println!("\n=== Ruby Variables by line ===");
+        for (pos, vars) in &info.variables {
+            println!("  Line {}: {:?}", pos.0, vars);
+        }
+
+        // Collect all extracted variables
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+        println!("\nAll variables: {:?}", all_vars);
+
+        // Method calls should NOT be in the variables list
+        assert!(
+            !all_vars.contains(&"puts".to_string()),
+            "puts should not be a variable"
+        );
+        assert!(
+            !all_vars.contains(&"calculate_sum".to_string()),
+            "calculate_sum() should not be a variable"
+        );
+
+        // But actual variables SHOULD be in the list
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"sum_val".to_string()),
+            "sum_val should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"doubled".to_string()),
+            "doubled should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"result".to_string()),
+            "result should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that Ruby method definition names are filtered out
+    #[test]
+    fn test_ruby_excludes_method_definition_names() {
+        use std::fs;
+
+        let code = r#"def my_method
+  x = 42
+end
+y = 10
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("ruby_method_def_test.rb");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+
+        assert!(
+            !all_vars.contains(&"my_method".to_string()),
+            "my_method should not be a variable (method definition)"
+        );
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"y".to_string()),
+            "y should be extracted as a variable"
         );
 
         fs::remove_file(&file_path).unwrap();
