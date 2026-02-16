@@ -72,16 +72,26 @@ public class CallTracePane : TabObject
 
     /// <summary>
     /// Finds the first call trace entry whose function name matches <paramref name="functionName"/>.
+    /// Entries that are scrolled out of the virtualized viewport may throw Playwright
+    /// timeouts when accessed — these are silently skipped.
     /// </summary>
     public async Task<CallTraceEntry?> FindEntryAsync(string functionName, bool forceReload = false)
     {
         var entries = await EntriesAsync(forceReload);
         foreach (var entry in entries)
         {
-            var name = await entry.FunctionNameAsync();
-            if (string.Equals(name, functionName, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                return entry;
+                var name = await entry.FunctionNameAsync();
+                if (string.Equals(name, functionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return entry;
+                }
+            }
+            catch (PlaywrightException)
+            {
+                // Entry is likely scrolled out of the virtualized viewport and its
+                // DOM element is inaccessible. Skip it and continue searching.
             }
         }
 

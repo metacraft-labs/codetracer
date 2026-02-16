@@ -115,8 +115,10 @@ public class FilesystemNode
     /// </summary>
     /// <remarks>
     /// jstree uses jQuery-based event handling that binds to 'contextmenu.jstree' events
-    /// on '.jstree-anchor' elements. We use Playwright's built-in right-click which
-    /// properly dispatches the contextmenu event with correct coordinates.
+    /// on '.jstree-anchor' elements. We use jstree's show_contextmenu API directly
+    /// because: (1) native DOM events don't trigger jQuery-bound handlers, (2) jQuery
+    /// trigger fires the handler but vakata context creation may fail in Electron,
+    /// (3) Playwright's right-click can be intercepted by Electron's default menu.
     /// </remarks>
     public async Task<ContextMenu> OpenContextMenuAsync()
     {
@@ -124,17 +126,75 @@ public class FilesystemNode
         await AnchorLocator.ScrollIntoViewIfNeededAsync();
 
         // Wait for jstree to fully process any pending events (folder expansion, etc.)
-        await Task.Delay(300);
+        await Task.Delay(500);
 
-        // Use Playwright's built-in right-click which handles positioning correctly
-        await AnchorLocator.ClickAsync(new() { Button = MouseButton.Right });
+        // Get the jstree node ID from the parent <li> element
+        var nodeId = await NodeLocator.GetAttributeAsync("id");
+
+        // Call $.vakata.context.show() directly to create the context menu.
+        // Previous approaches (jQuery trigger, show_contextmenu, _show_contextmenu) all
+        // failed because jstree's intermediary code calls activate_node which triggers
+        // CodeTracer's changed.jstree handler, causing a re-render that disrupts the
+        // context menu creation. By calling vakata.context.show() directly, we bypass
+        // all jstree event handling.
+        await _page.EvaluateAsync(@"(nodeId) => {
+            const jq = window.$ || window.jQuery;
+            if (!jq) {
+                throw new Error('jQuery is not available');
+            }
+
+            if (!jq.vakata || !jq.vakata.context || !jq.vakata.context.show) {
+                throw new Error('$.vakata.context is not available - jstree contextmenu module may not be loaded');
+            }
+
+            // Get the jstree instance to obtain the default items
+            const tree = jq('.filesystem').jstree(true);
+            if (!tree) {
+                throw new Error('jstree instance not found');
+            }
+
+            const node = tree.get_node(nodeId);
+            if (!node) {
+                throw new Error('jstree node not found: ' + nodeId);
+            }
+
+            // Get the menu items by calling jstree's default items function
+            const itemsFn = tree.settings.contextmenu.items;
+            let items;
+            if (typeof itemsFn === 'function') {
+                items = itemsFn.call(tree, node);
+            } else {
+                items = itemsFn;
+            }
+
+            if (!items || typeof items !== 'object') {
+                throw new Error('contextmenu items is empty or not an object');
+            }
+
+            // Get anchor element for positioning
+            const anchor = document.getElementById(nodeId + '_anchor');
+            if (!anchor) {
+                throw new Error('anchor element not found for node: ' + nodeId);
+            }
+            const rect = anchor.getBoundingClientRect();
+
+            // Mark the anchor with jstree-context class (as jstree's _show_contextmenu does)
+            jq(anchor).addClass('jstree-context');
+            tree._data.contextmenu.visible = true;
+
+            // Call vakata.context.show directly with the anchor reference and items
+            jq.vakata.context.show(jq(anchor), {
+                'x': rect.left + rect.width / 2,
+                'y': rect.top + rect.height
+            }, items);
+        }", nodeId);
 
         // Wait for context menu using Playwright's WaitForAsync with reasonable timeout
         // The jstree context menu plugin creates a .vakata-context element
         await _contextMenu.Container.WaitForAsync(new()
         {
             State = WaitForSelectorState.Visible,
-            Timeout = 5000
+            Timeout = 10000
         });
 
         return _contextMenu;

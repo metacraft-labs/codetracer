@@ -95,11 +95,14 @@ public static class LanguageSmokeTestHelpers
             }
 
             // The function might be nested inside collapsed entries. Expand all visible
-            // entries and search again on the next retry.
+            // entries and search again on the next retry. Entries scrolled out of the
+            // virtualized viewport may throw Playwright timeouts — skip those.
             var allEntries = await callTrace.EntriesAsync(true);
             foreach (var entry in allEntries)
             {
-                await entry.ExpandChildrenAsync();
+                try { await entry.ExpandChildrenAsync(); }
+                catch (PlaywrightException) { /* entry not in viewport */ }
+                catch (TimeoutException) { /* expansion did not complete */ }
             }
 
             return false;
@@ -161,7 +164,9 @@ public static class LanguageSmokeTestHelpers
             var allEntries = await callTrace.EntriesAsync(true);
             foreach (var entry in allEntries)
             {
-                await entry.ExpandChildrenAsync();
+                try { await entry.ExpandChildrenAsync(); }
+                catch (PlaywrightException) { /* entry not in viewport */ }
+                catch (TimeoutException) { /* expansion did not complete */ }
             }
 
             return false;

@@ -58,24 +58,34 @@ public class TraceLogPanel
     /// <param name="expression">The trace expression to type.</param>
     public async Task TypeExpressionAsync(string expression)
     {
-        var viewLines = MonacoViewLines();
-        await viewLines.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5000 });
-
-        // Click on the view lines to focus the Monaco editor
-        await viewLines.ClickAsync();
-        await Task.Delay(200);
+        // Try to scroll the trace panel into the visible viewport before interacting.
+        // Trace panels at far-off lines (e.g., line 37) may be off-screen,
+        // causing the inner Monaco view-lines to report as "not visible".
+        // The scroll itself can fail if the Root element is not yet attached or visible,
+        // so we catch that and still attempt the Monaco API path below.
+        try
+        {
+            await Root.ScrollIntoViewIfNeededAsync(new() { Timeout = 3000 });
+            await Task.Delay(300);
+        }
+        catch (Exception)
+        {
+            // Scroll failed - the element may not be visible yet.
+            // Continue to the Monaco API path which can set the value without visibility.
+            await Task.Delay(300);
+        }
 
         var editId = $"edit-trace-{ParentPane.IdNumber}-{LineNumber}";
         var page = ParentPane.Root.Page;
 
-        // Try to set value via Monaco API - access through data.services or global monaco
+        // Try to set value via Monaco API first. This bypasses visibility issues
+        // caused by Monaco setting aria-hidden="true" on off-screen trace panels.
         var setViaApi = await page.EvaluateAsync<bool>(@"(args) => {
             const editId = args.editId;
             const expression = args.expression;
             const editDiv = document.getElementById(editId);
             if (!editDiv) return false;
 
-            // Try multiple ways to access Monaco editors
             // Method 1: Via global monaco API
             const monacoEditors = window.monaco?.editor?.getEditors?.() || [];
             for (const editor of monacoEditors) {
@@ -96,9 +106,25 @@ public class TraceLogPanel
             return false;
         }", new { editId, expression });
 
-        // Always use keyboard fallback for reliability
-        // Click to ensure focus
-        await viewLines.ClickAsync();
+        if (setViaApi)
+        {
+            return;
+        }
+
+        // Keyboard fallback: try to click view-lines, or force-click if not visible.
+        // Monaco may mark view-lines as aria-hidden when the trace panel is partially
+        // off-screen, but the editor is still functional.
+        var viewLines = MonacoViewLines();
+        try
+        {
+            await viewLines.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 3000 });
+            await viewLines.ClickAsync();
+        }
+        catch (TimeoutException)
+        {
+            // Force-click bypasses visibility checks for aria-hidden elements
+            await viewLines.ClickAsync(new LocatorClickOptions { Force = true });
+        }
         await Task.Delay(150);
 
         // Select all and delete existing content
