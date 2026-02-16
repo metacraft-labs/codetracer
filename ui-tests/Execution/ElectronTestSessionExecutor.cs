@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
@@ -20,6 +21,12 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
     private readonly IProcessLifecycleManager _processLifecycle;
     private readonly ITestDiagnosticsService _diagnostics;
     private readonly ILogger<ElectronTestSessionExecutor> _logger;
+
+    /// <summary>
+    /// Caches in-flight or completed recording tasks keyed by trace program path, so that
+    /// multiple tests targeting the same program share a single recording.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, Task<int>> _recordedTraces = new(StringComparer.OrdinalIgnoreCase);
 
     public ElectronTestSessionExecutor(
         ICodetracerLauncher launcher,
@@ -48,7 +55,11 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
             throw new InvalidOperationException($"ct executable not found at {_launcher.CtPath}. Build CodeTracer or set CODETRACER_E2E_CT_PATH.");
         }
 
-        var traceId = await _launcher.RecordProgramAsync(_settings.Electron.TraceProgram, cancellationToken);
+        // Resolve the trace program from the most specific source: scenario > test > global default.
+        var traceProgram = entry.Scenario.TraceProgram
+            ?? entry.Test.TraceProgram
+            ?? _settings.Electron.TraceProgram;
+        var traceId = await GetOrRecordTraceAsync(traceProgram, cancellationToken);
         var cdpPort = _portAllocator.GetFreeTcpPort();
         var rustLspPort = _portAllocator.GetFreeTcpPort();
         var rubyLspPort = _portAllocator.GetFreeTcpPort();
@@ -139,6 +150,17 @@ internal sealed class ElectronTestSessionExecutor : ITestSessionExecutor
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Returns a cached trace ID for the given program, recording it at most once even when
+    /// multiple tests request the same program concurrently. The <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd(TKey, Func{TKey, TValue})"/>
+    /// factory guarantees the recording task is created exactly once per unique program path.
+    /// </summary>
+    private Task<int> GetOrRecordTraceAsync(string traceProgram, CancellationToken cancellationToken)
+    {
+        return _recordedTraces.GetOrAdd(traceProgram,
+            program => _launcher.RecordProgramAsync(program, cancellationToken));
     }
 
     private async Task<CodeTracerSession> LaunchElectronAsync(int traceId, int cdpPort, int rustLspPort, int rubyLspPort, string isolatedConfigDir, CancellationToken cancellationToken)

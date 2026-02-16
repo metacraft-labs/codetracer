@@ -189,6 +189,12 @@ public sealed class ScenarioSettings
     /// </summary>
     public bool VerboseLogging { get; set; }
         = false;
+
+    /// <summary>
+    /// Optional trace program path for this scenario. When non-null, overrides the test-level
+    /// and global <see cref="ElectronSettings.TraceProgram"/> defaults.
+    /// </summary>
+    public string? TraceProgram { get; set; } = null;
 }
 
 public sealed class ElectronSettings
