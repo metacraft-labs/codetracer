@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using UiTests.Tests;
 using UiTests.Tests.ProgramAgnostic;
+using UiTests.Tests.ProgramSpecific;
 using UiTests.Utils;
 
 namespace UiTests.Execution;
@@ -195,6 +196,42 @@ internal sealed class TestRegistry : ITestRegistry
                 "Layout.NormalOperationWithValidLayout",
                 "Layout Resilience / Normal Operation With Valid Layout",
                 async context => await LayoutResilienceTests.NormalOperationWithValidLayout(context.Page)));
+
+        // Python Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "PythonSudoku.EditorLoadsMainPy",
+                "Python Sudoku / Editor Loads main.py",
+                async context => await PythonSudokuTests.EditorLoadsMainPy(context.Page),
+                "py_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "PythonSudoku.EventLogPopulated",
+                "Python Sudoku / Event Log Populated",
+                async context => await PythonSudokuTests.EventLogPopulated(context.Page),
+                "py_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "PythonSudoku.CallTraceNavigationToIsValidMove",
+                "Python Sudoku / Call Trace Navigation To is_valid_move",
+                async context => await PythonSudokuTests.CallTraceNavigationToIsValidMove(context.Page),
+                "py_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "PythonSudoku.VariableInspectionInSolveSudoku",
+                "Python Sudoku / Variable Inspection In solve_sudoku",
+                async context => await PythonSudokuTests.VariableInspectionInSolveSudoku(context.Page),
+                "py_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "PythonSudoku.TerminalOutputShowsSolvedBoard",
+                "Python Sudoku / Terminal Output Shows Solved Board",
+                async context => await PythonSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "py_sudoku_solver"));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();
