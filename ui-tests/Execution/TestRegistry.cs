@@ -232,6 +232,42 @@ internal sealed class TestRegistry : ITestRegistry
                 "Python Sudoku / Terminal Output Shows Solved Board",
                 async context => await PythonSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
                 "py_sudoku_solver"));
+
+        // Ruby Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "RubySudoku.EditorLoadsSudokuSolverRb",
+                "Ruby Sudoku / Editor Loads sudoku_solver.rb",
+                async context => await RubySudokuTests.EditorLoadsSudokuSolverRb(context.Page),
+                "rb_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RubySudoku.EventLogPopulated",
+                "Ruby Sudoku / Event Log Populated",
+                async context => await RubySudokuTests.EventLogPopulated(context.Page),
+                "rb_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RubySudoku.CallTraceNavigationToSolve",
+                "Ruby Sudoku / Call Trace Navigation To solve",
+                async context => await RubySudokuTests.CallTraceNavigationToSolve(context.Page),
+                "rb_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RubySudoku.VariableInspectionBoard",
+                "Ruby Sudoku / Variable Inspection board",
+                async context => await RubySudokuTests.VariableInspectionBoard(context.Page),
+                "rb_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RubySudoku.TerminalOutputShowsSolvedBoard",
+                "Ruby Sudoku / Terminal Output Shows Solved Board",
+                async context => await RubySudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "rb_sudoku_solver"));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();
