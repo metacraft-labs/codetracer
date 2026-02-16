@@ -304,6 +304,42 @@ internal sealed class TestRegistry : ITestRegistry
                 "C Sudoku / Terminal Output Shows Solved Board",
                 async context => await CSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
                 "c_sudoku_solver"));
+
+        // Rust Sudoku Solver smoke tests
+        Register(
+            new UiTestDescriptor(
+                "RustSudoku.EditorLoadsMainRs",
+                "Rust Sudoku / Editor Loads main.rs",
+                async context => await RustSudokuTests.EditorLoadsMainRs(context.Page),
+                "rs_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RustSudoku.EventLogPopulated",
+                "Rust Sudoku / Event Log Populated",
+                async context => await RustSudokuTests.EventLogPopulated(context.Page),
+                "rs_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RustSudoku.CallTraceNavigationToSolve",
+                "Rust Sudoku / Call Trace Navigation To solve",
+                async context => await RustSudokuTests.CallTraceNavigationToSolve(context.Page),
+                "rs_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RustSudoku.VariableInspectionBoard",
+                "Rust Sudoku / Variable Inspection board",
+                async context => await RustSudokuTests.VariableInspectionBoard(context.Page),
+                "rs_sudoku_solver"));
+
+        Register(
+            new UiTestDescriptor(
+                "RustSudoku.TerminalOutputShowsSolvedBoard",
+                "Rust Sudoku / Terminal Output Shows Solved Board",
+                async context => await RustSudokuTests.TerminalOutputShowsSolvedBoard(context.Page),
+                "rs_sudoku_solver"));
     }
 
     public IReadOnlyCollection<UiTestDescriptor> All => _tests.Values.ToList();
