@@ -13,6 +13,12 @@ proc toLang*(lang: cstring): Lang =
     nim: LangNim,
     go: LangGo,
     pas: LangPascal,
+    f90: LangFortran,
+    d: LangD,
+    cr: LangCrystal,
+    lean: LangLean,
+    jl: LangJulia,
+    adb: LangAda,
     py: LangPythonDb,
     python: LangPythonDb,
     rb: LangRubyDb, # default for ruby for now
@@ -24,7 +30,6 @@ proc toLang*(lang: cstring): Lang =
     nr: LangNoir,
     small: LangSmall,
     noir: LangNoir,
-    d: LangC, # TODO
   }
   if langs.hasKey(lang):
     result = langs[lang]
@@ -48,7 +53,9 @@ proc toLangFromFilename*(location: cstring): Lang =
 proc toJsLang*(lang: Lang): cstring =
   var langs: array[Lang, cstring] = [
     cstring"c", cstring"cpp", cstring"rust", cstring"nim", cstring"go",
-    cstring"pascal", cstring"python", cstring"ruby", cstring"ruby",
+    cstring"pascal", cstring"fortran", cstring"d", cstring"crystal",
+    cstring"lean", cstring"julia", cstring"ada",
+    cstring"python", cstring"ruby", cstring"ruby",
     cstring"javascript", cstring"lua", cstring"assembler", cstring"noir",
     cstring"rust", cstring"cpp",
     cstring"small",
@@ -62,55 +69,71 @@ proc toSet(names: seq[cstring]): JsAssoc[cstring, bool] =
   for name in names:
     result[name] = true
 
-let SUPPORTED_LANGS* = @[LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall]
+let SUPPORTED_LANGS* = @[
+  LangC, LangCpp, LangRust, LangNim, LangGo,
+  LangPascal, LangFortran, LangD, LangCrystal, LangLean, LangAda,
+  LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall
+]
 
 let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
+  toSet(@[]),  # LangC
+  toSet(@[]),  # LangCpp
+  toSet(@[]),  # LangRust
   toSet(@[cstring"if", cstring"elif", cstring"else", cstring"when", cstring"case", cstring"of",
           cstring"for", cstring"while", cstring"block", cstring"try", cstring"except", cstring"finally",
           cstring"proc", cstring"func", cstring"method", cstring"iterator", cstring"template", cstring"macro", cstring"converter",
           cstring"var", cstring"let", cstring"const", cstring"type",
           cstring"return", cstring"yield", cstring"discard", cstring"break", cstring"continue",
           cstring"and", cstring"or", cstring"not", cstring"xor", cstring"in", cstring"notin", cstring"is", cstring"isnot",
-          cstring"nil", cstring"true", cstring"false", cstring"result"]),
-  toSet(@[]),
-  toSet(@[]), # LangGo: TODO
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[]),
-  toSet(@[])
+          cstring"nil", cstring"true", cstring"false", cstring"result"]),  # LangNim
+  toSet(@[]),  # LangGo: TODO
+  toSet(@[]),  # LangPascal
+  toSet(@[]),  # LangFortran
+  toSet(@[]),  # LangD
+  toSet(@[]),  # LangCrystal
+  toSet(@[]),  # LangLean
+  toSet(@[]),  # LangJulia
+  toSet(@[]),  # LangAda
+  toSet(@[]),  # LangPython
+  toSet(@[]),  # LangRuby
+  toSet(@[]),  # LangRubyDb
+  toSet(@[]),  # LangJavascript
+  toSet(@[]),  # LangLua
+  toSet(@[]),  # LangAsm
+  toSet(@[]),  # LangNoir
+  toSet(@[]),  # LangRustWasm
+  toSet(@[]),  # LangCppWasm
+  toSet(@[]),  # LangSmall
+  toSet(@[]),  # LangPythonDb
+  toSet(@[])   # LangUnknown
 ]
 
 proc getExtension*(lang: Lang): cstring =
   var extensions: array[Lang, string] = [
-    "c",
-    "cpp",
-    "rs",
-    "nim",
-    "go",
-    "pas",
-    "py",
-    "rb",
-    "rb",
-    "js",
-    "lua",
-    "asm",
-    "nr",
-    "rs",
-    "cpp",
-    "small",
-    "py",
-    ""
+    "c",      # LangC
+    "cpp",    # LangCpp
+    "rs",     # LangRust
+    "nim",    # LangNim
+    "go",     # LangGo
+    "pas",    # LangPascal
+    "f90",    # LangFortran
+    "d",      # LangD
+    "cr",     # LangCrystal
+    "lean",   # LangLean
+    "jl",     # LangJulia
+    "adb",    # LangAda
+    "py",     # LangPython
+    "rb",     # LangRuby
+    "rb",     # LangRubyDb
+    "js",     # LangJavascript
+    "lua",    # LangLua
+    "asm",    # LangAsm
+    "nr",     # LangNoir
+    "rs",     # LangRustWasm
+    "cpp",    # LangCppWasm
+    "small",  # LangSmall
+    "py",     # LangPythonDb
+    ""        # LangUnknown
   ]
   result = cstring(extensions[lang])
 
@@ -127,6 +150,12 @@ proc fromPath*(path: cstring): Lang =
     "h": LangC,
     "hpp": LangCpp,
     "pas": LangPascal,
+    "f90": LangFortran,
+    "d": LangD,
+    "cr": LangCrystal,
+    "lean": LangLean,
+    "jl": LangJulia,
+    "adb": LangAda,
     "rs": LangRust,
     "go": LangGo,
     "py": LangPythonDb,

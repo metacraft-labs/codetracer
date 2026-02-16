@@ -38,9 +38,15 @@ const AFTER_INITIAL_READS_EVENT_INDEX: array[Lang, int] = [
   0, # C
   0, # C++
   0, # Rust
-  0, # nim
+  0, # Nim
   0, # Go
   0, # Pascal
+  0, # Fortran
+  0, # D
+  0, # Crystal
+  0, # Lean
+  0, # Julia
+  0, # Ada
   0, # Python
   0, # Ruby
   0, # Ruby(db)
@@ -52,7 +58,7 @@ const AFTER_INITIAL_READS_EVENT_INDEX: array[Lang, int] = [
   0, # C++ wasm
   0, # Small
   0, # Python(db)
-  0 # unknown
+  0  # Unknown
 ]
 
 proc jumpToAllEventsOnce*(filePath: cstring, fileName: cstring, lang: Lang): Future[void] {.async.} =

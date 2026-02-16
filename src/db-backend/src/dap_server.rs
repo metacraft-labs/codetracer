@@ -71,6 +71,67 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
         .join(format!("{DAP_SOCKET_NAME}_{}.sock", pid))
 }
 
+/// Resolve the `ct-rr-support` binary path from the launch arguments,
+/// falling back to environment variable and PATH search when the provided
+/// path is empty or absent.
+///
+/// The fallback chain mirrors the discovery logic used in backend-manager's
+/// `ct/open-trace` handler:
+///   1. Use the value from the DAP launch `ctRRWorkerExe` argument (if non-empty)
+///   2. Check `CODETRACER_CT_RR_SUPPORT_CMD` environment variable
+///   3. Search for `ct-rr-support` on `PATH`
+///
+/// This is necessary because the Nim/Electron frontend's config loader
+/// does not auto-discover `ct-rr-support` (the auto-discovery in
+/// `common/config.nim` only runs in the native CLI context), so the
+/// frontend typically sends an empty `ctRRWorkerExe` in the DAP launch
+/// request for RR-based traces.
+fn resolve_ct_rr_worker_exe(from_launch_args: Option<PathBuf>) -> PathBuf {
+    // 1. Use the provided path if it's non-empty.
+    if let Some(ref path) = from_launch_args {
+        if !path.as_os_str().is_empty() {
+            info!("ct-rr-support: using path from launch args: {}", path.display());
+            return path.clone();
+        }
+    }
+
+    // 2. Check CODETRACER_CT_RR_SUPPORT_CMD environment variable.
+    if let Ok(env_path) = std::env::var("CODETRACER_CT_RR_SUPPORT_CMD") {
+        if !env_path.is_empty() {
+            info!("ct-rr-support: using path from CODETRACER_CT_RR_SUPPORT_CMD: {}", env_path);
+            return PathBuf::from(env_path);
+        }
+    }
+
+    // 3. Search for ct-rr-support on PATH.
+    if let Some(path) = find_on_path("ct-rr-support") {
+        info!("ct-rr-support: discovered on PATH: {}", path.display());
+        return path;
+    }
+
+    warn!(
+        "ct-rr-support: not found via launch args, environment, or PATH; \
+         RR-based traces will fail to replay"
+    );
+    PathBuf::new()
+}
+
+/// Search for an executable by name in the directories listed in `PATH`.
+///
+/// Returns the full path to the first matching executable, or `None` if
+/// the binary is not found.  This avoids shelling out to `which` which may
+/// not be available in all environments.
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 #[cfg(feature = "io-transport")]
 pub fn run_stdio() -> Result<(), Box<dyn Error>> {
     use std::io::BufReader;
@@ -493,7 +554,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
 
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
-                ctx.ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from(""));
+                ctx.ct_rr_worker_exe = resolve_ct_rr_worker_exe(args.ct_rr_worker_exe);
                 ctx.restore_location = args.restore_location.clone();
 
                 if ctx.received_configuration_done {
@@ -647,7 +708,7 @@ fn task_thread(
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
                 let launch_raw_diff_index = args.raw_diff_index.clone();
-                let ct_rr_worker_exe = args.ct_rr_worker_exe.unwrap_or(PathBuf::from("")); // unwrap_or(PathBuf::from(""));
+                let ct_rr_worker_exe = resolve_ct_rr_worker_exe(args.ct_rr_worker_exe);
                 let restore_location = args.restore_location.clone();
 
                 let for_launch = run_to_entry;

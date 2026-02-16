@@ -404,24 +404,30 @@ type
 
 var emptyKeywords = JsAssoc[cstring, bool]{}
 let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  JsAssoc[cstring, bool]{cstring"func": true, cstring"proc": true, cstring"int": true, cstring"seq": true, cstring"for": true, cstring"in": true, cstring"var": true},
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords,
-  emptyKeywords
+  emptyKeywords,  # LangC
+  emptyKeywords,  # LangCpp
+  emptyKeywords,  # LangRust
+  JsAssoc[cstring, bool]{cstring"func": true, cstring"proc": true, cstring"int": true, cstring"seq": true, cstring"for": true, cstring"in": true, cstring"var": true},  # LangNim
+  emptyKeywords,  # LangGo
+  emptyKeywords,  # LangPascal
+  emptyKeywords,  # LangFortran
+  emptyKeywords,  # LangD
+  emptyKeywords,  # LangCrystal
+  emptyKeywords,  # LangLean
+  emptyKeywords,  # LangJulia
+  emptyKeywords,  # LangAda
+  emptyKeywords,  # LangPython
+  emptyKeywords,  # LangRuby
+  emptyKeywords,  # LangRubyDb
+  emptyKeywords,  # LangJavascript
+  emptyKeywords,  # LangLua
+  emptyKeywords,  # LangAsm
+  emptyKeywords,  # LangNoir
+  emptyKeywords,  # LangRustWasm
+  emptyKeywords,  # LangCppWasm
+  emptyKeywords,  # LangSmall
+  emptyKeywords,  # LangPythonDb
+  emptyKeywords   # LangUnknown
 ]
 
 func isSymbol(c: char, lang: Lang): bool =

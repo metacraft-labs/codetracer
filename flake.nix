@@ -44,6 +44,11 @@
       flake = true;
     };
 
+    # Multi-language toolchain management
+    # Best practice: Don't use `inputs.nixpkgs.follows` here - letting the toolchains
+    # flake use its own pinned nixpkgs ensures binary cache hits from cachix.
+    codetracer-toolchains.url = "github:metacraft-labs/nix-codetracer-toolchains/57190da5ec700d8cc6a67a76cc2ea633a839a4cd";
+
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };

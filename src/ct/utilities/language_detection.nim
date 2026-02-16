@@ -17,6 +17,10 @@ proc detectFolderLang(folder: string): Lang =
     LangNoir
   elif fileExists(folder / "Cargo.toml"):
     LangRust
+  elif fileExists(folder / "lakefile.lean"):
+    LangLean
+  elif fileExists(folder / "shard.yml"):
+    LangCrystal
   else:
     # TODO: rust/ruby/others?
     LangUnknown
@@ -28,10 +32,15 @@ const LANGS = {
   "rs": LangRust,
   "nim": LangNim,
   "go": LangGo,
+  "pas": LangPascal,
+  "f90": LangFortran,
+  "d": LangD,
+  "cr": LangCrystal,
+  "lean": LangLean,
+  "adb": LangAda,
   "py": LangPythonDb,
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
-  "d": LangC, # TODO
   "small": LangSmall,
   "wasm": LangRustWasm, # TODO: can be Cpp or other as well, maybe pass
     # explicitly or check trace/other debug info?
