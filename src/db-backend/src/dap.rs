@@ -180,10 +180,7 @@ impl DapClient {
     ///
     /// The daemon's Python bridge waits for this event to build the
     /// `ct/py-run-tracepoints` response.
-    pub fn tracepoint_results_event(
-        &mut self,
-        args: task::TracepointResultsAggregate,
-    ) -> DapResult<DapMessage> {
+    pub fn tracepoint_results_event(&mut self, args: task::TracepointResultsAggregate) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),

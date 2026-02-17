@@ -31,9 +31,8 @@ use crate::task::{
     FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
     LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
     ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
-    StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults,
-    TracepointResultsAggregate, UpdateTableArgs, Variable, NO_ADDRESS,
-    NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
+    StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate,
+    UpdateTableArgs, Variable, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{to_ct_value, Type, Value};
@@ -485,11 +484,7 @@ impl Handler {
             // requested depth so calls are expanded up to that level.
             // The GUI uses auto_collapsing=true and handles expand/collapse
             // interactively, so it does not need this.
-            let max_depth = if args.auto_collapsing {
-                None
-            } else {
-                Some(args.depth)
-            };
+            let max_depth = if args.auto_collapsing { None } else { Some(args.depth) };
             self.calltrace
                 .jump_to_with_depth(self.step_id, args.auto_collapsing, max_depth, &self.db);
         }
