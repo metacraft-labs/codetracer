@@ -1,3 +1,0 @@
-include_rules
-
-: tester.nim |> !nim_tester |> ../bin/tester

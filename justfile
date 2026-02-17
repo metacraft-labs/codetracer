@@ -103,17 +103,6 @@ build-macos-app:
 build-app-image:
   ./appimage-scripts/build_appimage.sh
 
-tester := "src/build-debug/bin/tester"
-
-test-ui headless="0":
-  #!/usr/bin/env bash
-  set -e
-
-  if [[ "{{headless}}" == "0" ]]; then
-    {{tester}} ui
-  else
-    xvfb-run {{tester}} ui
-  fi
 
 # Run all Rust tests (db-backend unit + integration, backend-manager).
 test-rust:
@@ -197,14 +186,13 @@ test-csharp-ui display="default" *args:
       ;;
   esac
 
-# Run all GUI tests: stable Electron suite, legacy Nim UI, Playwright e2e,
+# Run all GUI tests: stable Electron suite, Playwright e2e,
 # and language smoke tests when codetracer-rr-backend is available.
 ui-tests:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   just test-csharp-ui xvfb --mode Electron --suite stable-tests --retries 2
-  just test-ui 1
   just test-e2e
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
     echo "codetracer-rr-backend detected — running language smoke tests..."
