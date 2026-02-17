@@ -6,7 +6,7 @@
     "test": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.48.1",
+    "@playwright/test": "1.56.1",
     "typescript": "^5.0.0"
   }
 }
