@@ -197,15 +197,21 @@ test-csharp-ui display="default" *args:
       ;;
   esac
 
-# Run stable Electron UI tests with xvfb.
-# Matches what CI runs. For local visible display, use: just test-csharp-ui default
-# Run stable Electron UI tests with xvfb.
-# Matches what CI runs. For local visible display, use: just test-csharp-ui default
+# Run all GUI tests: stable Electron suite, legacy Nim UI, Playwright e2e,
+# and language smoke tests when codetracer-rr-backend is available.
 ui-tests:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   just test-csharp-ui xvfb --mode Electron --suite stable-tests --retries 2
+  just test-ui 1
+  just test-e2e
+  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
+    echo "codetracer-rr-backend detected — running language smoke tests..."
+    just test-all-language-smoke
+  else
+    echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping language smoke tests"
+  fi
 
 # Run all language smoke tests (requires ct record + compilers on PATH).
 # This records fresh traces for each language, so it needs ct-rr-support and
