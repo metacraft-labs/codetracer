@@ -115,26 +115,36 @@ test-ui headless="0":
     xvfb-run {{tester}} ui
   fi
 
-# Run all Rust tests (db-backend + backend-manager).
-# Mirrors the logic in ci/test/rust.sh.
+# Run all Rust tests (db-backend unit + integration, backend-manager).
 test-rust:
   #!/usr/bin/env bash
   set -e
   pushd src/db-backend
+  # Unit tests (inside the binary)
   cargo test --release --bin db-backend
   cargo test --release --bin db-backend -- --ignored
+  # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
+  # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
+  cargo test --release --test '*'
   popd
   pushd src/backend-manager
   cargo test --release
   popd
 
-# Run all non-GUI tests (Rust, frontend JS, Python recorder).
+# Run all non-GUI tests.
 test:
   #!/usr/bin/env bash
   set -e
   just test-rust
   just test-frontend-js
   just test-python-recorder
+  just test-nimsuggest
+  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
+    echo "codetracer-rr-backend detected — running cross-repo tests..."
+    just cross-test
+  else
+    echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping cross-repo tests"
+  fi
 
 # Build the C# UI tests
 build-csharp-ui:
