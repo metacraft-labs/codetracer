@@ -189,6 +189,9 @@ property_warnings.txt
 ct_paths.json
 tup-generate.vardict
 
+# npm (project uses yarn; package-lock.json is generated accidentally by npm install)
+package-lock.json
+
 # yarn
 .pnp.*
 .yarn/*
