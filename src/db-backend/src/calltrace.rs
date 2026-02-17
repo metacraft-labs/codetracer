@@ -77,13 +77,7 @@ impl Calltrace {
     /// up to `max_depth` are expanded so that the full tree is visible —
     /// this is the path taken by the Python API bridge which does not use
     /// the GUI's collapsing behaviour.
-    pub fn jump_to_with_depth(
-        &mut self,
-        step_id: StepId,
-        auto_collapsing: bool,
-        max_depth: Option<usize>,
-        db: &Db,
-    ) {
+    pub fn jump_to_with_depth(&mut self, step_id: StepId, auto_collapsing: bool, max_depth: Option<usize>, db: &Db) {
         let call_key = db.call_key_for_step(step_id);
         if auto_collapsing {
             self.autocollapse_callstack(step_id, call_key, db);

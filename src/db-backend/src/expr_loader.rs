@@ -817,10 +817,7 @@ impl ExprLoader {
                 // `import os as operating_system` → aliased_import > identifier
                 if matches!(
                     parent_kind,
-                    "import_statement"
-                        | "import_from_statement"
-                        | "dotted_name"
-                        | "aliased_import"
+                    "import_statement" | "import_from_statement" | "dotted_name" | "aliased_import"
                 ) {
                     return false;
                 }
@@ -1808,10 +1805,7 @@ puts "Result: #{result}"
         println!("\nAll variables: {:?}", all_vars);
 
         // Method calls should NOT be in the variables list
-        assert!(
-            !all_vars.contains(&"puts".to_string()),
-            "puts should not be a variable"
-        );
+        assert!(!all_vars.contains(&"puts".to_string()), "puts should not be a variable");
         assert!(
             !all_vars.contains(&"calculate_sum".to_string()),
             "calculate_sum() should not be a variable"

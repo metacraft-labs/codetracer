@@ -98,7 +98,10 @@ fn resolve_ct_rr_worker_exe(from_launch_args: Option<PathBuf>) -> PathBuf {
     // 2. Check CODETRACER_CT_RR_SUPPORT_CMD environment variable.
     if let Ok(env_path) = std::env::var("CODETRACER_CT_RR_SUPPORT_CMD") {
         if !env_path.is_empty() {
-            info!("ct-rr-support: using path from CODETRACER_CT_RR_SUPPORT_CMD: {}", env_path);
+            info!(
+                "ct-rr-support: using path from CODETRACER_CT_RR_SUPPORT_CMD: {}",
+                env_path
+            );
             return PathBuf::from(env_path);
         }
     }
