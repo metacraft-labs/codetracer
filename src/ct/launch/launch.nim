@@ -162,7 +162,16 @@ proc runInitial*(conf: CodetracerConf) =
         replayInteractive
       )
     of StartupCommand.noCommand:
+      # Forward frontend flags (--welcome-screen, --deepreview) as app args.
+      # These are parsed by the frontend's src/frontend/index/args.nim.
+      var frontendArgs: seq[string] = @[]
+      if conf.welcomeScreen:
+        frontendArgs.add("--welcome-screen")
+      if conf.deepreview.len > 0:
+        frontendArgs.add("--deepreview")
+        frontendArgs.add(conf.deepreview)
       launchElectron(
+        args = frontendArgs,
         inspect = conf.inspect,
         remoteDebuggingPort = conf.remoteDebuggingPort)
     # of StartupCommand.ruby:

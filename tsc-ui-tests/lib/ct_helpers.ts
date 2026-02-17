@@ -214,7 +214,7 @@ async function launchDeepReview(jsonPath: string): Promise<void> {
   electronApp = await electron.launch({
     executablePath: codetracerPath,
     cwd: codetracerInstallDir,
-    args: ["--deepreview", jsonPath],
+    args: [`--deepreview=${jsonPath}`],
     env: cleanEnv,
   });
 
