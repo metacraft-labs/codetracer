@@ -132,12 +132,6 @@ c %f |> %o
 --out:%o\
 c %f |> %o
 
-!nim_tester = |> ^ %f^ $(NIM_DEBUG) \
---nimcache:/tmp/ct-nim-cache/tester \
---warnings:on \
---hints:on \
---out:%o\
-c %f |> %B macro_sourcemap_%B.json
 
 # mypy
 !mypy = |> ^ %f^ mypy --implicit-optional --cache-dir /tmp/.mypy-cache %f; |>
