@@ -1,20 +1,31 @@
 # Instructions for Codex
 
-To build the db-backend, run:
+## Building the full frontend (Nim + Electron)
+
+To rebuild the full CodeTracer frontend (Nim backend CLI, Nim renderer JS, webpack bundles):
+
+```
+just build-once
+```
+
+This runs tup (incremental build) and webpack. Use this after modifying any `.nim` files in
+`src/ct/`, `src/frontend/`, or `src/common/`.
+
+## Building the db-backend
 
 ```
 # inside src/db-backend
 cargo build
 ```
 
-To run the test suite, run:
+## Running tests
 
 ```
 # inside src/db-backend
 cargo test
 ```
 
-To run the linter, run:
+## Running the linter
 
 ```
 # inside src/db-backend
@@ -22,6 +33,17 @@ cargo clippy
 ```
 
 Don't disable the lint: try to fix the code instead first!
+
+## Running Playwright e2e tests
+
+```
+# From the repo root (needs Xvfb or a display)
+just test-e2e
+```
+
+The Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app via the `ct`
+binary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`
+first to rebuild the frontend before running the tests.
 
 # Keeping notes
 
