@@ -160,10 +160,12 @@ proc buildCoverageDecorations(file: DeepReviewFileData): seq[JsObject] =
     var className: cstring
     if cov.unreachable:
       className = cstring"deepreview-line-unreachable"
+    elif cov.partial:
+      # Partial takes priority over executed — a line that was only
+      # executed in some code paths should be highlighted as partial.
+      className = cstring"deepreview-line-partial"
     elif cov.executed:
       className = cstring"deepreview-line-executed"
-    elif cov.partial:
-      className = cstring"deepreview-line-partial"
     else:
       continue
 

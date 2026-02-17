@@ -32,11 +32,11 @@ test("welcome screen has start options buttons", async () => {
   await page.waitForSelector(".welcome-screen", { timeout: 10000 });
 
   // Check for Open Folder button
-  const openFolderButton = page.locator(".start-options-button").filter({ hasText: /folder/i }).first();
+  const openFolderButton = page.locator(".start-option").filter({ hasText: /folder/i }).first();
   await expect(openFolderButton).toBeVisible();
 
-  // Check for New Recording button
-  const newRecordingButton = page.locator(".start-options-button").filter({ hasText: /recording/i }).first();
+  // Check for Record new trace button
+  const newRecordingButton = page.locator(".start-option").filter({ hasText: /record/i }).first();
   await expect(newRecordingButton).toBeVisible();
 });
 

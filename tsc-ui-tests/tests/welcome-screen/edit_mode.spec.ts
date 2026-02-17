@@ -44,11 +44,11 @@ test("edit mode is in edit mode (not debug mode)", async () => {
   await page.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
   // Wait for UI to fully load
-  await wait(500);
+  await wait(1000);
 
   // Check that we're in edit mode by verifying debug-specific elements are not active
   // or by checking for edit-mode specific UI state
-  // The layout should be present and functional
-  const layoutContent = page.locator(".lm_content");
-  await expect(layoutContent).toBeVisible();
+  // The layout should be present and functional (multiple .lm_content panels expected)
+  const layoutContent = page.locator(".lm_content").first();
+  await expect(layoutContent).toBeVisible({ timeout: 10000 });
 });

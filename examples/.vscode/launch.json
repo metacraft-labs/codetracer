@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "codetracer",
+      "request": "launch",
+      "name": "Python: Fibonacci",
+      "program": "${workspaceFolder}/fibonacci.py"
+    },
+    {
+      "type": "codetracer",
+      "request": "launch",
+      "name": "Ruby: Fibonacci",
+      "program": "${workspaceFolder}/fibonacci.rb"
+    }
+  ]
+}
