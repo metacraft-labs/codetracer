@@ -106,14 +106,8 @@ type
       desc: "Chrome remote debugging port (injected by Playwright for debugging)"
     .} : Option[string]
 
-    # Frontend flags that are forwarded to Electron as app arguments.
-    # These are parsed by the frontend's src/frontend/index/args.nim.
-    welcomeScreen* {.
-      name: "welcome-screen"
-      desc: "Show the welcome screen on startup (forwarded to Electron frontend)"
-      defaultValue: false
-    .} : bool
-
+    # Frontend flag forwarded to Electron as an app argument.
+    # Parsed by the frontend's src/frontend/index/args.nim.
     deepreview* {.
       name: "deepreview"
       desc: "Path to a DeepReview JSON export file (forwarded to Electron frontend)"

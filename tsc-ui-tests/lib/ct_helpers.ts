@@ -150,7 +150,7 @@ async function launchWelcomeScreen(): Promise<void> {
   electronApp = await electron.launch({
     executablePath: codetracerPath,
     cwd: codetracerInstallDir,
-    args: ["--welcome-screen"],
+    args: [],
     env: cleanEnv,
   });
 

@@ -162,14 +162,14 @@ proc runInitial*(conf: CodetracerConf) =
         replayInteractive
       )
     of StartupCommand.noCommand:
-      # Forward frontend flags (--welcome-screen, --deepreview) as app args.
-      # These are parsed by the frontend's src/frontend/index/args.nim.
+      # When ct is launched with no subcommand, show the welcome screen.
+      # If --deepreview is provided, open the deepreview view instead.
       var frontendArgs: seq[string] = @[]
-      if conf.welcomeScreen:
-        frontendArgs.add("--welcome-screen")
       if conf.deepreview.len > 0:
         frontendArgs.add("--deepreview")
         frontendArgs.add(conf.deepreview)
+      else:
+        frontendArgs.add("--welcome-screen")
       launchElectron(
         args = frontendArgs,
         inspect = conf.inspect,
