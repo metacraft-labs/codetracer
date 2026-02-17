@@ -755,6 +755,22 @@ fn create_rr_recording_from_source(
 /// When `REQUIRE_REAL_RECORDINGS=1` is set, missing prerequisites cause a
 /// panic rather than a silent skip, so CI catches configuration problems.
 fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
+    // Gate: the codetracer-rr-backend sibling repo must be detected by the nix
+    // shell (which sets CODETRACER_RR_BACKEND_PRESENT=1). This ensures we have
+    // the correct rr wrapper and libraries. Without it, tests would find a
+    // system rr that may lack soft-mode support, or an incompatible ct-rr-support.
+    // See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
+    let rr_backend_present = std::env::var("CODETRACER_RR_BACKEND_PRESENT")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if !rr_backend_present && !require_real_recordings() {
+        return Err(
+            "CODETRACER_RR_BACKEND_PRESENT not set \
+             (codetracer-rr-backend sibling not detected, skipping RR tests)"
+                .to_string(),
+        );
+    }
+
     let ct_rr_support = match find_ct_rr_support() {
         Some(p) => p,
         None => {
