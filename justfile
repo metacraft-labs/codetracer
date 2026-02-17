@@ -595,6 +595,14 @@ test-ruby-flow:
   cd src/db-backend && cargo test test_ruby_flow -- --nocapture
   echo "Ruby flow test passed!"
 
+# Noir flow/omniscience integration test (DB-based, no rr required)
+test-noir-flow:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Noir flow integration test..."
+  cd src/db-backend && cargo test test_noir_flow -- --nocapture
+  echo "Noir flow test passed!"
+
 # ====
 # All flow/omniscience integration tests for all languages and versions
 
@@ -612,6 +620,8 @@ test-flow-all:
   just test-python-flow
   echo ""
   just test-ruby-flow
+  echo ""
+  just test-noir-flow
   echo ""
   echo "╔════════════════════════════════════════════════════════════╗"
   echo "║ All flow integration tests passed!                         ║"
