@@ -371,6 +371,20 @@ mkShell {
       (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
     fi
 
+    # --- Sibling detection ---
+    # When sibling repos are checked out alongside this one and have been built,
+    # add their binaries to PATH and set presence env vars that enable cross-repo
+    # integration tests. See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
+    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+    if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+      export PATH="$WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
+      export CODETRACER_RR_BACKEND_PRESENT=1
+    fi
+
     figlet "Welcome to CodeTracer"
+
+    if [ "''${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
+      echo "  sibling: codetracer-rr-backend detected (ct-rr-support available)"
+    fi
   '';
 }

@@ -9,8 +9,17 @@
   };
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Multi-language toolchain management.
+    # All CodeTracer repos share the same nixpkgs pin via this flake to ensure
+    # ABI compatibility (same glibc, libstdc++, LLDB, etc.) across dev shells.
+    # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
+    codetracer-toolchains.url = "github:metacraft-labs/nix-codetracer-toolchains/57190da5ec700d8cc6a67a76cc2ea633a839a4cd";
+
+    # Use the toolchains flake's nixpkgs pin. This ensures binaries built in
+    # this shell are link-compatible with binaries from sibling repos that also
+    # follow the same pin (e.g. codetracer-rr-backend).
+    nixpkgs.follows = "codetracer-toolchains/nixpkgs";
+    nixpkgs-unstable.follows = "nixpkgs";
 
     appimage-channel.url = "github:NixOS/nixpkgs/nixos-24.11";
 
@@ -23,31 +32,26 @@
 
     fenix = {
       url = "github:nix-community/fenix";
-      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     noir = {
       url = "github:metacraft-labs/noir?ref=codetracer-temp";
-      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
 
     wazero = {
       url = "github:metacraft-labs/codetracer-wasm-recorder?ref=wasm-tracing";
-      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
 
     nix-blockchain-development = {
       url = "github:metacraft-labs/nix-blockchain-development?ref=stylus-tools";
-      inputs.nixpkgs.follows = "nixpkgs-unstable";
+      inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
-
-    # Multi-language toolchain management
-    # Best practice: Don't use `inputs.nixpkgs.follows` here - letting the toolchains
-    # flake use its own pinned nixpkgs ensures binary cache hits from cachix.
-    codetracer-toolchains.url = "github:metacraft-labs/nix-codetracer-toolchains/57190da5ec700d8cc6a67a76cc2ea633a839a4cd";
 
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
