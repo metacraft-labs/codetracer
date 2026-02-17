@@ -1,0 +1,6 @@
+[package]
+name = "noir_flow_test"
+type = "bin"
+authors = [""]
+
+[dependencies]

@@ -39,6 +39,7 @@ pub enum Language {
     Go,
     Python,
     Ruby,
+    Noir,
 }
 
 impl Language {
@@ -51,12 +52,13 @@ impl Language {
             Language::Go => "go",
             Language::Python => "py",
             Language::Ruby => "rb",
+            Language::Noir => "nr",
         }
     }
 
-    /// Returns true for DB-based trace languages (Python, Ruby) that don't use rr.
+    /// Returns true for DB-based trace languages (Python, Ruby, Noir) that don't use rr.
     pub fn is_db_trace(&self) -> bool {
-        matches!(self, Language::Python | Language::Ruby)
+        matches!(self, Language::Python | Language::Ruby | Language::Noir)
     }
 }
 
@@ -580,9 +582,8 @@ fn accept_with_timeout(
 /// Panics if the recorder is not found (it's a required submodule).
 pub fn find_python_recorder() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let recorder = manifest_dir.join(
-        "../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py",
-    );
+    let recorder =
+        manifest_dir.join("../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py");
     assert!(
         recorder.exists(),
         "Python recorder not found at {}. Did you check out the codetracer-python-recorder submodule?",
@@ -643,8 +644,7 @@ fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     if let Some(filename) = source_path.file_name() {
         let dest = trace_dir.join(filename);
         if !dest.exists() {
-            fs::copy(source_path, &dest)
-                .map_err(|e| format!("failed to copy source to trace dir: {}", e))?;
+            fs::copy(source_path, &dest).map_err(|e| format!("failed to copy source to trace dir: {}", e))?;
         }
     }
 
@@ -682,15 +682,37 @@ fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
     Ok(())
 }
 
+/// Record a Noir trace by running `nargo trace` inside the Nargo project directory.
+///
+/// Unlike Python/Ruby where `source_path` is a single file, for Noir `source_path`
+/// points to the project directory containing `Nargo.toml`. The `nargo trace` command
+/// stores absolute source paths in `trace_paths.json`, so no source-file copying is
+/// needed (unlike Python).
+fn record_noir_trace(project_dir: &Path, trace_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let output = Command::new("nargo")
+        .args(["trace", "--trace-dir", trace_dir.to_str().unwrap()])
+        .current_dir(project_dir)
+        .output()
+        .map_err(|e| format!("failed to run nargo trace: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Noir recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
 impl TestRecording {
-    /// Create a new DB-based test recording (Python/Ruby) without rr or ct-rr-support.
+    /// Create a new DB-based test recording (Python/Ruby/Noir) without rr or ct-rr-support.
     ///
     /// For interpreted languages, the "binary_path" is the source path itself.
-    pub fn create_db_trace(
-        source_path: &Path,
-        language: Language,
-        version_label: &str,
-    ) -> Result<Self, String> {
+    pub fn create_db_trace(source_path: &Path, language: Language, version_label: &str) -> Result<Self, String> {
         let temp_dir = std::env::temp_dir().join(format!(
             "flow_test_{}_{}_{}",
             language.extension(),
@@ -710,6 +732,7 @@ impl TestRecording {
         match language {
             Language::Python => record_python_trace(source_path, &trace_dir)?,
             Language::Ruby => record_ruby_trace(source_path, &trace_dir)?,
+            Language::Noir => record_noir_trace(source_path, &trace_dir)?,
             _ => return Err(format!("{:?} is not a DB-based language", language)),
         }
 
@@ -717,10 +740,7 @@ impl TestRecording {
         let trace_json = trace_dir.join("trace.json");
         let trace_metadata = trace_dir.join("trace_metadata.json");
         if !trace_json.exists() {
-            return Err(format!(
-                "trace.json not produced at {}",
-                trace_json.display()
-            ));
+            return Err(format!("trace.json not produced at {}", trace_json.display()));
         }
         if !trace_metadata.exists() {
             return Err(format!(
@@ -758,11 +778,7 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
 
     // Create DB-based recording (no rr needed)
     println!("Recording trace...");
-    let recording = TestRecording::create_db_trace(
-        &config.source_path,
-        config.language,
-        version_label,
-    )?;
+    let recording = TestRecording::create_db_trace(&config.source_path, config.language, version_label)?;
     println!("Recording created at: {}", recording.trace_dir.display());
 
     // Start DAP client — ct_rr_support path is unused for DB traces, pass empty path
@@ -782,10 +798,13 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
         // The source was copied into trace_dir by record_python_trace().
         let filename = config.source_path.file_name().unwrap();
         recording.trace_dir.join(filename)
+    } else if config.language == Language::Noir {
+        // For Noir, source_path is the Nargo project directory (needed by
+        // nargo trace). The actual source file is src/main.nr within it.
+        // nargo trace stores absolute paths, so the suffix-match works.
+        config.source_path.join("src/main.nr")
     } else {
-        // Ruby recorder sets workdir = CWD (codetracer repo root) and stores
-        // the relative path from CWD. The suffix-match in load_path_id
-        // should handle the original absolute path.
+        // Ruby stores relative paths from CWD; handled by suffix-match.
         config.source_path.clone()
     };
 
