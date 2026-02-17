@@ -5,6 +5,7 @@
 //  ! https://github.com/spaceagetv/electron-playwright-example/blob/main/e2e-tests/main.spec.ts
 // and others
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
@@ -317,13 +318,30 @@ async function replayCodetracerInBrowser(
       "expected `$PLAYWRIGHT_BROWSERS_PATH` env var to be set: can't find browser without it",
     );
   }
+  // Discover the chromium directory dynamically so the path doesn't break
+  // when the nix-provided Playwright version (and its bundled chromium
+  // revision number) changes.
+  const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const chromiumDir = fs.readdirSync(browsersDir!)
+    .filter((d: string) => d.startsWith("chromium-") && !d.includes("headless"))
+    .sort()
+    .pop();
+  if (!chromiumDir) {
+    throw new CodetracerTestError(
+      `no chromium-* directory found in ${browsersDir}`,
+    );
+  }
+  // The chrome binary lives under chrome-linux or chrome-linux64 depending
+  // on the Playwright version.
+  const chromeSubdir = fs.readdirSync(path.join(browsersDir!, chromiumDir))
+    .find((d: string) => d.startsWith("chrome-linux"));
+  if (!chromeSubdir) {
+    throw new CodetracerTestError(
+      `no chrome-linux* directory found in ${browsersDir}/${chromiumDir}`,
+    );
+  }
   const chromiumBrowser = await chromium.launch({
-    executablePath: path.join(
-      process.env.PLAYWRIGHT_BROWSERS_PATH,
-      "chromium-1134",
-      "chrome-linux",
-      "chrome",
-    ),
+    executablePath: path.join(browsersDir!, chromiumDir, chromeSubdir, "chrome"),
   });
 
   page = await chromiumBrowser.newPage();
