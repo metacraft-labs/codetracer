@@ -648,6 +648,24 @@ cross-test-go-flow:
 # Per-language smoke test targets
 # Run individual language UI smoke tests via Electron + xvfb
 
+test-c-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite c-smoke
+
+test-rust-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite rust-smoke
+
+test-go-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite go-smoke
+
+test-nim-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite nim-smoke
+
+test-python-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite python-smoke
+
+test-ruby-smoke:
+  just test-csharp-ui xvfb --mode Electron --suite ruby-smoke
+
 test-cpp-smoke:
   just test-csharp-ui xvfb --mode Electron --suite cpp-smoke
 
