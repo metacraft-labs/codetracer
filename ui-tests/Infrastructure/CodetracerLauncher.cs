@@ -77,14 +77,24 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
         psi.ArgumentList.Add(programPath);
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ct record process.");
+
+        // Read stdout/stderr concurrently while the process runs to avoid pipe-buffer
+        // deadlocks.  ct record merges stderr into stdout (Nim's poStdErrToStdOut), so
+        // the real error messages appear on stdout, not stderr.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException($"ct record failed with exit code {process.ExitCode}: {stderr}");
+            // Include both streams — ct merges stderr→stdout, so stderr is typically
+            // empty while the actual diagnostics are in stdout.
+            var combined = string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stderr}\n{stdout}";
+            throw new InvalidOperationException(
+                $"ct record failed with exit code {process.ExitCode} (binary: {CtPath}):\n{combined}");
         }
 
         var traceId = ParseTraceId(stdout);
