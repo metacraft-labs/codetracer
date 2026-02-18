@@ -163,6 +163,12 @@ test-csharp-ui display="default" *args:
   ./dotnet_build.sh
   case "{{display}}" in
     xvfb)
+      # TODO: The nix xvfb-run wrapper has a bug where its cleanup trap
+      #   returns exit 1 when Xvfb exits before kill runs. The temp-file
+      #   workaround below captures the real dotnet exit code. Proper fix:
+      #   patch xvfb-run in nixpkgs to use `kill ... || true` in its trap,
+      #   or replace xvfb-run with manual Xvfb process management (like the
+      #   xephyr case below).
       # Save the dotnet exit code in a temp file so we can distinguish a real
       # test failure from xvfb-run's cleanup returning 1 (kill: No such process).
       _EC_FILE=$(mktemp)

@@ -327,6 +327,11 @@
             '';
 
             doCheck = true;
+            # TODO: The flow integration tests are skipped because they need
+            #   their respective recorders/compilers (Python, Ruby, nargo) which
+            #   are not available inside the nix build sandbox. To re-enable them,
+            #   add the recorders and language toolchains to nativeCheckInputs so
+            #   they are present during checkPhase.
             checkPhase = ''
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \

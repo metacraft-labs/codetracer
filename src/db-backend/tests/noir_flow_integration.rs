@@ -62,7 +62,10 @@ fn create_noir_flow_config() -> FlowTestConfig {
 
 #[test]
 fn test_noir_flow_integration() {
-    // Verify nargo is available
+    // TODO: This silently passes when nargo is missing (e.g. in the nix
+    //   sandbox). Consider adding nargo to the nix dev shell or using
+    //   #[ignore] with a dedicated `just test-noir-flow` target so that
+    //   `cargo test` doesn't silently skip it.
     let nargo_available = std::process::Command::new("nargo").arg("--version").output().is_ok();
     if !nargo_available {
         eprintln!("SKIP: nargo not found on PATH; skipping Noir flow test");

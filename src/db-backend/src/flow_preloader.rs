@@ -325,7 +325,7 @@ impl<'a> CallFlowPreloader<'a> {
             // the function entry point.
             if step_id.0 == 0 && self.mode == FlowMode::Call && self.location.line > 0 {
                 replay.jump_to(StepId(0))?;
-                let bp = replay.add_breakpoint(&self.location.path, self.location.line as i64)?;
+                let bp = replay.add_breakpoint(&self.location.path, self.location.line)?;
                 let hit = replay.step(Action::Continue, true)?;
                 let _ = replay.delete_breakpoint(&bp);
                 if hit {
