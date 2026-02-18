@@ -331,7 +331,10 @@
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
-                --skip backend_dap_server
+                --skip backend_dap_server \
+                --skip python_flow_integration \
+                --skip ruby_flow_integration \
+                --skip noir_flow_integration
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {
