@@ -159,20 +159,18 @@ test-csharp-ui display="default" *args:
   ./dotnet_build.sh
   case "{{display}}" in
     xvfb)
-      # TODO: The nix xvfb-run wrapper has a bug where its cleanup trap
-      #   returns exit 1 when Xvfb exits before kill runs. The temp-file
-      #   workaround below captures the real dotnet exit code. Proper fix:
-      #   patch xvfb-run in nixpkgs to use `kill ... || true` in its trap,
-      #   or replace xvfb-run with manual Xvfb process management (like the
-      #   xephyr case below).
-      # Save the dotnet exit code in a temp file so we can distinguish a real
-      # test failure from xvfb-run's cleanup returning 1 (kill: No such process).
-      _EC_FILE=$(mktemp)
-      xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-        bash -c 'dotnet run -- "$@"; echo $? > '"$_EC_FILE" -- {{args}} || true
-      _REAL_EC=$(cat "$_EC_FILE")
-      rm -f "$_EC_FILE"
-      exit "${_REAL_EC:-1}"
+      # Start Xvfb manually instead of using xvfb-run because the nix
+      # xvfb-run wrapper's cleanup trap returns exit 1 when Xvfb has
+      # already exited (kill: No such process).
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      DISPLAY=":${DISPLAY_NUM}" dotnet run -- {{args}}
       ;;
     xephyr)
       DISPLAY_NUM=99
