@@ -7,11 +7,9 @@ import {
 } from "../../lib/ct_helpers";
 import { LayoutPage } from "../../page-objects/layout_page";
 
-// Drive ct host/browser mode instead of Electron for this test.
-process.env.CODETRACER_TEST_IN_BROWSER = "1";
-
 // Record/replay a known program before the suite.
-ctRun("noir_space_ship/");
+// Use browser mode (ct host + chromium) since this test exercises browser reload.
+ctRun("noir_space_ship/", { inBrowser: true });
 
 test("browser reload rebinds IPC and keeps UI responsive", async () => {
   await readyOnEntry();

@@ -19,6 +19,9 @@ let electronApp; // eslint-disable-line @typescript-eslint/init-declarations
 export let window: Page; // eslint-disable-line @typescript-eslint/init-declarations
 export let page: Page; // eslint-disable-line @typescript-eslint/init-declarations
 
+// Track the last ct host process so it can be killed between test files.
+let activeCtHostProcess: childProcess.ChildProcess | null = null;
+
 export const currentDir = path.resolve(); // the tsc-ui-tests dir
 export const codetracerInstallDir = path.dirname(currentDir);
 export const codetracerTestDir = path.join(currentDir, "tests");
@@ -50,6 +53,14 @@ export function debugCodetracer(name: string, langExtension: string): void {
     setupLdLibraryPath();
     await recordAndReplayTestProgram(name, langExtension);
   });
+  test.afterAll(async () => {
+    if (electronApp) {
+      try { await electronApp.close(); } catch { /* already closed */ }
+      electronApp = undefined;
+    }
+    await killActiveCtHost();
+    cleanupCodetracerEnvVars();
+  });
 }
 
 export function getTestProgramNameFromPath(filePath: string): string {
@@ -61,35 +72,54 @@ export function getTestProgramNameFromPath(filePath: string): string {
   return pathSegments[0];
 }
 
-export function ctRun(relativeSourcePath: string): void {
+export interface CtRunOptions {
+  // Force browser mode (ct host + chromium) instead of the default Electron mode.
+  // Only set this on a per-call basis — do NOT set the CODETRACER_TEST_IN_BROWSER
+  // env var at module scope, because Playwright loads all spec files before running
+  // any tests and the side effect would leak into unrelated test files.
+  inBrowser?: boolean;
+}
+
+export function ctRun(relativeSourcePath: string, options?: CtRunOptions): void {
   test.beforeAll(async () => {
+    // Recording + chromium launch + ct host startup retries can exceed the
+    // default 30s beforeAll timeout, especially for browser-mode tests.
+    const BEFORE_ALL_TIMEOUT_MS = 90_000;
+    test.setTimeout(BEFORE_ALL_TIMEOUT_MS);
+    // Kill any leftover ct host process from a previous test file/describe
+    // block to avoid port conflicts on the hardcoded port 5005.
+    await killActiveCtHost();
+
     setupLdLibraryPath();
 
     const sourcePath = path.join(testProgramsPath, relativeSourcePath);
-    // const sourceFileName = path.basename(
-    //   relativeSourceFilePath,
-    //   path.extname(relativeSourceFilePath),
-    // );
-    // const sourceFileExtension = path.extname(sourceFilePath);
     const programName = getTestProgramNameFromPath(relativeSourcePath);
-
-    // fs.mkdirSync(testBinariesPath, { recursive: true });
-
-    // const binaryFileName = `${programName}__${sourceFileName}`;
-    // const binaryFilePath = path.join(testBinariesPath, binaryFileName);
-
-    // TODO: if rr-backend?
-    // buildTestProgram(sourceFilePath, binaryFilePath);
 
     const traceId = recordTestProgram(sourcePath);
 
-    const inBrowser = process.env.CODETRACER_TEST_IN_BROWSER === "1";
+    const inBrowser =
+      options?.inBrowser ?? (process.env.CODETRACER_TEST_IN_BROWSER === "1");
     if (!inBrowser) {
-      const runPid = 1;
-      await replayCodetracerInElectron(programName, traceId, runPid);
+      await replayCodetracerInElectron(programName, traceId);
     } else {
       await replayCodetracerInBrowser(programName, traceId);
     }
+  });
+
+  // Clean up after all tests in this describe block / file.
+  // Close the Electron app (and its backend-manager) so it doesn't
+  // hold backend-socket ports that conflict with subsequent test files.
+  // Also kill any ct host process used in browser mode.
+  // Clean up env vars so they don't leak into subsequent test files
+  // (e.g. CODETRACER_TRACE_ID causes server_index.js parseArgs to
+  // short-circuit, ignoring --port and other CLI flags).
+  test.afterAll(async () => {
+    if (electronApp) {
+      try { await electronApp.close(); } catch { /* already closed */ }
+      electronApp = undefined;
+    }
+    await killActiveCtHost();
+    cleanupCodetracerEnvVars();
   });
 }
 
@@ -114,6 +144,13 @@ export function ctWelcomeScreen(): void {
     setupLdLibraryPath();
     await launchWelcomeScreen();
   });
+  test.afterAll(async () => {
+    if (electronApp) {
+      try { await electronApp.close(); } catch { /* already closed */ }
+      electronApp = undefined;
+    }
+    cleanupCodetracerEnvVars();
+  });
 }
 
 /// Launch CodeTracer in edit mode with a folder
@@ -121,6 +158,13 @@ export function ctEditMode(folderPath: string): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
     await launchEditMode(folderPath);
+  });
+  test.afterAll(async () => {
+    if (electronApp) {
+      try { await electronApp.close(); } catch { /* already closed */ }
+      electronApp = undefined;
+    }
+    cleanupCodetracerEnvVars();
   });
 }
 
@@ -131,6 +175,13 @@ export function ctDeepReview(jsonPath: string): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
     await launchDeepReview(jsonPath);
+  });
+  test.afterAll(async () => {
+    if (electronApp) {
+      try { await electronApp.close(); } catch { /* already closed */ }
+      electronApp = undefined;
+    }
+    cleanupCodetracerEnvVars();
   });
 }
 
@@ -230,6 +281,41 @@ async function launchDeepReview(jsonPath: string): Promise<void> {
   page = window;
 }
 
+async function killActiveCtHost(): Promise<void> {
+  if (activeCtHostProcess !== null) {
+    try {
+      activeCtHostProcess.kill();
+    } catch {
+      // Process may have already exited — ignore.
+    }
+    activeCtHostProcess = null;
+  }
+
+  // Also kill any leaked ct host that might still be holding port 5005.
+  // This handles the case where Playwright reruns beforeAll after a test
+  // failure, overwriting activeCtHostProcess without killing the old one.
+  try {
+    childProcess.execSync("fuser -k 5005/tcp", { stdio: "ignore" });
+  } catch {
+    // No process on port 5005 — expected for the first run.
+  }
+
+  // Allow a brief delay for the OS to release port 5005.
+  const PORT_RELEASE_DELAY_MS = 500;
+  await new Promise<void>((resolve) => setTimeout(resolve, PORT_RELEASE_DELAY_MS));
+}
+
+/// Remove env vars set by replayCodetracerInElectron so they don't leak
+/// into subsequent test files.  In particular, CODETRACER_TRACE_ID causes
+/// server_index.js's parseArgs to short-circuit, skipping --port and other
+/// CLI flags (all ports default to 0).
+function cleanupCodetracerEnvVars(): void {
+  delete process.env.CODETRACER_TRACE_ID;
+  delete process.env.CODETRACER_CALLER_PID;
+  delete process.env.CODETRACER_IN_UI_TEST;
+  delete process.env.CODETRACER_TEST;
+}
+
 function setupLdLibraryPath(): void {
   // originally in src/tester/tester.nim
   // required so <path to>/codetracer can be called internally
@@ -243,33 +329,13 @@ function setupLdLibraryPath(): void {
 async function replayCodetracerInElectron(
   programName: string,
   traceId: number,
-  runPid: number,
-): Promise<number> {
-  // not clear, but maybe possible to directly augment the playwright test report?
-  // test.info().annotations.push({type: 'something', description: `# starting codetracer for ${pattern}`});
-  console.log(`# replay codetracer rr/gdb core process for ${programName}`);
+): Promise<void> {
+  console.log(`# replay codetracer in Electron for ${programName}`);
 
-  const ctProcess = childProcess.spawn(
-    codetracerPath,
-    ["start_core", `${traceId}`, runPid.toString()],
-    { cwd: codetracerInstallDir },
-  );
-  // ctProcess.stdout.setEncoding("utf8");
-  // ctProcess.stdout.on("data", console.log);
-  // ctProcess.stderr.setEncoding("utf8");
-  // ctProcess.stderr.on("data", console.log);
-  ctProcess.on("close", (code) => {
-    console.log(`child process exited with code ${code}`);
-
-    // eslint-disable-next-line @typescript-eslint/no-magic-numbers
-    if (code !== 0) {
-      throw new CodetracerTestError(
-        `The backend process has exited with status code ${code}`,
-      );
-    }
-  });
-
-  process.env.CODETRACER_CALLER_PID = runPid.toString();
+  // The Electron frontend reads the trace ID from env vars (see
+  // src/frontend/index/args.nim parseArgs).  It spawns backend-manager
+  // internally, which handles both RR and DB-based traces.
+  process.env.CODETRACER_CALLER_PID = process.pid.toString();
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
   process.env.CODETRACER_TEST = "1";
@@ -289,7 +355,6 @@ async function replayCodetracerInElectron(
     window = firstWindow;
   }
   page = window;
-  return ctProcess.pid ?? NO_PID;
 }
 
 async function replayCodetracerInBrowser(
@@ -308,6 +373,9 @@ async function replayCodetracerInBrowser(
     ],
     { cwd: codetracerInstallDir },
   );
+
+  // Track this process so it can be killed between test files.
+  activeCtHostProcess = ctProcess;
 
   // TODO: some kind of error with the test firefox on my setup/nixos
   // let firefoxBrowser = await firefox.launch();
@@ -346,11 +414,28 @@ async function replayCodetracerInBrowser(
 
   page = await chromiumBrowser.newPage();
 
-  // TODO: something more stable
-  const waitingTimeBeforeServerIsReadyInMs = 2_500;
-  await wait(waitingTimeBeforeServerIsReadyInMs);
-
-  await page.goto(`http://localhost:5005`);
+  // Wait for the ct host server to become ready.  Use retry-based navigation
+  // instead of a fixed delay so we tolerate variable startup times and
+  // port-release delays between sequential browser-mode tests.
+  const MAX_CONNECT_ATTEMPTS = 12;
+  const RETRY_DELAY_MS = 1_000;
+  const GOTO_TIMEOUT_MS = 3_000;
+  let connected = false;
+  for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
+    try {
+      await page.goto(`http://localhost:5005`, { timeout: GOTO_TIMEOUT_MS });
+      connected = true;
+    } catch {
+      if (attempt < MAX_CONNECT_ATTEMPTS) {
+        await wait(RETRY_DELAY_MS);
+      }
+    }
+  }
+  if (!connected) {
+    throw new CodetracerTestError(
+      `Failed to connect to ct host on localhost:5005 after ${MAX_CONNECT_ATTEMPTS} attempts`,
+    );
+  }
   window = page;
 
   return ctProcess.pid ?? NO_PID;
@@ -362,8 +447,7 @@ async function replayCodetracerAndSetup(
 ): Promise<void> {
   const inBrowser = process.env.CODETRACER_TEST_IN_BROWSER === "1";
   if (!inBrowser) {
-    const runPid = 1;
-    await replayCodetracerInElectron(pattern, traceId, runPid);
+    await replayCodetracerInElectron(pattern, traceId);
   } else {
     await replayCodetracerInBrowser(pattern, traceId);
   }
