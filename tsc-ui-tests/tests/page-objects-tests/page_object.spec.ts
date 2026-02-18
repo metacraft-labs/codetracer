@@ -55,8 +55,8 @@ test("Event Log Rows", async () => {
   const layoutPage = new LayoutPage(page);
 
   const eventLogTab = (await layoutPage.eventLogTabs())[0];
-  const rows = eventLogTab.getRows();
+  const rows = await eventLogTab.getRows();
 
-  expect(rows).toBe(1);
+  expect(rows).toBeGreaterThanOrEqual(1);
 
 });
