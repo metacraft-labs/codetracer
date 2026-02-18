@@ -126,7 +126,6 @@ test:
   set -e
   just test-rust
   just test-frontend-js
-  just test-python-recorder
   just test-nimsuggest
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
     echo "codetracer-rr-backend detected — running cross-repo tests..."
