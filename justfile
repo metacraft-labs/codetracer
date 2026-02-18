@@ -202,7 +202,20 @@ ui-tests:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
-  just test-csharp-ui xvfb --mode Electron --suite stable-tests --retries 2
+
+  # Start a persistent Xvfb for the entire test suite so both C# UI tests
+  # and Playwright e2e tests can launch Electron.
+  DISPLAY_NUM=99
+  while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+    DISPLAY_NUM=$((DISPLAY_NUM + 1))
+  done
+  Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+  XVFB_PID=$!
+  trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+  sleep 1
+  export DISPLAY=":${DISPLAY_NUM}"
+
+  just test-csharp-ui default --mode Electron --suite stable-tests --retries 2
   just test-e2e
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
     echo "codetracer-rr-backend detected — running language smoke tests..."
