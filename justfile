@@ -463,7 +463,7 @@ test-frontend-js:
 
 test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
-    npm ci --silent && \
+    npm install --no-audit --no-fund && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --reporter=list --workers=1 \
       {{args}}
 
