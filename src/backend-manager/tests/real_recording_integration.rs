@@ -1003,9 +1003,9 @@ fn create_noir_recording(test_dir: &Path, log_path: &Path) -> Result<PathBuf, St
 /// prerequisites cause a panic (via the underlying `find_nargo()` /
 /// `find_db_backend()` functions) rather than a silent skip.
 ///
-// TODO: The 7 callers silently pass when nargo/db-backend are missing
-//   (e.g. in CI). Consider setting REQUIRE_REAL_RECORDINGS=1 in CI or
-//   adding nargo to the nix dev shell so these tests actually run.
+/// nargo (our Noir fork) is available in the default nix dev shell but not
+/// in the nix build sandbox.  Use `REQUIRE_REAL_RECORDINGS=1` to force these
+/// tests to fail instead of skip when prerequisites are missing.
 fn check_noir_prerequisites() -> Result<(PathBuf, PathBuf), String> {
     let nargo = match find_nargo() {
         Some(p) => p,
