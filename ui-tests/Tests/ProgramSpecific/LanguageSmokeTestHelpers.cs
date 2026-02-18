@@ -249,42 +249,42 @@ public static class LanguageSmokeTestHelpers
             return editors.Count > 0;
         }, maxAttempts: 60, delayMs: 1000);
 
-        // First try: check for flow value annotations in the editor (fast path).
-        // Flow value IDs use the pattern: flow-parallel-value-box-{editor}-{line}-{varName}
+        // Check for the variable via flow value annotations OR the Program State pane.
+        //
+        // Flow value IDs use the pattern: flow-parallel-value-box-{editor}-{line}-{varName}.
         // Languages with flow support (C, Rust, C++, Nim) will have these annotations
-        // computed by the backend. We allow up to 30 seconds since RR replay + flow
-        // computation can be slow. Languages without flow support (Go, etc.) will time
-        // out here and fall through to the state pane approach below.
+        // computed by the backend.  For RR traces the flow computation involves LLDB
+        // replay which can take over 30 seconds (especially for Rust).
+        //
+        // Languages without flow support (Go, etc.) won't have annotations at all, but
+        // they do show variables in the Program State pane after stepping past variable
+        // initialization.
+        //
+        // We check both sources in a single retry loop so that:
+        //  - Languages with flow don't waste time on the state pane fallback
+        //  - Languages without flow start stepping early instead of waiting 30+s
         var flowSelector = $"span[id*=\"-{variableName}\"][class*=\"flow-parallel-value-box\"]";
-        bool foundViaFlow = false;
-        try
-        {
-            await RetryHelpers.RetryAsync(async () =>
-            {
-                var elements = await page.Locator(flowSelector).AllAsync();
-                return elements.Count > 0;
-            }, maxAttempts: 30, delayMs: 1000);
-            foundViaFlow = true;
-        }
-        catch (TimeoutException)
-        {
-            // Flow values not available for this language — fall through to state pane.
-        }
 
-        if (foundViaFlow)
-        {
-            return;
-        }
-
-        // Fallback: check the Program State pane, stepping forward if needed.
-        // Some languages (e.g. Go) don't have flow annotations but do show variables
-        // in the state pane after advancing past initialization.
         var statePane = (await layout.ProgramStateTabsAsync()).First();
-        await statePane.TabButton().ClickAsync();
-
+        bool statePaneOpened = false;
         int stepsPerformed = 0;
+
         await RetryHelpers.RetryAsync(async () =>
         {
+            // Check flow annotations first (cheap DOM query).
+            var flowElements = await page.Locator(flowSelector).AllAsync();
+            if (flowElements.Count > 0)
+            {
+                return true;
+            }
+
+            // Flow not ready yet — also check the state pane (opens it once).
+            if (!statePaneOpened)
+            {
+                await statePane.TabButton().ClickAsync();
+                statePaneOpened = true;
+            }
+
             var variables = await statePane.ProgramStateVariablesAsync(forceReload: true);
             foreach (var variable in variables)
             {
@@ -314,7 +314,7 @@ public static class LanguageSmokeTestHelpers
             }
 
             return false;
-        }, maxAttempts: 30, delayMs: 1000);
+        }, maxAttempts: 60, delayMs: 1000);
     }
 
     /// <summary>
