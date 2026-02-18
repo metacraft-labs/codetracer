@@ -429,13 +429,19 @@
 
           inherit src;
 
+          dontInstall = true;
+
           buildPhase = ''
 
-            mkdir -p $out/bin
+            mkdir -p $out/bin $out/lib
 
             cp -Lr \
             ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
             $out/bin
+
+            cp -Lr \
+            ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/lib/* \
+            $out/lib/
 
           '';
         };
