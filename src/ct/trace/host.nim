@@ -1,6 +1,5 @@
 import
   std / [ options, strformat, strutils, osproc, os ],
-  ../utilities/[ env ],
   ../../common/[ types, trace_index, paths ]
 
 
@@ -128,9 +127,6 @@ proc hostCommand*(
     traceId = trace.id
 
   let callerPid = getCurrentProcessId()
-  let recordCore = envLoadRecordCore()
-  # TODO: discuss how to start backend manager
-  # let coreProcess = startCoreProcess(traceId=traceId, recordCore=recordCore, callerPid=callerPid)
   echo "server index ", codetracerExeDir
   var process = startProcess(
     nodeExe,
@@ -156,6 +152,3 @@ proc hostCommand*(
     options={poParentStreams})
   var electronPid = process.processID
   echo "status code:", waitForExit(process)
-  # let code = waitForExit(coreProcess)
-  # echo "core exit code ", code
-  # stopCoreProcess(coreProcess, recordCore)
