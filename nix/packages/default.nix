@@ -298,6 +298,15 @@
 
             buildInputs = [ ];
 
+            nativeCheckInputs = [
+              pkgs.python3
+              pkgs.ruby
+              # Noir (our fork via inputs.noir) is not included because nargo
+              # tries to lock a git dependencies cache, which fails with
+              # PermissionDenied in the nix sandbox.  The noir_flow_integration
+              # test is still --skip'd below.
+            ];
+
             postUnpack = ''
               # Generate tree-sitter-nim parser
               if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
@@ -327,18 +336,11 @@
             '';
 
             doCheck = true;
-            # TODO: The flow integration tests are skipped because they need
-            #   their respective recorders/compilers (Python, Ruby, nargo) which
-            #   are not available inside the nix build sandbox. To re-enable them,
-            #   add the recorders and language toolchains to nativeCheckInputs so
-            #   they are present during checkPhase.
             checkPhase = ''
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
                 --skip backend_dap_server \
-                --skip python_flow_integration \
-                --skip ruby_flow_integration \
                 --skip noir_flow_integration
             '';
 
