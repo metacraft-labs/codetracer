@@ -158,8 +158,15 @@ test-csharp-ui display="default" *args:
   ./dotnet_build.sh
   case "{{display}}" in
     xvfb)
-      xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-        dotnet run -- {{args}}
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      DISPLAY=":${DISPLAY_NUM}" dotnet run -- {{args}}
       ;;
     xephyr)
       DISPLAY_NUM=99
