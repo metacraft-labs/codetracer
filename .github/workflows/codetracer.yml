@@ -668,13 +668,20 @@ jobs:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-python.sh"
 
-  # NOTE: Ruby smoke tests are temporarily disabled — the Ruby recorder
-  # works but the Playwright/Electron tests hang in CI (likely timeout issue).
-  # Re-enable once the test timeout is resolved.
+  # TODO: Re-enable Ruby smoke tests in CI. The Ruby recorder itself works
+  #   (ruby-recorder-pure lib/ fix landed), but the Playwright/Electron tests
+  #   hang after ~40 minutes in CI. Locally they pass fine. Suspected cause:
+  #   Electron process cleanup under xvfb on the self-hosted NixOS runners —
+  #   investigate whether increasing the test timeout or adding explicit
+  #   Electron kill logic after each test resolves the hang.
 
-  # NOTE: C, Rust, Go, and Nim smoke tests require ct-rr-support (rr-based
-  # tracing) which is only available in the cross-repo integration test
-  # workflow. They are intentionally not included here.
+  # TODO: Add C, Rust, Go, and Nim smoke tests to this workflow. Currently
+  #   they require ct-rr-support (rr-based tracing) which lives in the
+  #   private codetracer-rr-backend repo and is only available in the
+  #   cross-repo integration test workflow. To run them here, either:
+  #   (a) fetch and build ct-rr-support as a step in this workflow, or
+  #   (b) publish ct-rr-support as a cachix/nix binary cache artifact that
+  #       this workflow can pull without cloning the private repo.
 
   publish-pypi:
     needs:

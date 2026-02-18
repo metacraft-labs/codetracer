@@ -127,6 +127,11 @@ test:
   just test-rust
   just test-frontend-js
   just test-nimsuggest
+  # TODO: Re-add `just test-python-recorder` here. It was removed because
+  #   the test-non-gui CI job uses `nix build` output (result/bin/ct) but
+  #   python-recorder-smoke.sh builds a dev binary via tup (src/build-debug/bin/ct).
+  #   Fix by making the smoke script accept CODETRACER_E2E_CT_PATH (like the
+  #   UI tests do) so it can use either the nix-built or tup-built ct binary.
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
     echo "codetracer-rr-backend detected — running cross-repo tests..."
     just cross-test
