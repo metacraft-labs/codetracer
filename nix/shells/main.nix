@@ -147,6 +147,9 @@ mkShell {
     # Using toolchains from codetracer-toolchains
     # ============================================
 
+    # Go (needed by ct-rr-support build for Go programs)
+    toolchainsPkgs.go-default
+
     # Pascal
     toolchainsPkgs.fpc
 
