@@ -666,7 +666,7 @@ jobs:
       - name: Run Python UI smoke tests
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-        run: "nix develop .#ui-tests --command ./ci/test/ui-tests-python.sh"
+        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-python.sh"
 
   # NOTE: Ruby smoke tests are temporarily disabled — the Ruby recorder
   # works but the Playwright/Electron tests hang in CI (likely timeout issue).
