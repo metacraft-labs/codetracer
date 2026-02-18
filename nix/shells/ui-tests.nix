@@ -31,5 +31,9 @@ mkShell {
     # and copied into LD_LIBRARY_PATH before spawning ct subprocesses (e.g. ct trace-metadata).
     export CT_LD_LIBRARY_PATH="${pkgs.openssl.out}/lib:${pkgs.sqlite.out}/lib:${pkgs.pcre.out}/lib:${pkgs.glib.out}/lib:${pkgs.gcc.cc.lib}/lib:${pkgs.libzip.out}/lib"
     export LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+    # Set CODETRACER_REPO_ROOT_PATH so that just targets like test-e2e can
+    # locate the tsc-ui-tests directory.
+    export CODETRACER_REPO_ROOT_PATH="$(${pkgs.git}/bin/git rev-parse --show-toplevel)"
   '';
 }

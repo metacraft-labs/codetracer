@@ -812,6 +812,7 @@
           postFixup = ''
             wrapProgram $out/bin/ct \
               --prefix PATH : ${pkgs.lib.makeBinPath [ cargo-stylus ]} \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.openssl ]} \
               --set LINKS_PATH_DIR ${runtimeDeps.outPath}
           '';
 
