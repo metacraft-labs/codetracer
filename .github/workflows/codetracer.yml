@@ -787,6 +787,9 @@ jobs:
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_RR_SOFT_MODE: "1"
+          # rustup override is directory-specific and won't apply when
+          # ct-rr-support builds from a different cwd
+          RUSTUP_TOOLCHAIN: "1.89"
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-rust.sh"
 
       - name: Run Go smoke tests
