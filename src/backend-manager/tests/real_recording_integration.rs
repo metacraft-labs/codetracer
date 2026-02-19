@@ -12853,6 +12853,7 @@ async fn test_real_custom_example_scripts_execute() {
 ///   - totalEvents > 0 (Noir traces contain Step/Value/Call events)
 ///   - sourceFiles is non-empty
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_session_launches_db_backend() {
     let (test_dir, log_path) = setup_test_dir("real_noir_session_launches");
     let mut success = false;
@@ -12964,6 +12965,7 @@ async fn test_real_noir_session_launches_db_backend() {
 /// Noir-M2-2.  Create a Noir trace.  Call `ct/trace-info`.
 /// Verify language contains "noir" and program is non-empty.
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_trace_info_returns_metadata() {
     let (test_dir, log_path) = setup_test_dir("real_noir_trace_info");
     let mut success = false;
@@ -13059,6 +13061,7 @@ async fn test_real_noir_trace_info_returns_metadata() {
 /// Verify location changes (different line or different ticks, or
 /// end-of-trace is reached).
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_navigate_step_over() {
     let (test_dir, log_path) = setup_test_dir("real_noir_nav_step_over");
     let mut success = false;
@@ -13176,6 +13179,7 @@ async fn test_real_noir_navigate_step_over() {
 /// If success: verify calls array is non-empty with `rawName` fields.
 /// If error: only accept "not supported" type errors.
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_calltrace_returns_calls() {
     let (test_dir, log_path) = setup_test_dir("real_noir_calltrace");
     let mut success = false;
@@ -13325,6 +13329,7 @@ async fn test_real_noir_calltrace_returns_calls() {
 /// Step/Value events in trace.json, stronger than the synthetic Ruby test).
 /// If error: only accept "not supported" type errors.
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_events_returns_events() {
     let (test_dir, log_path) = setup_test_dir("real_noir_events");
     let mut success = false;
@@ -13481,6 +13486,7 @@ async fn test_real_noir_events_returns_events() {
 /// Send tools/call with `trace_info` and the real trace path.
 /// Verify response contains language with "noir".
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_mcp_trace_info() {
     let (test_dir, log_path) = setup_test_dir("real_noir_mcp_trace_info");
     let mut success = false;
@@ -13585,6 +13591,7 @@ async fn test_real_noir_mcp_trace_info() {
 /// Send tools/call with `exec_script` and `print('hello')`.
 /// Verify output contains "hello".
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_mcp_exec_script() {
     let (test_dir, log_path) = setup_test_dir("real_noir_mcp_exec_script");
     let mut success = false;

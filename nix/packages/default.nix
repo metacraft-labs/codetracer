@@ -304,7 +304,7 @@
               # Noir (our fork via inputs.noir) is not included because nargo
               # tries to lock a git dependencies cache, which fails with
               # PermissionDenied in the nix sandbox.  The noir_flow_integration
-              # test is still --skip'd below.
+              # test uses #[ignore] so it's automatically excluded from cargo test.
             ];
 
             postUnpack = ''
@@ -340,8 +340,7 @@
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
-                --skip backend_dap_server \
-                --skip noir_flow_integration
+                --skip backend_dap_server
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {

@@ -624,8 +624,16 @@ test-noir-flow:
   #!/usr/bin/env bash
   set -e
   echo "Running Noir flow integration test..."
-  cd src/db-backend && cargo test test_noir_flow -- --nocapture
+  cd src/db-backend && cargo test test_noir_flow -- --nocapture --include-ignored
   echo "Noir flow test passed!"
+
+# Noir real-recording integration tests (backend-manager, requires nargo + db-backend)
+test-noir-real-recordings:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Noir real-recording integration tests..."
+  cd src/backend-manager && cargo test test_real_noir -- --nocapture --include-ignored
+  echo "Noir real-recording tests passed!"
 
 # ====
 # All flow/omniscience integration tests for all languages and versions
