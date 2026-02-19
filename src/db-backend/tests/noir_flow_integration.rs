@@ -61,16 +61,8 @@ fn create_noir_flow_config() -> FlowTestConfig {
 }
 
 #[test]
+#[ignore] // requires nargo (our Noir fork) on PATH; run via `just test-noir-flow`
 fn test_noir_flow_integration() {
-    // nargo (our Noir fork) may not be on PATH in all environments (e.g. the
-    // nix build sandbox).  This test is also --skip'd in the nix checkPhase.
-    // Use `just test-noir-flow` to run it explicitly in a dev shell.
-    let nargo_available = std::process::Command::new("nargo").arg("--version").output().is_ok();
-    if !nargo_available {
-        eprintln!("SKIP: nargo not found on PATH; skipping Noir flow test");
-        return;
-    }
-
     let project_path = get_noir_project_path();
     assert!(
         project_path.join("Nargo.toml").exists(),
