@@ -694,13 +694,11 @@ jobs:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-ruby.sh"
 
-  # TODO: Add C, Rust, Go, and Nim smoke tests to this workflow. Currently
-  #   they require ct-rr-support (rr-based tracing) which lives in the
-  #   private codetracer-rr-backend repo and is only available in the
-  #   cross-repo integration test workflow. To run them here, either:
-  #   (a) fetch and build ct-rr-support as a step in this workflow, or
-  #   (b) publish ct-rr-support as a cachix/nix binary cache artifact that
-  #       this workflow can pull without cloning the private repo.
+  # NOTE: C, Rust, Go, and Nim smoke tests need ct-rr-support (rr-based
+  #   tracing) from the private codetracer-rr-backend repo. CI scripts are
+  #   ready (ci/test/ui-tests-{c,rust,go,nim}.sh) but can only run in the
+  #   cross-repo integration test workflow until ct-rr-support is available
+  #   here — either fetched as a build step or pulled from a binary cache.
 
   publish-pypi:
     needs:
