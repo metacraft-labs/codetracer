@@ -598,11 +598,15 @@ pub fn find_python_recorder() -> PathBuf {
 /// the top-level `codetracer/` directory. Same relative path as used by
 /// `tracepoint_interpreter/tests.rs`.
 ///
+/// Uses the pure-Ruby recorder (not the native Rust extension) because the
+/// native `.so` is not compiled during `cargo test`.
+///
 /// Panics if the recorder is not found (it's a required submodule).
 pub fn find_ruby_recorder() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let recorder = manifest_dir
-        .join("../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder");
+    let recorder = manifest_dir.join(
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+    );
     assert!(
         recorder.exists(),
         "Ruby recorder not found at {}. Did you check out the codetracer-ruby-recorder submodule?",

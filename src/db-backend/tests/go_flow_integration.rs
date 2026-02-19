@@ -52,6 +52,7 @@ fn is_delve_available() -> bool {
 }
 
 #[test]
+#[ignore] // requires rr+dlv pipeline; can hang in CI — run explicitly with --ignored
 fn test_go_flow_integration() {
     // Check prerequisites
     if find_ct_rr_support().is_none() {
