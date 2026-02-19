@@ -759,7 +759,7 @@ jobs:
           sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
           sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
           git add .gitmodules
-          git -c user.name="CI" -c user.email="ci@local" commit -m "CI: rewrite submodule URLs to HTTPS"
+          git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
 
       - name: Build ct-rr-support
         run: |
