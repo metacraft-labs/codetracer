@@ -439,15 +439,26 @@
 
           buildPhase = ''
 
-            mkdir -p $out/bin $out/lib
+            # Preserve the gems/ path component so that the recorder's
+            # self-ignore filter ('gems/') works correctly.  Without this,
+            # TracePoint callbacks fire for kernel_patches.rb inside the
+            # recorder itself, causing a ~100x slowdown.
+            #
+            # The entry script uses File.expand_path('../lib', __dir__) to
+            # find its lib directory, so bin/ and lib/ must stay as siblings.
+            mkdir -p $out/gems/bin $out/gems/lib
 
             cp -Lr \
             ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
-            $out/bin
+            $out/gems/bin/
 
             cp -Lr \
             ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/lib/* \
-            $out/lib/
+            $out/gems/lib/
+
+            # Create top-level bin/ symlink so runtimeDeps symlinkJoin picks it up
+            mkdir -p $out/bin
+            ln -s $out/gems/bin/codetracer-pure-ruby-recorder $out/bin/codetracer-pure-ruby-recorder
 
           '';
         };
