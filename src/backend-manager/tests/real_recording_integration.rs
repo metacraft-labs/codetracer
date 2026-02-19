@@ -142,7 +142,7 @@
 //!    when `ct-rr-support` or `rr` is not available.
 //!
 //! 2. **Ruby trace tests**: Record a Ruby test program via
-//!    `codetracer-pure-ruby-recorder`, producing real `trace.json`,
+//!    `codetracer-ruby-recorder`, producing real `trace.json`,
 //!    `trace_metadata.json`, and `trace_paths.json` files, then open the
 //!    resulting trace through the daemon.  These tests are skipped when the
 //!    Ruby recorder is not available.
@@ -826,7 +826,7 @@ fn find_nargo() -> Option<PathBuf> {
     None
 }
 
-/// Finds the `codetracer-pure-ruby-recorder` script.
+/// Finds the `codetracer-ruby-recorder` script.
 ///
 /// Search order:
 /// 1. `CODETRACER_RUBY_RECORDER_PATH` environment variable
@@ -846,7 +846,7 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 
     // Check PATH.
     if let Ok(output) = std::process::Command::new("which")
-        .arg("codetracer-pure-ruby-recorder")
+        .arg("codetracer-ruby-recorder")
         .output()
     {
         if output.status.success() {
@@ -861,8 +861,8 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     // The recorder lives in the codetracer-ruby-recorder sibling repo.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let relative_locations = [
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
-        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
+        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
     ];
     for loc in relative_locations {
         let path = manifest_dir.join(loc);
@@ -873,7 +873,7 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 
     if require_real_recordings() {
         panic!(
-            "REQUIRE_REAL_RECORDINGS is set but codetracer-pure-ruby-recorder was not found \
+            "REQUIRE_REAL_RECORDINGS is set but codetracer-ruby-recorder was not found \
              in PATH or at expected repository locations.  Set CODETRACER_RUBY_RECORDER_PATH \
              or ensure the recorder is on PATH."
         );
@@ -1063,7 +1063,7 @@ puts "Result: #{y}"
 /// function also creates a `files/` subdirectory mirroring the source path
 /// (required by db-backend for `read_source_file` requests).
 ///
-/// Reference: `codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+/// Reference: `codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`
 fn create_ruby_recording(
     test_dir: &Path,
     recorder_path: &Path,

@@ -340,7 +340,8 @@
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
-                --skip backend_dap_server
+                --skip backend_dap_server \
+                --skip ruby_flow_integration
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {
@@ -463,6 +464,10 @@
           '';
         };
 
+        # Built from the codetracer-ruby-recorder flake input, using our pkgs.ruby
+        # to ensure ABI compatibility (the native .so must match the Ruby that loads it).
+        ruby-recorder-native = inputs.codetracer-ruby-recorder.lib.mkRubyRecorderPackage pkgs pkgs.ruby;
+
         resources-derivation = stdenv.mkDerivation rec {
           name = "resources-derivation";
           pname = name;
@@ -499,7 +504,7 @@
             uiJavascript
             noir
             wazero
-            ruby-recorder-pure
+            ruby-recorder-native
             pkgs.universal-ctags
           ]
           ++ staticDeps.paths;

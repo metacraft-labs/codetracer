@@ -63,7 +63,7 @@ cat <<'EOF' >"${DIST_DIR}"/bin/ct
 
 export HERE=$(dirname $(dirname "$0"))
 
-export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
+export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
 
 exec ${HERE}/bin/ct_unwrapped "$@"
 EOF

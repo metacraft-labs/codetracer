@@ -635,7 +635,7 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer'
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
 
       - name: Run C# UI tests
         env:
@@ -661,7 +661,7 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer'
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
 
       - name: Run Python UI smoke tests
         env:
@@ -687,7 +687,7 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer'
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
 
       - name: Run Ruby UI smoke tests
         timeout-minutes: 15
@@ -714,7 +714,7 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer'
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
 
       - name: Resolve rr-backend ref
         id: resolve-ref
