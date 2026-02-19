@@ -99,10 +99,12 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1771508279,
-        "narHash": "sha256-Ex36/DUdRxXfy+ayk3RNJ6Sq2RtZgfFjtt7aEDiob74=",
-        "path": "/home/zahary/metacraft/codetracer-main/codetracer/libs/codetracer-ruby-recorder",
-        "type": "path"
+        "lastModified": 1771510908,
+        "narHash": "sha256-yIiBYGSfu0pJUuL6CzlFxPbeCN1p43uGgzvkTBTljUc=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-ruby-recorder",
+        "rev": "072f057c55442d2453255d5b4419bcc737f7017b",
+        "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",

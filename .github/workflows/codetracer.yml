@@ -68,7 +68,7 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
+      - run: "nix develop .#devShells.x86_64-linux.default --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder -c ./ci/lint/nix.sh"
 
   lint-rust:
     runs-on: [self-hosted, nixos]
