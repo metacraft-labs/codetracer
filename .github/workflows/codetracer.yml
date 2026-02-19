@@ -771,9 +771,9 @@ jobs:
           # rr/dlv/gdb symlinks manually by querying the nix shell for paths.
           nix develop . --command cargo build
           nix develop . --command bash -c '
-            ln -sf "$(which rr)" target/debug/rr
-            ln -sf "$(which dlv)" target/debug/dlv 2>/dev/null || true
-            ln -sf "$(which gdb)" target/debug/gdb 2>/dev/null || true
+            ln -sf "$(command -v rr)" target/debug/rr
+            ln -sf "$(command -v dlv)" target/debug/dlv 2>/dev/null || true
+            ln -sf "$(command -v gdb)" target/debug/gdb 2>/dev/null || true
           '
           ls -la target/debug/rr target/debug/ct-rr-support
 
