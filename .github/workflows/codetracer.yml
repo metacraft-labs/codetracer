@@ -690,6 +690,7 @@ jobs:
         run: nix build --print-build-logs '.?submodules=1#codetracer'
 
       - name: Run Ruby UI smoke tests
+        timeout-minutes: 15
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-ruby.sh"
