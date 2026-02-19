@@ -764,8 +764,12 @@ jobs:
       - name: Build ct-rr-support
         run: |
           SIBLING_DIR="${GITHUB_WORKSPACE}/../codetracer-rr-backend"
-          nix develop "${SIBLING_DIR}" --command \
-            bash -c "cd '${SIBLING_DIR}' && cargo build"
+          # Build from within the sibling dir so PRJ_ROOT is set correctly
+          # by the nix shellHook (which creates rr/dlv/gdb symlinks in target/debug/)
+          cd "${SIBLING_DIR}"
+          nix develop . --command cargo build
+          # Verify the rr symlink was created by the shellHook
+          ls -la target/debug/rr target/debug/ct-rr-support
 
       - name: Run C smoke tests
         env:
