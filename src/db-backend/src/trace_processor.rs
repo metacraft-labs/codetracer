@@ -381,6 +381,11 @@ impl<'a> TraceProcessor<'a> {
             TraceLowLevelEvent::Asm(asm_record) => {
                 self.db.instructions[self.current_step_id].extend(asm_record.clone());
             }
+            TraceLowLevelEvent::ThreadStart(_)
+            | TraceLowLevelEvent::ThreadExit(_)
+            | TraceLowLevelEvent::ThreadSwitch(_) => {
+                // Thread events are recorded but not yet used in postprocessing.
+            }
         }
         Ok(())
     }
