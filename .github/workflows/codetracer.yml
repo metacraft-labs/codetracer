@@ -668,12 +668,31 @@ jobs:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-python.sh"
 
-  # TODO: Re-enable Ruby smoke tests in CI. The Ruby recorder itself works
-  #   (ruby-recorder-pure lib/ fix landed), but the Playwright/Electron tests
-  #   hang after ~40 minutes in CI. Locally they pass fine. Suspected cause:
-  #   Electron process cleanup under xvfb on the self-hosted NixOS runners —
-  #   investigate whether increasing the test timeout or adding explicit
-  #   Electron kill logic after each test resolves the hang.
+  test-ui-tests-ruby:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Build CodeTracer
+        run: nix build --print-build-logs '.?submodules=1#codetracer'
+
+      - name: Run Ruby UI smoke tests
+        env:
+          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
+        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-ruby.sh"
 
   # TODO: Add C, Rust, Go, and Nim smoke tests to this workflow. Currently
   #   they require ct-rr-support (rr-based tracing) which lives in the

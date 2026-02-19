@@ -231,7 +231,13 @@ test-all-language-smoke:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
-  just test-csharp-ui xvfb --mode Electron --suite all-language-smoke --retries 2
+  # Use existing DISPLAY (from ui-tests persistent Xvfb) if available,
+  # otherwise start a new Xvfb via the "xvfb" display mode.
+  if [ -n "${DISPLAY:-}" ]; then
+    just test-csharp-ui default --mode Electron --suite all-language-smoke --retries 2
+  else
+    just test-csharp-ui xvfb --mode Electron --suite all-language-smoke --retries 2
+  fi
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
