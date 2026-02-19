@@ -96,7 +96,7 @@ let
   # TODO: tup/nix? => in linksPath / "bin
 
   rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH", linksPath / "bin" / "ruby" )
-  rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH", linksPath / "bin" / "codetracer-pure-ruby-recorder")
+  rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH", linksPath / "bin" / "codetracer-ruby-recorder")
 
   smallExe* = linksPath / "bin" / "small-lang"
   noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )

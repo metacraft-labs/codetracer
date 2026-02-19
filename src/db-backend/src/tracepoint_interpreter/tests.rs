@@ -173,7 +173,7 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) {
     let trace_path = target_dir.join("trace.json");
     let result = Command::new("ruby")
         .args([
-            "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+            "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
             "--out-dir",
             target_dir.to_str().unwrap(),
             main_path.to_str().unwrap(),

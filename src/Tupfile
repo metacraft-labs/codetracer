@@ -23,7 +23,7 @@ include_rules
 # preserve
 # : links/trace.rb |> !tup_preserve |> src/trace.rb
 
-: links/codetracer-pure-ruby-recorder |> !tup_preserve |> bin/codetracer-pure-ruby-recorder
+: links/codetracer-ruby-recorder |> !tup_preserve |> bin/codetracer-ruby-recorder
 
 : links/recorder.rb |> !tup_preserve |> src/recorder.rb
 : links/trace.py |> !tup_preserve |> src/trace.py
