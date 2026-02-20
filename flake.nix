@@ -53,6 +53,12 @@
       flake = true;
     };
 
+    codetracer-ruby-recorder = {
+      url = "github:metacraft-labs/codetracer-ruby-recorder";
+      inputs.nixpkgs.follows = "nixpkgs";
+      flake = true;
+    };
+
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };

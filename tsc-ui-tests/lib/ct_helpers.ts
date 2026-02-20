@@ -408,8 +408,15 @@ async function replayCodetracerInBrowser(
       `no chrome-linux* directory found in ${browsersDir}/${chromiumDir}`,
     );
   }
+  // In CI the nix-store chrome-sandbox binary lacks the SUID bit, so
+  // Chromium must be launched with --no-sandbox (same flags that
+  // CODETRACER_ELECTRON_ARGS supplies for Electron launches).
+  const extraArgs = (process.env.CODETRACER_ELECTRON_ARGS ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
   const chromiumBrowser = await chromium.launch({
     executablePath: path.join(browsersDir!, chromiumDir, chromeSubdir, "chrome"),
+    args: extraArgs,
   });
 
   page = await chromiumBrowser.newPage();

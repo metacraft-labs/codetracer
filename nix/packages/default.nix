@@ -298,6 +298,15 @@
 
             buildInputs = [ ];
 
+            nativeCheckInputs = [
+              pkgs.python3
+              pkgs.ruby
+              # Noir (our fork via inputs.noir) is not included because nargo
+              # tries to lock a git dependencies cache, which fails with
+              # PermissionDenied in the nix sandbox.  The noir_flow_integration
+              # test uses #[ignore] so it's automatically excluded from cargo test.
+            ];
+
             postUnpack = ''
               # Generate tree-sitter-nim parser
               if [ ! -f $sourceRoot/libs/tree-sitter-nim/src/parser.c ]; then
@@ -327,19 +336,12 @@
             '';
 
             doCheck = true;
-            # TODO: The flow integration tests are skipped because they need
-            #   their respective recorders/compilers (Python, Ruby, nargo) which
-            #   are not available inside the nix build sandbox. To re-enable them,
-            #   add the recorders and language toolchains to nativeCheckInputs so
-            #   they are present during checkPhase.
             checkPhase = ''
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
                 --skip backend_dap_server \
-                --skip python_flow_integration \
-                --skip ruby_flow_integration \
-                --skip noir_flow_integration
+                --skip ruby_flow_integration
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {
@@ -438,18 +440,33 @@
 
           buildPhase = ''
 
-            mkdir -p $out/bin $out/lib
+            # Preserve the gems/ path component so that the recorder's
+            # self-ignore filter ('gems/') works correctly.  Without this,
+            # TracePoint callbacks fire for kernel_patches.rb inside the
+            # recorder itself, causing a ~100x slowdown.
+            #
+            # The entry script uses File.expand_path('../lib', __dir__) to
+            # find its lib directory, so bin/ and lib/ must stay as siblings.
+            mkdir -p $out/gems/bin $out/gems/lib
 
             cp -Lr \
             ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
-            $out/bin
+            $out/gems/bin/
 
             cp -Lr \
             ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/lib/* \
-            $out/lib/
+            $out/gems/lib/
+
+            # Create top-level bin/ symlink so runtimeDeps symlinkJoin picks it up
+            mkdir -p $out/bin
+            ln -s $out/gems/bin/codetracer-pure-ruby-recorder $out/bin/codetracer-pure-ruby-recorder
 
           '';
         };
+
+        # Built from the codetracer-ruby-recorder flake input, using our pkgs.ruby
+        # to ensure ABI compatibility (the native .so must match the Ruby that loads it).
+        ruby-recorder-native = inputs.codetracer-ruby-recorder.lib.mkRubyRecorderPackage pkgs pkgs.ruby;
 
         resources-derivation = stdenv.mkDerivation rec {
           name = "resources-derivation";
@@ -487,7 +504,7 @@
             uiJavascript
             noir
             wazero
-            ruby-recorder-pure
+            ruby-recorder-native
             pkgs.universal-ctags
           ]
           ++ staticDeps.paths;

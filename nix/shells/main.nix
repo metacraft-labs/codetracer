@@ -315,9 +315,9 @@ mkShell {
     [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
     # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
-    [ ! -f links/codetracer-pure-ruby-recorder ] && ln -s \
-    $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
-    links/codetracer-pure-ruby-recorder
+    [ ! -f links/codetracer-ruby-recorder ] && ln -s \
+    $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder \
+    links/codetracer-ruby-recorder
 
     # [ ! -f links/ ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 

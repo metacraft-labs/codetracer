@@ -229,12 +229,23 @@ fn setup(
     };
     let metadata_path = trace_folder.join("trace_metadata.json");
     let trace_path = trace_folder.join(trace_file);
-    // duration code copied from
-    // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-    if let (Ok(meta), Ok(trace)) = (
-        load_trace_metadata(&metadata_path),
-        load_trace_data(&trace_path, trace_file_format),
-    ) {
+    let meta_result = load_trace_metadata(&metadata_path);
+    let trace_result = load_trace_data(&trace_path, trace_file_format);
+    if meta_result.is_err() {
+        error!(
+            "failed to load trace metadata from {:?}: {:?}",
+            metadata_path,
+            meta_result.as_ref().err()
+        );
+    }
+    if trace_result.is_err() {
+        error!(
+            "failed to load trace data from {:?}: {:?}",
+            trace_path,
+            trace_result.as_ref().err()
+        );
+    }
+    if let (Ok(meta), Ok(trace)) = (meta_result, trace_result) {
         let mut db = Db::new(&meta.workdir);
         let mut proc = TraceProcessor::new(&mut db);
         proc.postprocess(&trace)?;

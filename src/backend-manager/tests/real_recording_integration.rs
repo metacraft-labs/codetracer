@@ -142,7 +142,7 @@
 //!    when `ct-rr-support` or `rr` is not available.
 //!
 //! 2. **Ruby trace tests**: Record a Ruby test program via
-//!    `codetracer-pure-ruby-recorder`, producing real `trace.json`,
+//!    `codetracer-ruby-recorder`, producing real `trace.json`,
 //!    `trace_metadata.json`, and `trace_paths.json` files, then open the
 //!    resulting trace through the daemon.  These tests are skipped when the
 //!    Ruby recorder is not available.
@@ -826,7 +826,7 @@ fn find_nargo() -> Option<PathBuf> {
     None
 }
 
-/// Finds the `codetracer-pure-ruby-recorder` script.
+/// Finds the `codetracer-ruby-recorder` script.
 ///
 /// Search order:
 /// 1. `CODETRACER_RUBY_RECORDER_PATH` environment variable
@@ -844,7 +844,8 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
     }
 
-    // Check PATH.
+    // Check PATH for the pure Ruby recorder (the native extension .so is
+    // not compiled during cargo test, so we use the pure Ruby version).
     if let Ok(output) = std::process::Command::new("which")
         .arg("codetracer-pure-ruby-recorder")
         .output()
@@ -858,7 +859,8 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     }
 
     // Check relative to CARGO_MANIFEST_DIR (backend-manager crate).
-    // The recorder lives in the codetracer-ruby-recorder sibling repo.
+    // Use the pure Ruby recorder since the native Rust extension .so is
+    // not compiled during cargo test.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let relative_locations = [
         "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
@@ -873,7 +875,7 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 
     if require_real_recordings() {
         panic!(
-            "REQUIRE_REAL_RECORDINGS is set but codetracer-pure-ruby-recorder was not found \
+            "REQUIRE_REAL_RECORDINGS is set but codetracer-ruby-recorder was not found \
              in PATH or at expected repository locations.  Set CODETRACER_RUBY_RECORDER_PATH \
              or ensure the recorder is on PATH."
         );
@@ -1003,9 +1005,9 @@ fn create_noir_recording(test_dir: &Path, log_path: &Path) -> Result<PathBuf, St
 /// prerequisites cause a panic (via the underlying `find_nargo()` /
 /// `find_db_backend()` functions) rather than a silent skip.
 ///
-// TODO: The 7 callers silently pass when nargo/db-backend are missing
-//   (e.g. in CI). Consider setting REQUIRE_REAL_RECORDINGS=1 in CI or
-//   adding nargo to the nix dev shell so these tests actually run.
+/// nargo (our Noir fork) is available in the default nix dev shell but not
+/// in the nix build sandbox.  Use `REQUIRE_REAL_RECORDINGS=1` to force these
+/// tests to fail instead of skip when prerequisites are missing.
 fn check_noir_prerequisites() -> Result<(PathBuf, PathBuf), String> {
     let nargo = match find_nargo() {
         Some(p) => p,
@@ -1063,7 +1065,7 @@ puts "Result: #{y}"
 /// function also creates a `files/` subdirectory mirroring the source path
 /// (required by db-backend for `read_source_file` requests).
 ///
-/// Reference: `codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+/// Reference: `codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`
 fn create_ruby_recording(
     test_dir: &Path,
     recorder_path: &Path,
@@ -12853,6 +12855,7 @@ async fn test_real_custom_example_scripts_execute() {
 ///   - totalEvents > 0 (Noir traces contain Step/Value/Call events)
 ///   - sourceFiles is non-empty
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_session_launches_db_backend() {
     let (test_dir, log_path) = setup_test_dir("real_noir_session_launches");
     let mut success = false;
@@ -12964,6 +12967,7 @@ async fn test_real_noir_session_launches_db_backend() {
 /// Noir-M2-2.  Create a Noir trace.  Call `ct/trace-info`.
 /// Verify language contains "noir" and program is non-empty.
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_trace_info_returns_metadata() {
     let (test_dir, log_path) = setup_test_dir("real_noir_trace_info");
     let mut success = false;
@@ -13059,6 +13063,7 @@ async fn test_real_noir_trace_info_returns_metadata() {
 /// Verify location changes (different line or different ticks, or
 /// end-of-trace is reached).
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_navigate_step_over() {
     let (test_dir, log_path) = setup_test_dir("real_noir_nav_step_over");
     let mut success = false;
@@ -13176,6 +13181,7 @@ async fn test_real_noir_navigate_step_over() {
 /// If success: verify calls array is non-empty with `rawName` fields.
 /// If error: only accept "not supported" type errors.
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_calltrace_returns_calls() {
     let (test_dir, log_path) = setup_test_dir("real_noir_calltrace");
     let mut success = false;
@@ -13325,6 +13331,7 @@ async fn test_real_noir_calltrace_returns_calls() {
 /// Step/Value events in trace.json, stronger than the synthetic Ruby test).
 /// If error: only accept "not supported" type errors.
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_events_returns_events() {
     let (test_dir, log_path) = setup_test_dir("real_noir_events");
     let mut success = false;
@@ -13481,6 +13488,7 @@ async fn test_real_noir_events_returns_events() {
 /// Send tools/call with `trace_info` and the real trace path.
 /// Verify response contains language with "noir".
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_mcp_trace_info() {
     let (test_dir, log_path) = setup_test_dir("real_noir_mcp_trace_info");
     let mut success = false;
@@ -13585,6 +13593,7 @@ async fn test_real_noir_mcp_trace_info() {
 /// Send tools/call with `exec_script` and `print('hello')`.
 /// Verify output contains "hello".
 #[tokio::test]
+#[ignore] // requires nargo + db-backend; run via `just test-noir-real-recordings`
 async fn test_real_noir_mcp_exec_script() {
     let (test_dir, log_path) = setup_test_dir("real_noir_mcp_exec_script");
     let mut success = false;

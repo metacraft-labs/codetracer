@@ -216,7 +216,7 @@ export HERE=$(dirname "$(readlink -f "${0}")")
 # TODO: This includes references to x86_64. What about aarch64?
 export LINKS_PATH_DIR=$HERE
 export PATH="${HERE}/bin:${PATH}"
-export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
+export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
 
 exec ${HERE}/bin/ct "$@"
 EOF

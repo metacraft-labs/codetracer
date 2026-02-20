@@ -121,17 +121,14 @@ test-rust:
   popd
 
 # Run all non-GUI tests.
+# test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
+# test-python-recorder needs a built ct binary.
+# Both are skipped here; they run in their own CI steps or via dev builds.
 test:
   #!/usr/bin/env bash
   set -e
   just test-rust
-  just test-frontend-js
   just test-nimsuggest
-  # TODO: Re-add `just test-python-recorder` here. It was removed because
-  #   the test-non-gui CI job uses `nix build` output (result/bin/ct) but
-  #   python-recorder-smoke.sh builds a dev binary via tup (src/build-debug/bin/ct).
-  #   Fix by making the smoke script accept CODETRACER_E2E_CT_PATH (like the
-  #   UI tests do) so it can use either the nix-built or tup-built ct binary.
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
     echo "codetracer-rr-backend detected — running cross-repo tests..."
     just cross-test
@@ -163,20 +160,18 @@ test-csharp-ui display="default" *args:
   ./dotnet_build.sh
   case "{{display}}" in
     xvfb)
-      # TODO: The nix xvfb-run wrapper has a bug where its cleanup trap
-      #   returns exit 1 when Xvfb exits before kill runs. The temp-file
-      #   workaround below captures the real dotnet exit code. Proper fix:
-      #   patch xvfb-run in nixpkgs to use `kill ... || true` in its trap,
-      #   or replace xvfb-run with manual Xvfb process management (like the
-      #   xephyr case below).
-      # Save the dotnet exit code in a temp file so we can distinguish a real
-      # test failure from xvfb-run's cleanup returning 1 (kill: No such process).
-      _EC_FILE=$(mktemp)
-      xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-        bash -c 'dotnet run -- "$@"; echo $? > '"$_EC_FILE" -- {{args}} || true
-      _REAL_EC=$(cat "$_EC_FILE")
-      rm -f "$_EC_FILE"
-      exit "${_REAL_EC:-1}"
+      # Start Xvfb manually instead of using xvfb-run because the nix
+      # xvfb-run wrapper's cleanup trap returns exit 1 when Xvfb has
+      # already exited (kill: No such process).
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      DISPLAY=":${DISPLAY_NUM}" dotnet run -- {{args}}
       ;;
     xephyr)
       DISPLAY_NUM=99
@@ -208,7 +203,20 @@ ui-tests:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
-  just test-csharp-ui xvfb --mode Electron --suite stable-tests --retries 2
+
+  # Start a persistent Xvfb for the entire test suite so both C# UI tests
+  # and Playwright e2e tests can launch Electron.
+  DISPLAY_NUM=99
+  while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+    DISPLAY_NUM=$((DISPLAY_NUM + 1))
+  done
+  Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+  XVFB_PID=$!
+  trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+  sleep 1
+  export DISPLAY=":${DISPLAY_NUM}"
+
+  just test-csharp-ui default --mode Electron --suite stable-tests --retries 2
   just test-e2e
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
     echo "codetracer-rr-backend detected — running language smoke tests..."
@@ -224,7 +232,13 @@ test-all-language-smoke:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
-  just test-csharp-ui xvfb --mode Electron --suite all-language-smoke --retries 2
+  # Use existing DISPLAY (from ui-tests persistent Xvfb) if available,
+  # otherwise start a new Xvfb via the "xvfb" display mode.
+  if [ -n "${DISPLAY:-}" ]; then
+    just test-csharp-ui default --mode Electron --suite all-language-smoke --retries 2
+  else
+    just test-csharp-ui xvfb --mode Electron --suite all-language-smoke --retries 2
+  fi
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
@@ -469,6 +483,7 @@ test-frontend-js:
 
 test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
+    npm install --no-audit --no-fund && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --reporter=list --workers=1 \
       {{args}}
 
@@ -616,8 +631,16 @@ test-noir-flow:
   #!/usr/bin/env bash
   set -e
   echo "Running Noir flow integration test..."
-  cd src/db-backend && cargo test test_noir_flow -- --nocapture
+  cd src/db-backend && cargo test test_noir_flow -- --nocapture --include-ignored
   echo "Noir flow test passed!"
+
+# Noir real-recording integration tests (backend-manager, requires nargo + db-backend)
+test-noir-real-recordings:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Noir real-recording integration tests..."
+  cd src/backend-manager && cargo test test_real_noir -- --nocapture --include-ignored
+  echo "Noir real-recording tests passed!"
 
 # ====
 # All flow/omniscience integration tests for all languages and versions

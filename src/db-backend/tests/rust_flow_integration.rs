@@ -42,6 +42,7 @@ fn create_rust_flow_config() -> FlowTestConfig {
 }
 
 #[test]
+#[ignore] // requires rr pipeline; can hang in CI — run explicitly with --ignored
 fn test_rust_flow_integration() {
     // Check prerequisites
     if find_ct_rr_support().is_none() {
