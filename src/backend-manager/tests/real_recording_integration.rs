@@ -844,9 +844,10 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
     }
 
-    // Check PATH.
+    // Check PATH for the pure Ruby recorder (the native extension .so is
+    // not compiled during cargo test, so we use the pure Ruby version).
     if let Ok(output) = std::process::Command::new("which")
-        .arg("codetracer-ruby-recorder")
+        .arg("codetracer-pure-ruby-recorder")
         .output()
     {
         if output.status.success() {
@@ -858,11 +859,12 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     }
 
     // Check relative to CARGO_MANIFEST_DIR (backend-manager crate).
-    // The recorder lives in the codetracer-ruby-recorder sibling repo.
+    // Use the pure Ruby recorder since the native Rust extension .so is
+    // not compiled during cargo test.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let relative_locations = [
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
-        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
     ];
     for loc in relative_locations {
         let path = manifest_dir.join(loc);
