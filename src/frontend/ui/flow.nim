@@ -3343,9 +3343,9 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       self.resetFlow()
       self.key = update.location.key
       if self.flow.isNil:
-        self.flow = update.view_updates[editorView]
+        self.flow = update.viewUpdates[editorView]
     else:
-      self.flow = update.view_updates[editorView]
+      self.flow = update.viewUpdates[editorView]
 
     if not self.inExtension:
       self.editorUI.flowUpdate = update
@@ -3397,7 +3397,7 @@ proc addSliderWidget(self: FlowComponent, position:int) =
   let id = &"flow-slider-widget-{position}"
   let dom = makeSliderDom(self, position)
 
-  self.flowLoops[position].flowDom = dom
+  self.flowLoops[position].flowDom.appendChild(dom)
 
 proc resizeEditorHandler(self:FlowComponent, position: int) =
   # get new monaco editor config
@@ -4083,8 +4083,3 @@ when defined(ctInExtension):
     # )
 
     # dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
-
-when defined(ctInExtension):
-  when defined(ctInCentralExtensionContext):
-    {.emit: "module.exports.vsUpdatedFlow = vsUpdatedFlow".}
-    {.emit: "module.exports.completeMove = completeMove".}

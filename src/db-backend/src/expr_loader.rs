@@ -220,6 +220,28 @@ fn field_name_in_parent(node: &Node) -> Option<String> {
     None
 }
 
+fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+fn find_expr_column_in_line(line: &str, expression: &str) -> Option<usize> {
+    let mut search_start = 0;
+    while search_start <= line.len() {
+        let relative = line[search_start..].find(expression)?;
+        let abs = search_start + relative;
+        let before = line[..abs].chars().last();
+        let after = line[abs + expression.len()..].chars().next();
+        let before_ok = before.map_or(true, |c| !is_word_char(c));
+        let after_ok = after.map_or(true, |c| !is_word_char(c));
+        if before_ok && after_ok {
+            // Columns are 1-based to align with editor APIs.
+            return Some(line[..abs].chars().count() + 1);
+        }
+        search_start = abs + expression.len();
+    }
+    None
+}
+
 #[derive(Debug, Clone)]
 pub struct ExprLoader {
     // parser: Parser,
@@ -1294,6 +1316,18 @@ impl ExprLoader {
         self.processed_files
             .get(&PathBuf::from(&location.path))
             .and_then(|file| file.variables.get(&line).cloned())
+    }
+
+    // Returns a 1-based column index for the first whole-word occurrence of the expression on the line.
+    pub fn get_expr_column(&self, line: Position, expression: &str, location: &Location) -> Option<usize> {
+        if expression.is_empty() {
+            return None;
+        }
+        let path = PathBuf::from(&location.path);
+        let file_info = self.processed_files.get(&path)?;
+        let line_index = line.0.checked_sub(1)? as usize;
+        let source_line = file_info.file_lines.get(line_index)?;
+        find_expr_column_in_line(source_line, expression)
     }
     // pub fn load_loops(&mut self, )
 
