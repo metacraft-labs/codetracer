@@ -54,6 +54,12 @@ VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetrace
 SMALL_LANG_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]small_lang_target[/\\].*
 
 ifeq (@(TUP_PLATFORM),win32)
+CARGO_TARGET_BASE = C:/tmp/codetracer
+else
+CARGO_TARGET_BASE = /tmp/codetracer
+endif
+
+ifeq (@(TUP_PLATFORM),win32)
 TSC = tsc.cmd
 STYLUS = stylus.cmd
 else
@@ -185,17 +191,17 @@ export NIMFLAGS
 RUST_WINDOWS_LINKER_CONFIG =
 
 !rust_cargo_backend_manager = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/backend_manager_target && \
-    cp C:/tmp/codetracer/backend_manager_target/release/backend-manager$(EXE_SUFFIX) %o |> %o | $(BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS)
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/backend_manager_target && \
+    cp $(CARGO_TARGET_BASE)/backend_manager_target/release/backend-manager$(EXE_SUFFIX) %o |> %o | $(BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS)
 !debug_rust_cargo_db_backend = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --target-dir C:/tmp/codetracer/db_backend_target && \
-    cp C:/tmp/codetracer/db_backend_target/debug/db-backend$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/db-backend$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_db_backend = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/db_backend_target && \
-    cp C:/tmp/codetracer/db_backend_target/release/db-backend$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/release/db-backend$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_virtualization_layers = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/virtualization_layers_target && \
-    cp C:/tmp/codetracer/virtualization_layers_target/release/virtualization-layers$(EXE_SUFFIX) %o |> %o | $(VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS)
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/virtualization_layers_target && \
+    cp $(CARGO_TARGET_BASE)/virtualization_layers_target/release/virtualization-layers$(EXE_SUFFIX) %o |> %o | $(VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_small_lang = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/small_lang_target && \
-    cp C:/tmp/codetracer/small_lang_target/release/small-lang$(EXE_SUFFIX) %o |> %o | $(SMALL_LANG_CARGO_IGNORE_OUTPUTS)
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/small_lang_target && \
+    cp $(CARGO_TARGET_BASE)/small_lang_target/release/small-lang$(EXE_SUFFIX) %o |> %o | $(SMALL_LANG_CARGO_IGNORE_OUTPUTS)
