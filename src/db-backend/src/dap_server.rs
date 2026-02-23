@@ -5,9 +5,9 @@ use std::fmt;
 #[cfg(all(feature = "io-transport", unix))]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -26,10 +26,10 @@ use crate::task::{
     FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
     SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
-#[cfg(windows)]
-use crate::transport_endpoint::windows_named_pipe_path_for_pid;
 #[cfg(not(windows))]
 use crate::transport_endpoint::unix_socket_path_for_pid;
+#[cfg(windows)]
+use crate::transport_endpoint::windows_named_pipe_path_for_pid;
 use crate::transport_endpoint::DapEndpoint;
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
@@ -383,10 +383,7 @@ fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<P
         let mut newest_run: Option<(std::time::SystemTime, PathBuf)> = None;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path
-                .extension()
-                .is_none_or(|ext| ext != std::ffi::OsStr::new("run"))
-            {
+            if path.extension().is_none_or(|ext| ext != std::ffi::OsStr::new("run")) {
                 continue;
             }
             let modified = entry

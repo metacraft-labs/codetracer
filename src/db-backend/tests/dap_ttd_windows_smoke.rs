@@ -1,8 +1,8 @@
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::lang::Lang;
 use db_backend::task::{
-    RunTracepointsArg, SearchValue, Stop, TableArgs, TraceSession, Tracepoint, TracepointMode,
-    UpdateTableArgs, EVENT_KINDS_COUNT,
+    RunTracepointsArg, SearchValue, Stop, TableArgs, TraceSession, Tracepoint, TracepointMode, UpdateTableArgs,
+    EVENT_KINDS_COUNT,
 };
 use db_backend::transport::DapTransport;
 use serde_json::{json, Value};
@@ -100,9 +100,7 @@ impl DapStdioSession {
         match self.reader_rx.recv_timeout(timeout) {
             Ok(Ok(msg)) => Ok(msg),
             Ok(Err(err)) => Err(err),
-            Err(RecvTimeoutError::Timeout) => {
-                Err(format!("timed out waiting for DAP message after {timeout:?}"))
-            }
+            Err(RecvTimeoutError::Timeout) => Err(format!("timed out waiting for DAP message after {timeout:?}")),
             Err(RecvTimeoutError::Disconnected) => {
                 Err("DAP reader thread disconnected before delivering a message".to_string())
             }
@@ -133,9 +131,7 @@ impl DapStdioSession {
         let start = Instant::now();
         loop {
             if start.elapsed() >= timeout {
-                return Err(format!(
-                    "timed out waiting for event '{event}' after {timeout:?}"
-                ));
+                return Err(format!("timed out waiting for event '{event}' after {timeout:?}"));
             }
             match self.read_next(timeout.saturating_sub(start.elapsed()))? {
                 DapMessage::Event(ev) if ev.event == event => return Ok(ev.body),
@@ -327,19 +323,12 @@ fn compile_c_program(source: &Path, debug_info: bool) -> Result<Option<PathBuf>,
         if debug_info {
             command.arg("/Zi");
         }
-        command
-            .arg(source)
-            .arg(format!("/Fe:{}", output.display()));
+        command.arg(source).arg(format!("/Fe:{}", output.display()));
     } else {
         if debug_info {
             command.arg("-g");
         }
-        command
-            .arg("-O0")
-            .arg("-std=c11")
-            .arg(source)
-            .arg("-o")
-            .arg(&output);
+        command.arg("-O0").arg("-std=c11").arg(source).arg("-o").arg(&output);
     }
 
     let result = command.output().map_err(|e| format!("compile failed: {e}"))?;
@@ -357,11 +346,7 @@ fn is_access_denied_output(stderr: &str) -> bool {
         || lower.contains("access is denied")
 }
 
-fn record_ttd_trace(
-    ct_rr_support: &Path,
-    exe: &Path,
-    output_trace: &Path,
-) -> Result<Option<PathBuf>, String> {
+fn record_ttd_trace(ct_rr_support: &Path, exe: &Path, output_trace: &Path) -> Result<Option<PathBuf>, String> {
     let output = Command::new(ct_rr_support)
         .args([
             "record",
@@ -369,8 +354,7 @@ fn record_ttd_trace(
             output_trace
                 .to_str()
                 .ok_or_else(|| "trace path is not utf-8".to_string())?,
-            exe.to_str()
-                .ok_or_else(|| "exe path is not utf-8".to_string())?,
+            exe.to_str().ok_or_else(|| "exe path is not utf-8".to_string())?,
         ])
         .output()
         .map_err(|e| format!("failed to run ct-rr-support record: {e}"))?;
@@ -489,16 +473,18 @@ fn resolve_ct_rr_support() -> Result<PathBuf, String> {
     })
 }
 
-fn launch_ttd_session_with_fixture(
-    session: &mut DapStdioSession,
-    fixture: &TtdFixture,
-) -> Result<(), String> {
+fn launch_ttd_session_with_fixture(session: &mut DapStdioSession, fixture: &TtdFixture) -> Result<(), String> {
     let ct_rr_support = resolve_ct_rr_support()?;
 
     let trace_folder = fixture
         .trace_path
         .parent()
-        .ok_or_else(|| format!("fixture trace has no parent directory: {}", fixture.trace_path.display()))?
+        .ok_or_else(|| {
+            format!(
+                "fixture trace has no parent directory: {}",
+                fixture.trace_path.display()
+            )
+        })?
         .to_path_buf();
     let trace_file = fixture
         .trace_path
@@ -574,17 +560,14 @@ fn launch_ttd_session(session: &mut DapStdioSession) -> Result<(), String> {
 }
 
 fn find_marker_line(path: &Path, marker: &str) -> Result<usize, String> {
-    let contents = fs::read_to_string(path)
-        .map_err(|e| format!("failed to read source file {}: {e}", path.display()))?;
+    let contents =
+        fs::read_to_string(path).map_err(|e| format!("failed to read source file {}: {e}", path.display()))?;
     for (idx, line) in contents.lines().enumerate() {
         if line.contains(marker) {
             return Ok(idx + 1);
         }
     }
-    Err(format!(
-        "marker '{marker}' not found in {}",
-        path.display()
-    ))
+    Err(format!("marker '{marker}' not found in {}", path.display()))
 }
 
 fn build_tracepoint_session(
@@ -874,8 +857,8 @@ fn e2e_codetracer_dap_ttd_tracepoint_call_eval_windows() {
         .and_then(Value::as_str)
         .expect("top stack frame must include source.path");
 
-    let marker_line = find_marker_line(Path::new(source_path), "C_VALUES_MAIN_BREAKPOINT")
-        .expect("find breakpoint marker line");
+    let marker_line =
+        find_marker_line(Path::new(source_path), "C_VALUES_MAIN_BREAKPOINT").expect("find breakpoint marker line");
     let tracepoint_id = 0;
     let expression = "log(increment_static_local())";
     let args = build_tracepoint_session(tracepoint_id, source_path, marker_line, expression);
@@ -943,8 +926,8 @@ fn e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows() {
         .and_then(Value::as_str)
         .expect("top stack frame must include source.path");
 
-    let marker_line = find_marker_line(Path::new(source_path), "C_VALUES_MAIN_BREAKPOINT")
-        .expect("find breakpoint marker line");
+    let marker_line =
+        find_marker_line(Path::new(source_path), "C_VALUES_MAIN_BREAKPOINT").expect("find breakpoint marker line");
 
     let tracepoint_id = 0;
     let expression = "log(missing_tracepoint_function())";
@@ -1001,8 +984,7 @@ fn e2e_codetracer_dap_ttd_tracepoint_return_struct_windows() {
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
     launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
 
-    let marker_line = find_marker_line(&source_path, "TRACEPOINT_EVAL_BREAK")
-        .expect("find breakpoint marker line");
+    let marker_line = find_marker_line(&source_path, "TRACEPOINT_EVAL_BREAK").expect("find breakpoint marker line");
     let tracepoint_id = 0;
     let expression = "log(get_tracepoint_pair())";
     let args = build_tracepoint_session(
@@ -1063,8 +1045,7 @@ fn e2e_codetracer_dap_ttd_tracepoint_return_string_windows() {
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
     launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
 
-    let marker_line = find_marker_line(&source_path, "TRACEPOINT_EVAL_BREAK")
-        .expect("find breakpoint marker line");
+    let marker_line = find_marker_line(&source_path, "TRACEPOINT_EVAL_BREAK").expect("find breakpoint marker line");
     let tracepoint_id = 0;
     let expression = "log(echo_str(s))";
     let args = build_tracepoint_session(
