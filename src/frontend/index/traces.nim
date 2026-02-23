@@ -193,14 +193,15 @@ proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, he
   let configFile = dir / "dont_ask_again.txt"
 
   let dontAskAgain = fs.existsSync(configFile)
+  let startOptions = data.startOptions
 
   main.webContents.send "CODETRACER::trace-loaded", js{
     trace: trace,
     functions: functions,
     save: save,
-    diff: data.startOptions.diff,
-    withDiff: data.startOptions.withDiff,
-    rawDiffIndex: data.startOptions.rawDiffIndex,
+    diff: startOptions.diff,
+    withDiff: startOptions.withDiff,
+    rawDiffIndex: startOptions.rawDiffIndex,
     dontAskAgain: dontAskAgain,
   }
 

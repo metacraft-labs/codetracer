@@ -91,6 +91,15 @@ pub fn compile_expression(node: Node, source: &str) -> Result<Vec<Opcode>, Box<d
             Ok(opcodes)
         }
 
+        "callExpression" => {
+            let start = node.start_byte();
+            let end = node.end_byte();
+            let call_expr = source[start..end].to_string();
+
+            let opcodes = vec![Opcode::new(Instruction::CallExpression(call_expr), node.range())];
+            Ok(opcodes)
+        }
+
         "logExpression" => {
             let child_count = node.named_child_count();
 

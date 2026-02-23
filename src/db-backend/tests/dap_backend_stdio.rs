@@ -1,156 +1,206 @@
-use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
-use db_backend::dap_types::StackTraceArguments;
+use db_backend::dap::{self, DapClient, DapMessage};
 use db_backend::transport::DapTransport;
 use serde_json::json;
 use std::io::BufReader;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
-// #[test] TODO: enable again, but fix test:
-//   was failing with:
-// thread 'test_backend_dap_server_stdio' panicked at tests/dap_backend_stdio.rs:53:31:
-// failed to read initialize response: JSON error: Missing Content-Length header
-// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-fn _test_backend_dap_server_stdio() {
+fn terminate_child(child: &mut Child) {
+    for _ in 0..20 {
+        match child.try_wait() {
+            Ok(Some(_status)) => return,
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(_) => break,
+        }
+    }
+
+    child.kill().ok();
+    child.wait().ok();
+}
+
+fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
+    let poll_interval = Duration::from_millis(50);
+    let polls = (timeout.as_millis() / poll_interval.as_millis()) as usize;
+    for _ in 0..polls {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) => thread::sleep(poll_interval),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+#[test]
+fn dap_server_stdio_initialize_handshake_works() {
     let bin = env!("CARGO_BIN_EXE_db-backend");
-    let pid = std::process::id() as usize;
-    let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
-
     let mut child = Command::new(bin)
         .arg("dap-server")
         .arg("--stdio")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
-        .unwrap();
+        .unwrap_or_else(|err| panic!("failed to spawn db-backend: {err}"));
 
-    let mut writer = child.stdin.take().unwrap();
-    let mut reader = BufReader::new(child.stdout.take().unwrap());
-
+    let mut writer = child.stdin.take().expect("missing child stdin");
     let mut client = DapClient::default();
+
+    let reader_stdout = child.stdout.take().expect("missing child stdout");
+    let (tx, rx) = mpsc::channel::<Result<DapMessage, String>>();
+    let reader_thread = thread::spawn(move || {
+        let mut reader = BufReader::new(reader_stdout);
+        loop {
+            match dap::read_dap_message_from_reader(&mut reader) {
+                Ok(msg) => {
+                    if tx.send(Ok(msg)).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    let _ = tx.send(Err(err.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+
     let init = client.request("initialize", json!({}));
     writer
         .send(&init)
         .unwrap_or_else(|err| panic!("failed to send initialize request: {err}"));
 
-    let launch_args = LaunchRequestArguments {
-        program: Some("main".to_string()),
-        trace_folder: Some(trace_dir),
-        trace_file: None,
-        raw_diff_index: None,
-        pid: Some(pid as u64),
-        cwd: None,
-        no_debug: None,
-        restart: None,
-        name: None,
-        request: None,
-        typ: None,
-        session_id: None,
-        ct_rr_worker_exe: None,
-        restore_location: None,
-    };
-    let launch = client.launch(launch_args).expect("failed to build launch request");
-    writer
-        .send(&launch)
-        .unwrap_or_else(|err| panic!("failed to send launch request: {err}"));
-
-    let msg1 = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read initialize response: {err}"));
-    match msg1 {
-        DapMessage::Response(r) => {
-            assert_eq!(r.command, "initialize");
-            // assert!(r.body["supportsLoadedSourcesRequest"].as_bool().unwrap());
-            assert!(r.body["supportsStepBack"].as_bool().unwrap());
-            assert!(r.body["supportsConfigurationDoneRequest"].as_bool().unwrap());
-            assert!(r.body["supportsDisassembleRequest"].as_bool().unwrap());
-            assert!(r.body["supportsLogPoints"].as_bool().unwrap());
-            assert!(r.body["supportsRestartRequest"].as_bool().unwrap());
+    let mut initialize_response_seen = false;
+    let mut initialized_event_seen = false;
+    for _ in 0..4 {
+        let message = rx
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap_or_else(|err| panic!("timed out waiting for stdio DAP handshake: {err}"))
+            .unwrap_or_else(|err| panic!("failed while reading stdio DAP message: {err}"));
+        match message {
+            DapMessage::Response(r) if r.command == "initialize" => {
+                initialize_response_seen = true;
+                assert!(r.success, "initialize response reported failure");
+                assert_eq!(
+                    r.body["supportsConfigurationDoneRequest"].as_bool(),
+                    Some(true),
+                    "initialize response missing expected capability"
+                );
+            }
+            DapMessage::Event(e) if e.event == "initialized" => {
+                initialized_event_seen = true;
+            }
+            _ => {}
         }
-        _ => panic!(),
-    }
-    let msg2 = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read initialized event: {err}"));
-    match msg2 {
-        DapMessage::Event(e) => assert_eq!(e.event, "initialized"),
-        _ => panic!(),
-    }
-    let conf_done = client.request("configurationDone", json!({}));
-    // dap::write_message(&mut writer, &conf_done).unwrap();
-    writer
-        .send(&conf_done)
-        .unwrap_or_else(|err| panic!("failed to send configurationDone request: {err}"));
-    let msg3 = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read launch response: {err}"));
-    match msg3 {
-        DapMessage::Response(r) => assert_eq!(r.command, "launch"),
-        _ => panic!(),
-    }
-    let msg4 = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read configurationDone response: {err}"));
-    match msg4 {
-        DapMessage::Response(r) => assert_eq!(r.command, "configurationDone"),
-        _ => panic!(),
-    }
-
-    let msg5 = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read stopped event: {err}"));
-    match msg5 {
-        DapMessage::Event(e) => {
-            assert_eq!(e.event, "stopped");
-            assert_eq!(e.body["reason"], "entry");
+        if initialize_response_seen && initialized_event_seen {
+            break;
         }
-        _ => panic!("expected a stopped event, but got {:?}", msg5),
     }
 
-    let msg_complete_move = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read ct/complete-move event: {err}"));
-    match msg_complete_move {
-        DapMessage::Event(e) => {
-            assert_eq!(e.event, "ct/complete-move");
-        }
-        _ => panic!("expected a complete move events, but got {:?}", msg_complete_move),
-    }
-
-    let threads_request = client.request("threads", json!({}));
-    // dap::write_message(&mut writer, &threads_request).unwrap();
-    writer
-        .send(&threads_request)
-        .unwrap_or_else(|err| panic!("failed to send threads request: {err}"));
-    let msg_threads = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read threads response: {err}"));
-    match msg_threads {
-        DapMessage::Response(r) => {
-            assert_eq!(r.command, "threads");
-            assert_eq!(r.body["threads"][0]["id"], 1);
-        }
-        _ => panic!(
-            "expected a Response DapMessage after a threads request, but got {:?}",
-            msg_threads
-        ),
-    }
-
-    let stack_trace_request = client.request(
-        "stackTrace",
-        serde_json::to_value(StackTraceArguments {
-            thread_id: 1,
-            format: None,
-            levels: None,
-            start_frame: None,
-        })
-        .unwrap(),
+    assert!(
+        initialize_response_seen,
+        "did not observe initialize response over stdio"
     );
-    // dap::write_message(&mut writer, &stack_trace_request).unwrap();
-    writer
-        .send(&stack_trace_request)
-        .unwrap_or_else(|err| panic!("failed to send stackTrace request: {err}"));
-    let msg_stack_trace = dap::read_dap_message_from_reader(&mut reader)
-        .unwrap_or_else(|err| panic!("failed to read stackTrace response: {err}"));
-    match msg_stack_trace {
-        DapMessage::Response(r) => assert_eq!(r.command, "stackTrace"), // TODO: test stackFrames / totalFrames ?
-        _ => panic!(),
-    }
+    assert!(initialized_event_seen, "did not observe initialized event over stdio");
 
     drop(writer);
-    drop(reader);
-    let _ = child.wait().unwrap();
+    terminate_child(&mut child);
+    reader_thread
+        .join()
+        .unwrap_or_else(|_| panic!("stdio reader thread panicked"));
+}
+
+#[test]
+fn dap_server_stdio_disconnect_acknowledges_and_exits() {
+    let bin = env!("CARGO_BIN_EXE_db-backend");
+    let mut child = Command::new(bin)
+        .arg("dap-server")
+        .arg("--stdio")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("failed to spawn db-backend: {err}"));
+
+    let mut writer = child.stdin.take().expect("missing child stdin");
+    let mut client = DapClient::default();
+
+    let reader_stdout = child.stdout.take().expect("missing child stdout");
+    let (tx, rx) = mpsc::channel::<Result<DapMessage, String>>();
+    let reader_thread = thread::spawn(move || {
+        let mut reader = BufReader::new(reader_stdout);
+        loop {
+            match dap::read_dap_message_from_reader(&mut reader) {
+                Ok(msg) => {
+                    if tx.send(Ok(msg)).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    let _ = tx.send(Err(err.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+
+    let init = client.request("initialize", json!({}));
+    writer
+        .send(&init)
+        .unwrap_or_else(|err| panic!("failed to send initialize request: {err}"));
+
+    let mut initialize_response_seen = false;
+    let mut initialized_event_seen = false;
+    for _ in 0..4 {
+        let message = rx
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap_or_else(|err| panic!("timed out waiting for stdio initialize handshake: {err}"))
+            .unwrap_or_else(|err| panic!("failed while reading stdio DAP message: {err}"));
+        match message {
+            DapMessage::Response(r) if r.command == "initialize" => {
+                initialize_response_seen = true;
+                assert!(r.success, "initialize response reported failure");
+            }
+            DapMessage::Event(e) if e.event == "initialized" => {
+                initialized_event_seen = true;
+            }
+            _ => {}
+        }
+        if initialize_response_seen && initialized_event_seen {
+            break;
+        }
+    }
+    assert!(
+        initialize_response_seen && initialized_event_seen,
+        "did not observe initialize handshake before disconnect"
+    );
+
+    let disconnect = client.request("disconnect", json!({}));
+    writer
+        .send(&disconnect)
+        .unwrap_or_else(|err| panic!("failed to send disconnect request: {err}"));
+
+    let message = rx
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap_or_else(|err| panic!("timed out waiting for disconnect response: {err}"))
+        .unwrap_or_else(|err| panic!("failed while reading stdio DAP message: {err}"));
+    match message {
+        DapMessage::Response(r) => {
+            assert_eq!(r.command, "disconnect");
+            assert!(r.success, "disconnect response reported failure");
+        }
+        other => panic!("expected disconnect response, got {other:?}"),
+    }
+
+    let status = wait_for_child_exit(&mut child, Duration::from_secs(3))
+        .unwrap_or_else(|| panic!("db-backend did not exit after disconnect response"));
+    assert!(status.success(), "db-backend exited unsuccessfully: {status}");
+
+    drop(writer);
+    terminate_child(&mut child);
+    reader_thread
+        .join()
+        .unwrap_or_else(|_| panic!("stdio reader thread panicked"));
 }

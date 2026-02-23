@@ -192,6 +192,24 @@ On macOS, we do not yet have support for Nix, instead we compile by using the no
 1. The end result will be a `CodeTracer.dmg` file that can be found under the `non-nix-build` folder.
 1. For quicker testing without manually unpacking CodeTracer every time you can experiment with the contents of the `non-nix-build/CodeTracer.app` folder, which is equivalent to the final app bundle
 
+### Windows (non-Nix bootstrap)
+
+For Windows local development without Nix, use the scripts under `non-nix-build/windows/`:
+
+1. Bootstrap pinned toolchains: `pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1`
+1. Inspect pinned versions and source refs (Rust, Node.js, uv, Nim, ct-remote, Cap'n Proto, Tup): `non-nix-build/windows/toolchain-versions.env`
+1. In Git Bash, source the environment before building: `source non-nix-build/windows/env.sh`
+1. In PowerShell, dot-source the environment before building: `. .\non-nix-build\windows\env.ps1`
+
+This workflow bootstraps pinned tools into a shared user cache (`%LOCALAPPDATA%/codetracer/windows-diy` by default) and keeps setup deterministic for Windows contributors.
+When `env.sh` is sourced, it also ensures `libs/tree-sitter-nim/src/parser.c` is generated when missing or stale.
+The parser script prefers local `libs/tree-sitter-nim/node_modules/.bin/tree-sitter` and falls back to an isolated cached `tree-sitter-cli` install when needed, so generation does not require building native addons for the full grammar package.
+`env.sh` also restores caller shell options (it does not leave `set -e` enabled) and auto-installs missing Node deps in `node-packages` by default so `stylus.cmd`/`webpack.cmd` are available for `tup`/`just` (`WINDOWS_DIY_SETUP_NODE_DEPS=0` disables this behavior).
+For `ct-remote`, the default is `CT_REMOTE_WINDOWS_SOURCE_MODE=auto`: on Windows x64 it uses local `../codetracer-ci` source publish output when available and otherwise falls back to pinned download, while on Windows arm64 it routes to local source and does not fall back to pinned x64 download. `CT_REMOTE_WINDOWS_SOURCE_RID` defaults by architecture (`win-x64` on x64, `win-arm64` on arm64) and remains overrideable. Local-source publish now prefers `CT_REMOTE_WINDOWS_PUBLISH_SCRIPT` (default `<CT_REMOTE_WINDOWS_SOURCE_REPO>/non-nix-build/windows/publish-desktop-client.ps1`) so host-global `dotnet` is not required when that helper is present. Use `CT_REMOTE_WINDOWS_SOURCE_MODE=local|download` and `CT_REMOTE_WINDOWS_SOURCE_REPO=<path>` as needed (`download` is x64-only).
+For Nim, the default is `NIM_WINDOWS_SOURCE_MODE=auto`: try building from pinned Nim/csources source refs with deterministic cache reuse, and fall back to pinned `nim-<version>_x64.zip` when source bootstrap fails. Override with `NIM_WINDOWS_SOURCE_MODE=source|prebuilt`.
+For Cap'n Proto, the default is `CAPNP_WINDOWS_SOURCE_MODE=auto`: use pinned prebuilt ZIP on Windows x64 and source mode on non-x64, with deterministic source-cache reuse. Override with `CAPNP_WINDOWS_SOURCE_MODE=source|prebuilt`.
+For Tup, the default is `TUP_WINDOWS_SOURCE_MODE=auto`: build from pinned source (`https://github.com/zah/tup.git` ref `variants-for-windows`) with deterministic source-cache reuse to preserve Windows variant support. `auto` only falls back to prebuilt when you explicitly provide both `TUP_WINDOWS_PREBUILT_URL` and `TUP_WINDOWS_PREBUILT_SHA256`; otherwise it remains source-only by design. Override with `TUP_WINDOWS_SOURCE_MODE=source|prebuilt`.
+
 ## The CodeTracer CLI
 
 When you launch the CodeTracer GUI, it will offer you the option to also install the CodeTracer CLI. It provides convenient ways to create and load trace files from the command-line or to integrate CodeTracer w
@@ -202,8 +220,7 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
 `<application>` can be a source file or a project folder (depending on the language):
 
 1. `ct run <application>` - Creates a recording and load it in CodeTracer with a single command.
-1. `ct record <application>` - Creates a trace file that can be loaded later or shared. For Python scripts this reuses the interpreter you would get by running `python` in the same shell (honoring the `CODETRAC
-ER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, and `PYTHON` environment variables before falling back to `PATH`) and that interpreter must have `codetracer_python_recorder` installed.
+1. `ct record <application>` - Creates a trace file that can be loaded later or shared. On Windows, recordings use TTD via `ct-rr-support record` (requires an elevated shell). For Python scripts this reuses the interpreter you would get by running `python` in the same shell (honoring the `CODETRACER_PYTHON_INTERPRETER`, `PYTHON_EXECUTABLE`, `PYTHONEXECUTABLE`, and `PYTHON` environment variables before falling back to `PATH`) and that interpreter must have `codetracer_python_recorder` installed.
 1. `ct replay` - Launches the CodeTracer GUI with a previously recorded trace file. Common usages are:
    * `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
    * `ct replay <program-name>` - Opens the last trace of an application.

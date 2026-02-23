@@ -35,18 +35,39 @@ NIM_DANGER_FLAGS=\
 --linetrace:off
 
 ROOT = $(TUP_CWD)/../../
-NIM_BIN = nim1
+NIM_BIN = nim
 
 NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
 NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)
 NIM_DANGER  = $(NIM_BIN) $(NIM_DANGER_FLAGS)
 
+ifeq (@(TUP_PLATFORM),win32)
+EXE_SUFFIX = .exe
+else
+EXE_SUFFIX =
+endif
+
+NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
+BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[/\\].*
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[/\\].*
+VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[/\\].*
+SMALL_LANG_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]small_lang_target[/\\].*
+
+ifeq (@(TUP_PLATFORM),win32)
+TSC = tsc.cmd
+STYLUS = stylus.cmd
+else
 TSC = tsc
 STYLUS = stylus
+endif
 
 # misc rules
 !cp = |> ^ %f^ cp %f %o |>
+ifeq (@(TUP_PLATFORM),win32)
+!stylus = |> ^ %f^ $(STYLUS) -p %f > %o |>
+else
 !stylus = |> ^ %f^ $(STYLUS) %f -o %o |>
+endif
 # workaround for errors, file seems to be still generated
 !ts = |> ^ %f^ $(TSC) %f |> %o
 
@@ -108,14 +129,15 @@ js %f |> %o
 --debugInfo\
 --nimcache:/tmp/ct-nim-cache/%B_test_nimcache2\
 --out:%o\
-js %f |> %B.js
+js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 # C rules:
 !nim_c = |> ^ %f^ $(NIM_DEBUG)\
 -d:ssl \
 -d:useOpenssl3 \
+--nimcache:/tmp/ct-nim-cache/%B_c\
 --out:%o\
-c %f |> %o
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 !codetracer = |> $(NIM_DEBUG)\
 -d:testing\
@@ -128,10 +150,16 @@ c %f |> %o
 -d:withTup \
 -d:useOpenssl3 \
 -d:ssl \
---nimcache:/tmp/ct-nim-cache/codetracer_binary\
+--nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
 --out:%o\
-c %f |> %o
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
 
+!nim_tester = |> ^ %f^ $(NIM_DEBUG) \
+--nimcache:/tmp/ct-nim-cache/tester \
+--warnings:on \
+--hints:on \
+--out:%o\
+c %f |> %B macro_sourcemap_%B.json | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 # mypy
 !mypy = |> ^ %f^ mypy --implicit-optional --cache-dir /tmp/.mypy-cache %f; |>
@@ -144,24 +172,30 @@ c %f |> %o
 
 # rust
 export RUSTUP_HOME
+export PATH
+export LIB
+export LIBPATH
+export INCLUDE
+export CC
+export CXX
+export NIMFLAGS
+
+# Keep linker selection in Cargo config/env instead of inline --config args.
+# This avoids shell-quoting differences between Windows environments.
+RUST_WINDOWS_LINKER_CONFIG =
 
 !rust_cargo_backend_manager = |> \
-  CARGO_TARGET_DIR=/tmp/codetracer/backend_manager_target \
-    cargo build --release && \
-    cp /tmp/codetracer/backend_manager_target/release/backend-manager %o |> %o
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/backend_manager_target && \
+    cp C:/tmp/codetracer/backend_manager_target/release/backend-manager$(EXE_SUFFIX) %o |> %o | $(BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS)
 !debug_rust_cargo_db_backend = |> \
-  CARGO_TARGET_DIR=/tmp/codetracer/db_backend_target \
-    cargo build && \
-    cp /tmp/codetracer/db_backend_target/debug/db-backend %o |> %o
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --target-dir C:/tmp/codetracer/db_backend_target && \
+    cp C:/tmp/codetracer/db_backend_target/debug/db-backend$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_db_backend = |> \
-  CARGO_TARGET_DIR=/tmp/codetracer/db_backend_target \
-    cargo build --release && \
-    cp /tmp/codetracer/db_backend_target/release/db-backend %o |> %o
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/db_backend_target && \
+    cp C:/tmp/codetracer/db_backend_target/release/db-backend$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_virtualization_layers = |> \
-  CARGO_TARGET_DIR=/tmp/codetracer/virtualization_layers_target \
-    cargo build --release && \
-    cp /tmp/codetracer/virtualization_layers_target/release/virtualization-layers %o |> %o
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/virtualization_layers_target && \
+    cp C:/tmp/codetracer/virtualization_layers_target/release/virtualization-layers$(EXE_SUFFIX) %o |> %o | $(VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_small_lang = |> \
-  CARGO_TARGET_DIR=/tmp/codetracer/small_lang_target \
-    cargo build --release && \
-    cp /tmp/codetracer/small_lang_target/release/small-lang %o |> %o
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir C:/tmp/codetracer/small_lang_target && \
+    cp C:/tmp/codetracer/small_lang_target/release/small-lang$(EXE_SUFFIX) %o |> %o | $(SMALL_LANG_CARGO_IGNORE_OUTPUTS)

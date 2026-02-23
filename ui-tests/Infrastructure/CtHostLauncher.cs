@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace UiTests.Infrastructure;
@@ -14,6 +15,8 @@ internal interface ICtHostLauncher
 
 internal sealed class CtHostLauncher : ICtHostLauncher
 {
+    private static readonly Regex TraceFolderPattern = new(@"^trace-(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly ICodetracerLauncher _launcher;
     private readonly ILogger<CtHostLauncher> _logger;
 
@@ -25,6 +28,19 @@ internal sealed class CtHostLauncher : ICtHostLauncher
 
     public Process StartHostProcess(int port, int backendPort, int frontendPort, string tracePath, string label, bool emitOutput, string? isolatedConfigDir = null)
     {
+        var hostTraceArgument = BuildHostTraceArgument(tracePath);
+
+        _logger.LogInformation(
+            "[ct host:{Label}] launching: ct='{CtPath}' workdir='{Workdir}' trace='{TracePath}' hostTraceArg='{HostTraceArg}' ports(http={HttpPort}, backend={BackendPort}, frontend={FrontendPort})",
+            label,
+            _launcher.CtPath,
+            _launcher.CtInstallDirectory,
+            tracePath,
+            hostTraceArgument,
+            port,
+            backendPort,
+            frontendPort);
+
         var psi = new ProcessStartInfo(_launcher.CtPath)
         {
             WorkingDirectory = _launcher.CtInstallDirectory,
@@ -37,7 +53,7 @@ internal sealed class CtHostLauncher : ICtHostLauncher
         psi.ArgumentList.Add($"--port={port.ToString(CultureInfo.InvariantCulture)}");
         psi.ArgumentList.Add($"--backend-socket-port={backendPort.ToString(CultureInfo.InvariantCulture)}");
         psi.ArgumentList.Add($"--frontend-socket={frontendPort.ToString(CultureInfo.InvariantCulture)}");
-        psi.ArgumentList.Add(tracePath);
+        psi.ArgumentList.Add(hostTraceArgument);
 
         // Isolate config directory to prevent test interference
         if (!string.IsNullOrEmpty(isolatedConfigDir))
@@ -59,6 +75,23 @@ internal sealed class CtHostLauncher : ICtHostLauncher
         _ = Task.Run(async () => await PumpAsync(process.StandardError, line => _logger.LogError("[ct host:{Label}] {Line}", label, line)));
 
         return process;
+    }
+
+    private static string BuildHostTraceArgument(string tracePath)
+    {
+        var folderName = Path.GetFileName(tracePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            return tracePath;
+        }
+
+        var match = TraceFolderPattern.Match(folderName);
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+
+        return tracePath;
     }
 
     public async Task WaitForServerAsync(int port, TimeSpan timeout, string label, CancellationToken cancellationToken)

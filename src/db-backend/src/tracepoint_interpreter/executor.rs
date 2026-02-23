@@ -102,6 +102,19 @@ pub fn execute_bytecode(
                 });
             }
 
+            Instruction::CallExpression(call_expr) => match replay.evaluate_call_expression(call_expr, lang) {
+                Ok(val) => stack.push(val),
+                Err(e) => {
+                    let mut err_value = Value::new(TypeKind::Error, eval_error_type.clone());
+                    err_value.msg = format!("Call expression failed: {:?}", e);
+                    locals.push(StringAndValueTuple {
+                        field0: source[opcode.position.start_byte..opcode.position.end_byte].to_string(),
+                        field1: err_value,
+                    });
+                    return locals;
+                }
+            },
+
             Instruction::UnaryOperation(op) => {
                 if let Some(operand) = stack.pop() {
                     if let Some(op_func) = unary_op_functions.get(op) {

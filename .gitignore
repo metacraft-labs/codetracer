@@ -238,3 +238,6 @@ test-programs/ada_sudoku_solver/b~*
 src/libs
 src/tup.config
 .nix/
+/sub-agent-report-*.txt
+.tmp/
+.tools/

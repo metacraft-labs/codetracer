@@ -1,10 +1,15 @@
 import std / [
   os, osproc, strformat, httpclient, json, strutils, sequtils,
-  times, db_sqlite
+  times
 ]
 import json_serialization
 import paths, types, lang
 include common_trace_index
+
+when NimMajor >= 2:
+  import ../db_connector/db_sqlite
+else:
+  import impure/db_sqlite
 
 
 type
@@ -385,10 +390,30 @@ proc find*(id: int, test: bool): Trace =
 
 proc findByPath*(path: string, test: bool): Trace =
   let db = ensureDB(test)
-  let traces = db.getAllRows(sql"SELECT * FROM traces WHERE outputFolder = ? ORDER BY id DESC LIMIT 1", path)
+  let exact = db.getAllRows(
+    sql"SELECT * FROM traces WHERE outputFolder = ? ORDER BY id DESC LIMIT 1",
+    path)
+  if exact.len > 0:
+    db.close()
+    return exact[0].loadTrace(test)
+
+  let slashNormalizedPath = path.replace("\\", "/")
+  let normalizedInput =
+    if slashNormalizedPath.endsWith("/"):
+      slashNormalizedPath[0 .. ^2]
+    else:
+      slashNormalizedPath
+
+  let normalized = db.getAllRows(
+    sql"""SELECT * FROM traces
+          WHERE rtrim(replace(outputFolder, char(92), '/'), '/') = ?
+          ORDER BY id DESC LIMIT 1""",
+    normalizedInput)
+  if normalized.len > 0:
+    db.close()
+    return normalized[0].loadTrace(test)
+
   db.close()
-  if traces.len > 0:
-    result = traces[0].loadTrace(test)
 
 proc findByProgram*(program: string, test: bool): Trace =
   let db = ensureDB(test)

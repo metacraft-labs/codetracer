@@ -288,6 +288,17 @@ impl DapClient {
         }))
     }
 
+    pub fn tracepoint_locals_event(&mut self, values: &task::TraceValues) -> DapResult<DapMessage> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "tracepoint-locals".to_string(),
+            body: serde_json::to_value(values)?,
+        }))
+    }
+
     pub fn complete_move_event(&mut self, state: &task::MoveState) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {

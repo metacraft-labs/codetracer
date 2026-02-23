@@ -228,20 +228,22 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
     newElement.classList.add("layout-buttons-container")
     newElement.setAttribute("tabindex", "0")
     newElement.onclick = proc(e: Event) {.nimcall.} =
-      let element = cast[kdom.Element](e.target.children[0])
+      let currentElement = cast[kdom.Element](e.toJs.currentTarget)
+      let element = cast[kdom.Element](currentElement.children[0])
 
       if element.classList.contains("hidden"):
         element.classList.remove("hidden")
-        newElement.classList.add("active")
+        currentElement.classList.add("active")
       else:
         element.classList.add("hidden")
-        newElement.classList.remove("active")
+        currentElement.classList.remove("active")
 
       cast[kdom.Element](e.target).focus()
 
     newElement.onblur = proc(e: Event) {.nimcall.} =
+      let currentElement = cast[kdom.Element](e.toJs.currentTarget)
       e.toJs.target.children[0].classList.add("hidden")
-      newElement.classList.remove("active")
+      currentElement.classList.remove("active")
 
     let container = ev.toJs.target.element.childNodes[0].childNodes[1]
     let tabContainer = ev.toJs.target.element.childNodes[0].childNodes[0]

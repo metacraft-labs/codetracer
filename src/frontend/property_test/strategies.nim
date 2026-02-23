@@ -1,7 +1,7 @@
 import std / jsffi
 from std / strutils import splitWhitespace, parseInt
 from std / strformat import fmt
-from operations import Operation
+from operations import Operation, OperationKind
 
 type
   Strategy* = ref object of RootObj
@@ -39,12 +39,12 @@ type
 method generateOperation*(strategy: SimpleStrategy): (Operation, bool) =
   let countMod7 = strategy.count mod 7
   let operation = if countMod7 < 3:
-      Operation(kind: OpStepAction, stepAction: "step-in")
+      Operation(kind: OperationKind.OpStepAction, stepAction: "step-in")
     elif countMod7 < 6:
-      Operation(kind: OpStepAction, stepAction: "next")
+      Operation(kind: OperationKind.OpStepAction, stepAction: "next")
     else:
       let eventIndex = strategy.count div 7
-      Operation(kind: OpEventJump, eventIndex: eventIndex)
+      Operation(kind: OperationKind.OpEventJump, eventIndex: eventIndex)
   strategy.count += 1
   let finished = strategy.count > strategy.countLimit
   (operation, finished)

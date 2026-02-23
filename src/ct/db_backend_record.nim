@@ -52,15 +52,14 @@ proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
     echo "WARNING: Can't extract symbols. Some functionality may not work correctly!"
     echo ""
 
-proc recordWithRR(
+proc recordWithCtRrSupport(
     ctRRSupportExe: string,
     program: string, args: seq[string],
     traceFolder: string,
-    traceId: int): Trace =
+    traceId: int,
+    traceKind: string): Trace =
 
   createDir(traceFolder)
-  let traceMetadataPath = traceFolder / "trace_metadata.json"
-  let traceDbMetadataPath = traceFolder / "trace_db_metadata.json"
   let process = startProcess(
     ctRRSupportExe,
     args = @[
@@ -73,8 +72,8 @@ proc recordWithRR(
     echo fmt"error: ct-rr-support returned exit code ", code
     quit(code)
 
-  # record pid and lang in trace_db_metadata.json
-  result = importTrace(traceFolder, traceId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind="rr")
+  # import replay trace metadata written by ct-rr-support.
+  result = importTrace(traceFolder, traceId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
 # rr patches for ruby/other vm-s: not supported now, instead
@@ -327,17 +326,16 @@ proc record(
         pythonActivationPath = activationPathResolved,
         pythonTestFramework = pythonTestFramework,
         pythonTestArgs = pythonTestArgs)
-    elif traceKind == "rr":
-      echo "rr"
-      echo rrSupportPath
-      return recordWithRR(
+    elif traceKind == "rr" or traceKind == "ttd":
+      return recordWithCtRrSupport(
         rrSupportPath,
         executable,
         args,
         outputFolder,
-        traceId)
+        traceId,
+        traceKind)
     else:
-      echo fmt"ERROR: unsupported lang {lang}"
+      echo fmt"ERROR: unsupported trace kind {traceKind}"
       quit(1)
   except CatchableError:
     exitCode = -1
@@ -419,7 +417,7 @@ proc main*(): Trace =
   #   [-e/--export <export-zip>] [-c/--cleanup-output-folder]
   #   [-t/--stylus-trace <trace-path>]
   #   [-a/--address <address>] [--socket <socket-path>]
-  #   [--trace-kind db/rr] [--rr-support-path <rr-support-path>]
+  #   [--trace-kind db/rr/ttd] [--rr-support-path <rr-support-path>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:

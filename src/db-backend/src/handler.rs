@@ -1767,17 +1767,11 @@ impl Handler {
         args: UpdateTableArgs,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let (table_update, _trace_values_option) = self.event_db.update_table(args)?;
-        // TODO: For now no trace values are available
-        // if let Some(trace_values) = trace_values_option {
-        //     self.send_event((
-        //         EventKind::TracepointLocals,
-        //         gen_event_id(EventKind::TracepointLocals),
-        //         self.serialize(&trace_values)?,
-        //         false,
-        //     ))?;
-        // }
-        // info!("table update {:?}", table_update);
+        let (table_update, trace_values_option) = self.event_db.update_table(args)?;
+        if let Some(trace_values) = trace_values_option.as_ref() {
+            let trace_event = self.dap_client.tracepoint_locals_event(trace_values)?;
+            sender.send(trace_event)?;
+        }
         let raw_event = self
             .dap_client
             .updated_table_event(&task::CtUpdatedTableResponseBody { table_update })?;

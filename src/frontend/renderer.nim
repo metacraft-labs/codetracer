@@ -54,6 +54,7 @@ else:
 
 var escapeHandler*: proc: void
 escapeHandler = nil
+var contextMenuHandlers*: seq[proc(ev: Event)]
 
 template componentContainerClass*(class: string = ""): cstring =
   cstring("component-container " & class)
@@ -148,9 +149,6 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
     isEditMode: isEditMode}
 
 
-var redrawIndex* = 0
-
-
 proc redrawAll* =
   # echo "redraw"
   # echo "## REDRAW"
@@ -175,8 +173,7 @@ proc redrawAll* =
     # data.saveConfig(data.ui.layout)
     #   build.config.width = oldWidth
   data.ui.lastRedraw = now()
-  redrawIndex += 1
-  # echo "## FINISH REDRAW ", redrawIndex
+  # echo "## FINISH REDRAW"
 data.redraw = redrawAll
 
 
@@ -1113,25 +1110,30 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
   let container = dom.document.getElementById("context-menu-container")
   container.style.display = "flex"
   container.innerHTML = ""
+  contextMenuHandlers.setLen(options.len)
   for i, option in options:
-    capture [option]:
-      let newElement = kdom.document.createElement("div")
-      let itemContainer = kdom.document.createElement("div")
-      itemContainer.classList.add("context-menu-item-container")
-      newElement.classList.add("context-menu-item")
-      newElement.id = cstring(fmt"menu-item-{i}")
-      newElement.innerHTML = option.name
-      newElement.onclick = proc(ev: Event) {.nimcall.} =
-        option.handler(ev)
-        container.style.display = "none"
-      if option.hint != "":
-        let hint = kdom.document.createElement("div")
-        hint.classList.add("context-menu-hint")
-        hint.id = cstring(fmt"menu-hint-{i}")
-        hint.innerHTML = option.hint
-        cast[dom.Element](newElement).append(cast[dom.Element](hint))
-      cast[dom.Element](itemContainer).append(cast[dom.Element](newElement))
-      container.append(cast[dom.Element](itemContainer))
+    contextMenuHandlers[i] = option.handler
+    let newElement = kdom.document.createElement("div")
+    let itemContainer = kdom.document.createElement("div")
+    itemContainer.classList.add("context-menu-item-container")
+    newElement.classList.add("context-menu-item")
+    newElement.id = cstring(fmt"menu-item-{i}")
+    newElement.innerHTML = option.name
+    newElement.onclick = proc(ev: Event) {.nimcall.} =
+      let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
+      if targetId.startsWith("menu-item-"):
+        let itemIndex = parseInt(targetId["menu-item-".len..^1])
+        if itemIndex >= 0 and itemIndex < contextMenuHandlers.len:
+          contextMenuHandlers[itemIndex](ev)
+      cast[kdom.Element](dom.document.getElementById("context-menu-container")).style.display = "none"
+    if option.hint != "":
+      let hint = kdom.document.createElement("div")
+      hint.classList.add("context-menu-hint")
+      hint.id = cstring(fmt"menu-hint-{i}")
+      hint.innerHTML = option.hint
+      cast[dom.Element](newElement).append(cast[dom.Element](hint))
+    cast[dom.Element](itemContainer).append(cast[dom.Element](newElement))
+    container.append(cast[dom.Element](itemContainer))
 
   let contextWidth = cast[dom.Element](container).clientWidth
   let clientWidth = cast[int](jq("#ROOT").toJs.clientWidth)

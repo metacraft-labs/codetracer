@@ -95,7 +95,7 @@ proc receive*(m: MediatorWithSubscribers, eventKind: CtEventKind, rawValue: JsOb
     m.registerSubscriber(cast[CtEventKind](rawValue), subscriber)
 
 proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber: bool, transport: Transport): MediatorWithSubscribers =
-  result = MediatorWithSubscribers(
+  let mediator = MediatorWithSubscribers(
     name: name,
     isRemote: isRemote,
     singleSubscriber: singleSubscriber,
@@ -105,7 +105,8 @@ proc newMediatorWithSubscribers*(name: cstring, isRemote: bool, singleSubscriber
     if not data.kind.isNil and not data.value.isNil:
       let eventKind = cast[CtEventKind](data.kind)
       let rawValue = data.value
-      result.receive(eventKind, rawValue, subscriber))
+      mediator.receive(eventKind, rawValue, subscriber))
+  result = mediator
 
 # usecases:
 # -> load locals --send event to the central context -> does stuff; <-> backend; -> send us back loaded locals event or response;

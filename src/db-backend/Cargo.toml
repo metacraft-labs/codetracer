@@ -48,7 +48,7 @@ web-sys = { version = "0.3", optional = true, features = [
 
 vfs = "0.12"
 
-expanduser = { version = "1.2.2", optional = true }
+shellexpand = { version = "3.1.1", optional = true }
 
 ntest = "0.9.3"
 
@@ -68,6 +68,9 @@ tree-sitter-nim = { path = "../../libs/tree-sitter-nim/bindings/rust" }
 # the binding for our custom tracepoint tresitter grammar:
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 tree-sitter-go = "0.25.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59.0", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Pipes"] }
 
 [lib]
 name = "db_backend"
@@ -94,7 +97,7 @@ debugging = []
 
 default = ["io-transport"]
 
-io-transport = ["dep:expanduser"]
+io-transport = ["dep:shellexpand"]
 browser-transport = [
   "dep:serde-wasm-bindgen",
   "dep:wasm-bindgen",

@@ -4,7 +4,7 @@ Follow these steps to diagnose failures and keep the suite reliable.
 
 ## Environment Checklist
 
-- Ensure the `ct` executable is available. `Infrastructure/CodetracerLauncher.cs` resolves it via `CODETRACER_E2E_CT_PATH` or the default build output (`src/build-debug/bin/ct`).
+- Ensure the `ct` executable is available. `Infrastructure/CodetracerLauncher.cs` resolves it via `CODETRACER_E2E_CT_PATH` or the default build output (`src/build-debug/bin/ct` on POSIX, `src/build-debug/bin/ct.exe` on Windows).
 - Pass the correct program path to `ct record`: Noir scenarios require the directory that contains `program.json`, while Ruby/Python scenarios expect the `.rb` / `.py` file. The launcher now mirrors this behaviour so existing traces continue to build correctly.
 - Confirm `CODETRACER_REPO_ROOT_PATH` if you use a non-standard checkout layout. The launcher uses it to locate `test-programs/` when recording traces.
 - Verify Playwright dependencies with `npx playwright install`. The `Microsoft.Playwright` NuGet package boots browsers on first run, but explicit installation avoids surprises.
@@ -104,6 +104,13 @@ Adjust `--include` / `--suite` values to match the identifiers in `Execution/Tes
 
 ## Common Failure Modes
 
+- **Windows Noir recording hang (current blocker)**: On the current Windows non-Nix setup, Noir recording (`ct record test-programs/noir_space_ship`) can hang inside `nargo trace`, which prevents generating a usable trace for Noir scenarios. In this state, UI runs often pick a `trace-*` folder containing only `symbols.json`, and component waits time out because no real trace data is loaded.
+- **Interim unblock path**: Run **Web-only** program-agnostic/layout tests with an explicit non-Noir trace folder, for example:
+  - PowerShell:
+    - `$env:CODETRACER_TRACE_PATH = (Resolve-Path ..\src\tui\trace).Path`
+    - `dotnet run -- --mode=Web --include=Layout.NormalOperationWithValidLayout --max-parallel=1`
+    - `dotnet run -- --mode=Web --include=Layout.UiFunctionalityAfterRecovery --max-parallel=1`
+  - This bypasses Noir recording while still validating host, Playwright, and core UI interactions.
 - **Process startup**: If `Infrastructure/CodetracerLauncher.IsCtAvailable` resolves to false, rebuild CodeTracer or set `CODETRACER_E2E_CT_PATH` to a valid binary before running `dotnet run`.
 - **CDP negotiation**: Electron builds that reject `--remote-debugging-port=<port>` (error: `bad option: --remote-debugging-port=####`) prevent Playwright from attaching. Ensure your `ct` bundle ships an Electron binary with remote debugging enabled or update to a compatible build.
 - **Electron environment leaks**: Global variables like `ELECTRON_RUN_AS_NODE=1` cause Electron to behave like the Node runtime and reject debug flags. The Electron executor strips these, but confirm your shell configuration does not reintroduce them when running `ct` directly.

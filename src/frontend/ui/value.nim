@@ -13,7 +13,7 @@ proc view(
   value: Value,
   expression: cstring,
   name: cstring,
-  path: var seq[SubPath],
+  path: seq[SubPath],
   depth: int = 0,
   annotation: cstring = ""
 ): VNode
@@ -816,7 +816,7 @@ proc expandedCompoundView*(
   value: Value,
   expression: cstring,
   children: seq[(cstring, Value)],
-  path: var seq[SubPath],
+  path: seq[SubPath],
   left: string,
   right: string,
   depth: int = 0
@@ -832,13 +832,14 @@ proc expandedCompoundView*(
     else:
       for child in children:
         let (name, element) = child
+        var childPath = path
 
         if element.kind notin ATOM_KINDS and value.kind != Variant:
           try:
             let index = parseInt(($name)[1..^2])
-            block: path.add(SubPath{kind: Index, index: index, typeKind: value.kind})
+            block: childPath.add(SubPath{kind: Index, index: index, typeKind: value.kind})
           except:
-            block: path.add(SubPath{kind: Field, name: name, typeKind: value.kind})
+            block: childPath.add(SubPath{kind: Field, name: name, typeKind: value.kind})
 
         # TODO: when fixing expansion of values/fields:
         #   rework with activeVariantValue fields or elements
@@ -859,10 +860,7 @@ proc expandedCompoundView*(
         # else:
 
         echo "view expandCompoundView ", expression, " ", name
-        view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
-
-        if depth + 1 < path.len:
-          discard path.pop()
+        view(self, element, cstring(fmt"{expression} {name}"), name, childPath, depth + 1)
 
 proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem] =
   var showHistory:  ContextMenuItem
@@ -901,7 +899,7 @@ proc view(
   value: Value,
   expression: cstring,
   name: cstring,
-  path: var seq[SubPath],
+  path: seq[SubPath],
   depth: int = 0,
   annotation: cstring = ""
 ): VNode =
@@ -934,8 +932,9 @@ proc view(
 
     of Pointer:
       if self.uiExpanded(value, expression):
-        path.add(SubPath{kind: Dereference, typeKind: value.kind})
-        self.view(value.refValue, expression, "_", path, depth, value.address & " ->")
+        var nextPath = path
+        nextPath.add(SubPath{kind: Dereference, typeKind: value.kind})
+        self.view(value.refValue, expression, "_", nextPath, depth, value.address & " ->")
       else:
         self.atomValueView($value.textRepr, expression, "pointer", value)
 

@@ -53,8 +53,16 @@ public class LayoutPage : BasePage
         catch (TimeoutException ex)
         {
             var count = await locator.CountAsync();
-            DebugLogger.Log($"LayoutPage: component '{componentName}' FAILED to load (selector='{selector}', final count={count})");
-            throw new TimeoutException($"Component '{componentName}' (selector '{selector}') did not load; final count={count}.", ex);
+            var candidateIds = await Page.EvaluateAsync<string[]>(
+                "() => Array.from(document.querySelectorAll('div[id]')).map(el => el.id).filter(id => id.toLowerCase().includes('component')).slice(0, 25)");
+            var bodySummary = await Page.EvaluateAsync<string>(
+                "() => (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 600)");
+            var knownComponents = candidateIds.Length == 0 ? "none" : string.Join(", ", candidateIds);
+            DebugLogger.Log(
+                $"LayoutPage: component '{componentName}' FAILED to load (selector='{selector}', final count={count}, known={knownComponents}, body='{bodySummary}')");
+            throw new TimeoutException(
+                $"Component '{componentName}' (selector '{selector}') did not load; final count={count}. Known component-like ids: {knownComponents}. Body sample: {bodySummary}",
+                ex);
         }
     }
 

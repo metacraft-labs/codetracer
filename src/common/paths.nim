@@ -2,11 +2,15 @@ import std / [os, strformat]
 import env
 
 when not defined(js):
-  import std / posix
+  when defined(windows):
+    # Avoid POSIX-only pwd/getpwuid on Windows toolchains.
+    let username = env.get("USERNAME", "unknown")
+  else:
+    import std / posix
 
-  # copied and adapted from https://stackoverflow.com/a/8953445/438099
-  let pwd = getpwuid(geteuid())
-  let username = pwd.pw_name
+    # copied and adapted from https://stackoverflow.com/a/8953445/438099
+    let pwd = getpwuid(geteuid())
+    let username = pwd.pw_name
 
   var inUiTest = false
 else:
@@ -67,6 +71,10 @@ when defined(js):
       linksPathValue = codetracerExeDir
 
 let linksPath* = linksPathValue
+let bundledCtagsPath = linksPath / "bin" / "ctags"
+let bundledNargoPath = linksPath / "bin" / "nargo"
+when not defined(js):
+  let bundledNargoPathWithExeExt = bundledNargoPath & ExeExt
 
 # binary/lib/artifact paths
 # should be same in folder structure
@@ -99,12 +107,19 @@ let
   rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH", linksPath / "bin" / "codetracer-ruby-recorder")
 
   smallExe* = linksPath / "bin" / "small-lang"
-  noirExe* = env.get("CODETRACER_NOIR_EXE_PATH", linksPath / "bin" / "nargo" )
+  noirExe* = env.get(
+    "CODETRACER_NOIR_EXE_PATH",
+    when defined(js):
+      bundledNargoPath
+    else:
+      if existsFile(bundledNargoPath) or existsFile(bundledNargoPathWithExeExt):
+        bundledNargoPath
+      else:
+        "nargo")
   wazeroExe* = env.get("CODETRACER_WASM_VM_PATH", linksPath / "bin" / "wazero")
   dbBackendExe* = linksPath / "bin" / "db-backend"
   backendManagerExe* = linksPath / "bin" / "backend-manager"
   virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
-  ctagsExe* = linksPath / "bin" / "ctags"
 
   cargoExe* = linksPath / "bin" / "cargo"
 
@@ -114,9 +129,16 @@ let
   userInterfacePath* = codetracerExeDir / "ui.js"
   chromedriverExe* = linksPath / "bin" / "chromedriver"
 
-  cTraceObjectFilePath* = env.get(
-    "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
-    linksPath / "lib" / "trace.o")
+when defined(js):
+  let ctagsExe* = env.get("CODETRACER_CTAGS_EXE_PATH", bundledCtagsPath)
+else:
+  let ctagsExe* = env.get(
+    "CODETRACER_CTAGS_EXE_PATH",
+    if existsFile(bundledCtagsPath): bundledCtagsPath else: "ctags")
+
+let cTraceObjectFilePath* = env.get(
+  "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
+  linksPath / "lib" / "trace.o")
 
 when defined(ctmacos):
   let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/"
@@ -174,11 +196,19 @@ let
 
   nimcacheDir* = codetracerTmpPath / "codetracer_projects/"
   scriptExe* = linksPath / "bin" / "script"
-  nodeExe* = linksPath / "bin" / "node"
 
   zipExe* = linksPath / "bin" / "zip"
   unzipExe* = linksPath / "bin" / "unzip"
   curlExe* = linksPath / "bin" / "curl"
+
+when defined(js):
+  let nodeExe* = env.get("CODETRACER_NODE_EXE_PATH", linksPath / "bin" / "node")
+else:
+  let nodeBinName = if defined(windows): "node.exe" else: "node"
+  let bundledNodePath = linksPath / "bin" / nodeBinName
+  let nodeExe* = env.get(
+    "CODETRACER_NODE_EXE_PATH",
+    if existsFile(bundledNodePath): bundledNodePath else: "node")
 
 # echo "codetracer exe dir ", codetracerExeDir
 

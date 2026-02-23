@@ -225,6 +225,13 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
       echo "ERROR: maybe something wrong with record; couldn't read trace id after recording"
       quit(1)
 
+proc nativeReplayTraceKindForHost(): string =
+  ## Keep Linux/macOS on RR while routing Windows native recordings to TTD.
+  when defined(windows):
+    "ttd"
+  else:
+    "rr"
+
 proc record*(lang: string,
              outputFolder: string,
              exportFile: string,
@@ -332,9 +339,10 @@ proc record*(lang: string,
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
+      let traceKind = nativeReplayTraceKindForHost()
       return recordInternal(
         dbBackendRecordExe,
-        pargs.concat(@["--trace-kind", "rr", "--rr-support-path", ctConfig.rrBackend.path]),
+        pargs.concat(@["--trace-kind", traceKind, "--rr-support-path", ctConfig.rrBackend.path]),
         withDiff,
         storeTraceFolderForPid,
         upload)

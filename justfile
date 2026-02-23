@@ -1,50 +1,8 @@
 build:
-  #!/usr/bin/env bash
-
-  # (alexander) we still need to run direnv reload here, so
-  # think if we ned this here
-  # Make sure all submodules are up to date
-  # git submodule sync
-  # git submodule update --init --recursive
-
-  # Build CodeTracer once, so we can run the user-setup command
-  # TODO: alexander think more about this command
-  # cd src
-  # tup build-debug
-  # build-debug/codetracer user-setup
-
-  # Start building continuously
-  cd src
-  tup build-debug
-  tup monitor -a
-  cd ../
-
-  # start webpack
-  node_modules/.bin/webpack --watch --progress & # building frontend_bundle.js
-
-  # Start the JavaScript and CSS hot-reloading server
-  # TODO browser-sync is currently missing
-  # node build-debug/browsersync_serv.js &
+  bash scripts/build.sh
 
 build-once:
-  #!/usr/bin/env bash
-
-  # We have to make the dist directory here, because it's missing on a fresh check out
-  # It will be created by the webpack command below, but we have an a chicken and egg
-  # problem because the Tupfiles refer to it.
-  mkdir public/dist
-
-  cd src
-  tup build-debug
-  cd ..
-
-  # Build frontend_bundle.js in the dist folder
-  node_modules/.bin/webpack --progress
-
-  # We need to execute another tup run because webpack may have created some new files
-  # that tup will discover
-  cd src
-  tup build-debug
+  bash scripts/build-once.sh
 
 build-docs:
   #!/usr/bin/env bash

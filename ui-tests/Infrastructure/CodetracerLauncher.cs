@@ -31,6 +31,12 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".local", "share", "codetracer");
 
+    private static readonly string XdgDefaultTraceDirectory =
+        Path.Combine(
+            Environment.GetEnvironmentVariable("XDG_DATA_HOME") ??
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share"),
+            "codetracer");
+
     public CodetracerLauncher(IOptions<AppSettings> settings, ILogger<CodetracerLauncher> logger)
     {
         _settings = settings.Value;
@@ -40,7 +46,7 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
             Path.Combine(
                 Environment.GetEnvironmentVariable("NIX_CODETRACER_EXE_DIR") ??
                 Path.Combine(RepoRoot, "src", "build-debug"),
-                "bin", "ct");
+                "bin", OperatingSystem.IsWindows() ? "ct.exe" : "ct");
 
         CtPath = Path.GetFullPath(configuredCtPath);
         CtInstallDirectory = Path.GetDirectoryName(CtPath) ?? RepoRoot;
@@ -111,12 +117,15 @@ internal sealed class CodetracerLauncher : ICodetracerLauncher
         }
 
         var defaultTraceDirectory = string.IsNullOrWhiteSpace(_settings.Web.DefaultTraceDirectory)
-            ? LegacyDefaultTraceDirectory
+            ? XdgDefaultTraceDirectory
             : Path.GetFullPath(_settings.Web.DefaultTraceDirectory);
 
         if (!Directory.Exists(defaultTraceDirectory))
         {
-            throw new DirectoryNotFoundException($"Default trace directory not found: {defaultTraceDirectory}. Set CODETRACER_TRACE_PATH to a valid trace.");
+            throw new DirectoryNotFoundException(
+                $"Default trace directory not found: {defaultTraceDirectory}. " +
+                $"Set CODETRACER_TRACE_PATH or UITESTS_WEB__DEFAULTTRACEDIRECTORY to a valid trace path. " +
+                $"Legacy fallback is: {LegacyDefaultTraceDirectory}");
         }
 
         var traces = Directory.GetDirectories(defaultTraceDirectory, "trace-*", SearchOption.TopDirectoryOnly)

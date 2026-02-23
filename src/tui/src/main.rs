@@ -30,12 +30,12 @@ mod editor_component;
 mod event;
 mod lang;
 mod panel;
+mod paths;
 mod state_component;
 mod status_component;
 mod task;
 mod value;
 mod window;
-mod paths;
 
 use crate::dap_client::DapClient;
 use component::Component;
@@ -44,10 +44,10 @@ use editor_component::EditorComponent;
 use event::{CtEvent, Event};
 use lang::Lang;
 use panel::{coord, panel, size};
+use paths::CODETRACER_PATHS;
 use state_component::StateComponent;
 use status_component::StatusComponent;
 use task::{Action, EventId, EventKind, FlowUpdate, Location, MoveState, StepArg, TaskKind};
-use paths::CODETRACER_PATHS;
 
 #[derive(Debug, Default)]
 pub struct Trace {
@@ -652,10 +652,7 @@ mod tests {
 
     #[test]
     fn register_trace_in_db() {
-        let tmp_path =
-        {
-            CODETRACER_PATHS.lock()?.tmp_path.clone()
-        };
+        let tmp_path = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
         let base = tmp_path.join("ct_tui_test_db");
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();

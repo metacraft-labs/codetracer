@@ -650,10 +650,10 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
       var startColumn = cast[int](currentWord.startColumn) - 1
       var endColumn = cast[int](currentWord.endColumn) - 2
 
-      while startColumn > 0 and (lineContent[startColumn - 1] == ':' or xidRegex.test($lineContent[startColumn - 1])):
+      while startColumn > 0 and (lineContent[startColumn - 1] == ':' or cstring($lineContent[startColumn - 1]).contains(xidRegex)):
         startColumn -= 1
 
-      while endColumn < lineContent.len - 1 and (lineContent[endColumn + 1] == ':' or xidRegex.test($lineContent[endColumn + 1])):
+      while endColumn < lineContent.len - 1 and (lineContent[endColumn + 1] == ':' or cstring($lineContent[endColumn + 1]).contains(xidRegex)):
         endColumn += 1
 
       result = lineContent[startColumn..endColumn]
@@ -1431,20 +1431,19 @@ proc isPythonTestLine(lineContent: string): bool =
   let stripped = lineContent.strip()
   return stripped.startsWith("def test_") or stripped.startsWith("async def test_")
 
-proc loadAnimation(self: EditorViewComponent, el: Element, i: var int) =
+proc loadAnimation(self: EditorViewComponent, el: Element, i: int) =
   let frames = ["Running.  ", "Running.. ", "Running..."]
 
   el.innerHTML = frames[i]
-  i = (i + 1) mod frames.len
-  discard setTimeout(proc() = loadAnimation(self, el, i), 300)
+  let nextIndex = (i + 1) mod frames.len
+  discard setTimeout(proc() = loadAnimation(self, el, nextIndex), 300)
 
 proc redrawActiveTestButton(self: EditorViewComponent) =
   let el = cast[Element](jq("#" & self.activeTestId))
-  var i = 0
 
   el.classList.add("active-test-button")
 
-  discard setTimeout(proc() = loadAnimation(self, el, i), 0)
+  discard setTimeout(proc() = loadAnimation(self, el, 0), 0)
 
 proc testVNode(self: EditorViewComponent, line: int, isPythonTest: bool = false): VNode =
   # For Python tests, the function name is on the same line (line)
