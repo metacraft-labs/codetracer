@@ -1575,4 +1575,12 @@ impl Replay for DbReplay {
         _ = self.event_jump(event)?;
         Ok(())
     }
+
+    fn evaluate_call_expression(
+        &mut self,
+        _call_expression: &str,
+        _lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
+        Err("tracepoint call expressions are not supported for db traces".into())
+    }
 }

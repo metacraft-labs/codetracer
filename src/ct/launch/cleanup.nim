@@ -1,7 +1,10 @@
 import
-  std/[posix, osproc, os, strformat],
+  std/[osproc, os, strformat],
   ../../common/[types],
   ../globals
+
+when not defined(windows):
+  import std/posix
 
 var onInterrupt: proc: void
 proc cleanup*: void {.noconv.} =
@@ -15,7 +18,10 @@ proc cleanup*: void {.noconv.} =
   # https://gitlab.com/metacraft-labs/code-tracer/CodeTracer/-/merge_requests/116#note_1360620095
   # which shows maybe we need to stop the electron process if not stopped too
   if electronPid != -1:
-    discard kill(electronPid.Pid, SIGKILL)
+    when defined(windows):
+      discard
+    else:
+      discard kill(electronPid.Pid, SIGKILL)
 
 proc stop*(process: Process) =
   process.terminate()
@@ -53,10 +59,11 @@ proc stopCoreProcess*(process: Process, recordCore: bool) =
     echo "WAIT FOR \"record ready\" message"
     echo ""
 
-onSignal(SIGINT):
-  cleanup()
-  quit(1)
+when not defined(windows):
+  onSignal(SIGINT):
+    cleanup()
+    quit(1)
 
-onSignal(SIGTERM):
-  cleanup()
-  quit(0)
+  onSignal(SIGTERM):
+    cleanup()
+    quit(0)

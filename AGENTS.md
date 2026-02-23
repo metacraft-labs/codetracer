@@ -45,6 +45,22 @@ The Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app 
 binary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`
 first to rebuild the frontend before running the tests.
 
+## Windows local setup (non-Nix)
+
+For Windows local setup context (non-Nix), use:
+
+```
+pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1
+source non-nix-build/windows/env.sh   # in Git Bash
+. .\non-nix-build\windows\env.ps1     # in PowerShell
+```
+
+Pinned tool versions for that workflow are tracked in:
+
+```
+non-nix-build/windows/toolchain-versions.env
+```
+
 # Keeping notes
 
 In the `.agents/codebase-insights.txt` file, we try to maintain useful tips that may help

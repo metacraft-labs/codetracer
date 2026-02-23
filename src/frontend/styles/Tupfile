@@ -9,5 +9,7 @@ include_rules
 : default_white_theme.styl |> !stylus |> default_white_theme.css
 : default_dark_theme_electron.styl |> !stylus |> default_dark_theme_electron.css
 : default_dark_theme_extension.styl |> !stylus |> default_dark_theme_extension.css
+# Web/server mode expects default_dark_theme.css; reuse extension variant for now.
+: default_dark_theme_extension.css |> !cp |> default_dark_theme.css
 : loader.styl |> !stylus |> loader.css
 : subwindow.styl |> !stylus |> subwindow.css

@@ -10,6 +10,221 @@ permissions:
   id-token: write
 
 jobs:
+  windows-bootstrap-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate env.sh syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f non-nix-build/windows/env.sh
+          bash -n non-nix-build/windows/env.sh
+
+      - name: Validate PowerShell parser
+        shell: pwsh
+        run: |
+          $scriptPaths = @(
+            "non-nix-build/windows/bootstrap-windows-diy.ps1",
+            "non-nix-build/windows/validate-toolchain-versions.ps1"
+          )
+
+          foreach ($scriptPath in $scriptPaths) {
+            if (-not (Test-Path -LiteralPath $scriptPath)) {
+              throw "Missing required file: $scriptPath"
+            }
+
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $scriptPath,
+              [ref]$null,
+              [ref]$parseErrors
+            )
+
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error "$scriptPath: $($_.Message)" }
+              throw "PowerShell parser reported one or more errors."
+            }
+          }
+
+      - name: Validate toolchain-versions.env
+        shell: pwsh
+        run: |
+          pwsh -File non-nix-build/windows/validate-toolchain-versions.ps1
+
+      - name: Probe Windows env shell wiring (tup version)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WINDOWS_DIY_SKIP_RUST=1
+          export WINDOWS_DIY_SKIP_NODE=1
+          export WINDOWS_DIY_SKIP_UV=1
+          export WINDOWS_DIY_SKIP_NIM=1
+          export WINDOWS_DIY_SKIP_CAPNP=1
+          export WINDOWS_DIY_SKIP_CT_REMOTE=1
+          export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
+          source non-nix-build/windows/env.sh >/dev/null
+          command -v tup.exe
+          tup.exe --version
+
+      - name: Probe Windows env targeted tester build (nim + tup)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WINDOWS_DIY_SKIP_RUST=1
+          export WINDOWS_DIY_SKIP_NODE=1
+          export WINDOWS_DIY_SKIP_UV=1
+          export WINDOWS_DIY_SKIP_NIM=0
+          export WINDOWS_DIY_SKIP_CAPNP=1
+          export WINDOWS_DIY_SKIP_CT_REMOTE=1
+          export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
+          source non-nix-build/windows/env.sh >/dev/null
+          command -v nim
+          if [[ ! -d src/.tup ]]; then
+            (cd src && tup init)
+          fi
+          (cd src && tup upd build-debug/bin/tester.exe)
+
+      - name: Validate arm64 mode routing smoke checks
+        shell: pwsh
+        run: |
+          $bootstrapScript = "non-nix-build/windows/bootstrap-windows-diy.ps1"
+          if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
+            throw "Missing required file: $bootstrapScript"
+          }
+
+          function Invoke-BootstrapProbe {
+            param(
+              [Parameter(Mandatory = $true)][string]$Name,
+              [Parameter(Mandatory = $true)][hashtable]$Env,
+              [Parameter(Mandatory = $true)][string[]]$RequiredPatterns,
+              [string[]]$ForbiddenPatterns = @()
+            )
+
+            $installRoot = Join-Path $env:RUNNER_TEMP ("codetracer-bootstrap-routing-" + $Name)
+            if (Test-Path -LiteralPath $installRoot) {
+              Remove-Item -LiteralPath $installRoot -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+
+            $savedPath = $env:PATH
+            $savedArchOverride = $env:WINDOWS_DIY_ARCH_OVERRIDE
+            $savedEnv = @{}
+            foreach ($envKey in $Env.Keys) {
+              $savedEnv[$envKey] = [Environment]::GetEnvironmentVariable($envKey)
+              [Environment]::SetEnvironmentVariable($envKey, [string]$Env[$envKey])
+            }
+
+            [Environment]::SetEnvironmentVariable("WINDOWS_DIY_ARCH_OVERRIDE", "arm64")
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $probeOutput = @()
+            try {
+              $probeSucceeded = $true
+              $probeOutput = & $bootstrapScript -InstallRoot $installRoot 2>&1
+            } catch {
+              $probeSucceeded = $false
+              $probeOutput = @($probeOutput) + $_
+            } finally {
+              $env:PATH = $savedPath
+              [Environment]::SetEnvironmentVariable("WINDOWS_DIY_ARCH_OVERRIDE", $savedArchOverride)
+              foreach ($envKey in $Env.Keys) {
+                [Environment]::SetEnvironmentVariable($envKey, $savedEnv[$envKey])
+              }
+            }
+
+            $probeText = ($probeOutput | Out-String)
+            if ($probeSucceeded) {
+              throw "Probe '$Name' unexpectedly succeeded. Expected a fast-fail source-route assertion."
+            }
+
+            foreach ($pattern in $RequiredPatterns) {
+              if ($probeText -notmatch $pattern) {
+                throw "Probe '$Name' output is missing required pattern '$pattern'."
+              }
+            }
+
+            foreach ($pattern in $ForbiddenPatterns) {
+              if ($probeText -match $pattern) {
+                throw "Probe '$Name' output matched forbidden pattern '$pattern'."
+              }
+            }
+          }
+
+          Invoke-BootstrapProbe `
+            -Name "nim-auto-arm64-source-first" `
+            -Env @{
+              "NIM_WINDOWS_SOURCE_MODE" = "auto"
+              "WINDOWS_DIY_SKIP_RUST" = "1"
+              "WINDOWS_DIY_SKIP_NODE" = "1"
+              "WINDOWS_DIY_SKIP_UV" = "1"
+              "WINDOWS_DIY_SKIP_NIM" = "0"
+              "WINDOWS_DIY_SKIP_CAPNP" = "1"
+              "WINDOWS_DIY_SKIP_CT_REMOTE" = "1"
+            } `
+            -RequiredPatterns @(
+              "NIM_WINDOWS_SOURCE_MODE=auto attempted Nim source bootstrap on 'arm64' and failed:",
+              "Prebuilt fallback is x64-only"
+            ) `
+            -ForbiddenPatterns @(
+              "Falling back to pinned prebuilt asset",
+              "NIM_WINDOWS_SOURCE_MODE=prebuilt"
+            )
+
+          Invoke-BootstrapProbe `
+            -Name "capnp-auto-arm64-source-route" `
+            -Env @{
+              "CAPNP_WINDOWS_SOURCE_MODE" = "auto"
+              "WINDOWS_DIY_SKIP_RUST" = "1"
+              "WINDOWS_DIY_SKIP_NODE" = "1"
+              "WINDOWS_DIY_SKIP_UV" = "1"
+              "WINDOWS_DIY_SKIP_NIM" = "1"
+              "WINDOWS_DIY_SKIP_CAPNP" = "0"
+              "WINDOWS_DIY_SKIP_CT_REMOTE" = "1"
+            } `
+            -RequiredPatterns @(
+              "git is required for source bootstrap but was not found on PATH"
+            ) `
+            -ForbiddenPatterns @(
+              "capnproto-c\\+\\+-win32-"
+            )
+
+          Invoke-BootstrapProbe `
+            -Name "ct-remote-auto-arm64-local-route" `
+            -Env @{
+              "CT_REMOTE_WINDOWS_SOURCE_MODE" = "auto"
+              "CT_REMOTE_WINDOWS_SOURCE_REPO" = (Join-Path $env:RUNNER_TEMP "codetracer-ci-missing-routes")
+              "WINDOWS_DIY_SKIP_RUST" = "1"
+              "WINDOWS_DIY_SKIP_NODE" = "1"
+              "WINDOWS_DIY_SKIP_UV" = "1"
+              "WINDOWS_DIY_SKIP_NIM" = "1"
+              "WINDOWS_DIY_SKIP_CAPNP" = "1"
+              "WINDOWS_DIY_SKIP_CT_REMOTE" = "0"
+            } `
+            -RequiredPatterns @(
+              "CT_REMOTE_WINDOWS_SOURCE_MODE=auto on 'arm64' requires local source project",
+              "Pinned download is x64-only"
+            ) `
+            -ForbiddenPatterns @(
+              "Installing ct-remote from pinned download",
+              "Falling back to pinned download"
+            )
+
+  windows-named-pipe-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Windows named-pipe transport tests
+        working-directory: src/tui
+        shell: pwsh
+        run: cargo test --bin simple-tui windows_named_pipe -- --nocapture
+
   lint-bash:
     runs-on: [self-hosted, nixos]
     steps:

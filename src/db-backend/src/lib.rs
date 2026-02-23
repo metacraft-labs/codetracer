@@ -48,6 +48,7 @@ pub mod task;
 pub mod trace_processor;
 pub mod tracepoint_interpreter;
 pub mod transport;
+pub mod transport_endpoint;
 pub mod value;
 
 #[cfg(feature = "browser-transport")]

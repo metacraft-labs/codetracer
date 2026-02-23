@@ -15,29 +15,99 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+#[path = "transport_endpoint.rs"]
+mod transport_endpoint;
+use transport_endpoint::unix_socket_path_for_pid;
+#[cfg(windows)]
+use transport_endpoint::windows_named_pipe_path_for_pid;
 
 pub const DAP_SOCKET_NAME: &str = "ct_dap_socket";
 
 // assuming the lock must work
 #[allow(clippy::unwrap_used)]
+#[cfg(unix)]
 pub fn socket_path_for(pid: usize) -> PathBuf {
-    CODETRACER_PATHS
-        .lock()
-        .unwrap()
-        .tmp_path
-        .join(format!("{DAP_SOCKET_NAME}_{}", pid))
+    unix_socket_path_for_pid(&CODETRACER_PATHS.lock().unwrap().tmp_path, DAP_SOCKET_NAME, pid, None)
+}
+
+#[cfg(windows)]
+pub fn socket_path_for(pid: usize) -> PathBuf {
+    PathBuf::from(windows_named_pipe_path_for_pid(DAP_SOCKET_NAME, pid))
+}
+
+#[cfg(not(any(unix, windows)))]
+#[allow(clippy::unwrap_used)]
+pub fn socket_path_for(pid: usize) -> PathBuf {
+    unix_socket_path_for_pid(&CODETRACER_PATHS.lock().unwrap().tmp_path, DAP_SOCKET_NAME, pid, None)
 }
 
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     info!("dap_server::run {:?}", socket_path);
+    #[cfg(unix)]
     let stream = UnixStream::connect(socket_path)?;
+    #[cfg(windows)]
+    let stream = connect_windows_named_pipe(&socket_path.to_string_lossy())?;
+    #[cfg(not(any(unix, windows)))]
+    return Err(format!("unsupported platform for DAP transport endpoint: {}", socket_path.display()).into());
+
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
 
     handle_client(&mut reader, &mut writer)
+}
+
+#[cfg(windows)]
+fn connect_windows_named_pipe(pipe_path: &str) -> Result<std::fs::File, Box<dyn Error>> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::FromRawHandle;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::{GetLastError, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
+
+    let pipe_path_wide: Vec<u16> = OsStr::new(pipe_path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        // Wait briefly so startup races produce a clear timeout instead of a generic open failure.
+        if WaitNamedPipeW(pipe_path_wide.as_ptr(), 5_000) == 0 {
+            let err = GetLastError();
+            return Err(format!(
+                "failed waiting for Windows named pipe '{pipe_path}' (error code {err}); ensure the DAP listener is running and using the same pipe path"
+            )
+            .into());
+        }
+
+        let handle = CreateFileW(
+            pipe_path_wide.as_ptr(),
+            FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+            0,
+            null_mut(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            null_mut(),
+        );
+
+        if handle == INVALID_HANDLE_VALUE {
+            let err = GetLastError();
+            return Err(format!(
+                "failed to connect to Windows named pipe '{pipe_path}' via CreateFileW (error code {err}); verify endpoint path and listener permissions"
+            )
+            .into());
+        }
+
+        Ok(std::fs::File::from_raw_handle(handle as *mut _))
+    }
 }
 
 pub fn run_stdio() -> Result<(), Box<dyn Error>> {

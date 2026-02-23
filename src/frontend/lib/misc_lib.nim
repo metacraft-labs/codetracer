@@ -37,10 +37,7 @@ when defined(ctRenderer):
   proc tippy*(query: cstring, options: JsAssoc[cstring, JsObject]): JsObject {.importc.}
 
 var yaml*: Yaml
-if inElectron:
+when not defined(ctRenderer) and not defined(ctInExtension):
   yaml = cast[Yaml](require("js-yaml"))
-else:
-  when not defined(ctRenderer) and not defined(ctInExtension):
-    yaml = cast[Yaml](require("js-yaml"))
 
 var Mousetrap* {.importc.}: js

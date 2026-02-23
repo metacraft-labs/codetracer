@@ -1,26 +1,47 @@
 use std::error::Error;
 use std::io::Write;
 use std::io::{BufRead, BufReader};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+use std::net::TcpStream;
 
 use log::{debug, error, info, warn};
 use runtime_tracing::StepId;
+use serde::Deserialize;
 
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
+#[cfg(unix)]
 use crate::paths::ct_rr_worker_socket_path;
-use crate::query::CtRRQuery;
+#[cfg(windows)]
+use crate::paths::CODETRACER_PATHS;
+use crate::query::{
+    CtRRQuery, TtdTracepointEvalRequest, TtdTracepointEvalResponseEnvelope, TtdTracepointEvalMode,
+    TtdTracepointFunctionCallRequest,
+};
 use crate::replay::Replay;
 use crate::task::{
     Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
     ProgramEvent, VariableWithRecord, NO_STEP_ID,
 };
 use crate::value::ValueRecordWithType;
+use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
+
+#[cfg(unix)]
+type WorkerStream = UnixStream;
+
+#[cfg(windows)]
+type WorkerStream = TcpStream;
+
+#[cfg(not(any(unix, windows)))]
+type WorkerStream = ();
 
 #[derive(Debug)]
 pub struct RRDispatcher {
@@ -39,7 +60,7 @@ pub struct CtRRWorker {
     pub ct_rr_worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
     process: Option<Child>,
-    stream: Option<UnixStream>,
+    stream: Option<WorkerStream>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -47,6 +68,12 @@ pub struct CtRRArgs {
     pub worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkerTransportEndpoint {
+    transport: String,
+    address: String,
 }
 
 impl CtRRWorker {
@@ -81,12 +108,27 @@ impl CtRRWorker {
             .arg(&self.rr_trace_folder)
             .spawn()?;
 
+        let worker_pid = ct_worker.id();
         self.process = Some(ct_worker);
-        self.setup_worker_sockets()?;
+        if let Err(err) = self.setup_worker_sockets() {
+            if let Some(child) = self.process.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            self.process = None;
+            self.stream = None;
+            self.active = false;
+            return Err(format!(
+                "failed to initialize replay-worker transport for pid {}: {}",
+                worker_pid, err
+            )
+            .into());
+        }
         self.active = true;
         Ok(())
     }
 
+    #[cfg(unix)]
     fn setup_worker_sockets(&mut self) -> Result<(), Box<dyn Error>> {
         // assuming that the ct rr worker creates the sockets!
         // code copied and adapted from `connect_socket_with_backend_and_loop` in ct-rr-worker
@@ -123,8 +165,202 @@ impl CtRRWorker {
         Ok(())
     }
 
+    #[cfg(windows)]
+    fn setup_worker_sockets(&mut self) -> Result<(), Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let poll_interval = Duration::from_millis(25);
+        let mut last_error: Option<String> = None;
+        let manifest_name = format!("ct_rr_support_{}_{}_from_.sock", self.name, self.index);
+        let worker_pid = self.process.as_ref().map(std::process::Child::id);
+        let tmp_path = {
+            CODETRACER_PATHS
+                .lock()
+                .map_err(|e| format!("failed to lock CODETRACER_PATHS: {e}"))?
+                .tmp_path
+                .clone()
+        };
+        info!("try to resolve worker endpoint manifest for replay worker: {}", manifest_name);
+
+        while Instant::now() < deadline {
+            if let Some(pid) = worker_pid {
+                let preferred_manifest = tmp_path.join(format!("run-{}", pid)).join(&manifest_name);
+                if preferred_manifest.exists() {
+                    match std::fs::read_to_string(&preferred_manifest) {
+                        Ok(payload) => {
+                            let endpoint = match serde_json::from_str::<WorkerTransportEndpoint>(&payload) {
+                                Ok(endpoint) => endpoint,
+                                Err(err) => {
+                                    last_error = Some(format!(
+                                        "failed to parse worker endpoint manifest {}: {err}",
+                                        preferred_manifest.display()
+                                    ));
+                                    thread::sleep(poll_interval);
+                                    continue;
+                                }
+                            };
+
+                            if endpoint.transport != "tcp" {
+                                last_error = Some(format!(
+                                    "unsupported worker transport '{}' in manifest {}; expected 'tcp'",
+                                    endpoint.transport,
+                                    preferred_manifest.display()
+                                ));
+                                thread::sleep(poll_interval);
+                                continue;
+                            }
+                            if endpoint.address.trim().is_empty() {
+                                last_error = Some(format!(
+                                    "worker endpoint manifest {} has empty tcp address",
+                                    preferred_manifest.display()
+                                ));
+                                thread::sleep(poll_interval);
+                                continue;
+                            }
+
+                            match connect_tcp_endpoint_with_timeout(&endpoint.address, Duration::from_millis(250)) {
+                                Ok(stream) => {
+                                    self.stream = Some(stream);
+                                    info!(
+                                        "worker stream is now setup via tcp {} using preferred manifest {}",
+                                        endpoint.address,
+                                        preferred_manifest.display()
+                                    );
+                                    return Ok(());
+                                }
+                                Err(err) => {
+                                    last_error = Some(format!(
+                                        "failed connecting to replay-worker tcp endpoint {} from preferred manifest {}: {}",
+                                        endpoint.address,
+                                        preferred_manifest.display(),
+                                        err
+                                    ));
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            last_error = Some(format!(
+                                "failed reading worker endpoint manifest {}: {}",
+                                preferred_manifest.display(),
+                                err
+                            ));
+                        }
+                    }
+                }
+                thread::sleep(poll_interval);
+                continue;
+            }
+
+            let mut candidates = Vec::new();
+            if let Ok(run_dirs) = std::fs::read_dir(&tmp_path) {
+                for run_dir in run_dirs.flatten() {
+                    let path = run_dir.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let Some(run_name) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    if !run_name.starts_with("run-") {
+                        continue;
+                    }
+                    if let Some(pid) = worker_pid {
+                        if run_name == format!("run-{}", pid) {
+                            continue;
+                        }
+                    }
+                    let manifest_path = path.join(&manifest_name);
+                    if manifest_path.exists() {
+                        let modified = std::fs::metadata(&manifest_path)
+                            .and_then(|m| m.modified())
+                            .ok();
+                        candidates.push((manifest_path, modified));
+                    }
+                }
+            }
+
+            candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+            for (manifest_path, _) in candidates {
+                match std::fs::read_to_string(&manifest_path) {
+                    Ok(payload) => {
+                        let endpoint = match serde_json::from_str::<WorkerTransportEndpoint>(&payload) {
+                            Ok(endpoint) => endpoint,
+                            Err(err) => {
+                                last_error = Some(format!(
+                                    "failed to parse worker endpoint manifest {}: {err}",
+                                    manifest_path.display()
+                                ));
+                                continue;
+                            }
+                        };
+
+                        if endpoint.transport != "tcp" {
+                            last_error = Some(format!(
+                                "unsupported worker transport '{}' in manifest {}; expected 'tcp'",
+                                endpoint.transport,
+                                manifest_path.display()
+                            ));
+                            continue;
+                        }
+                        if endpoint.address.trim().is_empty() {
+                            last_error = Some(format!(
+                                "worker endpoint manifest {} has empty tcp address",
+                                manifest_path.display()
+                            ));
+                            continue;
+                        }
+
+                        match connect_tcp_endpoint_with_timeout(&endpoint.address, Duration::from_millis(250)) {
+                            Ok(stream) => {
+                                self.stream = Some(stream);
+                                info!(
+                                    "worker stream is now setup via tcp {} using manifest {}",
+                                    endpoint.address,
+                                    manifest_path.display()
+                                );
+                                return Ok(());
+                            }
+                            Err(err) => {
+                                last_error = Some(format!(
+                                    "failed connecting to replay-worker tcp endpoint {} from manifest {}: {}",
+                                    endpoint.address,
+                                    manifest_path.display(),
+                                    err
+                                ));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        last_error = Some(format!(
+                            "failed reading worker endpoint manifest {}: {}",
+                            manifest_path.display(),
+                            err
+                        ));
+                    }
+                }
+            }
+            thread::sleep(poll_interval);
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| {
+                format!(
+                    "timed out waiting for replay-worker endpoint manifest '{}' under {}",
+                    manifest_name,
+                    tmp_path.display()
+                )
+            })
+            .into())
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn setup_worker_sockets(&mut self) -> Result<(), Box<dyn Error>> {
+        Err("ct-rr worker transport is only supported on Unix and Windows platforms".into())
+    }
+
     // for now: don't return a typed value here, only Ok(raw value) or an error
     #[allow(clippy::expect_used)] // stream must be initialized before run_query is called
+    #[cfg(any(unix, windows))]
     pub fn run_query(&mut self, query: CtRRQuery) -> Result<String, Box<dyn Error>> {
         let raw_json = serde_json::to_string(&query)?;
 
@@ -160,6 +396,45 @@ impl CtRRWorker {
             Err(format!("run_query ct rr worker error: {}", res).into())
         }
     }
+
+    #[cfg(not(any(unix, windows)))]
+    pub fn run_query(&mut self, _query: CtRRQuery) -> Result<String, Box<dyn Error>> {
+        Err("ct-rr worker transport is only supported on Unix and Windows platforms".into())
+    }
+}
+
+impl Drop for CtRRWorker {
+    fn drop(&mut self) {
+        self.stream = None;
+        if let Some(child) = self.process.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.process = None;
+        self.active = false;
+    }
+}
+
+#[cfg(windows)]
+fn connect_tcp_endpoint_with_timeout(address: &str, timeout: Duration) -> Result<TcpStream, Box<dyn Error>> {
+    use std::net::ToSocketAddrs;
+
+    let mut last_error: Option<String> = None;
+    for resolved in address
+        .to_socket_addrs()
+        .map_err(|e| format!("failed to resolve replay-worker endpoint '{address}': {e}"))?
+    {
+        match TcpStream::connect_timeout(&resolved, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(err) => {
+                last_error = Some(format!("{} ({})", resolved, err));
+            }
+        }
+    }
+
+    Err(last_error
+        .unwrap_or_else(|| format!("no socket addresses resolved for replay-worker endpoint '{address}'"))
+        .into())
 }
 
 impl RRDispatcher {
@@ -395,5 +670,194 @@ impl Replay for RRDispatcher {
         self.stable
             .run_query(CtRRQuery::TracepointJump { event: event.clone() })?;
         Ok(())
+    }
+
+    fn evaluate_call_expression(
+        &mut self,
+        call_expression: &str,
+        _lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let request = TtdTracepointEvalRequest {
+            mode: TtdTracepointEvalMode::EmulatedFunction,
+            expression: None,
+            function_call: Some(TtdTracepointFunctionCallRequest {
+                target_expression: String::new(),
+                call_expression: Some(call_expression.to_string()),
+                signature: None,
+                arguments: vec![],
+                return_address: None,
+            }),
+        };
+
+        let response_json = self
+            .stable
+            .run_query(CtRRQuery::TtdTracepointEvaluate { request })?;
+        let response: TtdTracepointEvalResponseEnvelope = serde_json::from_str(&response_json)?;
+
+        if let Some(diag) = response.diagnostic {
+            return Err(format!(
+                "tracepoint call evaluation failed: {}{}",
+                diag.message,
+                diag.detail
+                    .as_ref()
+                    .map(|detail| format!(" ({detail})"))
+                    .unwrap_or_default()
+            )
+            .into());
+        }
+
+        if let Some(value) = tracepoint_response_value(&response) {
+            return Ok(value);
+        }
+
+        Err("tracepoint call evaluation did not return a value".into())
+    }
+}
+
+fn tracepoint_response_value(
+    response: &TtdTracepointEvalResponseEnvelope,
+) -> Option<ValueRecordWithType> {
+    response
+        .value
+        .clone()
+        .or_else(|| response.return_value.clone())
+        .or_else(|| tracepoint_return_value_from_class(response))
+}
+
+fn tracepoint_return_value_from_class(
+    response: &TtdTracepointEvalResponseEnvelope,
+) -> Option<ValueRecordWithType> {
+    let raw = response.return_value_u64?;
+    let class = response
+        .return_value_class
+        .unwrap_or(TtdTracepointValueClass::U64);
+
+    let (kind, lang_type) = match class {
+        TtdTracepointValueClass::Void => return None,
+        TtdTracepointValueClass::Bool => (TypeKind::Bool, "bool"),
+        TtdTracepointValueClass::I64 => (TypeKind::Int, "i64"),
+        TtdTracepointValueClass::U64 => (TypeKind::Int, "u64"),
+        TtdTracepointValueClass::Pointer => (TypeKind::Raw, "pointer"),
+    };
+
+    let typ = TypeRecord {
+        kind,
+        lang_type: lang_type.to_string(),
+        specific_info: TypeSpecificInfo::None,
+    };
+
+    Some(match class {
+        TtdTracepointValueClass::Void => return None,
+        TtdTracepointValueClass::Bool => ValueRecordWithType::Bool {
+            b: raw != 0,
+            typ,
+        },
+        TtdTracepointValueClass::I64 => {
+            let signed = i64::from_ne_bytes(raw.to_ne_bytes());
+            ValueRecordWithType::Int { i: signed, typ }
+        }
+        TtdTracepointValueClass::U64 => ValueRecordWithType::Int {
+            i: raw as i64,
+            typ,
+        },
+        TtdTracepointValueClass::Pointer => ValueRecordWithType::Raw {
+            r: format!("0x{raw:016x}"),
+            typ,
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runtime_tracing::{TypeSpecificInfo, TypeRecord, TypeKind};
+
+    #[test]
+    fn tracepoint_return_value_prefers_complex_payload() {
+        let typ = TypeRecord {
+            kind: TypeKind::Struct,
+            lang_type: "Pair".to_string(),
+            specific_info: TypeSpecificInfo::Struct {
+                fields: vec![],
+            },
+        };
+        let complex = ValueRecordWithType::Struct {
+            field_values: vec![],
+            typ: typ.clone(),
+        };
+        let response = TtdTracepointEvalResponseEnvelope {
+            mode: TtdTracepointEvalMode::EmulatedFunction,
+            replay_state_preserved: true,
+            value: None,
+            return_value: Some(complex.clone()),
+            return_value_class: Some(TtdTracepointValueClass::U64),
+            return_value_u64: Some(123),
+            invocation: None,
+            diagnostic: None,
+        };
+
+        let derived = tracepoint_response_value(&response).expect("value");
+        assert_eq!(derived, complex);
+    }
+
+    #[test]
+    fn tracepoint_return_value_bool() {
+        let response = TtdTracepointEvalResponseEnvelope {
+            mode: TtdTracepointEvalMode::EmulatedFunction,
+            replay_state_preserved: true,
+            value: None,
+            return_value: None,
+            return_value_class: Some(TtdTracepointValueClass::Bool),
+            return_value_u64: Some(1),
+            invocation: None,
+            diagnostic: None,
+        };
+
+        let value = tracepoint_return_value_from_class(&response).expect("bool value");
+        match value {
+            ValueRecordWithType::Bool { b, .. } => assert!(b),
+            other => panic!("unexpected value type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tracepoint_return_value_i64() {
+        let response = TtdTracepointEvalResponseEnvelope {
+            mode: TtdTracepointEvalMode::EmulatedFunction,
+            replay_state_preserved: true,
+            value: None,
+            return_value: None,
+            return_value_class: Some(TtdTracepointValueClass::I64),
+            return_value_u64: Some(u64::MAX),
+            invocation: None,
+            diagnostic: None,
+        };
+
+        let value = tracepoint_return_value_from_class(&response).expect("i64 value");
+        match value {
+            ValueRecordWithType::Int { i, .. } => assert_eq!(i, -1),
+            other => panic!("unexpected value type: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tracepoint_return_value_pointer() {
+        let response = TtdTracepointEvalResponseEnvelope {
+            mode: TtdTracepointEvalMode::EmulatedFunction,
+            replay_state_preserved: true,
+            value: None,
+            return_value: None,
+            return_value_class: Some(TtdTracepointValueClass::Pointer),
+            return_value_u64: Some(0x1234),
+            invocation: None,
+            diagnostic: None,
+        };
+
+        let value = tracepoint_return_value_from_class(&response).expect("pointer value");
+        match value {
+            ValueRecordWithType::Raw { r, .. } => assert_eq!(r, "0x0000000000001234"),
+            other => panic!("unexpected value type: {other:?}"),
+        }
     }
 }

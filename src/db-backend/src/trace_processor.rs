@@ -1,5 +1,5 @@
 #[cfg(feature = "io-transport")]
-use expanduser::expanduser;
+use std::path::PathBuf;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -425,6 +425,11 @@ impl<'a> TraceProcessor<'a> {
 }
 
 #[cfg(feature = "io-transport")]
+fn expand_tilde_path(path: &Path) -> PathBuf {
+    PathBuf::from(shellexpand::tilde(path.to_string_lossy().as_ref()).into_owned())
+}
+
+#[cfg(feature = "io-transport")]
 #[allow(clippy::panic)]
 pub fn load_trace_data(
     trace_file: &Path,
@@ -432,7 +437,7 @@ pub fn load_trace_data(
 ) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
     let mut trace_reader = runtime_tracing::create_trace_reader(file_format);
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
-    let path = expanduser(trace_file.display().to_string())?;
+    let path = expand_tilde_path(trace_file);
     let trace_events = trace_reader.load_trace_events(&path)?;
     Ok(trace_events)
 }
@@ -454,7 +459,7 @@ pub fn load_trace_data(
 #[allow(clippy::panic)]
 pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
-    let path = expanduser(trace_metadata_file.display().to_string())?;
+    let path = expand_tilde_path(trace_metadata_file);
     let raw_bytes = fs::read(&path)?; //.unwrap_or_else(|_| panic!("metadata file {path:?} read error"));
     let raw = str::from_utf8(&raw_bytes)?;
 

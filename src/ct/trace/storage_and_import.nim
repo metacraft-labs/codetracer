@@ -82,6 +82,42 @@ proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = 
   var sortedFolders = sorted(folders)
   result = sortedFolders
 
+proc readStringField(node: JsonNode, key: string): string =
+  if node.kind != JObject or not node.hasKey(key):
+    return ""
+  let field = node[key]
+  if field.kind == JString:
+    return field.getStr()
+  ""
+
+proc readStringSeqField(node: JsonNode, key: string): seq[string] =
+  if node.kind != JObject or not node.hasKey(key):
+    return @[]
+
+  let field = node[key]
+  case field.kind:
+  of JString:
+    result = field.getStr().splitLines()
+  of JArray:
+    for item in field:
+      if item.kind == JString:
+        result.add(item.getStr())
+  else:
+    discard
+
+proc deriveWorkdir(program: string): string =
+  if program.len == 0:
+    return getCurrentDir()
+
+  try:
+    let programPath = expandFilename(expandTilde(program))
+    let parent = programPath.parentDir
+    if parent.len > 0:
+      return parent
+  except CatchableError:
+    discard
+
+  getCurrentDir()
 
 proc importTrace*(
   traceFolder: string,
@@ -105,9 +141,14 @@ proc importTrace*(
   # echo traceMetadataPath
   let rawTraceMetadata = readFile(traceMetadataPath)
   let untypedJson = parseJson(rawTraceMetadata)
-  let program = untypedJson{"program"}.getStr()
-  let args = untypedJson{"args"}.getStr().splitLines()
-  let workdir = untypedJson{"workdir"}.getStr()
+  let program = readStringField(untypedJson, "program")
+  var args = readStringSeqField(untypedJson, "args")
+  if args.len == 0:
+    # TTD metadata uses `program_args` instead of legacy `args`.
+    args = readStringSeqField(untypedJson, "program_args")
+  var workdir = readStringField(untypedJson, "workdir")
+  if workdir.len == 0:
+    workdir = deriveWorkdir(program)
 
   let traceID = if traceIdArg != NO_TRACE_ID:
       traceIdArg
@@ -139,7 +180,8 @@ proc importTrace*(
       echo "WARNING: probably no trace_paths.json: no self-contained support in this case:"
       echo "  ", e.msg
       echo "  skipping trace_paths file"
-    copyFile(tracePath, outputFolder / traceFileName)
+    if fileExists(tracePath):
+      copyFile(tracePath, outputFolder / traceFileName)
 
   var rawPaths: string
   try:
@@ -222,8 +264,28 @@ proc importTrace*(
       # echo trace.repr
       trace_index.recordTrace(trace, test=false)
     except CatchableError as e:
-      echo "[codetracer importTrace error]: ", e.repr
-      quit(1)
+      # Fallback for replay metadata that is not a serialized Trace object
+      # (for example Windows TTD sidecar metadata from ct-rr-support).
+      echo "[codetracer importTrace warning]: fallback metadata parse: ", e.msg
+      trace_index.recordTrace(
+        traceID,
+        program = program,
+        args = args,
+        compileCommand = "",
+        env = "",
+        workdir = workdir,
+        lang = lang,
+        sourceFolders = sourceFoldersText,
+        lowLevelFolder = "",
+        outputFolder = outputFolder,
+        test = false,
+        imported = selfContained,
+        shellID = -1,
+        rrPid = recordPid,
+        exitCode = -1,
+        calltrace = true,
+        calltraceMode = loadCalltraceMode("", lang),
+        fileId = downloadUrl)
 
 proc getFolderSize(folderPath: string): int64 =
   var totalSize: int64 = 0

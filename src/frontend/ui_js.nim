@@ -148,6 +148,7 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
           node[2]
         else:
           tmpcstr
+      let folderTypeInt = ord(folderType)
 
       var r = quote:
         MenuNode(
@@ -155,7 +156,7 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
           name: `nameNode`,
           elements: `elementsNode`,
           enabled: true,
-          menuOs: `folderType`,
+          menuOs: `folderTypeInt`,
           role: `roleExpr`
         )
       result = (r, false)
@@ -191,6 +192,7 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
       # If it's a role, insert a random action. It will not get used anyway
       let actionNode = if not bMacRole: node[2] else: newLit(ClientAction.forwardContinue)
       let last = if node.len == 3 or bMacRole: newLit(true) else: node[^1]
+      let elementTypeInt = ord(elementType)
 
       var r = quote:
         MenuNode(
@@ -199,7 +201,7 @@ proc defineMenuImpl(node: NimNode): (NimNode, bool) =
           action: `actionNode`,
           elements: @[],
           enabled: `last`,
-          menuOs: `elementType`,
+          menuOs: `elementTypeInt`,
           role: if bool(`bMacRole`): `nameNode` else: cast[cstring]("")
         )
       result = (r, false)

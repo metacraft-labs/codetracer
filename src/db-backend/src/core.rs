@@ -1,8 +1,9 @@
 use std::error::Error;
 use std::fs::create_dir_all;
+#[cfg(unix)]
 use std::io::Write;
 
-#[cfg(feature = "io-transport")]
+#[cfg(all(feature = "io-transport", unix))]
 use std::os::unix::net::UnixStream;
 
 use std::path::PathBuf;
@@ -13,15 +14,23 @@ use crate::paths::CODETRACER_PATHS;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 // use crate::event::Event;
-use crate::task::{gen_task_id, to_task_kind_text, EventId, TaskId, TaskKind};
+use crate::task::{gen_task_id, EventId, TaskId, TaskKind};
+#[cfg(unix)]
+use crate::task::to_task_kind_text;
 
 // hopefully impossible for normal PID-s, as they start
 // from 1 for init?
 pub const NO_CALLER_PROCESS_PID: usize = 0;
 
+#[cfg(all(feature = "io-transport", unix))]
+type CoreSocket = UnixStream;
+
+#[cfg(all(feature = "io-transport", not(unix)))]
+type CoreSocket = ();
+
 #[derive(Debug, Default)]
 pub struct Core {
-    pub socket: Option<UnixStream>,
+    pub socket: Option<CoreSocket>,
     pub caller_process_pid: usize,
 }
 
@@ -101,10 +110,16 @@ impl Core {
     // eventually we can check explicitly or initialize
     // Sender with setup to make socket not Option
     #[allow(clippy::unwrap_used)]
+    #[cfg(unix)]
     fn send_task_message(&self, task_kind: TaskKind, task_id: TaskId) -> Result<(), Box<dyn Error>> {
         let raw = format!("{} {}\n", to_task_kind_text(task_kind), task_id.as_string());
         // info!("send socket {raw}");
         self.socket.as_ref().unwrap().write_all(raw.as_bytes())?;
         Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn send_task_message(&self, _task_kind: TaskKind, _task_id: TaskId) -> Result<(), Box<dyn Error>> {
+        Err("Core task socket transport is only supported on Unix platforms".into())
     }
 }

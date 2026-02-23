@@ -47,7 +47,7 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
     public async Task ExecuteAsync(TestPlanEntry entry, CancellationToken cancellationToken)
     {
         var traceOverride = Environment.GetEnvironmentVariable("CODETRACER_TRACE_PATH");
-        var tracePath = _launcher.ResolveTracePath(traceOverride);
+        var tracePath = await EnsureTracePathAsync(traceOverride, entry, cancellationToken);
         if (!Directory.Exists(tracePath))
         {
             throw new DirectoryNotFoundException($"Trace directory not found: {tracePath}. Set CODETRACER_TRACE_PATH to a valid trace.");
@@ -165,11 +165,36 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         var context = await browser.NewContextAsync(contextOptions);
         var page = await context.NewPageAsync();
         page.SetDefaultTimeout(20_000);
+        if (verboseConsole)
+        {
+            page.Console += (_, msg) =>
+                _logger.LogInformation("[{Scenario}] [browser:{Type}] {Text}", entry.Scenario.Id, msg.Type, msg.Text);
+            page.PageError += (_, message) =>
+                _logger.LogError("[{Scenario}] [browser:error] {Message}", entry.Scenario.Id, message);
+            page.RequestFailed += (_, req) =>
+                _logger.LogWarning("[{Scenario}] [browser:request-failed] {Method} {Url} {Failure}", entry.Scenario.Id, req.Method, req.Url, req.Failure);
+        }
 
         await page.GotoAsync($"http://localhost:{port}", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await page.EvaluateAsync("() => { document.body.style.zoom = '100%'; }");
         await page.EvaluateAsync("() => { document.documentElement.style.zoom = '100%'; }");
         await page.Keyboard.PressAsync("Control+0");
+        if (verboseConsole)
+        {
+            var title = await page.TitleAsync();
+            var bodyText = await page.EvaluateAsync<string>("() => (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 400)");
+            var divIds = await page.EvaluateAsync<string>(
+                "() => JSON.stringify(Array.from(document.querySelectorAll('div[id]')).map(el => el.id).slice(0, 30))");
+            var iframeInfo = await page.EvaluateAsync<string>(
+                "() => JSON.stringify(Array.from(document.querySelectorAll('iframe')).map(el => ({ id: el.id || '', src: el.getAttribute('src') || '', className: el.className || '' })))");
+            _logger.LogInformation(
+                "[{Scenario}] [browser:dom] title='{Title}' body='{Body}' divIds={DivIds} iframes={Iframes}",
+                entry.Scenario.Id,
+                title,
+                bodyText,
+                divIds,
+                iframeInfo);
+        }
 
         var resized = await WindowPositioningHelper.MoveWindowAsync(page, selectedMonitor);
 
@@ -179,6 +204,26 @@ internal sealed class WebTestSessionExecutor : ITestSessionExecutor
         }
 
         return new WebTestSession(hostProcess, playwright, browser, context, page, _processLifecycle, $"ct-host:{label}");
+    }
+
+    private async Task<string> EnsureTracePathAsync(string? traceOverride, TestPlanEntry entry, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return _launcher.ResolveTracePath(traceOverride);
+        }
+        catch (Exception ex) when (
+            string.IsNullOrWhiteSpace(traceOverride) &&
+            (ex is DirectoryNotFoundException || ex is InvalidOperationException))
+        {
+            _logger.LogInformation(
+                "[{Scenario}] No trace found in default location. Recording '{TraceProgram}' before web session startup.",
+                entry.Scenario.Id,
+                _settings.Electron.TraceProgram);
+
+            await _launcher.RecordProgramAsync(_settings.Electron.TraceProgram, cancellationToken);
+            return _launcher.ResolveTracePath(traceOverride);
+        }
     }
 
     private bool ShouldEmitVerboseConsole(TestPlanEntry entry)

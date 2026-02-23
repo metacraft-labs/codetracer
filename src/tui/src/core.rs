@@ -9,11 +9,11 @@ use std::str;
 use std::time;
 
 use crate::event::{CtEvent, Event};
+use crate::paths::CODETRACER_PATHS;
 use crate::task::{gen_task_id, to_event_kind, to_task_kind_text, EventId, TaskId, TaskKind};
 use serde::Serialize;
 use tokio;
 use tokio::sync::mpsc;
-use crate::paths::CODETRACER_PATHS;
 
 #[derive(Debug, Default)]
 pub struct Core {

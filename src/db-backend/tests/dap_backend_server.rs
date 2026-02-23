@@ -1,18 +1,30 @@
+#[cfg(unix)]
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
+#[cfg(unix)]
 use db_backend::dap_server;
+#[cfg(unix)]
 use db_backend::dap_types::StackTraceArguments;
+#[cfg(unix)]
 use db_backend::transport::DapTransport;
+#[cfg(unix)]
 use serde_json::json;
+#[cfg(unix)]
 use std::io::{BufReader, ErrorKind};
 
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 
+#[cfg(unix)]
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::Command;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
+#[cfg(unix)]
 use std::{fs, thread};
 
 #[allow(unused)]
+#[cfg(unix)]
 fn accept_with_timeout(
     listener: &UnixListener,
     timeout: Duration,
@@ -43,6 +55,7 @@ fn accept_with_timeout(
 // and bad commit, the current one probably;
 // it finds 4b6c4654980e49e0aee7c4c425e44d357528f49e : a commit
 //   starting separating db-backend logic in threads as the first bad commit
+#[cfg(unix)]
 fn _test_backend_dap_server_socket() {
     let bin = env!("CARGO_BIN_EXE_db-backend");
     let pid = std::process::id() as usize;
@@ -199,4 +212,10 @@ fn _test_backend_dap_server_socket() {
     drop(writer);
     drop(reader);
     let _ = child.wait().unwrap();
+}
+
+#[cfg(not(unix))]
+#[test]
+fn dap_server_socket_transport_is_unix_only() {
+    eprintln!("SKIPPED: Unix-domain-socket DAP server integration test is unsupported on non-Unix platforms");
 }

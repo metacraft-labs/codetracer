@@ -1,6 +1,9 @@
 import
-  std/[ osproc, posix, posix_utils, os, options ],
+  std/[ osproc, os, options ],
   ../../common/[ paths, config ]
+
+when not defined(windows):
+  import std/[posix, posix_utils]
 
 var coreProcessId* = -1
 
@@ -35,10 +38,11 @@ proc startBackend*(backendKind: string, isStdio: bool = true, socketPath: Option
   )
 
   coreProcessId = process.processId
-  onSignal(SIGTERM):
-    if coreProcessId != -1:
-      echo "ct: stopping core process"
-      sendSignal(coreProcessId.Pid, SIGTERM)
+  when not defined(windows):
+    onSignal(SIGTERM):
+      if coreProcessId != -1:
+        echo "ct: stopping core process"
+        sendSignal(coreProcessId.Pid, SIGTERM)
 
   let code = waitForExit(process)
   quit(code)

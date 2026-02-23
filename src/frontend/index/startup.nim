@@ -101,19 +101,21 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
       await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
 
   await started()
+  let configSnapshot = data.config
+  let startOptionsSnapshot = data.startOptions
 
-  if not data.startOptions.edit and not data.startOptions.welcomeScreen:
+  if not startOptionsSnapshot.edit and not startOptionsSnapshot.welcomeScreen:
     debugPrint "send ", "CODETRACER::init"
-    debugPrint data.startOptions
+    debugPrint startOptionsSnapshot
 
     mainWindow.webContents.send(
       "CODETRACER::init",
       js{
         home: paths.home.cstring,
-        config: data.config,
+        config: configSnapshot,
         layout: layout,
         helpers: helpers,
-        startOptions: data.startOptions,
+        startOptions: startOptionsSnapshot,
         bypass: bypass
     })
 
@@ -148,9 +150,9 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
       debugPrint "  that's ok, if this was not started from shell-ui!"
 
 
-  elif data.startOptions.edit:
-    let file = ($data.startOptions.name)
-    var folder = data.startOptions.folder
+  elif startOptionsSnapshot.edit:
+    let file = ($startOptionsSnapshot.name)
+    var folder = startOptionsSnapshot.folder
     # Store workspace folder for later use when switching modes
     data.workspaceFolder = folder
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
@@ -160,13 +162,13 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
     data.save = save
 
     mainWindow.webContents.send "CODETRACER::no-trace", js{
-      path: data.startOptions.name,
+      path: startOptionsSnapshot.name,
       lang: save.project.lang,
       home: paths.home.cstring,
       layout: layout,
       helpers: helpers,
-      startOptions: data.startOptions,
-      config: data.config,
+      startOptions: startOptionsSnapshot,
+      config: configSnapshot,
       filenames: filenames,
       filesystem: filesystem,
       functions: functions,
@@ -201,8 +203,8 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,
-      startOptions: data.startOptions,
-      config: data.config,
+      startOptions: startOptionsSnapshot,
+      config: configSnapshot,
       recentTraces: recentTraces,
       recentFolders: recentFolders,
       recentTransactions: recentTransactions

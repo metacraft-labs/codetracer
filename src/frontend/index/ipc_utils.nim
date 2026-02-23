@@ -94,12 +94,19 @@ proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
   var res = cast[Helpers](yaml.load(raw)[cstring"helpers"])
   return res
 
+let runtimePlatform {.importjs: "process.platform", nodecl.}: cstring
+
 proc ready*(): Future[void] {.async.} =
+  infoPrint "index: ready start"
   let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
   if backendManager.isOk:
     backendManagerProcess = backendManager.value
 
-  let backendManagerSocketPath = codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".sock"
+  let backendManagerSocketPath =
+    if runtimePlatform == cstring"win32":
+      cstring("\\\\.\\pipe\\ct_backend_manager_" & $backendManagerProcess.pid)
+    else:
+      codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".sock"
 
   await asyncSleep(100)
 
@@ -110,11 +117,13 @@ proc ready*(): Future[void] {.async.} =
     await asyncSleep(1000)
 
   setupProxyForDap(backendManagerSocket)
+  infoPrint "index: backend manager socket configured"
 
   configureIpcMain()
 
   # we load the config file
   var config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
+  infoPrint "index: config loaded"
   when defined(server):
     # replay bootstrap state on reconnect (server builds only)
     ipc.replayBootstrap = proc() =
@@ -133,6 +142,7 @@ proc ready*(): Future[void] {.async.} =
 
   debugPrint "index: creating window"
   mainWindow = createMainWindow()
+  infoPrint "index: main window created"
   sendLspStatusToRenderer()
 
   when not defined(server):
@@ -186,6 +196,8 @@ proc ready*(): Future[void] {.async.} =
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
   data.config = config
+  infoPrint "index: layout/helpers loaded, calling data.init"
 
-  # init the UI
-  discard windowSetTimeout(proc = discard data.init(config, layout, helpers), 250)
+  # init the UI directly; delayed timer scheduling can be skipped in server mode
+  discard data.init(config, layout, helpers)
+  infoPrint "index: data.init dispatched"

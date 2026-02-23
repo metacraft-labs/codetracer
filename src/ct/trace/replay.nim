@@ -140,7 +140,19 @@ proc replay*(
     trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
 
     if trace.isNil and traceFolderArg.isSome:
-      trace = importTrace(traceFolderArg.get(), NO_TRACE_ID, NO_PID, LangUnknown)
+      let traceFolder = traceFolderArg.get()
+      let traceKind =
+        if fileExists(traceFolder / "trace_metadata.json"):
+          "db"
+        else:
+          # replay traces (RR/TTD) carry trace_db_metadata.json
+          "rr"
+      trace = importTrace(
+        traceFolder,
+        NO_TRACE_ID,
+        NO_PID,
+        LangUnknown,
+        traceKind = traceKind)
     if trace.isNil:
       echo "ERROR: can't find or import trace"
       quit(1)

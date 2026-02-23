@@ -20,6 +20,7 @@ enum Instruction {
     PushFloat(f64),          // adds its arg to top of stack
     PushBool(bool),          // adds its arg to top of stack
     PushString(String),      // adds its arg to top of stack
+    CallExpression(String),  // evaluates the call expression in the replay engine
     Index,                   // pops ^2, ^1 before pushing ^2[^1]
     Field(String),           // pops ^1 brefore pushing ^1.<arg>
     UnaryOperation(String),  // pops ^1 before pushing <op> ^1

@@ -1,22 +1,31 @@
 import
-  std / [ strutils, os ],
-  json_serialization, json_serialization / std / tables,
+  std / [ os ],
   ../utilities/zip,
-  ../../common/[ types, trace_index ]
+  ../../common/[ types, trace_index, lang ],
+  storage_and_import,
+  ../globals
 
 proc importTraceInPreparedFolder(traceZipPath: string, outputFolderFullPath: string) =
 #   let res = execProcess(unzipExe, args = @[traceZipPath, "-d", outputFolderFullPath], options={})
 #   echo "unzip: ", res
   zip.unzipIntoFolder(traceZipPath, outputFolderFullPath)
-  let traceDbMetadata = Json.decode(readFile(outputFolderFullPath / "trace_db_metadata.json"), Trace)
-  let newTraceId = trace_index.newID(test=false)
-  var importedTrace = traceDbMetadata
-  importedTrace.id = newTraceId
-  importedTrace.outputFolder = outputFolderFullPath
-  importedTrace.imported = true
-  let t = trace_index.recordTrace(importedTrace, test=false)
-  discard t
-  echo "recorded with id ", newTraceId
+  let traceKind =
+    if fileExists(outputFolderFullPath / "trace_metadata.json"):
+      "db"
+    else:
+      # replay trace imports (RR/TTD) carry trace_db_metadata.json
+      "rr"
+  var importedTrace = importTrace(
+    outputFolderFullPath,
+    NO_TRACE_ID,
+    NO_PID,
+    LangUnknown,
+    DB_SELF_CONTAINED_DEFAULT,
+    traceKind = traceKind)
+  if importedTrace.isNil:
+    echo "error: failed to import trace metadata from ", outputFolderFullPath
+    quit(1)
+  echo "recorded with id ", importedTrace.id
 
 
 proc importCommand*(traceZipPath: string, importedTraceFolder: string) =

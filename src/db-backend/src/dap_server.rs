@@ -2,11 +2,14 @@ use serde_json::json;
 // use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
-#[cfg(feature = "io-transport")]
+#[cfg(all(feature = "io-transport", unix))]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::Duration;
 
 use log::{debug, error, info, warn};
 
@@ -15,6 +18,7 @@ use crate::dap_types;
 
 use crate::db::Db;
 use crate::handler::Handler;
+#[cfg(not(windows))]
 use crate::paths::CODETRACER_PATHS;
 use crate::rr_dispatcher::CtRRArgs;
 use crate::task::{
@@ -22,6 +26,11 @@ use crate::task::{
     FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
     SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
+#[cfg(windows)]
+use crate::transport_endpoint::windows_named_pipe_path_for_pid;
+#[cfg(not(windows))]
+use crate::transport_endpoint::unix_socket_path_for_pid;
+use crate::transport_endpoint::DapEndpoint;
 
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
@@ -63,12 +72,30 @@ pub fn make_transport() -> DapResult<WorkerTransport> {
 }
 
 #[allow(clippy::unwrap_used)] // Mutex poisoning indicates unrecoverable state
+#[cfg(unix)]
 pub fn socket_path_for(pid: usize) -> PathBuf {
-    CODETRACER_PATHS
-        .lock()
-        .unwrap()
-        .tmp_path
-        .join(format!("{DAP_SOCKET_NAME}_{}.sock", pid))
+    unix_socket_path_for_pid(
+        &CODETRACER_PATHS.lock().unwrap().tmp_path,
+        DAP_SOCKET_NAME,
+        pid,
+        Some("sock"),
+    )
+}
+
+#[cfg(windows)]
+pub fn socket_path_for(pid: usize) -> PathBuf {
+    PathBuf::from(windows_named_pipe_path_for_pid(DAP_SOCKET_NAME, pid))
+}
+
+#[cfg(not(any(unix, windows)))]
+#[allow(clippy::unwrap_used)] // Mutex poisoning indicates unrecoverable state
+pub fn socket_path_for(pid: usize) -> PathBuf {
+    unix_socket_path_for_pid(
+        &CODETRACER_PATHS.lock().unwrap().tmp_path,
+        DAP_SOCKET_NAME,
+        pid,
+        Some("sock"),
+    )
 }
 
 /// Resolve the `ct-rr-support` binary path from the launch arguments,
@@ -137,60 +164,113 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 
 #[cfg(feature = "io-transport")]
 pub fn run_stdio() -> Result<(), Box<dyn Error>> {
-    use std::io::BufReader;
-
-    // let mut transport = make_io_transport().unwrap();
-
-    let (receiving_sender, receiving_receiver) = mpsc::channel();
-    let builder = thread::Builder::new().name("receiving".to_string());
-    let receiving_thread = builder.spawn(move || -> Result<(), String> {
-        info!("receiving thread");
-        let stdin = std::io::stdin();
-        let mut reader = BufReader::new(stdin.lock());
-
-        loop {
-            info!("waiting for new stdio DAP message");
-            match dap::read_dap_message_from_reader(&mut reader) {
-                Ok(msg) => {
-                    receiving_sender.send(msg).map_err(|e| {
-                        error!("send error: {e:?}");
-                        format!("send error: {e:?}")
-                    })?;
-                }
-                Err(e) => {
-                    error!("error from read_dap_message_from_reader: {e:?}");
-                    break;
-                }
-            }
-        }
-        Ok(())
-    })?;
-
-    handle_client(receiving_receiver, true, &receiving_thread, None)
+    run_with_endpoint(DapEndpoint::Stdio)
 }
 
 #[cfg(feature = "io-transport")]
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
+    #[cfg(windows)]
+    {
+        run_with_endpoint(DapEndpoint::WindowsNamedPipe(
+            socket_path.to_string_lossy().into_owned(),
+        ))
+    }
+
+    #[cfg(not(windows))]
+    run_with_endpoint(DapEndpoint::UnixSocket(socket_path.to_path_buf()))
+}
+
+#[cfg(feature = "io-transport")]
+pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
     use std::io::BufReader;
 
+    match endpoint {
+        DapEndpoint::Stdio => {
+            let stdin = std::io::stdin();
+            let stdout = std::io::stdout();
+            run_with_stream(BufReader::new(stdin), stdout)
+        }
+        DapEndpoint::UnixSocket(socket_path) => {
+            #[cfg(unix)]
+            {
+                let stream = UnixStream::connect(&socket_path)?;
+                let writer = stream.try_clone()?;
+                info!("stream ok out of thread");
+                let reader = BufReader::new(stream);
+                run_with_stream(reader, writer)
+            }
+            #[cfg(not(unix))]
+            {
+                Err(format!(
+                    "unix socket transport is not supported on this platform: {}",
+                    socket_path.display()
+                )
+                .into())
+            }
+        }
+        DapEndpoint::WindowsNamedPipe(pipe_path) => {
+            #[cfg(windows)]
+            {
+                let stream = connect_windows_named_pipe(&pipe_path)?;
+                let writer = stream.try_clone().map_err(|e| {
+                    format!("connected to named pipe '{pipe_path}', but failed to clone stream handle: {e}")
+                })?;
+                let reader = BufReader::new(stream);
+                run_with_stream(reader, writer)
+            }
+
+            #[cfg(not(windows))]
+            {
+                Err(format!("windows named-pipe transport is not supported on this platform: {pipe_path}").into())
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "io-transport", windows))]
+fn connect_windows_named_pipe(pipe_path: &str) -> Result<std::fs::File, Box<dyn Error>> {
+    use std::ffi::OsStr;
+    use std::fs::OpenOptions;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
+
+    let pipe_path_wide: Vec<u16> = OsStr::new(pipe_path).encode_wide().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        // Wait briefly so startup races produce a clear timeout instead of a generic open failure.
+        if WaitNamedPipeW(pipe_path_wide.as_ptr(), 5_000) == 0 {
+            let err = GetLastError();
+            return Err(format!(
+                "failed waiting for Windows named pipe '{pipe_path}' (error code {err}); ensure the DAP listener is running and using the same pipe path"
+            )
+            .into());
+        }
+
+        OpenOptions::new().read(true).write(true).open(pipe_path).map_err(|e| {
+            let err = GetLastError();
+            format!(
+                "failed to connect to Windows named pipe '{pipe_path}' after WaitNamedPipeW success (error code {err}): {e}"
+            )
+            .into()
+        })
+    }
+}
+
+#[cfg(feature = "io-transport")]
+pub fn run_with_stream<R, W>(reader: R, writer: W) -> Result<(), Box<dyn Error>>
+where
+    R: std::io::BufRead + Send + 'static,
+    W: std::io::Write + Send + 'static,
+{
     let (receiving_sender, receiving_receiver) = mpsc::channel();
-
-    let socket_path_owned = socket_path.to_path_buf();
-
-    let stream = UnixStream::connect(&socket_path_owned)?;
-    let writer = stream.try_clone()?;
-    info!("stream ok out of thread");
-
     let builder = thread::Builder::new().name("receiving".to_string());
     let receiving_thread = builder.spawn(move || -> Result<(), String> {
         info!("receiving thread");
-        let mut reader = BufReader::new(stream.try_clone().map_err(|e| {
-            error!("buf reader try_clone error: {e:?}");
-            format!("buf reader try_clone error: {e:?}")
-        })?);
+        let mut reader = reader;
 
         loop {
-            info!("waiting for new socket DAP message");
+            info!("waiting for new DAP message");
             match dap::read_dap_message_from_reader(&mut reader) {
                 Ok(msg) => {
                     receiving_sender.send(msg).map_err(|e| {
@@ -207,7 +287,7 @@ pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
         Ok(())
     })?;
 
-    handle_client(receiving_receiver, false, &receiving_thread, Some(writer))
+    handle_client(receiving_receiver, &receiving_thread, writer)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -222,42 +302,59 @@ fn setup(
     thread_name: &str,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
+    let metadata_path = trace_folder.join("trace_metadata.json");
+    let trace_path = trace_folder.join(trace_file);
+    let is_ttd_run_trace = trace_path
+        .extension()
+        .is_some_and(|ext| ext == std::ffi::OsStr::new("run"));
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
         runtime_tracing::TraceEventsFileFormat::Json
     } else {
         runtime_tracing::TraceEventsFileFormat::Binary
     };
-    let metadata_path = trace_folder.join("trace_metadata.json");
-    let trace_path = trace_folder.join(trace_file);
-    let meta_result = load_trace_metadata(&metadata_path);
-    let trace_result = load_trace_data(&trace_path, trace_file_format);
-    if meta_result.is_err() {
-        error!(
-            "failed to load trace metadata from {:?}: {:?}",
-            metadata_path,
-            meta_result.as_ref().err()
-        );
-    }
-    if trace_result.is_err() {
-        error!(
-            "failed to load trace data from {:?}: {:?}",
-            trace_path,
-            trace_result.as_ref().err()
-        );
-    }
-    if let (Ok(meta), Ok(trace)) = (meta_result, trace_result) {
-        let mut db = Db::new(&meta.workdir);
-        let mut proc = TraceProcessor::new(&mut db);
-        proc.postprocess(&trace)?;
+    // duration code copied from
+    // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
+    if !is_ttd_run_trace {
+        if let (Ok(meta), Ok(trace)) = (
+            load_trace_metadata(&metadata_path),
+            load_trace_data(&trace_path, trace_file_format),
+        ) {
+            let mut db = Db::new(&meta.workdir);
+            let mut proc = TraceProcessor::new(&mut db);
+            proc.postprocess(&trace)?;
 
-        let mut handler = Handler::new(
-            TraceKind::DB,
-            CtRRArgs {
-                name: thread_name.to_string(),
-                ..CtRRArgs::default()
-            },
-            Box::new(db),
+            let mut handler = Handler::new(
+                TraceKind::DB,
+                CtRRArgs {
+                    name: thread_name.to_string(),
+                    ..CtRRArgs::default()
+                },
+                Box::new(db),
+            );
+            handler.raw_diff_index = raw_diff_index;
+            if for_launch {
+                handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+            }
+            handler.initialized = true;
+            return Ok(handler);
+        }
+    } else {
+        info!(
+            "skipping runtime-tracing metadata load for TTD .run replay trace: {}",
+            trace_path.display()
         );
+    }
+
+    info!("can't read db metadata or path trace files: try to read as rr trace");
+    if let Some(path) = resolve_replay_trace_path(trace_folder, trace_file) {
+        let db = Db::new(&PathBuf::from(""));
+        let ct_rr_args = CtRRArgs {
+            worker_exe: PathBuf::from(ct_rr_worker_exe),
+            rr_trace_folder: path,
+            name: thread_name.to_string(),
+        };
+        info!("ct_rr_args {:?}", ct_rr_args);
+        let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
         handler.raw_diff_index = raw_diff_index;
         if for_launch {
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
@@ -265,26 +362,52 @@ fn setup(
         handler.initialized = true;
         Ok(handler)
     } else {
-        info!("can't read db metadata or path trace files: try to read as rr trace");
-        let path = trace_folder.join("rr");
-        if path.exists() {
-            let db = Db::new(&PathBuf::from(""));
-            let ct_rr_args = CtRRArgs {
-                worker_exe: PathBuf::from(ct_rr_worker_exe),
-                rr_trace_folder: path,
-                name: thread_name.to_string(),
-            };
-            info!("ct_rr_args {:?}", ct_rr_args);
-            let mut handler = Handler::new(TraceKind::RR, ct_rr_args, Box::new(db));
-            handler.raw_diff_index = raw_diff_index;
-            if for_launch {
-                handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+        Err("problem with reading metadata or trace files and no replay-worker trace path was found".into())
+    }
+}
+
+fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<PathBuf> {
+    let explicit_trace_path = trace_folder.join(trace_file);
+    if explicit_trace_path
+        .extension()
+        .is_some_and(|ext| ext == std::ffi::OsStr::new("run"))
+        && explicit_trace_path.exists()
+    {
+        return Some(explicit_trace_path);
+    }
+
+    // Windows TTD recordings produced via `ct record` may not pass an explicit
+    // `trace_file` launch argument. In that case, discover a `.run` file in the
+    // trace folder and route replay through the worker path.
+    if let Ok(entries) = std::fs::read_dir(trace_folder) {
+        let mut newest_run: Option<(std::time::SystemTime, PathBuf)> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_none_or(|ext| ext != std::ffi::OsStr::new("run"))
+            {
+                continue;
             }
-            handler.initialized = true;
-            Ok(handler)
-        } else {
-            Err("problem with reading metadata or path trace files".into())
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if newest_run.as_ref().is_none_or(|(current, _)| modified > *current) {
+                newest_run = Some((modified, path));
+            }
         }
+        if let Some((_, path)) = newest_run {
+            return Some(path);
+        }
+    }
+
+    let legacy_rr_path = trace_folder.join("rr");
+    if legacy_rr_path.exists() {
+        Some(legacy_rr_path)
+    } else {
+        None
     }
 }
 
@@ -461,6 +584,8 @@ pub struct Ctx {
     pub to_stable_sender: Option<Sender<dap::Request>>,
     pub to_flow_sender: Option<Sender<dap::Request>>,
     pub to_tracepoint_sender: Option<Sender<dap::Request>>,
+    pub disconnect_response_written: Arc<AtomicBool>,
+    pub should_terminate: bool,
 }
 
 impl Default for Ctx {
@@ -480,6 +605,8 @@ impl Default for Ctx {
             to_stable_sender: None,
             to_flow_sender: None,
             to_tracepoint_sender: None,
+            disconnect_response_written: Arc::new(AtomicBool::new(false)),
+            should_terminate: false,
         }
     }
 }
@@ -643,16 +770,18 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             });
             ctx.write_dap_messages(sender, &[response])?;
 
-            // > The disconnect request asks the debug adapter to disconnect from the debuggee (thus ending the debug session)
-            // > and then to shut down itself (the debug adapter).
-            // (https://microsoft.github.io/debug-adapter-protocol//specification.html#Requests_Disconnect)
-            // we don't have a debuggee process, just a db, so we just stop db-backend for now
-            // (and before that, we respond to the request, acknowledging it)
-            //
-            // we allow it for now here, but if additional cleanup is needed, maybe we'd need
-            // to return to upper functions
-            #[allow(clippy::exit)]
-            std::process::exit(0);
+            // Wait briefly until the sending thread confirms the framed disconnect
+            // response was written, then terminate the server loop.
+            const DISCONNECT_WRITE_TIMEOUT_MS: usize = 2000;
+            let mut waited_ms = 0usize;
+            while !ctx.disconnect_response_written.load(Ordering::SeqCst) {
+                if waited_ms >= DISCONNECT_WRITE_TIMEOUT_MS {
+                    return Err("disconnect response was not written before shutdown timeout".into());
+                }
+                thread::sleep(Duration::from_millis(5));
+                waited_ms += 5;
+            }
+            ctx.should_terminate = true;
         }
         DapMessage::Request(req) => {
             if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
@@ -775,13 +904,14 @@ fn task_thread(
 }
 
 #[cfg(feature = "io-transport")]
-#[allow(clippy::expect_used)] // stream must be Some when is_stdio is false - internal invariant
-fn handle_client(
+fn handle_client<W>(
     receiver: Receiver<DapMessage>,
-    is_stdio: bool,
     _receiving_thread: &thread::JoinHandle<Result<(), String>>,
-    stream: Option<UnixStream>,
-) -> Result<(), Box<dyn Error>> {
+    writer: W,
+) -> Result<(), Box<dyn Error>>
+where
+    W: std::io::Write + Send + 'static,
+{
     use log::error;
 
     let mut ctx = Ctx::default();
@@ -791,13 +921,10 @@ fn handle_client(
     let (sending_sender, sending_receiver) = mpsc::channel();
 
     let builder = thread::Builder::new().name("sending".to_string());
+    let disconnect_response_written = ctx.disconnect_response_written.clone();
     let _sending_thread = builder.spawn(move || -> Result<(), String> {
         let mut send_seq = 0i64;
-        let mut transport: Box<dyn DapTransport> = if is_stdio {
-            Box::new(std::io::stdout())
-        } else {
-            Box::new(stream.expect("stream must be initialized if not stdio!"))
-        };
+        let mut transport: Box<dyn DapTransport> = Box::new(writer);
         loop {
             info!("wait for next message from dap server/task threads");
             let msg: DapMessage = sending_receiver.recv().map_err(|e| {
@@ -810,6 +937,11 @@ fn handle_client(
                 error!("transport send error: {e:}");
                 format!("transport send error: {e:}")
             })?;
+            if let DapMessage::Response(resp) = &msg_with_seq {
+                if resp.command == "disconnect" {
+                    disconnect_response_written.store(true, Ordering::SeqCst);
+                }
+            }
         }
     })?;
 
@@ -942,15 +1074,13 @@ fn handle_client(
                     if let Err(e) = res {
                         error!("handle_message error: {e:?}");
                     }
+                    if ctx.should_terminate {
+                        break;
+                    }
                 }
             }
         }
     }
 
-    // for now, we're just looping so this place is unreachable anyway:
-    //   no need to `join`
-    // still: TODO: think of when receiving a signal, do we need some special handling?
-
-    // let _ = sending_thread.join().expect("can join the sending thread");
-    // Ok(())
+    Ok(())
 }

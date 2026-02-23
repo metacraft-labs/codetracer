@@ -17,7 +17,10 @@ use log::LevelFilter;
 use log::{error, info};
 use std::fs::{create_dir_all, remove_file, File};
 use std::io::Write;
-use std::os::unix::fs::symlink;
+#[cfg(unix)]
+use std::os::unix::fs::symlink as symlink_path;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_dir as symlink_path;
 use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::thread;
@@ -48,6 +51,7 @@ mod task;
 mod trace_processor;
 mod tracepoint_interpreter;
 mod transport;
+mod transport_endpoint;
 mod value;
 
 use crate::paths::{run_dir_for, CODETRACER_PATHS};
@@ -142,11 +146,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     // remove_dir_all(&run_dir)?;
     create_dir_all(&run_dir)?;
     let last_link = tmp_path.join("last");
-    println!("last {:?}", last_link.display());
-    let _ = remove_file(&last_link); // it's ok if it doesn't exist, ignore other errors
-    if let Err(e) = symlink(run_dir, &last_link) {
+    eprintln!("last {:?}", last_link.display());
+    if last_link.exists() {
+        // On Windows this is a directory symlink (`symlink_dir`), so remove_dir is required.
+        let _ = std::fs::remove_dir(&last_link);
+        let _ = remove_file(&last_link);
+    }
+    if let Err(e) = symlink_path(run_dir, &last_link) {
         // ignore if it can't happen: it's just a help for debugging
-        println!("error symlink {e:?}");
+        eprintln!("error symlink {e:?}");
     }
 
     match cli.cmd {

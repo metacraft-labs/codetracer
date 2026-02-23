@@ -15,17 +15,24 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+#[cfg(unix)]
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
+#[cfg(unix)]
 use db_backend::task::{CtLoadFlowArguments, FlowMode, Location};
+#[cfg(unix)]
 use db_backend::transport::DapTransport;
+#[cfg(unix)]
 use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+#[cfg(unix)]
 use std::io::{self, BufReader, ErrorKind};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+#[cfg(unix)]
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -152,6 +159,7 @@ impl Drop for TestRecording {
 }
 
 /// A DAP test client wrapper with helper methods
+#[cfg(unix)]
 pub struct DapTestClient {
     client: DapClient,
     reader: BufReader<UnixStream>,
@@ -160,6 +168,7 @@ pub struct DapTestClient {
     _listener: UnixListener,
 }
 
+#[cfg(unix)]
 impl DapTestClient {
     /// Start a new DAP test client connected to db-backend
     pub fn start(temp_dir: &Path, ct_rr_support: &Path) -> Result<Self, String> {
@@ -347,6 +356,7 @@ impl DapTestClient {
     }
 }
 
+#[cfg(unix)]
 impl Drop for DapTestClient {
     fn drop(&mut self) {
         self.db_backend.kill().ok();
@@ -547,11 +557,20 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
 }
 
 /// Check if rr is available
+#[cfg(unix)]
 pub fn is_rr_available() -> bool {
     Command::new("rr").arg("--version").output().is_ok()
 }
 
+/// Check if rr is available
+#[cfg(not(unix))]
+pub fn is_rr_available() -> bool {
+    eprintln!("SKIPPED: rr-based DAP flow integration tests are only supported on Unix platforms");
+    false
+}
+
 /// Accept a connection with timeout
+#[cfg(unix)]
 fn accept_with_timeout(
     listener: &UnixListener,
     timeout: Duration,
@@ -774,6 +793,7 @@ impl TestRecording {
 /// copy path for breakpoints so the path matches what the DB lookup expects.
 /// For Ruby traces, paths are relative to the recorder's CWD, which is the
 /// codetracer repo root, so the original source path matches via suffix match.
+#[cfg(unix)]
 pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
     println!("Source: {}", config.source_path.display());
     println!("Language: {:?}", config.language);
@@ -834,6 +854,7 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
 }
 
 /// Run a flow integration test with the given configuration (RR-based languages)
+#[cfg(unix)]
 pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
     // Find ct-rr-support
     let ct_rr_support =
@@ -940,4 +961,16 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
 
     println!("\nTest completed successfully!");
     Ok(())
+}
+
+/// Run a flow integration test with the given configuration
+#[cfg(not(unix))]
+pub fn run_flow_test(_config: &FlowTestConfig, _version_label: &str) -> Result<(), String> {
+    Err("DAP flow integration tests currently require Unix domain sockets and rr; this test is unsupported on non-Unix platforms".to_string())
+}
+
+/// Run a flow integration test for a DB-based language (Python/Ruby).
+#[cfg(not(unix))]
+pub fn run_db_flow_test(_config: &FlowTestConfig, _version_label: &str) -> Result<(), String> {
+    Err("DAP flow integration tests currently require Unix domain sockets; this test is unsupported on non-Unix platforms".to_string())
 }

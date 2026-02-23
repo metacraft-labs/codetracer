@@ -53,6 +53,11 @@ pub trait Replay: std::fmt::Debug {
     fn callstack_jump(&mut self, depth: usize) -> Result<(), Box<dyn Error>>;
     fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>>;
     fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>>;
+    fn evaluate_call_expression(
+        &mut self,
+        call_expression: &str,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
     fn current_step_id(&mut self) -> StepId;
 }
