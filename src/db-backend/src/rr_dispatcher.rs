@@ -6,7 +6,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[cfg(windows)]
 use std::net::TcpStream;
@@ -23,8 +23,8 @@ use crate::paths::ct_rr_worker_socket_path;
 #[cfg(windows)]
 use crate::paths::CODETRACER_PATHS;
 use crate::query::{
-    CtRRQuery, TtdTracepointEvalRequest, TtdTracepointEvalResponseEnvelope, TtdTracepointEvalMode,
-    TtdTracepointFunctionCallRequest,
+    CtRRQuery, TtdTracepointEvalMode, TtdTracepointEvalRequest, TtdTracepointEvalResponseEnvelope,
+    TtdTracepointFunctionCallRequest, TtdTracepointValueClass,
 };
 use crate::replay::Replay;
 use crate::task::{
@@ -179,7 +179,10 @@ impl CtRRWorker {
                 .tmp_path
                 .clone()
         };
-        info!("try to resolve worker endpoint manifest for replay worker: {}", manifest_name);
+        info!(
+            "try to resolve worker endpoint manifest for replay worker: {}",
+            manifest_name
+        );
 
         while Instant::now() < deadline {
             if let Some(pid) = worker_pid {
@@ -270,9 +273,7 @@ impl CtRRWorker {
                     }
                     let manifest_path = path.join(&manifest_name);
                     if manifest_path.exists() {
-                        let modified = std::fs::metadata(&manifest_path)
-                            .and_then(|m| m.modified())
-                            .ok();
+                        let modified = std::fs::metadata(&manifest_path).and_then(|m| m.modified()).ok();
                         candidates.push((manifest_path, modified));
                     }
                 }
@@ -690,9 +691,7 @@ impl Replay for RRDispatcher {
             }),
         };
 
-        let response_json = self
-            .stable
-            .run_query(CtRRQuery::TtdTracepointEvaluate { request })?;
+        let response_json = self.stable.run_query(CtRRQuery::TtdTracepointEvaluate { request })?;
         let response: TtdTracepointEvalResponseEnvelope = serde_json::from_str(&response_json)?;
 
         if let Some(diag) = response.diagnostic {
@@ -715,9 +714,7 @@ impl Replay for RRDispatcher {
     }
 }
 
-fn tracepoint_response_value(
-    response: &TtdTracepointEvalResponseEnvelope,
-) -> Option<ValueRecordWithType> {
+fn tracepoint_response_value(response: &TtdTracepointEvalResponseEnvelope) -> Option<ValueRecordWithType> {
     response
         .value
         .clone()
@@ -725,13 +722,9 @@ fn tracepoint_response_value(
         .or_else(|| tracepoint_return_value_from_class(response))
 }
 
-fn tracepoint_return_value_from_class(
-    response: &TtdTracepointEvalResponseEnvelope,
-) -> Option<ValueRecordWithType> {
+fn tracepoint_return_value_from_class(response: &TtdTracepointEvalResponseEnvelope) -> Option<ValueRecordWithType> {
     let raw = response.return_value_u64?;
-    let class = response
-        .return_value_class
-        .unwrap_or(TtdTracepointValueClass::U64);
+    let class = response.return_value_class.unwrap_or(TtdTracepointValueClass::U64);
 
     let (kind, lang_type) = match class {
         TtdTracepointValueClass::Void => return None,
@@ -749,18 +742,12 @@ fn tracepoint_return_value_from_class(
 
     Some(match class {
         TtdTracepointValueClass::Void => return None,
-        TtdTracepointValueClass::Bool => ValueRecordWithType::Bool {
-            b: raw != 0,
-            typ,
-        },
+        TtdTracepointValueClass::Bool => ValueRecordWithType::Bool { b: raw != 0, typ },
         TtdTracepointValueClass::I64 => {
             let signed = i64::from_ne_bytes(raw.to_ne_bytes());
             ValueRecordWithType::Int { i: signed, typ }
         }
-        TtdTracepointValueClass::U64 => ValueRecordWithType::Int {
-            i: raw as i64,
-            typ,
-        },
+        TtdTracepointValueClass::U64 => ValueRecordWithType::Int { i: raw as i64, typ },
         TtdTracepointValueClass::Pointer => ValueRecordWithType::Raw {
             r: format!("0x{raw:016x}"),
             typ,
@@ -769,18 +756,17 @@ fn tracepoint_return_value_from_class(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use runtime_tracing::{TypeSpecificInfo, TypeRecord, TypeKind};
+    use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
 
     #[test]
     fn tracepoint_return_value_prefers_complex_payload() {
         let typ = TypeRecord {
             kind: TypeKind::Struct,
             lang_type: "Pair".to_string(),
-            specific_info: TypeSpecificInfo::Struct {
-                fields: vec![],
-            },
+            specific_info: TypeSpecificInfo::Struct { fields: vec![] },
         };
         let complex = ValueRecordWithType::Struct {
             field_values: vec![],
@@ -798,7 +784,10 @@ mod tests {
         };
 
         let derived = tracepoint_response_value(&response).expect("value");
-        assert_eq!(derived, complex);
+        assert_eq!(
+            serde_json::to_string(&derived).unwrap(),
+            serde_json::to_string(&complex).unwrap()
+        );
     }
 
     #[test]

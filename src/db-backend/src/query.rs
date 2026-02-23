@@ -126,7 +126,7 @@ pub struct TtdTracepointEvalDiagnostic {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TtdTracepointEvalResponseEnvelope {
     pub mode: TtdTracepointEvalMode,
     pub replay_state_preserved: bool,

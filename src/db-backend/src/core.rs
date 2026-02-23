@@ -14,9 +14,9 @@ use crate::paths::CODETRACER_PATHS;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 // use crate::event::Event;
-use crate::task::{gen_task_id, EventId, TaskId, TaskKind};
 #[cfg(unix)]
 use crate::task::to_task_kind_text;
+use crate::task::{gen_task_id, EventId, TaskId, TaskKind};
 
 // hopefully impossible for normal PID-s, as they start
 // from 1 for init?
