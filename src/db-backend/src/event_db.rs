@@ -2,8 +2,8 @@ use std::cmp::min;
 use std::collections::HashMap;
 use std::error::Error;
 
+use codetracer_trace_types::{EventLogKind, StepId, TypeKind};
 use log::error;
-use runtime_tracing::{EventLogKind, StepId, TypeKind};
 
 use crate::task::{
     DbEventKind, ProgramEvent, Stop, StringAndValueTuple, TableData, TableRow, TableUpdate, TraceValues,

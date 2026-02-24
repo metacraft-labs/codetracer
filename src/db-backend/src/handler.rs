@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
-use runtime_tracing::{CallKey, EventLogKind, Line, PathId, StepId, TypeKind, VariableId, NO_KEY};
+use codetracer_trace_types::{CallKey, EventLogKind, Line, PathId, StepId, TypeKind, VariableId, NO_KEY};
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};
@@ -2273,12 +2273,13 @@ mod tests {
     use clap::error::Result;
     // use event_db::{IndexInSingleTable, SingleTableId};
     // use futures::stream::Iter;
-    use lang::Lang;
-    use runtime_tracing::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NonStreamingTraceWriter, StepId, StepRecord,
-        TraceLowLevelEvent, TraceMetadata, TraceWriter, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
-        NONE_VALUE,
+    use codetracer_trace_types::{
+        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, StepId, StepRecord, TraceLowLevelEvent, TraceMetadata,
+        TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, NONE_VALUE,
     };
+    use codetracer_trace_writer::non_streaming_trace_writer::NonStreamingTraceWriter;
+    use codetracer_trace_writer::trace_writer::TraceWriter;
+    use lang::Lang;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
 
@@ -2556,10 +2557,10 @@ mod tests {
     }
     fn load_db_for_trace(path: &Path) -> Db {
         let mut trace_file = path.join("trace.bin");
-        let mut trace_file_format = runtime_tracing::TraceEventsFileFormat::Binary;
+        let mut trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Binary;
         if !trace_file.exists() {
             trace_file = path.join("trace.json");
-            trace_file_format = runtime_tracing::TraceEventsFileFormat::Json;
+            trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Json;
         }
         let trace_metadata_file = path.join("trace_metadata.json");
         let trace = load_trace_data(&trace_file, trace_file_format).expect("expected that it can load the trace file");

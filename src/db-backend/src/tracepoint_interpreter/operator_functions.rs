@@ -1,6 +1,6 @@
+use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
-use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
 
 use crate::value::{Type, Value, ValueRecordWithType};
 

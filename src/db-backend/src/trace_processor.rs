@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str;
 
 // use log::info;
-use runtime_tracing::{
+use codetracer_trace_types::{
     CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, ValueRecord,
 };
 
@@ -433,9 +433,9 @@ fn expand_tilde_path(path: &Path) -> PathBuf {
 #[allow(clippy::panic)]
 pub fn load_trace_data(
     trace_file: &Path,
-    file_format: runtime_tracing::TraceEventsFileFormat,
+    file_format: codetracer_trace_reader::TraceEventsFileFormat,
 ) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let mut trace_reader = runtime_tracing::create_trace_reader(file_format);
+    let mut trace_reader = codetracer_trace_reader::create_trace_reader(file_format);
     // copied and adapted from https://stackoverflow.com/a/70926549/438099
     let path = expand_tilde_path(trace_file);
     let trace_events = trace_reader.load_trace_events(&path)?;
@@ -446,7 +446,7 @@ pub fn load_trace_data(
 #[allow(clippy::panic)]
 pub fn load_trace_data(
     trace_file: &Path,
-    file_format: runtime_tracing::TraceEventsFileFormat,
+    file_format: codetracer_trace_reader::TraceEventsFileFormat,
 ) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
     use crate::vfs::{load_trace_data_vfs, trace_vfs_root};
 

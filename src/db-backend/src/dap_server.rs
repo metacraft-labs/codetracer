@@ -308,9 +308,9 @@ fn setup(
         .extension()
         .is_some_and(|ext| ext == std::ffi::OsStr::new("run"));
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
-        runtime_tracing::TraceEventsFileFormat::Json
+        codetracer_trace_reader::TraceEventsFileFormat::Json
     } else {
-        runtime_tracing::TraceEventsFileFormat::Binary
+        codetracer_trace_reader::TraceEventsFileFormat::Binary
     };
     // duration code copied from
     // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html

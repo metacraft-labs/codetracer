@@ -13,7 +13,7 @@ use std::{
     sync::{LazyLock, Mutex, Once},
 };
 
-use runtime_tracing::{StepId, TypeKind};
+use codetracer_trace_types::{StepId, TypeKind};
 
 use crate::{
     db::{Db, DbReplay},
@@ -148,7 +148,7 @@ fn check_equal_values(actual: &Value, expected: &Value) {
 fn load_db_for_trace(path: &Path) -> Db {
     let trace_file = path.join("trace.json");
     let trace_metadata_file = path.join("trace_metadata.json");
-    let trace = load_trace_data(&trace_file, runtime_tracing::TraceEventsFileFormat::Json)
+    let trace = load_trace_data(&trace_file, codetracer_trace_reader::TraceEventsFileFormat::Json)
         .expect("expected that it can load the trace file");
     let trace_metadata =
         load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");

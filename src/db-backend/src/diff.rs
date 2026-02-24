@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
+use codetracer_trace_types::FunctionId;
 use log::info;
 use num_derive::FromPrimitive;
-use runtime_tracing::FunctionId;
 use serde::{Deserialize, Serialize};
 use serde_repr::*;
 
@@ -69,10 +69,10 @@ pub struct DiffLine {
 pub fn load_and_postprocess_trace(trace_folder: &Path) -> Result<Db, Box<dyn Error>> {
     info!("load_and_postprocess_trace {:?}", trace_folder.display());
     let mut trace_path = trace_folder.join("trace.json");
-    let mut trace_file_format = runtime_tracing::TraceEventsFileFormat::Json;
+    let mut trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Json;
     if !trace_path.exists() {
         trace_path = trace_folder.join("trace.bin");
-        trace_file_format = runtime_tracing::TraceEventsFileFormat::Binary;
+        trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Binary;
     }
     let metadata_path = trace_folder.join("trace_metadata.json");
 

@@ -1,5 +1,5 @@
+use codetracer_trace_types::{TraceLowLevelEvent, TraceMetadata};
 use once_cell::sync::Lazy;
-use runtime_tracing::{TraceLowLevelEvent, TraceMetadata};
 use std::{error::Error, path::Path, str};
 use vfs::{MemoryFS, VfsPath};
 
@@ -15,12 +15,12 @@ pub fn trace_vfs_root() -> &'static VfsPath {
 pub fn load_trace_data_vfs(
     root: &VfsPath,
     virtual_path: &str,
-    file_format: runtime_tracing::TraceEventsFileFormat,
+    file_format: codetracer_trace_reader::TraceEventsFileFormat,
 ) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
     let mut f = root.join(virtual_path)?.open_file()?;
     let mut bytes = Vec::new();
     f.read_to_end(&mut bytes)?;
-    let mut rdr = runtime_tracing::create_trace_reader(file_format);
+    let mut rdr = codetracer_trace_reader::create_trace_reader(file_format);
     Ok(rdr.load_trace_events(Path::new(virtual_path)).unwrap())
 }
 

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
+use codetracer_trace_types::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo, NO_KEY};
 use log::{error, info, warn};
-use runtime_tracing::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo, NO_KEY};
 
 use crate::{
     db::{Db, DbRecordEvent},
@@ -86,7 +86,7 @@ impl FlowPreloader {
         // breakpoint; count a next call for it;
         // maybe this will just work because they're registered as loop first line
 
-        for step in db.step_from(runtime_tracing::StepId(0), true) {
+        for step in db.step_from(codetracer_trace_types::StepId(0), true) {
             if diff_lines.contains(&(PathBuf::from(db.paths[step.path_id].clone()), step.line.0)) {
                 diff_call_keys.insert(step.call_key.0);
                 let location = db.load_location(step.step_id, step.call_key, &mut self.expr_loader);

@@ -876,7 +876,7 @@ fn e2e_codetracer_dap_ttd_tracepoint_call_eval_windows() {
         .expect("expected call expression entry in tracepoint locals");
 
     assert!(
-        matches!(entry.field1.kind, runtime_tracing::TypeKind::Int),
+        matches!(entry.field1.kind, codetracer_trace_types::TypeKind::Int),
         "expected call expression to evaluate to int value, got {:?}",
         entry.field1.kind
     );
@@ -946,7 +946,7 @@ fn e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows() {
         .expect("expected failed call expression entry in tracepoint locals");
 
     assert!(
-        matches!(entry.field1.kind, runtime_tracing::TypeKind::Error),
+        matches!(entry.field1.kind, codetracer_trace_types::TypeKind::Error),
         "expected missing function call to report error, got {:?}",
         entry.field1.kind
     );
@@ -1007,7 +1007,7 @@ fn e2e_codetracer_dap_ttd_tracepoint_return_struct_windows() {
         .expect("expected struct return entry in tracepoint locals");
 
     assert!(
-        matches!(entry.field1.kind, runtime_tracing::TypeKind::Struct),
+        matches!(entry.field1.kind, codetracer_trace_types::TypeKind::Struct),
         "expected struct return value, got {:?}",
         entry.field1.kind
     );
@@ -1068,7 +1068,7 @@ fn e2e_codetracer_dap_ttd_tracepoint_return_string_windows() {
         .expect("expected string return entry in tracepoint locals");
 
     assert!(
-        matches!(entry.field1.kind, runtime_tracing::TypeKind::String),
+        matches!(entry.field1.kind, codetracer_trace_types::TypeKind::String),
         "expected string return value, got {:?}",
         entry.field1.kind
     );

@@ -1,8 +1,8 @@
+use codetracer_trace_types::{Place, TypeKind, TypeRecord, TypeSpecificInfo};
 use num_bigint::BigInt;
-use runtime_tracing::{Place, TypeKind, TypeRecord, TypeSpecificInfo};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-// TODO? from types if needed use runtime_tracing::base64;
+// TODO? from types if needed use codetracer_trace_types::base64;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::ops;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use codetracer_trace_types::{CallKey, EventLogKind, StepId, TypeKind};
 use num_derive::FromPrimitive;
-use runtime_tracing::{CallKey, EventLogKind, StepId, TypeKind};
 use serde::{Deserialize, Serialize};
 use serde_repr::*;
 

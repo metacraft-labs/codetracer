@@ -13,8 +13,8 @@
 use std::collections::HashMap;
 use std::error::Error;
 
+use codetracer_trace_types::{StepId, TypeKind};
 use log::info;
-use runtime_tracing::{StepId, TypeKind};
 use tree_sitter::{Node, Parser};
 use tree_sitter_traversal2::{traverse, Order};
 

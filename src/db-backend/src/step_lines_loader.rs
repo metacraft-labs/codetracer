@@ -2,8 +2,8 @@ use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use codetracer_trace_types::{CallKey, StepId};
 use log::info;
-use runtime_tracing::{CallKey, StepId};
 
 use crate::db::{Db, DbReplay, DbStep};
 use crate::distinct_vec::DistinctVec;

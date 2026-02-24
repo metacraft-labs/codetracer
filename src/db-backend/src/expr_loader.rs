@@ -4,9 +4,9 @@ use crate::{
         Branch, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, Position, NO_BRANCH_ID, NO_POSITION,
     },
 };
+use codetracer_trace_types::Line;
 use log::{debug, info, warn};
 use once_cell::sync::Lazy;
-use runtime_tracing::Line;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;

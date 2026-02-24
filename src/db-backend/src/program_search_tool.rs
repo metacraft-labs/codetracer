@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::path::PathBuf;
 
+use codetracer_trace_types::{CallKey, StepId, TypeId, ValueRecord};
 use log::warn;
-use runtime_tracing::{CallKey, StepId, TypeId, ValueRecord};
 
 use crate::db::Db;
 use crate::expr_loader::ExprLoader;

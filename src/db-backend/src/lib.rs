@@ -3,7 +3,7 @@
 // use std::ffi::{c_char, CStr, CString};
 // use std::slice;
 
-// use runtime_tracing::EventLogKind;
+// use codetracer_trace_types::EventLogKind;
 
 #[cfg(feature = "browser-transport")]
 use wasm_bindgen::prelude::wasm_bindgen;

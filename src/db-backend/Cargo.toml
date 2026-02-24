@@ -30,7 +30,9 @@ schemars-zod = "0.1.5"
 futures = "0.3.30"
 futures-timer = "3.0.3"
 clap = { version = "4.5.4", features = ["derive"] }
-runtime_tracing = { path = "../../libs/runtime_tracing/runtime_tracing" }
+codetracer_trace_types = { path = "../../libs/codetracer-trace-format/codetracer_trace_types" }
+codetracer_trace_reader = { path = "../../libs/codetracer-trace-format/codetracer_trace_reader" }
+codetracer_trace_writer = { path = "../../libs/codetracer-trace-format/codetracer_trace_writer" }
 num-bigint = "0.4.6"
 chrono = "0.4.41"
 

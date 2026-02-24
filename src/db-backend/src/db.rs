@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
 
-use log::{error, info, warn};
-use runtime_tracing::{
+use codetracer_trace_types::{
     CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, Place, StepId, TypeId, TypeKind,
     TypeRecord, TypeSpecificInfo, ValueRecord, VariableId, NO_KEY,
 };
+use log::{error, info, warn};
 
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;

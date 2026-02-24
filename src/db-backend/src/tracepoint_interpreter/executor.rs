@@ -1,5 +1,5 @@
+use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 use log::info;
-use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
 
 use crate::{
     lang::Lang,

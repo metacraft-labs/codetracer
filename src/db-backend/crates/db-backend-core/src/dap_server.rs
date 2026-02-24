@@ -121,9 +121,9 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
 fn launch(trace_folder: &Path, trace_file: &Path, raw_diff_index: Option<String>, seq: i64) -> Result<Handler, Box<dyn Error>> {
     info!("run launch() for {:?}", trace_folder);
     let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
-        runtime_tracing::TraceEventsFileFormat::Json
+        codetracer_trace_reader::TraceEventsFileFormat::Json
     } else {
-        runtime_tracing::TraceEventsFileFormat::Binary
+        codetracer_trace_reader::TraceEventsFileFormat::Binary
     };
     let metadata_path = trace_folder.join("trace_metadata.json");
     let trace_path = trace_folder.join(trace_file);

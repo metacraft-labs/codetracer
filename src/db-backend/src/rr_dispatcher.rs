@@ -11,8 +11,8 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::net::TcpStream;
 
+use codetracer_trace_types::StepId;
 use log::{debug, error, info, warn};
-use runtime_tracing::StepId;
 use serde::Deserialize;
 
 use crate::db::DbRecordEvent;
@@ -32,7 +32,7 @@ use crate::task::{
     ProgramEvent, VariableWithRecord, NO_STEP_ID,
 };
 use crate::value::ValueRecordWithType;
-use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
+use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 
 #[cfg(unix)]
 type WorkerStream = UnixStream;
@@ -759,7 +759,7 @@ fn tracepoint_return_value_from_class(response: &TtdTracepointEvalResponseEnvelo
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use runtime_tracing::{TypeKind, TypeRecord, TypeSpecificInfo};
+    use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 
     #[test]
     fn tracepoint_return_value_prefers_complex_payload() {
