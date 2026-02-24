@@ -9,7 +9,7 @@ echo "TUP=${TUP:-<unset>}"
 echo "TUP_DIR=${TUP_DIR:-<unset>}"
 echo -n "command -v tup: "
 if command -v tup >/dev/null 2>&1; then
-  command -v tup
+	command -v tup
 else
-  echo "<missing>"
+	echo "<missing>"
 fi
