@@ -160,10 +160,12 @@ jobs:
             -Env @{
               "NIM_WINDOWS_SOURCE_MODE" = "auto"
               "WINDOWS_DIY_SKIP_RUST" = "1"
+              "WINDOWS_DIY_SKIP_NARGO" = "1"
               "WINDOWS_DIY_SKIP_NODE" = "1"
               "WINDOWS_DIY_SKIP_UV" = "1"
               "WINDOWS_DIY_SKIP_NIM" = "0"
               "WINDOWS_DIY_SKIP_CAPNP" = "1"
+              "WINDOWS_DIY_SKIP_TUP" = "1"
               "WINDOWS_DIY_SKIP_CT_REMOTE" = "1"
             } `
             -RequiredPatterns @(
@@ -180,10 +182,12 @@ jobs:
             -Env @{
               "CAPNP_WINDOWS_SOURCE_MODE" = "auto"
               "WINDOWS_DIY_SKIP_RUST" = "1"
+              "WINDOWS_DIY_SKIP_NARGO" = "1"
               "WINDOWS_DIY_SKIP_NODE" = "1"
               "WINDOWS_DIY_SKIP_UV" = "1"
               "WINDOWS_DIY_SKIP_NIM" = "1"
               "WINDOWS_DIY_SKIP_CAPNP" = "0"
+              "WINDOWS_DIY_SKIP_TUP" = "1"
               "WINDOWS_DIY_SKIP_CT_REMOTE" = "1"
             } `
             -RequiredPatterns @(
@@ -199,10 +203,12 @@ jobs:
               "CT_REMOTE_WINDOWS_SOURCE_MODE" = "auto"
               "CT_REMOTE_WINDOWS_SOURCE_REPO" = (Join-Path $env:RUNNER_TEMP "codetracer-ci-missing-routes")
               "WINDOWS_DIY_SKIP_RUST" = "1"
+              "WINDOWS_DIY_SKIP_NARGO" = "1"
               "WINDOWS_DIY_SKIP_NODE" = "1"
               "WINDOWS_DIY_SKIP_UV" = "1"
               "WINDOWS_DIY_SKIP_NIM" = "1"
               "WINDOWS_DIY_SKIP_CAPNP" = "1"
+              "WINDOWS_DIY_SKIP_TUP" = "1"
               "WINDOWS_DIY_SKIP_CT_REMOTE" = "0"
             } `
             -RequiredPatterns @(
