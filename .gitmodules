@@ -52,9 +52,6 @@
 [submodule "libs/nim-result"]
 	path = libs/nim-result
 	url = https://github.com/metacraft-labs/nim-result.git
-[submodule "libs/runtime_tracing"]
-	path = libs/runtime_tracing
-	url = https://github.com/metacraft-labs/runtime_tracing.git
 [submodule "libs/codetracer-ruby-recorder"]
 	path = libs/codetracer-ruby-recorder
 	url = https://github.com/metacraft-labs/codetracer-ruby-recorder.git
@@ -87,3 +84,7 @@
 [submodule "examples/recordings"]
 	path = examples/recordings
 	url = https://github.com/metacraft-labs/codetracer-example-recordings.git
+[submodule "libs/codetracer-trace-format"]
+	path = libs/codetracer-trace-format
+	url = https://github.com/metacraft-labs/codetracer-trace-format.git
+	branch = char-variant-traversal-limit-visibility
