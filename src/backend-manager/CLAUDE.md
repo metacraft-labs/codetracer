@@ -3,21 +3,25 @@
 ## Building and Testing
 
 Build:
+
 ```bash
 cargo build
 ```
 
 Run tests:
+
 ```bash
 cargo nextest run
 ```
 
 Run a single test:
+
 ```bash
 cargo nextest run --profile single <test_name>
 ```
 
 Lint:
+
 ```bash
 cargo clippy
 ```
@@ -73,5 +77,6 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
 ### Available MCP Resources
 
 After loading a trace (via `exec_script` or `trace_info`), resources become available:
+
 - `trace:///<trace_path>/info` - Trace metadata (JSON)
 - `trace:///<trace_path>/source/<file_path>` - Source file content (text)

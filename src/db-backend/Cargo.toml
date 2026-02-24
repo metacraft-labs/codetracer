@@ -70,7 +70,11 @@ tree-sitter-tracepoint = { path = "./tree-sitter-trace/" }
 tree-sitter-go = "0.25.0"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59.0", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Pipes"] }
+windows-sys = { version = "0.59.0", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+] }
 
 [lib]
 name = "db_backend"
