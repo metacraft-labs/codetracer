@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "codetracer_trace_writer"
-version = "0.17.1"
+version = "0.17.3"
 dependencies = [
  "cbor4ii",
  "codetracer_trace_format_capnp",
