@@ -195,7 +195,7 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
 name = "codetracer_trace_format_capnp"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "capnp",
  "capnpc",
@@ -208,7 +208,7 @@ version = "0.16.0"
 
 [[package]]
 name = "codetracer_trace_reader"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "cbor4ii",
  "codetracer_trace_format_capnp",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "codetracer_trace_types"
-version = "0.16.2"
+version = "0.16.3"
 dependencies = [
  "base64",
  "num-derive",
@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "codetracer_trace_writer"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "cbor4ii",
  "codetracer_trace_format_capnp",
