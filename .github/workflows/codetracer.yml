@@ -86,6 +86,10 @@ jobs:
           export WINDOWS_DIY_ENSURE_TTD=0
           source non-nix-build/windows/env.sh >/dev/null
           command -v nim
+          # setup-codetracer-runtime-env.sh creates config/ and public/ in
+          # build-debug/ for ct runtime, but tup requires variant directories
+          # to contain only tup.config. Remove them before tup init/upd.
+          rm -rf src/build-debug/config src/build-debug/public
           if [[ ! -d src/.tup ]]; then
             (cd src && tup init)
           fi
