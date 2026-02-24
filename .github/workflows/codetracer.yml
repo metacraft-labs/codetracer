@@ -137,7 +137,7 @@ jobs:
               }
             }
 
-            $probeText = ($probeOutput | Out-String)
+            $probeText = ($probeOutput | Out-String -Width 10000)
             if ($probeSucceeded) {
               throw "Probe '$Name' unexpectedly succeeded. Expected a fast-fail source-route assertion."
             }
