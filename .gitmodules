@@ -87,4 +87,4 @@
 [submodule "libs/codetracer-trace-format"]
 	path = libs/codetracer-trace-format
 	url = https://github.com/metacraft-labs/codetracer-trace-format.git
-	branch = char-variant-traversal-limit-visibility
+	branch = master
