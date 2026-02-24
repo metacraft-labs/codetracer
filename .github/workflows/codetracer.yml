@@ -59,6 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           export WINDOWS_DIY_SKIP_RUST=1
+          export WINDOWS_DIY_SKIP_NARGO=1
           export WINDOWS_DIY_SKIP_NODE=1
           export WINDOWS_DIY_SKIP_UV=1
           export WINDOWS_DIY_SKIP_NIM=1
@@ -75,6 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           export WINDOWS_DIY_SKIP_RUST=1
+          export WINDOWS_DIY_SKIP_NARGO=1
           export WINDOWS_DIY_SKIP_NODE=1
           export WINDOWS_DIY_SKIP_UV=1
           export WINDOWS_DIY_SKIP_NIM=0
