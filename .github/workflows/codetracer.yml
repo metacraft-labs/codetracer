@@ -44,7 +44,7 @@ jobs:
             )
 
             if ($parseErrors.Count -gt 0) {
-              $parseErrors | ForEach-Object { Write-Error "$scriptPath: $($_.Message)" }
+              $parseErrors | ForEach-Object { Write-Error "${scriptPath}: $($_.Message)" }
               throw "PowerShell parser reported one or more errors."
             }
           }
