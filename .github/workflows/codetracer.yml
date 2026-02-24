@@ -65,6 +65,7 @@ jobs:
           export WINDOWS_DIY_SKIP_CAPNP=1
           export WINDOWS_DIY_SKIP_CT_REMOTE=1
           export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
+          export WINDOWS_DIY_ENSURE_TTD=0
           source non-nix-build/windows/env.sh >/dev/null
           command -v tup.exe
           tup.exe --version
@@ -80,6 +81,7 @@ jobs:
           export WINDOWS_DIY_SKIP_CAPNP=1
           export WINDOWS_DIY_SKIP_CT_REMOTE=1
           export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
+          export WINDOWS_DIY_ENSURE_TTD=0
           source non-nix-build/windows/env.sh >/dev/null
           command -v nim
           if [[ ! -d src/.tup ]]; then

@@ -8,7 +8,7 @@ if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
 fi
 
 set -uo pipefail
-if [[ $WINDOWS_ENV_WAS_SOURCED -eq 0 ]]; then
+if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 0 ]]; then
 	set -e
 fi
 
@@ -328,7 +328,7 @@ resolve_dotnet_root() {
 }
 if ! DOTNET_ROOT=$(resolve_dotnet_root); then
 	echo "ERROR: Could not find dotnet.exe. Install pinned SDK $DOTNET_SDK_VERSION (for example: winget install --id Microsoft.DotNet.SDK.9 --exact --source winget) or set WINDOWS_DIY_DOTNET_ROOT." >&2
-	if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+	if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 		return 1
 	fi
 	exit 1
@@ -417,42 +417,42 @@ export WINDBG_MIN_VERSION="$WINDBG_REQUIRED_MIN_VERSION"
 if [[ ${WINDOWS_DIY_ENSURE_TTD:-1} == "1" ]]; then
 	if [[ -z ${WINDOWS_DIY_TTD_EXE:-} ]]; then
 		echo "ERROR: Microsoft Time Travel Debugging is not available. Install with: winget install --id Microsoft.TimeTravelDebugging --exact --source winget" >&2
-		if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+		if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 			return 1
 		fi
 		exit 1
 	fi
 	if [[ -z ${WINDOWS_DIY_TTD_VERSION:-} ]]; then
 		echo "ERROR: Could not determine Microsoft.TimeTravelDebugging version via Get-AppxPackage." >&2
-		if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+		if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 			return 1
 		fi
 		exit 1
 	fi
 	if [[ -z ${WINDOWS_DIY_TTD_REPLAY_DLL:-} ]]; then
 		echo "ERROR: TTDReplay.dll was not found under WINDOWS_DIY_TTD_DIR='${WINDOWS_DIY_TTD_DIR:-<unset>}'." >&2
-		if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+		if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 			return 1
 		fi
 		exit 1
 	fi
 	if ! version_gte "$WINDOWS_DIY_TTD_VERSION" "$TTD_REQUIRED_MIN_VERSION"; then
 		echo "ERROR: Microsoft.TimeTravelDebugging version '$WINDOWS_DIY_TTD_VERSION' is below required '$TTD_REQUIRED_MIN_VERSION'. Upgrade with: winget install --id Microsoft.TimeTravelDebugging --exact --source winget" >&2
-		if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+		if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 			return 1
 		fi
 		exit 1
 	fi
 	if [[ -z ${WINDOWS_DIY_WINDBG_VERSION:-} ]]; then
 		echo "ERROR: Could not determine Microsoft.WinDbg version via Get-AppxPackage. Install with: winget install --id Microsoft.WinDbg --exact --source winget" >&2
-		if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+		if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 			return 1
 		fi
 		exit 1
 	fi
 	if ! version_gte "$WINDOWS_DIY_WINDBG_VERSION" "$WINDBG_REQUIRED_MIN_VERSION"; then
 		echo "ERROR: Microsoft.WinDbg version '$WINDOWS_DIY_WINDBG_VERSION' is below required '$WINDBG_REQUIRED_MIN_VERSION'. Upgrade with: winget install --id Microsoft.WinDbg --exact --source winget" >&2
-		if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+		if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 			return 1
 		fi
 		exit 1
@@ -474,7 +474,7 @@ if [[ ${WINDOWS_DIY_ENSURE_DOTNET:-1} == "1" ]]; then
 
 		if [[ -z ${DOTNET_SDK_VERSION_EFFECTIVE:-} ]]; then
 			echo "ERROR: Pinned .NET SDK $DOTNET_SDK_VERSION is not installed under '$DOTNET_ROOT'. Install it with: winget install --id Microsoft.DotNet.SDK.9 --exact --source winget" >&2
-			if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+			if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 				return 1
 			fi
 			exit 1
@@ -598,7 +598,7 @@ if [[ ${WINDOWS_DIY_SYNC:-1} == "1" ]]; then
 fi
 
 if ! ensure_node_tooling; then
-	if [[ $WINDOWS_ENV_WAS_SOURCED -eq 1 ]]; then
+	if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 1 ]]; then
 		return 1
 	fi
 	exit 1
@@ -693,7 +693,7 @@ export TUP_DIR
 export NARGO_DIR
 
 # Shared runtime env expected by ct/ct_wrapper and ui-tests launcher.
-# shellcheck source=non-nix-build/windows/setup-codetracer-runtime-env.sh
+# shellcheck disable=SC1091
 source "$WINDOWS_DIR/setup-codetracer-runtime-env.sh"
 
 # Ensure tree-sitter-nim parser.c exists before local Windows builds that depend on it.
