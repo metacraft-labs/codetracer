@@ -128,7 +128,7 @@ jobs:
               $probeOutput = & $bootstrapScript -InstallRoot $installRoot 2>&1
             } catch {
               $probeSucceeded = $false
-              $probeOutput = @($probeOutput) + $_
+              $probeOutput = @($probeOutput) + $_.Exception.Message + ($_ | Out-String -Width 10000)
             } finally {
               $env:PATH = $savedPath
               [Environment]::SetEnvironmentVariable("WINDOWS_DIY_ARCH_OVERRIDE", $savedArchOverride)
