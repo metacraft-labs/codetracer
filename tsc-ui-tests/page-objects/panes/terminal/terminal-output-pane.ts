@@ -18,6 +18,10 @@ export class TerminalOutputPane {
     this.tabButtonText = tabButtonText;
   }
 
+  tabButton(): Locator {
+    return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
+  }
+
   linesContainer(): Locator {
     return this.root.locator("pre");
   }

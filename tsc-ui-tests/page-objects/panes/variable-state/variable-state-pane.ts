@@ -19,6 +19,10 @@ export class VariableStatePane {
     this.tabButtonText = tabButtonText;
   }
 
+  tabButton(): Locator {
+    return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
+  }
+
   watchExpressionTextBox(): Locator {
     return this.root.locator("#watch");
   }
