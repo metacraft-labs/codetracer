@@ -314,26 +314,6 @@ jobs:
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh"
 
-  lint-ui-tests:
-    runs-on: [self-hosted, nixos]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/ui-tests.sh"
-
   push-gpg-public-key:
     runs-on: [self-hosted, nixos]
     steps:
@@ -379,7 +359,7 @@ jobs:
       - lint-nim
       - lint-nix
       - lint-rust
-      - lint-ui-tests
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -405,7 +385,7 @@ jobs:
       - lint-nim
       - lint-nix
       - lint-rust
-      - lint-ui-tests
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -430,7 +410,7 @@ jobs:
       - lint-nim
       - lint-nix
       - lint-rust
-      - lint-ui-tests
+
     strategy:
       fail-fast: false
       matrix:
@@ -674,7 +654,7 @@ jobs:
       - lint-nim
       - lint-nix
       - lint-rust
-      - lint-ui-tests
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -720,7 +700,7 @@ jobs:
       - lint-nim
       - lint-nix
       - lint-rust
-      - lint-ui-tests
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -861,172 +841,10 @@ jobs:
       - name: Build CodeTracer
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
 
-      - name: Run C# UI tests
+      - name: Run TypeScript Playwright UI tests
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-        run: "nix develop .#ui-tests --command ./ci/test/ui-tests.sh"
-
-  test-ui-tests-python:
-    runs-on: [self-hosted, nixos]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
-
-      - name: Run Python UI smoke tests
-        env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-python.sh"
-
-  test-ui-tests-ruby:
-    runs-on: [self-hosted, nixos]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
-
-      - name: Run Ruby UI smoke tests
-        timeout-minutes: 15
-        env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-ruby.sh"
-
-  test-ui-tests-rr-languages:
-    runs-on: [self-hosted, nixos]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-
-      - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
-
-      - name: Resolve rr-backend ref
-        id: resolve-ref
-        run: |
-          if [[ -f .github/rr-backend-pin.txt ]]; then
-            REF="$(head -1 .github/rr-backend-pin.txt | tr -d '[:space:]')"
-          fi
-          REF="${REF:-main}"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "Resolved rr-backend ref: $REF"
-
-      - name: Clone rr-backend as sibling
-        run: |
-          REF="${{ steps.resolve-ref.outputs.ref }}"
-          echo "Cloning codetracer-rr-backend at ref: $REF"
-
-          # Rewrite GitHub URLs for authenticated cloning of private repos
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
-
-          # Clone as a sibling directory so the codetracer shell hook auto-detects it
-          # (shellHook checks for ../codetracer-rr-backend/target/debug/ct-rr-support)
-          SIBLING_DIR="${GITHUB_WORKSPACE}/../codetracer-rr-backend"
-          rm -rf "$SIBLING_DIR"
-          git clone \
-            "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-rr-backend.git" \
-            "$SIBLING_DIR"
-          cd "$SIBLING_DIR"
-          git checkout "$REF"
-
-          git submodule init
-          for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
-            old_url=$(git config --get "$url")
-            new_url=$(echo "$old_url" \
-              | sed "s|git@github.com:|https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/|" \
-              | sed "s|https://github.com/|https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/|")
-            git config "$url" "$new_url"
-          done
-          git submodule update --recursive
-
-          # Rewrite .gitmodules SSH→HTTPS so nix's internal git fetcher can resolve them
-          sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
-          sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
-          git add .gitmodules
-          git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
-
-      - name: Build ct-rr-support
-        run: |
-          SIBLING_DIR="${GITHUB_WORKSPACE}/../codetracer-rr-backend"
-          cd "${SIBLING_DIR}"
-          # PRJ_ROOT may not be set (it comes from direnv), so the shellHook's
-          # symlink creation can fail silently.  Build first, then create the
-          # rr/dlv/gdb symlinks manually by querying the nix shell for paths.
-          nix develop . --command cargo build
-          nix develop . --command bash -c '
-            ln -sf "$(command -v rr)" target/debug/rr
-            ln -sf "$(command -v dlv)" target/debug/dlv 2>/dev/null || true
-            ln -sf "$(command -v gdb)" target/debug/gdb 2>/dev/null || true
-          '
-          ls -la target/debug/rr target/debug/ct-rr-support
-
-      - name: Run C smoke tests
-        env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-          CODETRACER_RR_SOFT_MODE: "1"
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-c.sh"
-
-      - name: Run Rust smoke tests
-        env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-          CODETRACER_RR_SOFT_MODE: "1"
-          # rustup override is directory-specific and won't apply when
-          # ct-rr-support builds from a different cwd
-          RUSTUP_TOOLCHAIN: "1.89"
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-rust.sh"
-
-      - name: Run Go smoke tests
-        env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-          CODETRACER_RR_SOFT_MODE: "1"
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-go.sh"
-
-      - name: Run Nim smoke tests
-        env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-          CODETRACER_RR_SOFT_MODE: "1"
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests-nim.sh"
+        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
 
   publish-pypi:
     needs:

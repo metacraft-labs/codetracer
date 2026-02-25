@@ -50,7 +50,7 @@ This plan tracks the work required to implement ADR 0006 (“Make `ct host` Surv
      - Given a browser test loads the host UI, when the page is refreshed, then core interactions (open recent trace, navigate tabs) still succeed and socket reconnects without manual host restart.
    - Implementation notes:
      - Add fast headless coverage under the Nim `tester ui` suite; wire the scenario into the `ui` set so `just test` exercises it (`tester ui reload` for focused runs).
-     - Add Playwright coverage under `tsc-ui-tests/tests/` (or C# under `ui-tests/Tests` if preferred); run locally with `just test-e2e -- <filter>` or `direnv exec . dotnet test` for the C# suite.
+     - Add Playwright coverage under `tsc-ui-tests/tests/`; run locally with `just test-e2e -- <filter>`.
 
 2. **Manual verification & docs**
    - Document the new reload-safe behavior and any operator-visible logs; include a short reproduction script in `docs/` for manual QA.
