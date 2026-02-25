@@ -51,6 +51,7 @@ test.describe("ProgramAgnostic", () => {
 
     // Click on Scratchpad tab button to make it visible
     await scratchpad.tabButton().click();
+    expect(await scratchpad.isVisible()).toBe(true);
 
     // Verify we can switch back to Event Log
     await eventLog.tabButton().click();
