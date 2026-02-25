@@ -40,6 +40,12 @@ proc drSetMonacoValue(editor: MonacoEditor, value: cstring)
 proc drDeltaDecorations(editor: MonacoEditor, oldDecorations: js, newDecorations: js): js
   {.importjs: "#.deltaDecorations(#, #)".}
 
+proc drCreateDecorationsCollection(editor: MonacoEditor, decorations: js): js
+  {.importjs: "#.createDecorationsCollection(#)".}
+
+proc drCollectionSet(collection: js, decorations: js)
+  {.importjs: "#.set(#)".}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -207,7 +213,7 @@ proc buildInlineValueDecorations(file: DeepReviewFileData, executionIndex: int):
         startLineNumber: step.line,
         startColumn: 1,
         endLineNumber: step.line,
-        endColumn: 1
+        endColumn: 10000
       },
       options: js{
         after: js{
@@ -289,8 +295,13 @@ proc updateDecorations(self: DeepReviewComponent) =
   for d in valueDecos:
     allDecorations.add(d)
 
-  let oldIds = if self.currentDecorationIds.isNil: newJsObject() else: self.currentDecorationIds
-  self.currentDecorationIds = self.editor.drDeltaDecorations(oldIds, allDecorations.toJs)
+  # Use createDecorationsCollection (Monaco 0.36+) instead of the
+  # deprecated deltaDecorations so that ``after`` injected text
+  # (inline variable values) renders correctly as DOM spans.
+  if self.decorationCollection.isNil:
+    self.decorationCollection = self.editor.drCreateDecorationsCollection(allDecorations.toJs)
+  else:
+    self.decorationCollection.drCollectionSet(allDecorations.toJs)
 
 proc switchToFile(self: DeepReviewComponent, fileIndex: int) =
   ## Switch the editor to display a different file.
@@ -315,18 +326,24 @@ proc switchToFile(self: DeepReviewComponent, fileIndex: int) =
 # Render helpers
 # ---------------------------------------------------------------------------
 
+proc makeFileClickHandler(self: DeepReviewComponent, idx: int): proc(ev: Event, n: VNode) =
+  ## Create a click handler for a file list item.
+  ## Using a separate proc avoids the Nim 1.6 JS backend closure-in-loop
+  ## bug where all closures capture the same loop variable by reference
+  ## (JS ``var`` is function-scoped, not block-scoped).
+  result = proc(ev: Event, n: VNode) =
+    self.switchToFile(idx)
+    redrawAll()
+
 proc renderFileList(self: DeepReviewComponent): VNode =
   ## Render the file list sidebar.
   buildHtml(tdiv(class = "deepreview-file-list")):
     for i, file in self.drData.files:
       let isSelected = (i == self.selectedFileIndex)
       let selectedClass = if isSelected: " selected" else: ""
-      let fileIdx = i
       tdiv(
         class = cstring(fmt"deepreview-file-item{selectedClass}"),
-        onclick = proc(ev: Event, n: VNode) =
-          self.switchToFile(fileIdx)
-          redrawAll()
+        onclick = self.makeFileClickHandler(i)
       ):
         tdiv(class = "deepreview-file-name"):
           text fileBasename(file.path)

@@ -837,6 +837,7 @@ type
     editor*: MonacoEditor
     editorInitialized*: bool
     currentDecorationIds*: js
+    decorationCollection*: js
     fileContentCache*: JsAssoc[cstring, cstring]
 
   AgentWorkspaceComponent* = ref object of Component

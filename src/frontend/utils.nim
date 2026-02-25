@@ -657,6 +657,7 @@ proc makeDeepReviewComponent*(data: Data, id: int): DeepReviewComponent =
     selectedIteration: 0,
     editorInitialized: false,
     currentDecorationIds: jsNull,
+    decorationCollection: jsNull,
     fileContentCache: JsAssoc[cstring, cstring]{}
   )
   data.registerComponent(result, Content.DeepReview)
