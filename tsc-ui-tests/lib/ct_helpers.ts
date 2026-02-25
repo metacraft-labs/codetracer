@@ -10,17 +10,28 @@ import * as path from "node:path";
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
 
-import { test, type Page } from "@playwright/test";
+import { test, type Page, type ElectronApplication } from "@playwright/test";
 import { _electron, chromium } from "playwright";
 
 const electron = _electron;
 
-let electronApp; // eslint-disable-line @typescript-eslint/init-declarations
+let electronApp: ElectronApplication | undefined;
+
+// ---------------------------------------------------------------------------
+// Global mutable state (DEPRECATED -- new tests should use fixtures.ts)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use `ctPage` fixture from `lib/fixtures.ts` instead. */
 export let window: Page; // eslint-disable-line @typescript-eslint/init-declarations
+/** @deprecated Use `ctPage` fixture from `lib/fixtures.ts` instead. */
 export let page: Page; // eslint-disable-line @typescript-eslint/init-declarations
 
 // Track the last ct host process so it can be killed between test files.
 let activeCtHostProcess: childProcess.ChildProcess | null = null;
+
+// ---------------------------------------------------------------------------
+// Path constants (shared with fixtures.ts)
+// ---------------------------------------------------------------------------
 
 export const currentDir = path.resolve(); // the tsc-ui-tests dir
 export const codetracerInstallDir = path.dirname(currentDir);
@@ -46,8 +57,11 @@ const ERROR_EXIT_CODE = 1;
 const NO_PID = -1;
 const EDITOR_WINDOW_INDEX = 1; // if both windows are open: 1 is Editor, 0 is DevTools
 
-/// exported public functions:
+// ---------------------------------------------------------------------------
+// Exported public functions (DEPRECATED -- new tests should use fixtures.ts)
+// ---------------------------------------------------------------------------
 
+/** @deprecated Use `test.use({ sourcePath, launchMode: "trace" })` with fixtures.ts instead. */
 export function debugCodetracer(name: string, langExtension: string): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
@@ -80,6 +94,7 @@ export interface CtRunOptions {
   inBrowser?: boolean;
 }
 
+/** @deprecated Use `test.use({ sourcePath, launchMode: "trace" })` with fixtures.ts instead. */
 export function ctRun(relativeSourcePath: string, options?: CtRunOptions): void {
   test.beforeAll(async () => {
     // Recording + chromium launch + ct host startup retries can exceed the
@@ -138,7 +153,7 @@ export function wait(ms: number): Promise<void> {
   return future;
 }
 
-/// Launch CodeTracer showing the welcome screen (no trace)
+/** @deprecated Use `test.use({ launchMode: "welcome" })` with fixtures.ts instead. */
 export function ctWelcomeScreen(): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
@@ -153,7 +168,7 @@ export function ctWelcomeScreen(): void {
   });
 }
 
-/// Launch CodeTracer in edit mode with a folder
+/** @deprecated Use `test.use({ launchMode: "edit", editFolderPath })` with fixtures.ts instead. */
 export function ctEditMode(folderPath: string): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
@@ -168,9 +183,7 @@ export function ctEditMode(folderPath: string): void {
   });
 }
 
-/// Launch CodeTracer in DeepReview mode with a JSON export file.
-/// The ``--deepreview <jsonPath>`` flag loads the DeepReview data into
-/// the standalone review view (offline, no debugger connection).
+/** @deprecated Use `test.use({ launchMode: "deepreview", deepreviewJsonPath })` with fixtures.ts instead. */
 export function ctDeepReview(jsonPath: string): void {
   test.beforeAll(async () => {
     setupLdLibraryPath();
@@ -185,14 +198,18 @@ export function ctDeepReview(jsonPath: string): void {
   });
 }
 
-/// end of exported public functions
-/// ===================================
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 async function launchWelcomeScreen(): Promise<void> {
   console.log("# launching codetracer welcome screen");
 
   // Create a clean env without trace-related vars
-  const cleanEnv = { ...process.env };
+  const cleanEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) cleanEnv[k] = v;
+  }
   delete cleanEnv.CODETRACER_TRACE_ID;
   delete cleanEnv.CODETRACER_CALLER_PID;
 
@@ -221,7 +238,10 @@ async function launchEditMode(folderPath: string): Promise<void> {
   console.log(`# launching codetracer edit mode for ${folderPath}`);
 
   // Create a clean env like launchWelcomeScreen does
-  const cleanEnv = { ...process.env };
+  const cleanEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) cleanEnv[k] = v;
+  }
   delete cleanEnv.CODETRACER_TRACE_ID;
   delete cleanEnv.CODETRACER_CALLER_PID;
 
@@ -253,7 +273,10 @@ async function launchDeepReview(jsonPath: string): Promise<void> {
   console.log(`# launching codetracer deepreview mode for ${jsonPath}`);
 
   // Create a clean env without trace-related vars, same as other modes.
-  const cleanEnv = { ...process.env };
+  const cleanEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) cleanEnv[k] = v;
+  }
   delete cleanEnv.CODETRACER_TRACE_ID;
   delete cleanEnv.CODETRACER_CALLER_PID;
 
