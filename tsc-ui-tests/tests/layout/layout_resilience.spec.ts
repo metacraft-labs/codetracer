@@ -140,3 +140,86 @@ test.describe("Normal operation with valid layout", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Port of ui-tests/Tests/ProgramAgnostic/LayoutResilienceTests.cs
+// Recovery tests that corrupt/modify the layout file and verify the app recovers.
+// ---------------------------------------------------------------------------
+
+test.describe("Recovery from corrupted JSON", () => {
+  ctEditMode(testFolder);
+
+  test("app recovers from corrupted layout JSON", async () => {
+    const layoutPath = defaultEditLayoutPath;
+    backupLayoutFile(layoutPath);
+
+    try {
+      corruptLayoutFile(layoutPath);
+
+      await page.reload();
+      await page.waitForSelector(".lm_goldenlayout", { timeout: 20000 });
+
+      const layout = page.locator(".lm_goldenlayout");
+      await expect(layout).toBeVisible();
+
+      const layoutContent = page.locator(".lm_content");
+      await expect(layoutContent).toBeVisible();
+
+      // Verify the layout file was restored to valid JSON
+      await wait(2000);
+
+      if (fs.existsSync(layoutPath)) {
+        const content = fs.readFileSync(layoutPath, "utf8");
+        expect(() => JSON.parse(content)).not.toThrow();
+
+        const parsed = JSON.parse(content);
+        expect(parsed).toHaveProperty("root");
+        expect(parsed.root).toHaveProperty("type");
+      }
+    } finally {
+      restoreLayoutFile(layoutPath);
+    }
+  });
+});
+
+test.describe("Recovery from invalid structure", () => {
+  ctEditMode(testFolder);
+
+  test("app recovers from layout with missing root", async () => {
+    const layoutPath = defaultEditLayoutPath;
+    backupLayoutFile(layoutPath);
+
+    try {
+      createInvalidStructureLayoutFile(layoutPath);
+
+      await page.reload();
+      await page.waitForSelector(".lm_goldenlayout", { timeout: 20000 });
+
+      const layout = page.locator(".lm_goldenlayout");
+      await expect(layout).toBeVisible();
+    } finally {
+      restoreLayoutFile(layoutPath);
+    }
+  });
+});
+
+test.describe("Recovery from missing type", () => {
+  ctEditMode(testFolder);
+
+  test("app recovers from layout root missing type property", async () => {
+    const layoutPath = defaultEditLayoutPath;
+    backupLayoutFile(layoutPath);
+
+    try {
+      createMissingTypeLayoutFile(layoutPath);
+
+      await page.reload();
+      await page.waitForSelector(".lm_goldenlayout", { timeout: 20000 });
+
+      const layout = page.locator(".lm_goldenlayout");
+      await expect(layout).toBeVisible();
+    } finally {
+      restoreLayoutFile(layoutPath);
+    }
+  });
+});
