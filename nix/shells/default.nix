@@ -19,7 +19,6 @@
             ;
         };
         ci = import ./ci.nix { inherit pkgs self'; };
-        ui-tests = import ./ui-tests.nix { inherit pkgs; };
       };
     };
 }
