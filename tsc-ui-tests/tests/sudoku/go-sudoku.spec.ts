@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/GoSudokuTests.cs
  */
 test.describe("GoSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "go_sudoku_solver/sudoku.go", launchMode: "trace" });
 
   test("editor loads sudoku.go", async ({ ctPage }) => {

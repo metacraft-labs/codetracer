@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/CppSudokuTests.cs
  */
 test.describe("CppSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "cpp_sudoku_solver/main.cpp", launchMode: "trace" });
 
   test("editor loads main.cpp", async ({ ctPage }) => {

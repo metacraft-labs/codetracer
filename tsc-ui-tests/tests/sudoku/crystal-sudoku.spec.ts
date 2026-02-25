@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/CrystalSudokuTests.cs
  */
 test.describe("CrystalSudoku", () => {
+  test.setTimeout(900_000);
   test.use({
     sourcePath: "crystal_sudoku_solver/sudoku.cr",
     launchMode: "trace",

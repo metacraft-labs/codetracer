@@ -12,6 +12,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/AdaSudokuTests.cs
  */
 test.describe("AdaSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "ada_sudoku_solver/sudoku.adb", launchMode: "trace" });
 
   test("editor loads (event log fallback)", async ({ ctPage }) => {

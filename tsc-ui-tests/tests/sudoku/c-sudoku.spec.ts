@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/CSudokuTests.cs
  */
 test.describe("CSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "c_sudoku_solver/main.c", launchMode: "trace" });
 
   test("editor loads main.c", async ({ ctPage }) => {

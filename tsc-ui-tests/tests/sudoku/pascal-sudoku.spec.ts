@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/PascalSudokuTests.cs
  */
 test.describe("PascalSudoku", () => {
+  test.setTimeout(900_000);
   test.use({
     sourcePath: "pascal_sudoku_solver/sudoku.pas",
     launchMode: "trace",

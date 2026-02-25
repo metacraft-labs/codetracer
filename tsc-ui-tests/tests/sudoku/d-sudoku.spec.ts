@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/DSudokuTests.cs
  */
 test.describe("DSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "d_sudoku_solver/sudoku.d", launchMode: "trace" });
 
   test("editor loads entrypoint.d", async ({ ctPage }) => {

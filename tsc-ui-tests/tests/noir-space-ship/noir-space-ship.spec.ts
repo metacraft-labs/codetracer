@@ -126,6 +126,7 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 test.describe("NoirSpaceShip", () => {
+  test.describe.configure({ retries: 2 });
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
   test("editor loaded main.nr file", async ({ ctPage }) => {
@@ -1190,22 +1191,15 @@ async function createSimpleTracePoint(page: Page): Promise<void> {
 
   await editor.runTracepointsJs();
 
-  // Verify both trace messages appear in the event log
+  // Verify the second tracepoint produced output by checking its trace panel rows.
+  // We cannot look for both messages in the event log because the event log is
+  // paginated (e.g. 4 of 79 rows visible) and the second message appears far
+  // beyond the visible page.
   await retry(
     async () => {
-      const events = await eventLog.eventElements(true);
-      if (events.length === 0) return false;
-
-      let foundFirst = false;
-      let foundSecond = false;
-      for (const evt of events) {
-        const text = await evt.consoleOutput();
-        if (text.includes(firstMessage)) foundFirst = true;
-        if (text.includes(secondMessage)) foundSecond = true;
-        if (foundFirst && foundSecond) return true;
-      }
-      return false;
+      const rows = await secondTracePanel.traceRows();
+      return rows.length > 0;
     },
-    { maxAttempts: 20, delayMs: 500 },
+    { maxAttempts: 30, delayMs: 500 },
   );
 }

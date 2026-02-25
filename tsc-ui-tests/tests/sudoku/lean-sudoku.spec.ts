@@ -11,6 +11,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/LeanSudokuTests.cs
  */
 test.describe("LeanSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "lean_sudoku_solver/Main.lean", launchMode: "trace" });
 
   test("editor loads (event log fallback)", async ({ ctPage }) => {

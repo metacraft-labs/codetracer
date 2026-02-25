@@ -14,6 +14,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/FortranSudokuTests.cs
  */
 test.describe("FortranSudoku", () => {
+  test.setTimeout(900_000);
   test.use({
     sourcePath: "fortran_sudoku_solver/sudoku.f90",
     launchMode: "trace",

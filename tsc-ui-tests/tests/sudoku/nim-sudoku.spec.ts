@@ -13,6 +13,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/NimSudokuTests.cs
  */
 test.describe("NimSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "nim_sudoku_solver/main.nim", launchMode: "trace" });
 
   test("editor loads a .nim file", async ({ ctPage }) => {

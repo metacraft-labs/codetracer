@@ -23,6 +23,11 @@ export class ScratchpadPane {
     return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
   }
 
+  async isVisible(): Promise<boolean> {
+    const style = await this.root.locator("..").getAttribute("style");
+    return !(style?.includes("none"));
+  }
+
   entriesContainer(): Locator {
     return this.root.locator(".value-components-container");
   }

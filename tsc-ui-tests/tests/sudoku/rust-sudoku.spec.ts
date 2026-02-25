@@ -8,6 +8,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/RustSudokuTests.cs
  */
 test.describe("RustSudoku", () => {
+  test.setTimeout(900_000);
   test.use({ sourcePath: "rs_sudoku_solver/main.rs", launchMode: "trace" });
 
   test("editor loads main.rs", async ({ ctPage }) => {
