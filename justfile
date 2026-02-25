@@ -155,15 +155,13 @@ test-csharp-ui display="default" *args:
       ;;
   esac
 
-# Run all GUI tests: stable Electron suite, Playwright e2e,
-# and language smoke tests when codetracer-rr-backend is available.
-ui-tests:
+# Run all GUI tests (TypeScript Playwright e2e suite).
+test-gui *args:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
-  # Start a persistent Xvfb for the entire test suite so both C# UI tests
-  # and Playwright e2e tests can launch Electron.
+  # Start a persistent Xvfb so Playwright/Electron tests have a display.
   DISPLAY_NUM=99
   while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
     DISPLAY_NUM=$((DISPLAY_NUM + 1))
@@ -174,14 +172,7 @@ ui-tests:
   sleep 1
   export DISPLAY=":${DISPLAY_NUM}"
 
-  just test-csharp-ui default --mode Electron --suite stable-tests --retries 2
-  just test-e2e
-  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
-    echo "codetracer-rr-backend detected — running language smoke tests..."
-    just test-all-language-smoke
-  else
-    echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping language smoke tests"
-  fi
+  just test-e2e {{args}}
 
 # Run all language smoke tests (requires ct record + compilers on PATH).
 # This records fresh traces for each language, so it needs ct-rr-support and
