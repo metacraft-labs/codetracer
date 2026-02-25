@@ -11,6 +11,7 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/LeanSudokuTests.cs
  */
 test.describe("LeanSudoku", () => {
+  test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
   test.setTimeout(900_000);
   test.use({ sourcePath: "lean_sudoku_solver/Main.lean", launchMode: "trace" });
 

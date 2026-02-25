@@ -126,6 +126,10 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 test.describe("NoirSpaceShip", () => {
+  test.skip(
+    !!process.env.CI,
+    "Electron fixture instability in CI — noir coverage provided by program_specific_tests/noir_space_ship.spec.ts",
+  );
   test.describe.configure({ retries: 2 });
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
