@@ -65,6 +65,7 @@ type
     CtLoadAsmFunction,
     CtLoadAsmFunctionResponse,
     InternalLastCompleteMove,
+    InternalCompleteMove,
     InternalAddToScratchpad,
     InternalAddToScratchpadFromExpression,
     InternalStatusUpdate,
@@ -84,4 +85,3 @@ type
   CtEvent*[T] = ref object
     kind*: CtEventKind
     value: T
-
