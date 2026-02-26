@@ -59,10 +59,13 @@ clone_rr_backend() {
 		exit 1
 	fi
 
+	# Clean up any previous clone (self-hosted runners reuse workspaces)
+	rm -rf "$CLONE_DIR"
+
 	# Rewrite all GitHub URL styles to authenticated HTTPS.
-	git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:"
-	git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
-	git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "git@github.com:" || true
+	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "ssh://git@github.com/" || true
+	git config --global --replace-all url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/" || true
 
 	git clone \
 		"https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer-rr-backend.git" \
@@ -70,7 +73,10 @@ clone_rr_backend() {
 
 	(
 		cd "$CLONE_DIR"
-		git checkout "$ref"
+		git checkout "$ref" || {
+			echo "Warning: ref '$ref' not found, falling back to main" >&2
+			git checkout main
+		}
 
 		# Initialize submodules and explicitly rewrite their URLs
 		git submodule init
