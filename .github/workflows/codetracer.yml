@@ -846,6 +846,49 @@ jobs:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
 
+  test-ui-tests-rr:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Build CodeTracer
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
+
+      - name: Setup rr-backend
+        env:
+          GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+        run: ./ci/setup-rr-backend.sh
+
+      - name: Run TypeScript Playwright UI tests (with rr-backend)
+        env:
+          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
+          CODETRACER_RR_BACKEND_PRESENT: "1"
+        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ui-tests-rr-artifacts
+          path: |
+            tsc-ui-tests/test-results/
+            tsc-ui-tests/playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
   publish-pypi:
     needs:
       - build-python-packages

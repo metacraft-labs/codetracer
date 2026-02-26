@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/db-backend/**'
       - '.github/rr-backend-pin.txt'
+      - '.github/sibling-pins.json'
       - 'scripts/run-cross-repo-tests.sh'
       - '.github/workflows/cross-repo-tests.yml'
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - 'src/db-backend/**'
       - '.github/rr-backend-pin.txt'
+      - '.github/sibling-pins.json'
       - 'scripts/run-cross-repo-tests.sh'
       - '.github/workflows/cross-repo-tests.yml'
   workflow_dispatch:
@@ -50,7 +52,18 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.rr_backend_ref }}" ]]; then
             REF="${{ github.event.inputs.rr_backend_ref }}"
-          elif [[ -f .github/rr-backend-pin.txt ]]; then
+          elif [[ -f .github/sibling-pins.json ]]; then
+            PIN=$(python3 -c "
+          import json
+          with open('.github/sibling-pins.json') as f:
+              pins = json.load(f)
+          print(pins.get('codetracer-rr-backend', ''))
+          " 2>/dev/null) || true
+            if [[ -n "${PIN:-}" ]]; then
+              REF="$PIN"
+            fi
+          fi
+          if [[ -z "${REF:-}" ]] && [[ -f .github/rr-backend-pin.txt ]]; then
             REF="$(head -1 .github/rr-backend-pin.txt | tr -d '[:space:]')"
           fi
           REF="${REF:-main}"
