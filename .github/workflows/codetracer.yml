@@ -848,6 +848,7 @@ jobs:
 
   test-ui-tests-rr:
     runs-on: [self-hosted, nixos]
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -877,6 +878,8 @@ jobs:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_RR_BACKEND_PRESENT: "1"
           PLAYWRIGHT_RETRIES: "0"
+          PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
+          CODETRACER_SKIP_SLOW_RR_TESTS: "1"
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
 
       - name: Upload test artifacts

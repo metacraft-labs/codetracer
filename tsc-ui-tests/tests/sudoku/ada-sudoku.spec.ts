@@ -13,6 +13,10 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  */
 test.describe("AdaSudoku", () => {
   test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
+  test.skip(
+    !!process.env.CODETRACER_SKIP_SLOW_RR_TESTS,
+    "Ada tracing is too slow for CI (30min+ per test)",
+  );
   test.setTimeout(900_000);
   test.use({ sourcePath: "ada_sudoku_solver/sudoku.adb", launchMode: "trace" });
 
