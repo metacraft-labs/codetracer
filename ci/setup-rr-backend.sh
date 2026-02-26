@@ -13,6 +13,8 @@ set -euo pipefail
 # Exports CODETRACER_RR_BACKEND_PRESENT=1 and updated PATH/LD_LIBRARY_PATH
 # to GITHUB_ENV / GITHUB_PATH for subsequent CI steps.
 
+# Save the repo root (all paths relative to this)
+REPO_ROOT="$(pwd)"
 CLONE_DIR="${CLONE_DIR:-target/rr-backend-clone}"
 
 resolve_ref() {
@@ -22,15 +24,12 @@ resolve_ref() {
 		return
 	fi
 
-	# 2. sibling-pins.json
+	# 2. sibling-pins.json (parse with grep/sed — no python3 needed)
 	if [[ -f .github/sibling-pins.json ]]; then
 		local pin
-		pin=$(python3 -c "
-import json, sys
-with open('.github/sibling-pins.json') as f:
-    pins = json.load(f)
-print(pins.get('codetracer-rr-backend', ''))
-" 2>/dev/null) || true
+		pin=$(grep '"codetracer-rr-backend"' .github/sibling-pins.json |
+			sed 's/.*: *"\([^"]*\)".*/\1/' |
+			tr -d '[:space:]') || true
 		if [[ -n $pin ]]; then
 			echo "$pin"
 			return
@@ -68,30 +67,31 @@ clone_rr_backend() {
 	git clone \
 		"https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer-rr-backend.git" \
 		"$CLONE_DIR"
-	cd "$CLONE_DIR"
-	git checkout "$ref"
 
-	# Initialize submodules and explicitly rewrite their URLs
-	git submodule init
-	for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
-		old_url=$(git config --get "$url")
-		new_url=$(echo "$old_url" |
-			sed "s|git@github.com:|https://x-access-token:${GH_TOKEN}@github.com/|" |
-			sed "s|https://github.com/|https://x-access-token:${GH_TOKEN}@github.com/|")
-		echo "Rewriting submodule URL: $url"
-		git config "$url" "$new_url"
-	done
-	git submodule update --recursive
+	(
+		cd "$CLONE_DIR"
+		git checkout "$ref"
 
-	# Rewrite .gitmodules SSH URLs to HTTPS so nix's internal git fetcher
-	# can resolve submodules when evaluating the flake with submodules=1
-	sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
-	sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
-	# Stage and commit the rewrite so nix sees it in the git tree
-	git add .gitmodules
-	git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
+		# Initialize submodules and explicitly rewrite their URLs
+		git submodule init
+		for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
+			old_url=$(git config --get "$url")
+			new_url=$(echo "$old_url" |
+				sed "s|git@github.com:|https://x-access-token:${GH_TOKEN}@github.com/|" |
+				sed "s|https://github.com/|https://x-access-token:${GH_TOKEN}@github.com/|")
+			echo "Rewriting submodule URL: $url"
+			git config "$url" "$new_url"
+		done
+		git submodule update --recursive
 
-	cd - >/dev/null
+		# Rewrite .gitmodules SSH URLs to HTTPS so nix's internal git fetcher
+		# can resolve submodules when evaluating the flake with submodules=1
+		sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
+		sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
+		# Stage and commit the rewrite so nix sees it in the git tree
+		git add .gitmodules
+		git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
+	)
 }
 
 build_rr_support() {
@@ -143,8 +143,7 @@ resolve_runtime_deps() {
 
 	# Create symlinks for rr, dlv, gdb that the codetracer nix shell expects
 	# at $PRJ_ROOT/target/debug/ (normally created by rr-backend shellHook)
-	local target_debug
-	target_debug="$(pwd)/target/debug"
+	local target_debug="${REPO_ROOT}/target/debug"
 	mkdir -p "$target_debug"
 
 	for tool in rr dlv gdb; do
@@ -179,7 +178,7 @@ export_to_github_env() {
 		bin_dir=$(dirname "$ct_rr_support")
 		echo "$bin_dir" >>"$GITHUB_PATH"
 		# Also add the target/debug dir for rr, dlv, gdb symlinks
-		echo "$(pwd)/target/debug" >>"$GITHUB_PATH"
+		echo "${REPO_ROOT}/target/debug" >>"$GITHUB_PATH"
 	fi
 
 	echo ""

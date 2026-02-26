@@ -876,6 +876,7 @@ jobs:
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_RR_BACKEND_PRESENT: "1"
+          PLAYWRIGHT_RETRIES: "0"
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
 
       - name: Upload test artifacts
