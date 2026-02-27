@@ -93,6 +93,36 @@ function createMissingTypeLayoutFile(layoutPath: string): void {
   fs.writeFileSync(layoutPath, JSON.stringify(invalidLayout, null, 2), "utf8");
 }
 
+/**
+ * Ensure a layout file is valid JSON with the expected structure.
+ * If it exists but is corrupted or structurally invalid (e.g. left
+ * over from a previous failed test run), delete it so the app creates
+ * a fresh default on next launch.
+ */
+function ensureLayoutFileValid(layoutPath: string): void {
+  // First, try to restore from a leftover backup.
+  restoreLayoutFile(layoutPath);
+
+  // If the file still exists but is corrupted or structurally invalid, remove it.
+  if (fs.existsSync(layoutPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(layoutPath, "utf8"));
+      if (!parsed.root || !parsed.root.type) {
+        fs.unlinkSync(layoutPath);
+      }
+    } catch {
+      fs.unlinkSync(layoutPath);
+    }
+  }
+}
+
+// Clean up any corrupted layout files from previous failed runs so
+// corruption doesn't leak across test sessions.
+test.beforeAll(() => {
+  ensureLayoutFileValid(defaultEditLayoutPath);
+  ensureLayoutFileValid(defaultLayoutPath);
+});
+
 // Test: Normal operation with valid layout (sanity check)
 test.describe("Normal operation with valid layout", () => {
   // Use default (hopefully valid) layout
@@ -137,6 +167,82 @@ test.describe("Normal operation with valid layout", () => {
       const parsed = JSON.parse(content);
       expect(parsed).toHaveProperty("root");
       expect(parsed.root).toHaveProperty("type");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Port of ui-tests/Tests/ProgramAgnostic/LayoutResilienceTests.cs
+// Recovery tests that corrupt/modify the layout file and verify the app recovers.
+// ---------------------------------------------------------------------------
+
+test.describe("Recovery from corrupted JSON", () => {
+  // Recovery tests can be flaky when running sequentially due to
+  // Playwright fixture lifecycle interactions with ctEditMode.
+  test.describe.configure({ retries: 2 });
+  ctEditMode(testFolder);
+
+  test("app recovers from corrupted layout JSON", async () => {
+    const layoutPath = defaultEditLayoutPath;
+    backupLayoutFile(layoutPath);
+
+    try {
+      corruptLayoutFile(layoutPath);
+
+      await page.reload();
+      await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+
+      const layout = page.locator(".lm_goldenlayout");
+      await expect(layout).toBeVisible();
+
+      const layoutContent = page.locator(".lm_content").first();
+      await expect(layoutContent).toBeVisible();
+    } finally {
+      restoreLayoutFile(layoutPath);
+    }
+  });
+});
+
+test.describe("Recovery from invalid structure", () => {
+  test.describe.configure({ retries: 2 });
+  ctEditMode(testFolder);
+
+  test("app recovers from layout with missing root", async () => {
+    const layoutPath = defaultEditLayoutPath;
+    backupLayoutFile(layoutPath);
+
+    try {
+      createInvalidStructureLayoutFile(layoutPath);
+
+      await page.reload();
+      await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+
+      const layout = page.locator(".lm_goldenlayout");
+      await expect(layout).toBeVisible();
+    } finally {
+      restoreLayoutFile(layoutPath);
+    }
+  });
+});
+
+test.describe("Recovery from missing type", () => {
+  test.describe.configure({ retries: 2 });
+  ctEditMode(testFolder);
+
+  test("app recovers from layout root missing type property", async () => {
+    const layoutPath = defaultEditLayoutPath;
+    backupLayoutFile(layoutPath);
+
+    try {
+      createMissingTypeLayoutFile(layoutPath);
+
+      await page.reload();
+      await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+
+      const layout = page.locator(".lm_goldenlayout");
+      await expect(layout).toBeVisible();
+    } finally {
+      restoreLayoutFile(layoutPath);
     }
   });
 });

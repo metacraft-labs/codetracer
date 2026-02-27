@@ -205,7 +205,7 @@ package-lock.json
 # emacs
 .#*
 
-# playwright ui-tests
+# Playwright e2e test artifacts
 playwright-report
 test-results
 

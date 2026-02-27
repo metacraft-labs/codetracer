@@ -56,14 +56,6 @@ lint:rust:
   script:
     - nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
 
-lint:ui-tests:
-  stage: lint
-  only:
-    - master
-    - merge_requests
-  script:
-    - nix develop .#devShells.x86_64-linux.default -c ./ci/lint/ui-tests.sh
-
 dev-build:
   stage: build
   only:
@@ -111,7 +103,7 @@ test:ui-tests:
   variables:
     DISPLAY: ":99"
   script:
-    - nix develop .#ui-tests --command ./ci/test/ui-tests.sh
+    - nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh
 
 push-to-cachix:
   stage: deploy

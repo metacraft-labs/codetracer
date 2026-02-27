@@ -3,7 +3,7 @@
 set -e
 
 echo '###############################################################################'
-echo 'Running UI tests: C# Playwright suite + TypeScript e2e tests'
+echo 'Running GUI tests: TypeScript Playwright e2e suite'
 echo '###############################################################################'
 
 # CI-specific Electron/Chromium flags:
@@ -14,4 +14,4 @@ echo '##########################################################################
 #   --disable-dev-shm-usage use /tmp instead of /dev/shm (small in containers)
 export CODETRACER_ELECTRON_ARGS="--no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage"
 
-just ui-tests
+just test-gui

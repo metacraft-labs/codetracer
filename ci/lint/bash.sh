@@ -14,10 +14,3 @@ echo "Lint AppImage scripts:"
 echo '###############################################################################'
 shellcheck appimage-scripts/*.sh
 echo OK
-
-echo
-echo '###############################################################################'
-echo "Lint dotnet_build script:"
-echo '###############################################################################'
-shellcheck ui-tests/*.sh
-echo OK

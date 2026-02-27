@@ -1,0 +1,16 @@
+{
+  "codetracer-agent-evals": "ff3eb0a9f2ada9ee0ac76cc317205d94d2e358d4",
+  "codetracer-browser-extension": "1bb0c30bda33fe14a8a53fafd70820c027a1cf5b",
+  "codetracer-ci": "d4b8051bdbeda11041ad555702d449e0a6d4c9cb",
+  "codetracer-native-recorder": "83330456bbe44e31922a5f5a2406a2ba351791e6",
+  "codetracer-python-recorder": "52811f84a282c02e38ec59f34db6587075c1ff9a",
+  "codetracer-rr": "265e010d4d05653b4bc7ddf79c36dee639c4ffeb",
+  "codetracer-rr-backend": "58b959b4543e9b28c3e140df7eca4bfc0641b077",
+  "codetracer-rr-driver": "3d33a00424bc4665c1c0024b54f09a8aa957c150",
+  "codetracer-ruby-recorder": "0e772cc055ac2a5592a7ce79f510a9cd1484f24a",
+  "codetracer-specs": "3c85ecfbed0c756cee5b39ad5627483a929994e7",
+  "codetracer-trace-format": "13911b1a099c44b811783b6ffd3e4cf519633442",
+  "codetracer-vscode-extension": "26192e5a2dbec44281530691d578e84f077e84f7",
+  "codetracer-wasm-recorder": "ad8d1cae5a799214cc607b3437c883cc1bd0e7dd",
+  "nix-codetracer-toolchains": "57190da5ec700d8cc6a67a76cc2ea633a839a4cd"
+}
