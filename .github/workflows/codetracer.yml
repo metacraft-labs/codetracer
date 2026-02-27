@@ -879,7 +879,6 @@ jobs:
           CODETRACER_RR_BACKEND_PRESENT: "1"
           PLAYWRIGHT_RETRIES: "0"
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
-          CODETRACER_SKIP_SLOW_RR_TESTS: "1"
         run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
 
       - name: Upload test artifacts
