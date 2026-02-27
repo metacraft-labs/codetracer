@@ -61,7 +61,6 @@ fn create_noir_flow_config() -> FlowTestConfig {
 }
 
 #[test]
-#[ignore] // requires nargo (our Noir fork) on PATH; run via `just test-noir-flow`
 fn test_noir_flow_integration() {
     let project_path = get_noir_project_path();
     assert!(
