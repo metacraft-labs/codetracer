@@ -21,7 +21,8 @@ module.exports = {
   output: {
     globalObject: 'window',
     path: path.resolve(__dirname, 'src/public/dist'),
-    filename: "frontend_bundle.js"
+    filename: "frontend_imports.js",
+    publicPath: path.resolve(__dirname, 'src/public/dist')
   },
   module: {
     rules: [

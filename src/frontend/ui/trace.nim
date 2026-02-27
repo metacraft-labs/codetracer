@@ -16,7 +16,7 @@ proc closeTrace*(self: TraceComponent)
 proc resizeTraceHandler(self: TraceComponent)
 
 when defined(ctInExtension):
-  var tracepointComponentMapping* {.exportc.}: JsAssoc[cstring, JsAssoc[int, TraceComponent]] = JsAssoc[cstring, JsAssoc[int, TraceComponent]]{}
+  var tracepointComponentMapping*: JsAssoc[cstring, JsAssoc[int, TraceComponent]] = JsAssoc[cstring, JsAssoc[int, TraceComponent]]{}
   # var tracepointComponentSeq* {.exportc.}: seq[TraceComponent] = @[]
   proc makeTracepointComponentForExtension*(id: cstring, line: int, name: cstring, traceId: int): TraceComponent {.exportc.} =
     # var tracepointComponentForExtension* {.exportc.}: TraceComponent = makeTraceComponent(data, inExtension = true)
@@ -35,11 +35,18 @@ when defined(ctInExtension):
 proc calcTraceWidth(self: TraceComponent) =
   let editor = self.editorUI.monacoEditor
   let editorLayout = editor.config.layoutInfo
-  let editorWidth = editorLayout.width
   let contentLeft = editorLayout.contentLeft
   let minimapWidth = editorLayout.minimapWidth
+  var traceWidth = editorLayout.width - minimapWidth - contentLeft - 8
 
-  self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
+  if self.inExtension:
+    let viewportWidth = window.innerWidth.int
+    if viewportWidth > 0:
+      # In extension insets we want the width of the current editor window/group,
+      # not a global editor layout width.
+      traceWidth = viewportWidth - minimapWidth - 8
+
+  self.traceWidth = max(traceWidth, 120)
 
 # proc traceMainStyle(self: TraceComponent): VStyle =
 #   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
@@ -138,12 +145,7 @@ proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
     self.zoneId = cast[int](view.addZone(self.viewZone))
   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
   let traceMain = kdom.document.getElementById(cstring(fmt"trace-{self.id}"))
-  let editor = self.editorUI.monacoEditor
-  let editorLayout = editor.config.layoutInfo
-  let editorWidth = editorLayout.width
-  let contentLeft = editorLayout.contentLeft
-  let minimapWidth = editorLayout.minimapWidth
-  self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
+  self.calcTraceWidth()
   traceMain.style.width = cstring(fmt"{self.traceWidth}px")
   self.resultsHeight = 210
   jq(cstring(fmt"#trace-{self.id} .editor-traces")).style.height = cstring(fmt"{self.resultsHeight}px")
@@ -585,7 +587,7 @@ proc saveSource*(self: TraceComponent) =
 
 proc ensureEdit*(self: TraceComponent) =
   if self.selectorId.len == 0:
-    self.selectorId = cstring(&"edit-trace-{self.editorUI.id}-{self.line}")
+    self.selectorId = cstring(&"edit-trace-{self.id}-{self.line}")
     self.isChanged = true
 
 proc ensureChart(self: TraceComponent) =
@@ -828,12 +830,7 @@ proc expandWithEnter*(self: TraceComponent, newHeight: int) =
   )
   self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
   let traceMain = kdom.document.getElementById(cstring(fmt"trace-{self.id}"))
-  let editor = self.editorUI.monacoEditor
-  let editorLayout = editor.config.layoutInfo
-  let editorWidth = editorLayout.width
-  let contentLeft = editorLayout.contentLeft
-  let minimapWidth = editorLayout.minimapWidth
-  self.traceWidth = editorWidth - minimapWidth - contentLeft - 8
+  self.calcTraceWidth()
   traceMain.style.width = cstring(fmt"{self.traceWidth}px")
   jq(cstring(fmt"#trace-{self.id} .editor-textarea")).style.height = cstring(fmt"{self.lineCount * (data.ui.fontSize + 5)}px")
 
@@ -860,7 +857,7 @@ proc ensureMonacoEditor(self: TraceComponent) =
 
     # create trace monaco editor
     self.monacoEditor = monaco.editor.create(
-      jq(cstring(fmt".trace #{self.selectorId}")),
+      jq(cstring(fmt"#{self.selectorId}")),
       MonacoEditorOptions(
         value: self.source,
         # language: toJsLang(self.editorUI.lang),

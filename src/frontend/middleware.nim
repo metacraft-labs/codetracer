@@ -248,3 +248,7 @@ when defined(ctInExtension):
     {.emit: "module.exports.getTransactionTrace = getTransactionTrace".}
     {.emit: "module.exports.getCurrentTrace = getCurrentTrace".}
     {.emit: "module.exports.getFlowList = getFlowList".}
+    {.emit: "module.exports.computeRenderValueGroups = computeRenderValueGroups".}
+    {.emit: "module.exports.computeFlowLineValues = computeFlowLineValues".}
+    {.emit: "module.exports.computeFlowLoopSliders = computeFlowLoopSliders".}
+    {.emit: "module.exports.computeFlowInsetData = computeFlowInsetData".}

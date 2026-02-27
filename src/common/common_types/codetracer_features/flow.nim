@@ -40,6 +40,16 @@ type
     rrTicks*: int64
     metadata*: langstring
 
+  FlowRenderValue* = object
+    ## 1-based source line/column for rendering inline values.
+    line*: int
+    column*: int
+    ## 0 means not in a loop; positive values map to loop ids.
+    loopId*: int
+    iteration*: int
+    rrTicks*: int
+    text*: langstring
+
   FlowStep* = object
     position*: int
     loop*: int
@@ -69,6 +79,7 @@ type
     loopIterationSteps*: seq[seq[LoopIterationSteps]]
     relevantStepCount*: seq[int]
     commentLines*: seq[int]
+    renderValueGroups*: seq[seq[FlowRenderValue]]
 
   FlowViewUpdate* = ref FlowViewUpdateObject ## FlowViewUpdate obejct ref
 
