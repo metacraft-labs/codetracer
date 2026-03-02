@@ -293,7 +293,8 @@
     // max-width: 250px
     z-index:1
     display: flex
-    align-items: center
+    if !IS_EXTENSION
+      align-items: center
 
   button
     background-color: PRIMARY_BASE
@@ -911,7 +912,8 @@ else
   // max-width: 250px
   z-index:1
   display: flex
-  align-items: center
+  if !IS_EXTENSION
+    align-items: center
 
 button
   background-color: PRIMARY_BASE

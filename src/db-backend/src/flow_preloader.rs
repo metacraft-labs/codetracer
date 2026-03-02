@@ -579,6 +579,7 @@ impl<'a> CallFlowPreloader<'a> {
                 .expr_loader
                 .final_branch_load(path_buf, &flow_view_update.branches_taken[0][0].table),
         );
+        flow_view_update.render_value_groups = Vec::new();
         Ok(flow_view_update)
     }
 
@@ -842,4 +843,24 @@ impl<'a> CallFlowPreloader<'a> {
         self.last_expr_order = expr_order;
         flow_view_update
     }
+
+    // render_value_groups are built in the frontend to share logic with the extension.
+}
+
+fn resolve_loop_id(flow_view_update: &FlowViewUpdate, step: &FlowStep) -> i64 {
+    if step.r#loop.0 != 0 {
+        return step.r#loop.0;
+    }
+
+    let line = step.position.0;
+    let mut selected = 0;
+    for loop_info in &flow_view_update.loops {
+        if loop_info.base.0 == 0 {
+            continue;
+        }
+        if loop_info.first.0 <= line && loop_info.last.0 >= line {
+            selected = loop_info.base.0;
+        }
+    }
+    selected
 }
