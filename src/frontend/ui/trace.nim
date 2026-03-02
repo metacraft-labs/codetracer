@@ -959,6 +959,7 @@ method render*(self: TraceComponent): VNode =
   #     initialPosition = currentPosition
 
   var mainView = self.chart.render()
+  let height = if self.inExtension: 150 else: self.lineCount * (data.ui.fontSize + 5) + 20
 
   result = buildHtml(tdiv):
     tdiv(
@@ -984,7 +985,7 @@ method render*(self: TraceComponent): VNode =
       tdiv(class = "editor-info"):
         tdiv(
           class = cstring(fmt"editor-textarea editor-textarea-width-{$self.editorWidth}"),
-          style = style(StyleAttr.height, cstring(fmt"{self.lineCount * (data.ui.fontSize + 5) + 20}px"))
+          style = style(StyleAttr.height, cstring(fmt"{height}px"))
         ):
           tdiv(class = "trace-disabled-overlay tracepoint-overlay hidden"):
             tdiv(class = "trace-overlay"):

@@ -69,21 +69,36 @@ proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value
       return BeforeAndAfterValueMode
 
 when defined(ctInExtension):
-  var flowComponentForExtension* {.exportc.}: FlowComponent = makeFlowComponent(data, 13, inExtension = true)
+  var flowComponentMapping* {.exportc.}: JsAssoc[cstring, JsAssoc[int, FlowComponent]] = JsAssoc[cstring, JsAssoc[int, FlowComponent]]{}
 
-  proc makeFlowComponentForExtension*(id: cstring, line: int): FlowComponent {.exportc.} =
-    if flowComponentForExtension.kxi.isNil:
-      flowComponentForExtension.kxi = setRenderer(proc: VNode = flowComponentForExtension.render(), id, proc = discard)
-    if flowComponentForExtension.position != line:
-      flowComponentForExtension.position = line
-      flowComponentForExtension.activeStep = FlowStep(rrTicks: -1)
-      flowComponentForExtension.flowLoops = JsAssoc[int, FlowLoop]{}
-    result = flowComponentForExtension
+  proc makeFlowComponentForExtension*(id: cstring, line: int, name: cstring, traceId: int): FlowComponent {.exportc.} =
+    discard traceId
+    if not flowComponentMapping.hasKey(name):
+      flowComponentMapping[name] = JsAssoc[int, FlowComponent]{}
+    if not flowComponentMapping[name].hasKey(line):
+      flowComponentMapping[name][line] = makeFlowComponent(data, line, inExtension = true)
+
+    let component = flowComponentMapping[name][line]
+    if component.kxi.isNil:
+      component.kxi = setRenderer(proc: VNode = component.render(), id, proc = discard)
+      component.position = line
+      component.activeStep = FlowStep(rrTicks: -1)
+      component.flowLoops = JsAssoc[int, FlowLoop]{}
+    elif component.position != line:
+      component.position = line
+      component.activeStep = FlowStep(rrTicks: -1)
+      component.flowLoops = JsAssoc[int, FlowLoop]{}
+
+    result = component
 
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     self.location = response.location
+    if self.inExtension:
+      # Extension insets receive replayed complete-move events when other inset views
+      # register (e.g. tracepoints). Avoid reloading/redrawing flow in that path.
+      return
     api.emit(CtLoadFlow, self.location)
     self.redraw()
   )
@@ -107,13 +122,11 @@ method render*(self: FlowComponent): VNode =
     if self.flow.isNil or step.rrTicks == -1 or step.loop < 0 or step.loop >= self.flow.loops.len:
       0
     else:
-      self.flow.loops[step.loop].rrTicksForIterations.len - 1
+      self.flow.loops[step.loop].iteration
 
   result = buildHtml(tdiv(class="flow-component-container")):
     makeLoopLine(self, step, allIterations)
 
-  when defined(ctInExtension):
-    # In extension inset, let makeSlider build/manage slider DOM so behavior matches flow.nim.
     if not self.flow.isNil and step.rrTicks != -1 and step.loop > 0 and step.loop < self.flow.loops.len:
       let loopLine = self.flow.loops[step.loop].first
       discard setTimeout(proc() =
@@ -3151,7 +3164,8 @@ proc makeLoopLine(
     (StyleAttr.fontSize, fontSize),
     (StyleAttr.lineHeight, cstring($self.lineHeight & "px")),
     (StyleAttr.height, cstring($self.lineHeight & "px")),
-    (StyleAttr.width, cstring("fit-content"))
+    (StyleAttr.width, cstring("fit-content")),
+    (StyleAttr.zIndex, cstring("1"))
   )
 
   let vNode = buildHtml(
