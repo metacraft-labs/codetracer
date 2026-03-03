@@ -94,76 +94,13 @@ test:
     echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping cross-repo tests"
   fi
 
-# Build the C# UI tests
-build-csharp-ui:
-  #!/usr/bin/env bash
-  set -e
-  cd ui-tests
-  ./dotnet_build.sh
-
-# Run C# UI tests
-#
-# display: controls how the graphical display is handled
-#   "default"  - use the current display, showing the Electron window
-#   "xvfb"     - use xvfb-run for a headless X11 server (used in CI)
-#   "xephyr"   - use Xephyr to show the virtual X11 server window
-#   "headless" - run with headless Electron (no X11 server needed)
-#
-# Additional arguments are forwarded to `dotnet run`, e.g.:
-#   just test-csharp-ui xvfb --suite stable-tests --mode Electron
-test-csharp-ui display="default" *args:
-  #!/usr/bin/env bash
-  set -e
-  cd ui-tests
-  ./dotnet_build.sh
-  case "{{display}}" in
-    xvfb)
-      # Start Xvfb manually instead of using xvfb-run because the nix
-      # xvfb-run wrapper's cleanup trap returns exit 1 when Xvfb has
-      # already exited (kill: No such process).
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-      XVFB_PID=$!
-      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-      sleep 1
-      DISPLAY=":${DISPLAY_NUM}" dotnet run -- {{args}}
-      ;;
-    xephyr)
-      DISPLAY_NUM=99
-      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-      done
-      Xephyr ":${DISPLAY_NUM}" -screen 1920x1080 &
-      XEPHYR_PID=$!
-      trap "kill $XEPHYR_PID 2>/dev/null || true" EXIT
-      sleep 1
-      DISPLAY=":${DISPLAY_NUM}" dotnet run -- {{args}}
-      ;;
-    headless)
-      UITESTS_ELECTRON_HEADLESS=true dotnet run -- {{args}}
-      ;;
-    default)
-      dotnet run -- {{args}}
-      ;;
-    *)
-      echo "Error: Unknown display mode '{{display}}'."
-      echo "Valid modes: default, xvfb, xephyr, headless"
-      exit 1
-      ;;
-  esac
-
-# Run all GUI tests: stable Electron suite, Playwright e2e,
-# and language smoke tests when codetracer-rr-backend is available.
-ui-tests:
+# Run all GUI tests (TypeScript Playwright e2e suite).
+test-gui *args:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
-  # Start a persistent Xvfb for the entire test suite so both C# UI tests
-  # and Playwright e2e tests can launch Electron.
+  # Start a persistent Xvfb so Playwright/Electron tests have a display.
   DISPLAY_NUM=99
   while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
     DISPLAY_NUM=$((DISPLAY_NUM + 1))
@@ -174,29 +111,7 @@ ui-tests:
   sleep 1
   export DISPLAY=":${DISPLAY_NUM}"
 
-  just test-csharp-ui default --mode Electron --suite stable-tests --retries 2
-  just test-e2e
-  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
-    echo "codetracer-rr-backend detected — running language smoke tests..."
-    just test-all-language-smoke
-  else
-    echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping language smoke tests"
-  fi
-
-# Run all language smoke tests (requires ct record + compilers on PATH).
-# This records fresh traces for each language, so it needs ct-rr-support and
-# the full compiler toolchain available in the nix shell.
-test-all-language-smoke:
-  #!/usr/bin/env bash
-  set -e
-  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
-  # Use existing DISPLAY (from ui-tests persistent Xvfb) if available,
-  # otherwise start a new Xvfb via the "xvfb" display mode.
-  if [ -n "${DISPLAY:-}" ]; then
-    just test-csharp-ui default --mode Electron --suite all-language-smoke --retries 2
-  else
-    just test-csharp-ui xvfb --mode Electron --suite all-language-smoke --retries 2
-  fi
+  just test-e2e {{args}}
 
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
@@ -640,49 +555,6 @@ cross-test-rust-flow:
 
 cross-test-go-flow:
   bash scripts/run-cross-repo-tests.sh go-flow
-
-# ====
-# Per-language smoke test targets
-# Run individual language UI smoke tests via Electron + xvfb
-
-test-c-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite c-smoke
-
-test-rust-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite rust-smoke
-
-test-go-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite go-smoke
-
-test-nim-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite nim-smoke
-
-test-python-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite python-smoke
-
-test-ruby-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite ruby-smoke
-
-test-cpp-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite cpp-smoke
-
-test-pascal-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite pascal-smoke
-
-test-fortran-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite fortran-smoke
-
-test-d-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite d-smoke
-
-test-crystal-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite crystal-smoke
-
-test-lean-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite lean-smoke
-
-test-ada-smoke:
-  just test-csharp-ui xvfb --mode Electron --suite ada-smoke
 
 show-rr-backend-pin:
   @cat .github/rr-backend-pin.txt 2>/dev/null || echo "main (default)"

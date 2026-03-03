@@ -9,4 +9,4 @@ updates:
         patterns:
           - "*"
     exclude-paths:
-      - "tsc-ui-tests" # not used right now: legacy; not ui tests are in dotnet, in `ui-tests`
+      - "tsc-ui-tests" # TypeScript Playwright e2e tests (managed separately)

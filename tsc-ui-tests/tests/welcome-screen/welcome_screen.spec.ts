@@ -1,107 +1,94 @@
-import { test, expect } from "@playwright/test";
-import { page, ctWelcomeScreen, ctEditMode, wait } from "../../lib/ct_helpers";
-import * as path from "node:path";
-import * as fs from "node:fs";
-import * as os from "node:os";
+import { test, expect } from "../../lib/fixtures";
 
-// Test the welcome screen functionality
-ctWelcomeScreen();
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-test("welcome screen is displayed", async () => {
-  // Wait for welcome screen to load
-  await page.waitForSelector(".welcome-screen", { timeout: 15000 });
+test.describe("Welcome Screen", () => {
+  test.use({ launchMode: "welcome" });
 
-  // Verify the main welcome screen container is visible
-  const welcomeScreen = page.locator(".welcome-screen");
-  await expect(welcomeScreen).toBeVisible();
-});
+  test("welcome screen is displayed", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15000 });
 
-test("welcome screen has left and right panels", async () => {
-  await page.waitForSelector(".welcome-screen", { timeout: 10000 });
+    const welcomeScreen = ctPage.locator(".welcome-screen");
+    await expect(welcomeScreen).toBeVisible();
+  });
 
-  // Check for left panel (recent folders)
-  const leftPanel = page.locator(".welcome-left-panel");
-  await expect(leftPanel).toBeVisible();
+  test("welcome screen has left and right panels", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
 
-  // Check for right panel (recent traces)
-  const rightPanel = page.locator(".welcome-right-panel");
-  await expect(rightPanel).toBeVisible();
-});
+    const leftPanel = ctPage.locator(".welcome-left-panel");
+    await expect(leftPanel).toBeVisible();
 
-test("welcome screen has start options buttons", async () => {
-  await page.waitForSelector(".welcome-screen", { timeout: 10000 });
+    const rightPanel = ctPage.locator(".welcome-right-panel");
+    await expect(rightPanel).toBeVisible();
+  });
 
-  // Check for Open Folder button
-  const openFolderButton = page.locator(".start-option").filter({ hasText: /folder/i }).first();
-  await expect(openFolderButton).toBeVisible();
+  test("welcome screen has start options buttons", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
 
-  // Check for Record new trace button
-  const newRecordingButton = page.locator(".start-option").filter({ hasText: /record/i }).first();
-  await expect(newRecordingButton).toBeVisible();
-});
+    const openFolderButton = ctPage
+      .locator(".start-option")
+      .filter({ hasText: /folder/i })
+      .first();
+    await expect(openFolderButton).toBeVisible();
 
-test("recent traces section is visible", async () => {
-  await page.waitForSelector(".welcome-screen", { timeout: 10000 });
+    const newRecordingButton = ctPage
+      .locator(".start-option")
+      .filter({ hasText: /record/i })
+      .first();
+    await expect(newRecordingButton).toBeVisible();
+  });
 
-  // Check for recent traces section
-  const recentTraces = page.locator(".recent-traces");
-  await expect(recentTraces).toBeVisible();
+  test("recent traces section is visible", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
 
-  // Check for title
-  const title = page.locator(".recent-traces-title");
-  await expect(title).toBeVisible();
-});
+    const recentTraces = ctPage.locator(".recent-traces");
+    await expect(recentTraces).toBeVisible();
 
-test("recent folders section is visible", async () => {
-  await page.waitForSelector(".welcome-screen", { timeout: 10000 });
+    const title = ctPage.locator(".recent-traces-title");
+    await expect(title).toBeVisible();
+  });
 
-  // Check for recent folders section
-  const recentFolders = page.locator(".recent-folders");
-  await expect(recentFolders).toBeVisible();
-});
+  test("recent folders section is visible", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
 
-// Test for time ago display in trace list (if there are any traces)
-test("trace entries show time ago format", async () => {
-  await page.waitForSelector(".welcome-screen", { timeout: 10000 });
+    const recentFolders = ctPage.locator(".recent-folders");
+    await expect(recentFolders).toBeVisible();
+  });
 
-  // Check if there are any recent traces
-  const traceEntries = page.locator(".recent-trace");
-  const count = await traceEntries.count();
+  test("trace entries show time ago format", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
 
-  if (count > 0) {
-    // Check that the first trace has a time-ago element
-    const firstTrace = traceEntries.first();
-    const timeAgo = firstTrace.locator(".recent-trace-title-time");
-    await expect(timeAgo).toBeVisible();
+    const traceEntries = ctPage.locator(".recent-trace");
+    const count = await traceEntries.count();
 
-    // Verify it has some text content (could be "just now", "X minutes ago", etc.)
-    const timeText = await timeAgo.textContent();
-    expect(timeText).toBeTruthy();
-  }
-});
+    if (count > 0) {
+      const firstTrace = traceEntries.first();
+      const timeAgo = firstTrace.locator(".recent-trace-title-time");
+      await expect(timeAgo).toBeVisible();
 
-// Test tooltip visibility on hover
-test("trace tooltip appears on hover", async () => {
-  await page.waitForSelector(".welcome-screen", { timeout: 10000 });
+      const timeText = await timeAgo.textContent();
+      expect(timeText).toBeTruthy();
+    }
+  });
 
-  // Check if there are any recent traces
-  const traceEntries = page.locator(".recent-trace");
-  const count = await traceEntries.count();
+  test("trace tooltip appears on hover", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
 
-  if (count > 0) {
-    const firstTrace = traceEntries.first();
-    const tooltip = firstTrace.locator(".recent-trace-tooltip");
+    const traceEntries = ctPage.locator(".recent-trace");
+    const count = await traceEntries.count();
 
-    // Initially tooltip should be hidden (opacity: 0)
-    await expect(tooltip).toBeHidden();
+    if (count > 0) {
+      const firstTrace = traceEntries.first();
+      const tooltip = firstTrace.locator(".recent-trace-tooltip");
 
-    // Hover over the trace
-    await firstTrace.hover();
+      await expect(tooltip).toBeHidden();
 
-    // Wait for the tooltip delay (0.5s) plus some buffer
-    await wait(700);
+      await firstTrace.hover();
+      await sleep(700);
 
-    // Now tooltip should be visible
-    await expect(tooltip).toBeVisible();
-  }
+      await expect(tooltip).toBeVisible();
+    }
+  });
 });

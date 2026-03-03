@@ -74,8 +74,6 @@
         "AGENTS\\.md$" # Agent instruction files
         "^tasks\\.md$"
         "^docs/" # Many legacy docs with formatting issues
-        "^ui-tests/docs/" # Test debug temp docs
-        "^ui-tests-v3/" # UI tests v3 docs
         "^src/db-backend/" # db-backend internal docs
         "^examples/" # Example project READMEs with varied formatting
         "^test-programs/" # Test program READMEs

@@ -159,79 +159,49 @@ test.describe("DeepReview GUI - main features", () => {
   // Test 4: Inline variable values
   // -----------------------------------------------------------------------
 
-  // FIXME: Monaco's "after" injected text with inlineClassName creates <span> elements
-  // that should be queryable via .deepreview-inline-value, but the decorations
-  // aren't appearing in the DOM. Needs investigation of Monaco deltaDecorations
-  // vs createDecorationsCollection API for afterContent rendering.
-  test.fixme("Test 4: inline variable values appear as decorations", async () => {
+  test("Test 4: inline variable values appear as decorations", async () => {
     const dr = new DeepReviewPage(page);
     await dr.waitForReady();
     await dr.waitForEditorReady();
     // Inline value decorations are Monaco "after" injected text, rendered
-    // asynchronously after deltaDecorations call.
+    // asynchronously after createDecorationsCollection call.
     await wait(2000);
 
     // The first file has flow data with variable values at multiple lines.
     // The default execution index is 0, which corresponds to the first
     // "main" execution. That execution has steps with values at lines
     // 2, 3, 4, and 10.
-    //
-    // Monaco's ``afterContent`` decorations are rendered as pseudo-elements
-    // styled with the ``deepreview-inline-value`` class.
+
+    // Verify that inline value decorations exist as styled spans.
     const inlineCount = await dr.inlineValues().count();
     expect(inlineCount).toBeGreaterThan(0);
 
-    // Check that one of the inline values contains expected text.
-    // The first step with values (execution 0, step at line 2) has:
-    //   x = 10
-    // We look for any inline value decoration containing "x = 10".
+    // Verify that the inline value spans contain expected variable names.
+    // Monaco renders injected text using &nbsp; (U+00A0) instead of regular
+    // spaces, so we normalize non-breaking spaces before checking.
+    const normalize = (s: string) => s.replace(/\u00a0/g, " ");
+
     const allInlineTexts: string[] = [];
     const inlineLocators = await dr.inlineValues().all();
     for (const loc of inlineLocators) {
-      // afterContent decorations may expose their content via the CSS
-      // `content` property rather than textContent. In some Monaco versions
-      // the rendered text appears in the element's text. We try textContent
-      // first, then fall back to evaluating the CSS content property.
-      let text = await loc.textContent();
-      if (!text || text.trim() === "") {
-        text = await loc.evaluate((el) => {
-          const style = window.getComputedStyle(el, "::after");
-          return style.getPropertyValue("content");
-        });
-      }
-      if (text) {
-        allInlineTexts.push(text);
-      }
+      const text = await loc.textContent();
+      if (text) allInlineTexts.push(normalize(text));
     }
-
-    // At least one inline decoration should be present (we verified
-    // count > 0 above). If we can read the text, check for an expected
-    // variable. The deepreview.nim builds inline text like:
-    //   "  // x = 10"
-    // or for truncated values:
-    //   "  // input = \"hello world...\"..."
-    // This is a best-effort check since Monaco rendering details may vary.
-    if (allInlineTexts.length > 0) {
-      const combined = allInlineTexts.join(" | ");
-      // We expect at least one of our known variable names to appear.
-      const hasKnownVar =
-        combined.includes("x =") ||
-        combined.includes("y =") ||
-        combined.includes("result =") ||
-        combined.includes("n =") ||
-        combined.includes("acc =");
-      expect(hasKnownVar).toBe(true);
-    }
+    const combined = allInlineTexts.join(" | ");
+    // The deepreview.nim buildInlineValueDecorations generates text like:
+    //   "  // x = 10"  or  "  // x = 10, y = 20"
+    const hasKnownVar =
+      combined.includes("x =") ||
+      combined.includes("y =") ||
+      combined.includes("result =");
+    expect(hasKnownVar).toBe(true);
   });
 
   // -----------------------------------------------------------------------
   // Test 5: File switching
   // -----------------------------------------------------------------------
 
-  // FIXME: The ROOT div (id="ROOT") intercepts pointer events, preventing clicks
-  // on the deepreview file list sidebar. The root-container's click overlay needs
-  // to be excluded from the deepreview layout (CSS z-index or pointer-events fix).
-  test.fixme("Test 5: clicking a file in the sidebar switches the editor", async () => {
+  test("Test 5: clicking a file in the sidebar switches the editor", async () => {
     const dr = new DeepReviewPage(page);
     await dr.waitForReady();
     await dr.waitForEditorReady();

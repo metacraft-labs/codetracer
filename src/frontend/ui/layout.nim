@@ -193,6 +193,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig) =
         proc = discard)
     drComponent.kxi = kxiMap["deepreview"]
     redrawSync(kxiMap["deepreview"])
+    # Hide root-container so it doesn't intercept pointer events
+    # over the deepreview view (it has position: fixed and overlays
+    # the entire viewport).
+    let rootCont = document.getElementById(cstring"root-container")
+    if not rootCont.isNil:
+      rootCont.style.display = cstring"none"
     return
 
   if data.startOptions.welcomeScreen and data.trace.isNil:

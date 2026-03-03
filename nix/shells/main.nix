@@ -11,11 +11,6 @@ let
   # Import toolchains from the codetracer-toolchains flake for multi-language support.
   # These provide compilers needed by `ct record` → `ct-rr-support build` for new languages.
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
-  # .NET SDK + runtime for C# UI tests (dotnet build)
-  dotnet-full = pkgs.dotnetCorePackages.combinePackages [
-    pkgs.dotnetCorePackages.sdk_8_0
-    pkgs.dotnetCorePackages.runtime_8_0
-  ];
 in
 with pkgs;
 mkShell {
@@ -204,10 +199,9 @@ mkShell {
     # build environment is different from the regular one.
     python3Packages.distutils
 
-    # ui-test dependencies
+    # Playwright / display dependencies (used by TS e2e tests)
     playwright-driver.browsers
     playwright
-    dotnet-full
     xvfb-run
     xorg.xorgserver # provides Xephyr for visible virtual X11
 
@@ -316,7 +310,7 @@ mkShell {
     # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
     [ ! -f links/codetracer-ruby-recorder ] && ln -s \
-    $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder \
+    $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
     links/codetracer-ruby-recorder
 
     # [ ! -f links/ ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
@@ -328,12 +322,9 @@ mkShell {
 
     # ==== END of src/links for tup
 
-    # ui-test shell hooks
+    # Playwright/e2e test environment
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
-
-    # used in ui-tests/dotnet_build.sh
-    export NIX_NODE=${pkgs.nodejs_22.outPath}/bin/node
 
     # workaround to reuse devshell node_modules for tup build
     # make sure it's always updated

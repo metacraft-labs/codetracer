@@ -1,11 +1,23 @@
 {
   "compilerOptions": {
     "module": "CommonJS",
-    "noImplicitAny": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
     "sourceMap": true,
-    "strictNullChecks": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@lib/*": ["./lib/*"],
+      "@page-objects/*": ["./page-objects/*"]
+    },
+    "baseUrl": "."
   },
-  "include": ["tests/**.ts", "playwright.config.ts", "tests/noir-tests/**.ts", "tests/page-objects-tests/page_object.spec.ts"],
-  "exclude": ["**.mjs"]
+  "include": [
+    "lib/**/*.ts",
+    "page-objects/**/*.ts",
+    "tests/**/*.ts",
+    "playwright.config.ts"
+  ],
+  "exclude": ["**/*.mjs", "node_modules"]
 }
