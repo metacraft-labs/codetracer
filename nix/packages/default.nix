@@ -301,10 +301,7 @@
             nativeCheckInputs = [
               pkgs.python3
               pkgs.ruby
-              # Noir (our fork via inputs.noir) is not included because nargo
-              # tries to lock a git dependencies cache, which fails with
-              # PermissionDenied in the nix sandbox.  The noir_flow_integration
-              # test uses #[ignore] so it's automatically excluded from cargo test.
+              noir
             ];
 
             postUnpack = ''
@@ -337,6 +334,8 @@
 
             doCheck = true;
             checkPhase = ''
+              # nargo needs a writable HOME for its git-dependencies cache lock
+              export HOME=$(mktemp -d)
               cargo test --release --offline -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
