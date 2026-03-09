@@ -507,6 +507,25 @@ test-noir-flow:
   cd src/db-backend && cargo test test_noir_flow -- --nocapture --include-ignored
   echo "Noir flow test passed!"
 
+# WASM flow/omniscience integration test (DB-based, no rr required)
+# Requires: wazero on PATH, wasm32-wasip1 Rust target installed
+test-wasm-flow:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running WASM flow integration test..."
+  cd src/db-backend && cargo test test_wasm_flow -- --nocapture
+  echo "WASM flow test passed!"
+
+# Stylus flow/omniscience integration test (requires Arbitrum devnode)
+# Prerequisites: devnode at localhost:8547, cargo-stylus, cast (Foundry), wazero
+test-stylus-flow:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Stylus flow integration test..."
+  echo "NOTE: Requires Arbitrum devnode running at localhost:8547"
+  cd src/db-backend && cargo test test_stylus_flow -- --nocapture --include-ignored
+  echo "Stylus flow test passed!"
+
 # Noir real-recording integration tests (backend-manager, requires nargo + db-backend)
 test-noir-real-recordings:
   #!/usr/bin/env bash
@@ -534,6 +553,8 @@ test-flow-all:
   just test-ruby-flow
   echo ""
   just test-noir-flow
+  echo ""
+  just test-wasm-flow
   echo ""
   echo "╔════════════════════════════════════════════════════════════╗"
   echo "║ All flow integration tests passed!                         ║"

@@ -47,6 +47,7 @@ pub enum Language {
     Python,
     Ruby,
     Noir,
+    RustWasm,
 }
 
 impl Language {
@@ -60,12 +61,16 @@ impl Language {
             Language::Python => "py",
             Language::Ruby => "rb",
             Language::Noir => "nr",
+            Language::RustWasm => "wasm",
         }
     }
 
-    /// Returns true for DB-based trace languages (Python, Ruby, Noir) that don't use rr.
+    /// Returns true for DB-based trace languages (Python, Ruby, Noir, RustWasm) that don't use rr.
     pub fn is_db_trace(&self) -> bool {
-        matches!(self, Language::Python | Language::Ruby | Language::Noir)
+        matches!(
+            self,
+            Language::Python | Language::Ruby | Language::Noir | Language::RustWasm
+        )
     }
 }
 
@@ -634,6 +639,114 @@ pub fn find_ruby_recorder() -> PathBuf {
     recorder.canonicalize().unwrap_or(recorder)
 }
 
+/// Find the wazero binary for WASM recording.
+///
+/// Checks `CODETRACER_WASM_VM_PATH` env var, then PATH, then the dev build
+/// location at `../../src/build-debug/bin/wazero`.
+pub fn find_wazero() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_WASM_VM_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() && p.is_file() {
+            return Some(p);
+        }
+        eprintln!(
+            "WARNING: CODETRACER_WASM_VM_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
+    if let Ok(output) = Command::new("which").arg("wazero").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dev_locations = ["../../src/build-debug/bin/wazero", "../../result/bin/wazero"];
+    for loc in dev_locations {
+        let path = manifest_dir.join(loc);
+        if path.exists() {
+            return Some(path.canonicalize().unwrap_or(path));
+        }
+    }
+
+    None
+}
+
+/// Build a WASM test program from a Cargo project directory.
+///
+/// Runs `cargo build --target wasm32-wasip1` in debug mode (preserving DWARF).
+/// Returns the path to the produced `.wasm` binary.
+pub fn build_wasm_test_program(project_dir: &Path) -> Result<PathBuf, String> {
+    let output = Command::new("cargo")
+        .args(["build", "--target", "wasm32-wasip1"])
+        .current_dir(project_dir)
+        .output()
+        .map_err(|e| format!("failed to run cargo build for WASM: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "WASM build failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // Find the produced .wasm binary
+    let cargo_toml = project_dir.join("Cargo.toml");
+    let cargo_content = fs::read_to_string(&cargo_toml).map_err(|e| format!("failed to read Cargo.toml: {}", e))?;
+
+    // Extract package name from Cargo.toml
+    let pkg_name = cargo_content
+        .lines()
+        .find(|l| l.starts_with("name"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .ok_or("failed to parse package name from Cargo.toml")?;
+
+    let wasm_path = project_dir
+        .join("target/wasm32-wasip1/debug")
+        .join(format!("{}.wasm", pkg_name));
+
+    if !wasm_path.exists() {
+        return Err(format!("WASM binary not found at {}", wasm_path.display()));
+    }
+
+    Ok(wasm_path)
+}
+
+/// Record a WASM trace by running wazero.
+///
+/// Invokes `wazero run --trace-dir <trace_dir> <wasm_path>`.
+/// wazero stores absolute source paths in `trace_paths.json`.
+fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let output = Command::new(&wazero)
+        .args([
+            "run",
+            "--trace-dir",
+            trace_dir.to_str().unwrap(),
+            wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| format!("failed to run wazero: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "WASM recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
 /// Record a Python trace by running the pure-Python recorder.
 ///
 /// The recorder writes `trace.json`, `trace_metadata.json`, `trace_paths.json` to CWD,
@@ -755,6 +868,11 @@ impl TestRecording {
             Language::Python => record_python_trace(source_path, &trace_dir)?,
             Language::Ruby => record_ruby_trace(source_path, &trace_dir)?,
             Language::Noir => record_noir_trace(source_path, &trace_dir)?,
+            Language::RustWasm => {
+                // source_path is the Cargo project directory; build then record
+                let wasm_binary = build_wasm_test_program(source_path)?;
+                record_wasm_trace(&wasm_binary, &trace_dir)?;
+            }
             _ => return Err(format!("{:?} is not a DB-based language", language)),
         }
 
@@ -826,6 +944,11 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
         // nargo trace). The actual source file is src/main.nr within it.
         // nargo trace stores absolute paths, so the suffix-match works.
         config.source_path.join("src/main.nr")
+    } else if config.language == Language::RustWasm {
+        // For WASM, source_path is the Cargo project directory.
+        // wazero stores absolute source paths in trace_paths.json,
+        // so the suffix-match works with the actual .rs source file.
+        config.source_path.join("src/main.rs")
     } else {
         // Ruby stores relative paths from CWD; handled by suffix-match.
         config.source_path.clone()
