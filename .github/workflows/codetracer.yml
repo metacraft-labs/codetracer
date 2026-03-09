@@ -818,6 +818,10 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
+      # Runs all Rust tests including flow integration tests for all languages.
+      # WASM flow tests (wasm_flow_integration.rs) skip automatically if wazero
+      # or wasm32-wasip1 target are not available.
+      # Stylus flow tests are #[ignore] and require a devnode — not run here.
       - run: "nix develop .#devShells.x86_64-linux.default --command just test"
 
   test-ui-tests:
