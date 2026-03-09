@@ -467,6 +467,40 @@
         # to ensure ABI compatibility (the native .so must match the Ruby that loads it).
         ruby-recorder-native = inputs.codetracer-ruby-recorder.lib.mkRubyRecorderPackage pkgs pkgs.ruby;
 
+        # C FFI static library + header for codetracer_trace_writer.
+        # Allows Go (cgo) and other C-compatible languages to produce traces
+        # using the Rust trace format crates.
+        trace-writer-ffi = pkgs.rustPlatform.buildRustPackage {
+          name = "trace-writer-ffi";
+          pname = "trace-writer-ffi";
+
+          src = ../../libs/codetracer-trace-format;
+
+          nativeBuildInputs = [
+            pkgs.capnproto
+          ];
+
+          buildPhase = ''
+            cargo build --release -p codetracer_trace_writer_ffi --offline
+          '';
+
+          doCheck = false;
+
+          installPhase = ''
+            mkdir -p $out/lib $out/include
+            cp target/release/libcodetracer_trace_writer_ffi.a $out/lib/
+            cp target/release/libcodetracer_trace_writer_ffi.so $out/lib/ || true
+            cp target/release/libcodetracer_trace_writer_ffi.dylib $out/lib/ || true
+            if [ -f codetracer_trace_writer_ffi/codetracer_trace_writer.h ]; then
+              cp codetracer_trace_writer_ffi/codetracer_trace_writer.h $out/include/
+            fi
+          '';
+
+          cargoLock = {
+            lockFile = ../../libs/codetracer-trace-format/Cargo.lock;
+          };
+        };
+
         resources-derivation = stdenv.mkDerivation rec {
           name = "resources-derivation";
           pname = name;
