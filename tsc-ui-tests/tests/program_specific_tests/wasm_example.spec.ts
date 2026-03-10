@@ -42,17 +42,18 @@ test.describe("wasm example — state and navigation", () => {
   test("expected event count", async () => {
     await loadedEventLog();
 
-    const raw = await page.$eval(
-      ".data-tables-footer-rows-count",
-      (el) => el.textContent ?? "",
-    );
-
-    // Verify at least one event is recorded rather than hardcoding a count
-    // that can change with wazero/debugger version updates.
-    const match = raw.match(/(\d+)/);
-    expect(match).not.toBeNull();
-    const count = parseInt(match![1], 10);
-    expect(count).toBeGreaterThanOrEqual(1);
+    // WASM traces may populate the event log asynchronously; poll until a
+    // non-zero count appears (up to 10 s).
+    await expect(async () => {
+      const raw = await page.$eval(
+        ".data-tables-footer-rows-count",
+        (el) => el.textContent ?? "",
+      );
+      const match = raw.match(/(\d+)/);
+      expect(match).not.toBeNull();
+      const count = parseInt(match![1], 10);
+      expect(count).toBeGreaterThanOrEqual(1);
+    }).toPass({ timeout: 10_000 });
   });
 
   test("state panel loaded initially", async () => {
