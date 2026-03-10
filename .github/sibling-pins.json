@@ -11,6 +11,7 @@
   "codetracer-specs": "3c85ecfbed0c756cee5b39ad5627483a929994e7",
   "codetracer-trace-format": "13911b1a099c44b811783b6ffd3e4cf519633442",
   "codetracer-vscode-extension": "26192e5a2dbec44281530691d578e84f077e84f7",
+  "codetracer-shell-recorders": "700cf354499523e8b1220b2820a2211b06bb14c1",
   "codetracer-wasm-recorder": "ad8d1cae5a799214cc607b3437c883cc1bd0e7dd",
   "nix-codetracer-toolchains": "57190da5ec700d8cc6a67a76cc2ea633a839a4cd"
 }

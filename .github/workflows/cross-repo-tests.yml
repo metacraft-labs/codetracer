@@ -22,13 +22,17 @@ on:
         description: 'rr-backend git ref to test against (default: from pin file)'
         required: false
         default: ''
+      shell_recorders_ref:
+        description: 'shell-recorders git ref to test against (default: from sibling-pins.json)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  cross-repo-tests:
+  rr-backend-tests:
     runs-on: [self-hosted, nixos]
 
     steps:
@@ -151,7 +155,90 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cross-test-logs
+          name: rr-backend-test-logs
+          path: target/cross-test-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  shell-recorder-tests:
+    runs-on: [self-hosted, nixos]
+
+    steps:
+      - name: Checkout codetracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Resolve shell-recorders ref
+        id: resolve-ref
+        run: |
+          if [[ -n "${{ github.event.inputs.shell_recorders_ref }}" ]]; then
+            REF="${{ github.event.inputs.shell_recorders_ref }}"
+          elif [[ -f .github/sibling-pins.json ]]; then
+            PIN=$(python3 -c "
+          import json
+          with open('.github/sibling-pins.json') as f:
+              pins = json.load(f)
+          print(pins.get('codetracer-shell-recorders', ''))
+          " 2>/dev/null) || true
+            if [[ -n "${PIN:-}" ]]; then
+              REF="$PIN"
+            fi
+          fi
+          REF="${REF:-main}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved shell-recorders ref: $REF"
+
+      - name: Clone shell-recorders
+        run: |
+          REF="${{ steps.resolve-ref.outputs.ref }}"
+          echo "Cloning codetracer-shell-recorders at ref: $REF"
+
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
+
+          git clone \
+            "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-shell-recorders.git" \
+            target/shell-recorders-clone
+          cd target/shell-recorders-clone
+          git checkout "$REF"
+
+      - name: Build shell trace writer
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command \
+            bash -c "cd target/shell-recorders-clone && cargo build"
+
+      - name: Run shell-recorder integration tests
+        run: |
+          SHELL_RECORDERS="$(pwd)/target/shell-recorders-clone"
+          BASH_RECORDER="${SHELL_RECORDERS}/bash-recorder/launcher.sh"
+          ZSH_RECORDER="${SHELL_RECORDERS}/zsh-recorder/launcher.zsh"
+          echo "Using bash recorder: $BASH_RECORDER"
+          echo "Using zsh recorder: $ZSH_RECORDER"
+          nix develop .#devShells.x86_64-linux.default --command \
+            bash -c "
+              export CODETRACER_BASH_RECORDER_PATH=\"${BASH_RECORDER}\"
+              export CODETRACER_ZSH_RECORDER_PATH=\"${ZSH_RECORDER}\"
+              cd src/db-backend
+              cargo test --test bash_flow_integration --test zsh_flow_integration -- --nocapture
+            "
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shell-recorder-test-logs
           path: target/cross-test-logs/
           retention-days: 14
           if-no-files-found: ignore
