@@ -264,39 +264,19 @@ else
 	INTERPRETER_PATH=/lib64/ld-linux-x86-64.so.2
 fi
 
+# Helper: skip patchelf on statically-linked binaries (e.g. Go binaries built with CGO_ENABLED=0)
+try_patchelf() {
+	local binary="$1"
+	shift
+	if file "$binary" | grep -q "statically linked"; then
+		echo "Skipping patchelf for statically-linked binary: $binary"
+		return 0
+	fi
+	patchelf "$@" "$binary"
+}
+
 # Patchelf the executable's interpreter
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct_unwrapped
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/db-backend-record
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/backend-manager
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/nargo
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/wazero
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ctags
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/curl
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/cargo-stylus
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/node
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/ruby/bin/ruby
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${APP_DIR}"/bin/ct-remote
-
-# Clear up the executable's rpath
-patchelf --remove-rpath "${APP_DIR}"/bin/ct_unwrapped
-patchelf --remove-rpath "${APP_DIR}"/bin/db-backend
-patchelf --remove-rpath "${APP_DIR}"/bin/db-backend-record
-patchelf --remove-rpath "${APP_DIR}"/bin/backend-manager
-patchelf --remove-rpath "${APP_DIR}"/bin/nargo
-patchelf --remove-rpath "${APP_DIR}"/bin/wazero
-patchelf --remove-rpath "${APP_DIR}"/bin/ctags
-patchelf --remove-rpath "${APP_DIR}"/bin/curl
-patchelf --remove-rpath "${APP_DIR}"/bin/node
-patchelf --remove-rpath "${APP_DIR}"/ruby/bin/ruby
-patchelf --remove-rpath "${APP_DIR}"/bin/ct-remote
-patchelf --remove-rpath "${APP_DIR}"/lib/libicui18n.so.76
-patchelf --remove-rpath "${APP_DIR}"/lib/libgssapi_krb5.so.2
-
-# Set rpath for binaries and libraries
-# Note: $ORIGIN is an ELF rpath token, not a shell variable - it should NOT be expanded
-RPATH_BINARIES=(
-	"${APP_DIR}"/bin/node
+PATCHELF_BINARIES=(
 	"${APP_DIR}"/bin/ct_unwrapped
 	"${APP_DIR}"/bin/db-backend
 	"${APP_DIR}"/bin/db-backend-record
@@ -305,15 +285,35 @@ RPATH_BINARIES=(
 	"${APP_DIR}"/bin/wazero
 	"${APP_DIR}"/bin/ctags
 	"${APP_DIR}"/bin/curl
+	"${APP_DIR}"/bin/cargo-stylus
 	"${APP_DIR}"/bin/node
 	"${APP_DIR}"/ruby/bin/ruby
 	"${APP_DIR}"/bin/ct-remote
+)
+for binary in "${PATCHELF_BINARIES[@]}"; do
+	try_patchelf "$binary" --set-interpreter "${INTERPRETER_PATH}"
+done
+
+# Clear up the executable's rpath
+REMOVE_RPATH_TARGETS=(
+	"${PATCHELF_BINARIES[@]}"
+	"${APP_DIR}"/lib/libicui18n.so.76
+	"${APP_DIR}"/lib/libgssapi_krb5.so.2
+)
+for binary in "${REMOVE_RPATH_TARGETS[@]}"; do
+	try_patchelf "$binary" --remove-rpath
+done
+
+# Set rpath for binaries and libraries
+# Note: $ORIGIN is an ELF rpath token, not a shell variable - it should NOT be expanded
+RPATH_BINARIES=(
+	"${PATCHELF_BINARIES[@]}"
 	"${APP_DIR}"/lib/libicui18n.so.76
 	"${APP_DIR}"/lib/libgssapi_krb5.so.2
 )
 for binary in "${RPATH_BINARIES[@]}"; do
 	# shellcheck disable=SC2016
-	patchelf --set-rpath '$ORIGIN/../lib' "$binary"
+	try_patchelf "$binary" --set-rpath '$ORIGIN/../lib'
 done
 
 APPIMAGE_ARCH=$CURRENT_ARCH
