@@ -49,6 +49,7 @@ pub enum Language {
     Noir,
     RustWasm,
     JavaScript,
+    Bash,
 }
 
 impl Language {
@@ -64,6 +65,7 @@ impl Language {
             Language::Noir => "nr",
             Language::RustWasm => "wasm",
             Language::JavaScript => "js",
+            Language::Bash => "sh",
         }
     }
 
@@ -71,7 +73,12 @@ impl Language {
     pub fn is_db_trace(&self) -> bool {
         matches!(
             self,
-            Language::Python | Language::Ruby | Language::Noir | Language::RustWasm | Language::JavaScript
+            Language::Python
+                | Language::Ruby
+                | Language::Noir
+                | Language::RustWasm
+                | Language::JavaScript
+                | Language::Bash
         )
     }
 }
@@ -911,6 +918,81 @@ fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), S
     Ok(())
 }
 
+/// Find the Bash recorder launcher script via CARGO_MANIFEST_DIR.
+///
+/// The Bash recorder is a sibling repo at `codetracer-shell-recorders/` relative to the
+/// top-level `codetracer/` directory. The entry point is `bash-recorder/launcher.sh`.
+/// Also supports `CODETRACER_BASH_RECORDER_PATH` env var.
+///
+/// Panics if the recorder is not found.
+pub fn find_bash_recorder() -> PathBuf {
+    if let Ok(path) = env::var("CODETRACER_BASH_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return p;
+        }
+        eprintln!(
+            "WARNING: CODETRACER_BASH_RECORDER_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let recorder = manifest_dir.join("../../../codetracer-shell-recorders/bash-recorder/launcher.sh");
+    assert!(
+        recorder.exists(),
+        "Bash recorder not found at {}. Is codetracer-shell-recorders set up?",
+        recorder.display()
+    );
+    recorder.canonicalize().unwrap_or(recorder)
+}
+
+/// Record a Bash trace by running the shell recorder launcher.
+///
+/// Uses `bash <launcher.sh> --output-dir <trace_dir> --format binary <source>`.
+fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let recorder = find_bash_recorder();
+
+    // Build the trace writer binary first
+    let shell_recorders_dir = recorder.parent().unwrap().parent().unwrap();
+    let build_output = Command::new("cargo")
+        .args(["build"])
+        .current_dir(shell_recorders_dir)
+        .output()
+        .map_err(|e| format!("failed to build shell trace writer: {}", e))?;
+
+    if !build_output.status.success() {
+        return Err(format!(
+            "Shell trace writer build failed:\nstderr: {}",
+            String::from_utf8_lossy(&build_output.stderr)
+        ));
+    }
+
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let output = Command::new("bash")
+        .args([
+            recorder.to_str().unwrap(),
+            "--output-dir",
+            trace_dir.to_str().unwrap(),
+            "--format",
+            "binary",
+            source_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| format!("failed to run Bash recorder: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Bash recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
 /// Record a Noir trace by running `nargo trace` inside the Nargo project directory.
 ///
 /// Unlike Python/Ruby where `source_path` is a single file, for Noir `source_path`
@@ -962,6 +1044,7 @@ impl TestRecording {
             Language::Python => record_python_trace(source_path, &trace_dir)?,
             Language::Ruby => record_ruby_trace(source_path, &trace_dir)?,
             Language::JavaScript => record_javascript_trace(source_path, &trace_dir)?,
+            Language::Bash => record_bash_trace(source_path, &trace_dir)?,
             Language::Noir => record_noir_trace(source_path, &trace_dir)?,
             Language::RustWasm => {
                 // source_path is the Cargo project directory; build then record
@@ -1049,6 +1132,9 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
         // wazero stores absolute source paths in trace_paths.json,
         // so the suffix-match works with the actual .rs source file.
         config.source_path.join("src/main.rs")
+    } else if config.language == Language::Bash {
+        // Bash recorder stores absolute paths, suffix-match works
+        config.source_path.clone()
     } else {
         // Ruby and JavaScript store paths that are handled by suffix-match.
         config.source_path.clone()

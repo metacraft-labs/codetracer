@@ -32,6 +32,7 @@ pub enum Lang {
     Ruby,
     RubyDb,
     Javascript,
+    Bash,
     Lua,
     Asm,
     Noir,
@@ -61,6 +62,7 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "d" => Lang::C, // TODO
         "go" => Lang::Go,
         "js" | "mjs" | "cjs" => Lang::Javascript,
+        "sh" | "bash" => Lang::Bash,
         _ => Lang::Unknown,
     }
 }
