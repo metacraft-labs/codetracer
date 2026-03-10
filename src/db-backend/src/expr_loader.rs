@@ -211,6 +211,26 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         },
     );
 
+    // Zsh language support — reuses tree-sitter-bash grammar and node types
+    // since Zsh syntax is very similar to Bash.
+    m.insert(
+        Lang::Zsh,
+        NodeNames {
+            if_conditions: vec!["if_statement".to_string()],
+            else_conditions: vec!["elif_clause".to_string(), "else_clause".to_string()],
+            loops: vec![
+                "for_statement".to_string(),
+                "while_statement".to_string(),
+                "c_style_for_statement".to_string(),
+            ],
+            branches_body: vec!["compound_statement".to_string()],
+            branches: vec!["compound_statement".to_string()],
+            functions: vec!["function_definition".to_string()],
+            values: vec!["variable_name".to_string()],
+            comments: vec!["comment".to_string()],
+        },
+    );
+
     m
 });
 
@@ -321,6 +341,8 @@ impl ExprLoader {
                 Lang::Javascript
             } else if extension == "sh" || extension == "bash" {
                 Lang::Bash
+            } else if extension == "zsh" {
+                Lang::Zsh
             } else {
                 Lang::Unknown
             }
@@ -358,7 +380,7 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_go::LANGUAGE.into())?;
         } else if lang == Lang::Javascript {
             parser.set_language(&tree_sitter_javascript::LANGUAGE.into())?;
-        } else if lang == Lang::Bash {
+        } else if lang == Lang::Bash || lang == Lang::Zsh {
             parser.set_language(&tree_sitter_bash::LANGUAGE.into())?;
         } else {
             // else if lang == Lang::Small {
@@ -1083,8 +1105,8 @@ impl ExprLoader {
 
                 true
             }
-            Lang::Bash => {
-                // Filter out non-variable identifiers in Bash code.
+            Lang::Bash | Lang::Zsh => {
+                // Filter out non-variable identifiers in Bash/Zsh code.
                 //
                 // In tree-sitter-bash, variable references use the `variable_name` node type.
                 // These appear in:

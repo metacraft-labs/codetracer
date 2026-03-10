@@ -50,6 +50,7 @@ pub enum Language {
     RustWasm,
     JavaScript,
     Bash,
+    Zsh,
 }
 
 impl Language {
@@ -66,6 +67,7 @@ impl Language {
             Language::RustWasm => "wasm",
             Language::JavaScript => "js",
             Language::Bash => "sh",
+            Language::Zsh => "zsh",
         }
     }
 
@@ -79,6 +81,7 @@ impl Language {
                 | Language::RustWasm
                 | Language::JavaScript
                 | Language::Bash
+                | Language::Zsh
         )
     }
 }
@@ -947,6 +950,34 @@ pub fn find_bash_recorder() -> PathBuf {
     recorder.canonicalize().unwrap_or(recorder)
 }
 
+/// Find the Zsh recorder launcher script via CARGO_MANIFEST_DIR.
+///
+/// The Zsh recorder is in `codetracer-shell-recorders/zsh-recorder/launcher.zsh`.
+/// Also supports `CODETRACER_ZSH_RECORDER_PATH` env var.
+///
+/// Panics if the recorder is not found.
+pub fn find_zsh_recorder() -> PathBuf {
+    if let Ok(path) = env::var("CODETRACER_ZSH_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return p;
+        }
+        eprintln!(
+            "WARNING: CODETRACER_ZSH_RECORDER_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let recorder = manifest_dir.join("../../../codetracer-shell-recorders/zsh-recorder/launcher.zsh");
+    assert!(
+        recorder.exists(),
+        "Zsh recorder not found at {}. Is codetracer-shell-recorders set up?",
+        recorder.display()
+    );
+    recorder.canonicalize().unwrap_or(recorder)
+}
+
 /// Record a Bash trace by running the shell recorder launcher.
 ///
 /// Uses `bash <launcher.sh> --output-dir <trace_dir> --format binary <source>`.
@@ -985,6 +1016,52 @@ fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
     if !output.status.success() {
         return Err(format!(
             "Bash recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Record a Zsh trace by running the shell recorder launcher.
+///
+/// Uses `zsh <launcher.zsh> --output-dir <trace_dir> --format binary <source>`.
+fn record_zsh_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let recorder = find_zsh_recorder();
+
+    // Build the trace writer binary first (shared with Bash recorder)
+    let shell_recorders_dir = recorder.parent().unwrap().parent().unwrap();
+    let build_output = Command::new("cargo")
+        .args(["build"])
+        .current_dir(shell_recorders_dir)
+        .output()
+        .map_err(|e| format!("failed to build shell trace writer: {}", e))?;
+
+    if !build_output.status.success() {
+        return Err(format!(
+            "Shell trace writer build failed:\nstderr: {}",
+            String::from_utf8_lossy(&build_output.stderr)
+        ));
+    }
+
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let output = Command::new("zsh")
+        .args([
+            recorder.to_str().unwrap(),
+            "--output-dir",
+            trace_dir.to_str().unwrap(),
+            "--format",
+            "binary",
+            source_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| format!("failed to run Zsh recorder: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Zsh recording failed:\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ));
@@ -1045,6 +1122,7 @@ impl TestRecording {
             Language::Ruby => record_ruby_trace(source_path, &trace_dir)?,
             Language::JavaScript => record_javascript_trace(source_path, &trace_dir)?,
             Language::Bash => record_bash_trace(source_path, &trace_dir)?,
+            Language::Zsh => record_zsh_trace(source_path, &trace_dir)?,
             Language::Noir => record_noir_trace(source_path, &trace_dir)?,
             Language::RustWasm => {
                 // source_path is the Cargo project directory; build then record
@@ -1132,8 +1210,8 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
         // wazero stores absolute source paths in trace_paths.json,
         // so the suffix-match works with the actual .rs source file.
         config.source_path.join("src/main.rs")
-    } else if config.language == Language::Bash {
-        // Bash recorder stores absolute paths, suffix-match works
+    } else if config.language == Language::Bash || config.language == Language::Zsh {
+        // Bash/Zsh recorder stores absolute paths, suffix-match works
         config.source_path.clone()
     } else {
         // Ruby and JavaScript store paths that are handled by suffix-match.
