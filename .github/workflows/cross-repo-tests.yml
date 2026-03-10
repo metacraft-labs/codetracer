@@ -211,6 +211,7 @@ jobs:
           # Clone as a sibling of the codetracer checkout so that path deps in
           # Cargo.toml (../../../codetracer/libs/codetracer-trace-format/...) resolve.
           CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
+          rm -rf "$CLONE_DIR"
           git clone \
             "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-shell-recorders.git" \
             "$CLONE_DIR"
