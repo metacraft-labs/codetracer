@@ -48,6 +48,7 @@ pub enum Language {
     Ruby,
     Noir,
     RustWasm,
+    JavaScript,
 }
 
 impl Language {
@@ -62,6 +63,7 @@ impl Language {
             Language::Ruby => "rb",
             Language::Noir => "nr",
             Language::RustWasm => "wasm",
+            Language::JavaScript => "js",
         }
     }
 
@@ -69,7 +71,7 @@ impl Language {
     pub fn is_db_trace(&self) -> bool {
         matches!(
             self,
-            Language::Python | Language::Ruby | Language::Noir | Language::RustWasm
+            Language::Python | Language::Ruby | Language::Noir | Language::RustWasm | Language::JavaScript
         )
     }
 }
@@ -365,6 +367,16 @@ impl DapTestClient {
 impl Drop for DapTestClient {
     fn drop(&mut self) {
         self.db_backend.kill().ok();
+        // Capture and print stderr for debugging test failures
+        if let Some(stderr) = self.db_backend.stderr.take() {
+            use std::io::Read as _;
+            let mut buf = String::new();
+            let mut stderr = stderr;
+            stderr.read_to_string(&mut buf).ok();
+            if !buf.is_empty() {
+                eprintln!("\n=== db-backend stderr ===\n{}\n=== end db-backend stderr ===", buf);
+            }
+        }
         self.db_backend.wait().ok();
     }
 }
@@ -817,6 +829,88 @@ fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
     Ok(())
 }
 
+/// Find the JavaScript recorder CLI entry point via CARGO_MANIFEST_DIR.
+///
+/// The JS recorder is a sibling repo at `codetracer-js-recorder/` relative to the
+/// top-level `codetracer/` directory. The CLI entry point is at
+/// `packages/cli/dist/index.js`. Also supports `CODETRACER_JS_RECORDER_PATH` env var.
+///
+/// Panics if the recorder is not found.
+pub fn find_js_recorder() -> PathBuf {
+    // Check explicit environment variable first
+    if let Ok(path) = env::var("CODETRACER_JS_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return p;
+        }
+        eprintln!(
+            "WARNING: CODETRACER_JS_RECORDER_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let recorder = manifest_dir.join("../../../codetracer-js-recorder/packages/cli/dist/index.js");
+    assert!(
+        recorder.exists(),
+        "JavaScript recorder not found at {}. Is codetracer-js-recorder built?",
+        recorder.display()
+    );
+    recorder.canonicalize().unwrap_or(recorder)
+}
+
+/// Record a JavaScript trace by running the JS recorder CLI.
+///
+/// Uses `node <cli> record <source> --format json --out-dir <tmp>`.
+/// The recorder creates a `trace-N` subdirectory inside the output dir,
+/// so after recording we find that subdirectory and rename it to `trace_dir`.
+///
+/// The recorder stores absolute source paths in the manifest, so suffix-matching works.
+fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
+    let recorder = find_js_recorder();
+
+    // The JS recorder creates a trace-N subdirectory inside --out-dir.
+    // Use a temporary output directory, then rename the subdirectory to trace_dir.
+    let out_parent = trace_dir.parent().unwrap_or(trace_dir);
+    let recorder_out = out_parent.join("js-recorder-out");
+    fs::create_dir_all(&recorder_out).map_err(|e| format!("failed to create recorder out dir: {}", e))?;
+
+    let output = Command::new("node")
+        .args([
+            recorder.to_str().unwrap(),
+            "record",
+            source_path.to_str().unwrap(),
+            "--format",
+            "binary",
+            "--out-dir",
+            recorder_out.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| format!("failed to run JavaScript recorder: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "JavaScript recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // Find the generated trace-* subdirectory and rename it to the expected trace_dir
+    let trace_subdir = fs::read_dir(&recorder_out)
+        .map_err(|e| format!("failed to read recorder output: {}", e))?
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir() && e.file_name().to_str().is_some_and(|n| n.starts_with("trace-")))
+        .ok_or("no trace-* directory found in recorder output")?;
+
+    fs::rename(trace_subdir.path(), trace_dir).map_err(|e| format!("failed to rename trace dir: {}", e))?;
+
+    // Clean up the temporary output directory
+    fs::remove_dir_all(&recorder_out).ok();
+
+    Ok(())
+}
+
 /// Record a Noir trace by running `nargo trace` inside the Nargo project directory.
 ///
 /// Unlike Python/Ruby where `source_path` is a single file, for Noir `source_path`
@@ -867,6 +961,7 @@ impl TestRecording {
         match language {
             Language::Python => record_python_trace(source_path, &trace_dir)?,
             Language::Ruby => record_ruby_trace(source_path, &trace_dir)?,
+            Language::JavaScript => record_javascript_trace(source_path, &trace_dir)?,
             Language::Noir => record_noir_trace(source_path, &trace_dir)?,
             Language::RustWasm => {
                 // source_path is the Cargo project directory; build then record
@@ -876,11 +971,16 @@ impl TestRecording {
             _ => return Err(format!("{:?} is not a DB-based language", language)),
         }
 
-        // Verify the essential trace files were produced
+        // Verify the essential trace files were produced.
+        // Some recorders (e.g. JS with --format binary) produce trace.bin instead of trace.json.
         let trace_json = trace_dir.join("trace.json");
+        let trace_bin = trace_dir.join("trace.bin");
         let trace_metadata = trace_dir.join("trace_metadata.json");
-        if !trace_json.exists() {
-            return Err(format!("trace.json not produced at {}", trace_json.display()));
+        if !trace_json.exists() && !trace_bin.exists() {
+            return Err(format!(
+                "neither trace.json nor trace.bin produced in {}",
+                trace_dir.display()
+            ));
         }
         if !trace_metadata.exists() {
             return Err(format!(
@@ -950,7 +1050,7 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
         // so the suffix-match works with the actual .rs source file.
         config.source_path.join("src/main.rs")
     } else {
-        // Ruby stores relative paths from CWD; handled by suffix-match.
+        // Ruby and JavaScript store paths that are handled by suffix-match.
         config.source_path.clone()
     };
 

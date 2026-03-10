@@ -60,6 +60,7 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "nim" => Lang::Nim,
         "d" => Lang::C, // TODO
         "go" => Lang::Go,
+        "js" | "mjs" | "cjs" => Lang::Javascript,
         _ => Lang::Unknown,
     }
 }

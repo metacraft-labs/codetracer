@@ -842,7 +842,13 @@ fn task_thread(
                 let launch_trace_file = if let Some(trace_file) = &args.trace_file {
                     trace_file.clone()
                 } else {
-                    "trace.json".into()
+                    // Auto-detect: prefer trace.bin (binary CBOR+zstd) over trace.json.
+                    let bin_path = folder.join("trace.bin");
+                    if bin_path.is_file() {
+                        "trace.bin".into()
+                    } else {
+                        "trace.json".into()
+                    }
                 };
 
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);

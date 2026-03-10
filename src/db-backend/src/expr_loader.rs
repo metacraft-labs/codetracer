@@ -168,6 +168,28 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         },
     );
 
+    // JavaScript language support
+    // tree-sitter-javascript node types reference:
+    // https://github.com/tree-sitter/tree-sitter-javascript/blob/master/src/node-types.json
+    m.insert(
+        Lang::Javascript,
+        NodeNames {
+            if_conditions: vec!["if_statement".to_string()],
+            else_conditions: vec!["else_clause".to_string()],
+            loops: vec![
+                "for_statement".to_string(),
+                "for_in_statement".to_string(),
+                "while_statement".to_string(),
+                "do_statement".to_string(),
+            ],
+            branches_body: vec!["statement_block".to_string()],
+            branches: vec!["statement_block".to_string()],
+            functions: vec!["function_declaration".to_string(), "method_definition".to_string()],
+            values: vec!["identifier".to_string()],
+            comments: vec!["comment".to_string()],
+        },
+    );
+
     m
 });
 
@@ -274,6 +296,8 @@ impl ExprLoader {
                 Lang::Nim
             } else if extension == "go" {
                 Lang::Go
+            } else if extension == "js" || extension == "mjs" || extension == "cjs" {
+                Lang::Javascript
             } else {
                 Lang::Unknown
             }
@@ -309,6 +333,8 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_nim::LANGUAGE.into())?;
         } else if lang == Lang::Go {
             parser.set_language(&tree_sitter_go::LANGUAGE.into())?;
+        } else if lang == Lang::Javascript {
+            parser.set_language(&tree_sitter_javascript::LANGUAGE.into())?;
         } else {
             // else if lang == Lang::Small {
             //     parser.set_language(&tree_sitter_elisp::LANGUAGE.into())?;
@@ -908,6 +934,124 @@ impl ExprLoader {
                 if parent_kind == "method_parameters"
                     || parent_kind == "block_parameters"
                     || parent_kind == "lambda_parameters"
+                {
+                    return false;
+                }
+
+                true
+            }
+            Lang::Javascript => {
+                // Filter out non-variable identifiers in JavaScript code.
+                //
+                // In tree-sitter-javascript, we want only actual variable references.
+                // We filter out:
+                //   - Function declaration names (`function_declaration` → `name` field)
+                //   - Function names in call expressions (`call_expression` → `function` field)
+                //   - Property names in member expressions (`member_expression` → `property` field)
+                //   - Object names when used as receiver of a method call
+                //   - Class definition names (`class_declaration` → `name` field)
+                //   - Import/export identifiers
+                //   - Parameter names in formal_parameters
+                //   - Method definition names
+                //
+                // tree-sitter-javascript node types reference:
+                //   https://github.com/tree-sitter/tree-sitter-javascript/blob/master/src/node-types.json
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out function declaration names.
+                // AST: function_declaration { name: identifier "foo", parameters: ..., body: ... }
+                if parent_kind == "function_declaration" || parent_kind == "function" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out method definition names.
+                // AST: method_definition { name: property_identifier ... }
+                // (method names are usually property_identifier, not identifier,
+                // but handle defensively)
+                if parent_kind == "method_definition" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out class declaration names.
+                // AST: class_declaration { name: identifier "MyClass", body: ... }
+                if parent_kind == "class_declaration" || parent_kind == "class" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "name" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out function names in call expressions.
+                // AST: call_expression { function: identifier "foo", arguments: ... }
+                if parent_kind == "call_expression" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "function" {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter out property names in member expressions.
+                // AST: member_expression { object: identifier, property: property_identifier }
+                // The `property` field is usually property_identifier but handle identifier too.
+                if parent_kind == "member_expression" {
+                    if let Some(field_name) = field_name_in_parent(node) {
+                        if field_name == "property" {
+                            return false;
+                        }
+                        // Filter out the object when the member_expression is a callee.
+                        // E.g., `console.log(x)` — `console` is not a local variable reference.
+                        if field_name == "object" {
+                            if let Some(grandparent) = parent.parent() {
+                                if grandparent.kind() == "call_expression" {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter out import/export identifiers.
+                if matches!(
+                    parent_kind,
+                    "import_statement"
+                        | "import_specifier"
+                        | "import_clause"
+                        | "export_statement"
+                        | "export_specifier"
+                        | "namespace_import"
+                        | "named_imports"
+                ) {
+                    return false;
+                }
+
+                // Filter out formal parameter identifiers.
+                // `function foo(a, b)` → formal_parameters > identifier
+                if parent_kind == "formal_parameters" {
+                    return false;
+                }
+
+                // Filter out label identifiers.
+                if parent_kind == "labeled_statement"
+                    || parent_kind == "break_statement"
+                    || parent_kind == "continue_statement"
                 {
                     return false;
                 }
@@ -1860,6 +2004,157 @@ y = 10
         assert!(
             all_vars.contains(&"x".to_string()),
             "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"y".to_string()),
+            "y should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
+mod javascript_tests {
+    use super::*;
+
+    /// Test that JavaScript function calls are correctly filtered out of the variable list
+    /// while actual variables are preserved.
+    #[test]
+    fn test_javascript_excludes_function_calls_from_variables() {
+        use std::fs;
+
+        let code = r#"function calculate_sum(a, b) {
+  var sum_val = a + b;
+  var doubled = sum_val * 2;
+  var final_result = doubled + 10;
+  console.log("Sum:", sum_val);
+  console.log("Doubled:", doubled);
+  console.log("Final:", final_result);
+  return final_result;
+}
+
+var x = 10;
+var y = 32;
+var result = calculate_sum(x, y);
+console.log("Result:", result);
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("js_func_test.js");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+
+        // Print all extracted variables by line for debugging
+        println!("\n=== JavaScript Variables by line ===");
+        for (pos, vars) in &info.variables {
+            println!("  Line {}: {:?}", pos.0, vars);
+        }
+
+        // Collect all extracted variables
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+        println!("\nAll variables: {:?}", all_vars);
+
+        // Function calls should NOT be in the variables list
+        assert!(
+            !all_vars.contains(&"console".to_string()),
+            "console should not be a variable (method call receiver)"
+        );
+        assert!(
+            !all_vars.contains(&"calculate_sum".to_string()),
+            "calculate_sum() should not be a variable"
+        );
+
+        // But actual variables SHOULD be in the list
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"sum_val".to_string()),
+            "sum_val should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"doubled".to_string()),
+            "doubled should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"result".to_string()),
+            "result should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that JavaScript function declaration names are filtered out
+    #[test]
+    fn test_javascript_excludes_function_declaration_names() {
+        use std::fs;
+
+        let code = r#"function myFunction() {
+  var x = 42;
+}
+var y = 10;
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("js_func_decl_test.js");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+
+        assert!(
+            !all_vars.contains(&"myFunction".to_string()),
+            "myFunction should not be a variable (function declaration)"
+        );
+        assert!(
+            all_vars.contains(&"x".to_string()),
+            "x should be extracted as a variable"
+        );
+        assert!(
+            all_vars.contains(&"y".to_string()),
+            "y should be extracted as a variable"
+        );
+
+        fs::remove_file(&file_path).unwrap();
+    }
+
+    /// Test that JavaScript class names are filtered out
+    #[test]
+    fn test_javascript_excludes_class_names() {
+        use std::fs;
+
+        let code = r#"class MyClass {
+  constructor() {
+    this.x = 10;
+  }
+}
+var y = 20;
+"#;
+
+        let tmp_dir = std::env::temp_dir();
+        let file_path = tmp_dir.join("js_class_test.js");
+        fs::write(&file_path, code).unwrap();
+
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+
+        assert!(
+            !all_vars.contains(&"MyClass".to_string()),
+            "MyClass should not be a variable (class declaration)"
         );
         assert!(
             all_vars.contains(&"y".to_string()),
