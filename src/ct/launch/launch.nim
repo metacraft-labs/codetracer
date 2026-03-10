@@ -173,7 +173,8 @@ proc runInitial*(conf: CodetracerConf) =
       launchElectron(
         args = frontendArgs,
         inspect = conf.inspect,
-        remoteDebuggingPort = conf.remoteDebuggingPort)
+        remoteDebuggingPort = conf.remoteDebuggingPort,
+        remoteDebuggingPipe = conf.remoteDebuggingPipe)
     # of StartupCommand.ruby:
     #   runCompilerProcess(
     #     "ruby",
@@ -247,7 +248,8 @@ proc runInitial*(conf: CodetracerConf) =
         launchElectron(
           mode = ElectronLaunchMode.ArbExplorer,
           inspect = conf.inspect,
-          remoteDebuggingPort = conf.remoteDebuggingPort)
+          remoteDebuggingPort = conf.remoteDebuggingPort,
+          remoteDebuggingPipe = conf.remoteDebuggingPipe)
       of ArbCommand.record:
         discard recordStylus(conf.arbRecordTransaction)
       of ArbCommand.replay:
@@ -271,7 +273,8 @@ proc runInitial*(conf: CodetracerConf) =
       launchElectron(
         args = @["edit", absPath],
         inspect = conf.inspect,
-        remoteDebuggingPort = conf.remoteDebuggingPort)
+        remoteDebuggingPort = conf.remoteDebuggingPort,
+        remoteDebuggingPipe = conf.remoteDebuggingPipe)
     # of StartupCommand.host:
     #   host(
     #     conf.hostPort,

@@ -20,7 +20,8 @@ proc launchElectron*(
     recordCore: bool = false,
     test: bool = false,
     inspect: Option[string] = none(string),
-    remoteDebuggingPort: Option[string] = none(string)) =
+    remoteDebuggingPort: Option[string] = none(string),
+    remoteDebuggingPipe: bool = false) =
   ## Launch Electron, replacing the current process via execv on POSIX.
   ## On non-POSIX platforms, spawns Electron as a child process and waits.
   ## This function does not return on POSIX systems.
@@ -59,6 +60,8 @@ proc launchElectron*(
     runtimeFlags.add("--inspect=" & inspect.get)
   if remoteDebuggingPort.isSome:
     runtimeFlags.add("--remote-debugging-port=" & remoteDebuggingPort.get)
+  if remoteDebuggingPipe:
+    runtimeFlags.add("--remote-debugging-pipe")
 
   var entryPoint: string
   var appArgs: seq[string]

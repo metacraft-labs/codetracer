@@ -106,6 +106,12 @@ type
       desc: "Chrome remote debugging port (injected by Playwright for debugging)"
     .} : Option[string]
 
+    remoteDebuggingPipe* {.
+      name: "remote-debugging-pipe"
+      desc: "Chrome remote debugging pipe (injected by Playwright for testing)"
+      defaultValue: false
+    .} : bool
+
     # Frontend flag forwarded to Electron as an app argument.
     # Parsed by the frontend's src/frontend/index/args.nim.
     deepreview* {.
