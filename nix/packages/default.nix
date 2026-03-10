@@ -342,7 +342,8 @@
                 --skip backend_dap_server \
                 --skip ruby_flow_integration \
                 --skip bash_flow_integration \
-                --skip zsh_flow_integration
+                --skip zsh_flow_integration \
+                --skip javascript_flow_integration
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {
@@ -498,8 +499,11 @@
             fi
           '';
 
+          # The lockfile lives in a git submodule whose content is not available
+          # during nix evaluation (nix flake check).  Keep a copy in the main repo
+          # tree so importCargoLock can resolve it at eval time.
           cargoLock = {
-            lockFile = ../../libs/codetracer-trace-format/Cargo.lock;
+            lockFile = ../cargo-locks/codetracer-trace-format.lock;
           };
         };
 

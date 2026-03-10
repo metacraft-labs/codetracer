@@ -208,28 +208,32 @@ jobs:
           git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
           git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
 
+          # Clone as a sibling of the codetracer checkout so that path deps in
+          # Cargo.toml (../../../codetracer/libs/codetracer-trace-format/...) resolve.
+          CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
           git clone \
             "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-shell-recorders.git" \
-            target/shell-recorders-clone
-          cd target/shell-recorders-clone
+            "$CLONE_DIR"
+          cd "$CLONE_DIR"
           git checkout "$REF"
 
       - name: Build shell trace writer
         run: |
+          CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
           nix develop .#devShells.x86_64-linux.default --command \
-            bash -c "cd target/shell-recorders-clone && cargo build"
+            bash -c "cd '$CLONE_DIR' && cargo build"
 
       - name: Run shell-recorder integration tests
         run: |
-          SHELL_RECORDERS="$(pwd)/target/shell-recorders-clone"
-          BASH_RECORDER="${SHELL_RECORDERS}/bash-recorder/launcher.sh"
-          ZSH_RECORDER="${SHELL_RECORDERS}/zsh-recorder/launcher.zsh"
+          CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
+          BASH_RECORDER="${CLONE_DIR}/bash-recorder/launcher.sh"
+          ZSH_RECORDER="${CLONE_DIR}/zsh-recorder/launcher.zsh"
           echo "Using bash recorder: $BASH_RECORDER"
           echo "Using zsh recorder: $ZSH_RECORDER"
           nix develop .#devShells.x86_64-linux.default --command \
             bash -c "
-              export CODETRACER_BASH_RECORDER_PATH=\"${BASH_RECORDER}\"
-              export CODETRACER_ZSH_RECORDER_PATH=\"${ZSH_RECORDER}\"
+              export CODETRACER_BASH_RECORDER_PATH='${BASH_RECORDER}'
+              export CODETRACER_ZSH_RECORDER_PATH='${ZSH_RECORDER}'
               cd src/db-backend
               cargo test --test bash_flow_integration --test zsh_flow_integration -- --nocapture
             "
