@@ -59,6 +59,14 @@
       flake = true;
     };
 
+    # Non-flake input: the trace-format library lives in a git submodule whose
+    # content isn't available during `nix flake check`.  Fetching it as an input
+    # lets nix resolve the source and Cargo.lock at evaluation time.
+    codetracer-trace-format = {
+      url = "github:metacraft-labs/codetracer-trace-format/ffi-crate-and-format-fixes";
+      flake = false;
+    };
+
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };

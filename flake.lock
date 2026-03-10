@@ -136,6 +136,23 @@
         "type": "github"
       }
     },
+    "codetracer-trace-format": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1773156441,
+        "narHash": "sha256-QGSSUGtoB9xz46/4pxFiuWsfQLjaXHQE6+CUuUjs2fc=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-trace-format",
+        "rev": "81966222bf59669609edb473dcdd5b1f2576ea2c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "ffi-crate-and-format-fixes",
+        "repo": "codetracer-trace-format",
+        "type": "github"
+      }
+    },
     "crane": {
       "locked": {
         "lastModified": 1748047550,
@@ -1743,6 +1760,7 @@
         "appimage-channel": "appimage-channel",
         "codetracer-ruby-recorder": "codetracer-ruby-recorder",
         "codetracer-toolchains": "codetracer-toolchains",
+        "codetracer-trace-format": "codetracer-trace-format",
         "fenix": "fenix_3",
         "flake-parts": "flake-parts_2",
         "flake-utils": "flake-utils_3",

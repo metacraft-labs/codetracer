@@ -843,7 +843,7 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       - name: Run TypeScript Playwright UI tests
         env:
@@ -870,7 +870,7 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       - name: Setup rr-backend
         env:

@@ -473,11 +473,16 @@
         # C FFI static library + header for codetracer_trace_writer.
         # Allows Go (cgo) and other C-compatible languages to produce traces
         # using the Rust trace format crates.
+        #
+        # The trace-format source lives in a git submodule whose content isn't
+        # available during `nix flake check`.  We fetch it via a dedicated flake
+        # input (codetracer-trace-format) so nix can resolve src and Cargo.lock
+        # at evaluation time.
         trace-writer-ffi = pkgs.rustPlatform.buildRustPackage {
           name = "trace-writer-ffi";
           pname = "trace-writer-ffi";
 
-          src = ../../libs/codetracer-trace-format;
+          src = inputs.codetracer-trace-format;
 
           nativeBuildInputs = [
             pkgs.capnproto
@@ -499,11 +504,8 @@
             fi
           '';
 
-          # The lockfile lives in a git submodule whose content is not available
-          # during nix evaluation (nix flake check).  Keep a copy in the main repo
-          # tree so importCargoLock can resolve it at eval time.
           cargoLock = {
-            lockFile = ../cargo-locks/codetracer-trace-format.lock;
+            lockFile = "${inputs.codetracer-trace-format}/Cargo.lock";
           };
         };
 
