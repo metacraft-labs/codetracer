@@ -33,6 +33,10 @@ proc toLang*(lang: string): Lang =
     "nr": LangNoir,
     "noir": LangNoir,
     "small": LangSmall,
+    "rust-wasm": LangRustWasm,
+    "rustwasm": LangRustWasm,
+    "cpp-wasm": LangCppWasm,
+    "cppwasm": LangCppWasm,
   }.toTable()
   if langs.hasKey(lang.toLowerAscii):
     result = langs[lang.toLowerAscii]

@@ -72,7 +72,12 @@ test-rust:
   cargo test --release --bin db-backend -- --ignored
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
   # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
-  cargo test --release --test '*'
+  # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
+  # and are run separately in cross-repo CI jobs.
+  cargo test --release --test '*' -- \
+    --skip bash_flow_integration \
+    --skip zsh_flow_integration \
+    --skip javascript_flow_integration
   popd
   pushd src/backend-manager
   cargo test --release

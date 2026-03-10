@@ -12,11 +12,24 @@ import
 #   TODO: a project can have sources in multiple languages
 #   so the assumption it has a single one is not always valid
 #   but for now are not reforming that yet
+proc isWasmCargoProject(folder: string): bool =
+  let configPath = folder / ".cargo" / "config.toml"
+  if fileExists(configPath):
+    try:
+      let content = readFile(configPath)
+      return "wasm32" in content
+    except CatchableError:
+      discard
+  false
+
 proc detectFolderLang(folder: string): Lang =
   if fileExists(folder / "Nargo.toml"):
     LangNoir
   elif fileExists(folder / "Cargo.toml"):
-    LangRust
+    if isWasmCargoProject(folder):
+      LangRustWasm
+    else:
+      LangRust
   elif fileExists(folder / "lakefile.lean"):
     LangLean
   elif fileExists(folder / "shard.yml"):

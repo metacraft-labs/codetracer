@@ -299,7 +299,33 @@ proc record*(lang: string,
     pargs.add("--python-interpreter")
     pargs.add(pythonInterpreter)
 
-  if not detectedLang.isDbBased:
+  if detectedLang in {LangRustWasm, LangCppWasm} and dirExists(program):
+    # WASM Cargo project: build with wasm32-wasip1 target, then record the .wasm binary.
+    let buildProcess = osproc.execProcess(
+      "cargo",
+      workingDir = program,
+      args = @["build", "--target", "wasm32-wasip1"],
+      options = {poUsePath, poStdErrToStdOut})
+    # Read the package name from Cargo.toml to find the .wasm binary.
+    var pkgName = ""
+    for line in readFile(program / "Cargo.toml").splitLines:
+      if line.strip.startsWith("name"):
+        let parts = line.split("=", 1)
+        if parts.len == 2:
+          pkgName = parts[1].strip.strip(chars = {'"', '\''})
+          break
+    if pkgName.len == 0:
+      echo "error: could not determine package name from Cargo.toml"
+      quit(1)
+    # Replace hyphens with underscores (Cargo convention for binary names).
+    let binaryName = pkgName.replace('-', '_')
+    let wasmPath = program / "target" / "wasm32-wasip1" / "debug" / (binaryName & ".wasm")
+    if not fileExists(wasmPath):
+      echo "error: WASM build failed or binary not found at: ", wasmPath
+      echo buildProcess
+      quit(1)
+    programToRecord = wasmPath
+  elif not detectedLang.isDbBased:
     # Match `ct run` behavior for RR-based languages by building first.
     if detectedLang == LangNim and outputFolderValue.len == 0:
       let traceID = trace_index.newID(test=false)
