@@ -22,8 +22,10 @@ if [ "$(git rev-parse HEAD)" != "${commit}" ]; then
 	FFI_STAGE_DIR="$DEPS_DIR/trace-writer-ffi"
 	if [ -d "$FFI_STAGE_DIR/lib" ] && [ -d "$FFI_STAGE_DIR/include" ]; then
 		echo "Building wazero with CGO (trace-writer-ffi from $FFI_STAGE_DIR)"
+		# Note: no CGO_CFLAGS needed — the wasm-recorder bundles its own
+		# header (tracewriter/codetracer_trace_writer.h). We only provide
+		# CGO_LDFLAGS for the library search path.
 		CGO_ENABLED=1 \
-			CGO_CFLAGS="-I${FFI_STAGE_DIR}/include" \
 			CGO_LDFLAGS="-L${FFI_STAGE_DIR}/lib" \
 			go build cmd/wazero/wazero.go
 	else
