@@ -231,6 +231,29 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
         },
     );
 
+    // D language support (tree-sitter-d by gdamore)
+    // tree-sitter-d uses a single `identifier` node type for all identifiers
+    // (no separate `type_identifier` or `field_identifier` like in C/C++).
+    // Built-in types (int, float, etc.) are keyword nodes, not identifiers.
+    m.insert(
+        Lang::D,
+        NodeNames {
+            if_conditions: vec!["if_statement".to_string()],
+            else_conditions: vec!["else".to_string()],
+            loops: vec![
+                "for_statement".to_string(),
+                "while_statement".to_string(),
+                "do_statement".to_string(),
+                "foreach_statement".to_string(),
+            ],
+            branches_body: vec!["block_statement".to_string()],
+            branches: vec!["block_statement".to_string()],
+            functions: vec!["function_declaration".to_string()],
+            values: vec!["identifier".to_string()],
+            comments: vec!["comment".to_string()],
+        },
+    );
+
     m
 });
 
@@ -382,6 +405,8 @@ impl ExprLoader {
             parser.set_language(&tree_sitter_javascript::LANGUAGE.into())?;
         } else if lang == Lang::Bash || lang == Lang::Zsh {
             parser.set_language(&tree_sitter_bash::LANGUAGE.into())?;
+        } else if lang == Lang::D {
+            parser.set_language(&tree_sitter_d::LANGUAGE.into())?;
         } else {
             // else if lang == Lang::Small {
             //     parser.set_language(&tree_sitter_elisp::LANGUAGE.into())?;
@@ -1225,6 +1250,91 @@ impl ExprLoader {
                             return false;
                         }
                     }
+                }
+
+                true
+            }
+            Lang::D => {
+                // Filter out non-variable identifiers in D code.
+                //
+                // tree-sitter-d uses a single `identifier` node type for ALL identifiers
+                // (unlike C/C++ which has separate type_identifier, field_identifier, etc.).
+                // Built-in types (int, float, void, etc.) are keyword nodes, not identifiers.
+                //
+                // We filter out:
+                //   - Function names in call expressions (first child of `call_expression`)
+                //   - Function declaration names (identifier child of `function_declaration`)
+                //   - Import/module identifiers
+                //   - Type declaration names (struct, class, enum, interface, union)
+                //   - Enum member names
+                //   - Template instance names
+                //   - Property expression field names (right side of `.`)
+                //
+                // Reference: https://github.com/gdamore/tree-sitter-d
+                if node.kind() != "identifier" {
+                    return false;
+                }
+
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+
+                let parent_kind = parent.kind();
+
+                // Filter out function names in call expressions.
+                // AST: call_expression { identifier "writeln", named_arguments { ... } }
+                // The function name is the first child (a direct identifier), while
+                // arguments are wrapped inside named_arguments.
+                if parent_kind == "call_expression" {
+                    return false;
+                }
+
+                // Filter out function declaration names.
+                // AST: function_declaration { type, identifier "foo", parameters, function_body }
+                if parent_kind == "function_declaration" {
+                    return false;
+                }
+
+                // Filter out import/module identifiers.
+                // `import std.stdio;` → import_declaration > ... > identifier
+                // `module foo.bar;` → module_declaration > ... > identifier
+                if parent_kind == "import_declaration"
+                    || parent_kind == "module_declaration"
+                    || parent_kind == "module_fully_qualified_name"
+                {
+                    return false;
+                }
+
+                // Filter out type declaration names.
+                if matches!(
+                    parent_kind,
+                    "struct_declaration"
+                        | "class_declaration"
+                        | "enum_declaration"
+                        | "interface_declaration"
+                        | "union_declaration"
+                        | "template_declaration"
+                ) {
+                    return false;
+                }
+
+                // Filter out enum member names.
+                // AST: enum_member { identifier "RED", ... }
+                if parent_kind == "enum_member" {
+                    return false;
+                }
+
+                // Filter out template instance names.
+                // `foo!bar` → template_instance { identifier "foo", ... }
+                if parent_kind == "template_instance" {
+                    return false;
+                }
+
+                // Filter out field names in property expressions (right side of `.`).
+                // AST: property_expression { expr, ".", identifier "field" }
+                // The identifier directly under property_expression is the field name.
+                if parent_kind == "property_expression" {
+                    return false;
                 }
 
                 true

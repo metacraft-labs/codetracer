@@ -41,6 +41,7 @@ pub enum Lang {
     CppWasm,
     Small,
     PythonDb,
+    D,
     Unknown,
 }
 
@@ -60,7 +61,7 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "cpp" => Lang::Cpp,
         "pas" => Lang::Pascal,
         "nim" => Lang::Nim,
-        "d" => Lang::C, // TODO
+        "d" => Lang::D,
         "go" => Lang::Go,
         "js" | "mjs" | "cjs" => Lang::Javascript,
         "sh" | "bash" => Lang::Bash,
