@@ -325,8 +325,8 @@ fi
 # Use AppImage tool to create AppImage itself
 ARCH=$APPIMAGE_ARCH appimagetool "${APP_DIR}" CodeTracer.AppImage
 
-patchelf --set-interpreter "${INTERPRETER_PATH}" "${ROOT_PATH}"/CodeTracer.AppImage
-patchelf --remove-rpath "${ROOT_PATH}"/CodeTracer.AppImage
+try_patchelf "${ROOT_PATH}"/CodeTracer.AppImage --set-interpreter "${INTERPRETER_PATH}"
+try_patchelf "${ROOT_PATH}"/CodeTracer.AppImage --remove-rpath
 
 echo "============================"
 echo "AppImage successfully built!"

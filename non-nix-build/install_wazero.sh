@@ -18,6 +18,6 @@ if [ "$(git rev-parse HEAD)" != "${commit}" ]; then
 	git clone "${repo}"
 	cd "${folder}"
 	git checkout "$commit"
-	go build cmd/wazero/wazero.go
+	CGO_ENABLED=0 go build cmd/wazero/wazero.go
 	cp ./wazero "$BIN_DIR/"
 fi
