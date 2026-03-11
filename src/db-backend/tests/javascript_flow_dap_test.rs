@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{Language, TestRecording};
+use test_harness::{find_js_recorder, Language, TestRecording};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_db-backend"))
@@ -14,6 +14,13 @@ fn find_db_backend() -> PathBuf {
 
 #[test]
 fn javascript_flow_dap_variables_and_values() {
+    if find_js_recorder().is_none() {
+        eprintln!(
+            "SKIPPED: JavaScript recorder not found (set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder)"
+        );
+        return;
+    }
+
     let db_backend = find_db_backend();
 
     let source_path =

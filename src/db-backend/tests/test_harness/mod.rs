@@ -845,13 +845,13 @@ fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
 /// top-level `codetracer/` directory. The CLI entry point is at
 /// `packages/cli/dist/index.js`. Also supports `CODETRACER_JS_RECORDER_PATH` env var.
 ///
-/// Panics if the recorder is not found.
-pub fn find_js_recorder() -> PathBuf {
+/// Returns `None` if the recorder is not found.
+pub fn find_js_recorder() -> Option<PathBuf> {
     // Check explicit environment variable first
     if let Ok(path) = env::var("CODETRACER_JS_RECORDER_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() {
-            return p;
+            return Some(p);
         }
         eprintln!(
             "WARNING: CODETRACER_JS_RECORDER_PATH='{}' but file does not exist; falling back",
@@ -861,12 +861,11 @@ pub fn find_js_recorder() -> PathBuf {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let recorder = manifest_dir.join("../../../codetracer-js-recorder/packages/cli/dist/index.js");
-    assert!(
-        recorder.exists(),
-        "JavaScript recorder not found at {}. Is codetracer-js-recorder built?",
-        recorder.display()
-    );
-    recorder.canonicalize().unwrap_or(recorder)
+    if recorder.exists() {
+        Some(recorder.canonicalize().unwrap_or(recorder))
+    } else {
+        None
+    }
 }
 
 /// Record a JavaScript trace by running the JS recorder CLI.
@@ -877,7 +876,8 @@ pub fn find_js_recorder() -> PathBuf {
 ///
 /// The recorder stores absolute source paths in the manifest, so suffix-matching works.
 fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    let recorder = find_js_recorder();
+    let recorder = find_js_recorder()
+        .ok_or("JavaScript recorder not found. Set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder")?;
 
     // The JS recorder creates a trace-N subdirectory inside --out-dir.
     // Use a temporary output directory, then rename the subdirectory to trace_dir.
