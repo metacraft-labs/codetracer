@@ -31,7 +31,10 @@ proc onOpenDevTools* =
 
 proc onClose*(e: js) =
   if not data.config.isNil and data.config.test:
-    discard
+    # In test mode, prevent all window closes so the window stays alive
+    # for the full test duration. The test fixture tears down by killing
+    # the process directly.
+    e.preventDefault()
   elif not close:
     # TODO refactor to use just `client.send`
     mainWindow.webContents.send "CODETRACER::close", js{}

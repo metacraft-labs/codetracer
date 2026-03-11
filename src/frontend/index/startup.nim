@@ -64,7 +64,7 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
   let bypass = true
 
   data.config = config
-  data.config.test = data.config.test
+  data.config.test = data.startOptions.inTest
   data.startOptions.isInstalled = isCtInstalled(data.config)
   data.config.skipInstall = data.startOptions.isInstalled
 

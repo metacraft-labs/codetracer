@@ -824,11 +824,17 @@ proc tryInitLayout*(data: Data) =
 
 # We receive a DAP "Response" from the index process
 proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
-  receiveResponse(data.dapApi, raw["command"].to(cstring), raw["body"])
+  try:
+    receiveResponse(data.dapApi, raw["command"].to(cstring), raw["body"])
+  except ValueError:
+    console.log(cstring"dap: ignoring response for unmapped command: ", raw["command"])
 
 # We receive a DAP "Event" from the index process
 proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
-  receiveEvent(data.dapApi, raw["event"].to(cstring), raw["body"])
+  try:
+    receiveEvent(data.dapApi, raw["event"].to(cstring), raw["body"])
+  except ValueError:
+    console.log(cstring"dap: ignoring event for unmapped event type: ", raw["event"])
 
 proc onReady(event: dom.Event) =
   if cast[cstring](cast[js](dom.document).readyState) == cstring"complete":

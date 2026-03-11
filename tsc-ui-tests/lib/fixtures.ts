@@ -85,6 +85,8 @@ interface CodetracerFixtures {
   ctPage: Page;
   /** The Electron app handle (null in web mode). */
   electronApp: ElectronApplication | null;
+  /** Internal: forces worker exit to avoid teardown timeout. */
+  _workerCleanup: void;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +140,7 @@ function recordTestProgram(recordArg: string): number {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
 
 /**
  * Finds the editor window from an Electron app.
@@ -240,8 +243,12 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        await app.close();
-      } catch {
+        // In test mode, window close events are prevented to keep the
+        // window alive during test execution.  app.close() would hang,
+        // so we kill the process directly.  The _workerCleanup fixture
+        // handles forcing the worker exit to avoid teardown timeout.
+        app.process().kill("SIGKILL");
+      } catch (_e) {
         /* already closed */
       }
       cleanupCodetracerEnvVars();
@@ -345,8 +352,12 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        await app.close();
-      } catch {
+        // In test mode, window close events are prevented to keep the
+        // window alive during test execution.  app.close() would hang,
+        // so we kill the process directly.  The _workerCleanup fixture
+        // handles forcing the worker exit to avoid teardown timeout.
+        app.process().kill("SIGKILL");
+      } catch (_e) {
         /* already closed */
       }
       cleanupCodetracerEnvVars();
@@ -372,8 +383,12 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        await app.close();
-      } catch {
+        // In test mode, window close events are prevented to keep the
+        // window alive during test execution.  app.close() would hang,
+        // so we kill the process directly.  The _workerCleanup fixture
+        // handles forcing the worker exit to avoid teardown timeout.
+        app.process().kill("SIGKILL");
+      } catch (_e) {
         /* already closed */
       }
       cleanupCodetracerEnvVars();
@@ -399,8 +414,12 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        await app.close();
-      } catch {
+        // In test mode, window close events are prevented to keep the
+        // window alive during test execution.  app.close() would hang,
+        // so we kill the process directly.  The _workerCleanup fixture
+        // handles forcing the worker exit to avoid teardown timeout.
+        app.process().kill("SIGKILL");
+      } catch (_e) {
         /* already closed */
       }
       cleanupCodetracerEnvVars();
@@ -421,6 +440,17 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   deepreviewJsonPath: ["", { option: true }],
 
   // Fixtures
+  _workerCleanup: [
+    async ({}, use) => {
+      await use();
+      // Killing Electron with SIGKILL leaves Playwright's internal CDP
+      // pipe handles open, preventing the worker from exiting.  Force
+      // exit after a brief delay so test results can still be reported.
+      setTimeout(() => process.exit(0), 2000);
+    },
+    { scope: "worker" as const, auto: true },
+  ],
+
   electronApp: [
     async ({}, use) => {
       // Populated by ctPage fixture. Default null for direct use.
