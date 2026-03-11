@@ -100,6 +100,9 @@ name = "schema-generator"
 path = "src/bin/schema_generator.rs"
 required-features = ["io-transport"]
 
+[dev-dependencies]
+ct-dap-client = { path = "../../libs/ct-dap-client" }
+
 [features]
 debugging = []
 

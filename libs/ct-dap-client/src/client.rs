@@ -36,11 +36,26 @@ impl DapStdioClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn db-backend at {}: {}", db_backend_bin.display(), e))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to spawn db-backend at {}: {}",
+                    db_backend_bin.display(),
+                    e
+                )
+            })?;
 
-        let writer = child.stdin.take().ok_or("Failed to get stdin of db-backend")?;
-        let stdout = child.stdout.take().ok_or("Failed to get stdout of db-backend")?;
-        let stderr = child.stderr.take().ok_or("Failed to get stderr of db-backend")?;
+        let writer = child
+            .stdin
+            .take()
+            .ok_or("Failed to get stdin of db-backend")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("Failed to get stdout of db-backend")?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or("Failed to get stderr of db-backend")?;
 
         let (tx, rx) = mpsc::channel();
 
@@ -105,14 +120,17 @@ impl DapStdioClient {
 
     /// Send initialize request and return capabilities.
     pub fn initialize(&mut self) -> Result<Capabilities, BoxError> {
-        self.send_request("initialize", json!({
-            "clientID": "ct-dap-client",
-            "clientName": "ct-dap-client",
-            "adapterID": "codetracer",
-            "pathFormat": "path",
-            "linesStartAt1": true,
-            "columnsStartAt1": true
-        }))?;
+        self.send_request(
+            "initialize",
+            json!({
+                "clientID": "ct-dap-client",
+                "clientName": "ct-dap-client",
+                "adapterID": "codetracer",
+                "pathFormat": "path",
+                "linesStartAt1": true,
+                "columnsStartAt1": true
+            }),
+        )?;
 
         let resp = self.recv_response(Duration::from_secs(30))?;
         if !resp.success {
@@ -157,10 +175,55 @@ impl DapStdioClient {
                         e,
                         stderr.len(),
                         stderr.join("\n    ")
-                    ).into())
+                    )
+                    .into())
                 }
             }
         }
+    }
+
+    // === Breakpoints ===
+
+    /// Set breakpoints in a source file. Returns the response body.
+    pub fn set_breakpoints(&mut self, file: &str, lines: &[usize]) -> Result<Value, BoxError> {
+        let breakpoints: Vec<_> = lines.iter().map(|l| json!({"line": l})).collect();
+        self.send_request(
+            "setBreakpoints",
+            json!({
+                "source": { "path": file },
+                "breakpoints": breakpoints,
+            }),
+        )?;
+        let resp = self.recv_response(Duration::from_secs(30))?;
+        if !resp.success {
+            return Err(format!("setBreakpoints failed: {:?}", resp.message).into());
+        }
+        Ok(resp.body)
+    }
+
+    // === DAP continue ===
+
+    /// Send standard DAP "continue", wait for stopped + ct/complete-move.
+    /// Returns the MoveState from ct/complete-move.
+    ///
+    /// Note: db-backend does not send a response for `continue` — only events
+    /// (stopped + ct/complete-move), so we skip recv_response here.
+    pub fn dap_continue(&mut self) -> Result<MoveState, BoxError> {
+        self.send_request("continue", json!({"threadId": 1}))?;
+        self.wait_for_stopped(Duration::from_secs(60))?;
+        let event = self.recv_event("ct/complete-move", Duration::from_secs(10))?;
+        let state: MoveState = serde_json::from_value(event.body)?;
+        Ok(state)
+    }
+
+    // === Flow ===
+
+    /// Load flow data. Sends ct/load-flow, waits for ct/updated-flow event.
+    /// Returns the raw event body (caller parses as needed).
+    pub fn load_flow(&mut self, args: LoadFlowArguments) -> Result<Value, BoxError> {
+        self.send_request("ct/load-flow", serde_json::to_value(&args)?)?;
+        let event = self.recv_event("ct/updated-flow", Duration::from_secs(60))?;
+        Ok(event.body)
     }
 
     // === Tracepoints ===
@@ -170,7 +233,10 @@ impl DapStdioClient {
     /// Sends `ct/run-tracepoints`, then waits for a `ct/tracepoint-results`
     /// event carrying the aggregate results. Note: this request does not
     /// produce a DAP response — only events (trace updates + results).
-    pub fn run_tracepoints(&mut self, args: RunTracepointsArg) -> Result<TracepointResultsAggregate, BoxError> {
+    pub fn run_tracepoints(
+        &mut self,
+        args: RunTracepointsArg,
+    ) -> Result<TracepointResultsAggregate, BoxError> {
         self.send_request("ct/run-tracepoints", serde_json::to_value(&args)?)?;
 
         // Wait for the aggregate results event (skips intermediate trace update events)
@@ -250,7 +316,10 @@ impl DapStdioClient {
                     continue;
                 }
                 Ok(Ok(other)) => {
-                    info!("DAP <- unexpected message while waiting for response: {:?}", other);
+                    info!(
+                        "DAP <- unexpected message while waiting for response: {:?}",
+                        other
+                    );
                     continue;
                 }
                 Ok(Err(e)) => return Err(format!("Reader error: {}", e).into()),
@@ -276,11 +345,17 @@ impl DapStdioClient {
                     continue;
                 }
                 Ok(Ok(DapMessage::Response(r))) => {
-                    info!("DAP <- response (seq={}) while waiting for event '{}'", r.request_seq, event_name);
+                    info!(
+                        "DAP <- response (seq={}) while waiting for event '{}'",
+                        r.request_seq, event_name
+                    );
                     continue;
                 }
                 Ok(Ok(other)) => {
-                    info!("DAP <- unexpected message while waiting for event '{}': {:?}", event_name, other);
+                    info!(
+                        "DAP <- unexpected message while waiting for event '{}': {:?}",
+                        event_name, other
+                    );
                     continue;
                 }
                 Ok(Err(e)) => return Err(format!("Reader error: {}", e).into()),
