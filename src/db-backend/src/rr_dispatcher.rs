@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -106,6 +106,8 @@ impl CtRRWorker {
             .arg("--index")
             .arg(self.index.to_string())
             .arg(&self.rr_trace_folder)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn()?;
 
         let worker_pid = ct_worker.id();
