@@ -59,6 +59,7 @@ fi
 ./install_rust.sh
 ./install_node.sh
 ./install_nargo.sh
+./build_trace_writer_ffi.sh
 ./install_wazero.sh
 ./install_nim_osx.sh
 ./install_ct_remote.sh

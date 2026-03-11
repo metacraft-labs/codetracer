@@ -18,6 +18,18 @@ if [ "$(git rev-parse HEAD)" != "${commit}" ]; then
 	git clone "${repo}"
 	cd "${folder}"
 	git checkout "$commit"
-	CGO_ENABLED=0 go build cmd/wazero/wazero.go
+
+	FFI_STAGE_DIR="$DEPS_DIR/trace-writer-ffi"
+	if [ -d "$FFI_STAGE_DIR/lib" ] && [ -d "$FFI_STAGE_DIR/include" ]; then
+		echo "Building wazero with CGO (trace-writer-ffi from $FFI_STAGE_DIR)"
+		CGO_ENABLED=1 \
+			CGO_CFLAGS="-I${FFI_STAGE_DIR}/include" \
+			CGO_LDFLAGS="-L${FFI_STAGE_DIR}/lib" \
+			go build cmd/wazero/wazero.go
+	else
+		echo "WARNING: trace-writer-ffi not staged at $FFI_STAGE_DIR, building without CGO"
+		CGO_ENABLED=0 go build cmd/wazero/wazero.go
+	fi
+
 	cp ./wazero "$BIN_DIR/"
 fi
