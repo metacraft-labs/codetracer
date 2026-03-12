@@ -28,12 +28,11 @@
  *   - Optionally: ``CODETRACER_AGENTIC_E2E=1`` to enable live IPC tests.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, wait } from "../../lib/fixtures";
+import type { Page } from "@playwright/test";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as process from "node:process";
-
-import { page, ctEditMode, wait } from "../../lib/ct_helpers";
 import {
   AgentWorkspacePage,
   CaptionBarProgressPage,
@@ -145,8 +144,8 @@ const agenticFeatureEnabled =
  * If the renderer does not expose a global IPC dispatch helper, we fall
  * back to evaluating the handler directly.
  */
-async function sendIpcMessage(channel: string, payload: unknown): Promise<void> {
-  await page.evaluate(
+async function sendIpcMessage(p: Page, channel: string, payload: unknown): Promise<void> {
+  await p.evaluate(
     ({ ch, data }) => {
       // Attempt to use the CodeTracer test IPC bridge if available.
       // The bridge is injected when CODETRACER_IN_UI_TEST=1.
@@ -172,8 +171,8 @@ async function sendIpcMessage(channel: string, payload: unknown): Promise<void> 
  * Send an agent progress IPC message. Convenience wrapper around
  * ``sendIpcMessage`` for the ``IPC_AGENT_PROGRESS`` channel.
  */
-async function sendAgentProgress(progress: AgentSessionFixture["progress"]): Promise<void> {
-  await sendIpcMessage(IPC_AGENT_PROGRESS, progress);
+async function sendAgentProgress(p: Page, progress: AgentSessionFixture["progress"]): Promise<void> {
+  await sendIpcMessage(p, IPC_AGENT_PROGRESS, progress);
 }
 
 /**
@@ -181,9 +180,10 @@ async function sendAgentProgress(progress: AgentSessionFixture["progress"]): Pro
  * ``sendIpcMessage`` for the ``IPC_DEEPREVIEW_NOTIFICATION`` channel.
  */
 async function sendDeepReviewNotification(
+  p: Page,
   notification: AgentSessionFixture["notifications"][number],
 ): Promise<void> {
-  await sendIpcMessage(IPC_DEEPREVIEW_NOTIFICATION, notification);
+  await sendIpcMessage(p, IPC_DEEPREVIEW_NOTIFICATION, notification);
 }
 
 // ===========================================================================
@@ -346,17 +346,17 @@ test.describe("test_acp_deepreview_extension", () => {
 
     // Launch in edit mode (the simplest mode that includes the agent
     // workspace components when the feature is compiled in).
-    ctEditMode(path.join(__dirname, "fixtures"));
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("CoverageUpdate notification updates the activity pane", async () => {
+    test("CoverageUpdate notification updates the activity pane", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
       // Send an agent progress message to initialise the session.
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       // Send the first CoverageUpdate notification.
@@ -366,7 +366,7 @@ test.describe("test_acp_deepreview_extension", () => {
       expect(coverageNotif).toBeDefined();
       if (!coverageNotif) return;
 
-      await sendDeepReviewNotification(coverageNotif);
+      await sendDeepReviewNotification(ctPage, coverageNotif);
       await wait(500);
 
       // The activity pane should have been updated. Check that the
@@ -384,12 +384,12 @@ test.describe("test_acp_deepreview_extension", () => {
       }
     });
 
-    test("TestComplete notification updates test results", async () => {
+    test("TestComplete notification updates test results", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
       const testNotif = fixture.notifications.find(
         (n) => n.kind === "TestComplete",
@@ -397,7 +397,7 @@ test.describe("test_acp_deepreview_extension", () => {
       expect(testNotif).toBeDefined();
       if (!testNotif) return;
 
-      await sendDeepReviewNotification(testNotif);
+      await sendDeepReviewNotification(ctPage, testNotif);
       await wait(500);
 
       try {
@@ -409,17 +409,17 @@ test.describe("test_acp_deepreview_extension", () => {
       }
     });
 
-    test("invalid notification kind does not crash the application", async () => {
+    test("invalid notification kind does not crash the application", async ({ ctPage }) => {
       // Send a notification with an unknown kind. The IPC handler in
       // agent_workspace.nim logs a warning but does not crash.
-      await sendDeepReviewNotification({
+      await sendDeepReviewNotification(ctPage, {
         kind: "UnknownNotificationKind",
         sessionId: "agentic-e2e-test-session-001",
       });
       await wait(300);
 
       // Verify the page is still responsive by checking a known element.
-      const body = page.locator("body");
+      const body = ctPage.locator("body");
       await expect(body).toBeVisible();
     });
   });
@@ -488,18 +488,18 @@ test.describe("test_workspace_view_switching", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    ctEditMode(path.join(__dirname, "fixtures"));
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("clicking caption bar toggles workspace view", async () => {
+    test("clicking caption bar toggles workspace view", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
-      const agentWorkspace = new AgentWorkspacePage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
+      const agentWorkspace = new AgentWorkspacePage(ctPage);
 
       // Initialise the agent session so the caption bar becomes active.
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -552,15 +552,15 @@ test.describe("test_workspace_view_switching", () => {
       }
     });
 
-    test("view toggle button text changes with active view", async () => {
+    test("view toggle button text changes with active view", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const agentWorkspace = new AgentWorkspacePage(page);
+      const agentWorkspace = new AgentWorkspacePage(ctPage);
 
       // Initialise the session.
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -711,17 +711,17 @@ test.describe("test_caption_bar_progress", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    ctEditMode(path.join(__dirname, "fixtures"));
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("progress bar width matches milestone completion", async () => {
+    test("progress bar width matches milestone completion", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
       // Send progress to activate the caption bar.
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -741,14 +741,14 @@ test.describe("test_caption_bar_progress", () => {
       expect(fillStyle).toContain("42.9%");
     });
 
-    test("state label shows 'Working' for AgentWorking state", async () => {
+    test("state label shows 'Working' for AgentWorking state", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -765,14 +765,14 @@ test.describe("test_caption_bar_progress", () => {
       expect(cssClass).toBe("caption-progress-working");
     });
 
-    test("milestone count displays completed/total format", async () => {
+    test("milestone count displays completed/total format", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -786,14 +786,14 @@ test.describe("test_caption_bar_progress", () => {
       expect(countText).toContain("3/7");
     });
 
-    test("hover expands milestone list with correct items", async () => {
+    test("hover expands milestone list with correct items", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -849,14 +849,14 @@ test.describe("test_caption_bar_progress", () => {
       await wait(500);
     });
 
-    test("current milestone name is displayed in compact view", async () => {
+    test("current milestone name is displayed in compact view", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -976,22 +976,22 @@ test.describe("test_activity_pane_deepreview", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    ctEditMode(path.join(__dirname, "fixtures"));
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("summary cards display correct coverage, test, and function counts", async () => {
+    test("summary cards display correct coverage, test, and function counts", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
       // Initialise the session.
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(300);
 
       // Send all notifications from the fixture.
       for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(notif);
+        await sendDeepReviewNotification(ctPage, notif);
         await wait(100);
       }
       await wait(500);
@@ -1024,18 +1024,18 @@ test.describe("test_activity_pane_deepreview", () => {
       expect(values[2]).toContain("3");
     });
 
-    test("per-file coverage table shows all files", async () => {
+    test("per-file coverage table shows all files", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(300);
 
       for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(notif);
+        await sendDeepReviewNotification(ctPage, notif);
         await wait(100);
       }
       await wait(500);
@@ -1063,18 +1063,18 @@ test.describe("test_activity_pane_deepreview", () => {
       }
     });
 
-    test("test results section shows pass/fail status and timing", async () => {
+    test("test results section shows pass/fail status and timing", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(300);
 
       for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(notif);
+        await sendDeepReviewNotification(ctPage, notif);
         await wait(100);
       }
       await wait(500);
@@ -1106,18 +1106,18 @@ test.describe("test_activity_pane_deepreview", () => {
       expect(lastPassed).toBe(false);
     });
 
-    test("collapsible header toggles expanded/collapsed state", async () => {
+    test("collapsible header toggles expanded/collapsed state", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(300);
 
       // Send at least one notification so the component has data.
-      await sendDeepReviewNotification(fixture.notifications[0]);
+      await sendDeepReviewNotification(ctPage, fixture.notifications[0]);
       await wait(500);
 
       try {
@@ -1154,18 +1154,18 @@ test.describe("test_activity_pane_deepreview", () => {
       await wait(300);
     });
 
-    test("warning detail appears when tests have failures", async () => {
+    test("warning detail appears when tests have failures", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
 
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(300);
 
       for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(notif);
+        await sendDeepReviewNotification(ctPage, notif);
         await wait(100);
       }
       await wait(500);
@@ -1339,19 +1339,19 @@ test.describe("test_realtime_collection", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    ctEditMode(path.join(__dirname, "fixtures"));
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
-    test("incremental notifications update UI in real-time", async () => {
+    test("incremental notifications update UI in real-time", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const activityDr = new ActivityDeepReviewPage(page);
-      const captionBar = new CaptionBarProgressPage(page);
+      const activityDr = new ActivityDeepReviewPage(ctPage);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
       // Phase 1: Idle -> Initializing -> Working
       for (const transition of fixture.stateTransitions) {
-        await sendAgentProgress({
+        await sendAgentProgress(ctPage, {
           ...fixture.progress,
           state: transition.state,
         });
@@ -1371,7 +1371,7 @@ test.describe("test_realtime_collection", () => {
       let expectedFileCount = 0;
 
       for (const notif of fixture.notifications) {
-        await sendDeepReviewNotification(notif);
+        await sendDeepReviewNotification(ctPage, notif);
         await wait(300);
 
         if (notif.kind === "CoverageUpdate") {
@@ -1392,15 +1392,15 @@ test.describe("test_realtime_collection", () => {
       }
     });
 
-    test("agent state transitions to Completed after CollectionComplete", async () => {
+    test("agent state transitions to Completed after CollectionComplete", async ({ ctPage }) => {
       const fixture = loadFixture();
       expect(fixture).not.toBeNull();
       if (!fixture) return;
 
-      const captionBar = new CaptionBarProgressPage(page);
+      const captionBar = new CaptionBarProgressPage(ctPage);
 
       // Start with Working state.
-      await sendAgentProgress(fixture.progress);
+      await sendAgentProgress(ctPage, fixture.progress);
       await wait(500);
 
       try {
@@ -1411,7 +1411,7 @@ test.describe("test_realtime_collection", () => {
       }
 
       // Send a CollectionComplete notification.
-      await sendDeepReviewNotification({
+      await sendDeepReviewNotification(ctPage, {
         kind: "CollectionComplete",
         sessionId: fixture.sessionId,
         totalFiles: 3,
@@ -1421,7 +1421,7 @@ test.describe("test_realtime_collection", () => {
       await wait(300);
 
       // Transition the agent to Completed state.
-      await sendAgentProgress({
+      await sendAgentProgress(ctPage, {
         ...fixture.progress,
         state: "AgentCompleted",
         milestonesCompleted: fixture.progress.milestonesTotal,

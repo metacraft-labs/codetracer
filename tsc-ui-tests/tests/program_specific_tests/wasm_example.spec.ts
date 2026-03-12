@@ -1,35 +1,24 @@
-import { test, expect } from "@playwright/test";
-import {
-  window,
-  page,
-  loadedEventLog,
-  clickNext,
-  clickContinue,
-  readyOnEntryTest as readyOnEntry,
-  ctRun,
-} from "../../lib/ct_helpers";
+import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
 import { StatusBar } from "../../page-objects/status_bar";
 import { StatePanel } from "../../page-objects/state";
 
 const ENTRY_LINE = 11;
 
-// Each describe block gets its own ctRun (and therefore its own beforeAll/afterAll),
-// preventing port 5005 conflicts that occur when multiple ctRun calls are placed
-// at module scope without describe blocks.
+// Each describe block gets its own fixture scope (each test records + launches independently).
 
 test.describe("wasm example — basic layout", () => {
-  ctRun("wasm_example/");
+  test.use({ sourcePath: "wasm_example/", launchMode: "trace" });
 
-  test("we can access the browser window, not just dev tools", async () => {
-    const title = await window.title();
+  test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
+    const title = await ctPage.title();
     expect(title).toContain("CodeTracer");
-    await window.focus("div");
+    await ctPage.focus("div");
   });
 
-  test("correct entry status path/line", async () => {
-    await readyOnEntry();
+  test("correct entry status path/line", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
 
-    const statusBar = new StatusBar(page, page.locator(".status-bar"));
+    const statusBar = new StatusBar(ctPage, ctPage.locator(".status-bar"));
     const simpleLocation = await statusBar.location();
     expect(simpleLocation.path.endsWith("main.rs")).toBeTruthy();
     expect(simpleLocation.line).toBe(ENTRY_LINE);
@@ -37,14 +26,14 @@ test.describe("wasm example — basic layout", () => {
 });
 
 test.describe("wasm example — state and navigation", () => {
-  ctRun("wasm_example/");
+  test.use({ sourcePath: "wasm_example/", launchMode: "trace" });
 
   // Event log footer count is not populated for WASM/DB traces yet.
   // Re-enable once the frontend populates the event count for DB traces.
-  test.fixme("expected event count", async () => {
-    await loadedEventLog();
+  test.fixme("expected event count", async ({ ctPage }) => {
+    await loadedEventLog(ctPage);
 
-    const raw = await page.$eval(
+    const raw = await ctPage.$eval(
       ".data-tables-footer-rows-count",
       (el) => el.textContent ?? "",
     );
@@ -54,17 +43,17 @@ test.describe("wasm example — state and navigation", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
-  test("state panel loaded initially", async () => {
-    await readyOnEntry();
-    const statePanel = new StatePanel(page);
+  test("state panel loaded initially", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
+    const statePanel = new StatePanel(ctPage);
     await expect(statePanel.codeStateLine()).toContainText(`${ENTRY_LINE} | `);
   });
 
   // WASM DB-based debugger variable inspection may not be fully supported yet.
   // Re-enable once wazero trace support includes variable inspection.
-  test.fixme("state panel supports integer values", async () => {
-    await readyOnEntry();
-    const statePanel = new StatePanel(page);
+  test.fixme("state panel supports integer values", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
+    const statePanel = new StatePanel(ctPage);
 
     const values = await statePanel.values();
     expect(values.x.text).toBe("3");
@@ -77,13 +66,10 @@ test.describe("wasm example — state and navigation", () => {
   // Debug movement (continue/next) may not work for WASM traces in browser
   // mode. Re-enable once the backend implements movement for WASM traces.
   test.fixme("continue", async () => {
-    await readyOnEntry();
-    await clickContinue();
-    expect(true);
+    // Requires debug movement counter support in WASM backend.
   });
 
   test.fixme("next", async () => {
-    await readyOnEntry();
-    await clickNext();
+    // Requires debug movement counter support in WASM backend.
   });
 });

@@ -1,22 +1,21 @@
-import { test, expect } from "@playwright/test";
-import { page, readyOnEntryTest as readyOnEntry, ctRun } from "../../lib/ct_helpers";
+import { test, expect, readyOnEntryTest as readyOnEntry } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout_page";
 import { extractLayoutPageModel } from "../../page-objects/layout_extractors";
 
 // Use the noir example just like the other tests.
-ctRun("noir_space_ship/");
+test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
-test("page object test", async () => {
-  await readyOnEntry();
+test("page object test", async ({ ctPage }) => {
+  await readyOnEntry(ctPage);
 
-  const layout = new LayoutPage(page);
+  const layout = new LayoutPage(ctPage);
 
   // Access debug buttons
   await layout.runToEntryButton().isVisible();
   await layout.continueButton().isVisible();
   await layout.nextButton().isVisible();
 
-  //await page.waitForTimeout(4000);
+  //await ctPage.waitForTimeout(4000);
   // Iterate over event log tabs
   const eventLogs = await layout.eventLogTabs();
   for (const tab of eventLogs) {
@@ -49,10 +48,10 @@ test("page object test", async () => {
   await extractLayoutPageModel(layout);
 });
 
-test("Event Log Rows", async () => {
-  await readyOnEntry();
+test("Event Log Rows", async ({ ctPage }) => {
+  await readyOnEntry(ctPage);
 
-  const layoutPage = new LayoutPage(page);
+  const layoutPage = new LayoutPage(ctPage);
 
   const eventLogTab = (await layoutPage.eventLogTabs())[0];
   const rows = await eventLogTab.getRows();

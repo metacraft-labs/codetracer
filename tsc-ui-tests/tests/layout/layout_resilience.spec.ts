@@ -1,5 +1,4 @@
-import { test, expect } from "@playwright/test";
-import { page, ctEditMode, wait, codetracerInstallDir } from "../../lib/ct_helpers";
+import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -126,31 +125,31 @@ test.beforeAll(() => {
 // Test: Normal operation with valid layout (sanity check)
 test.describe("Normal operation with valid layout", () => {
   // Use default (hopefully valid) layout
-  ctEditMode(testFolder);
+  test.use({ launchMode: "edit", editFolderPath: testFolder });
 
-  test("app loads normally with valid layout", async () => {
-    await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+  test("app loads normally with valid layout", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-    const layout = page.locator(".lm_goldenlayout");
+    const layout = ctPage.locator(".lm_goldenlayout");
     await expect(layout).toBeVisible();
 
     // Should have at least one panel/tab
-    const tabs = page.locator(".lm_tab");
+    const tabs = ctPage.locator(".lm_tab");
     const tabCount = await tabs.count();
     expect(tabCount).toBeGreaterThan(0);
   });
 
-  test("layout contains expected panels", async () => {
-    await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+  test("layout contains expected panels", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
     await wait(1000);
 
     // Check for some expected panel types
-    const panels = page.locator(".lm_stack");
+    const panels = ctPage.locator(".lm_stack");
     const panelCount = await panels.count();
     expect(panelCount).toBeGreaterThan(0);
   });
 
-  test("layout file exists and is valid JSON", async () => {
+  test("layout file exists and is valid JSON", async ({ ctPage }) => {
     await wait(2000);
 
     // Check that the layout file contains valid JSON
@@ -178,24 +177,24 @@ test.describe("Normal operation with valid layout", () => {
 
 test.describe("Recovery from corrupted JSON", () => {
   // Recovery tests can be flaky when running sequentially due to
-  // Playwright fixture lifecycle interactions with ctEditMode.
+  // Playwright fixture lifecycle interactions.
   test.describe.configure({ retries: 2 });
-  ctEditMode(testFolder);
+  test.use({ launchMode: "edit", editFolderPath: testFolder });
 
-  test("app recovers from corrupted layout JSON", async () => {
+  test("app recovers from corrupted layout JSON", async ({ ctPage }) => {
     const layoutPath = defaultEditLayoutPath;
     backupLayoutFile(layoutPath);
 
     try {
       corruptLayoutFile(layoutPath);
 
-      await page.reload();
-      await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+      await ctPage.reload();
+      await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-      const layout = page.locator(".lm_goldenlayout");
+      const layout = ctPage.locator(".lm_goldenlayout");
       await expect(layout).toBeVisible();
 
-      const layoutContent = page.locator(".lm_content").first();
+      const layoutContent = ctPage.locator(".lm_content").first();
       await expect(layoutContent).toBeVisible();
     } finally {
       restoreLayoutFile(layoutPath);
@@ -205,19 +204,19 @@ test.describe("Recovery from corrupted JSON", () => {
 
 test.describe("Recovery from invalid structure", () => {
   test.describe.configure({ retries: 2 });
-  ctEditMode(testFolder);
+  test.use({ launchMode: "edit", editFolderPath: testFolder });
 
-  test("app recovers from layout with missing root", async () => {
+  test("app recovers from layout with missing root", async ({ ctPage }) => {
     const layoutPath = defaultEditLayoutPath;
     backupLayoutFile(layoutPath);
 
     try {
       createInvalidStructureLayoutFile(layoutPath);
 
-      await page.reload();
-      await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+      await ctPage.reload();
+      await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-      const layout = page.locator(".lm_goldenlayout");
+      const layout = ctPage.locator(".lm_goldenlayout");
       await expect(layout).toBeVisible();
     } finally {
       restoreLayoutFile(layoutPath);
@@ -227,19 +226,19 @@ test.describe("Recovery from invalid structure", () => {
 
 test.describe("Recovery from missing type", () => {
   test.describe.configure({ retries: 2 });
-  ctEditMode(testFolder);
+  test.use({ launchMode: "edit", editFolderPath: testFolder });
 
-  test("app recovers from layout root missing type property", async () => {
+  test("app recovers from layout root missing type property", async ({ ctPage }) => {
     const layoutPath = defaultEditLayoutPath;
     backupLayoutFile(layoutPath);
 
     try {
       createMissingTypeLayoutFile(layoutPath);
 
-      await page.reload();
-      await page.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
+      await ctPage.reload();
+      await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 30000 });
 
-      const layout = page.locator(".lm_goldenlayout");
+      const layout = ctPage.locator(".lm_goldenlayout");
       await expect(layout).toBeVisible();
     } finally {
       restoreLayoutFile(layoutPath);

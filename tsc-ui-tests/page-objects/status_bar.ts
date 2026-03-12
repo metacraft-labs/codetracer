@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-magic-numbers */
 
 import type { Locator, Page } from "@playwright/test";
-import { CodetracerTestError } from "../lib/ct_helpers";
+import { CodetracerTestError } from "../lib/fixtures";
 
 interface SimpleLocation {
   path: string;

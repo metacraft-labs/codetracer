@@ -521,3 +521,29 @@ export {
   testProgramsPath,
   codetracerPath,
 };
+
+// ---------------------------------------------------------------------------
+// Shared test utilities
+// ---------------------------------------------------------------------------
+
+export class CodetracerTestError extends Error {
+  constructor(msg: string) {
+    super(msg);
+    Object.setPrototypeOf(this, CodetracerTestError.prototype);
+  }
+}
+
+/** Promise-based delay. */
+export function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Wait for the entry point to be ready (location path clickable). */
+export async function readyOnEntryTest(p: Page): Promise<void> {
+  await p.locator(".location-path").click();
+}
+
+/** Wait for the event log footer to be populated. */
+export async function loadedEventLog(p: Page): Promise<void> {
+  await p.locator(".data-tables-footer-rows-count").click();
+}

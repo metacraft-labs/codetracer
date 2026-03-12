@@ -1,15 +1,14 @@
-import { test } from "@playwright/test";
-import { page, readyOnEntryTest as readyOnEntry, ctRun } from "../../lib/ct_helpers";
+import { test, readyOnEntryTest as readyOnEntry } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout_page";
 import { extractLayoutPageModel } from "../../page-objects/layout_extractors";
 
 // Use the noir example just like the other tests.
-ctRun("noir_space_ship/");
+test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
-test("noir_space_ship smoke test", async () => {
-  await readyOnEntry();
+test("noir_space_ship smoke test", async ({ ctPage }) => {
+  await readyOnEntry(ctPage);
 
-  const layout = new LayoutPage(page);
+  const layout = new LayoutPage(ctPage);
 
   // Access debug buttons
   await layout.runToEntryButton().isVisible();
