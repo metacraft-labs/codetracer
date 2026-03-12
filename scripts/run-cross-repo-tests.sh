@@ -6,10 +6,17 @@
 # Usage:
 #   ./scripts/run-cross-repo-tests.sh [OPTIONS] [SELECTOR...]
 #
-# Selectors:
+# Selectors (db-backend tests, need ct-rr-support):
 #   nim-flow    Run Nim flow integration tests
 #   rust-flow   Run Rust flow integration tests
 #   go-flow     Run Go flow integration tests
+#
+# Selectors (rr-backend tests, need db-backend):
+#   c-flow      Run C flow tests (in rr-backend repo)
+#   cpp-flow    Run C++ flow tests (in rr-backend repo)
+#   d-flow      Run D flow tests (in rr-backend repo)
+#   pascal-flow Run Pascal flow tests (in rr-backend repo)
+#
 #   all         Run all flow integration tests (default)
 #
 # Options:
@@ -85,13 +92,13 @@ expand_selectors() {
 	for sel in "${SELECTORS[@]}"; do
 		case "$sel" in
 		all)
-			expanded+=(nim-flow rust-flow go-flow)
+			expanded+=(nim-flow rust-flow go-flow c-flow cpp-flow d-flow pascal-flow)
 			;;
-		nim-flow | rust-flow | go-flow)
+		nim-flow | rust-flow | go-flow | c-flow | cpp-flow | d-flow | pascal-flow)
 			expanded+=("$sel")
 			;;
 		*)
-			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, all)"
+			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, c-flow, cpp-flow, d-flow, pascal-flow, all)"
 			;;
 		esac
 	done
@@ -123,6 +130,18 @@ check_prerequisites() {
 		go-flow)
 			command -v go >/dev/null 2>&1 || warn "go not found — go-flow tests may fail"
 			command -v dlv >/dev/null 2>&1 || warn "dlv not found — go-flow tests may fail"
+			;;
+		c-flow)
+			command -v gcc >/dev/null 2>&1 || warn "gcc not found — c-flow tests may fail"
+			;;
+		cpp-flow)
+			command -v g++ >/dev/null 2>&1 || warn "g++ not found — cpp-flow tests may fail"
+			;;
+		d-flow)
+			command -v ldc2 >/dev/null 2>&1 || warn "ldc2 not found — d-flow tests may fail"
+			;;
+		pascal-flow)
+			command -v fpc >/dev/null 2>&1 || warn "fpc not found — pascal-flow tests may fail"
 			;;
 		esac
 	done
@@ -325,12 +344,33 @@ resolve_rr_backend_lib_path
 # ---------------------------------------------------------------------------
 mkdir -p "$LOG_DIR"
 
+# Returns "db-backend" or "rr-backend" depending on where the test lives
+selector_test_location() {
+	case "$1" in
+	nim-flow | rust-flow | go-flow) echo "db-backend" ;;
+	c-flow | cpp-flow | d-flow | pascal-flow) echo "rr-backend" ;;
+	*) die "Unknown selector: $1" ;;
+	esac
+}
+
+# For db-backend tests: cargo test filter string
 selector_to_test_name() {
 	case "$1" in
 	nim-flow) echo "test_nim_flow" ;;
 	rust-flow) echo "test_rust_flow" ;;
 	go-flow) echo "test_go_flow" ;;
-	*) die "Unknown selector: $1" ;;
+	*) die "Unknown db-backend selector: $1" ;;
+	esac
+}
+
+# For rr-backend tests: integration test file name (without .rs)
+selector_to_rr_test_file() {
+	case "$1" in
+	c-flow) echo "c_flow_test" ;;
+	cpp-flow) echo "cpp_flow_test" ;;
+	d-flow) echo "d_flow_test" ;;
+	pascal-flow) echo "pascal_flow_test" ;;
+	*) die "Unknown rr-backend selector: $1" ;;
 	esac
 }
 
@@ -341,18 +381,14 @@ SKIPPED=()
 
 run_test() {
 	local selector="$1"
-	local test_name
-	test_name="$(selector_to_test_name "$selector")"
+	local location
+	location="$(selector_test_location "$selector")"
 	local ts
 	ts="$(timestamp)"
 	local log_file="$LOG_DIR/${selector}-${ts}.log"
 
-	log "Running: $selector (test name: $test_name)"
-
-	# Build environment
-	local -a env_vars=(
-		"CT_RR_SUPPORT_PATH=$CT_RR_SUPPORT_PATH"
-	)
+	# Build environment (common)
+	local -a env_vars=()
 
 	if [[ -n $SOFT_MODE ]]; then
 		env_vars+=("CODETRACER_RR_SOFT_MODE=1")
@@ -367,10 +403,52 @@ run_test() {
 	fi
 
 	local exit_code=0
-	(
-		cd "$REPO_ROOT/src/db-backend"
-		env "${env_vars[@]}" cargo test "$test_name" -- --nocapture
-	) >"$log_file" 2>&1 || exit_code=$?
+
+	if [[ $location == "db-backend" ]]; then
+		local test_name
+		test_name="$(selector_to_test_name "$selector")"
+		log "Running: $selector (db-backend test: $test_name)"
+
+		env_vars+=("CT_RR_SUPPORT_PATH=$CT_RR_SUPPORT_PATH")
+
+		(
+			cd "$REPO_ROOT/src/db-backend"
+			env "${env_vars[@]}" cargo test "$test_name" -- --nocapture
+		) >"$log_file" 2>&1 || exit_code=$?
+	else
+		local test_file
+		test_file="$(selector_to_rr_test_file "$selector")"
+		log "Running: $selector (rr-backend test: $test_file)"
+
+		# rr-backend tests need to find db-backend
+		local db_backend_bin="$REPO_ROOT/src/build-debug/bin/db-backend"
+		if [[ -x $db_backend_bin ]]; then
+			env_vars+=("DB_BACKEND_BIN=$db_backend_bin")
+		fi
+
+		local rr_repo
+		if ! rr_repo="$(find_rr_backend_repo)"; then
+			log "SKIPPED: $selector (rr-backend repo not found)"
+			SKIPPED+=("$selector")
+			return
+		fi
+
+		# rr-backend tests must be compiled in the rr-backend's nix shell
+		# (needs lldb-sys, llvm, etc. that aren't in the codetracer shell)
+		local env_prefix=""
+		for ev in "${env_vars[@]}"; do
+			env_prefix+="export ${ev}; "
+		done
+
+		(
+			cd "$rr_repo"
+			if [[ -f flake.nix ]]; then
+				nix develop --command bash -c "${env_prefix}cargo test --test $test_file -- --nocapture"
+			else
+				env "${env_vars[@]}" cargo test --test "$test_file" -- --nocapture
+			fi
+		) >"$log_file" 2>&1 || exit_code=$?
+	fi
 
 	if [[ $exit_code -eq 0 ]]; then
 		log "PASSED: $selector"
