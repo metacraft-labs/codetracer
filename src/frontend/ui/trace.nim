@@ -1316,7 +1316,8 @@ method register*(self: TraceComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
     discard self.onUpdatedTrace(response)
   )
-  api.emit(InternalLastCompleteMove, EmptyArg())
+  if not self.inExtension:
+    api.emit(InternalLastCompleteMove, EmptyArg())
 
 proc closeTrace*(self: TraceComponent) =
   if self.isRan:

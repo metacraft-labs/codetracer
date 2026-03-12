@@ -96,8 +96,11 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     self.location = response.location
     if self.inExtension:
-      # Extension insets receive replayed complete-move events when other inset views
-      # register (e.g. tracepoints). Avoid reloading/redrawing flow in that path.
+      # Keep extension insets on the cached flow shape for same-function moves.
+      # Reloads are handled by the VS Code extension only when the function key changes.
+      if not self.flow.isNil and (self.key.len == 0 or response.location.key == self.key):
+        self.activeStep = self.resolveActiveStepForExtension()
+        self.redraw()
       return
     api.emit(CtLoadFlow, self.location)
     self.redraw()
