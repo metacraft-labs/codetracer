@@ -247,6 +247,7 @@ mkShell {
     # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
     # gcc.cc.lib ..
     export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
+    export CODETRACER_LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH"
 
     export RUST_LOG=info
 
@@ -327,6 +328,7 @@ mkShell {
     ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
 
     export NIX_CODETRACER_EXE_DIR=$ROOT_PATH/src/build-debug/
+    export CODETRACER_PREFIX=$ROOT_PATH/src/build-debug
     export LINKS_PATH_DIR=$ROOT_PATH/src/build-debug/
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
     export PATH=$ROOT_PATH/src/build-debug/bin:$PATH
