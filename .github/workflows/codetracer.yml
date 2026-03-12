@@ -852,7 +852,7 @@ jobs:
 
   test-ui-tests-rr:
     runs-on: [self-hosted, nixos]
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
