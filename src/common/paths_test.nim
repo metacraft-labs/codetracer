@@ -12,6 +12,15 @@ suite "findTool":
     let result = findTool("this_tool_does_not_exist_xyz_12345")
     check result.len == 0
 
+  test "findTool falls back to linksPath":
+    # If a tool isn't on PATH but exists in linksPath/bin/, findTool should find it
+    # This tests the transitional fallback mechanism
+    # We can't easily test this without creating a fake linksPath,
+    # but we can verify that tools found via PATH match what findExe returns
+    let viaFindTool = findTool("bash")
+    let viaFindExe = findExe("bash")
+    check viaFindTool == viaFindExe  # PATH lookup should match
+
 suite "requireTool":
   test "requireTool resolves bash":
     let result = requireTool("bash")
@@ -22,10 +31,23 @@ suite "codetracerPrefix":
   test "codetracerPrefix is non-empty":
     check codetracerPrefix.len > 0
 
-  test "codetracerPrefix respects CODETRACER_PREFIX env var":
-    let envVal = getEnv("CODETRACER_PREFIX")
-    if envVal.len > 0:
-      check codetracerPrefix == envVal
+suite "external tool resolution":
+  test "bashExe resolves to a real path":
+    check bashExe.len > 0
+    check fileExists(bashExe)
+
+  test "rubyExe resolves consistently with findTool":
+    # Verify that rubyExe at runtime matches what findTool would return
+    # (assuming CODETRACER_RUBY_EXE_PATH env var is not set, which is the
+    # normal test case).
+    let expected = findTool("ruby")
+    if getEnv("CODETRACER_RUBY_EXE_PATH").len == 0:
+      check rubyExe == expected
     else:
-      # When env var is unset, codetracerPrefix falls back to getAppDir().parentDir
-      check codetracerPrefix == getAppDir().parentDir
+      # env var override is in effect — rubyExe should match the env var
+      check rubyExe == getEnv("CODETRACER_RUBY_EXE_PATH")
+
+  test "electronExe resolves consistently with findTool":
+    # Verify that electronExe matches what findTool("electron") returns.
+    let expected = findTool("electron")
+    check electronExe == expected

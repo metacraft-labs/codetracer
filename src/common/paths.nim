@@ -41,22 +41,6 @@ else:
 when not defined(ctRenderer):
   import std / sequtils
 
-when not defined(js):
-  proc findTool*(name: string): string =
-    ## Find an external tool on PATH.
-    ## Returns the full path, or "" if not found.
-    ## During transition, falls back to linksPath / "bin" if PATH lookup fails.
-    result = findExe(name)
-
-  proc requireTool*(name: string, installHint: string = ""): string =
-    ## Find an external tool on PATH, or exit with a helpful error.
-    result = findTool(name)
-    if result.len == 0:
-      var msg = "error: required tool '" & name & "' not found on PATH"
-      if installHint.len > 0:
-        msg &= "\n  install: " & installHint
-      quit(msg, 1)
-
 const linksPathConst {.strdefine.} = ""
 
 when not defined(js) and defined(ctEntrypoint):
@@ -92,6 +76,27 @@ when defined(js):
       linksPathValue = codetracerExeDir
 
 let linksPath* = linksPathValue
+
+when not defined(js):
+  proc findTool*(name: string): string =
+    ## Find an external tool on PATH.
+    ## Returns the full path, or "" if not found.
+    ## During transition, falls back to linksPath / "bin" if PATH lookup fails.
+    result = findExe(name)
+    if result.len == 0:
+      let fallback = linksPath / "bin" / name
+      if fileExists(fallback):
+        result = fallback
+
+  proc requireTool*(name: string, installHint: string = ""): string =
+    ## Find an external tool on PATH, or exit with a helpful error.
+    result = findTool(name)
+    if result.len == 0:
+      var msg = "error: required tool '" & name & "' not found on PATH"
+      if installHint.len > 0:
+        msg &= "\n  install: " & installHint
+      quit(msg, 1)
+
 let bundledCtagsPath = linksPath / "bin" / "ctags"
 let bundledNargoPath = linksPath / "bin" / "nargo"
 when not defined(js):
@@ -119,13 +124,15 @@ let
   consoleExe* = linksPath / "bin" / "console"
   # (additional note: it is a workaround for dev/some cases: TODO think more)
   ctRemoteExe* = codetracerExeDir / "bin" / "ct-remote"
-  bashExe* = linksPath / "bin" / "bash"
+  # External tools - use findTool with linksPath fallback
+  bashExe* = when not defined(js): findTool("bash") else: linksPath / "bin" / "bash"
   taskProcessExe* = linksPath / "bin" / "task_process"
-  python3Path* = linksPath / "bin" / "python3"
-  # TODO: tup/nix? => in linksPath / "bin
+  python3Path* = when not defined(js): findTool("python3") else: linksPath / "bin" / "python3"
 
-  rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH", linksPath / "bin" / "ruby" )
-  rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH", linksPath / "bin" / "codetracer-ruby-recorder")
+  rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH",
+    when not defined(js): findTool("ruby") else: linksPath / "bin" / "ruby")
+  rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH",
+    when not defined(js): findTool("codetracer-ruby-recorder") else: linksPath / "bin" / "codetracer-ruby-recorder")
 
   smallExe* = linksPath / "bin" / "small-lang"
   noirExe* = env.get(
@@ -133,29 +140,24 @@ let
     when defined(js):
       bundledNargoPath
     else:
-      if existsFile(bundledNargoPath) or existsFile(bundledNargoPathWithExeExt):
-        bundledNargoPath
-      else:
-        "nargo")
-  wazeroExe* = env.get("CODETRACER_WASM_VM_PATH", linksPath / "bin" / "wazero")
+      findTool("nargo"))
+  wazeroExe* = env.get("CODETRACER_WASM_VM_PATH",
+    when not defined(js): findTool("wazero") else: linksPath / "bin" / "wazero")
   dbBackendExe* = linksPath / "bin" / "db-backend"
   backendManagerExe* = linksPath / "bin" / "backend-manager"
   virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
 
-  cargoExe* = linksPath / "bin" / "cargo"
+  cargoExe* = when not defined(js): findTool("cargo") else: linksPath / "bin" / "cargo"
 
-  # TODO make it work
-  electronExe* = linksPath / "bin" / "electron"
+  electronExe* = when not defined(js): findTool("electron") else: linksPath / "bin" / "electron"
   electronIndexPath* = codetracerExeDir / "src" / "index.js"
   userInterfacePath* = codetracerExeDir / "ui.js"
-  chromedriverExe* = linksPath / "bin" / "chromedriver"
+  chromedriverExe* = when not defined(js): findTool("chromedriver") else: linksPath / "bin" / "chromedriver"
 
 when defined(js):
   let ctagsExe* = env.get("CODETRACER_CTAGS_EXE_PATH", bundledCtagsPath)
 else:
-  let ctagsExe* = env.get(
-    "CODETRACER_CTAGS_EXE_PATH",
-    if existsFile(bundledCtagsPath): bundledCtagsPath else: "ctags")
+  let ctagsExe* = env.get("CODETRACER_CTAGS_EXE_PATH", findTool("ctags"))
 
 let cTraceObjectFilePath* = env.get(
   "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
@@ -216,20 +218,16 @@ let
   luaPath* = codetracerInstallDir / "libs" / "lua"
 
   nimcacheDir* = codetracerTmpPath / "codetracer_projects/"
-  scriptExe* = linksPath / "bin" / "script"
+  scriptExe* = when not defined(js): findTool("script") else: linksPath / "bin" / "script"
 
-  zipExe* = linksPath / "bin" / "zip"
-  unzipExe* = linksPath / "bin" / "unzip"
-  curlExe* = linksPath / "bin" / "curl"
+  zipExe* = when not defined(js): findTool("zip") else: linksPath / "bin" / "zip"
+  unzipExe* = when not defined(js): findTool("unzip") else: linksPath / "bin" / "unzip"
+  curlExe* = when not defined(js): findTool("curl") else: linksPath / "bin" / "curl"
 
 when defined(js):
   let nodeExe* = env.get("CODETRACER_NODE_EXE_PATH", linksPath / "bin" / "node")
 else:
-  let nodeBinName = if defined(windows): "node.exe" else: "node"
-  let bundledNodePath = linksPath / "bin" / nodeBinName
-  let nodeExe* = env.get(
-    "CODETRACER_NODE_EXE_PATH",
-    if existsFile(bundledNodePath): bundledNodePath else: "node")
+  let nodeExe* = env.get("CODETRACER_NODE_EXE_PATH", findTool("node"))
 
 # echo "codetracer exe dir ", codetracerExeDir
 
