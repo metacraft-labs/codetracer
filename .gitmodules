@@ -52,13 +52,6 @@
 [submodule "libs/nim-result"]
 	path = libs/nim-result
 	url = https://github.com/metacraft-labs/nim-result.git
-[submodule "libs/codetracer-ruby-recorder"]
-	path = libs/codetracer-ruby-recorder
-	url = https://github.com/metacraft-labs/codetracer-ruby-recorder.git
-	branch = old-ruby-recorder
-[submodule "libs/codetracer-python-recorder"]
-	path = libs/codetracer-python-recorder
-	url = https://github.com/metacraft-labs/codetracer-python-recorder.git
 [submodule "libs/nimcrypto"]
 	path = libs/nimcrypto
 	url = https://github.com/cheatfate/nimcrypto.git

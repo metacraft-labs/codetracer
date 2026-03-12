@@ -59,6 +59,24 @@
       flake = true;
     };
 
+    codetracer-python-recorder = {
+      url = "github:metacraft-labs/codetracer-python-recorder";
+      inputs.nixpkgs.follows = "nixpkgs";
+      flake = true;
+    };
+
+    codetracer-js-recorder = {
+      url = "github:metacraft-labs/codetracer-js-recorder";
+      inputs.nixpkgs.follows = "nixpkgs";
+      flake = true;
+    };
+
+    codetracer-shell-recorders = {
+      url = "github:metacraft-labs/codetracer-shell-recorders";
+      inputs.nixpkgs.follows = "nixpkgs";
+      flake = true;
+    };
+
     # Non-flake input: the trace-format library lives in a git submodule whose
     # content isn't available during `nix flake check`.  Fetching it as an input
     # lets nix resolve the source and Cargo.lock at evaluation time.

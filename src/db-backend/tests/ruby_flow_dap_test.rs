@@ -14,6 +14,11 @@ fn find_db_backend() -> PathBuf {
 
 #[test]
 fn ruby_flow_dap_variables_and_values() {
+    if test_harness::find_ruby_recorder().is_none() {
+        eprintln!("SKIPPED: Ruby recorder not found");
+        return;
+    }
+
     let db_backend = find_db_backend();
 
     let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/ruby/ruby_flow_test.rb");

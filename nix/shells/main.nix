@@ -309,14 +309,9 @@ mkShell {
     [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
     # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
 
-    [ ! -f links/codetracer-ruby-recorder ] && ln -s \
-    $ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
-    links/codetracer-ruby-recorder
-
-    # [ ! -f links/ ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
-
-    [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
-    [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py
+    # NOTE: Ruby/Python recorder links are created AFTER sibling detection
+    # (below), because RUBY_RECORDER_ROOT and CODETRACER_PYTHON_RECORDER_PATH
+    # are only set during sibling detection.
 
     cd ..;
 
@@ -339,14 +334,95 @@ mkShell {
     export CODETRACER_DEV_TOOLS=0
     export CODETRACER_LOG_LEVEL=INFO
 
-    # ==== Python recorder for ct record (DB-based Python tracing)
+    # Ensure tree-sitter-nim parser is generated (cached - only regenerates if needed)
+    if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
+      (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
+    fi
+
+    # ===========================================================================
+    # Sibling repo detection
+    # ===========================================================================
+    # When sibling repos are checked out alongside this one (workspace layout),
+    # detect them, add their binaries to PATH, and set CODETRACER_*_PRESENT env
+    # vars that enable cross-repo integration tests.
+    # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
+    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+
+    # --- codetracer-rr-backend ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+      export PATH="$WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
+      export CODETRACER_RR_BACKEND_PRESENT=1
+    fi
+
+    # --- codetracer-python-recorder ---
+    # Prefer sibling repo, fall back to submodule (deprecated)
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-python-recorder" ]; then
+      RECORDER_SRC="$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-python-recorder"
+      export CODETRACER_PYTHON_RECORDER_PRESENT=1
+      export CODETRACER_PYTHON_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py"
+    elif [ -d "$ROOT_PATH/libs/codetracer-python-recorder/codetracer-python-recorder" ]; then
+      RECORDER_SRC="$ROOT_PATH/libs/codetracer-python-recorder/codetracer-python-recorder"
+      export CODETRACER_PYTHON_RECORDER_PRESENT=1
+      export CODETRACER_PYTHON_RECORDER_PATH="$ROOT_PATH/libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py"
+    else
+      RECORDER_SRC=""
+    fi
+
+    # --- codetracer-ruby-recorder ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-ruby-recorder/gems" ]; then
+      export CODETRACER_RUBY_RECORDER_PRESENT=1
+      export RUBY_RECORDER_ROOT="$WORKSPACE_ROOT/codetracer-ruby-recorder"
+      export CODETRACER_RUBY_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
+    elif [ -d "$ROOT_PATH/libs/codetracer-ruby-recorder/gems" ]; then
+      export CODETRACER_RUBY_RECORDER_PRESENT=1
+      export RUBY_RECORDER_ROOT="$ROOT_PATH/libs/codetracer-ruby-recorder"
+      export CODETRACER_RUBY_RECORDER_PATH="$ROOT_PATH/libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
+    fi
+
+    # --- codetracer-js-recorder ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-js-recorder/packages/cli" ]; then
+      export CODETRACER_JS_RECORDER_PRESENT=1
+      export CODETRACER_JS_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-js-recorder/packages/cli/dist/index.js"
+    fi
+
+    # --- codetracer-shell-recorders ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder" ]; then
+      export CODETRACER_SHELL_RECORDERS_PRESENT=1
+      export CODETRACER_BASH_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder/launcher.sh"
+      export CODETRACER_ZSH_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-shell-recorders/zsh-recorder/launcher.zsh"
+    fi
+
+    # --- codetracer-wasm-recorder ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-wasm-recorder" ]; then
+      export CODETRACER_WASM_RECORDER_PRESENT=1
+    fi
+
+    # ==== Create recorder links (after sibling detection) ====
+    # These depend on RUBY_RECORDER_ROOT and CODETRACER_PYTHON_RECORDER_PATH
+    # which are set in the sibling detection block above.
+    if [ -n "''${RUBY_RECORDER_ROOT:-}" ]; then
+      [ ! -f src/links/codetracer-ruby-recorder ] && ln -s \
+        "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" \
+        src/links/codetracer-ruby-recorder
+      if [ ! -f src/links/recorder.rb ]; then
+        if [ -f "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/lib/recorder.rb" ]; then
+          ln -s "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/lib/recorder.rb" src/links/recorder.rb
+        elif [ -f "$RUBY_RECORDER_ROOT/src/recorder.rb" ]; then
+          ln -s "$RUBY_RECORDER_ROOT/src/recorder.rb" src/links/recorder.rb
+        fi
+      fi
+    fi
+    if [ -n "''${CODETRACER_PYTHON_RECORDER_PATH:-}" ]; then
+      [ ! -f src/links/trace.py ] && ln -s "$CODETRACER_PYTHON_RECORDER_PATH" src/links/trace.py
+    fi
+
+    # ==== Python recorder venv setup ====
     # Build the Rust-backed codetracer_python_recorder module into a venv
     # so that `ct record` can use it for Python tracing. This is only done
     # once (cached in .python-recorder-venv/) and re-triggered if the module
     # becomes un-importable (e.g. after Rust source changes).
     RECORDER_VENV="$ROOT_PATH/.python-recorder-venv"
-    RECORDER_SRC="$ROOT_PATH/libs/codetracer-python-recorder/codetracer-python-recorder"
-    if [ -d "$RECORDER_SRC" ]; then
+    if [ -n "$RECORDER_SRC" ] && [ -d "$RECORDER_SRC" ]; then
       if [ ! -d "$RECORDER_VENV" ] || ! "$RECORDER_VENV/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
         echo "Setting up Python recorder venv (first time or module needs rebuild)..."
         python3 -m venv "$RECORDER_VENV"
@@ -360,25 +436,26 @@ mkShell {
       export CODETRACER_PYTHON_INTERPRETER="$RECORDER_VENV/bin/python"
     fi
 
-    # Ensure tree-sitter-nim parser is generated (cached - only regenerates if needed)
-    if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
-      (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
-    fi
-
-    # --- Sibling detection ---
-    # When sibling repos are checked out alongside this one and have been built,
-    # add their binaries to PATH and set presence env vars that enable cross-repo
-    # integration tests. See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
-    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
-    if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
-      export PATH="$WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
-      export CODETRACER_RR_BACKEND_PRESENT=1
-    fi
-
     figlet "Welcome to CodeTracer"
 
+    # Print sibling detection summary
     if [ "''${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
       echo "  sibling: codetracer-rr-backend detected (ct-rr-support available)"
+    fi
+    if [ "''${CODETRACER_PYTHON_RECORDER_PRESENT:-}" = "1" ]; then
+      echo "  sibling: codetracer-python-recorder detected"
+    fi
+    if [ "''${CODETRACER_RUBY_RECORDER_PRESENT:-}" = "1" ]; then
+      echo "  sibling: codetracer-ruby-recorder detected"
+    fi
+    if [ "''${CODETRACER_JS_RECORDER_PRESENT:-}" = "1" ]; then
+      echo "  sibling: codetracer-js-recorder detected"
+    fi
+    if [ "''${CODETRACER_SHELL_RECORDERS_PRESENT:-}" = "1" ]; then
+      echo "  sibling: codetracer-shell-recorders detected"
+    fi
+    if [ "''${CODETRACER_WASM_RECORDER_PRESENT:-}" = "1" ]; then
+      echo "  sibling: codetracer-wasm-recorder detected"
     fi
   '';
 }

@@ -431,40 +431,45 @@
         #  ..
         # ```
 
-        # TODO: like this or as a flake input?
-        ruby-recorder-pure = stdenv.mkDerivation rec {
-          name = "ruby-recorder-pure";
-          pname = name;
+        # Pure-Ruby recorder package. Uses flake input source when available,
+        # falls back to submodule path for backward compatibility.
+        ruby-recorder-pure =
+          let
+            rubyRecorderSrc = inputs.codetracer-ruby-recorder;
+          in
+          stdenv.mkDerivation rec {
+            name = "ruby-recorder-pure";
+            pname = name;
 
-          inherit src;
+            src = rubyRecorderSrc;
 
-          dontInstall = true;
+            dontInstall = true;
 
-          buildPhase = ''
+            buildPhase = ''
 
-            # Preserve the gems/ path component so that the recorder's
-            # self-ignore filter ('gems/') works correctly.  Without this,
-            # TracePoint callbacks fire for kernel_patches.rb inside the
-            # recorder itself, causing a ~100x slowdown.
-            #
-            # The entry script uses File.expand_path('../lib', __dir__) to
-            # find its lib directory, so bin/ and lib/ must stay as siblings.
-            mkdir -p $out/gems/bin $out/gems/lib
+              # Preserve the gems/ path component so that the recorder's
+              # self-ignore filter ('gems/') works correctly.  Without this,
+              # TracePoint callbacks fire for kernel_patches.rb inside the
+              # recorder itself, causing a ~100x slowdown.
+              #
+              # The entry script uses File.expand_path('../lib', __dir__) to
+              # find its lib directory, so bin/ and lib/ must stay as siblings.
+              mkdir -p $out/gems/bin $out/gems/lib
 
-            cp -Lr \
-            ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
-            $out/gems/bin/
+              cp -Lr \
+              ./gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder \
+              $out/gems/bin/
 
-            cp -Lr \
-            ./libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/lib/* \
-            $out/gems/lib/
+              cp -Lr \
+              ./gems/codetracer-pure-ruby-recorder/lib/* \
+              $out/gems/lib/
 
-            # Create top-level bin/ symlink so runtimeDeps symlinkJoin picks it up
-            mkdir -p $out/bin
-            ln -s $out/gems/bin/codetracer-pure-ruby-recorder $out/bin/codetracer-pure-ruby-recorder
+              # Create top-level bin/ symlink so runtimeDeps symlinkJoin picks it up
+              mkdir -p $out/bin
+              ln -s $out/gems/bin/codetracer-pure-ruby-recorder $out/bin/codetracer-pure-ruby-recorder
 
-          '';
-        };
+            '';
+          };
 
         # Built from the codetracer-ruby-recorder flake input, using our pkgs.ruby
         # to ensure ABI compatibility (the native .so must match the Ruby that loads it).

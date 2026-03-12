@@ -225,13 +225,68 @@ mkShell {
     # TODO: try to add an option to link to libs/upstream-nim, libs/rr
     #   for faster iteration when patching them as Zahary suggested?
     [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
-    [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
-    [ ! -f links/recorder.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/recorder.rb links/recorder.rb
-    [ ! -f links/trace.py ] && ln -s $ROOT_PATH/libs/codetracer-python-recorder/src/trace.py links/trace.py
-
     cd ..;
 
     # ==== END of src/links for tup
+
+    # ===========================================================================
+    # Sibling repo detection
+    # ===========================================================================
+    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+
+    # --- codetracer-python-recorder ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-python-recorder" ]; then
+      export CODETRACER_PYTHON_RECORDER_PRESENT=1
+      export CODETRACER_PYTHON_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py"
+    elif [ -d "$ROOT_PATH/libs/codetracer-python-recorder/codetracer-pure-python-recorder" ]; then
+      export CODETRACER_PYTHON_RECORDER_PRESENT=1
+      export CODETRACER_PYTHON_RECORDER_PATH="$ROOT_PATH/libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py"
+    fi
+
+    # --- codetracer-ruby-recorder ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-ruby-recorder/gems" ]; then
+      export CODETRACER_RUBY_RECORDER_PRESENT=1
+      export RUBY_RECORDER_ROOT="$WORKSPACE_ROOT/codetracer-ruby-recorder"
+    elif [ -d "$ROOT_PATH/libs/codetracer-ruby-recorder/gems" ]; then
+      export CODETRACER_RUBY_RECORDER_PRESENT=1
+      export RUBY_RECORDER_ROOT="$ROOT_PATH/libs/codetracer-ruby-recorder"
+    fi
+
+    # Ruby recorder links
+    if [ -n "''${RUBY_RECORDER_ROOT:-}" ]; then
+      cd src
+      [ ! -f links/trace.rb ] && [ -f "$RUBY_RECORDER_ROOT/src/trace.rb" ] && \
+        ln -s "$RUBY_RECORDER_ROOT/src/trace.rb" links/trace.rb
+      [ ! -f links/recorder.rb ] && [ -f "$RUBY_RECORDER_ROOT/src/recorder.rb" ] && \
+        ln -s "$RUBY_RECORDER_ROOT/src/recorder.rb" links/recorder.rb
+      cd ..
+    fi
+
+    # Python recorder link
+    if [ -n "''${CODETRACER_PYTHON_RECORDER_PATH:-}" ]; then
+      cd src
+      [ ! -f links/trace.py ] && ln -s "$CODETRACER_PYTHON_RECORDER_PATH" links/trace.py
+      cd ..
+    fi
+
+    # --- codetracer-js-recorder ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-js-recorder/packages/cli" ]; then
+      export CODETRACER_JS_RECORDER_PRESENT=1
+      export CODETRACER_JS_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-js-recorder/packages/cli/dist/index.js"
+    fi
+
+    # --- codetracer-shell-recorders ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder" ]; then
+      export CODETRACER_SHELL_RECORDERS_PRESENT=1
+      export CODETRACER_BASH_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder/launcher.sh"
+      export CODETRACER_ZSH_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-shell-recorders/zsh-recorder/launcher.zsh"
+    fi
+
+    # --- codetracer-rr-backend ---
+    if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+      export PATH="$WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
+      export CODETRACER_RR_BACKEND_PRESENT=1
+    fi
 
     # ui-test shell hooks
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}

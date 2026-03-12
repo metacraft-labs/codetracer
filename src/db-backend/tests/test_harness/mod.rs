@@ -618,47 +618,80 @@ fn accept_with_timeout(
     }
 }
 
-/// Find the pure-Python recorder script (`trace.py`) via CARGO_MANIFEST_DIR.
+/// Find the pure-Python recorder script (`trace.py`).
 ///
-/// The recorder is a git submodule at `libs/codetracer-python-recorder/` relative to
-/// the top-level `codetracer/` directory. This function resolves the path from the
-/// db-backend crate manifest directory: `../../libs/codetracer-python-recorder/
-/// codetracer-pure-python-recorder/src/trace.py`.
+/// Search order:
+/// 1. `CODETRACER_PYTHON_RECORDER_PATH` env var (explicit override)
+/// 2. Sibling repo: `../../../codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
+/// 3. Legacy submodule: `../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
 ///
-/// Panics if the recorder is not found (it's a required submodule).
-pub fn find_python_recorder() -> PathBuf {
+/// Returns `None` if the recorder is not found.
+pub fn find_python_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_PYTHON_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+        eprintln!(
+            "WARNING: CODETRACER_PYTHON_RECORDER_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let recorder =
-        manifest_dir.join("../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py");
-    assert!(
-        recorder.exists(),
-        "Python recorder not found at {}. Did you check out the codetracer-python-recorder submodule?",
-        recorder.display()
-    );
-    recorder.canonicalize().unwrap_or(recorder)
+    let locations = [
+        // Sibling repo (workspace layout)
+        "../../../codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py",
+        // Legacy submodule
+        "../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py",
+    ];
+
+    for loc in locations {
+        let path = manifest_dir.join(loc);
+        if path.exists() {
+            return Some(path.canonicalize().unwrap_or(path));
+        }
+    }
+
+    None
 }
 
-/// Find the pure-Ruby recorder script via CARGO_MANIFEST_DIR.
+/// Find the pure-Ruby recorder script.
 ///
-/// The recorder is a git submodule at `libs/codetracer-ruby-recorder/` relative to
-/// the top-level `codetracer/` directory. Same relative path as used by
-/// `tracepoint_interpreter/tests.rs`.
+/// Search order:
+/// 1. `CODETRACER_RUBY_RECORDER_PATH` env var (explicit override)
+/// 2. Sibling repo: `../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+/// 3. Legacy submodule: `../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
 ///
-/// Uses the pure-Ruby recorder (not the native Rust extension) because the
-/// native `.so` is not compiled during `cargo test`.
-///
-/// Panics if the recorder is not found (it's a required submodule).
-pub fn find_ruby_recorder() -> PathBuf {
+/// Returns `None` if the recorder is not found.
+pub fn find_ruby_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_RUBY_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+        eprintln!(
+            "WARNING: CODETRACER_RUBY_RECORDER_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let recorder = manifest_dir.join(
+    let locations = [
+        // Sibling repo (workspace layout)
+        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        // Legacy submodule
         "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
-    );
-    assert!(
-        recorder.exists(),
-        "Ruby recorder not found at {}. Did you check out the codetracer-ruby-recorder submodule?",
-        recorder.display()
-    );
-    recorder.canonicalize().unwrap_or(recorder)
+    ];
+
+    for loc in locations {
+        let path = manifest_dir.join(loc);
+        if path.exists() {
+            return Some(path.canonicalize().unwrap_or(path));
+        }
+    }
+
+    None
 }
 
 /// Find the wazero binary for WASM recording.
@@ -778,7 +811,8 @@ fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
 /// and sets `workdir` to CWD. The DAP server's ExprLoader resolves source files relative
 /// to workdir, so we must copy the source file into the trace_dir to make it findable.
 fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    let recorder = find_python_recorder();
+    let recorder = find_python_recorder()
+        .ok_or("Python recorder not found. Set CODETRACER_PYTHON_RECORDER_PATH or check out the sibling/submodule")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
     let output = Command::new("python")
@@ -813,7 +847,8 @@ fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
 /// Uses the same invocation pattern as `tracepoint_interpreter/tests.rs`:
 /// `ruby <recorder> --out-dir <trace_dir> <source>` with `CODETRACER_DB_TRACE_PATH`.
 fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    let recorder = find_ruby_recorder();
+    let recorder = find_ruby_recorder()
+        .ok_or("Ruby recorder not found. Set CODETRACER_RUBY_RECORDER_PATH or check out the sibling/submodule")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
     let trace_path = trace_dir.join("trace.json");
@@ -921,18 +956,18 @@ fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), S
     Ok(())
 }
 
-/// Find the Bash recorder launcher script via CARGO_MANIFEST_DIR.
+/// Find the Bash recorder launcher script.
 ///
-/// The Bash recorder is a sibling repo at `codetracer-shell-recorders/` relative to the
-/// top-level `codetracer/` directory. The entry point is `bash-recorder/launcher.sh`.
-/// Also supports `CODETRACER_BASH_RECORDER_PATH` env var.
+/// Search order:
+/// 1. `CODETRACER_BASH_RECORDER_PATH` env var (explicit override)
+/// 2. Sibling repo: `../../../codetracer-shell-recorders/bash-recorder/launcher.sh`
 ///
-/// Panics if the recorder is not found.
-pub fn find_bash_recorder() -> PathBuf {
+/// Returns `None` if the recorder is not found.
+pub fn find_bash_recorder() -> Option<PathBuf> {
     if let Ok(path) = env::var("CODETRACER_BASH_RECORDER_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() {
-            return p;
+            return Some(p);
         }
         eprintln!(
             "WARNING: CODETRACER_BASH_RECORDER_PATH='{}' but file does not exist; falling back",
@@ -942,25 +977,25 @@ pub fn find_bash_recorder() -> PathBuf {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let recorder = manifest_dir.join("../../../codetracer-shell-recorders/bash-recorder/launcher.sh");
-    assert!(
-        recorder.exists(),
-        "Bash recorder not found at {}. Is codetracer-shell-recorders set up?",
-        recorder.display()
-    );
-    recorder.canonicalize().unwrap_or(recorder)
+    if recorder.exists() {
+        Some(recorder.canonicalize().unwrap_or(recorder))
+    } else {
+        None
+    }
 }
 
-/// Find the Zsh recorder launcher script via CARGO_MANIFEST_DIR.
+/// Find the Zsh recorder launcher script.
 ///
-/// The Zsh recorder is in `codetracer-shell-recorders/zsh-recorder/launcher.zsh`.
-/// Also supports `CODETRACER_ZSH_RECORDER_PATH` env var.
+/// Search order:
+/// 1. `CODETRACER_ZSH_RECORDER_PATH` env var (explicit override)
+/// 2. Sibling repo: `../../../codetracer-shell-recorders/zsh-recorder/launcher.zsh`
 ///
-/// Panics if the recorder is not found.
-pub fn find_zsh_recorder() -> PathBuf {
+/// Returns `None` if the recorder is not found.
+pub fn find_zsh_recorder() -> Option<PathBuf> {
     if let Ok(path) = env::var("CODETRACER_ZSH_RECORDER_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() {
-            return p;
+            return Some(p);
         }
         eprintln!(
             "WARNING: CODETRACER_ZSH_RECORDER_PATH='{}' but file does not exist; falling back",
@@ -970,24 +1005,24 @@ pub fn find_zsh_recorder() -> PathBuf {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let recorder = manifest_dir.join("../../../codetracer-shell-recorders/zsh-recorder/launcher.zsh");
-    assert!(
-        recorder.exists(),
-        "Zsh recorder not found at {}. Is codetracer-shell-recorders set up?",
-        recorder.display()
-    );
-    recorder.canonicalize().unwrap_or(recorder)
+    if recorder.exists() {
+        Some(recorder.canonicalize().unwrap_or(recorder))
+    } else {
+        None
+    }
 }
 
 /// Record a Bash trace by running the shell recorder launcher.
 ///
-/// Uses `bash <launcher.sh> --output-dir <trace_dir> --format binary <source>`.
+/// Uses `bash <launcher.sh> --out-dir <trace_dir> --format binary <source>`.
 fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    let recorder = find_bash_recorder();
+    let recorder = find_bash_recorder()
+        .ok_or("Bash recorder not found. Set CODETRACER_BASH_RECORDER_PATH or check out codetracer-shell-recorders")?;
 
     // Build the trace writer binary first
     let shell_recorders_dir = recorder.parent().unwrap().parent().unwrap();
     let build_output = Command::new("cargo")
-        .args(["build"])
+        .args(["build", "--release"])
         .current_dir(shell_recorders_dir)
         .output()
         .map_err(|e| format!("failed to build shell trace writer: {}", e))?;
@@ -1004,7 +1039,7 @@ fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
     let output = Command::new("bash")
         .args([
             recorder.to_str().unwrap(),
-            "--output-dir",
+            "--out-dir",
             trace_dir.to_str().unwrap(),
             "--format",
             "binary",
@@ -1026,14 +1061,15 @@ fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
 
 /// Record a Zsh trace by running the shell recorder launcher.
 ///
-/// Uses `zsh <launcher.zsh> --output-dir <trace_dir> --format binary <source>`.
+/// Uses `zsh <launcher.zsh> --out-dir <trace_dir> --format binary <source>`.
 fn record_zsh_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    let recorder = find_zsh_recorder();
+    let recorder = find_zsh_recorder()
+        .ok_or("Zsh recorder not found. Set CODETRACER_ZSH_RECORDER_PATH or check out codetracer-shell-recorders")?;
 
     // Build the trace writer binary first (shared with Bash recorder)
     let shell_recorders_dir = recorder.parent().unwrap().parent().unwrap();
     let build_output = Command::new("cargo")
-        .args(["build"])
+        .args(["build", "--release"])
         .current_dir(shell_recorders_dir)
         .output()
         .map_err(|e| format!("failed to build shell trace writer: {}", e))?;
@@ -1050,7 +1086,7 @@ fn record_zsh_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> 
     let output = Command::new("zsh")
         .args([
             recorder.to_str().unwrap(),
-            "--output-dir",
+            "--out-dir",
             trace_dir.to_str().unwrap(),
             "--format",
             "binary",

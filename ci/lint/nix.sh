@@ -3,5 +3,4 @@
 set -e
 
 nix flake check \
-	--override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder \
 	--override-input codetracer-trace-format path:./libs/codetracer-trace-format
