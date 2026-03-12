@@ -41,6 +41,22 @@ else:
 when not defined(ctRenderer):
   import std / sequtils
 
+when not defined(js):
+  proc findTool*(name: string): string =
+    ## Find an external tool on PATH.
+    ## Returns the full path, or "" if not found.
+    ## During transition, falls back to linksPath / "bin" if PATH lookup fails.
+    result = findExe(name)
+
+  proc requireTool*(name: string, installHint: string = ""): string =
+    ## Find an external tool on PATH, or exit with a helpful error.
+    result = findTool(name)
+    if result.len == 0:
+      var msg = "error: required tool '" & name & "' not found on PATH"
+      if installHint.len > 0:
+        msg &= "\n  install: " & installHint
+      quit(msg, 1)
+
 const linksPathConst {.strdefine.} = ""
 
 when not defined(js) and defined(ctEntrypoint):
@@ -49,6 +65,11 @@ when not defined(js) and defined(ctEntrypoint):
 else:
   # echo "not ct entrypoint: env : ", env.get("NIX_CODETRACER_EXE_DIR")
   let codetracerExeDir* = env.get("NIX_CODETRACER_EXE_DIR", "<unknown>")
+
+when not defined(js) and defined(ctEntrypoint):
+  let codetracerPrefix* = env.get("CODETRACER_PREFIX", getAppDir().parentDir)
+else:
+  let codetracerPrefix* = env.get("CODETRACER_PREFIX", codetracerExeDir)
 
 # binary/lib/artifact paths
 # should be same in folder structure
