@@ -525,7 +525,46 @@ pub struct FlowTestConfig {
     pub expected_values: HashMap<String, i64>,
 }
 
-/// Find ct-rr-support binary
+/// Look up a tool on the system PATH.
+/// Uses `which` on Unix (already used by existing find_ct_rr_support and find_wazero).
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        if let Ok(output) = Command::new("which").arg(name).output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(PathBuf::from(path));
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(output) = Command::new("where").arg(name).output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !path.is_empty() {
+                    return Some(PathBuf::from(path));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Find ct-rr-support binary.
+///
+/// Search order:
+/// 1. `CT_RR_SUPPORT_PATH` env var (explicit override)
+/// 2. System PATH lookup (via `which`/`where`)
+/// 3. Common development locations relative to CARGO_MANIFEST_DIR
+/// 4. Home directory locations
 pub fn find_ct_rr_support() -> Option<PathBuf> {
     // Highest priority: explicit CT_RR_SUPPORT_PATH environment variable.
     // Used by cross-repo test scripts to communicate the binary location.
@@ -540,14 +579,9 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
         );
     }
 
-    // First check PATH
-    if let Ok(output) = Command::new("which").arg("ct-rr-support").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
-        }
+    // Check PATH
+    if let Some(path) = find_on_path("ct-rr-support") {
+        return Some(path);
     }
 
     // Check common development locations
@@ -622,8 +656,9 @@ fn accept_with_timeout(
 ///
 /// Search order:
 /// 1. `CODETRACER_PYTHON_RECORDER_PATH` env var (explicit override)
-/// 2. Sibling repo: `../../../codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
-/// 3. Legacy submodule: `../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
+/// 2. System PATH lookup for `trace.py` (for pip-installed recorder)
+/// 3. Sibling repo: `../../../codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
+/// 4. Legacy submodule: `../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
 ///
 /// Returns `None` if the recorder is not found.
 pub fn find_python_recorder() -> Option<PathBuf> {
@@ -636,6 +671,11 @@ pub fn find_python_recorder() -> Option<PathBuf> {
             "WARNING: CODETRACER_PYTHON_RECORDER_PATH='{}' but file does not exist; falling back",
             path
         );
+    }
+
+    // Check PATH (for pip-installed recorder)
+    if let Some(path) = find_on_path("trace.py") {
+        return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -660,8 +700,9 @@ pub fn find_python_recorder() -> Option<PathBuf> {
 ///
 /// Search order:
 /// 1. `CODETRACER_RUBY_RECORDER_PATH` env var (explicit override)
-/// 2. Sibling repo: `../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
-/// 3. Legacy submodule: `../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+/// 2. System PATH lookup for `codetracer-pure-ruby-recorder` (for gem-installed recorder)
+/// 3. Sibling repo: `../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+/// 4. Legacy submodule: `../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
 ///
 /// Returns `None` if the recorder is not found.
 pub fn find_ruby_recorder() -> Option<PathBuf> {
@@ -674,6 +715,11 @@ pub fn find_ruby_recorder() -> Option<PathBuf> {
             "WARNING: CODETRACER_RUBY_RECORDER_PATH='{}' but file does not exist; falling back",
             path
         );
+    }
+
+    // Check PATH (for gem-installed recorder)
+    if let Some(path) = find_on_path("codetracer-pure-ruby-recorder") {
+        return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -696,8 +742,10 @@ pub fn find_ruby_recorder() -> Option<PathBuf> {
 
 /// Find the wazero binary for WASM recording.
 ///
-/// Checks `CODETRACER_WASM_VM_PATH` env var, then PATH, then the dev build
-/// location at `../../src/build-debug/bin/wazero`.
+/// Search order:
+/// 1. `CODETRACER_WASM_VM_PATH` env var (explicit override)
+/// 2. System PATH lookup (via `which`/`where`)
+/// 3. Dev build locations relative to CARGO_MANIFEST_DIR
 pub fn find_wazero() -> Option<PathBuf> {
     if let Ok(path) = env::var("CODETRACER_WASM_VM_PATH") {
         let p = PathBuf::from(&path);
@@ -710,13 +758,9 @@ pub fn find_wazero() -> Option<PathBuf> {
         );
     }
 
-    if let Ok(output) = Command::new("which").arg("wazero").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
-        }
+    // Check PATH
+    if let Some(path) = find_on_path("wazero") {
+        return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -876,9 +920,10 @@ fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
 
 /// Find the JavaScript recorder CLI entry point via CARGO_MANIFEST_DIR.
 ///
-/// The JS recorder is a sibling repo at `codetracer-js-recorder/` relative to the
-/// top-level `codetracer/` directory. The CLI entry point is at
-/// `packages/cli/dist/index.js`. Also supports `CODETRACER_JS_RECORDER_PATH` env var.
+/// Search order:
+/// 1. `CODETRACER_JS_RECORDER_PATH` env var (explicit override)
+/// 2. System PATH lookup for `codetracer-js-recorder` (for npm-installed recorder)
+/// 3. Sibling repo: `../../../codetracer-js-recorder/packages/cli/dist/index.js`
 ///
 /// Returns `None` if the recorder is not found.
 pub fn find_js_recorder() -> Option<PathBuf> {
@@ -892,6 +937,11 @@ pub fn find_js_recorder() -> Option<PathBuf> {
             "WARNING: CODETRACER_JS_RECORDER_PATH='{}' but file does not exist; falling back",
             path
         );
+    }
+
+    // Check PATH (for npm-installed recorder)
+    if let Some(path) = find_on_path("codetracer-js-recorder") {
+        return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -960,7 +1010,8 @@ fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), S
 ///
 /// Search order:
 /// 1. `CODETRACER_BASH_RECORDER_PATH` env var (explicit override)
-/// 2. Sibling repo: `../../../codetracer-shell-recorders/bash-recorder/launcher.sh`
+/// 2. System PATH lookup for `codetracer-bash-recorder`
+/// 3. Sibling repo: `../../../codetracer-shell-recorders/bash-recorder/launcher.sh`
 ///
 /// Returns `None` if the recorder is not found.
 pub fn find_bash_recorder() -> Option<PathBuf> {
@@ -973,6 +1024,11 @@ pub fn find_bash_recorder() -> Option<PathBuf> {
             "WARNING: CODETRACER_BASH_RECORDER_PATH='{}' but file does not exist; falling back",
             path
         );
+    }
+
+    // Check PATH
+    if let Some(path) = find_on_path("codetracer-bash-recorder") {
+        return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -988,7 +1044,8 @@ pub fn find_bash_recorder() -> Option<PathBuf> {
 ///
 /// Search order:
 /// 1. `CODETRACER_ZSH_RECORDER_PATH` env var (explicit override)
-/// 2. Sibling repo: `../../../codetracer-shell-recorders/zsh-recorder/launcher.zsh`
+/// 2. System PATH lookup for `codetracer-zsh-recorder`
+/// 3. Sibling repo: `../../../codetracer-shell-recorders/zsh-recorder/launcher.zsh`
 ///
 /// Returns `None` if the recorder is not found.
 pub fn find_zsh_recorder() -> Option<PathBuf> {
@@ -1001,6 +1058,11 @@ pub fn find_zsh_recorder() -> Option<PathBuf> {
             "WARNING: CODETRACER_ZSH_RECORDER_PATH='{}' but file does not exist; falling back",
             path
         );
+    }
+
+    // Check PATH
+    if let Some(path) = find_on_path("codetracer-zsh-recorder") {
+        return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
