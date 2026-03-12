@@ -7,10 +7,7 @@ if [[ -z ${ROOT_DIR:-} ]]; then
 fi
 
 export CODETRACER_REPO_ROOT_PATH="$ROOT_DIR"
-export NIX_CODETRACER_EXE_DIR="${NIX_CODETRACER_EXE_DIR:-$ROOT_DIR/src/build-debug}"
-export LINKS_PATH_DIR="${LINKS_PATH_DIR:-$NIX_CODETRACER_EXE_DIR}"
-export CODETRACER_LINKS_PATH="${CODETRACER_LINKS_PATH:-$LINKS_PATH_DIR}"
-export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$NIX_CODETRACER_EXE_DIR}"
+export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$ROOT_DIR/src/build-debug}"
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 export CODETRACER_DEV_TOOLS="${CODETRACER_DEV_TOOLS:-0}"
 export CODETRACER_LOG_LEVEL="${CODETRACER_LOG_LEVEL:-INFO}"
@@ -42,36 +39,36 @@ fi
 
 # `ct host` serves static assets from `<build-debug>/public` in non-Nix mode.
 # Ensure the folder exists by linking it to `src/public` when missing.
-if [[ ! -e "$NIX_CODETRACER_EXE_DIR/public" && -d "$ROOT_DIR/src/public" ]]; then
-	mkdir -p "$NIX_CODETRACER_EXE_DIR"
-	ln -s "$ROOT_DIR/src/public" "$NIX_CODETRACER_EXE_DIR/public" 2>/dev/null || cp -R "$ROOT_DIR/src/public" "$NIX_CODETRACER_EXE_DIR/public"
+if [[ ! -e "$CODETRACER_PREFIX/public" && -d "$ROOT_DIR/src/public" ]]; then
+	mkdir -p "$CODETRACER_PREFIX"
+	ln -s "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public" 2>/dev/null || cp -R "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public"
 fi
 
 # `ct` runtime expects `<build-debug>/config/default_config.yaml` in non-Nix mode.
-if [[ ! -e "$NIX_CODETRACER_EXE_DIR/config" && -d "$ROOT_DIR/src/config" ]]; then
-	mkdir -p "$NIX_CODETRACER_EXE_DIR"
-	ln -s "$ROOT_DIR/src/config" "$NIX_CODETRACER_EXE_DIR/config" 2>/dev/null || cp -R "$ROOT_DIR/src/config" "$NIX_CODETRACER_EXE_DIR/config"
+if [[ ! -e "$CODETRACER_PREFIX/config" && -d "$ROOT_DIR/src/config" ]]; then
+	mkdir -p "$CODETRACER_PREFIX"
+	ln -s "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config" 2>/dev/null || cp -R "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config"
 fi
 
 if [[ -d "$ROOT_DIR/src/config" ]]; then
-	mkdir -p "$NIX_CODETRACER_EXE_DIR/config"
+	mkdir -p "$CODETRACER_PREFIX/config"
 	for filename in default_config.yaml default_layout.json; do
-		if [[ -f "$ROOT_DIR/src/config/$filename" && ! -f "$NIX_CODETRACER_EXE_DIR/config/$filename" ]]; then
-			cp "$ROOT_DIR/src/config/$filename" "$NIX_CODETRACER_EXE_DIR/config/$filename"
+		if [[ -f "$ROOT_DIR/src/config/$filename" && ! -f "$CODETRACER_PREFIX/config/$filename" ]]; then
+			cp "$ROOT_DIR/src/config/$filename" "$CODETRACER_PREFIX/config/$filename"
 		fi
 	done
 fi
 
 if [[ -z ${CODETRACER_E2E_CT_PATH:-} ]]; then
-	if [[ -f "$NIX_CODETRACER_EXE_DIR/bin/ct.exe" ]]; then
-		export CODETRACER_E2E_CT_PATH="$NIX_CODETRACER_EXE_DIR/bin/ct.exe"
-	elif [[ -f "$NIX_CODETRACER_EXE_DIR/bin/ct" ]]; then
-		export CODETRACER_E2E_CT_PATH="$NIX_CODETRACER_EXE_DIR/bin/ct"
+	if [[ -f "$CODETRACER_PREFIX/bin/ct.exe" ]]; then
+		export CODETRACER_E2E_CT_PATH="$CODETRACER_PREFIX/bin/ct.exe"
+	elif [[ -f "$CODETRACER_PREFIX/bin/ct" ]]; then
+		export CODETRACER_E2E_CT_PATH="$CODETRACER_PREFIX/bin/ct"
 	fi
 fi
 
 if [[ -d "$ROOT_DIR/node_modules/.bin" ]]; then
-	export PATH="$NIX_CODETRACER_EXE_DIR/bin:$ROOT_DIR/node_modules/.bin:$PATH"
+	export PATH="$CODETRACER_PREFIX/bin:$ROOT_DIR/node_modules/.bin:$PATH"
 else
-	export PATH="$NIX_CODETRACER_EXE_DIR/bin:$PATH"
+	export PATH="$CODETRACER_PREFIX/bin:$PATH"
 fi

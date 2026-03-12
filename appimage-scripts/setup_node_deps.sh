@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# depends on env `$ROOT_PATH` and `$NIX_CODETRACER_EXE_DIR`
+# depends on env `$ROOT_PATH` and `$CODETRACER_PREFIX`
 # and node
 
 set -e
@@ -28,6 +28,6 @@ popd
 rm -rf "${ROOT_PATH}/node-packages/node_modules"
 
 # => now we have node_modules, and $ROOT_PATH/src/public/dist/frontend_bundle.js
-# <=> $NIX_CODETRACER_EXE_DIR/public/dist/frontend_bundle.js
+# <=> $CODETRACER_PREFIX/public/dist/frontend_bundle.js
 
 echo "==========="

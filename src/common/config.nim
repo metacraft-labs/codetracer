@@ -80,7 +80,7 @@ let defaultConfigPath* = "default_config.yaml"
 
 let defaultLayoutPath* = "default_layout.json"
 
-let configDir* = linksPath / "config"
+let configDir* = codetracerPrefix / "config"
 
 let userConfigDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
 let userLayoutDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"

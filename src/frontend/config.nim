@@ -16,7 +16,7 @@ when not defined(ctRenderer):
     paths
 
   let
-    configDir* = linksPath / "config"
+    configDir* = codetracerPrefix / "config"
     userConfigDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
     userLayoutDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
 

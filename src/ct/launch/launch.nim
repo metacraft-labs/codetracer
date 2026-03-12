@@ -115,7 +115,7 @@ proc runInitial*(conf: CodetracerConf) =
           else:
             raise newException(ValueError, "no valid git root: " & gitTopLevelResult.error)
         else:
-          linksPath & "/"
+          codetracerPrefix & "/"
 
       when defined(macosx):
         let
@@ -150,7 +150,7 @@ proc runInitial*(conf: CodetracerConf) =
 
       when defined(linux):
         if conf.installCtDesktopFile:
-          installCodetracerDesktopFile(linksPath, rootDir, codetracerExe)
+          installCodetracerDesktopFile(codetracerPrefix, rootDir, codetracerExe)
 
       quit(0)
 

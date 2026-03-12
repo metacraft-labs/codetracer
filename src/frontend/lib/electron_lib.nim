@@ -126,7 +126,7 @@ else:
   let basedir* = cstring(basedirText)
   let currentPath* = if not jsDirname.isNil: ($jsDirname).rsplit("/", 3)[0] & "/" else: ""
 
-let chomedriverExe* = linksPath & "/bin/chromedriver"
+let chomedriverExe* = codetracerPrefix & "/bin/chromedriver"
 
 import misc_lib
 

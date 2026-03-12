@@ -41,41 +41,18 @@ else:
 when not defined(ctRenderer):
   import std / sequtils
 
-const linksPathConst {.strdefine.} = ""
-
 when not defined(js) and defined(ctEntrypoint):
   # echo "ct entrypoint"
   let codetracerExeDir* = getAppDir().parentDir
 else:
-  # echo "not ct entrypoint: env : ", env.get("NIX_CODETRACER_EXE_DIR")
-  let codetracerExeDir* = env.get("NIX_CODETRACER_EXE_DIR", "<unknown>")
+  # In non-entrypoint contexts (e.g. Electron renderer), codetracerExeDir is
+  # derived from CODETRACER_PREFIX when available, otherwise "<unknown>".
+  let codetracerExeDir* = env.get("CODETRACER_PREFIX", "<unknown>")
 
 when not defined(js) and defined(ctEntrypoint):
   let codetracerPrefix* = env.get("CODETRACER_PREFIX", getAppDir().parentDir)
 else:
   let codetracerPrefix* = env.get("CODETRACER_PREFIX", codetracerExeDir)
-
-# binary/lib/artifact paths
-# should be same in folder structure
-# in tup dev env, nix and packages
-var linksPathValue = env.get("LINKS_PATH_DIR",
-  if linksPathConst.len > 0:
-    linksPathConst
-  else:
-    when not defined(js) and defined(ctEntrypoint):
-      codetracerExeDir
-    else:
-      ""
-)
-
-when defined(js):
-  if linksPathValue.len == 0 or linksPathValue == "<unknown>":
-    # In renderer processes triggered from tests the launcher may omit LINKS_PATH_DIR,
-    # so fall back to the Electron bundle directory if it is available.
-    if codetracerExeDir.len > 0 and codetracerExeDir != "<unknown>":
-      linksPathValue = codetracerExeDir
-
-let linksPath* = linksPathValue
 
 when not defined(js):
   proc findTool*(name: string): string =
@@ -92,18 +69,10 @@ when not defined(js):
         msg &= "\n  install: " & installHint
       quit(msg, 1)
 
-let bundledCtagsPath = linksPath / "bin" / "ctags"
-let bundledNargoPath = linksPath / "bin" / "nargo"
+let bundledCtagsPath = codetracerPrefix / "bin" / "ctags"
+let bundledNargoPath = codetracerPrefix / "bin" / "nargo"
 when not defined(js):
   let bundledNargoPathWithExeExt = bundledNargoPath & ExeExt
-
-# binary/lib/artifact paths
-# should be same in folder structure
-# in tup dev env, nix and packages
-# when defined(js):
-#   echo "linksPath ", linksPath
-#   echo "linksPathConst ", linksPathConst
-#   echo "codetracerExeDir ", codetracerExeDir
 
 when not defined(pythonPackage):
   let
@@ -120,14 +89,14 @@ let
   # (additional note: it is a workaround for dev/some cases: TODO think more)
   ctRemoteExe* = codetracerExeDir / "bin" / "ct-remote"
   # External tools - use findTool (PATH lookup)
-  bashExe* = when not defined(js): findTool("bash") else: linksPath / "bin" / "bash"
+  bashExe* = when not defined(js): findTool("bash") else: codetracerPrefix / "bin" / "bash"
   taskProcessExe* = codetracerPrefix / "bin" / "task_process"
-  python3Path* = when not defined(js): findTool("python3") else: linksPath / "bin" / "python3"
+  python3Path* = when not defined(js): findTool("python3") else: codetracerPrefix / "bin" / "python3"
 
   rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH",
-    when not defined(js): findTool("ruby") else: linksPath / "bin" / "ruby")
+    when not defined(js): findTool("ruby") else: codetracerPrefix / "bin" / "ruby")
   rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH",
-    when not defined(js): findTool("codetracer-ruby-recorder") else: linksPath / "bin" / "codetracer-ruby-recorder")
+    when not defined(js): findTool("codetracer-ruby-recorder") else: codetracerPrefix / "bin" / "codetracer-ruby-recorder")
 
   smallExe* = codetracerPrefix / "bin" / "small-lang"
   noirExe* = env.get(
@@ -137,17 +106,17 @@ let
     else:
       findTool("nargo"))
   wazeroExe* = env.get("CODETRACER_WASM_VM_PATH",
-    when not defined(js): findTool("wazero") else: linksPath / "bin" / "wazero")
+    when not defined(js): findTool("wazero") else: codetracerPrefix / "bin" / "wazero")
   dbBackendExe* = codetracerPrefix / "bin" / "db-backend"
   backendManagerExe* = codetracerPrefix / "bin" / "backend-manager"
   virtualizationLayersExe* = codetracerPrefix / "bin" / "virtualization-layers"
 
-  cargoExe* = when not defined(js): findTool("cargo") else: linksPath / "bin" / "cargo"
+  cargoExe* = when not defined(js): findTool("cargo") else: codetracerPrefix / "bin" / "cargo"
 
-  electronExe* = when not defined(js): findTool("electron") else: linksPath / "bin" / "electron"
+  electronExe* = when not defined(js): findTool("electron") else: codetracerPrefix / "bin" / "electron"
   electronIndexPath* = codetracerExeDir / "src" / "index.js"
   userInterfacePath* = codetracerExeDir / "ui.js"
-  chromedriverExe* = when not defined(js): findTool("chromedriver") else: linksPath / "bin" / "chromedriver"
+  chromedriverExe* = when not defined(js): findTool("chromedriver") else: codetracerPrefix / "bin" / "chromedriver"
 
 when defined(js):
   let ctagsExe* = env.get("CODETRACER_CTAGS_EXE_PATH", bundledCtagsPath)
@@ -213,14 +182,14 @@ let
   luaPath* = codetracerInstallDir / "libs" / "lua"
 
   nimcacheDir* = codetracerTmpPath / "codetracer_projects/"
-  scriptExe* = when not defined(js): findTool("script") else: linksPath / "bin" / "script"
+  scriptExe* = when not defined(js): findTool("script") else: codetracerPrefix / "bin" / "script"
 
-  zipExe* = when not defined(js): findTool("zip") else: linksPath / "bin" / "zip"
-  unzipExe* = when not defined(js): findTool("unzip") else: linksPath / "bin" / "unzip"
-  curlExe* = when not defined(js): findTool("curl") else: linksPath / "bin" / "curl"
+  zipExe* = when not defined(js): findTool("zip") else: codetracerPrefix / "bin" / "zip"
+  unzipExe* = when not defined(js): findTool("unzip") else: codetracerPrefix / "bin" / "unzip"
+  curlExe* = when not defined(js): findTool("curl") else: codetracerPrefix / "bin" / "curl"
 
 when defined(js):
-  let nodeExe* = env.get("CODETRACER_NODE_EXE_PATH", linksPath / "bin" / "node")
+  let nodeExe* = env.get("CODETRACER_NODE_EXE_PATH", codetracerPrefix / "bin" / "node")
 else:
   let nodeExe* = env.get("CODETRACER_NODE_EXE_PATH", findTool("node"))
 

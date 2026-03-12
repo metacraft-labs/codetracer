@@ -44,7 +44,7 @@ proc createMainWindow*: js =
   when not defined(server):
     # TODO load from config
 
-    let iconPath = linksPath & "/resources/Icon.iconset/icon_256x256.png"
+    let iconPath = codetracerPrefix & "/resources/Icon.iconset/icon_256x256.png"
 
     var initInfo = newJsObject()
     initInfo = js{

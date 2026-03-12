@@ -75,7 +75,7 @@ pub struct App {
     receiver: Option<UnixStream>,
     sender: Option<UnixStream>,
     caller_process_pid: u32,
-    links_path: PathBuf,
+    codetracer_prefix: PathBuf,
     codetracer_exe_dir: PathBuf,
     core: Core,
     exit: bool,
@@ -91,7 +91,7 @@ impl Default for App {
             receiver: None,
             sender: None,
             caller_process_pid: 0,
-            links_path: PathBuf::new(),
+            codetracer_prefix: PathBuf::new(),
             codetracer_exe_dir: PathBuf::new(),
             core: Core::default(),
             exit: false,
@@ -290,7 +290,7 @@ impl App {
         )?;
 
         // for now set in shell nix
-        // env::set_var("CODETRACER_LINKS_PATH", ..)
+        // env::set_var("CODETRACER_PREFIX", ..)
         env::set_var("CODETRACER_DISPATCHER_READ_CLIENT", "STDIN");
         env::set_var("CODETRACER_DISPATCHER_SEND_CLIENT", "FILE");
 
@@ -353,8 +353,8 @@ impl App {
         // might be hardcoded for now or just missing
         // self.load_config();
 
-        self.links_path = PathBuf::from(env::var("CODETRACER_LINKS_PATH")?);
-        self.codetracer_exe_dir = self.links_path.join("bin");
+        self.codetracer_prefix = PathBuf::from(env::var("CODETRACER_PREFIX")?);
+        self.codetracer_exe_dir = self.codetracer_prefix.join("bin");
 
         self.caller_process_pid = caller_process_pid();
 

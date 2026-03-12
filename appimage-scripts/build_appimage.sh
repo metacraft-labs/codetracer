@@ -37,7 +37,7 @@ mkdir "${APP_DIR}"
 
 # This is the env var which essentially controls where we'll put our
 # compiled files/static resources
-export NIX_CODETRACER_EXE_DIR="${APP_DIR}"
+export CODETRACER_PREFIX="${APP_DIR}"
 
 mkdir -p "${APP_DIR}"/bin
 mkdir -p "${APP_DIR}"/src
@@ -221,7 +221,7 @@ cat <<'EOF' >"${APP_DIR}/AppRun"
 export HERE=$(dirname "$(readlink -f "${0}")")
 
 # TODO: This includes references to x86_64. What about aarch64?
-export LINKS_PATH_DIR=$HERE
+export CODETRACER_PREFIX=$HERE
 export PATH="${HERE}/bin:${PATH}"
 export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
 

@@ -35,13 +35,13 @@ import { getFreeTcpPort } from "./port-allocator";
 const currentDir = path.resolve();
 const codetracerInstallDir = path.dirname(currentDir);
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
-const linksPath = path.join(codetracerInstallDir, "src", "build-debug");
+const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
 
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
 const codetracerPath =
   envCodetracerPath.length > 0
     ? envCodetracerPath
-    : path.join(linksPath, "bin", "ct");
+    : path.join(codetracerPrefix, "bin", "ct");
 
 // ---------------------------------------------------------------------------
 // Constants

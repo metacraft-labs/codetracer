@@ -88,9 +88,7 @@ if (Test-Path -LiteralPath $repoConfigDir -PathType Container) {
 }
 
 [Environment]::SetEnvironmentVariable("CODETRACER_REPO_ROOT_PATH", $resolvedRepoRoot, "Process")
-[Environment]::SetEnvironmentVariable("NIX_CODETRACER_EXE_DIR", $buildDebugDir, "Process")
-[Environment]::SetEnvironmentVariable("LINKS_PATH_DIR", $buildDebugDir, "Process")
-[Environment]::SetEnvironmentVariable("CODETRACER_LINKS_PATH", $buildDebugDir, "Process")
+[Environment]::SetEnvironmentVariable("CODETRACER_PREFIX", $buildDebugDir, "Process")
 [Environment]::SetEnvironmentVariable("CODETRACER_DEV_TOOLS", "0", "Process")
 [Environment]::SetEnvironmentVariable("CODETRACER_LOG_LEVEL", "INFO", "Process")
 [Environment]::SetEnvironmentVariable("PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS", "1", "Process")

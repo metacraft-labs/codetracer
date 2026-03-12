@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# depends on env `$ROOT_PATH` and `$NIX_CODETRACER_EXE_DIR`
+# depends on env `$ROOT_PATH` and `$CODETRACER_PREFIX`
 #   and nim 1.6 installed
 #   and valid env `$LIBSQLITE3_PATH` at least for nixos
 
@@ -41,7 +41,6 @@ nim1 -d:release \
 	-d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
 	-d:builtWithNix \
 	-d:ctEntrypoint \
-	-d:linksPathConst=.. \
 	-d:libcPath=libc \
 	-d:pathToNodeModules=../node_modules \
 	--nimcache:nimcache \
@@ -56,7 +55,6 @@ nim1 \
 	-d:chronicles_timestamps=UnixTime \
 	-d:ssl \
 	-d:ctTest -d:testing --hint"[XDeclaredButNotUsed]":off \
-	-d:linksPathConst=.. \
 	-d:libcPath=libc \
 	-d:builtWithNix \
 	-d:ctEntrypoint \

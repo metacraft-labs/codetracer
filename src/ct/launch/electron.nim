@@ -37,8 +37,7 @@ proc launchElectron*(
   putEnv("ELECTRON_ENABLE_LOGGING", "1")
   when defined(builtWithNix):
     putEnv("NODE_PATH", nodeModulesPath)
-  putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir)
-  putEnv("LINKS_PATH_DIR", linksPath)
+  putEnv("CODETRACER_PREFIX", codetracerPrefix)
   if mode != ElectronLaunchMode.Default:
     putEnv("CODETRACER_LAUNCH_MODE", $mode)
 
@@ -114,8 +113,7 @@ when defined(posix):
 
     # Set up environment variables
     putEnv("ELECTRON_ENABLE_LOGGING", "1")
-    putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir)
-    putEnv("LINKS_PATH_DIR", linksPath)
+    putEnv("CODETRACER_PREFIX", codetracerPrefix)
 
     # Build execv args: electron [electronArgs] [indexPath] [appArgs]
     let finalArgs = electronArgs.concat(@[electronIndexPath]).concat(appArgs)

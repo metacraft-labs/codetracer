@@ -75,8 +75,7 @@ proc hostCommand*(
     idleTimeoutRaw: string) =
 
   putEnv("NODE_PATH", nodeModulesPath)
-  putEnv("NIX_CODETRACER_EXE_DIR", codetracerExeDir)
-  putEnv("LINKS_PATH_DIR", linksPath)
+  putEnv("CODETRACER_PREFIX", codetracerPrefix)
 
   let isSetBackendSocketPort = backendSocketPort.isSome
   let isSetFrontendSocketPort = frontendSocketPort.isSome

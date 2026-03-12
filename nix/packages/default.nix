@@ -793,7 +793,6 @@
               -d:chronicles_timestamps=UnixTime \
               -d:ssl \
               -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
-              -d:linksPathConst=${runtimeDeps.outPath}/ \
               -d:libcPath=${pkgs.glibc.out} \
               -d:builtWithNix \
               -d:ctEntrypoint \
@@ -811,7 +810,6 @@
               -d:chronicles_timestamps=UnixTime \
               -d:ssl \
               -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
-              -d:linksPathConst=${runtimeDeps.outPath}/ \
               -d:libcPath=${pkgs.glibc.out} \
               -d:builtWithNix \
               -d:ctEntrypoint \
@@ -896,7 +894,7 @@
                   stdenv.cc.cc.lib
                 ]
               } \
-              --set LINKS_PATH_DIR ${runtimeDeps.outPath}
+              --set CODETRACER_PREFIX ${runtimeDeps.outPath}
           '';
 
         };

@@ -198,7 +198,7 @@ const
   codetracerIconFilename = codetracerXdgAppName & ".png"
 
 when defined(linux):
-  proc installCodetracerDesktopFile*(linksPath: string, rootDir: string, codetracerExe: string) =
+  proc installCodetracerDesktopFile*(prefix: string, rootDir: string, codetracerExe: string) =
 
     let iconsetPath = rootDir / "resources" / "Icon.iconset"
     let desktopFilePath = rootDir / "resources" / "codetracer.desktop"

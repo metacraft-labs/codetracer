@@ -43,7 +43,7 @@ proc installStatusView: VNode =
     text installStatus[1]
 
 proc dialogBox(): VNode =
-  echo "linksPath: ", linksPath
+  echo "codetracerPrefix: ", codetracerPrefix
   buildHtml(tdiv):
     tdiv(class="dialog-box"):
       tdiv(class="dialog-header"):
