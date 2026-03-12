@@ -49,6 +49,9 @@ if [ ! -f "$ROOT_DIR"/ct_paths.json ]; then
 	echo '{"PYTHONPATH": "","LD_LIBRARY_PATH":""}' >"$ROOT_DIR"/ct_paths.json
 fi
 
+export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$ROOT_DIR/src/build-debug}"
+export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
+
 export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build-debug/bin:$PATH
 export NIM1=$DEPS_DIR/nim/bin/nim
 
