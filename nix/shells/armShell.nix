@@ -168,6 +168,7 @@ mkShell {
     # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
     # gcc.cc.lib ..
     export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
+    export CODETRACER_LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH"
 
     export RUST_LOG=info
 
@@ -196,38 +197,6 @@ mkShell {
     # ====
 
 
-    echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
-
-    # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
-
-    # ==== src/links for tup
-
-    # make sure we have the correct up to date links
-    # each time for now
-    rm -rf src/links;
-    # TODO
-    # ln -s "$ {ourPkgs TODO .shellLinksDeps.outPath}" src/links;
-
-    mkdir -p src/links
-
-    cd src;
-
-    [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
-    [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
-    [ ! -f links/node ] && ln -s ${nodejs-18_x.outPath}/bin/node links/node
-    [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
-    [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
-    [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
-    [ ! -f links/wazero ] && ln -s ${ourPkgs.wazero.outPath}/bin/wazero links/wazero
-    [ ! -f links/electron ] && ln -s ${electron_33.outPath}/bin/electron links/electron
-    [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
-    # TODO: try to add an option to link to libs/upstream-nim, libs/rr
-    #   for faster iteration when patching them as Zahary suggested?
-    [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
-    cd ..;
-
-    # ==== END of src/links for tup
-
     # ===========================================================================
     # Sibling repo detection
     # ===========================================================================
@@ -249,23 +218,6 @@ mkShell {
     elif [ -d "$ROOT_PATH/libs/codetracer-ruby-recorder/gems" ]; then
       export CODETRACER_RUBY_RECORDER_PRESENT=1
       export RUBY_RECORDER_ROOT="$ROOT_PATH/libs/codetracer-ruby-recorder"
-    fi
-
-    # Ruby recorder links
-    if [ -n "''${RUBY_RECORDER_ROOT:-}" ]; then
-      cd src
-      [ ! -f links/trace.rb ] && [ -f "$RUBY_RECORDER_ROOT/src/trace.rb" ] && \
-        ln -s "$RUBY_RECORDER_ROOT/src/trace.rb" links/trace.rb
-      [ ! -f links/recorder.rb ] && [ -f "$RUBY_RECORDER_ROOT/src/recorder.rb" ] && \
-        ln -s "$RUBY_RECORDER_ROOT/src/recorder.rb" links/recorder.rb
-      cd ..
-    fi
-
-    # Python recorder link
-    if [ -n "''${CODETRACER_PYTHON_RECORDER_PATH:-}" ]; then
-      cd src
-      [ ! -f links/trace.py ] && ln -s "$CODETRACER_PYTHON_RECORDER_PATH" links/trace.py
-      cd ..
     fi
 
     # --- codetracer-js-recorder ---

@@ -73,9 +73,6 @@ echo '##########################################################################
 TRACE_PROGRAM="${ROOT_DIR}/examples/python_script.py"
 export TRACE_DIR
 
-CODETRACER_CT_PATHS=$(pwd)/ct_paths.json
-export CODETRACER_CT_PATHS
-
 "${CT_BIN}" record -o="${TRACE_DIR}" "${TRACE_PROGRAM}"
 
 if [[ ! -f "${TRACE_DIR}/trace.json" ]]; then

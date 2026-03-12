@@ -12,7 +12,6 @@ export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 export CODETRACER_DEV_TOOLS="${CODETRACER_DEV_TOOLS:-0}"
 export CODETRACER_LOG_LEVEL="${CODETRACER_LOG_LEVEL:-INFO}"
 export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS="${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-1}"
-export CODETRACER_CT_PATHS="${CODETRACER_CT_PATHS:-$ROOT_DIR/ct_paths.json}"
 
 if [[ -z ${CODETRACER_CTAGS_EXE_PATH:-} ]]; then
 	if command -v ctags >/dev/null 2>&1; then
@@ -31,10 +30,6 @@ if [[ -z ${CODETRACER_CTAGS_EXE_PATH:-} ]]; then
 			fi
 		done
 	fi
-fi
-
-if [[ ! -f $CODETRACER_CT_PATHS ]]; then
-	echo '{"PYTHONPATH":"","LD_LIBRARY_PATH":""}' >"$CODETRACER_CT_PATHS"
 fi
 
 # `ct host` serves static assets from `<build-debug>/public` in non-Nix mode.

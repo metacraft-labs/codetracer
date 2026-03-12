@@ -45,10 +45,6 @@ export DIST_DIR
 export RUSTUP_HOME=$DEPS_DIR/rustup
 export CARGO_HOME=$DEPS_DIR/cargo
 
-if [ ! -f "$ROOT_DIR"/ct_paths.json ]; then
-	echo '{"PYTHONPATH": "","LD_LIBRARY_PATH":""}' >"$ROOT_DIR"/ct_paths.json
-fi
-
 export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$ROOT_DIR/src/build-debug}"
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 

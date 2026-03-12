@@ -20,7 +20,6 @@ $buildDebugConfigDir = Join-Path $buildDebugDir "config"
 $repoPublicDir = Join-Path $resolvedRepoRoot "src\public"
 $repoConfigDir = Join-Path $resolvedRepoRoot "src\config"
 $repoNodeModulesBinDir = Join-Path $resolvedRepoRoot "node_modules\.bin"
-$ctPathsPath = Join-Path $resolvedRepoRoot "ct_paths.json"
 
 function Resolve-CtagsExe {
   $explicit = [Environment]::GetEnvironmentVariable("CODETRACER_CTAGS_EXE_PATH")
@@ -49,10 +48,6 @@ function Resolve-CtagsExe {
   }
 
   return ""
-}
-
-if (-not (Test-Path -LiteralPath $ctPathsPath -PathType Leaf)) {
-  Set-Content -LiteralPath $ctPathsPath -Value '{"PYTHONPATH":"","LD_LIBRARY_PATH":""}' -Encoding utf8
 }
 
 # `ct host` serves static assets from `<build-debug>/public` in non-Nix mode.
@@ -92,10 +87,6 @@ if (Test-Path -LiteralPath $repoConfigDir -PathType Container) {
 [Environment]::SetEnvironmentVariable("CODETRACER_DEV_TOOLS", "0", "Process")
 [Environment]::SetEnvironmentVariable("CODETRACER_LOG_LEVEL", "INFO", "Process")
 [Environment]::SetEnvironmentVariable("PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS", "1", "Process")
-
-if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("CODETRACER_CT_PATHS"))) {
-  [Environment]::SetEnvironmentVariable("CODETRACER_CT_PATHS", $ctPathsPath, "Process")
-}
 
 if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("CODETRACER_E2E_CT_PATH"))) {
   $ctExeCandidate = Join-Path $buildDebugBinDir "ct.exe"

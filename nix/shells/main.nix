@@ -275,10 +275,6 @@ mkShell {
 
     # ====
 
-    echo "{\"PYTHONPATH\": \"$CT_PYTHONPATH\",\"LD_LIBRARY_PATH\":\"$CT_LD_LIBRARY_PATH\"}" > ct_paths.json
-
-    # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
-
     # Playwright/e2e test environment
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
