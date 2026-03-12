@@ -106,6 +106,7 @@ const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
   CtLoadAsmFunction: "ct/load-asm-function",
   CtLoadAsmFunctionResponse: "",
   InternalLastCompleteMove: "internal/last-complete-move",
+  InternalCompleteMove: "internal/complete-move",
   InternalAddToScratchpad: "",
   InternalAddToScratchpadFromExpression: "",
   InternalStatusUpdate: "",

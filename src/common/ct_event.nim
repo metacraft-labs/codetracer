@@ -65,6 +65,7 @@ type
     CtLoadAsmFunction,
     CtLoadAsmFunctionResponse,
     InternalLastCompleteMove,
+    InternalCompleteMove,
     InternalAddToScratchpad,
     InternalAddToScratchpadFromExpression,
     InternalStatusUpdate,
