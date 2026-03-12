@@ -1,7 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: "./tests",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: Number(process.env.PLAYWRIGHT_RETRIES ?? (process.env.CI ? 2 : 0)),
@@ -19,4 +18,19 @@ export default defineConfig({
   // Deployment mode (electron vs web) is controlled per-test via
   // test.use({ deploymentMode: "web" }) or defaults to "electron".
   // To run all tests in web mode, set CODETRACER_TEST_IN_BROWSER=1.
+
+  // Projects split tests into "default" (no rr required) and "rr"
+  // (requires ct-rr-support). CI runs them in separate jobs to avoid
+  // duplicating the non-rr tests. Running without --project executes both.
+  projects: [
+    {
+      name: "default",
+      testDir: "./tests",
+      testIgnore: "**/sudoku/**",
+    },
+    {
+      name: "rr",
+      testDir: "./tests/sudoku",
+    },
+  ],
 });

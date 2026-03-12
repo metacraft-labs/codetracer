@@ -292,7 +292,7 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder -c ./ci/lint/nix.sh"
+      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
 
   lint-rust:
     runs-on: [self-hosted, nixos]
@@ -843,12 +843,12 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       - name: Run TypeScript Playwright UI tests
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui --project=default"
 
   test-ui-tests-rr:
     runs-on: [self-hosted, nixos]
@@ -870,20 +870,20 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
-        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-ruby-recorder path:./libs/codetracer-ruby-recorder --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+        run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       - name: Setup rr-backend
         env:
           GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
         run: ./ci/setup-rr-backend.sh
 
-      - name: Run TypeScript Playwright UI tests (with rr-backend)
+      - name: Run TypeScript Playwright UI tests (rr-only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_RR_BACKEND_PRESENT: "1"
           PLAYWRIGHT_RETRIES: "0"
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/test/ui-tests.sh"
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui --project=rr"
 
       - name: Upload test artifacts
         if: failure()

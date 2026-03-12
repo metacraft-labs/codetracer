@@ -99,7 +99,9 @@ test:
     echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping cross-repo tests"
   fi
 
-# Run all GUI tests (TypeScript Playwright e2e suite).
+# Run all GUI tests headlessly (TypeScript Playwright e2e suite).
+# Uses a virtual display (Xvfb) — same as CI. For visible windows on your
+# desktop, use `just test-gui-visible` instead.
 test-gui *args:
   #!/usr/bin/env bash
   set -e
@@ -116,6 +118,17 @@ test-gui *args:
   sleep 1
   export DISPLAY=":${DISPLAY_NUM}"
 
+  just test-e2e {{args}}
+
+# Run GUI tests with windows visible on the current desktop session.
+# Requires a running display server ($DISPLAY must be set).
+test-gui-visible *args:
+  #!/usr/bin/env bash
+  set -e
+  if [ -z "${DISPLAY:-}" ]; then
+    echo "Error: \$DISPLAY is not set. Run this from a desktop session." >&2
+    exit 1
+  fi
   just test-e2e {{args}}
 
 make-quick-mr name message:
