@@ -53,6 +53,10 @@ elif [ -d "${ROOT_DIR}/libs/codetracer-ruby-recorder" ]; then
 else
 	echo "WARNING: codetracer-ruby-recorder not found; build will lack Ruby tracing support"
 fi
+# Make the ruby recorder discoverable via PATH (in bin/)
+if [ -x "$DIST_DIR/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" ]; then
+	ln -sf "../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" "$DIST_DIR/bin/codetracer-ruby-recorder"
+fi
 cp "$(which ctags)" "$DIST_DIR"/bin/ctags
 cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/src/helpers.js
 cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/helpers.js
@@ -71,7 +75,8 @@ cat <<'EOF' >"${DIST_DIR}"/bin/ct
 
 export HERE=$(dirname $(dirname "$0"))
 
-export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder"
+export CODETRACER_PREFIX=$HERE
+export PATH="${HERE}/bin:${PATH}"
 
 exec ${HERE}/bin/ct_unwrapped "$@"
 EOF

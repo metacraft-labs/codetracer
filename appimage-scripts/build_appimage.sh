@@ -69,6 +69,11 @@ else
 	echo "WARNING: codetracer-ruby-recorder not found; AppImage will lack Ruby tracing support"
 fi
 
+# Make the ruby recorder discoverable via PATH (in ${APP_DIR}/bin/)
+if [ -x "${APP_DIR}/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder" ]; then
+	ln -sf "../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder" "${APP_DIR}/bin/codetracer-ruby-recorder"
+fi
+
 CURRENT_NIX_SYSTEM=$(nix eval --impure --raw --expr 'builtins.currentSystem')
 CURRENT_ARCH=$(uname -m)
 
@@ -122,8 +127,6 @@ cat <<'EOF' >"${APP_DIR}/bin/ct"
 
 HERE=${HERE:-$(dirname "$(readlink -f "${0}")")}
 
-# TODO: This includes references to x86_64. What about aarch64?
-
 exec "${HERE}"/bin/ct_unwrapped "$@"
 
 EOF
@@ -135,7 +138,7 @@ bash "${ROOT_PATH}"/appimage-scripts/build_db_backend.sh
 bash "${ROOT_PATH}"/appimage-scripts/build_backend_manager.sh
 
 # Noir
-cp -Lr "${ROOT_PATH}/src/links/nargo" "${APP_DIR}/bin/"
+cp -L "$(which nargo)" "${APP_DIR}/bin/nargo"
 chmod +x "${APP_DIR}/bin/nargo"
 
 # Wazero
@@ -151,20 +154,20 @@ CARGO_STYLUS=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.cargo
 cp -L "${CARGO_STYLUS}"/bin/cargo-stylus "${APP_DIR}"/bin
 
 # ctags
-cp -Lr "${ROOT_PATH}/src/links/ctags" "${APP_DIR}/bin/"
+cp -L "$(which ctags)" "${APP_DIR}/bin/ctags"
 chmod +x "${APP_DIR}/bin/ctags"
 # We want splitting
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/ctags" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
 # curl
-cp -Lr "${ROOT_PATH}/src/links/curl" "${APP_DIR}/bin/"
+cp -L "$(which curl)" "${APP_DIR}/bin/curl"
 chmod +x "${APP_DIR}/bin/curl"
 # shellcheck disable=SC2046
 cp -n $(lddtree -l "${APP_DIR}/bin/curl" | grep -v glibc | grep /nix) "${APP_DIR}"/lib
 
 # ct-remote
-cp -Lr "${ROOT_PATH}/src/links/ct-remote" "${APP_DIR}/bin/"
+cp -L "$(which ct-remote)" "${APP_DIR}/bin/ct-remote"
 chmod +x "${APP_DIR}/bin/ct-remote"
 # shellcheck disable=SC2046
 ct_remote_libs=$(lddtree -l "${APP_DIR}/bin/ct-remote" | grep -v glibc | grep /nix || true)
@@ -175,7 +178,7 @@ fi
 ls -al "${APP_DIR}"/lib
 
 # node
-cp -Lr "${ROOT_PATH}/src/links/node" "${APP_DIR}/bin/"
+cp -L "$(which node)" "${APP_DIR}/bin/node"
 chmod +x "${APP_DIR}/bin/node"
 
 # shellcheck disable=SC2046
@@ -220,10 +223,8 @@ cat <<'EOF' >"${APP_DIR}/AppRun"
 
 export HERE=$(dirname "$(readlink -f "${0}")")
 
-# TODO: This includes references to x86_64. What about aarch64?
 export CODETRACER_PREFIX=$HERE
 export PATH="${HERE}/bin:${PATH}"
-export CODETRACER_RUBY_RECORDER_PATH="${HERE}/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
 
 exec ${HERE}/bin/ct "$@"
 EOF
