@@ -400,20 +400,27 @@ mkShell {
     # ==== Create recorder links (after sibling detection) ====
     # These depend on RUBY_RECORDER_ROOT and CODETRACER_PYTHON_RECORDER_PATH
     # which are set in the sibling detection block above.
+    # When a recorder is not available, create a stub placeholder so that the
+    # tup build (which unconditionally references these links) does not fail.
     if [ -n "''${RUBY_RECORDER_ROOT:-}" ]; then
-      [ ! -f src/links/codetracer-ruby-recorder ] && ln -s \
+      [ ! -e src/links/codetracer-ruby-recorder ] && ln -s \
         "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" \
         src/links/codetracer-ruby-recorder
-      if [ ! -f src/links/recorder.rb ]; then
+      if [ ! -e src/links/recorder.rb ]; then
         if [ -f "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/lib/recorder.rb" ]; then
           ln -s "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/lib/recorder.rb" src/links/recorder.rb
         elif [ -f "$RUBY_RECORDER_ROOT/src/recorder.rb" ]; then
           ln -s "$RUBY_RECORDER_ROOT/src/recorder.rb" src/links/recorder.rb
         fi
       fi
+    else
+      [ ! -e src/links/codetracer-ruby-recorder ] && touch src/links/codetracer-ruby-recorder
+      [ ! -e src/links/recorder.rb ] && touch src/links/recorder.rb
     fi
     if [ -n "''${CODETRACER_PYTHON_RECORDER_PATH:-}" ]; then
-      [ ! -f src/links/trace.py ] && ln -s "$CODETRACER_PYTHON_RECORDER_PATH" src/links/trace.py
+      [ ! -e src/links/trace.py ] && ln -s "$CODETRACER_PYTHON_RECORDER_PATH" src/links/trace.py
+    else
+      [ ! -e src/links/trace.py ] && touch src/links/trace.py
     fi
 
     # ==== Python recorder venv setup ====
