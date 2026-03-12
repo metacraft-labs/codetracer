@@ -8,7 +8,7 @@ use std::{
     error::Error,
     fs::{create_dir, remove_dir_all},
     iter::zip,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::{LazyLock, Mutex, Once},
 };
@@ -29,6 +29,11 @@ use super::TracepointInterpreter;
 #[test]
 #[ignore]
 fn log_array() -> Result<(), Box<dyn Error>> {
+    if find_ruby_recorder().is_none() {
+        eprintln!("SKIPPED: Ruby recorder not found");
+        return Ok(());
+    }
+
     let src = "log(arr)";
 
     let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
@@ -42,6 +47,11 @@ fn log_array() -> Result<(), Box<dyn Error>> {
 #[test]
 #[ignore]
 fn array_indexing() -> Result<(), Box<dyn Error>> {
+    if find_ruby_recorder().is_none() {
+        eprintln!("SKIPPED: Ruby recorder not found");
+        return Ok(());
+    }
+
     let src = "log(arr[0])
 log(arr[1])
 log(arr[2])";
@@ -167,13 +177,41 @@ fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
     }
 }
 
-fn record_ruby_trace(program_dir: &Path, target_dir: &Path) {
-    println!("TARGET DIR: ${target_dir:#?}");
+fn find_ruby_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_RUBY_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let locations = [
+        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+    ];
+    for loc in locations {
+        let path = manifest_dir.join(loc);
+        if path.exists() {
+            return Some(path.canonicalize().unwrap_or(path));
+        }
+    }
+    None
+}
+
+fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let recorder = match find_ruby_recorder() {
+        Some(r) => r,
+        None => {
+            return Err("Ruby recorder not found \
+                 (set CODETRACER_RUBY_RECORDER_PATH or check out sibling repo)"
+                .into());
+        }
+    };
     let main_path = program_dir.join("main.rb");
     let trace_path = target_dir.join("trace.json");
     let result = Command::new("ruby")
         .args([
-            "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+            recorder.to_str().unwrap(),
             "--out-dir",
             target_dir.to_str().unwrap(),
             main_path.to_str().unwrap(),
@@ -183,8 +221,14 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) {
         .unwrap();
 
     if !result.status.success() {
-        panic!("Recording trace failed!\n{:#?}.", result);
+        return Err(format!(
+            "Recording trace failed!\n    stderr: {:?},\n    stdout: {:?}",
+            String::from_utf8_lossy(&result.stderr),
+            String::from_utf8_lossy(&result.stdout)
+        )
+        .into());
     }
+    Ok(())
 }
 
 fn record_noir_trace(program_dir: &Path, target_dir: &Path) {
@@ -205,7 +249,7 @@ fn record_rust_wasm_trace(_program_dir: &Path, _target_dir: &Path) {
 
 fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(), Box<dyn Error>> {
     match lang {
-        Lang::Ruby | Lang::RubyDb => record_ruby_trace(program_dir, target_dir),
+        Lang::Ruby | Lang::RubyDb => record_ruby_trace(program_dir, target_dir)?,
         Lang::Noir => record_noir_trace(program_dir, target_dir),
         Lang::RustWasm => record_rust_wasm_trace(program_dir, target_dir),
         _ => return Err("Unsupported language".into()),

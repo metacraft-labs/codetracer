@@ -863,8 +863,10 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     // not compiled during cargo test.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let relative_locations = [
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        // Sibling repo (workspace layout)
         "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        // Legacy submodule
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
     ];
     for loc in relative_locations {
         let path = manifest_dir.join(loc);
