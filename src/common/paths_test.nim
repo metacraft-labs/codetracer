@@ -12,14 +12,10 @@ suite "findTool":
     let result = findTool("this_tool_does_not_exist_xyz_12345")
     check result.len == 0
 
-  test "findTool falls back to linksPath":
-    # If a tool isn't on PATH but exists in linksPath/bin/, findTool should find it
-    # This tests the transitional fallback mechanism
-    # We can't easily test this without creating a fake linksPath,
-    # but we can verify that tools found via PATH match what findExe returns
-    let viaFindTool = findTool("bash")
-    let viaFindExe = findExe("bash")
-    check viaFindTool == viaFindExe  # PATH lookup should match
+  test "findTool matches findExe exactly":
+    # findTool is now a direct wrapper around findExe with no fallback
+    check findTool("bash") == findExe("bash")
+    check findTool("nonexistent_tool_xyz") == findExe("nonexistent_tool_xyz")
 
 suite "requireTool":
   test "requireTool resolves bash":

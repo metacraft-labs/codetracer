@@ -81,12 +81,7 @@ when not defined(js):
   proc findTool*(name: string): string =
     ## Find an external tool on PATH.
     ## Returns the full path, or "" if not found.
-    ## During transition, falls back to linksPath / "bin" if PATH lookup fails.
     result = findExe(name)
-    if result.len == 0:
-      let fallback = linksPath / "bin" / name
-      if fileExists(fallback):
-        result = fallback
 
   proc requireTool*(name: string, installHint: string = ""): string =
     ## Find an external tool on PATH, or exit with a helpful error.
@@ -120,13 +115,13 @@ else:
     dbBackendRecordExe* = "db-backend-record"
 
 let
-  cTraceSourcePath* = linksPath / "src" / "trace.c"
-  consoleExe* = linksPath / "bin" / "console"
+  cTraceSourcePath* = codetracerPrefix / "src" / "trace.c"
+  consoleExe* = codetracerPrefix / "bin" / "console"
   # (additional note: it is a workaround for dev/some cases: TODO think more)
   ctRemoteExe* = codetracerExeDir / "bin" / "ct-remote"
-  # External tools - use findTool with linksPath fallback
+  # External tools - use findTool (PATH lookup)
   bashExe* = when not defined(js): findTool("bash") else: linksPath / "bin" / "bash"
-  taskProcessExe* = linksPath / "bin" / "task_process"
+  taskProcessExe* = codetracerPrefix / "bin" / "task_process"
   python3Path* = when not defined(js): findTool("python3") else: linksPath / "bin" / "python3"
 
   rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH",
@@ -134,7 +129,7 @@ let
   rubyRecorderPath* = env.get("CODETRACER_RUBY_RECORDER_PATH",
     when not defined(js): findTool("codetracer-ruby-recorder") else: linksPath / "bin" / "codetracer-ruby-recorder")
 
-  smallExe* = linksPath / "bin" / "small-lang"
+  smallExe* = codetracerPrefix / "bin" / "small-lang"
   noirExe* = env.get(
     "CODETRACER_NOIR_EXE_PATH",
     when defined(js):
@@ -143,9 +138,9 @@ let
       findTool("nargo"))
   wazeroExe* = env.get("CODETRACER_WASM_VM_PATH",
     when not defined(js): findTool("wazero") else: linksPath / "bin" / "wazero")
-  dbBackendExe* = linksPath / "bin" / "db-backend"
-  backendManagerExe* = linksPath / "bin" / "backend-manager"
-  virtualizationLayersExe* = linksPath / "bin" / "virtualization-layers"
+  dbBackendExe* = codetracerPrefix / "bin" / "db-backend"
+  backendManagerExe* = codetracerPrefix / "bin" / "backend-manager"
+  virtualizationLayersExe* = codetracerPrefix / "bin" / "virtualization-layers"
 
   cargoExe* = when not defined(js): findTool("cargo") else: linksPath / "bin" / "cargo"
 
@@ -161,7 +156,7 @@ else:
 
 let cTraceObjectFilePath* = env.get(
   "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
-  linksPath / "lib" / "trace.o")
+  codetracerPrefix / "lib" / "trace.o")
 
 when defined(ctmacos):
   let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/"
@@ -185,7 +180,7 @@ let
 
 var
   # overrideable in local functions !:
-  shellPreloadPath* = linksPath / "lib" / "shell_preload.so"
+  shellPreloadPath* = codetracerPrefix / "lib" / "shell_preload.so"
 
 
 # other path/exe consts:
@@ -196,7 +191,7 @@ let
   else:
     codetracerExeDir.parentDir.parentDir # <top-level>/ (from <top-level>/src/build-debug/)
 
-  nodeModulesPath* = linksPath / "node_modules"
+  nodeModulesPath* = codetracerPrefix / "node_modules"
 
   codetracerTestDir* = codetracerInstallDir / "src" / "tests"
   codetracerNixResultExe* = codetracerInstallDir / "result" / "bin" / "ct"

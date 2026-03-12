@@ -281,43 +281,6 @@ mkShell {
 
     # export LD_LIBRARY_PATH="$NIX_LDFLAGS"
 
-    # ==== src/links for tup
-
-    # make sure we have the correct up to date links
-    # each time for now
-    rm -rf src/links;
-    # TODO
-    # ln -s "$ {ourPkgs TODO .shellLinksDeps.outPath}" src/links;
-
-    mkdir -p src/links
-
-    cd src;
-
-    [ ! -f links/which ] && ln -s ${which.outPath}/bin/which links/which
-    [ ! -f links/bash ] && ln -s ${bash.outPath}/bin/bash links/bash
-    [ ! -f links/node ] && ln -s ${nodejs_22.outPath}/bin/node links/node
-    [ ! -f links/cmp ] && ln -s ${diffutils.outPath}/bin/cmp links/cmp
-    [ ! -f links/ruby ] && ln -s ${ruby.outPath}/bin/ruby links/ruby
-    [ ! -f links/nargo ] && ln -s ${ourPkgs.noir.outPath}/bin/nargo links/nargo
-    [ ! -f links/wazero ] && ln -s ${ourPkgs.wazero.outPath}/bin/wazero links/wazero
-    [ ! -f links/electron ] && ln -s ${electron.outPath}/bin/electron links/electron
-    [ ! -f links/ctags ] && ln -s ${universal-ctags.outPath}/bin/ctags links/ctags
-    [ ! -f links/curl ] && ln -s ${curl.outPath}/bin/curl links/curl
-    [ ! -f links/ct-remote ] && ln -s ${ourPkgs.ctRemote.outPath}/bin/ct-remote links/ct-remote
-
-    # TODO: try to add an option to link to libs/upstream-nim, libs/rr
-    #   for faster iteration when patching them as Zahary suggested?
-    [ ! -f links/nim1 ] && ln -s ${ourPkgs.upstream-nim-codetracer.outPath}/bin/nim links/nim1
-    # [ ! -f links/trace.rb ] && ln -s $ROOT_PATH/libs/codetracer-ruby-recorder/src/trace.rb links/trace.rb
-
-    # NOTE: Ruby/Python recorder links are created AFTER sibling detection
-    # (below), because RUBY_RECORDER_ROOT and CODETRACER_PYTHON_RECORDER_PATH
-    # are only set during sibling detection.
-
-    cd ..;
-
-    # ==== END of src/links for tup
-
     # Playwright/e2e test environment
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
@@ -397,32 +360,6 @@ mkShell {
     # --- codetracer-wasm-recorder ---
     if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-wasm-recorder" ]; then
       export CODETRACER_WASM_RECORDER_PRESENT=1
-    fi
-
-    # ==== Create recorder links (after sibling detection) ====
-    # These depend on RUBY_RECORDER_ROOT and CODETRACER_PYTHON_RECORDER_PATH
-    # which are set in the sibling detection block above.
-    # When a recorder is not available, create a stub placeholder so that the
-    # tup build (which unconditionally references these links) does not fail.
-    if [ -n "''${RUBY_RECORDER_ROOT:-}" ]; then
-      [ ! -e src/links/codetracer-ruby-recorder ] && ln -s \
-        "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" \
-        src/links/codetracer-ruby-recorder
-      if [ ! -e src/links/recorder.rb ]; then
-        if [ -f "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/lib/recorder.rb" ]; then
-          ln -s "$RUBY_RECORDER_ROOT/gems/codetracer-pure-ruby-recorder/lib/recorder.rb" src/links/recorder.rb
-        elif [ -f "$RUBY_RECORDER_ROOT/src/recorder.rb" ]; then
-          ln -s "$RUBY_RECORDER_ROOT/src/recorder.rb" src/links/recorder.rb
-        fi
-      fi
-    else
-      [ ! -e src/links/codetracer-ruby-recorder ] && touch src/links/codetracer-ruby-recorder
-      [ ! -e src/links/recorder.rb ] && touch src/links/recorder.rb
-    fi
-    if [ -n "''${CODETRACER_PYTHON_RECORDER_PATH:-}" ]; then
-      [ ! -e src/links/trace.py ] && ln -s "$CODETRACER_PYTHON_RECORDER_PATH" src/links/trace.py
-    else
-      [ ! -e src/links/trace.py ] && touch src/links/trace.py
     fi
 
     # ==== Python recorder venv setup ====
