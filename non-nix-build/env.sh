@@ -78,9 +78,26 @@ popd
 
 mkdir -p ../src/links
 pushd ../src/links
-[ ! -f codetracer-ruby-recorder ] && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" codetracer-ruby-recorder
-# [ ! -f recorder.rb ]  && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/src/recorder.rb" recorder.rb
-[ ! -f trace.py ] && ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-python-recorder/src/trace.py" trace.py
+# ruby/python recorder links — prefer sibling repos, fall back to submodule paths
+WORKSPACE_ROOT="$(cd "$NON_NIX_BUILD_DIR/../.." 2>/dev/null && pwd)"
+if [ ! -e codetracer-ruby-recorder ]; then
+	if [ -d "$WORKSPACE_ROOT/codetracer-ruby-recorder" ]; then
+		ln -sf "$WORKSPACE_ROOT/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" codetracer-ruby-recorder
+	elif [ -d "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder" ]; then
+		ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder" codetracer-ruby-recorder
+	else
+		touch codetracer-ruby-recorder
+	fi
+fi
+if [ ! -e trace.py ]; then
+	if [ -d "$WORKSPACE_ROOT/codetracer-python-recorder" ]; then
+		ln -sf "$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py" trace.py
+	elif [ -d "$NON_NIX_BUILD_DIR/../libs/codetracer-python-recorder" ]; then
+		ln -sf "$NON_NIX_BUILD_DIR/../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py" trace.py
+	else
+		touch trace.py
+	fi
+fi
 
 [ ! -f bash ] && ln -sf "$(readlink -f "$(which bash)")" bash
 [ ! -f node ] && ln -sf "$(readlink -f "$(which node)")" node

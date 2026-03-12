@@ -55,7 +55,16 @@ python3 -m venv "${VENV_DIR}"
 # shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip
-python -m pip install "${ROOT_DIR}/libs/codetracer-python-recorder/codetracer-python-recorder"
+# Prefer sibling repo, fall back to submodule path
+WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." 2>/dev/null && pwd)"
+if [ -d "${WORKSPACE_ROOT}/codetracer-python-recorder/codetracer-python-recorder" ]; then
+	python -m pip install "${WORKSPACE_ROOT}/codetracer-python-recorder/codetracer-python-recorder"
+elif [ -d "${ROOT_DIR}/libs/codetracer-python-recorder/codetracer-python-recorder" ]; then
+	python -m pip install "${ROOT_DIR}/libs/codetracer-python-recorder/codetracer-python-recorder"
+else
+	echo "error: codetracer-python-recorder not found in sibling or submodule paths"
+	exit 1
+fi
 
 echo '###############################################################################'
 echo "Running python recorder smoke test via ct record"

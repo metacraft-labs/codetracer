@@ -59,8 +59,15 @@ export RUBYLIB="${HERE}/ruby/lib/ruby/3.3.0:${HERE}/ruby/lib/ruby/3.3.0/x86_64-l
 
 EOF
 
-# ruby recorder
-cp -Lr "${ROOT_PATH}/libs/codetracer-ruby-recorder" "${APP_DIR}/"
+# ruby recorder — prefer sibling repo, fall back to submodule (deprecated)
+WORKSPACE_ROOT="$(cd "${ROOT_PATH}/.." 2>/dev/null && pwd)"
+if [ -d "${WORKSPACE_ROOT}/codetracer-ruby-recorder" ]; then
+	cp -Lr "${WORKSPACE_ROOT}/codetracer-ruby-recorder" "${APP_DIR}/"
+elif [ -d "${ROOT_PATH}/libs/codetracer-ruby-recorder" ]; then
+	cp -Lr "${ROOT_PATH}/libs/codetracer-ruby-recorder" "${APP_DIR}/"
+else
+	echo "WARNING: codetracer-ruby-recorder not found; AppImage will lack Ruby tracing support"
+fi
 
 CURRENT_NIX_SYSTEM=$(nix eval --impure --raw --expr 'builtins.currentSystem')
 CURRENT_ARCH=$(uname -m)
