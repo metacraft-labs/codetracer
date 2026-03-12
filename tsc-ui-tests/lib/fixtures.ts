@@ -27,6 +27,7 @@ import {
 import { _electron, chromium } from "playwright";
 
 import { getFreeTcpPort } from "./port-allocator";
+import { captureFailureDiagnostics } from "./test-diagnostics";
 
 // ---------------------------------------------------------------------------
 // Path constants (shared with ct_helpers.ts)
@@ -463,6 +464,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
     async (
       { deploymentMode, sourcePath, launchMode, editFolderPath, deepreviewJsonPath },
       use,
+      testInfo,
     ) => {
       let result: LaunchResult;
 
@@ -507,6 +509,12 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
       }
 
       await use(result.page);
+
+      // Capture diagnostics on test failure (DOM snapshot, summary, error details)
+      if (testInfo.status !== testInfo.expectedStatus) {
+        await captureFailureDiagnostics(result.page, testInfo);
+      }
+
       await result.teardown();
     },
     { scope: "test" },
