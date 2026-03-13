@@ -580,6 +580,14 @@
 
             ln -sf ${codetracer-electron.out}/src/helpers.js $out/src/helpers.js
 
+            # The Karax-compiled renderer (ui.js) and CSS are loaded relative
+            # to CODETRACER_PREFIX by the Electron renderer process via index.html.
+            cp -L ${uiJavascript}/bin/ui.js $out/
+            # index.html references frontend/styles/ but codetracer-electron
+            # installs CSS to styles/ — create the expected path.
+            mkdir -p $out/frontend/styles
+            cp -Lr ${codetracer-electron}/styles/* $out/frontend/styles/
+
           '';
 
           postInstallPhase = ''
