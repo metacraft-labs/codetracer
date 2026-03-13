@@ -31,6 +31,7 @@ import { captureFailureDiagnostics } from "./test-diagnostics";
 import {
   LIMIT_CACHED_RECORDING_MS,
   LIMIT_SMALL_RECORDING_MS,
+  LIMIT_RR_RECORDING_MS,
   LIMIT_ELECTRON_LAUNCH_MS,
   LIMIT_FIRST_WINDOW_MS,
   LIMIT_TOTAL_SETUP_MS,
@@ -331,14 +332,14 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
   }).catch(() => { /* page may be closed */ });
 }
 
-async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
+async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SMALL_RECORDING_MS): Promise<LaunchResult> {
   setupLdLibraryPath();
   const t0 = Date.now();
 
   const fullSourcePath = path.join(testProgramsPath, sourcePath);
   const { result: traceId, durationMs: recordMs } = await timed(
     "record",
-    LIMIT_SMALL_RECORDING_MS,
+    recordingLimit,
     async () => recordTestProgram(fullSourcePath),
   );
 
@@ -394,14 +395,14 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
   };
 }
 
-async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
+async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_RECORDING_MS): Promise<LaunchResult> {
   setupLdLibraryPath();
   const t0 = Date.now();
 
   const fullSourcePath = path.join(testProgramsPath, sourcePath);
   const { result: traceId, durationMs: recordMs } = await timed(
     "record",
-    LIMIT_SMALL_RECORDING_MS,
+    recordingLimit,
     async () => recordTestProgram(fullSourcePath),
   );
 
@@ -652,6 +653,9 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
     ) => {
       let result: LaunchResult;
 
+      const isRR = testInfo.project.name === "rr";
+      const recordingLimit = isRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
+
       switch (launchMode) {
         case "trace": {
           if (!sourcePath) {
@@ -660,9 +664,9 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
             );
           }
           if (deploymentMode === "web") {
-            result = await launchTraceWeb(sourcePath);
+            result = await launchTraceWeb(sourcePath, recordingLimit);
           } else {
-            result = await launchTraceElectron(sourcePath);
+            result = await launchTraceElectron(sourcePath, recordingLimit);
           }
           break;
         }
