@@ -88,10 +88,14 @@ jobs:
           git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
           git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
 
+          # Clone as a sibling of the codetracer checkout so that path deps in
+          # Cargo.toml (../codetracer/libs/ct-dap-client) resolve correctly.
+          CLONE_DIR="$(pwd)/../codetracer-rr-backend"
+          rm -rf "$CLONE_DIR"
           git clone \
             "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-rr-backend.git" \
-            target/rr-backend-clone
-          cd target/rr-backend-clone
+            "$CLONE_DIR"
+          cd "$CLONE_DIR"
           git checkout "$REF"
 
           # Initialize submodules and explicitly rewrite their URLs to include the
@@ -119,14 +123,16 @@ jobs:
 
       - name: Build ct-rr-support
         run: |
-          nix develop ./target/rr-backend-clone --command \
-            bash -c "cd target/rr-backend-clone && cargo build"
+          CLONE_DIR="$(pwd)/../codetracer-rr-backend"
+          nix develop "$CLONE_DIR" --command \
+            bash -c "cd '$CLONE_DIR' && cargo build"
 
       - name: Resolve rr-backend environment paths
         id: rr-libs
         run: |
+          CLONE_DIR="$(pwd)/../codetracer-rr-backend"
           # Use markers to extract paths cleanly (nix develop may print banners)
-          RAW="$(nix develop ./target/rr-backend-clone --command bash -c \
+          RAW="$(nix develop "$CLONE_DIR" --command bash -c \
             'echo "___LD_PATH_START___"; echo "$LD_LIBRARY_PATH"; echo "___LD_PATH_END___";
              echo "___PATH_START___"; echo "$PATH"; echo "___PATH_END___"')"
           RR_LD="$(echo "$RAW" | sed -n '/___LD_PATH_START___/{n;p;}')"
@@ -138,7 +144,7 @@ jobs:
 
       - name: Run cross-repo integration tests
         run: |
-          CT_RR_SUPPORT="$(pwd)/target/rr-backend-clone/target/debug/ct-rr-support"
+          CT_RR_SUPPORT="$(pwd)/../codetracer-rr-backend/target/debug/ct-rr-support"
           echo "Using ct-rr-support: $CT_RR_SUPPORT"
           RR_EXTRA_PATH="${{ steps.rr-libs.outputs.extra_path }}"
           RR_LD="${{ steps.rr-libs.outputs.ld_library_path }}"
