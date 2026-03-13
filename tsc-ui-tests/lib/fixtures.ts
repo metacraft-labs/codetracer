@@ -262,6 +262,40 @@ interface LaunchResult {
   electronApp: ElectronApplication | null;
   /** Cleanup function called during teardown. */
   teardown: () => Promise<void>;
+  /** Collected console errors from the renderer (for diagnostics). */
+  consoleErrors: string[];
+}
+
+/**
+ * Attach console/page-error listeners to collect renderer-side JS errors.
+ * Also probes the page for any errors that occurred before attachment.
+ */
+function attachErrorCollectors(page: Page, bucket: string[]): void {
+  page.on("console", (msg) => {
+    if (msg.type() === "error") {
+      bucket.push(`[console.error] ${msg.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => {
+    bucket.push(`[pageerror] ${error.message}`);
+  });
+  // Check for script-load failures that happened before we attached.
+  page.evaluate(() => {
+    // Report which scripts are on the page and whether they have errors
+    const scripts = Array.from(document.querySelectorAll("script[src]"));
+    const info = scripts.map((s) => {
+      const el = s as HTMLScriptElement;
+      return `${el.src} (loaded)`;
+    });
+    // Check if key globals exist
+    const globals: Record<string, boolean> = {
+      "window.electron": typeof (window as any).electron !== "undefined",
+      "window.inElectron": typeof (window as any).inElectron !== "undefined",
+      "window.loadScripts": typeof (window as any).loadScripts !== "undefined",
+    };
+    console.error(`[diag] scripts: ${info.join("; ")}`);
+    console.error(`[diag] globals: ${JSON.stringify(globals)}`);
+  }).catch(() => { /* page may be closed */ });
 }
 
 async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
@@ -292,11 +326,13 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
       }),
   );
 
+  const consoleErrors: string[] = [];
   const { result: page, durationMs: windowMs } = await timed(
     "first window",
     LIMIT_FIRST_WINDOW_MS,
     async () => getEditorWindow(app),
   );
+  attachErrorCollectors(page, consoleErrors);
 
   const totalMs = Date.now() - t0;
   console.log(`#   electron: ${launchMs}ms  window: ${windowMs}ms  total setup: ${totalMs}ms`);
@@ -307,6 +343,7 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
   return {
     page,
     electronApp: app,
+    consoleErrors,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -374,7 +411,9 @@ async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
     args: extraArgs,
   });
 
+  const consoleErrors: string[] = [];
   const page = await browser.newPage();
+  attachErrorCollectors(page, consoleErrors);
 
   // Wait for ct host to become ready with retry-based navigation.
   const tConnect0 = Date.now();
@@ -411,6 +450,7 @@ async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
   return {
     page,
     electronApp: null,
+    consoleErrors,
     teardown: async () => {
       const pid = ctProcess.pid;
       if (pid) {
@@ -438,11 +478,14 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
     env: makeCleanEnv(),
   });
 
+  const consoleErrors: string[] = [];
   const page = await getEditorWindow(app);
+  attachErrorCollectors(page, consoleErrors);
 
   return {
     page,
     electronApp: app,
+    consoleErrors,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -468,11 +511,14 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
     env: makeCleanEnv(),
   });
 
+  const consoleErrors: string[] = [];
   const page = await getEditorWindow(app);
+  attachErrorCollectors(page, consoleErrors);
 
   return {
     page,
     electronApp: app,
+    consoleErrors,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -498,11 +544,14 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
     env: makeCleanEnv(),
   });
 
+  const consoleErrors: string[] = [];
   const page = await getEditorWindow(app);
+  attachErrorCollectors(page, consoleErrors);
 
   return {
     page,
     electronApp: app,
+    consoleErrors,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -609,7 +658,20 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           }).catch(() => "(page closed)");
           console.log(`  FAIL url: ${url}`);
           console.log(`  FAIL body: ${bodyText}`);
+          // Check if key script files loaded
+          const scriptStatus = await result.page.evaluate(() => {
+            const scripts = Array.from(document.querySelectorAll("script[src]"));
+            return scripts.map((s) => (s as HTMLScriptElement).src).join(", ");
+          }).catch(() => "(page closed)");
+          console.log(`  FAIL scripts: ${scriptStatus}`);
         } catch { /* page may be closed */ }
+        // Report collected JS errors from the renderer
+        if (result.consoleErrors.length > 0) {
+          console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
+          for (const err of result.consoleErrors.slice(0, 10)) {
+            console.log(`    ${err}`);
+          }
+        }
         await captureFailureDiagnostics(result.page, testInfo);
       }
 
