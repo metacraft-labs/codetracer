@@ -264,6 +264,33 @@ interface LaunchResult {
   teardown: () => Promise<void>;
   /** Collected console errors from the renderer (for diagnostics). */
   consoleErrors: string[];
+  /** Collected main-process stderr lines (for diagnostics). */
+  mainProcessOutput: string[];
+}
+
+/**
+ * Attach a stderr listener to the Electron main process to capture
+ * infoPrint / debugPrint output from the Nim-compiled index.js.
+ */
+function attachMainProcessCapture(
+  app: ElectronApplication,
+  bucket: string[],
+): void {
+  const proc = app.process();
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString().split("\n")) {
+      if (line.trim().length > 0) {
+        bucket.push(line);
+      }
+    }
+  });
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString().split("\n")) {
+      if (line.trim().length > 0) {
+        bucket.push(`[stdout] ${line}`);
+      }
+    }
+  });
 }
 
 /**
@@ -293,8 +320,14 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
       "window.inElectron": typeof (window as any).inElectron !== "undefined",
       "window.loadScripts": typeof (window as any).loadScripts !== "undefined",
     };
+    // Check CODETRACER_PREFIX from main process env (accessible via Node require)
+    let ctPrefix = "(not available)";
+    try {
+      ctPrefix = (window as any).require("process").env.CODETRACER_PREFIX ?? "(undefined)";
+    } catch { /* renderer may not have Node integration */ }
     console.error(`[diag] scripts: ${info.join("; ")}`);
     console.error(`[diag] globals: ${JSON.stringify(globals)}`);
+    console.error(`[diag] CODETRACER_PREFIX: ${ctPrefix}`);
   }).catch(() => { /* page may be closed */ });
 }
 
@@ -327,6 +360,8 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
   );
 
   const consoleErrors: string[] = [];
+  const mainProcessOutput: string[] = [];
+  attachMainProcessCapture(app, mainProcessOutput);
   const { result: page, durationMs: windowMs } = await timed(
     "first window",
     LIMIT_FIRST_WINDOW_MS,
@@ -344,6 +379,7 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
     page,
     electronApp: app,
     consoleErrors,
+    mainProcessOutput,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -451,6 +487,7 @@ async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
     page,
     electronApp: null,
     consoleErrors,
+    mainProcessOutput: ctStderr,
     teardown: async () => {
       const pid = ctProcess.pid;
       if (pid) {
@@ -479,6 +516,8 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
   });
 
   const consoleErrors: string[] = [];
+  const mainProcessOutput: string[] = [];
+  attachMainProcessCapture(app, mainProcessOutput);
   const page = await getEditorWindow(app);
   attachErrorCollectors(page, consoleErrors);
 
@@ -486,6 +525,7 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
     page,
     electronApp: app,
     consoleErrors,
+    mainProcessOutput,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -512,6 +552,8 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
   });
 
   const consoleErrors: string[] = [];
+  const mainProcessOutput: string[] = [];
+  attachMainProcessCapture(app, mainProcessOutput);
   const page = await getEditorWindow(app);
   attachErrorCollectors(page, consoleErrors);
 
@@ -519,6 +561,7 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
     page,
     electronApp: app,
     consoleErrors,
+    mainProcessOutput,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -545,6 +588,8 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   });
 
   const consoleErrors: string[] = [];
+  const mainProcessOutput: string[] = [];
+  attachMainProcessCapture(app, mainProcessOutput);
   const page = await getEditorWindow(app);
   attachErrorCollectors(page, consoleErrors);
 
@@ -552,6 +597,7 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
     page,
     electronApp: app,
     consoleErrors,
+    mainProcessOutput,
     teardown: async () => {
       try {
         const pid = app.process().pid;
@@ -671,6 +717,15 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           for (const err of result.consoleErrors.slice(0, 10)) {
             console.log(`    ${err}`);
           }
+        }
+        // Report main process output (backend-manager, socket, init flow)
+        if (result.mainProcessOutput.length > 0) {
+          console.log(`  FAIL main process output (${result.mainProcessOutput.length} lines):`);
+          for (const line of result.mainProcessOutput.slice(0, 30)) {
+            console.log(`    ${line}`);
+          }
+        } else {
+          console.log(`  FAIL main process output: (none captured)`);
         }
         await captureFailureDiagnostics(result.page, testInfo);
       }
