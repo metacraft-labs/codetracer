@@ -793,6 +793,7 @@
               -d:chronicles_timestamps=UnixTime \
               -d:ssl \
               -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
+              -d:codetracerPrefixConst=${runtimeDeps.outPath}/ \
               -d:libcPath=${pkgs.glibc.out} \
               -d:builtWithNix \
               -d:ctEntrypoint \
@@ -810,6 +811,7 @@
               -d:chronicles_timestamps=UnixTime \
               -d:ssl \
               -d:ctTest -d:testing --hint[XDeclaredButNotUsed]:off \
+              -d:codetracerPrefixConst=${runtimeDeps.outPath}/ \
               -d:libcPath=${pkgs.glibc.out} \
               -d:builtWithNix \
               -d:ctEntrypoint \

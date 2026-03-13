@@ -41,18 +41,29 @@ else:
 when not defined(ctRenderer):
   import std / sequtils
 
+## Compile-time fallback for the runtime-deps prefix. When the nix build
+## passes -d:codetracerPrefixConst=<path>, this value is baked into the
+## binary/JS so that paths resolve even when CODETRACER_PREFIX is not in
+## the process environment (e.g. Electron renderer in the nix package).
+const codetracerPrefixConst {.strdefine.} = ""
+
 when not defined(js) and defined(ctEntrypoint):
   # echo "ct entrypoint"
   let codetracerExeDir* = getAppDir().parentDir
 else:
   # In non-entrypoint contexts (e.g. Electron renderer), codetracerExeDir is
-  # derived from CODETRACER_PREFIX when available, otherwise "<unknown>".
-  let codetracerExeDir* = env.get("CODETRACER_PREFIX", "<unknown>")
+  # derived from CODETRACER_PREFIX when available, otherwise the compile-time
+  # constant, otherwise "<unknown>".
+  let codetracerExeDir* = env.get("CODETRACER_PREFIX",
+    if codetracerPrefixConst.len > 0: codetracerPrefixConst
+    else: "<unknown>")
 
 when not defined(js) and defined(ctEntrypoint):
   let codetracerPrefix* = env.get("CODETRACER_PREFIX", getAppDir().parentDir)
 else:
-  let codetracerPrefix* = env.get("CODETRACER_PREFIX", codetracerExeDir)
+  let codetracerPrefix* = env.get("CODETRACER_PREFIX",
+    if codetracerPrefixConst.len > 0: codetracerPrefixConst
+    else: codetracerExeDir)
 
 when not defined(js):
   proc findTool*(name: string): string =
