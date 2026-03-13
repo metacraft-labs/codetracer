@@ -38,8 +38,8 @@ export const LIMIT_CACHED_RECORDING_MS = 500;
 /** Small program recording (< 100 lines). */
 export const LIMIT_SMALL_RECORDING_MS = 5_000;
 
-/** RR recording: compile + rr record (typically 8-15s, Lean up to 60s). */
-export const LIMIT_RR_RECORDING_MS = 30_000;
+/** RR recording: compile + rr record. Ranges from 8s (C) to 60s+ (Crystal, Lean). */
+export const LIMIT_RR_RECORDING_MS = 90_000;
 
 // ---------------------------------------------------------------------------
 // UI interactions (with loaded trace)
