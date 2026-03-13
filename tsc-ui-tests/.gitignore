@@ -4,5 +4,6 @@ node_modules/
 /playwright-report/
 /blob-report/
 /test-diagnostics/
+/test-stats/
 /playwright/.cache/
 *.js

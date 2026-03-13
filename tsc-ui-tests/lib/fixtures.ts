@@ -28,6 +28,15 @@ import { _electron, chromium } from "playwright";
 
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
+import {
+  LIMIT_CACHED_RECORDING_MS,
+  LIMIT_SMALL_RECORDING_MS,
+  LIMIT_ELECTRON_LAUNCH_MS,
+  LIMIT_FIRST_WINDOW_MS,
+  LIMIT_TOTAL_SETUP_MS,
+  LIMIT_CT_HOST_STARTUP_MS,
+  timed,
+} from "./performance-limits";
 
 // ---------------------------------------------------------------------------
 // Path constants (shared with ct_helpers.ts)
@@ -50,8 +59,8 @@ const codetracerPath =
 
 const OK_EXIT_CODE = 0;
 const EDITOR_WINDOW_INDEX = 1;
-const MAX_CONNECT_ATTEMPTS = 12;
-const RETRY_DELAY_MS = 1_000;
+const MAX_CONNECT_ATTEMPTS = 20;
+const RETRY_DELAY_MS = 1_500;
 const GOTO_TIMEOUT_MS = 3_000;
 const PORT_RELEASE_DELAY_MS = 500;
 
@@ -96,6 +105,39 @@ interface CodetracerFixtures {
 
 function setupLdLibraryPath(): void {
   process.env.LD_LIBRARY_PATH = process.env.CT_LD_LIBRARY_PATH;
+}
+
+/**
+ * Recursively kills a process and all its descendants.
+ * Prevents backend-manager and db-backend from leaking as orphans
+ * when Electron is killed during test teardown.
+ */
+function killProcessTree(pid: number): void {
+  // Find children before killing the parent (once parent dies,
+  // children get reparented to init and we lose the relationship).
+  let childPids: number[] = [];
+  try {
+    const output = childProcess
+      .execSync(`pgrep -P ${pid} 2>/dev/null`, { encoding: "utf-8" })
+      .trim();
+    if (output) {
+      childPids = output.split("\n").map(Number).filter(Boolean);
+    }
+  } catch {
+    // No children found.
+  }
+
+  // Recursively kill children first.
+  for (const child of childPids) {
+    killProcessTree(child);
+  }
+
+  // Kill the process itself.
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Already dead.
+  }
 }
 
 function cleanupCodetracerEnvVars(): void {
@@ -149,7 +191,7 @@ function sleep(ms: number): Promise<void> {
  * and the editor is at index 1.
  */
 async function getEditorWindow(app: ElectronApplication): Promise<Page> {
-  const firstWindow = await app.firstWindow();
+  const firstWindow = await app.firstWindow({ timeout: 45_000 });
   const title = await firstWindow.title();
   if (title === "DevTools") {
     return app.windows()[EDITOR_WINDOW_INDEX];
@@ -220,35 +262,54 @@ interface LaunchResult {
 
 async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
+  const t0 = Date.now();
 
   const fullSourcePath = path.join(testProgramsPath, sourcePath);
-  const traceId = recordTestProgram(fullSourcePath);
+  const { result: traceId, durationMs: recordMs } = await timed(
+    "record",
+    LIMIT_SMALL_RECORDING_MS,
+    async () => recordTestProgram(fullSourcePath),
+  );
 
-  console.log(`# launching Electron for trace ${traceId}`);
+  console.log(`# launching Electron for trace ${traceId} (record: ${recordMs}ms)`);
 
   process.env.CODETRACER_CALLER_PID = process.pid.toString();
   process.env.CODETRACER_TRACE_ID = traceId.toString();
   process.env.CODETRACER_IN_UI_TEST = "1";
   process.env.CODETRACER_TEST = "1";
 
-  const app = await _electron.launch({
-    executablePath: codetracerPath,
-    cwd: codetracerInstallDir,
-    args: [],
-  });
+  const { result: app, durationMs: launchMs } = await timed(
+    "electron launch",
+    LIMIT_ELECTRON_LAUNCH_MS,
+    async () =>
+      _electron.launch({
+        executablePath: codetracerPath,
+        cwd: codetracerInstallDir,
+        args: [],
+      }),
+  );
 
-  const page = await getEditorWindow(app);
+  const { result: page, durationMs: windowMs } = await timed(
+    "first window",
+    LIMIT_FIRST_WINDOW_MS,
+    async () => getEditorWindow(app),
+  );
+
+  const totalMs = Date.now() - t0;
+  console.log(`#   electron: ${launchMs}ms  window: ${windowMs}ms  total setup: ${totalMs}ms`);
+  if (totalMs > LIMIT_TOTAL_SETUP_MS) {
+    console.warn(`# WARNING: total setup ${totalMs}ms exceeds limit ${LIMIT_TOTAL_SETUP_MS}ms`);
+  }
 
   return {
     page,
     electronApp: app,
     teardown: async () => {
       try {
-        // In test mode, window close events are prevented to keep the
-        // window alive during test execution.  app.close() would hang,
-        // so we kill the process directly.  The _workerCleanup fixture
-        // handles forcing the worker exit to avoid teardown timeout.
-        app.process().kill("SIGKILL");
+        const pid = app.process().pid;
+        if (pid) {
+          killProcessTree(pid);
+        }
       } catch (_e) {
         /* already closed */
       }
@@ -259,15 +320,20 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
 
 async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
+  const t0 = Date.now();
 
   const fullSourcePath = path.join(testProgramsPath, sourcePath);
-  const traceId = recordTestProgram(fullSourcePath);
+  const { result: traceId, durationMs: recordMs } = await timed(
+    "record",
+    LIMIT_SMALL_RECORDING_MS,
+    async () => recordTestProgram(fullSourcePath),
+  );
 
   const httpPort = await getFreeTcpPort();
   const backendPort = await getFreeTcpPort();
 
   console.log(
-    `# launching ct host for trace ${traceId} on port ${httpPort}`,
+    `# launching ct host for trace ${traceId} on port ${httpPort} (record: ${recordMs}ms)`,
   );
 
   const ctProcess = childProcess.spawn(
@@ -279,8 +345,22 @@ async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
       `--backend-socket-port=${backendPort}`,
       `--frontend-socket=${backendPort}`,
     ],
-    { cwd: codetracerInstallDir },
+    {
+      cwd: codetracerInstallDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
   );
+
+  // Capture ct host output for diagnostics.
+  const ctStderr: string[] = [];
+  const ctStdout: string[] = [];
+  ctProcess.stdout?.on("data", (chunk: Buffer) => {
+    ctStdout.push(chunk.toString());
+  });
+  ctProcess.stderr?.on("data", (chunk: Buffer) => {
+    ctStderr.push(chunk.toString());
+  });
 
   const chromiumPath = resolveChromiumPath();
   const extraArgs = (process.env.CODETRACER_ELECTRON_ARGS ?? "")
@@ -294,6 +374,7 @@ async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
   const page = await browser.newPage();
 
   // Wait for ct host to become ready with retry-based navigation.
+  const tConnect0 = Date.now();
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
@@ -303,26 +384,34 @@ async function launchTraceWeb(sourcePath: string): Promise<LaunchResult> {
       connected = true;
     } catch {
       if (attempt < MAX_CONNECT_ATTEMPTS) {
+        console.log(`  attempt ${attempt}/${MAX_CONNECT_ATTEMPTS} failed, retrying...`);
         await sleep(RETRY_DELAY_MS);
       }
     }
   }
+  const connectMs = Date.now() - tConnect0;
   if (!connected) {
+    console.error(`ct host stdout:\n${ctStdout.join("")}`);
+    console.error(`ct host stderr:\n${ctStderr.join("")}`);
     ctProcess.kill();
     await browser.close();
     throw new Error(
       `Failed to connect to ct host on port ${httpPort} after ${MAX_CONNECT_ATTEMPTS} attempts`,
     );
   }
+  const totalMs = Date.now() - t0;
+  console.log(`#   ct host connect: ${connectMs}ms  total web setup: ${totalMs}ms`);
+  if (connectMs > LIMIT_CT_HOST_STARTUP_MS) {
+    console.warn(`# WARNING: ct host connect ${connectMs}ms exceeds limit ${LIMIT_CT_HOST_STARTUP_MS}ms`);
+  }
 
   return {
     page,
     electronApp: null,
     teardown: async () => {
-      try {
-        ctProcess.kill();
-      } catch {
-        /* already exited */
+      const pid = ctProcess.pid;
+      if (pid) {
+        killProcessTree(pid);
       }
       await sleep(PORT_RELEASE_DELAY_MS);
       try {
@@ -353,11 +442,10 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        // In test mode, window close events are prevented to keep the
-        // window alive during test execution.  app.close() would hang,
-        // so we kill the process directly.  The _workerCleanup fixture
-        // handles forcing the worker exit to avoid teardown timeout.
-        app.process().kill("SIGKILL");
+        const pid = app.process().pid;
+        if (pid) {
+          killProcessTree(pid);
+        }
       } catch (_e) {
         /* already closed */
       }
@@ -384,11 +472,10 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        // In test mode, window close events are prevented to keep the
-        // window alive during test execution.  app.close() would hang,
-        // so we kill the process directly.  The _workerCleanup fixture
-        // handles forcing the worker exit to avoid teardown timeout.
-        app.process().kill("SIGKILL");
+        const pid = app.process().pid;
+        if (pid) {
+          killProcessTree(pid);
+        }
       } catch (_e) {
         /* already closed */
       }
@@ -415,11 +502,10 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
     electronApp: app,
     teardown: async () => {
       try {
-        // In test mode, window close events are prevented to keep the
-        // window alive during test execution.  app.close() would hang,
-        // so we kill the process directly.  The _workerCleanup fixture
-        // handles forcing the worker exit to avoid teardown timeout.
-        app.process().kill("SIGKILL");
+        const pid = app.process().pid;
+        if (pid) {
+          killProcessTree(pid);
+        }
       } catch (_e) {
         /* already closed */
       }
@@ -530,6 +616,19 @@ export {
   codetracerPath,
 };
 
+// Re-export performance timing utilities for use in tests
+export { timed, timedVoid } from "./performance-limits";
+export {
+  LIMIT_STEP_MS,
+  LIMIT_NAVIGATE_MS,
+  LIMIT_TAB_SWITCH_MS,
+  LIMIT_CONTEXT_MENU_MS,
+  LIMIT_SCRATCHPAD_UPDATE_MS,
+  LIMIT_STATE_DISPLAY_MS,
+  LIMIT_EVENT_LOG_POPULATE_MS,
+  LIMIT_RELOAD_RECONNECT_MS,
+} from "./performance-limits";
+
 // ---------------------------------------------------------------------------
 // Shared test utilities
 // ---------------------------------------------------------------------------
@@ -548,10 +647,12 @@ export function wait(ms: number): Promise<void> {
 
 /** Wait for the entry point to be ready (location path clickable). */
 export async function readyOnEntryTest(p: Page): Promise<void> {
+  await p.locator(".location-path").waitFor({ state: "visible", timeout: 15_000 });
   await p.locator(".location-path").click();
 }
 
 /** Wait for the event log footer to be populated. */
 export async function loadedEventLog(p: Page): Promise<void> {
+  await p.locator(".data-tables-footer-rows-count").waitFor({ state: "visible", timeout: 15_000 });
   await p.locator(".data-tables-footer-rows-count").click();
 }

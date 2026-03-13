@@ -373,15 +373,31 @@ test-frontend-js:
   node --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/nimMonacoTokenizer.test.mjs 2>&1 | grep -v "ExperimentalWarning"
 
 test-e2e *args:
-  cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
+  #!/usr/bin/env bash
+  set -e
+  if [ -z "${DISPLAY:-}" ]; then
+    echo "Error: \$DISPLAY is not set. Electron tests require a display server." >&2
+    echo "Use 'just test-gui' to run under Xvfb, or 'just test-gui-visible' from a desktop session." >&2
+    exit 1
+  fi
+  cd "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests" && \
     npm install --no-audit --no-fund && \
-    env CODETRACER_DEV_TOOLS=0 npx playwright test --reporter=list --workers=1 \
+    env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
       {{args}}
 
 dev-tools-test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
-    env CODETRACER_DEV_TOOLS=1 npx playwright test --reporter=list --workers=1 \
+    env CODETRACER_DEV_TOOLS=1 npx playwright test --workers=1 \
       {{args}}
+
+# Show accumulated test timing statistics.
+test-stats *args:
+  cd "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests" && \
+    node scripts/analyze-stats.mjs {{args}}
+
+# Delete all accumulated test stats.
+test-stats-reset:
+  rm -rf "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests/test-stats"
 
 # ====
 # Python recorder tests

@@ -9,6 +9,11 @@ import { TerminalOutputPane } from "./panes/terminal/terminal-output-pane";
 import { VariableStatePane } from "./panes/variable-state/variable-state-pane";
 import { retry } from "../lib/retry-helpers";
 import { debugLogger } from "../lib/debug-logger";
+import {
+  LIMIT_COMPONENTS_LOADED_MS,
+  LIMIT_TRACE_LOADED_MS,
+  timedVoid,
+} from "../lib/performance-limits";
 
 const EVENT_LOG_LOADING_RETRY_ATTEMPTS = 30;
 
@@ -137,28 +142,32 @@ export class LayoutPage extends BasePage {
    */
   async waitForTraceLoaded(): Promise<void> {
     debugLogger.log("LayoutPage: waiting for trace to be loaded (checking document title)");
-    await retry(async () => {
-      const title = await this.page.title();
-      const isLoaded = title.toLowerCase().includes("trace");
-      if (!isLoaded) {
-        debugLogger.log(`LayoutPage: trace not yet loaded (title='${title}')`);
-      }
-      return isLoaded;
+    await timedVoid("trace loaded", LIMIT_TRACE_LOADED_MS, async () => {
+      await retry(async () => {
+        const title = await this.page.title();
+        const isLoaded = title.toLowerCase().includes("trace");
+        if (!isLoaded) {
+          debugLogger.log(`LayoutPage: trace not yet loaded (title='${title}')`);
+        }
+        return isLoaded;
+      });
     });
     debugLogger.log("LayoutPage: trace loaded confirmed via title");
   }
 
   async waitForAllComponentsLoaded(): Promise<void> {
     debugLogger.log("LayoutPage: waiting for all components");
-    await Promise.all([
-      this.waitForFilesystemLoaded(),
-      this.waitForStateLoaded(),
-      this.waitForCallTraceLoaded(),
-      this.waitForEventLogLoaded(),
-      this.waitForEditorLoaded(),
-      this.waitForTerminalLoaded(),
-      this.waitForScratchpadLoaded(),
-    ]);
+    await timedVoid("all components loaded", LIMIT_COMPONENTS_LOADED_MS, async () => {
+      await Promise.all([
+        this.waitForFilesystemLoaded(),
+        this.waitForStateLoaded(),
+        this.waitForCallTraceLoaded(),
+        this.waitForEventLogLoaded(),
+        this.waitForEditorLoaded(),
+        this.waitForTerminalLoaded(),
+        this.waitForScratchpadLoaded(),
+      ]);
+    });
   }
 
   /**

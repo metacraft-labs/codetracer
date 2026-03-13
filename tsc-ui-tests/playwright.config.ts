@@ -8,9 +8,14 @@ export default defineConfig({
   globalTimeout: Number(
     process.env.PLAYWRIGHT_GLOBAL_TIMEOUT ?? (process.env.CI ? 7_200_000 : 0),
   ),
-  timeout: 120_000,
+  // Default timeout covers Electron launch (~20s) + simple UI interactions.
+  // Tests involving trace recording override via test.setTimeout().
+  timeout: 45_000,
   expect: { timeout: 10_000 },
-  reporter: process.env.CI ? "github" : "html",
+  reporter: [
+    [process.env.CI ? "github" : "list"],
+    ["./lib/stats-reporter.ts"],
+  ],
   use: {
     trace: "on-first-retry",
     screenshot: "only-on-failure",
@@ -31,6 +36,7 @@ export default defineConfig({
     {
       name: "rr",
       testDir: "./tests/sudoku",
+      timeout: 120_000,
     },
   ],
 });
