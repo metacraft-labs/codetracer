@@ -61,6 +61,7 @@ test.describe("ProgramAgnostic", () => {
   test("command palette switch theme updates styles", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
+    await layout.waitForTraceLoaded();
 
     const palette = new CommandPalette(ctPage);
     await palette.open();
@@ -89,6 +90,7 @@ test.describe("ProgramAgnostic", () => {
   test("command palette find symbol uses fuzzy search", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
+    await layout.waitForTraceLoaded();
 
     const palette = new CommandPalette(ctPage);
     await palette.open();
@@ -110,6 +112,7 @@ test.describe("ProgramAgnostic", () => {
     async ({ ctPage }) => {
       const layout = new LayoutPage(ctPage);
       await layout.waitForAllComponentsLoaded();
+      await layout.waitForTraceLoaded();
 
       await layout.nextButton().click();
 
@@ -128,6 +131,7 @@ test.describe("ProgramAgnostic", () => {
   test("event log filter trace vs recorded", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
+    await layout.waitForTraceLoaded();
 
     const eventLog = (await layout.eventLogTabs())[0];
     await eventLog.tabButton().click();
