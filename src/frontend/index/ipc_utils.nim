@@ -98,22 +98,32 @@ let runtimePlatform {.importjs: "process.platform", nodecl.}: cstring
 
 proc ready*(): Future[void] {.async.} =
   infoPrint "index: ready start"
+  infoPrint "index: backendManagerExe = ", backendManagerExe
   let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
   if backendManager.isOk:
     backendManagerProcess = backendManager.value
+    infoPrint "index: backend-manager started, pid = ", $backendManagerProcess.pid
+  else:
+    errorPrint "index: backend-manager FAILED to start: ", backendManager.error
+    errorPrint "index: backendManagerExe was: ", backendManagerExe
 
   let backendManagerSocketPath =
     if runtimePlatform == cstring"win32":
       cstring("\\\\.\\pipe\\ct_backend_manager_" & $backendManagerProcess.pid)
     else:
       codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".sock"
+  infoPrint "index: waiting for socket at ", backendManagerSocketPath
 
   await asyncSleep(100)
 
+  var socketAttempt = 0
   while true:
     backendManagerSocket = await startSocket(backendManagerSocketPath)
     if not backendManagerSocket.isNil:
       break
+    socketAttempt += 1
+    if socketAttempt mod 5 == 0:
+      infoPrint "index: still waiting for backend-manager socket (attempt ", $socketAttempt, ")"
     await asyncSleep(1000)
 
   setupProxyForDap(backendManagerSocket)

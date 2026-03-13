@@ -16,6 +16,9 @@ nodeProcess.on(cstring"uncaughtException", proc(err: JsObject) =
   # handle the error safely
   console.log cstring"[index]: uncaught exception: ", err)
 
+nodeProcess.on(cstring"unhandledRejection", proc(reason: JsObject, promise: JsObject) =
+  console.log cstring"[index]: unhandled promise rejection: ", reason)
+
 proc asyncSleep*(ms: int): Future[void] =
   let future = newPromise() do (resolve: (proc: void)):
     discard windowSetTimeout(resolve, ms)
