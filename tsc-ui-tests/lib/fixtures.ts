@@ -148,7 +148,18 @@ function cleanupCodetracerEnvVars(): void {
   delete process.env.CODETRACER_TEST;
 }
 
+// Cache trace IDs by source path so multiple tests for the same program
+// don't re-record. This dramatically speeds up RR test suites where each
+// language has 5 tests sharing the same sourcePath.
+const recordingCache = new Map<string, number>();
+
 function recordTestProgram(recordArg: string): number {
+  const cached = recordingCache.get(recordArg);
+  if (cached !== undefined) {
+    console.log(`# reusing cached trace for ${recordArg} with id ${cached}`);
+    return cached;
+  }
+
   process.env.CODETRACER_IN_UI_TEST = "1";
 
   const ctProcess = childProcess.spawnSync(
@@ -178,6 +189,7 @@ function recordTestProgram(recordArg: string): number {
     throw new Error(`Could not parse trace id from: ${rawTraceId}`);
   }
   console.log(`# recorded trace for ${recordArg} with id ${traceId}`);
+  recordingCache.set(recordArg, traceId);
   return traceId;
 }
 
