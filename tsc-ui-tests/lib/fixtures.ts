@@ -212,6 +212,10 @@ function makeCleanEnv(
   }
   delete env.CODETRACER_TRACE_ID;
   delete env.CODETRACER_CALLER_PID;
+  // Remove CODETRACER_PREFIX so the ct binary derives it from its own location
+  // (getAppDir().parentDir). The nix dev shell sets this to src/build-debug/
+  // which is wrong when running the nix-built binary from result/.
+  delete env.CODETRACER_PREFIX;
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   if (extra) {
