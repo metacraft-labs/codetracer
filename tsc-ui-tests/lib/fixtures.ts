@@ -277,11 +277,6 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
 
   console.log(`# launching Electron for trace ${traceId} (record: ${recordMs}ms)`);
 
-  process.env.CODETRACER_CALLER_PID = process.pid.toString();
-  process.env.CODETRACER_TRACE_ID = traceId.toString();
-  process.env.CODETRACER_IN_UI_TEST = "1";
-  process.env.CODETRACER_TEST = "1";
-
   const { result: app, durationMs: launchMs } = await timed(
     "electron launch",
     LIMIT_ELECTRON_LAUNCH_MS,
@@ -290,6 +285,10 @@ async function launchTraceElectron(sourcePath: string): Promise<LaunchResult> {
         executablePath: codetracerPath,
         cwd: codetracerInstallDir,
         args: [],
+        env: makeCleanEnv({
+          CODETRACER_CALLER_PID: process.pid.toString(),
+          CODETRACER_TRACE_ID: traceId.toString(),
+        }),
       }),
   );
 
