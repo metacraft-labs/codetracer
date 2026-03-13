@@ -4,10 +4,9 @@
  * Program-agnostic tests that work across any traced program.
  * Uses the noir_space_ship trace as the default test subject.
  *
- * Only ViewMenuOpensEventLogAndScratchpad is currently active in the C#
- * test registry. The remaining tests are marked test.skip because the C#
- * suite also has them commented out (keyboard emulation issues across
- * Electron and Web runtimes).
+ * The editor shortcuts test (Ctrl+F8, Ctrl+F11) remains test.skip due to
+ * potential cross-platform F-key emulation issues — verify the shortcuts
+ * are wired up in the editor before unskipping.
  */
 
 import { test, expect } from "../../lib/fixtures";
@@ -59,7 +58,7 @@ test.describe("ProgramAgnostic", () => {
     expect(await eventLog.isVisible()).toBe(true);
   });
 
-  test.skip("command palette switch theme updates styles", async ({ ctPage }) => {
+  test("command palette switch theme updates styles", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
 
@@ -87,7 +86,7 @@ test.describe("ProgramAgnostic", () => {
     });
   });
 
-  test.skip("command palette find symbol uses fuzzy search", async ({ ctPage }) => {
+  test("command palette find symbol uses fuzzy search", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
 
@@ -106,7 +105,7 @@ test.describe("ProgramAgnostic", () => {
     });
   });
 
-  test.skip(
+  test(
     "debugger controls step buttons reflect busy state",
     async ({ ctPage }) => {
       const layout = new LayoutPage(ctPage);
@@ -126,7 +125,7 @@ test.describe("ProgramAgnostic", () => {
     },
   );
 
-  test.skip("event log filter trace vs recorded", async ({ ctPage }) => {
+  test("event log filter trace vs recorded", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
 
