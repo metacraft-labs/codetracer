@@ -169,6 +169,7 @@ function recordTestProgram(recordArg: string): number {
       cwd: codetracerInstallDir,
       stdio: "pipe",
       encoding: "utf-8",
+      timeout: LIMIT_RR_RECORDING_MS,
     },
   );
 
