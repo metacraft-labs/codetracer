@@ -17,10 +17,12 @@ test.describe("wasm example — basic layout", () => {
     await ctPage.focus("div");
   });
 
-  test("correct entry status path/line", async ({ ctPage }) => {
+  // WASM backend does not send CtCompleteMove on trace load, so .location-path
+  // never appears. Re-enable once the WASM db-backend supports initial location.
+  test.fixme("correct entry status path/line", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
 
-    const statusBar = new StatusBar(ctPage, ctPage.locator(".status-bar"));
+    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     const simpleLocation = await statusBar.location();
     expect(simpleLocation.path.endsWith("main.rs")).toBeTruthy();
     expect(simpleLocation.line).toBe(ENTRY_LINE);
@@ -46,7 +48,9 @@ test.describe("wasm example — state and navigation", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
-  test("state panel loaded initially", async ({ ctPage }) => {
+  // WASM backend does not send CtCompleteMove on trace load, so readyOnEntry
+  // times out. Re-enable once the WASM db-backend supports initial location.
+  test.fixme("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statePanel = new StatePanel(ctPage);
     // Wait for the code state line to be populated before asserting

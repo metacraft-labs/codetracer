@@ -21,7 +21,7 @@ test.describe("noir example — basic layout", () => {
   test("correct entry status path/line", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
 
-    const statusBar = new StatusBar(ctPage, ctPage.locator(".status-bar"));
+    const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     const simpleLocation = await statusBar.location();
     expect(simpleLocation.path.endsWith("main.nr")).toBeTruthy();
     expect(simpleLocation.line).toBe(ENTRY_LINE);

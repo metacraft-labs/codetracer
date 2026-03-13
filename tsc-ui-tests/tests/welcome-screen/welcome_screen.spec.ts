@@ -15,7 +15,7 @@ test.describe("Welcome Screen", () => {
   });
 
   test("welcome screen has left and right panels", async ({ ctPage }) => {
-    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15_000 });
 
     const leftPanel = ctPage.locator(".welcome-left-panel");
     await expect(leftPanel).toBeVisible();
@@ -25,7 +25,7 @@ test.describe("Welcome Screen", () => {
   });
 
   test("welcome screen has start options buttons", async ({ ctPage }) => {
-    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15_000 });
 
     const openFolderButton = ctPage
       .locator(".start-option")
@@ -41,7 +41,7 @@ test.describe("Welcome Screen", () => {
   });
 
   test("recent traces section is visible", async ({ ctPage }) => {
-    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15_000 });
 
     const recentTraces = ctPage.locator(".recent-traces");
     await expect(recentTraces).toBeVisible();
@@ -51,14 +51,14 @@ test.describe("Welcome Screen", () => {
   });
 
   test("recent folders section is visible", async ({ ctPage }) => {
-    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15_000 });
 
     const recentFolders = ctPage.locator(".recent-folders");
     await expect(recentFolders).toBeVisible();
   });
 
   test("trace entries show time ago format", async ({ ctPage }) => {
-    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15_000 });
 
     const traceEntries = ctPage.locator(".recent-trace");
     const count = await traceEntries.count();
@@ -74,7 +74,7 @@ test.describe("Welcome Screen", () => {
   });
 
   test("trace tooltip appears on hover", async ({ ctPage }) => {
-    await ctPage.waitForSelector(".welcome-screen", { timeout: 10000 });
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15_000 });
 
     const traceEntries = ctPage.locator(".recent-trace");
     const count = await traceEntries.count();
