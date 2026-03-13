@@ -7,6 +7,7 @@ const ENTRY_LINE = 17;
 // Each describe block gets its own fixture scope (each test records + launches independently).
 
 test.describe("noir example — basic layout", () => {
+  test.setTimeout(90_000);
   test.use({ sourcePath: "noir_example/", launchMode: "trace" });
 
   test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
@@ -28,6 +29,7 @@ test.describe("noir example — basic layout", () => {
 });
 
 test.describe("noir example — state and navigation", () => {
+  test.setTimeout(90_000);
   test.use({ sourcePath: "noir_example/", launchMode: "trace" });
 
   test("expected event count", async ({ ctPage }) => {

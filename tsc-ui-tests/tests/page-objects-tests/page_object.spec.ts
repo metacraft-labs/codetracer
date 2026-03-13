@@ -4,6 +4,7 @@ import { extractLayoutPageModel } from "../../page-objects/layout_extractors";
 
 // Use the noir example just like the other tests.
 test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
+test.setTimeout(90_000);
 
 test("page object test", async ({ ctPage }) => {
   await readyOnEntry(ctPage);

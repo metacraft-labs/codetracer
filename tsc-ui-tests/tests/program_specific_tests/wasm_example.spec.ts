@@ -1,12 +1,14 @@
 import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
 import { StatusBar } from "../../page-objects/status_bar";
 import { StatePanel } from "../../page-objects/state";
+import { retry } from "../../lib/retry-helpers";
 
 const ENTRY_LINE = 11;
 
 // Each describe block gets its own fixture scope (each test records + launches independently).
 
 test.describe("wasm example — basic layout", () => {
+  test.setTimeout(90_000);
   test.use({ sourcePath: "wasm_example/", launchMode: "trace" });
 
   test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
@@ -26,6 +28,7 @@ test.describe("wasm example — basic layout", () => {
 });
 
 test.describe("wasm example — state and navigation", () => {
+  test.setTimeout(90_000);
   test.use({ sourcePath: "wasm_example/", launchMode: "trace" });
 
   // Event log footer count is not populated for WASM/DB traces yet.
@@ -46,6 +49,14 @@ test.describe("wasm example — state and navigation", () => {
   test("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statePanel = new StatePanel(ctPage);
+    // Wait for the code state line to be populated before asserting
+    await retry(
+      async () => {
+        const text = await statePanel.codeStateLine().textContent();
+        return text !== null && text.includes(`${ENTRY_LINE} | `);
+      },
+      { maxAttempts: 20, delayMs: 300 },
+    );
     await expect(statePanel.codeStateLine()).toContainText(`${ENTRY_LINE} | `);
   });
 

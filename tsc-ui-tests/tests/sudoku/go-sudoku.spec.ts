@@ -9,7 +9,6 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  */
 test.describe("GoSudoku", () => {
   test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
-  test.setTimeout(900_000);
   test.use({ sourcePath: "go_sudoku_solver/sudoku.go", launchMode: "trace" });
 
   test("editor loads sudoku.go", async ({ ctPage }) => {

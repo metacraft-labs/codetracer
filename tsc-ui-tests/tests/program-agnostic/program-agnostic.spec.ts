@@ -20,6 +20,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 test.describe("ProgramAgnostic", () => {
+  test.setTimeout(90_000);
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
   test("view menu opens event log and scratchpad", async ({ ctPage }) => {

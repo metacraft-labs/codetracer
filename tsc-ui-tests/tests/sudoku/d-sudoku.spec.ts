@@ -9,7 +9,6 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  */
 test.describe("DSudoku", () => {
   test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
-  test.setTimeout(900_000);
   test.use({ sourcePath: "d_sudoku_solver/sudoku.d", launchMode: "trace" });
 
   test("editor loads entrypoint.d", async ({ ctPage }) => {

@@ -14,7 +14,6 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  */
 test.describe("NimSudoku", () => {
   test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
-  test.setTimeout(900_000);
   test.use({ sourcePath: "nim_sudoku_solver/main.nim", launchMode: "trace" });
 
   test("editor loads a .nim file", async ({ ctPage }) => {

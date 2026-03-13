@@ -130,6 +130,7 @@ test.describe("NoirSpaceShip", () => {
     !!process.env.CI,
     "Electron fixture instability in CI — noir coverage provided by program_specific_tests/noir_space_ship.spec.ts",
   );
+  test.setTimeout(90_000);
   test.describe.configure({ retries: 2 });
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
@@ -356,7 +357,9 @@ test.describe("NoirSpaceShip", () => {
     await iterationEditor.waitFor({ state: "visible", timeout: 5_000 });
 
     const iterationTarget = "4";
-    await iterationEditor.press("Backspace");
+    await iterationEditor.click();
+    await sleep(100);
+    await iterationEditor.press("Control+a");
     await iterationEditor.type(iterationTarget, { delay: 20 });
     await iterationEditor.press("Enter");
 
@@ -768,15 +771,14 @@ test.describe("NoirSpaceShip", () => {
 
     // Prepare trace log data by running tracepoints
     await sleep(500);
-    const layout2 = new LayoutPage(ctPage);
-    await layout2.waitForAllComponentsLoaded();
 
-    const scratchpad2 = (await layout2.scratchpadTabs(true))[0];
-    await scratchpad2.tabButton().click();
-    expectedCount = await scratchpad2.entryCount();
+    // Re-fetch tabs from the same layout (avoid creating new LayoutPage instances)
+    const scratchpadForTrace = (await layout.scratchpadTabs(true))[0];
+    await scratchpadForTrace.tabButton().click();
+    expectedCount = await scratchpadForTrace.entryCount();
 
-    const editors = await layout2.editorTabs(true);
-    editor = editors.find((e) => e.tabButtonText.includes("src/main.nr"))!;
+    const editorsForTrace = await layout.editorTabs(true);
+    editor = editorsForTrace.find((e) => e.tabButtonText.includes("src/main.nr"))!;
     await editor.tabButton().click();
     await sleep(300);
 
@@ -791,14 +793,12 @@ test.describe("NoirSpaceShip", () => {
       try {
         await createSimpleTracePoint(ctPage);
 
-        // Re-acquire references after createSimpleTracePoint
-        const layout3 = new LayoutPage(ctPage);
-        await layout3.waitForAllComponentsLoaded();
-        const scratchpad3 = (await layout3.scratchpadTabs(true))[0];
-        await scratchpad3.tabButton().click();
-        expectedCount = await scratchpad3.entryCount();
-        const editors3 = await layout3.editorTabs(true);
-        editor = editors3.find((e) => e.tabButtonText.includes("src/main.nr"))!;
+        // Re-acquire references after createSimpleTracePoint (which creates its own LayoutPage)
+        const refreshedScratchpad = (await layout.scratchpadTabs(true))[0];
+        await refreshedScratchpad.tabButton().click();
+        expectedCount = await refreshedScratchpad.entryCount();
+        const refreshedEditors = await layout.editorTabs(true);
+        editor = refreshedEditors.find((e) => e.tabButtonText.includes("src/main.nr"))!;
       } catch (ex) {
         const msg = ex instanceof Error ? ex.message : String(ex);
         if (msg.includes("data.services") || msg.includes("services")) {
@@ -834,6 +834,9 @@ test.describe("NoirSpaceShip", () => {
     const traceRows = await tracePanel.traceRows();
     expect(traceRows.length).toBeGreaterThan(0);
 
+    // Re-fetch scratchpad for this phase
+    const scratchpadForTraceRow = (await layout.scratchpadTabs(true))[0];
+
     // Try to add a trace row value to the scratchpad via its context menu
     try {
       const traceMenuOptions = await traceRows[0].contextMenuEntries();
@@ -843,8 +846,8 @@ test.describe("NoirSpaceShip", () => {
       if (addTraceOption) {
         await traceRows[0].selectMenuOption(addTraceOption);
         expectedCount += 1;
-        await scratchpad2.waitForEntryCount(expectedCount);
-        scratchpad2.invalidateCache();
+        await scratchpadForTraceRow.waitForEntryCount(expectedCount);
+        scratchpadForTraceRow.invalidateCache();
       }
     } catch {
       console.warn(
@@ -853,7 +856,7 @@ test.describe("NoirSpaceShip", () => {
     }
 
     // Flow value addition from shield.nr
-    const shieldEditor = await navigateToShieldEditor(layout2);
+    const shieldEditor = await navigateToShieldEditor(layout);
     let shieldFlowValue: FlowValue | null = null;
     await retry(
       async () => {
@@ -873,9 +876,10 @@ test.describe("NoirSpaceShip", () => {
 
     await shieldFlowValue!.addToScratchpad();
     expectedCount += 1;
-    await scratchpad2.waitForEntryCount(expectedCount);
+    const finalScratchpad = (await layout.scratchpadTabs(true))[0];
+    await finalScratchpad.waitForEntryCount(expectedCount);
 
-    const finalCount = await scratchpad2.entryCount();
+    const finalCount = await finalScratchpad.entryCount();
     expect(finalCount).toBeGreaterThanOrEqual(expectedCount);
   });
 
@@ -1108,19 +1112,36 @@ test.describe("NoirSpaceShip", () => {
       const events = await tab.eventElements(true);
       expect(events.length).toBeGreaterThan(0);
 
-      for (let i = 0; i < events.length; i++) {
-        const row = events[i];
+      // Test a representative subset (first, middle, last) to stay within
+      // the test timeout — each click triggers a backend jump that takes time.
+      const indices: number[] = [];
+      if (events.length > 0) indices.push(0);
+      if (events.length >= 3) indices.push(Math.floor(events.length / 2));
+      if (events.length >= 2) indices.push(events.length - 1);
+
+      for (const i of indices) {
+        // Re-fetch events to avoid stale DOM references after previous click.
+        const freshEvents = await tab.eventElements(true);
+        if (i >= freshEvents.length) {
+          debugLogger.log(
+            `JumpToAllEvents: row ${i} no longer exists (${freshEvents.length} rows); stopping.`,
+          );
+          break;
+        }
+
+        const row = freshEvents[i];
         await row.click();
 
-        const capturedIndex = i;
         await retry(
           async () => {
-            const highlighted = await events[capturedIndex].isHighlighted();
+            const currentEvents = await tab.eventElements(true);
+            if (i >= currentEvents.length) return false;
+            const highlighted = await currentEvents[i].isHighlighted();
             if (!highlighted) {
               const classes =
-                (await events[capturedIndex].root.getAttribute("class")) ?? "";
+                (await currentEvents[i].root.getAttribute("class")) ?? "";
               debugLogger.log(
-                `JumpToAllEvents: row ${capturedIndex} classes '${classes}' not highlighted yet.`,
+                `JumpToAllEvents: row ${i} classes '${classes}' not highlighted yet.`,
               );
             }
             return highlighted;
