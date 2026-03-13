@@ -176,14 +176,16 @@ export class LayoutPage extends BasePage {
    */
   async waitForBaseComponentsLoaded(): Promise<void> {
     debugLogger.log("LayoutPage: waiting for base components (excluding editor)");
-    await Promise.all([
-      this.waitForFilesystemLoaded(),
-      this.waitForStateLoaded(),
-      this.waitForCallTraceLoaded(),
-      this.waitForEventLogLoaded(),
-      this.waitForTerminalLoaded(),
-      this.waitForScratchpadLoaded(),
-    ]);
+    await timedVoid("base components loaded", LIMIT_COMPONENTS_LOADED_MS, async () => {
+      await Promise.all([
+        this.waitForFilesystemLoaded(),
+        this.waitForStateLoaded(),
+        this.waitForCallTraceLoaded(),
+        this.waitForEventLogLoaded(),
+        this.waitForTerminalLoaded(),
+        this.waitForScratchpadLoaded(),
+      ]);
+    });
   }
 
   // ---------------------------------------------------------------------------

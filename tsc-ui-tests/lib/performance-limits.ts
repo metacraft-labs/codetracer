@@ -17,8 +17,9 @@ export const LIMIT_ELECTRON_LAUNCH_MS = 5_000;
 /** First window: from app ready to firstWindow() resolving. */
 export const LIMIT_FIRST_WINDOW_MS = 3_000;
 
-/** All UI components visible (GoldenLayout + Editor + EventLog + ...). */
-export const LIMIT_COMPONENTS_LOADED_MS = 5_000;
+/** All UI components visible (GoldenLayout + Editor + EventLog + ...).
+ * Includes waiting for event log data to finish loading. */
+export const LIMIT_COMPONENTS_LOADED_MS = 8_000;
 
 /** Trace data populated in UI after window ready. */
 export const LIMIT_TRACE_LOADED_MS = 3_000;
