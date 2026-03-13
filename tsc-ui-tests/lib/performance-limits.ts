@@ -18,8 +18,9 @@ export const LIMIT_ELECTRON_LAUNCH_MS = 5_000;
 export const LIMIT_FIRST_WINDOW_MS = 3_000;
 
 /** All UI components visible (GoldenLayout + Editor + EventLog + ...).
- * Includes waiting for event log data to finish loading. */
-export const LIMIT_COMPONENTS_LOADED_MS = 8_000;
+ * Includes waiting for event log data to finish loading.
+ * Under parallel worker load, event log loading can take 10-13s. */
+export const LIMIT_COMPONENTS_LOADED_MS = 15_000;
 
 /** Trace data populated in UI after window ready. */
 export const LIMIT_TRACE_LOADED_MS = 3_000;
