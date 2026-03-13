@@ -818,7 +818,10 @@ jobs:
       # WASM flow tests (wasm_flow_integration.rs) skip automatically if wazero
       # or wasm32-wasip1 target are not available.
       # Stylus flow tests are #[ignore] and require a devnode — not run here.
+      # Cross-repo tests (rr) run in the separate test-ui-tests-rr job.
       - run: "nix develop .#devShells.x86_64-linux.default --command just test"
+        env:
+          CODETRACER_RR_BACKEND_PRESENT: "0"
 
   test-ui-tests:
     runs-on: [self-hosted, nixos]
