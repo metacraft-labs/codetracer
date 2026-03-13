@@ -15,7 +15,9 @@ set -euo pipefail
 
 # Save the repo root (all paths relative to this)
 REPO_ROOT="$(pwd)"
-CLONE_DIR="${CLONE_DIR:-target/rr-backend-clone}"
+# Clone as a sibling directory so that path deps in rr-backend's Cargo.toml
+# (../codetracer/libs/ct-dap-client) resolve correctly.
+CLONE_DIR="${CLONE_DIR:-$(pwd)/../codetracer-rr-backend}"
 
 resolve_ref() {
 	# 1. Explicit override
@@ -111,7 +113,7 @@ build_rr_support() {
 		--print-build-logs ||
 		{
 			echo "nix build failed, falling back to cargo build via nix develop..." >&2
-			nix develop "./${CLONE_DIR}" --command \
+			nix develop "${CLONE_DIR}" --command \
 				bash -c "cd '${CLONE_DIR}' && cargo build"
 		}
 
@@ -137,7 +139,7 @@ resolve_runtime_deps() {
 	# Use markers to extract paths cleanly (nix develop may print banners)
 	local raw
 	# shellcheck disable=SC2016
-	raw="$(nix develop "./${CLONE_DIR}" --command bash -c \
+	raw="$(nix develop "${CLONE_DIR}" --command bash -c \
 		'echo "___LD_PATH_START___"; echo "$LD_LIBRARY_PATH"; echo "___LD_PATH_END___";
          echo "___PATH_START___"; echo "$PATH"; echo "___PATH_END___"')"
 
