@@ -57,7 +57,9 @@ export class EventRow {
   async click(): Promise<void> {
     const idx = await this.index();
     debugLogger.log(`EventRow: clicking row index ${idx}`);
-    await this.root.click();
+    // Use noWaitAfter to avoid blocking on "waiting for scheduled navigations"
+    // which can hang when the click triggers backend position updates via WebSocket.
+    await this.root.click({ noWaitAfter: true });
     debugLogger.log(`EventRow: click completed for row index ${idx}`);
   }
 }

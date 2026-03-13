@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { EventRow, EventElementType } from "./event-row";
 import { debugLogger } from "../../../lib/debug-logger";
+import { retry } from "../../../lib/retry-helpers";
 
 const POST_FILTER_DELAY_MS = 100;
 
@@ -74,15 +75,30 @@ export class EventLogPane {
 
   async rowByIndex(index: number, forceReload = false): Promise<EventRow> {
     debugLogger.log(`EventLogPane: locating row ${index} (forceReload=${forceReload})`);
-    const rows = await this.eventElements(forceReload);
-    for (const row of rows) {
-      if ((await row.index()) === index) {
-        debugLogger.log(`EventLogPane: found row ${index}`);
-        return row;
-      }
+
+    let found: EventRow | null = null;
+    await retry(
+      async () => {
+        const rows = await this.eventElements(true);
+        for (const row of rows) {
+          if ((await row.index()) === index) {
+            found = row;
+            return true;
+          }
+        }
+        debugLogger.log(
+          `EventLogPane: row ${index} not found among ${rows.length} rows; retrying`,
+        );
+        return false;
+      },
+      { maxAttempts: 20, delayMs: 300 },
+    );
+
+    if (!found) {
+      throw new Error(`Event log row with index ${index} was not found after retries.`);
     }
-    debugLogger.log(`EventLogPane: row ${index} not found`);
-    throw new Error(`Event log row with index ${index} was not found.`);
+    debugLogger.log(`EventLogPane: found row ${index}`);
+    return found;
   }
 
   private filterButton(): Locator {
