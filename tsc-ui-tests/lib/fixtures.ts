@@ -601,6 +601,15 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
 
       // Capture diagnostics on test failure (DOM snapshot, summary, error details)
       if (testInfo.status !== testInfo.expectedStatus) {
+        try {
+          const url = result.page.url();
+          const bodyText = await result.page.evaluate(() => {
+            const body = document.body;
+            return body ? body.innerHTML.substring(0, 500) : "(no body)";
+          }).catch(() => "(page closed)");
+          console.log(`  FAIL url: ${url}`);
+          console.log(`  FAIL body: ${bodyText}`);
+        } catch { /* page may be closed */ }
         await captureFailureDiagnostics(result.page, testInfo);
       }
 
