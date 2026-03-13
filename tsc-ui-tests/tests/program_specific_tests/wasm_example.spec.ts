@@ -11,7 +11,10 @@ test.describe("wasm example — basic layout", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "wasm_example/", launchMode: "trace" });
 
-  test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
+  // ct record for WASM requires cargo build --target wasm32-wasip1, which
+  // is not available in the nix-built ct wrapper's PATH. Re-enable once the
+  // nix wrapper includes the Rust toolchain or the WASM binary is pre-built.
+  test.fixme("we can access the browser window, not just dev tools", async ({ ctPage }) => {
     const title = await ctPage.title();
     expect(title).toContain("CodeTracer");
     await ctPage.focus("div");

@@ -159,6 +159,7 @@ proc recordDb(
   if lang in {LangRustWasm, LangCppWasm}:
     if vmExe.len == 0:
       echo "error: expected a path in `CODETRACER_WASM_VM_PATH`: please fill this env var"
+      quit(1)
 
   # echo vmExe, " ", startArgs.concat(args), " ", programDir
   # noir: call directly its local exe as a simple workaround for now:
