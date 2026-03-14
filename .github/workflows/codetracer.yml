@@ -881,7 +881,6 @@ jobs:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_RR_BACKEND_PRESENT: "1"
           CODETRACER_RR_TESTS_ONLY: "1"
-          PLAYWRIGHT_RETRIES: "0"
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
         run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
