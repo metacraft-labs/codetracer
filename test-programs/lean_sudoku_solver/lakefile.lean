@@ -10,3 +10,5 @@ package «lean_sudoku_solver» where
 lean_exe «sudoku» where
   root := `Main
   moreLeanArgs := #["-DautoImplicit=false"]
+  -- Pass -g to the C compiler so DWARF debug info is present in the binary
+  moreLeancArgs := #["-g"]

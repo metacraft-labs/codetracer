@@ -10,6 +10,7 @@
 #   nim-flow    Run Nim flow integration tests
 #   rust-flow   Run Rust flow integration tests
 #   go-flow     Run Go flow integration tests
+#   lean-flow   Run Lean build/record/replay tests
 #
 # Selectors (rr-backend tests, need db-backend):
 #   c-flow      Run C flow tests (in rr-backend repo)
@@ -92,13 +93,13 @@ expand_selectors() {
 	for sel in "${SELECTORS[@]}"; do
 		case "$sel" in
 		all)
-			expanded+=(nim-flow rust-flow go-flow c-flow cpp-flow d-flow pascal-flow)
+			expanded+=(nim-flow rust-flow go-flow lean-flow c-flow cpp-flow d-flow pascal-flow)
 			;;
-		nim-flow | rust-flow | go-flow | c-flow | cpp-flow | d-flow | pascal-flow)
+		nim-flow | rust-flow | go-flow | lean-flow | c-flow | cpp-flow | d-flow | pascal-flow)
 			expanded+=("$sel")
 			;;
 		*)
-			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, c-flow, cpp-flow, d-flow, pascal-flow, all)"
+			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, c-flow, cpp-flow, d-flow, pascal-flow, all)"
 			;;
 		esac
 	done
@@ -142,6 +143,10 @@ check_prerequisites() {
 			;;
 		pascal-flow)
 			command -v fpc >/dev/null 2>&1 || warn "fpc not found — pascal-flow tests may fail"
+			;;
+		lean-flow)
+			command -v lake >/dev/null 2>&1 || warn "lake not found — lean-flow tests may fail"
+			command -v lean >/dev/null 2>&1 || warn "lean not found — lean-flow tests may fail"
 			;;
 		esac
 	done
@@ -347,7 +352,7 @@ mkdir -p "$LOG_DIR"
 # Returns "db-backend" or "rr-backend" depending on where the test lives
 selector_test_location() {
 	case "$1" in
-	nim-flow | rust-flow | go-flow) echo "db-backend" ;;
+	nim-flow | rust-flow | go-flow | lean-flow) echo "db-backend" ;;
 	c-flow | cpp-flow | d-flow | pascal-flow) echo "rr-backend" ;;
 	*) die "Unknown selector: $1" ;;
 	esac
@@ -359,6 +364,7 @@ selector_to_test_name() {
 	nim-flow) echo "test_nim_flow" ;;
 	rust-flow) echo "test_rust_flow" ;;
 	go-flow) echo "test_go_flow" ;;
+	lean-flow) echo "test_lean" ;;
 	*) die "Unknown db-backend selector: $1" ;;
 	esac
 }
