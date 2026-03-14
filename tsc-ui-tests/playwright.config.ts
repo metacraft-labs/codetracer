@@ -29,4 +29,9 @@ export default defineConfig({
   // from lib/lang-support.ts. CI runs two jobs with different env vars;
   // locally, `just test-gui` runs everything.
   testDir: "./tests",
+  // In the DB-only CI job, exclude per-language sudoku tests (they need
+  // language-specific recorders not available in that job).
+  ...(process.env.CODETRACER_DB_TESTS_ONLY === "1" && {
+    testIgnore: "**/sudoku/**",
+  }),
 });

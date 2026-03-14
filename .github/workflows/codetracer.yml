@@ -847,9 +847,7 @@ jobs:
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_DB_TESTS_ONLY: "1"
-        # Ignore sudoku/ — per-language smoke tests need recorders not available in this job.
-        # The test-ui-tests-rr job runs the full suite including sudoku.
-        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui --ignore='**/sudoku/**'"
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
   test-ui-tests-rr:
     runs-on: [self-hosted, nixos]
