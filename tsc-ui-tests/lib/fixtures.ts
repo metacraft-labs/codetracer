@@ -176,7 +176,7 @@ function recordTestProgram(recordArg: string): number {
 
   if (ctProcess.error !== undefined || ctProcess.status !== OK_EXIT_CODE) {
     throw new Error(
-      `ct record failed: error=${ctProcess.error}; status=${ctProcess.status}\n${ctProcess.stderr}`,
+      `ct record failed: error=${ctProcess.error}; status=${ctProcess.status}\nstderr: ${ctProcess.stderr}\nstdout: ${ctProcess.stdout}`,
     );
   }
 
