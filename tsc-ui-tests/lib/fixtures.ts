@@ -28,6 +28,7 @@ import { _electron, chromium } from "playwright";
 
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
+import { requiresRR } from "./lang-support";
 import {
   LIMIT_CACHED_RECORDING_MS,
   LIMIT_SMALL_RECORDING_MS,
@@ -666,8 +667,12 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
     ) => {
       let result: LaunchResult;
 
-      const isRR = testInfo.project.name === "rr";
-      const recordingLimit = isRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
+      const needsRR = sourcePath ? requiresRR(sourcePath) : false;
+      const recordingLimit = needsRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
+
+      if (needsRR && !process.env.CODETRACER_RR_BACKEND_PRESENT) {
+        testInfo.skip(true, "requires ct-rr-support (RR-based language)");
+      }
 
       switch (launchMode) {
         case "trace": {

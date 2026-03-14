@@ -8,7 +8,6 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/GoSudokuTests.cs
  */
 test.describe("GoSudoku", () => {
-  test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
   test.use({ sourcePath: "go_sudoku_solver/sudoku.go", launchMode: "trace" });
 
   test("editor loads sudoku.go", async ({ ctPage }) => {

@@ -24,22 +24,19 @@ export default defineConfig({
   // test.use({ deploymentMode: "web" }) or defaults to "electron".
   // To run all tests in web mode, set CODETRACER_TEST_IN_BROWSER=1.
 
-  // Projects split tests into "default" (no rr required) and "rr"
-  // (requires ct-rr-support). CI runs them in separate jobs to avoid
-  // duplicating the non-rr tests. Running without --project executes both.
-  //
-  // Python and Ruby sudoku tests use DB-based recorders (not RR), so they
-  // belong in the default project despite living under tests/sudoku/.
+  // Projects split tests into "default" and "rr". The fixture auto-skips
+  // RR-based tests when CODETRACER_RR_BACKEND_PRESENT is not set, using
+  // language detection from lib/lang-support.ts. CI runs them in separate
+  // jobs; running without --project executes both.
   projects: [
     {
       name: "default",
       testDir: "./tests",
-      testIgnore: "**/sudoku/!(python-*|ruby-*)*.spec.ts",
+      testIgnore: "**/sudoku/**",
     },
     {
       name: "rr",
       testDir: "./tests/sudoku",
-      testIgnore: ["**/python-*", "**/ruby-*"],
       timeout: 120_000,
     },
   ],

@@ -8,7 +8,6 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/CSudokuTests.cs
  */
 test.describe("CSudoku", () => {
-  test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
   test.use({ sourcePath: "c_sudoku_solver/main.c", launchMode: "trace" });
 
   test("editor loads main.c", async ({ ctPage }) => {

@@ -8,7 +8,6 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  * Port of ui-tests/Tests/ProgramSpecific/CrystalSudokuTests.cs
  */
 test.describe("CrystalSudoku", () => {
-  test.skip(!process.env.CODETRACER_RR_BACKEND_PRESENT, "requires ct-rr-support");
   test.use({
     sourcePath: "crystal_sudoku_solver/sudoku.cr",
     launchMode: "trace",
