@@ -3,15 +3,19 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
 
 /**
  * Smoke tests for the Lean Sudoku Solver (lean_sudoku_solver).
- * RR-based trace with very limited LLDB support (compiled through C/LLVM).
  *
- * No editor tab, no call trace entries, no flow values, no state variables
- * at the initial RR position. All tests fall back to event log verification.
+ * DISABLED: Lean compiles to C but the generated C code has no #line
+ * directives, so DWARF debug info maps to .c files, not .lean source.
+ * Source-level breakpoints and stepping don't work until upstream adds
+ * #line support (leanprover/lean4#12921).
  *
- * Port of ui-tests/Tests/ProgramSpecific/LeanSudokuTests.cs
+ * Tracking issue: https://github.com/metacraft-labs/codetracer/issues/535
+ *
+ * The build+record+DAP-connect pipeline works — see
+ * src/db-backend/tests/lean_flow_integration.rs for headless tests.
  */
 test.describe("LeanSudoku", () => {
-  test.setTimeout(180_000);
+  test.fixme(true, "Lean C codegen lacks #line directives — no source-level debugging (codetracer#535)");
   test.use({ sourcePath: "lean_sudoku_solver/Main.lean", launchMode: "trace" });
 
   test("editor loads (event log fallback)", async ({ ctPage }) => {
