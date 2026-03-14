@@ -673,6 +673,17 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
       if (needsRR && !process.env.CODETRACER_RR_BACKEND_PRESENT) {
         testInfo.skip(true, "requires ct-rr-support (RR-based language)");
       }
+      if (needsRR && process.env.CODETRACER_DB_TESTS_ONLY === "1") {
+        testInfo.skip(true, "RR test skipped — running DB-based tests only");
+      }
+      if (!needsRR && process.env.CODETRACER_RR_TESTS_ONLY === "1") {
+        testInfo.skip(true, "DB-based test skipped — running RR tests only");
+      }
+
+      // RR-based tests need more time: compile + rr record + Electron + UI.
+      if (needsRR) {
+        test.setTimeout(120_000);
+      }
 
       switch (launchMode) {
         case "trace": {

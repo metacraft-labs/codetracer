@@ -843,10 +843,11 @@ jobs:
       - name: Build CodeTracer
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
-      - name: Run TypeScript Playwright UI tests
+      - name: Run TypeScript Playwright UI tests (DB-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
-        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui --project=default"
+          CODETRACER_DB_TESTS_ONLY: "1"
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
   test-ui-tests-rr:
     runs-on: [self-hosted, nixos]
@@ -875,13 +876,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
         run: ./ci/setup-rr-backend.sh
 
-      - name: Run TypeScript Playwright UI tests (rr-only)
+      - name: Run TypeScript Playwright UI tests (RR-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
           CODETRACER_RR_BACKEND_PRESENT: "1"
+          CODETRACER_RR_TESTS_ONLY: "1"
           PLAYWRIGHT_RETRIES: "0"
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
-        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui --project=rr"
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
       - name: Upload test artifacts
         if: failure()
