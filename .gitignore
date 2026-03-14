@@ -29,9 +29,13 @@ gem_home/
 # Direnv or shell hook + Nix Flake generated files
 .direnv/
 result
+result-bin
+result-man
 
 docs/book/book
 src/index.js
+src/common/paths.js
+src/common/paths_test
 ui.js
 debugger.js
 browsersync_serv.js
@@ -228,8 +232,13 @@ test-programs/*/main
 test-programs/*/sudoku
 test-programs/lean_sudoku_solver/.lake/
 test-programs/lean_sudoku_solver/lake-manifest.json
+test-programs/lean_sudoku_solver/*_build/
 # GNAT Ada build intermediaries
 test-programs/ada_sudoku_solver/b~*
+test-programs/ada_sudoku_solver/*.ali
+# Cargo.lock for test programs (not published crates)
+test-programs/*/Cargo.lock
+src/db-backend/test-programs/*/Cargo.lock
 
 # Temporary .patch file, used to coppy results from codex and applied using git apply <file name>.patch
 *.patch
