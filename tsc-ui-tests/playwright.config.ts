@@ -27,15 +27,19 @@ export default defineConfig({
   // Projects split tests into "default" (no rr required) and "rr"
   // (requires ct-rr-support). CI runs them in separate jobs to avoid
   // duplicating the non-rr tests. Running without --project executes both.
+  //
+  // Python and Ruby sudoku tests use DB-based recorders (not RR), so they
+  // belong in the default project despite living under tests/sudoku/.
   projects: [
     {
       name: "default",
       testDir: "./tests",
-      testIgnore: "**/sudoku/**",
+      testIgnore: "**/sudoku/!(python-*|ruby-*)*.spec.ts",
     },
     {
       name: "rr",
       testDir: "./tests/sudoku",
+      testIgnore: ["**/python-*", "**/ruby-*"],
       timeout: 120_000,
     },
   ],
