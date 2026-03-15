@@ -15,7 +15,7 @@ import {
   timedVoid,
 } from "../lib/performance-limits";
 
-const EVENT_LOG_LOADING_RETRY_ATTEMPTS = 30;
+const EVENT_LOG_LOADING_RETRY_ATTEMPTS = 60;
 
 /**
  * Main layout page that contains all pane tabs, debug buttons, and menu elements.

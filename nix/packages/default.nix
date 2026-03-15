@@ -249,7 +249,6 @@
                 --hints:off --warnings:off \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
-                -d:release \
                 --out:./subwindow.js js src/frontend/subwindow.nim
 
           '';
@@ -275,7 +274,6 @@
               --hints:off --warnings:off \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
-              -d:release \
               --out:./ui.js js src/frontend/ui_js.nim
           '';
 

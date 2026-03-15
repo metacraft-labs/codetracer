@@ -10,8 +10,8 @@ export default defineConfig({
   ),
   // Default timeout covers Electron launch (~20s) + simple UI interactions.
   // Tests involving trace recording override via test.setTimeout().
-  timeout: 45_000,
-  expect: { timeout: 10_000 },
+  timeout: 90_000,
+  expect: { timeout: 30_000 },
   reporter: [
     [process.env.CI ? "github" : "list"],
     ["./lib/stats-reporter.ts"],

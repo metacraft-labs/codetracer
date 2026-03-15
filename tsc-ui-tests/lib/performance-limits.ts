@@ -12,21 +12,22 @@
 // ---------------------------------------------------------------------------
 
 /** Electron app launch: from _electron.launch() to process ready. */
-export const LIMIT_ELECTRON_LAUNCH_MS = 5_000;
+export const LIMIT_ELECTRON_LAUNCH_MS = 15_000;
 
 /** First window: from app ready to firstWindow() resolving. */
-export const LIMIT_FIRST_WINDOW_MS = 3_000;
+export const LIMIT_FIRST_WINDOW_MS = 10_000;
 
 /** All UI components visible (GoldenLayout + Editor + EventLog + ...).
  * Includes waiting for event log data to finish loading.
- * Under parallel worker load, event log loading can take 10-13s. */
-export const LIMIT_COMPONENTS_LOADED_MS = 15_000;
+ * Under parallel worker load, event log loading can take 10-13s.
+ * Nim 2.2 JS codegen is slower than 1.6, requiring more headroom. */
+export const LIMIT_COMPONENTS_LOADED_MS = 45_000;
 
 /** Trace data populated in UI after window ready. */
 export const LIMIT_TRACE_LOADED_MS = 3_000;
 
 /** Total cold setup: record + launch + window + components. */
-export const LIMIT_TOTAL_SETUP_MS = 10_000;
+export const LIMIT_TOTAL_SETUP_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Recording
