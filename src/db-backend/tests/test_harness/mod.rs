@@ -907,10 +907,20 @@ pub fn is_rr_available() -> bool {
 
 /// Check if TTD (Time Travel Debugging) is available (Windows only).
 ///
-/// TTD is available when ct-rr-support is present, since it handles TTD under the hood.
+/// Checks that ct-rr-support is present AND the Microsoft.TimeTravelDebugging
+/// package is installed (required for actual TTD recording/replay).
 #[cfg(windows)]
 pub fn is_ttd_available() -> bool {
-    find_ct_rr_support().is_some()
+    if find_ct_rr_support().is_none() {
+        return false;
+    }
+    // Check if TTD package is installed via PowerShell
+    Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "if (Get-AppxPackage Microsoft.TimeTravelDebugging -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// TTD is not available on non-Windows platforms.
@@ -992,6 +1002,15 @@ pub fn find_python_recorder() -> Option<PathBuf> {
     }
 
     None
+}
+
+/// Check if a command is available on PATH.
+pub fn is_command_available(cmd: &str) -> bool {
+    Command::new(cmd)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Find the pure-Ruby recorder script.
