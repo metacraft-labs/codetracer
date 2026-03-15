@@ -21,26 +21,36 @@ let
   };
 
   # Build Nim for a specific version.
-  # For minor version bumps within the same major.minor (e.g. 2.2.4 → 2.2.6),
-  # keep the nixpkgs patches (NIM_CONFIG_DIR, nixbuild, etc.) as they still apply.
-  # For different major.minor versions (e.g. 1.6.x when nixpkgs has 2.2.x),
-  # clear patches since they're version-specific.
+  #
+  # When nixpkgs already ships the same major.minor (e.g. nixpkgs has 2.2.4
+  # and we want 2.2.x), use nim-unwrapped directly. Overriding the point
+  # release causes patch-application failures because nixpkgs patches
+  # (NIM_CONFIG_DIR, nixbuild, etc.) are version-specific and may not apply
+  # to a different point release's source tree.
+  #
+  # For a different major.minor (e.g. requesting 1.6.x when nixpkgs has 2.2.x),
+  # we must override and drop the patches entirely.
   mkNim =
     version: hash:
     let
       nixpkgsNimVersion = pkgs.lib.versions.majorMinor pkgs.nim-unwrapped.version;
       targetMajorMinor = pkgs.lib.versions.majorMinor version;
-      patchesCompatible = nixpkgsNimVersion == targetMajorMinor;
+      sameMajorMinor = nixpkgsNimVersion == targetMajorMinor;
     in
-    pkgs.nim-unwrapped.overrideAttrs (old: {
-      inherit version;
-      pname = "nim";
-      src = pkgs.fetchurl {
-        url = "https://nim-lang.org/download/nim-${version}.tar.xz";
-        inherit hash;
-      };
-      patches = if patchesCompatible then old.patches else [ ];
-    });
+    if sameMajorMinor then
+      # Reuse nixpkgs' nim-unwrapped (with its working patches) rather than
+      # risking patch conflicts from a different point release.
+      pkgs.nim-unwrapped
+    else
+      pkgs.nim-unwrapped.overrideAttrs (old: {
+        inherit version;
+        pname = "nim";
+        src = pkgs.fetchurl {
+          url = "https://nim-lang.org/download/nim-${version}.tar.xz";
+          inherit hash;
+        };
+        patches = [ ];
+      });
 
 in
 {
