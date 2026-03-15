@@ -175,12 +175,15 @@ mkShell {
     # TODO: use eventually if more stable, instead of
     # a lot of the shellHook logic
     # ourPkgs.staticDeps
-    ourPkgs.upstream-nim-codetracer
 
-    # Nim 1.6 for runtime/development - compatible with vendored libs and nimsuggest
-    # Note: Don't add nim-2_x here - it breaks nimsuggest compatibility.
-    # Use scripts/with-nim-* for multi-version testing instead.
-    ourPkgs.nim-1_6
+    # Nim 2.2.x — the primary compiler (provides nim and nim2)
+    ourPkgs.nim-codetracer
+
+    # Legacy Nim 1.6 for transition period (provides nim1)
+    ourPkgs.nim1-legacy
+
+    # TODO: uncomment when nim-devel builds from source work in nix
+    # ourPkgs.nim-devel
 
     # useful for lsp/editor support
     nimlsp

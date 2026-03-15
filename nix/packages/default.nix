@@ -33,14 +33,24 @@
           rust-1_80
           ;
 
-        # nim1 is used for building CodeTracer itself
-        # It provides only 'nim1' binary (not 'nim') to ensure we don't
-        # accidentally use it for runtime compilation
-        upstream-nim-codetracer = nimVersions.nim-1_6.overrideAttrs (old: {
+        # nim2 (Nim 2.2.x) is used for building CodeTracer itself.
+        # Provides both 'nim' and 'nim2' binaries.
+        nim-codetracer = nimVersions.nim-2_2.overrideAttrs (old: {
+          postInstall = (old.postInstall or "") + ''
+            cp $out/bin/nim $out/bin/nim2
+          '';
+        });
+
+        # Legacy nim1 for transition period.
+        # Provides only 'nim1' binary (not 'nim') to avoid conflicts.
+        nim1-legacy = nimVersions.nim-1_6.overrideAttrs (old: {
           postInstall = (old.postInstall or "") + ''
             mv $out/bin/nim $out/bin/nim1
           '';
         });
+
+        # Keep backward compat alias for anything that still references this
+        upstream-nim-codetracer = nim-codetracer;
 
         noir = inputs.noir.packages.${system}.default;
 
@@ -186,7 +196,7 @@
             pkgs.rustup
             # pkgs.rustc
             # pkgs.go
-            upstream-nim-codetracer
+            nim-codetracer
 
             # sourcemap-and-macros-nim-codetracer
           ];
@@ -202,16 +212,16 @@
           inherit src;
 
           nativeBuildInputs = [
-            upstream-nim-codetracer
+            nim-codetracer
           ];
 
           buildPhase = ''
-            ${upstream-nim-codetracer.out}/bin/nim1 \
+            ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
-            ${upstream-nim-codetracer.out}/bin/nim1 \
+            ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
@@ -232,12 +242,12 @@
           inherit src;
 
           nativeBuildInputs = [
-            upstream-nim-codetracer
+            nim-codetracer
           ];
 
           buildPhase = ''
 
-            ${upstream-nim-codetracer}/bin/nim1 \
+            ${nim-codetracer}/bin/nim2 \
                 --hints:off --warnings:off \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
@@ -259,11 +269,11 @@
           inherit src;
 
           nativeBuildInputs = [
-            upstream-nim-codetracer
+            nim-codetracer
           ];
 
           buildPhase = ''
-            ${upstream-nim-codetracer.out}/bin/nim1 \
+            ${nim-codetracer.out}/bin/nim2 \
               --hints:off --warnings:off \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
@@ -401,11 +411,11 @@
           inherit src;
 
           nativeBuildInputs = [
-            upstream-nim-codetracer
+            nim-codetracer
           ];
 
           buildPhase = ''
-            ${upstream-nim-codetracer.out}/bin/nim1 \
+            ${nim-codetracer.out}/bin/nim2 \
               -d:ctRepl --debugInfo --lineDir:on --threads:on \
               --hints:off --warnings:off \
               -d:chronicles_enabled=off \
@@ -772,7 +782,7 @@
           inherit src;
 
           nativeBuildInputs = with pkgs; [
-            upstream-nim-codetracer
+            nim-codetracer
             staticDeps
             runtimeDeps
             node-modules-derivation
@@ -794,9 +804,9 @@
             echo ${runtimeDeps.outPath}/bin
             ls -al ${runtimeDeps.outPath}/bin
 
-            ${upstream-nim-codetracer.out}/bin/nim1 \
+            ${nim-codetracer.out}/bin/nim2 \
               -d:debug -d:asyncBackend=asyncdispatch \
-              --gc:refc --hints:off --warnings:off \
+              --mm:refc --hints:off --warnings:off \
               --debugInfo --lineDir:on \
               --boundChecks:on --stacktrace:on --linetrace:on \
               -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
@@ -812,9 +822,9 @@
               --nimcache:nimcache \
               --out:ct c ./src/ct/codetracer.nim
 
-            ${upstream-nim-codetracer.out}/bin/nim1 \
+            ${nim-codetracer.out}/bin/nim2 \
               -d:debug -d:asyncBackend=asyncdispatch \
-              --gc:refc --hints:off --warnings:off \
+              --mm:refc --hints:off --warnings:off \
               --debugInfo --lineDir:on \
               --boundChecks:on --stacktrace:on --linetrace:on \
               -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
