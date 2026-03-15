@@ -175,12 +175,12 @@ mkShell {
     # TODO: use eventually if more stable, instead of
     # a lot of the shellHook logic
     # ourPkgs.staticDeps
-    ourPkgs.upstream-nim-codetracer
 
-    # Nim 1.6 for runtime/development - compatible with vendored libs and nimsuggest
-    # Note: Don't add nim-2_x here - it breaks nimsuggest compatibility.
-    # Use scripts/with-nim-* for multi-version testing instead.
-    ourPkgs.nim-1_6
+    # Nim 2.2.x — the primary compiler (provides nim and nim2)
+    ourPkgs.nim-codetracer
+
+    # TODO: uncomment when nim-devel builds from source work in nix
+    # ourPkgs.nim-devel
 
     # useful for lsp/editor support
     nimlsp
@@ -297,13 +297,39 @@ mkShell {
     fi
 
     # ===========================================================================
+    # Workspace tools detection
+    # ===========================================================================
+    # Detect shared metacraft scripts by walking up from the repo root.
+    # Supports both direct nesting (metacraft/codetracer/) and workspace
+    # nesting (metacraft/codetracer-main/codetracer/).
+    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+    METACRAFT_SCRIPTS=""
+
+    # Check parent (workspace dir or metacraft root)
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/scripts" ]; then
+      METACRAFT_SCRIPTS="$WORKSPACE_ROOT/scripts"
+    fi
+    # Check grandparent (metacraft root when inside a workspace dir)
+    if [ -z "$METACRAFT_SCRIPTS" ] && [ -n "$WORKSPACE_ROOT" ]; then
+      METACRAFT_PARENT="$(cd "$WORKSPACE_ROOT/.." 2>/dev/null && pwd)"
+      if [ -n "$METACRAFT_PARENT" ] && [ -d "$METACRAFT_PARENT/scripts" ]; then
+        METACRAFT_SCRIPTS="$METACRAFT_PARENT/scripts"
+      fi
+    fi
+
+    if [ -n "$METACRAFT_SCRIPTS" ]; then
+      export METACRAFT_WORKSPACE_PRESENT=1
+      export METACRAFT_WORKSPACE_SCRIPTS="$METACRAFT_SCRIPTS"
+      export PATH="$METACRAFT_SCRIPTS:$PATH"
+    fi
+
+    # ===========================================================================
     # Sibling repo detection
     # ===========================================================================
     # When sibling repos are checked out alongside this one (workspace layout),
     # detect them, add their binaries to PATH, and set CODETRACER_*_PRESENT env
     # vars that enable cross-repo integration tests.
     # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
-    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
 
     # --- codetracer-rr-backend ---
     if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
@@ -375,6 +401,11 @@ mkShell {
     fi
 
     figlet "Welcome to CodeTracer"
+
+    # Print workspace tools summary
+    if [ "''${METACRAFT_WORKSPACE_PRESENT:-}" = "1" ]; then
+      echo "  workspace: detected (shared scripts at $METACRAFT_WORKSPACE_SCRIPTS)"
+    fi
 
     # Print sibling detection summary
     if [ "''${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then

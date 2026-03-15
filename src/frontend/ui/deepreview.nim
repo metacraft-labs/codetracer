@@ -160,7 +160,8 @@ proc buildCoverageDecorations(file: DeepReviewFileData): seq[JsObject] =
   if file.isNil:
     return
 
-  for cov in file.coverage:
+  for covItem in file.coverage:
+    let cov = covItem
     if cov.line < 1:
       continue
     var className: cstring
@@ -198,7 +199,8 @@ proc buildInlineValueDecorations(file: DeepReviewFileData, executionIndex: int):
     return
 
   let flow = file.flow[executionIndex]
-  for step in flow.steps:
+  for stepItem in flow.steps:
+    let step = stepItem
     if step.values.len == 0:
       continue
     # Build a summary of variable values at this step.

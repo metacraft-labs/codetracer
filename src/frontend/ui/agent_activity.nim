@@ -211,10 +211,11 @@ proc flushPendingPrompts(self: AgentActivityComponent) =
     return
 
   for queuedPrompt in self.pendingPrompts:
+    let promptCopy = queuedPrompt
     data.ipc.send("CODETRACER::acp-prompt", js{
       "sessionId": self.sessionId,
       "clientSessionId": self.pendingSessionId,
-      "text": queuedPrompt
+      "text": promptCopy
     })
   self.pendingPrompts.setLen(0)
 

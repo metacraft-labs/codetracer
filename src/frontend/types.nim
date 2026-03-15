@@ -1,5 +1,5 @@
 import
-  std/[ jsffi, dom, async, typetraits, tables ],
+  std/[ jsffi, dom, asyncjs, typetraits, tables ],
   vdom, karax, kdom,
   lang, communication, dap,
   lib/[ monaco_lib, jslib ],

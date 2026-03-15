@@ -4,7 +4,7 @@ NIM_COMMON_FLAGS=\
 -d:chronicles_line_numbers=true\
 -d:chronicles_timestamps=UnixTime\
 -d:ssl\
---gc:refc\
+--mm:refc\
 --hints:off\
 --warnings:off\
 --hint[Processing]:off\

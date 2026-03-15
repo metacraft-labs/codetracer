@@ -155,7 +155,7 @@ proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
   except:
     errorPrint "loading symbols: ", getCurrentExceptionMsg()
 
-proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
+proc loadTrace*(data: ptr ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
   # set title
   when not defined(server):
     main.setTitle(trace.program)
@@ -231,7 +231,7 @@ proc loadExistingRecord*(traceId: int) {.async.} =
 
   if not data.trace.isNil:
     infoPrint "index: loading trace in mainWindow"
-    await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
+    await addr(data).loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
   # (alexander: i think this is not really used anymore: as it's expected to really work only
   #    for ct shell, but that's not currently maintained a lot)
@@ -430,7 +430,8 @@ proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
   for i, config in launchConfigs:
     var envJs: seq[JsObject] = @[]
     for envPair in config.env:
-      envJs.add(js{key: envPair.key, value: envPair.value})
+      let envPairCopy = envPair
+      envJs.add(js{key: envPairCopy.key, value: envPairCopy.value})
     configsJs.add(js{
       index: i,
       name: config.name,
@@ -570,7 +571,8 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
     for i, config in launchConfigs:
       var envJs: seq[JsObject] = @[]
       for envPair in config.env:
-        envJs.add(js{key: envPair.key, value: envPair.value})
+        let envPairCopy = envPair
+        envJs.add(js{key: envPairCopy.key, value: envPairCopy.value})
       configsJs.add(js{
         index: i,
         name: config.name,

@@ -209,5 +209,5 @@ proc ready*(): Future[void] {.async.} =
   infoPrint "index: layout/helpers loaded, calling data.init"
 
   # init the UI directly; delayed timer scheduling can be skipped in server mode
-  discard data.init(config, layout, helpers)
+  discard addr(data).init(config, layout, helpers)
   infoPrint "index: data.init dispatched"

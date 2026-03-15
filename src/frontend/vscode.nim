@@ -1,5 +1,5 @@
 when defined(ctInExtension):
-  import std / [async, jsffi, jsconsole, strformat, strutils]
+  import std / [asyncjs, jsffi, jsconsole, strformat, strutils]
   import .. / common / [ct_event, paths]
   import communication
   import results

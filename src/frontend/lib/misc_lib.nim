@@ -1,5 +1,5 @@
 import
-  std / [ jsffi, async ],
+  std / [ jsffi, asyncjs ],
   electron_lib
 
 type

@@ -289,7 +289,8 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
   let textModel = self.monacoEditor.getModel()
   var newDecorations: seq[DeltaDecoration] = @[]
 
-  for line in lines:
+  for lineItem in lines:
+    let line = lineItem
     let lineContent = textModel.getLineContent(line.line)
     let endIndex = lineContent.len() + 1
     let startIndex = textModel.getLineFirstNonWhitespaceColumn(line.line)
