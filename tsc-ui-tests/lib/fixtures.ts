@@ -62,6 +62,22 @@ const codetracerPath =
     ? envCodetracerPath
     : path.join(codetracerPrefix, "bin", ctBinaryName);
 
+// On Windows, ct.exe spawns Electron as a child process (no execv), which
+// prevents Playwright from connecting via CDP.  We launch Electron directly
+// and pass the app directory so it picks up package.json / index.js.
+const electronExePath: string | null = (() => {
+  if (!isWindows) return null;
+  // Try node_modules in the codetracer install dir
+  const candidates = [
+    path.join(codetracerInstallDir, "node-packages", "node_modules", "electron", "dist", "electron.exe"),
+    path.join(codetracerInstallDir, "node_modules", "electron", "dist", "electron.exe"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+})();
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -406,14 +422,20 @@ async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SM
 
   console.log(`# launching Electron for trace ${traceId} (record: ${recordMs}ms)`);
 
+  // On Windows, ct.exe spawns Electron as a child process (no execv),
+  // which prevents Playwright from connecting via CDP.  Launch Electron
+  // directly and pass the app directory so it picks up package.json.
+  const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const launchArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
+
   const { result: app, durationMs: launchMs } = await timed(
     "electron launch",
     LIMIT_ELECTRON_LAUNCH_MS,
     async () =>
       _electron.launch({
-        executablePath: codetracerPath,
+        executablePath: launchExe,
         cwd: codetracerInstallDir,
-        args: [],
+        args: launchArgs,
         env: makeCleanEnv({
           CODETRACER_CALLER_PID: process.pid.toString(),
           CODETRACER_TRACE_ID: traceId.toString(),
@@ -570,10 +592,13 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
   setupLdLibraryPath();
   console.log("# launching welcome screen");
 
+  const welcomeExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const welcomeArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
+
   const app = await _electron.launch({
-    executablePath: codetracerPath,
+    executablePath: welcomeExe,
     cwd: codetracerInstallDir,
-    args: [],
+    args: welcomeArgs,
     env: makeCleanEnv(),
   });
 
@@ -606,10 +631,15 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
   console.log(`# launching edit mode for ${folderPath}`);
 
+  const editExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const editArgs = (isWindows && electronExePath)
+    ? [codetracerPrefix, "edit", folderPath]
+    : ["edit", folderPath];
+
   const app = await _electron.launch({
-    executablePath: codetracerPath,
+    executablePath: editExe,
     cwd: codetracerInstallDir,
-    args: ["edit", folderPath],
+    args: editArgs,
     env: makeCleanEnv(),
   });
 
@@ -642,10 +672,15 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
   console.log(`# launching deepreview mode for ${jsonPath}`);
 
+  const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const drArgs = (isWindows && electronExePath)
+    ? [codetracerPrefix, `--deepreview=${jsonPath}`]
+    : [`--deepreview=${jsonPath}`];
+
   const app = await _electron.launch({
-    executablePath: codetracerPath,
+    executablePath: drExe,
     cwd: codetracerInstallDir,
-    args: [`--deepreview=${jsonPath}`],
+    args: drArgs,
     env: makeCleanEnv(),
   });
 

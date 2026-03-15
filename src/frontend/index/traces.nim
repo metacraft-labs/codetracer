@@ -155,7 +155,10 @@ proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
   except:
     errorPrint "loading symbols: ", getCurrentExceptionMsg()
 
-proc loadTrace*(data: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
+proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
+  # Copy into a local var to work around Nim 2.2's capture check.
+  # On the JS backend, this is a reference copy, so mutations propagate.
+  var data = dataArg
   # set title
   when not defined(server):
     main.setTitle(trace.program)
