@@ -35,14 +35,15 @@
 
         # nim2 (Nim 2.2.x) is used for building CodeTracer itself.
         # Provides both 'nim' and 'nim2' binaries.
-        # Wraps them with NIM_CONFIG_PATH so Nim can find its stdlib
-        # in the nix store (nim-unwrapped alone doesn't set this).
+        # Wraps all Nim tools with NIM_CONFIG_PATH so they can find the
+        # stdlib in the nix store (nim-unwrapped alone doesn't set this).
         nim-codetracer = nimVersions.nim-2_2.overrideAttrs (old: {
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
           postInstall = (old.postInstall or "") + ''
             cp $out/bin/nim $out/bin/nim2
-            wrapProgram $out/bin/nim --set NIM_CONFIG_PATH $out/nim/config
-            wrapProgram $out/bin/nim2 --set NIM_CONFIG_PATH $out/nim/config
+            for tool in nim nim2 nimsuggest nimgrep nimpretty testament nim_dbg; do
+              [ -f "$out/bin/$tool" ] && wrapProgram $out/bin/$tool --set NIM_CONFIG_PATH $out/nim/config
+            done
           '';
         });
 
