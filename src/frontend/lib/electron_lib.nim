@@ -79,6 +79,8 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
 
       setupLdLibraryPath()
 
+      # Prevent spawned console apps from creating visible console windows on Windows.
+      options.windowsHide = true
       let process = nodeStartProcess.spawn(path, args, options)
 
       process.stdout.setEncoding(cstring"utf8")

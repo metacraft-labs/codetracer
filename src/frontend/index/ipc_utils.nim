@@ -99,7 +99,7 @@ let runtimePlatform {.importjs: "process.platform", nodecl.}: cstring
 proc ready*(): Future[void] {.async.} =
   infoPrint "index: ready start"
   infoPrint "index: backendManagerExe = ", backendManagerExe
-  let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "stdio": cstring"inherit" })
+  let backendManager = await startProcess(backendManagerExe.cstring, @[], js{ "windowsHide": true })
   if backendManager.isOk:
     backendManagerProcess = backendManager.value
     infoPrint "index: backend-manager started, pid = ", $backendManagerProcess.pid

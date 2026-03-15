@@ -189,7 +189,8 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
       var configsJs: seq[JsObject] = @[]
       for i, config in launchConfigs:
         var envJs: seq[JsObject] = @[]
-        for envPair in config.env:
+        for j in 0 ..< config.env.len:
+          let envPair = config.env[j]
           envJs.add(js{key: envPair.key, value: envPair.value})
         configsJs.add(js{
           index: i,

@@ -377,7 +377,8 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
   var repoPathSet: JsAssoc[cstring, bool] = JsAssoc[cstring, bool]{}
 
   if not selfContained:
-    for path in paths:
+    for i in 0 ..< paths.len:
+      let path = paths[i]
       try:
         let (stdoutRev, stderrRev, errRev) = await childProcessExec(cstring(&"git rev-parse --show-toplevel"), js{cwd: path})
         repoPathSet[stdoutRev.trim] = true
