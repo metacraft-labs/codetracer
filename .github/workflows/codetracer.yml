@@ -523,9 +523,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          wget https://nim-lang.org/download/nim-1.6.20.tar.xz
-          tar xf nim-1.6.20.tar.xz
-          pushd nim-1.6.20
+          wget https://nim-lang.org/download/nim-2.2.6.tar.xz
+          tar xf nim-2.2.6.tar.xz
+          pushd nim-2.2.6
           sh build.sh
           bin/nim c koch
           ./koch boot -d:release
@@ -587,10 +587,10 @@ jobs:
           TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
           mkdir -p "${TARGET_DIR}"
 
-          ./nim-1.6.20/bin/nim -d:release \
+          ./nim-2.2.6/bin/nim -d:release \
             --d:asyncBackend=asyncdispatch \
             --dynlibOverride:std -d:staticStd \
-            --gc:refc --hints:on --warnings:off \
+            --mm:refc --hints:on --warnings:off \
             --boundChecks:on \
             -d:useOpenssl3 \
             -d:ssl \
@@ -610,9 +610,9 @@ jobs:
             --passL:"-Wl,-Bstatic -L/usr/lib/x86_64-linux-gnu -l:libssl.a -l:libcrypto.a -Wl,-Bdynamic" \
             --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
 
-          ./nim-1.6.20/bin/nim \
+          ./nim-2.2.6/bin/nim \
             -d:release -d:asyncBackend=asyncdispatch \
-            --gc:refc --hints:off --warnings:off \
+            --mm:refc --hints:off --warnings:off \
             --debugInfo --lineDir:on \
             --boundChecks:on --stacktrace:on --linetrace:on \
             -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
@@ -644,10 +644,10 @@ jobs:
           TARGET_DIR="build-python/src/ct/bin/${{ matrix.target_os }}-${{ matrix.arch }}"
           mkdir -p "${TARGET_DIR}"
 
-          ./nim-1.6.20/bin/nim -d:release \
+          ./nim-2.2.6/bin/nim -d:release \
             --d:asyncBackend=asyncdispatch \
             --dynlibOverride:std -d:staticStd \
-            --gc:refc --hints:on --warnings:off \
+            --mm:refc --hints:on --warnings:off \
             --boundChecks:on \
             -d:useOpenssl3 \
             -d:ssl \
@@ -667,9 +667,9 @@ jobs:
             --passL:"$(pwd)/openssl-res/lib/libssl.a $(pwd)/openssl-res/lib/libcrypto.a" \
             --out:"${TARGET_DIR}/ct" c ./src/ct/codetracer.nim
 
-          ./nim-1.6.20/bin/nim \
+          ./nim-2.2.6/bin/nim \
             -d:release -d:asyncBackend=asyncdispatch \
-            --gc:refc --hints:off --warnings:off \
+            --mm:refc --hints:off --warnings:off \
             --debugInfo --lineDir:on \
             --boundChecks:on --stacktrace:on --linetrace:on \
             -d:chronicles_sinks=json -d:chronicles_line_numbers=true \
