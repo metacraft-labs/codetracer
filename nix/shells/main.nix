@@ -300,6 +300,20 @@ mkShell {
     fi
 
     # ===========================================================================
+    # Workspace tools detection
+    # ===========================================================================
+    # When this repo lives inside a workspace directory (e.g. metacraft workspace),
+    # detect shared workspace-level scripts and add them to PATH. This makes tools
+    # like `with-nim-devel` available regardless of which repo's shell you're in.
+    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/scripts" ]; then
+      export METACRAFT_WORKSPACE_PRESENT=1
+      export METACRAFT_WORKSPACE_SCRIPTS="$WORKSPACE_ROOT/scripts"
+      export PATH="$WORKSPACE_ROOT/scripts:$PATH"
+    fi
+
+    # ===========================================================================
     # Sibling repo detection (unified script)
     # ===========================================================================
     source "$ROOT_PATH/scripts/detect-siblings.sh" "$ROOT_PATH"
@@ -329,6 +343,12 @@ mkShell {
     fi
 
     figlet "Welcome to CodeTracer"
+
+    # Print workspace tools summary
+    if [ "''${METACRAFT_WORKSPACE_PRESENT:-}" = "1" ]; then
+      echo "  workspace: detected (shared scripts at $METACRAFT_WORKSPACE_SCRIPTS)"
+    fi
+
     # Sibling summary is printed by detect-siblings.sh above.
   '';
 }
