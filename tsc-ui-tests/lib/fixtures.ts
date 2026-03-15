@@ -264,6 +264,7 @@ function killProcessTree(pid: number): void {
       childProcess.execSync(`taskkill /PID ${pid} /T /F`, {
         encoding: "utf-8",
         stdio: "pipe",
+        windowsHide: true,
       });
     } catch {
       // Process may already be dead.
@@ -298,6 +299,27 @@ function killProcessTree(pid: number): void {
   }
 }
 
+/**
+ * Kill stray CodeTracer-related processes that may have leaked from
+ * previous test runs.  On Windows, this kills all backend_manager.exe,
+ * db-backend.exe, and db-backend-record.exe instances.  No-op on other
+ * platforms where Unix process groups handle cleanup more reliably.
+ */
+function killStrayCodetracerProcesses(): void {
+  if (!isWindows) return;
+  for (const name of ["backend_manager.exe", "db-backend.exe", "db-backend-record.exe"]) {
+    try {
+      childProcess.execSync(`taskkill /IM ${name} /F`, {
+        encoding: "utf-8",
+        stdio: "pipe",
+        windowsHide: true,
+      });
+    } catch {
+      // No matching processes — expected.
+    }
+  }
+}
+
 function cleanupCodetracerEnvVars(): void {
   delete process.env.CODETRACER_TRACE_ID;
   delete process.env.CODETRACER_CALLER_PID;
@@ -327,6 +349,7 @@ function recordTestProgram(recordArg: string): number {
       stdio: "pipe",
       encoding: "utf-8",
       timeout: LIMIT_RR_RECORDING_MS,
+      windowsHide: true,
     },
   );
 
@@ -627,6 +650,7 @@ async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_R
       cwd: codetracerInstallDir,
       env: makeCleanEnv(),
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     },
   );
 
@@ -842,7 +866,11 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   // Fixtures
   _workerCleanup: [
     async ({}, use) => {
+      // Kill any stray backend processes left over from previous runs.
+      killStrayCodetracerProcesses();
       await use();
+      // Kill any backend processes that may have leaked from this worker.
+      killStrayCodetracerProcesses();
       // Killing Electron with SIGKILL leaves Playwright's internal CDP
       // pipe handles open, preventing the worker from exiting.  Force
       // exit after a brief delay so test results can still be reported.

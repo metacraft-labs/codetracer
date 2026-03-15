@@ -39,46 +39,13 @@ test.describe("PythonSudoku", () => {
 
     const callTrace = (await layout.callTraceTabs())[0];
     await callTrace.tabButton().dispatchEvent("click");
-    callTrace.invalidateEntries();
 
-    // Locate solve_sudoku in the call trace.
-    let targetFound = false;
-    let targetEntry: Awaited<
-      ReturnType<typeof callTrace.findEntry>
-    > = null;
-
-    await retry(
-      async () => {
-        callTrace.invalidateEntries();
-        targetEntry = await callTrace.findEntry("solve_sudoku", true);
-        if (targetEntry !== null) {
-          targetFound = true;
-          return true;
-        }
-
-        const allEntries = await callTrace.getEntries(true);
-        for (const entry of allEntries) {
-          try {
-            await entry.expandChildren();
-          } catch {
-            // entry may not support expansion
-          }
-        }
-        return false;
-      },
-      { maxAttempts: 60, delayMs: 1000 },
-    );
-
-    if (!targetFound || targetEntry === null) {
-      throw new Error(
-        "Call trace entry 'solve_sudoku' was not found when trying to inspect the 'board' argument.",
-      );
-    }
+    const targetEntry = await callTrace.navigateToEntry("solve_sudoku");
 
     // Verify the solve_sudoku entry has a 'board' argument.
     await retry(
       async () => {
-        const args = await targetEntry!.arguments();
+        const args = await targetEntry.arguments();
         for (const arg of args) {
           const name = await arg.name();
           if (name.toLowerCase() === "board") {
