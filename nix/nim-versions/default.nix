@@ -20,37 +20,25 @@ let
     "2.2.6" = "sha256-ZXsOPV3veIFI0qh/phI/p1Wy2SytMe9g/SYeRReFUos=";
   };
 
-  # Build Nim for a specific version.
+  # Build Nim for a specific version from vanilla upstream source.
   #
-  # When nixpkgs already ships the same major.minor (e.g. nixpkgs has 2.2.4
-  # and we want 2.2.x), use nim-unwrapped directly. Overriding the point
-  # release causes patch-application failures because nixpkgs patches
-  # (NIM_CONFIG_DIR, nixbuild, etc.) are version-specific and may not apply
-  # to a different point release's source tree.
-  #
-  # For a different major.minor (e.g. requesting 1.6.x when nixpkgs has 2.2.x),
-  # we must override and drop the patches entirely.
+  # We always override nim-unwrapped with our requested version and clear
+  # all nixpkgs patches. This avoids inheriting nixpkgs-specific patches
+  # (e.g. openssl.patch introduces an undefined `gimportc` pragma) that
+  # can break compilation. The resulting binary knows its stdlib location
+  # via the install prefix, and nim-codetracer additionally wraps it with
+  # NIM_CONFIG_PATH for robustness.
   mkNim =
     version: hash:
-    let
-      nixpkgsNimVersion = pkgs.lib.versions.majorMinor pkgs.nim-unwrapped.version;
-      targetMajorMinor = pkgs.lib.versions.majorMinor version;
-      sameMajorMinor = nixpkgsNimVersion == targetMajorMinor;
-    in
-    if sameMajorMinor then
-      # Reuse nixpkgs' nim-unwrapped (with its working patches) rather than
-      # risking patch conflicts from a different point release.
-      pkgs.nim-unwrapped
-    else
-      pkgs.nim-unwrapped.overrideAttrs (old: {
-        inherit version;
-        pname = "nim";
-        src = pkgs.fetchurl {
-          url = "https://nim-lang.org/download/nim-${version}.tar.xz";
-          inherit hash;
-        };
-        patches = [ ];
-      });
+    pkgs.nim-unwrapped.overrideAttrs (old: {
+      inherit version;
+      pname = "nim";
+      src = pkgs.fetchurl {
+        url = "https://nim-lang.org/download/nim-${version}.tar.xz";
+        inherit hash;
+      };
+      patches = [ ];
+    });
 
 in
 {
