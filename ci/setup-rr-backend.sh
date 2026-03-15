@@ -26,12 +26,10 @@ resolve_ref() {
 		return
 	fi
 
-	# 2. sibling-pins.json (parse with grep/sed — no python3 needed)
-	if [[ -f .github/sibling-pins.json ]]; then
+	# 2. sibling-pins (plain text: name sha branch)
+	if [[ -f .github/sibling-pins ]]; then
 		local pin
-		pin=$(grep '"codetracer-rr-backend"' .github/sibling-pins.json |
-			sed 's/.*: *"\([^"]*\)".*/\1/' |
-			tr -d '[:space:]') || true
+		pin=$(grep '^codetracer-rr-backend ' .github/sibling-pins | cut -d' ' -f2) || true
 		if [[ -n $pin ]]; then
 			echo "$pin"
 			return
