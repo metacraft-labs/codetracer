@@ -300,13 +300,26 @@ mkShell {
     fi
 
     # ===========================================================================
+    # Workspace tools detection
+    # ===========================================================================
+    # When this repo lives inside a workspace directory (e.g. metacraft workspace),
+    # detect shared workspace-level scripts and add them to PATH. This makes tools
+    # like `with-nim-devel` available regardless of which repo's shell you're in.
+    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+
+    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/scripts" ]; then
+      export METACRAFT_WORKSPACE_PRESENT=1
+      export METACRAFT_WORKSPACE_SCRIPTS="$WORKSPACE_ROOT/scripts"
+      export PATH="$WORKSPACE_ROOT/scripts:$PATH"
+    fi
+
+    # ===========================================================================
     # Sibling repo detection
     # ===========================================================================
     # When sibling repos are checked out alongside this one (workspace layout),
     # detect them, add their binaries to PATH, and set CODETRACER_*_PRESENT env
     # vars that enable cross-repo integration tests.
     # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
-    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
 
     # --- codetracer-rr-backend ---
     if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
@@ -378,6 +391,11 @@ mkShell {
     fi
 
     figlet "Welcome to CodeTracer"
+
+    # Print workspace tools summary
+    if [ "''${METACRAFT_WORKSPACE_PRESENT:-}" = "1" ]; then
+      echo "  workspace: detected (shared scripts at $METACRAFT_WORKSPACE_SCRIPTS)"
+    fi
 
     # Print sibling detection summary
     if [ "''${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
