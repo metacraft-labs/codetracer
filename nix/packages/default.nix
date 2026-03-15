@@ -40,9 +40,9 @@
         nim-codetracer = nimVersions.nim-2_2.overrideAttrs (old: {
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
           postInstall = (old.postInstall or "") + ''
-            cp $out/bin/nim $out/bin/nim2
+            ln -sf $out/nim/bin/nim $out/bin/nim2
             for tool in nim nim2 nimsuggest nimgrep nimpretty testament nim_dbg; do
-              [ -f "$out/bin/$tool" ] && wrapProgram $out/bin/$tool --set NIM_CONFIG_PATH $out/nim/config
+              [ -f "$out/bin/$tool" ] || [ -L "$out/bin/$tool" ] && wrapProgram $out/bin/$tool --set NIM_CONFIG_PATH $out/nim/config
             done
           '';
         });
