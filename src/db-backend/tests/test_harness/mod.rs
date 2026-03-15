@@ -15,24 +15,21 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-#[cfg(unix)]
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
-#[cfg(unix)]
 use db_backend::task::{CtLoadFlowArguments, FlowMode, Location};
-#[cfg(unix)]
 use db_backend::transport::DapTransport;
-#[cfg(unix)]
 use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::BufReader;
 #[cfg(unix)]
-use std::io::{self, BufReader, ErrorKind};
+use std::io::{self, ErrorKind};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-#[cfg(unix)]
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -390,6 +387,234 @@ impl Drop for DapTestClient {
             }
         }
         self.db_backend.wait().ok();
+    }
+}
+
+/// A cross-platform DAP test client that communicates over stdio (stdin/stdout pipes).
+///
+/// This avoids Unix domain sockets entirely, making it usable on Windows. The child
+/// process is `db-backend dap-server --stdio`. A background thread reads stdout and
+/// sends parsed `DapMessage`s through an `mpsc` channel so the main thread can
+/// wait with timeouts.
+pub struct DapStdioTestClient {
+    child: Child,
+    reader_rx: Receiver<Result<DapMessage, String>>,
+    writer: ChildStdin,
+    client: DapClient,
+}
+
+impl DapStdioTestClient {
+    /// Spawn `db-backend dap-server --stdio` and set up pipes.
+    pub fn start() -> Result<Self, String> {
+        let db_backend_bin = env!("CARGO_BIN_EXE_db-backend");
+        let mut child = Command::new(db_backend_bin)
+            .arg("dap-server")
+            .arg("--stdio")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("failed to spawn db-backend dap-server --stdio: {}", e))?;
+
+        let writer = child
+            .stdin
+            .take()
+            .ok_or_else(|| "failed to capture db-backend stdin".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "failed to capture db-backend stdout".to_string())?;
+        let (reader_tx, reader_rx) = mpsc::channel::<Result<DapMessage, String>>();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                match dap::read_dap_message_from_reader(&mut reader) {
+                    Ok(msg) => {
+                        if reader_tx.send(Ok(msg)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        let _ = reader_tx.send(Err(format!("error reading DAP message: {}", err)));
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(DapStdioTestClient {
+            child,
+            reader_rx,
+            writer,
+            client: DapClient::default(),
+        })
+    }
+
+    /// Initialize the DAP session and launch with a recording (DB-trace variant).
+    pub fn initialize_and_launch(&mut self, recording: &TestRecording) -> Result<(), String> {
+        // Send initialize
+        let init = self.client.request("initialize", json!({}));
+        self.send(&init)?;
+        self.read_until_response("initialize", Duration::from_secs(5))?;
+
+        // Wait for initialized event
+        self.read_until_event("initialized", Duration::from_secs(5))?;
+
+        // Send configurationDone
+        let conf_done = self.client.request("configurationDone", json!({}));
+        self.send(&conf_done)?;
+
+        // Send launch — ct_rr_worker_exe is unused for DB traces, pass empty path.
+        let launch_args = LaunchRequestArguments {
+            program: None,
+            trace_folder: Some(recording.trace_dir.clone()),
+            trace_file: None,
+            raw_diff_index: None,
+            pid: None,
+            cwd: None,
+            no_debug: None,
+            restart: None,
+            name: None,
+            request: None,
+            typ: None,
+            session_id: None,
+            ct_rr_worker_exe: Some(PathBuf::from("")),
+            restore_location: None,
+        };
+        let launch = self
+            .client
+            .launch(launch_args)
+            .map_err(|e| format!("failed to build launch: {}", e))?;
+        self.send(&launch)?;
+
+        // Wait for stopped event (entry point)
+        self.read_until_event("stopped", Duration::from_secs(30))?;
+        // Consume the complete-move event
+        self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+
+        Ok(())
+    }
+
+    /// Set a breakpoint at the given line
+    pub fn set_breakpoint(&mut self, source_path: &Path, line: u32) -> Result<(), String> {
+        let set_bp = self.client.request(
+            "setBreakpoints",
+            json!({
+                "source": {
+                    "path": source_path.to_str().unwrap()
+                },
+                "breakpoints": [
+                    { "line": line }
+                ]
+            }),
+        );
+        self.send(&set_bp)?;
+        self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        Ok(())
+    }
+
+    /// Continue execution and wait for stopped event
+    pub fn continue_to_breakpoint(&mut self) -> Result<Location, String> {
+        let continue_req = self.client.request("continue", json!({ "threadId": 1 }));
+        self.send(&continue_req)?;
+
+        // Wait for stopped event
+        self.read_until_event("stopped", Duration::from_secs(30))?;
+
+        // Wait for complete-move event to get location
+        let complete_move = self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+
+        match complete_move {
+            DapMessage::Event(e) => serde_json::from_value(e.body["location"].clone())
+                .map_err(|e| format!("failed to parse location: {}", e)),
+            _ => Err("expected event".to_string()),
+        }
+    }
+
+    /// Request flow data for a location
+    pub fn request_flow(&mut self, location: Location) -> Result<FlowData, String> {
+        let flow_args = CtLoadFlowArguments {
+            flow_mode: FlowMode::Call,
+            location,
+        };
+        let flow_req = self
+            .client
+            .request("ct/load-flow", serde_json::to_value(flow_args).unwrap());
+        self.send(&flow_req)?;
+
+        // Wait for flow update event
+        let flow_update = self.read_until_event("ct/updated-flow", Duration::from_secs(30))?;
+
+        match flow_update {
+            DapMessage::Event(e) => FlowData::from_event_body(&e.body),
+            _ => Err("expected event".to_string()),
+        }
+    }
+
+    fn send(&mut self, msg: &DapMessage) -> Result<(), String> {
+        self.writer.send(msg).map_err(|e| format!("failed to send: {}", e))
+    }
+
+    fn read_next(&mut self, timeout: Duration) -> Result<DapMessage, String> {
+        match self.reader_rx.recv_timeout(timeout) {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(err)) => Err(err),
+            Err(RecvTimeoutError::Timeout) => Err(format!("timed out waiting for DAP message after {:?}", timeout)),
+            Err(RecvTimeoutError::Disconnected) => {
+                Err("DAP reader thread disconnected before delivering a message".to_string())
+            }
+        }
+    }
+
+    fn read_until_event(&mut self, event_name: &str, timeout: Duration) -> Result<DapMessage, String> {
+        let start = Instant::now();
+        loop {
+            let remaining = timeout.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                return Err(format!("timeout waiting for event '{}'", event_name));
+            }
+
+            let msg = self.read_next(remaining)?;
+            if let DapMessage::Event(ref e) = msg {
+                if e.event == event_name {
+                    return Ok(msg);
+                }
+            }
+        }
+    }
+
+    fn read_until_response(&mut self, command: &str, timeout: Duration) -> Result<DapMessage, String> {
+        let start = Instant::now();
+        loop {
+            let remaining = timeout.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                return Err(format!("timeout waiting for response to '{}'", command));
+            }
+
+            let msg = self.read_next(remaining)?;
+            if let DapMessage::Response(ref r) = msg {
+                if r.command == command {
+                    return Ok(msg);
+                }
+            }
+        }
+    }
+}
+
+impl Drop for DapStdioTestClient {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        // Capture and print stderr for debugging test failures
+        if let Some(stderr) = self.child.stderr.take() {
+            use std::io::Read as _;
+            let mut buf = String::new();
+            let mut stderr = stderr;
+            stderr.read_to_string(&mut buf).ok();
+            if !buf.is_empty() {
+                eprintln!("\n=== db-backend stderr ===\n{}\n=== end db-backend stderr ===", buf);
+            }
+        }
+        self.child.wait().ok();
     }
 }
 
@@ -1261,18 +1486,17 @@ impl TestRecording {
     }
 }
 
-/// Run a flow integration test for a DB-based language (Python/Ruby).
+/// Run a flow integration test for a DB-based language (Python, Ruby, JS, Noir, WASM, Bash, Zsh).
 ///
 /// Similar to `run_flow_test()` but does not require ct-rr-support or rr.
-/// Uses `create_db_trace()` for recording and passes an empty path for
-/// `ct_rr_worker_exe` (unused by DB traces).
+/// Uses `create_db_trace()` for recording and `DapStdioTestClient` for
+/// DAP communication (cross-platform, no Unix sockets needed).
 ///
 /// For Python traces, the source file is copied into the trace_dir and paths
 /// in the trace are relative to workdir (= trace_dir). We use the trace_dir
 /// copy path for breakpoints so the path matches what the DB lookup expects.
 /// For Ruby traces, paths are relative to the recorder's CWD, which is the
 /// codetracer repo root, so the original source path matches via suffix match.
-#[cfg(unix)]
 pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
     println!("Source: {}", config.source_path.display());
     println!("Language: {:?}", config.language);
@@ -1283,14 +1507,13 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
     let recording = TestRecording::create_db_trace(&config.source_path, config.language, version_label)?;
     println!("Recording created at: {}", recording.trace_dir.display());
 
-    // Start DAP client — ct_rr_support path is unused for DB traces, pass empty path
-    let dummy_ct_rr = PathBuf::from("");
-    println!("Starting DAP client...");
-    let mut client = DapTestClient::start(&recording.temp_dir, &dummy_ct_rr)?;
+    // Start DAP client via stdio (cross-platform, no Unix sockets)
+    println!("Starting DAP stdio client...");
+    let mut client = DapStdioTestClient::start()?;
 
-    // Initialize and launch — pass empty path for ct_rr_worker_exe
+    // Initialize and launch
     println!("Initializing DAP session...");
-    client.initialize_and_launch(&recording, &dummy_ct_rr)?;
+    client.initialize_and_launch(&recording)?;
 
     // Determine the breakpoint path. For DB traces, the trace stores relative
     // paths and the DAP server resolves them against the trace's workdir.
@@ -1454,10 +1677,4 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
 #[cfg(not(unix))]
 pub fn run_flow_test(_config: &FlowTestConfig, _version_label: &str) -> Result<(), String> {
     Err("DAP flow integration tests currently require Unix domain sockets and rr; this test is unsupported on non-Unix platforms".to_string())
-}
-
-/// Run a flow integration test for a DB-based language (Python/Ruby).
-#[cfg(not(unix))]
-pub fn run_db_flow_test(_config: &FlowTestConfig, _version_label: &str) -> Result<(), String> {
-    Err("DAP flow integration tests currently require Unix domain sockets; this test is unsupported on non-Unix platforms".to_string())
 }

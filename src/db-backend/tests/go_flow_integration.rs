@@ -6,6 +6,10 @@
 //! to the DAP flow infrastructure.
 //!
 //! The test is skipped if `ct-rr-support`, `rr`, or `dlv` is not available.
+//!
+//! Go uses rr-based traces, which are only supported on Unix.
+
+#![cfg(not(windows))]
 
 mod test_harness;
 

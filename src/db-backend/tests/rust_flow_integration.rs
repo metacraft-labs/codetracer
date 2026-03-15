@@ -4,6 +4,10 @@
 //! and filters out function calls when loading flow data for Rust programs.
 //!
 //! The test is skipped if `ct-rr-support` or `rr` is not available.
+//!
+//! Rust uses rr-based traces, which are only supported on Unix.
+
+#![cfg(not(windows))]
 
 mod test_harness;
 

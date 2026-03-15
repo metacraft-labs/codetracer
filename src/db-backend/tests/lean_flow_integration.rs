@@ -11,6 +11,10 @@
 //! 3. db-backend can connect to the replay and initialize a DAP session
 //!
 //! The test is skipped if `ct-rr-support`, `rr`, or `lake` is not available.
+//!
+//! Lean uses rr-based traces, which are only supported on Unix.
+
+#![cfg(not(windows))]
 
 mod test_harness;
 
