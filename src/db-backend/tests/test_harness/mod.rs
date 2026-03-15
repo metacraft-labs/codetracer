@@ -121,7 +121,7 @@ impl TestRecording {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("test_program");
-        let binary_path = temp_dir.join(binary_name);
+        let binary_path = temp_dir.join(format!("{}{}", binary_name, std::env::consts::EXE_SUFFIX));
 
         // Build the program
         let build_output = Command::new(ct_rr_support)
@@ -455,6 +455,54 @@ impl DapStdioTestClient {
             writer,
             client: DapClient::default(),
         })
+    }
+
+    /// Initialize the DAP session and launch with an RR/TTD recording.
+    ///
+    /// Unlike `initialize_and_launch()` (for DB traces), this passes the
+    /// `ct_rr_worker_exe` so the backend can spawn the replay worker.
+    pub fn initialize_and_launch_rr(&mut self, recording: &TestRecording, ct_rr_support: &Path) -> Result<(), String> {
+        // Send initialize
+        let init = self.client.request("initialize", json!({}));
+        self.send(&init)?;
+        self.read_until_response("initialize", Duration::from_secs(5))?;
+
+        // Wait for initialized event
+        self.read_until_event("initialized", Duration::from_secs(5))?;
+
+        // Send configurationDone
+        let conf_done = self.client.request("configurationDone", json!({}));
+        self.send(&conf_done)?;
+
+        // Send launch with ct_rr_worker_exe
+        let launch_args = LaunchRequestArguments {
+            program: None,
+            trace_folder: Some(recording.trace_dir.clone()),
+            trace_file: None,
+            raw_diff_index: None,
+            pid: None,
+            cwd: None,
+            no_debug: None,
+            restart: None,
+            name: None,
+            request: None,
+            typ: None,
+            session_id: None,
+            ct_rr_worker_exe: Some(ct_rr_support.to_path_buf()),
+            restore_location: None,
+        };
+        let launch = self
+            .client
+            .launch(launch_args)
+            .map_err(|e| format!("failed to build launch: {}", e))?;
+        self.send(&launch)?;
+
+        // Wait for stopped event (entry point)
+        self.read_until_event("stopped", Duration::from_secs(30))?;
+        // Consume the complete-move event
+        self.read_until_event("ct/complete-move", Duration::from_secs(5))?;
+
+        Ok(())
     }
 
     /// Initialize the DAP session and launch with a recording (DB-trace variant).
@@ -814,19 +862,20 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
     }
 
     // Check PATH
-    if let Some(path) = find_on_path("ct-rr-support") {
+    let exe_name = format!("ct-rr-support{}", std::env::consts::EXE_SUFFIX);
+    if let Some(path) = find_on_path(&exe_name) {
         return Some(path);
     }
 
     // Check common development locations
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dev_locations = [
-        "../../codetracer-rr-backend/target/debug/ct-rr-support",
-        "../../codetracer-rr-backend/target/release/ct-rr-support",
-        "../../../codetracer-rr-backend/target/debug/ct-rr-support",
+        format!("../../codetracer-rr-backend/target/debug/{}", exe_name),
+        format!("../../codetracer-rr-backend/target/release/{}", exe_name),
+        format!("../../../codetracer-rr-backend/target/debug/{}", exe_name),
     ];
 
-    for loc in dev_locations {
+    for loc in &dev_locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
             return Some(path.canonicalize().unwrap_or(path));
@@ -834,13 +883,13 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
     }
 
     // Check from home directory
-    if let Some(home) = env::var_os("HOME") {
+    if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
         let home_path = PathBuf::from(home);
         let home_locations = [
-            "metacraft/codetracer-rr-backend/target/debug/ct-rr-support",
-            "codetracer-rr-backend/target/debug/ct-rr-support",
+            format!("metacraft/codetracer-rr-backend/target/debug/{}", exe_name),
+            format!("codetracer-rr-backend/target/debug/{}", exe_name),
         ];
-        for loc in home_locations {
+        for loc in &home_locations {
             let path = home_path.join(loc);
             if path.exists() {
                 return Some(path);
@@ -851,17 +900,39 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
     None
 }
 
-/// Check if rr is available
+/// Check if rr is available (Unix only)
 #[cfg(unix)]
 pub fn is_rr_available() -> bool {
     Command::new("rr").arg("--version").output().is_ok()
 }
 
-/// Check if rr is available
+/// Check if rr is available (always false on non-Unix)
 #[cfg(not(unix))]
 pub fn is_rr_available() -> bool {
-    eprintln!("SKIPPED: rr-based DAP flow integration tests are only supported on Unix platforms");
     false
+}
+
+/// Check if TTD (Time Travel Debugging) is available (Windows only).
+///
+/// TTD is available when ct-rr-support is present, since it handles TTD under the hood.
+#[cfg(windows)]
+pub fn is_ttd_available() -> bool {
+    find_ct_rr_support().is_some()
+}
+
+/// TTD is not available on non-Windows platforms.
+#[cfg(not(windows))]
+pub fn is_ttd_available() -> bool {
+    false
+}
+
+/// Check if a replay backend is available (rr on Unix, TTD on Windows).
+pub fn is_replay_backend_available() -> bool {
+    if cfg!(unix) {
+        is_rr_available()
+    } else {
+        is_ttd_available()
+    }
 }
 
 /// Accept a connection with timeout
@@ -1631,15 +1702,20 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
     verify_flow_results(config, &flow)
 }
 
-/// Run a flow integration test with the given configuration (RR-based languages)
-#[cfg(unix)]
+/// Run a flow integration test with the given configuration (RR/TTD-based languages).
+///
+/// On Unix, uses `DapTestClient` (Unix sockets). On Windows (and as a fallback),
+/// uses `DapStdioTestClient` (cross-platform stdio pipes).
+///
+/// Returns an error if ct-rr-support is not found or the replay backend (rr/TTD) is
+/// not available, which allows tests to skip gracefully.
 pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(), String> {
     // Find ct-rr-support
     let ct_rr_support =
         find_ct_rr_support().ok_or("ct-rr-support not found in PATH or development locations".to_string())?;
 
-    if !is_rr_available() {
-        return Err("rr is not available".to_string());
+    if !is_replay_backend_available() {
+        return Err("replay backend not available (rr on Unix, TTD on Windows)".to_string());
     }
 
     println!("Using ct-rr-support: {}", ct_rr_support.display());
@@ -1651,30 +1727,62 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
     let recording = TestRecording::create(&config.source_path, config.language, version_label, &ct_rr_support)?;
     println!("Recording created at: {}", recording.trace_dir.display());
 
-    // Start DAP client
-    println!("Starting DAP client...");
-    let mut client = DapTestClient::start(&recording.temp_dir, &ct_rr_support)?;
+    // On Unix, try Unix socket client first; on Windows use stdio client
+    #[cfg(unix)]
+    {
+        // Start DAP client via Unix sockets
+        println!("Starting DAP client (Unix sockets)...");
+        let mut client = DapTestClient::start(&recording.temp_dir, &ct_rr_support)?;
 
-    // Initialize and launch
-    println!("Initializing DAP session...");
-    client.initialize_and_launch(&recording, &ct_rr_support)?;
+        // Initialize and launch
+        println!("Initializing DAP session...");
+        client.initialize_and_launch(&recording, &ct_rr_support)?;
 
-    // Set breakpoint
-    println!("Setting breakpoint at line {}...", config.breakpoint_line);
-    client.set_breakpoint(&config.source_path, config.breakpoint_line)?;
+        // Set breakpoint
+        println!("Setting breakpoint at line {}...", config.breakpoint_line);
+        client.set_breakpoint(&config.source_path, config.breakpoint_line)?;
 
-    // Continue to breakpoint
-    println!("Continuing to breakpoint...");
-    let location = client.continue_to_breakpoint()?;
-    println!("Stopped at: {}:{}", location.path, location.line);
+        // Continue to breakpoint
+        println!("Continuing to breakpoint...");
+        let location = client.continue_to_breakpoint()?;
+        println!("Stopped at: {}:{}", location.path, location.line);
 
-    // Request flow data
-    println!("Requesting flow data...");
-    let flow = client.request_flow(location)?;
-    println!("Flow has {} steps", flow.steps.len());
+        // Request flow data
+        println!("Requesting flow data...");
+        let flow = client.request_flow(location)?;
+        println!("Flow has {} steps", flow.steps.len());
 
-    // Verify results
-    verify_flow_results(config, &flow)
+        // Verify results
+        return verify_flow_results(config, &flow);
+    }
+
+    #[cfg(not(unix))]
+    {
+        // Start DAP client via stdio (cross-platform)
+        println!("Starting DAP stdio client...");
+        let mut client = DapStdioTestClient::start()?;
+
+        // Initialize and launch (using the rr-trace variant that passes ct_rr_worker_exe)
+        println!("Initializing DAP session...");
+        client.initialize_and_launch_rr(&recording, &ct_rr_support)?;
+
+        // Set breakpoint
+        println!("Setting breakpoint at line {}...", config.breakpoint_line);
+        client.set_breakpoint(&config.source_path, config.breakpoint_line)?;
+
+        // Continue to breakpoint
+        println!("Continuing to breakpoint...");
+        let location = client.continue_to_breakpoint()?;
+        println!("Stopped at: {}:{}", location.path, location.line);
+
+        // Request flow data
+        println!("Requesting flow data...");
+        let flow = client.request_flow(location)?;
+        println!("Flow has {} steps", flow.steps.len());
+
+        // Verify results
+        return verify_flow_results(config, &flow);
+    }
 }
 
 /// Verify flow results: check excluded identifiers, expected variables, and values.
@@ -1741,8 +1849,3 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
     Ok(())
 }
 
-/// Run a flow integration test with the given configuration
-#[cfg(not(unix))]
-pub fn run_flow_test(_config: &FlowTestConfig, _version_label: &str) -> Result<(), String> {
-    Err("DAP flow integration tests currently require Unix domain sockets and rr; this test is unsupported on non-Unix platforms".to_string())
-}

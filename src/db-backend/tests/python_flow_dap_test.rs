@@ -1,5 +1,3 @@
-#![cfg(not(windows))]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
