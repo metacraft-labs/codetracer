@@ -384,10 +384,11 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
         repoPathSet[stdoutRev.trim] = true
       except Exception as e:
         errorPrint "git rev-parse error for ", path, ": ", e.repr
-    for path, _ in repoPathSet:
-      let (stdout, stderr, err) = await childProcessExec(cstring(&"git ls-tree HEAD -r --name-only"), js{cwd: path})
+    for repoPath, _ in repoPathSet:
+      let repoPathCopy = repoPath
+      let (stdout, stderr, err) = await childProcessExec(cstring(&"git ls-tree HEAD -r --name-only"), js{cwd: repoPathCopy})
       if err.isNil:
-        res = res.concat(($stdout).splitLines().mapIt($path & "/" & it))
+        res = res.concat(($stdout).splitLines().mapIt($repoPathCopy & "/" & it))
       else:
         discard
         #res = cast[seq[string]](@[])
