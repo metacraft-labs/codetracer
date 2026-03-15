@@ -33,6 +33,30 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Canonicalize a path, stripping the Windows `\\?\` UNC prefix if present.
+///
+/// Rust's `std::fs::canonicalize` on Windows returns extended-length paths
+/// prefixed with `\\?\` (e.g. `\\?\D:\foo\bar`). Many tools (Node.js, Ruby)
+/// cannot handle this prefix and fail with confusing errors like
+/// `EISDIR: illegal operation on a directory, lstat 'D:'`.
+///
+/// This helper strips the prefix so callers get a normal absolute path.
+fn safe_canonicalize(path: &Path) -> PathBuf {
+    match path.canonicalize() {
+        Ok(p) => {
+            #[cfg(windows)]
+            {
+                let s = p.to_string_lossy();
+                if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                    return PathBuf::from(stripped);
+                }
+            }
+            p
+        }
+        Err(_) => path.to_path_buf(),
+    }
+}
+
 /// Supported languages for test programs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
@@ -871,7 +895,7 @@ pub fn find_ct_rr_support() -> Option<PathBuf> {
     for loc in &dev_locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
+            return Some(safe_canonicalize(&path));
         }
     }
 
@@ -1014,7 +1038,7 @@ pub fn find_python_recorder() -> Option<PathBuf> {
     for loc in locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
+            return Some(safe_canonicalize(&path));
         }
     }
 
@@ -1067,7 +1091,7 @@ pub fn find_ruby_recorder() -> Option<PathBuf> {
     for loc in locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
+            return Some(safe_canonicalize(&path));
         }
     }
 
@@ -1102,7 +1126,7 @@ pub fn find_wazero() -> Option<PathBuf> {
     for loc in dev_locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
+            return Some(safe_canonicalize(&path));
         }
     }
 
@@ -1281,7 +1305,7 @@ pub fn find_js_recorder() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let recorder = manifest_dir.join("../../../codetracer-js-recorder/packages/cli/dist/index.js");
     if recorder.exists() {
-        Some(recorder.canonicalize().unwrap_or(recorder))
+        Some(safe_canonicalize(&recorder))
     } else {
         None
     }
@@ -1368,7 +1392,7 @@ pub fn find_bash_recorder() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let recorder = manifest_dir.join("../../../codetracer-shell-recorders/bash-recorder/launcher.sh");
     if recorder.exists() {
-        Some(recorder.canonicalize().unwrap_or(recorder))
+        Some(safe_canonicalize(&recorder))
     } else {
         None
     }
@@ -1402,7 +1426,7 @@ pub fn find_zsh_recorder() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let recorder = manifest_dir.join("../../../codetracer-shell-recorders/zsh-recorder/launcher.zsh");
     if recorder.exists() {
-        Some(recorder.canonicalize().unwrap_or(recorder))
+        Some(safe_canonicalize(&recorder))
     } else {
         None
     }
