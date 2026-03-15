@@ -20,9 +20,18 @@ let
     "2.2.6" = "sha256-ZXsOPV3veIFI0qh/phI/p1Wy2SytMe9g/SYeRReFUos=";
   };
 
-  # Build Nim for a specific version
+  # Build Nim for a specific version.
+  # For minor version bumps within the same major.minor (e.g. 2.2.4 → 2.2.6),
+  # keep the nixpkgs patches (NIM_CONFIG_DIR, nixbuild, etc.) as they still apply.
+  # For different major.minor versions (e.g. 1.6.x when nixpkgs has 2.2.x),
+  # clear patches since they're version-specific.
   mkNim =
     version: hash:
+    let
+      nixpkgsNimVersion = pkgs.lib.versions.majorMinor pkgs.nim-unwrapped.version;
+      targetMajorMinor = pkgs.lib.versions.majorMinor version;
+      patchesCompatible = nixpkgsNimVersion == targetMajorMinor;
+    in
     pkgs.nim-unwrapped.overrideAttrs (old: {
       inherit version;
       pname = "nim";
@@ -30,8 +39,7 @@ let
         url = "https://nim-lang.org/download/nim-${version}.tar.xz";
         inherit hash;
       };
-      # Clear nixpkgs patches - they're version-specific and don't apply to other versions
-      patches = [ ];
+      patches = if patchesCompatible then old.patches else [ ];
     });
 
 in
