@@ -171,13 +171,31 @@ pub fn run_stdio() -> Result<(), Box<dyn Error>> {
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
     #[cfg(windows)]
     {
-        run_with_endpoint(DapEndpoint::WindowsNamedPipe(
-            socket_path.to_string_lossy().into_owned(),
-        ))
+        // On Windows, the backend-manager passes a TCP address like
+        // "127.0.0.1:12345" as the socket path.  Detect this by checking
+        // if the path contains a colon followed by digits (host:port format).
+        let path_str = socket_path.to_string_lossy();
+        if looks_like_tcp_address(&path_str) {
+            run_with_endpoint(DapEndpoint::TcpSocket(path_str.into_owned()))
+        } else {
+            run_with_endpoint(DapEndpoint::WindowsNamedPipe(path_str.into_owned()))
+        }
     }
 
     #[cfg(not(windows))]
     run_with_endpoint(DapEndpoint::UnixSocket(socket_path.to_path_buf()))
+}
+
+/// Returns true if the string looks like a TCP address (e.g. "127.0.0.1:12345").
+fn looks_like_tcp_address(s: &str) -> bool {
+    // A simple heuristic: contains a colon and the part after the last colon
+    // is a valid port number.
+    if let Some(colon_pos) = s.rfind(':') {
+        let port_part = &s[colon_pos + 1..];
+        port_part.parse::<u16>().is_ok()
+    } else {
+        false
+    }
 }
 
 #[cfg(feature = "io-transport")]
@@ -223,6 +241,15 @@ pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
             {
                 Err(format!("windows named-pipe transport is not supported on this platform: {pipe_path}").into())
             }
+        }
+        DapEndpoint::TcpSocket(addr) => {
+            info!("Connecting to backend-manager via TCP at {addr}");
+            let stream = std::net::TcpStream::connect(&addr)
+                .map_err(|e| format!("failed to connect to TCP endpoint {addr}: {e}"))?;
+            let writer = stream.try_clone()
+                .map_err(|e| format!("connected to TCP {addr}, but failed to clone stream: {e}"))?;
+            let reader = BufReader::new(stream);
+            run_with_stream(reader, writer)
         }
     }
 }

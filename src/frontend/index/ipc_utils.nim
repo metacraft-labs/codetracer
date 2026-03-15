@@ -107,24 +107,43 @@ proc ready*(): Future[void] {.async.} =
     errorPrint "index: backend-manager FAILED to start: ", backendManager.error
     errorPrint "index: backendManagerExe was: ", backendManagerExe
 
-  let backendManagerSocketPath =
-    if runtimePlatform == cstring"win32":
-      cstring("\\\\.\\pipe\\ct_backend_manager_" & $backendManagerProcess.pid)
-    else:
+  if runtimePlatform == cstring"win32":
+    # On Windows, the backend-manager uses TCP on localhost.
+    # It writes the port number to a .port file.
+    let portFilePath = codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".port"
+    infoPrint "index: waiting for TCP port file at ", portFilePath
+
+    await asyncSleep(100)
+
+    var socketAttempt = 0
+    while true:
+      let portStr = await readPortFile(portFilePath)
+      if portStr.len > 0:
+        let port = parseInt(portStr)
+        if port > 0:
+          backendManagerSocket = await startTcpSocket(cstring"127.0.0.1", port)
+          if not backendManagerSocket.isNil:
+            break
+      socketAttempt += 1
+      if socketAttempt mod 5 == 0:
+        infoPrint "index: still waiting for backend-manager TCP port (attempt ", $socketAttempt, ")"
+      await asyncSleep(1000)
+  else:
+    let backendManagerSocketPath =
       codetracerTmpPath / "backend-manager" / $backendManagerProcess.pid & ".sock"
-  infoPrint "index: waiting for socket at ", backendManagerSocketPath
+    infoPrint "index: waiting for socket at ", backendManagerSocketPath
 
-  await asyncSleep(100)
+    await asyncSleep(100)
 
-  var socketAttempt = 0
-  while true:
-    backendManagerSocket = await startSocket(backendManagerSocketPath)
-    if not backendManagerSocket.isNil:
-      break
-    socketAttempt += 1
-    if socketAttempt mod 5 == 0:
-      infoPrint "index: still waiting for backend-manager socket (attempt ", $socketAttempt, ")"
-    await asyncSleep(1000)
+    var socketAttempt = 0
+    while true:
+      backendManagerSocket = await startSocket(backendManagerSocketPath)
+      if not backendManagerSocket.isNil:
+        break
+      socketAttempt += 1
+      if socketAttempt mod 5 == 0:
+        infoPrint "index: still waiting for backend-manager socket (attempt ", $socketAttempt, ")"
+      await asyncSleep(1000)
 
   setupProxyForDap(backendManagerSocket)
   infoPrint "index: backend manager socket configured"

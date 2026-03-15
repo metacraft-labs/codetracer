@@ -28,6 +28,8 @@ use tokio::{
 };
 #[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(windows)]
+use tokio::net::TcpStream;
 
 use crate::backend_manager::BackendManager;
 use crate::config::DaemonConfig;
@@ -243,6 +245,27 @@ async fn remove_pid_file(pid_path: &PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
+// Port file helper (Windows)
+// ---------------------------------------------------------------------------
+
+/// Reads a port number from a port file.
+///
+/// On Windows, the daemon writes its TCP port to a file instead of creating
+/// a Unix socket.  This helper reads and parses that file.
+#[cfg(windows)]
+async fn read_port_file(path: &PathBuf) -> Result<u16, Box<dyn Error>> {
+    if !path.exists() {
+        return Err(format!("port file does not exist: {}", path.display()).into());
+    }
+    let contents = read_to_string(path).await?;
+    let port: u16 = contents
+        .trim()
+        .parse()
+        .map_err(|e| format!("invalid port in {}: {e}", path.display()))?;
+    Ok(port)
+}
+
+// ---------------------------------------------------------------------------
 // Daemon stop / status / connect subcommands
 // ---------------------------------------------------------------------------
 
@@ -287,10 +310,44 @@ async fn daemon_stop(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Stub: Unix socket daemon communication not yet implemented on Windows.
+/// Connects to the daemon via TCP and sends a `ct/daemon-shutdown` request.
+///
+/// On Windows, `socket_path` is actually a port file containing the TCP port.
 #[cfg(windows)]
-async fn daemon_stop(_socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    Err("daemon stop is not yet supported on Windows (requires Unix sockets)".into())
+async fn daemon_stop(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let port = read_port_file(socket_path).await?;
+    let mut stream = match TcpStream::connect(format!("127.0.0.1:{port}")).await {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "Cannot connect to daemon at 127.0.0.1:{port} (port file: {}): {err}",
+                socket_path.display()
+            );
+            eprintln!("Daemon is not running.");
+            return Err(Box::new(err));
+        }
+    };
+
+    let request = json!({
+        "type": "request",
+        "command": "ct/daemon-shutdown",
+        "seq": 1
+    });
+    let bytes = DapParser::to_bytes(&request);
+    stream.write_all(&bytes).await?;
+
+    let mut buf = vec![0u8; 4096];
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf));
+    match timeout.await {
+        Ok(Ok(n)) if n > 0 => {
+            println!("Daemon acknowledged shutdown.");
+        }
+        _ => {
+            println!("Daemon may have shut down (no response received).");
+        }
+    }
+
+    Ok(())
 }
 
 /// Checks whether the daemon is running and prints a human-readable status
@@ -322,10 +379,9 @@ async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
     }
 }
 
-/// Stub: Unix socket daemon status check not yet implemented on Windows.
+/// Checks whether the daemon is running via TCP connection on Windows.
 #[cfg(windows)]
-async fn daemon_status(_socket_path: &PathBuf, pid_path: &PathBuf) {
-    // On Windows, we can still check the PID file.
+async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
     let pid_info = if pid_path.exists() {
         match read_to_string(pid_path).await {
             Ok(contents) => contents.trim().parse::<u32>().ok(),
@@ -335,14 +391,21 @@ async fn daemon_status(_socket_path: &PathBuf, pid_path: &PathBuf) {
         None
     };
 
-    if let Some(pid) = pid_info {
-        if is_pid_alive(pid) {
-            println!("Daemon process is alive (PID {pid}), but socket check not available on Windows.");
+    // Try to connect to the daemon via TCP.
+    let connected = if let Ok(port) = read_port_file(socket_path).await {
+        TcpStream::connect(format!("127.0.0.1:{port}")).await.is_ok()
+    } else {
+        false
+    };
+
+    if connected {
+        if let Some(pid) = pid_info {
+            println!("Daemon is running (PID {pid}).");
         } else {
-            println!("Daemon is not running (stale PID file for {pid}).");
+            println!("Daemon is running (PID unknown).");
         }
     } else {
-        println!("Daemon is not running (no PID file).");
+        println!("Daemon is not running.");
     }
 }
 
@@ -416,10 +479,72 @@ async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(),
     }
 }
 
-/// Stub: Unix socket daemon connection not yet implemented on Windows.
+/// Auto-daemonization on Windows: connects to the daemon via TCP, starting
+/// it if necessary.
 #[cfg(windows)]
-async fn daemon_connect(_socket_path: &PathBuf, _pid_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    Err("daemon connect is not yet supported on Windows (requires Unix sockets)".into())
+async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    // Try to connect to an existing daemon.
+    if let Ok(port) = read_port_file(socket_path).await {
+        if let Ok(stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await {
+            drop(stream);
+            println!("connected");
+            return Ok(());
+        }
+        // Port file exists but connection failed — stale.
+        info!("Removing stale port file: {}", socket_path.display());
+        let _ = remove_file(socket_path).await;
+    }
+
+    // Clean up a stale PID file if the process is dead.
+    if pid_path.exists() {
+        let contents = read_to_string(pid_path).await.unwrap_or_default();
+        if let Ok(old_pid) = contents.trim().parse::<u32>()
+            && !is_pid_alive(old_pid)
+        {
+            info!("Removing stale PID file for dead process {old_pid}");
+            let _ = remove_file(pid_path).await;
+        }
+    }
+
+    // Ensure the port file directory exists.
+    if let Some(parent) = socket_path.parent() {
+        create_dir_all(parent).await?;
+    }
+
+    // Spawn `backend-manager daemon start` as a detached process.
+    let exe = std::env::current_exe()?;
+    info!("Auto-starting daemon: {} daemon start", exe.display());
+
+    let _child = std::process::Command::new(&exe)
+        .arg("daemon")
+        .arg("start")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn daemon: {e}"))?;
+
+    // Poll for the port file to appear and a successful TCP connection.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut delay = Duration::from_millis(50);
+
+    loop {
+        tokio::time::sleep(delay).await;
+
+        if let Ok(port) = read_port_file(socket_path).await
+            && let Ok(stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await
+        {
+            drop(stream);
+            println!("connected");
+            return Ok(());
+        }
+
+        if tokio::time::Instant::now() > deadline {
+            return Err("timeout waiting for daemon to start".into());
+        }
+
+        delay = (delay * 2).min(Duration::from_millis(500));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1583,16 +1708,158 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Stub: mock backends require Unix sockets (not available on Windows).
+/// Mock backend for Windows using TCP — connects to the given address and sleeps.
 #[cfg(windows)]
-async fn run_mock_backend(_socket_path: &str) -> Result<(), Box<dyn Error>> {
-    Err("mock-backend is not supported on Windows (requires Unix sockets)".into())
+async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
+    let _stream = TcpStream::connect(socket_path).await?;
+    loop {
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+    }
 }
 
-/// Stub: mock DAP backends require Unix sockets (not available on Windows).
+/// Mock DAP-speaking backend for Windows using TCP.
+///
+/// Connects to the parent's TCP listener, speaks DAP protocol.
 #[cfg(windows)]
-async fn run_mock_dap_backend(_socket_path: &str) -> Result<(), Box<dyn Error>> {
-    Err("mock-dap-backend is not supported on Windows (requires Unix sockets)".into())
+async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
+    use tokio::io::AsyncReadExt as _;
+
+    let stream = TcpStream::connect(socket_path).await?;
+    let (mut read_half, mut write_half) = tokio::io::split(stream);
+
+    let mut parser = DapParser::new();
+    let mut buf = vec![0u8; 8 * 1024];
+    let mut init_done = false;
+
+    // Stateful mock position for navigation commands (simplified for
+    // Windows — the full mock on Unix has more navigation logic).
+    let _current_file = "main.nim".to_string();
+    let _current_line: i64 = 1;
+    let _current_column: i64 = 1;
+    let _current_ticks: i64 = 100;
+    let _end_of_trace = false;
+    let _call_depth: i32 = 0;
+
+    let _breakpoints: Vec<(String, i64)> = Vec::new();
+    let _watchpoints: Vec<String> = Vec::new();
+
+    let mut _is_multi_process = false;
+    let _selected_process_id: i64 = 1;
+
+    loop {
+        let cnt = read_half.read(&mut buf).await?;
+        if cnt == 0 {
+            break;
+        }
+
+        parser.add_bytes(&buf[..cnt]);
+
+        loop {
+            let msg = match parser.get_message() {
+                Some(Ok(msg)) => msg,
+                Some(Err(e)) => {
+                    warn!("mock-dap-backend: bad DAP message: {e}");
+                    continue;
+                }
+                None => break,
+            };
+
+            let msg_type = msg
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let command = msg
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let seq = msg
+                .get("seq")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+
+            if msg_type != "request" {
+                continue;
+            }
+
+            match command {
+                "initialize" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "initialize",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {
+                            "supportsConfigurationDoneRequest": true,
+                            "supportsStepBack": true,
+                        }
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
+                }
+                "launch" => {
+                    let trace_folder = msg
+                        .get("arguments")
+                        .and_then(|a| a.get("traceFolder"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    if trace_folder.contains("multi") {
+                        _is_multi_process = true;
+                    }
+
+                    let response = json!({
+                        "type": "response",
+                        "command": "launch",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
+                }
+                "configurationDone" => {
+                    let response = json!({
+                        "type": "response",
+                        "command": "configurationDone",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
+
+                    if !init_done {
+                        let stopped = json!({
+                            "type": "event",
+                            "event": "stopped",
+                            "body": {
+                                "reason": "entry",
+                                "threadId": 1,
+                            }
+                        });
+                        write_half.write_all(&DapParser::to_bytes(&stopped)).await?;
+                        init_done = true;
+                    }
+                }
+                _ => {
+                    let response = json!({
+                        "type": "response",
+                        "command": command,
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1606,7 +1873,9 @@ async fn run_mock_dap_backend(_socket_path: &str) -> Result<(), Box<dyn Error>> 
 /// to stderr if file logging cannot be set up.
 fn init_daemon_logging(config: &DaemonConfig) {
     let log_path = config.log_file.clone().or_else(|| {
+        // On Windows, HOME is not set by default; prefer USERPROFILE.
         std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
             .ok()
             .map(|home| PathBuf::from(home).join(".codetracer").join("daemon.log"))
     });
@@ -1813,6 +2082,153 @@ async fn ensure_daemon_connected(
 
         if socket_path.exists()
             && let Ok(stream) = UnixStream::connect(socket_path).await
+        {
+            return Ok(stream);
+        }
+
+        if tokio::time::Instant::now() > deadline {
+            return Err("timeout waiting for daemon to start".into());
+        }
+
+        delay = (delay * 2).min(Duration::from_millis(500));
+    }
+}
+
+/// Sends a DAP request over a TCP `stream` and reads the response (Windows).
+#[cfg(windows)]
+async fn cli_dap_request(
+    stream: &mut TcpStream,
+    command: &str,
+    seq: i64,
+    arguments: serde_json::Value,
+    deadline_secs: u64,
+) -> Result<serde_json::Value, Box<dyn Error>> {
+    let request = json!({
+        "type": "request",
+        "command": command,
+        "seq": seq,
+        "arguments": arguments,
+    });
+    let bytes = DapParser::to_bytes(&request);
+    stream.write_all(&bytes).await?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(deadline_secs);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("timeout waiting for {command} response").into());
+        }
+
+        let msg = tokio::time::timeout(remaining, cli_dap_read(stream))
+            .await
+            .map_err(|_| format!("timeout waiting for {command} response"))??;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            continue;
+        }
+
+        if msg_type == "response" {
+            let resp_seq = msg.get("request_seq").and_then(Value::as_i64).unwrap_or(-1);
+            if resp_seq != seq {
+                continue;
+            }
+        }
+
+        return Ok(msg);
+    }
+}
+
+/// Reads a single DAP-framed JSON message from a TCP `stream` (Windows).
+#[cfg(windows)]
+async fn cli_dap_read(stream: &mut TcpStream) -> Result<serde_json::Value, Box<dyn Error>> {
+    let mut header_buf = Vec::with_capacity(256);
+    let mut single = [0u8; 1];
+
+    loop {
+        let n = stream.read(&mut single).await?;
+        if n == 0 {
+            return Err("EOF while reading DAP header".into());
+        }
+        header_buf.push(single[0]);
+        if header_buf.len() >= 4 && header_buf.ends_with(b"\r\n\r\n") {
+            break;
+        }
+        if header_buf.len() > 8192 {
+            return Err("DAP header too large".into());
+        }
+    }
+
+    let header_str = String::from_utf8_lossy(&header_buf);
+    let prefix = "Content-Length: ";
+    let line = header_str
+        .lines()
+        .find(|l| l.starts_with(prefix))
+        .ok_or("missing Content-Length in DAP header")?;
+    let content_length: usize = line[prefix.len()..]
+        .trim()
+        .parse()
+        .map_err(|e| format!("bad Content-Length: {e}"))?;
+
+    let mut body_buf = vec![0u8; content_length];
+    stream.read_exact(&mut body_buf).await?;
+
+    Ok(serde_json::from_slice(&body_buf)?)
+}
+
+/// Ensures the daemon is running and returns a connected TCP stream (Windows).
+///
+/// If the daemon port file does not exist or a connection attempt fails, this
+/// function auto-starts the daemon and polls for the port file.
+#[cfg(windows)]
+async fn ensure_daemon_connected(
+    socket_path: &PathBuf,
+    pid_path: &PathBuf,
+) -> Result<TcpStream, Box<dyn Error>> {
+    // First try to connect to an already-running daemon.
+    if let Ok(port) = read_port_file(socket_path).await {
+        if let Ok(stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await {
+            return Ok(stream);
+        }
+        // Port file exists but connection failed — stale.
+        let _ = remove_file(socket_path).await;
+    }
+
+    // Clean up stale PID file if the process is dead.
+    if pid_path.exists() {
+        let contents = read_to_string(pid_path).await.unwrap_or_default();
+        if let Ok(old_pid) = contents.trim().parse::<u32>()
+            && !is_pid_alive(old_pid)
+        {
+            let _ = remove_file(pid_path).await;
+        }
+    }
+
+    // Ensure the parent directory exists.
+    if let Some(parent) = socket_path.parent() {
+        create_dir_all(parent).await?;
+    }
+
+    // Spawn the daemon.
+    let exe = std::env::current_exe()?;
+    let _child = std::process::Command::new(&exe)
+        .arg("daemon")
+        .arg("start")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn daemon: {e}"))?;
+
+    // Poll for the port file with exponential backoff.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut delay = Duration::from_millis(50);
+
+    loop {
+        tokio::time::sleep(delay).await;
+
+        if let Ok(port) = read_port_file(socket_path).await
+            && let Ok(stream) = TcpStream::connect(format!("127.0.0.1:{port}")).await
         {
             return Ok(stream);
         }
@@ -2080,6 +2496,225 @@ async fn run_trace_info(
     Ok(())
 }
 
+/// Implements `ct trace query` on Windows (TCP-based daemon connection).
+#[cfg(windows)]
+async fn run_trace_query(
+    trace_path: &std::path::Path,
+    script_file: Option<&std::path::Path>,
+    code: Option<&str>,
+    timeout_secs: u64,
+    session_id: Option<&str>,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let script = match (script_file, code) {
+        (_, Some(inline)) => inline.to_string(),
+        (Some(path), None) => std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read script file '{}': {e}", path.display()))?,
+        (None, None) => {
+            use std::io::{IsTerminal, Read};
+            if std::io::stdin().is_terminal() {
+                eprintln!(
+                    "error: no script provided.\n\n\
+                     Usage:\n  \
+                     ct trace query <trace> script.py\n  \
+                     ct trace query <trace> -c 'print(trace.location)'\n  \
+                     ct trace query <trace> <<'PYEOF'\n  \
+                     trace.step_over()\n  \
+                     print(trace.location)\n  \
+                     PYEOF"
+                );
+                std::process::exit(1);
+            }
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| format!("failed to read script from stdin: {e}"))?;
+            if buf.trim().is_empty() {
+                eprintln!("error: stdin was empty (no script to execute)");
+                std::process::exit(1);
+            }
+            buf
+        }
+    };
+
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    let resp = cli_dap_request(
+        &mut stream,
+        "ct/exec-script",
+        1,
+        json!({
+            "tracePath": trace_path_str,
+            "script": script,
+            "timeout": timeout_secs,
+            "sessionId": session_id,
+        }),
+        timeout_secs + 30,
+    )
+    .await?;
+
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let body = resp.get("body").cloned().unwrap_or(json!({}));
+    let stdout = body.get("stdout").and_then(Value::as_str).unwrap_or("");
+    let stderr = body.get("stderr").and_then(Value::as_str).unwrap_or("");
+    let exit_code = body.get("exitCode").and_then(Value::as_i64).unwrap_or(0);
+    let timed_out = body
+        .get("timedOut")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
+    if timed_out {
+        eprintln!("error: script execution timed out after {timeout_secs} seconds");
+    }
+    if exit_code != 0 {
+        std::process::exit(exit_code as i32);
+    }
+
+    Ok(())
+}
+
+/// Implements `ct trace query --session-close` on Windows.
+#[cfg(windows)]
+async fn run_session_close(
+    trace_path: &std::path::Path,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    let resp = cli_dap_request(
+        &mut stream,
+        "ct/close-trace",
+        1,
+        json!({"tracePath": trace_path_str}),
+        10,
+    )
+    .await?;
+
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    eprintln!("Session closed.");
+    Ok(())
+}
+
+/// Implements `ct trace info` on Windows.
+#[cfg(windows)]
+async fn run_trace_info(
+    trace_path: &std::path::Path,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    let open_resp = cli_dap_request(
+        &mut stream,
+        "ct/open-trace",
+        1,
+        json!({"tracePath": trace_path_str}),
+        180,
+    )
+    .await?;
+
+    if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = open_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("failed to open trace");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let info_resp = cli_dap_request(
+        &mut stream,
+        "ct/trace-info",
+        2,
+        json!({"tracePath": trace_path_str}),
+        10,
+    )
+    .await?;
+
+    if info_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = info_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("failed to get trace info");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let body = info_resp.get("body").cloned().unwrap_or(json!({}));
+
+    println!("Trace Information");
+    println!("=================");
+    println!();
+    if let Some(path) = body.get("tracePath").and_then(Value::as_str) {
+        println!("  Path:          {path}");
+    }
+    if let Some(lang) = body.get("language").and_then(Value::as_str) {
+        println!("  Language:      {lang}");
+    }
+    if let Some(events) = body.get("totalEvents").and_then(Value::as_u64) {
+        println!("  Total events:  {events}");
+    }
+    if let Some(program) = body.get("program").and_then(Value::as_str) {
+        println!("  Program:       {program}");
+    }
+    if let Some(workdir) = body.get("workdir").and_then(Value::as_str) {
+        println!("  Working dir:   {workdir}");
+    }
+    if let Some(files) = body.get("sourceFiles").and_then(Value::as_array) {
+        println!("  Source files:  ({} files)", files.len());
+        for file in files {
+            if let Some(path) = file.as_str() {
+                println!("    - {path}");
+            }
+        }
+    }
+    println!();
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -2147,18 +2782,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await;
             }
             #[cfg(windows)]
-            TraceAction::Query { .. } => {
-                eprintln!("error: trace query is not yet supported on Windows (requires Unix sockets)");
-                std::process::exit(1);
+            TraceAction::Query {
+                trace_path,
+                script_file,
+                code,
+                timeout,
+                session,
+                session_close,
+            } => {
+                if let Some(_close_id) = session_close {
+                    return run_session_close(trace_path, &daemon_socket_path, &daemon_pid_path)
+                        .await;
+                }
+                return run_trace_query(
+                    trace_path,
+                    script_file.as_deref(),
+                    code.as_deref(),
+                    *timeout,
+                    session.as_deref(),
+                    &daemon_socket_path,
+                    &daemon_pid_path,
+                )
+                .await;
             }
             #[cfg(unix)]
             TraceAction::Info { trace_path } => {
                 return run_trace_info(trace_path, &daemon_socket_path, &daemon_pid_path).await;
             }
             #[cfg(windows)]
-            TraceAction::Info { .. } => {
-                eprintln!("error: trace info is not yet supported on Windows (requires Unix sockets)");
-                std::process::exit(1);
+            TraceAction::Info { trace_path } => {
+                return run_trace_info(trace_path, &daemon_socket_path, &daemon_pid_path).await;
             }
             TraceAction::Mcp => {
                 // MCP server: redirect all logging to stderr only.

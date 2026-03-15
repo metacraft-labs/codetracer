@@ -15,6 +15,8 @@ use tokio::{
 };
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     config::DaemonConfig,
@@ -216,10 +218,143 @@ impl BackendManager {
         Ok(res)
     }
 
-    /// Stub: Legacy single-client mode requires Unix sockets (not available on Windows).
+    /// Legacy single-client constructor for Windows — uses TCP on localhost.
+    ///
+    /// Binds a TCP listener on `127.0.0.1:0` (OS-assigned port), writes the
+    /// port number to a file so the frontend can connect, then waits for a
+    /// single connection.
     #[cfg(windows)]
     pub async fn new() -> Result<Arc<Mutex<Self>>, Box<dyn Error>> {
-        Err("BackendManager::new() is not yet supported on Windows (requires Unix sockets)".into())
+        let res = Arc::new(Mutex::new(Self {
+            children: vec![],
+            children_receivers: vec![],
+            parent_senders: vec![],
+            selected: 0,
+            manager_receiver: None,
+            manager_sender: None,
+            daemon_state: None,
+        }));
+
+        let res1 = res.clone();
+        let res2 = res.clone();
+
+        let socket_dir: std::path::PathBuf;
+        {
+            let path = &CODETRACER_PATHS.lock()?;
+            socket_dir = path.tmp_path.join("backend-manager");
+        }
+
+        create_dir_all(&socket_dir).await?;
+
+        // On Windows, write a port file instead of creating a Unix socket.
+        let port_file = socket_dir.join(std::process::id().to_string() + ".port");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let local_addr = listener.local_addr()?;
+        let port = local_addr.port();
+
+        // Write the port number so the frontend can discover it.
+        tokio::fs::write(&port_file, port.to_string()).await?;
+
+        info!("TCP listening on: 127.0.0.1:{} (port file: {})", port, port_file.display());
+
+        let mut socket_read;
+        let mut socket_write;
+
+        match listener.accept().await {
+            Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
+            Err(err) => return Err(Box::new(err)),
+        }
+
+        info!("Connected");
+
+        let (manager_tx, manager_rx) = mpsc::unbounded_channel::<Value>();
+        {
+            let mut locked = res.lock().await;
+            locked.manager_receiver = Some(manager_rx);
+            locked.manager_sender = Some(manager_tx);
+        }
+
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(10)).await;
+
+                let mut res = res2.lock().await;
+                for rx in res.children_receivers.iter_mut().flatten() {
+                    if !rx.is_empty()
+                        && let Some(message) = rx.recv().await
+                    {
+                        let write_res =
+                            socket_write.write_all(&DapParser::to_bytes(&message)).await;
+
+                        match write_res {
+                            Ok(()) => {}
+                            Err(err) => {
+                                error!("Can't write to frontend socket! Error: {err}");
+                            }
+                        }
+                    }
+                }
+
+                #[allow(clippy::collapsible_if)]
+                if let Some(manager_rx) = res.manager_receiver.as_mut() {
+                    if !manager_rx.is_empty()
+                        && let Some(message) = manager_rx.recv().await
+                    {
+                        let write_res =
+                            socket_write.write_all(&DapParser::to_bytes(&message)).await;
+
+                        match write_res {
+                            Ok(()) => {}
+                            Err(err) => {
+                                error!(
+                                    "Can't write manager message to frontend socket! Error: {err}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            let mut parser = DapParser::new();
+
+            let mut buff = vec![0; 8 * 1024];
+
+            loop {
+                match socket_read.read(&mut buff).await {
+                    Ok(cnt) => {
+                        parser.add_bytes(&buff[..cnt]);
+
+                        loop {
+                            let message = match parser.get_message() {
+                                Some(Ok(message)) => Some(message),
+                                Some(Err(err)) => {
+                                    error!("Invalid DAP message received. Error: {err}");
+                                    None
+                                }
+                                None => None,
+                            };
+
+                            let Some(message) = message else {
+                                break;
+                            };
+
+                            let mut res = res1.lock().await;
+                            if let Err(err) = res.dispatch_message(message).await {
+                                error!("Can't handle DAP message. Error: {err}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Can't read from frontend socket! Error: {err}");
+                    }
+                }
+            }
+        });
+
+        Ok(res)
     }
 
     // -----------------------------------------------------------------------
@@ -400,13 +535,158 @@ impl BackendManager {
         Ok((mgr, shutdown_rx))
     }
 
-    /// Stub: daemon mode requires Unix sockets (not available on Windows).
+    /// Daemon (multi-client) constructor for Windows — uses TCP on localhost.
+    ///
+    /// Binds a TCP listener on `127.0.0.1:0`, writes the port number to the
+    /// `socket_path` file (which on Windows is actually a `.port` file), then
+    /// accepts multiple concurrent client connections.
     #[cfg(windows)]
     pub async fn new_daemon(
-        _socket_path: PathBuf,
-        _config: DaemonConfig,
+        socket_path: PathBuf,
+        config: DaemonConfig,
     ) -> Result<(Arc<Mutex<Self>>, UnboundedReceiver<()>), Box<dyn Error>> {
-        Err("BackendManager::new_daemon() is not yet supported on Windows (requires Unix sockets)".into())
+        let (shutdown_tx, shutdown_rx) = mpsc::unbounded_channel::<()>();
+
+        let (session_manager, ttl_expiry_rx) =
+            SessionManager::new(config.default_ttl, config.max_sessions);
+
+        let mgr = Arc::new(Mutex::new(Self {
+            children: vec![],
+            children_receivers: vec![],
+            parent_senders: vec![],
+            selected: 0,
+            manager_receiver: None,
+            manager_sender: None,
+            daemon_state: Some(DaemonState {
+                clients: HashMap::new(),
+                request_client_map: HashMap::new(),
+                shutdown_tx: Some(shutdown_tx),
+                session_manager,
+                config,
+                py_bridge: PyBridgeState::new(),
+            }),
+        }));
+
+        // Channel for the per-client read tasks to forward (client_id, message)
+        // tuples into the central dispatch loop.
+        let (inbound_tx, mut inbound_rx) = mpsc::unbounded_channel::<(u64, Value)>();
+
+        // Ensure the port file directory exists.
+        if let Some(parent) = socket_path.parent() {
+            create_dir_all(parent).await?;
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let local_addr = listener.local_addr()?;
+        let port = local_addr.port();
+
+        // Write the port number to the port file so clients can discover it.
+        tokio::fs::write(&socket_path, port.to_string()).await?;
+        info!("Daemon listening on: 127.0.0.1:{} (port file: {})", port, socket_path.display());
+
+        // --- Accept loop: spawns per-client read and write tasks. ---
+        let mgr_accept = mgr.clone();
+        tokio::spawn(async move {
+            let mut next_client_id: u64 = 0;
+            loop {
+                match listener.accept().await {
+                    Ok((socket, _addr)) => {
+                        let client_id = next_client_id;
+                        next_client_id += 1;
+
+                        let (read_half, write_half) = tokio::io::split(socket);
+
+                        // Each client gets a channel; the write task drains it.
+                        let (client_tx, client_rx) = mpsc::unbounded_channel::<Value>();
+
+                        // Register the client in daemon state.
+                        {
+                            let mut locked = mgr_accept.lock().await;
+                            if let Some(ds) = locked.daemon_state.as_mut() {
+                                ds.clients.insert(client_id, ClientHandle { tx: client_tx });
+                            }
+                        }
+
+                        info!("Daemon: client {client_id} connected");
+
+                        // Spawn writer task for this client.
+                        Self::spawn_client_writer(client_id, write_half, client_rx);
+
+                        // Spawn reader task for this client.
+                        Self::spawn_client_reader(
+                            client_id,
+                            read_half,
+                            inbound_tx.clone(),
+                            mgr_accept.clone(),
+                        );
+                    }
+                    Err(e) => {
+                        error!("Daemon accept error: {e}");
+                    }
+                }
+            }
+        });
+
+        // --- Central dispatch loop ---
+        let mgr_dispatch = mgr.clone();
+        tokio::spawn(async move {
+            while let Some((client_id, message)) = inbound_rx.recv().await {
+                let mut locked = mgr_dispatch.lock().await;
+
+                if let Some(seq) = message.get("seq").and_then(Value::as_i64)
+                    && let Some(ds) = locked.daemon_state.as_mut()
+                {
+                    ds.request_client_map.insert(seq, client_id);
+                }
+
+                if let Err(err) = locked.dispatch_message(message).await {
+                    error!("Daemon: dispatch error for client {client_id}: {err}");
+                }
+            }
+        });
+
+        // --- Response router ---
+        let mgr_router = mgr.clone();
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_millis(10)).await;
+
+                let mut locked = mgr_router.lock().await;
+
+                let mut outbound: Vec<(Option<usize>, Value)> = Vec::new();
+                for (idx, rx_opt) in locked.children_receivers.iter_mut().enumerate() {
+                    if let Some(rx) = rx_opt {
+                        while !rx.is_empty() {
+                            if let Some(msg) = rx.recv().await {
+                                outbound.push((Some(idx), msg));
+                            }
+                        }
+                    }
+                }
+
+                if let Some(manager_rx) = locked.manager_receiver.as_mut() {
+                    while !manager_rx.is_empty() {
+                        if let Some(msg) = manager_rx.recv().await {
+                            outbound.push((None, msg));
+                        }
+                    }
+                }
+
+                for (backend_id, msg) in outbound {
+                    locked.route_daemon_message(backend_id, &msg);
+                }
+            }
+        });
+
+        // --- TTL expiry loop ---
+        let mgr_ttl = mgr.clone();
+        tokio::spawn(Self::ttl_expiry_loop(mgr_ttl, ttl_expiry_rx));
+
+        // --- Crash detection loop ---
+        let mgr_crash = mgr.clone();
+        tokio::spawn(Self::crash_detection_loop(mgr_crash));
+
+        Ok((mgr, shutdown_rx))
     }
 
     /// Spawns a task that reads DAP messages from a client's socket and forwards
@@ -463,6 +743,71 @@ impl BackendManager {
     fn spawn_client_writer(
         client_id: u64,
         mut write_half: WriteHalf<UnixStream>,
+        mut rx: UnboundedReceiver<Value>,
+    ) {
+        tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                let bytes = DapParser::to_bytes(&message);
+                if let Err(err) = write_half.write_all(&bytes).await {
+                    error!("Daemon: write error for client {client_id}: {err}");
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Spawns a task that reads DAP messages from a client's TCP socket and
+    /// forwards `(client_id, message)` tuples to the central dispatch channel.
+    #[cfg(windows)]
+    fn spawn_client_reader(
+        client_id: u64,
+        mut read_half: tokio::io::ReadHalf<TcpStream>,
+        inbound_tx: UnboundedSender<(u64, Value)>,
+        mgr: Arc<Mutex<Self>>,
+    ) {
+        tokio::spawn(async move {
+            let mut parser = DapParser::new();
+            let mut buf = vec![0u8; 8 * 1024];
+
+            loop {
+                match read_half.read(&mut buf).await {
+                    Ok(0) => {
+                        info!("Daemon: client {client_id} disconnected (EOF)");
+                        Self::remove_client(&mgr, client_id).await;
+                        break;
+                    }
+                    Ok(cnt) => {
+                        parser.add_bytes(&buf[..cnt]);
+                        loop {
+                            match parser.get_message() {
+                                Some(Ok(message)) => {
+                                    if inbound_tx.send((client_id, message)).is_err() {
+                                        return;
+                                    }
+                                }
+                                Some(Err(err)) => {
+                                    error!("Daemon: bad DAP from client {client_id}: {err}");
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Daemon: read error for client {client_id}: {err}");
+                        Self::remove_client(&mgr, client_id).await;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Spawns a task that drains a per-client channel and writes DAP-framed
+    /// messages to the client's TCP socket.
+    #[cfg(windows)]
+    fn spawn_client_writer(
+        client_id: u64,
+        mut write_half: WriteHalf<TcpStream>,
         mut rx: UnboundedReceiver<Value>,
     ) {
         tokio::spawn(async move {
@@ -1553,14 +1898,131 @@ impl BackendManager {
         Ok((id, parent_tx, child_rx))
     }
 
-    /// Stub: start_replay_raw requires Unix sockets (not available on Windows).
+    /// Windows implementation of `start_replay_raw` using TCP on localhost.
+    ///
+    /// Creates a TCP listener on `127.0.0.1:0`, passes the `host:port`
+    /// address as the last argument to the child process (same convention as
+    /// Unix where the socket path is the last argument), then waits for the
+    /// child to connect back.
     #[cfg(windows)]
     pub async fn start_replay_raw(
         &mut self,
-        _cmd: &str,
-        _args: &[&str],
+        cmd: &str,
+        args: &[&str],
     ) -> Result<(usize, UnboundedSender<Value>, UnboundedReceiver<Value>), Box<dyn Error>> {
-        Err("start_replay_raw is not yet supported on Windows (requires Unix sockets)".into())
+        // Reserve a slot for the child process.
+        self.children.push(None);
+        let id = self.children.len() - 1;
+
+        // Also reserve placeholder slots in the channel vectors.
+        self.children_receivers.push(None);
+        self.parent_senders.push(None);
+
+        // Bind a TCP listener on a random port.
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let local_addr = listener.local_addr()?;
+        let addr_str = local_addr.to_string();
+
+        let cmd_text = cmd;
+        let mut cmd = if let Ok(_record_backend) = std::env::var("CODETRACER_RECORD_BACKEND") {
+            let mut ct_cmd = Command::new("ct");
+            ct_cmd.arg("record");
+            ct_cmd.arg(cmd_text);
+            ct_cmd
+        } else {
+            Command::new(cmd_text)
+        };
+        cmd.args(args);
+
+        // Pass the TCP address as the last argument (same convention as Unix
+        // socket path).
+        cmd.arg(&addr_str);
+
+        let child = cmd.spawn();
+        let child = match child {
+            Ok(c) => c,
+            Err(err) => {
+                error!("Can't start replay: {err}");
+                return Err(Box::new(err));
+            }
+        };
+
+        self.children[id] = Some(child);
+
+        info!("Starting replay with id {id}. Listening on {addr_str}");
+
+        let socket_read;
+        let mut socket_write;
+
+        info!("Awaiting connection!");
+
+        match listener.accept().await {
+            Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
+            Err(err) => return Err(Box::new(err)),
+        }
+
+        info!("Accepted connection!");
+
+        let (child_tx, child_rx) = mpsc::unbounded_channel();
+        let (parent_tx, mut parent_rx) = mpsc::unbounded_channel::<Value>();
+
+        // Spawn the writer task.
+        tokio::spawn(async move {
+            while let Some(message) = parent_rx.recv().await {
+                let write_res = socket_write.write_all(&DapParser::to_bytes(&message)).await;
+                match write_res {
+                    Ok(()) => {
+                        debug!("Sent message {message:?} to replay socket with id {id}");
+                    }
+                    Err(err) => {
+                        error!("Can't send message to replay socket! Error: {err}");
+                    }
+                }
+            }
+        });
+
+        // Spawn the reader task.
+        tokio::spawn(async move {
+            let mut parser = DapParser::new();
+            let mut read_half = socket_read;
+            let mut buff = vec![0; 8 * 1024];
+
+            loop {
+                match read_half.read(&mut buff).await {
+                    Ok(0) => {
+                        info!("Replay {id}: child connection closed (EOF)");
+                        break;
+                    }
+                    Ok(cnt) => {
+                        parser.add_bytes(&buff[..cnt]);
+
+                        loop {
+                            let message = match parser.get_message() {
+                                Some(Ok(message)) => Some(message),
+                                Some(Err(err)) => {
+                                    warn!("Recieved malformed DAP message! Error: {err}");
+                                    None
+                                }
+                                None => None,
+                            };
+
+                            let Some(message) = message else {
+                                break;
+                            };
+
+                            if let Err(err) = child_tx.send(message) {
+                                error!("Can't send to child channel! Error: {err}");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Can't read from replay socket! Error: {err}");
+                    }
+                }
+            }
+        });
+
+        Ok((id, parent_tx, child_rx))
     }
 
     /// Installs the DAP channels for a previously-started replay, making it

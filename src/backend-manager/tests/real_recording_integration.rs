@@ -163,7 +163,12 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
 use tokio::net::UnixStream;
+// On Windows, use TcpStream as a stand-in for UnixStream so the test code
+// compiles unchanged.  The actual socket address will be a TCP endpoint.
+#[cfg(windows)]
+type UnixStream = tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 
@@ -171,6 +176,24 @@ use tokio::time::{sleep, timeout};
 // Shared helpers (previously in daemon_integration.rs; now consolidated here since integration
 // test files cannot share code without a helper crate or `mod` file)
 // ---------------------------------------------------------------------------
+
+/// Connects to the daemon socket/port.
+///
+/// On Unix, connects directly to the Unix socket at `socket_path`.
+/// On Windows, reads the TCP port from the port file at `socket_path` and
+/// connects to `127.0.0.1:<port>`.
+async fn connect_to_daemon_socket(socket_path: &Path) -> Result<UnixStream, Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    {
+        Ok(tokio::net::UnixStream::connect(socket_path).await?)
+    }
+    #[cfg(windows)]
+    {
+        let contents = tokio::fs::read_to_string(socket_path).await?;
+        let port: u16 = contents.trim().parse()?;
+        Ok(tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await?)
+    }
+}
 
 /// Returns the path to the compiled `backend-manager` binary.
 fn binary_path() -> PathBuf {
@@ -430,7 +453,11 @@ async fn start_daemon_with_real_backend(
     let ct_dir = daemon_paths_in(test_dir);
     std::fs::create_dir_all(&ct_dir).expect("create ct dir");
 
-    let socket_path = ct_dir.join("daemon.sock");
+    let socket_path = if cfg!(windows) {
+        ct_dir.join("daemon.port")
+    } else {
+        ct_dir.join("daemon.sock")
+    };
     let pid_path = ct_dir.join("daemon.pid");
 
     // Remove any stale files from a previous run.
@@ -1215,7 +1242,7 @@ async fn test_real_rr_session_launches_db_backend() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -1346,7 +1373,7 @@ async fn test_real_rr_session_reuses_existing() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -1437,7 +1464,7 @@ async fn test_real_rr_trace_info_returns_metadata() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -1579,7 +1606,7 @@ async fn test_real_rr_dap_initialization_sequence() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -1711,7 +1738,7 @@ async fn test_real_custom_session_launches_db_backend() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -1836,7 +1863,7 @@ async fn test_real_custom_trace_info_returns_metadata() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -2086,7 +2113,7 @@ async fn test_real_rr_navigate_step_over() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -2193,7 +2220,7 @@ async fn test_real_rr_navigate_step_in_out() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -2417,7 +2444,7 @@ async fn test_real_rr_navigate_continue_forward() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -2576,7 +2603,7 @@ async fn test_real_rr_navigate_step_back() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -2740,7 +2767,7 @@ async fn test_real_custom_navigate_step_over() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -2873,7 +2900,7 @@ async fn test_real_custom_navigate_continue_forward() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -3031,7 +3058,7 @@ async fn test_real_custom_navigate_step_back() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -3350,7 +3377,7 @@ async fn test_real_rr_locals_returns_variables() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -3548,7 +3575,7 @@ async fn test_real_rr_evaluate_expression() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -3719,7 +3746,7 @@ async fn test_real_rr_stack_trace_returns_frames() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -3929,7 +3956,7 @@ async fn test_real_custom_locals_returns_variables() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -4113,7 +4140,7 @@ async fn test_real_custom_evaluate_expression() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -4278,7 +4305,7 @@ async fn test_real_custom_stack_trace_returns_frames() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -4686,7 +4713,7 @@ async fn test_real_rr_breakpoint_stops_execution() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -4852,7 +4879,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -5076,7 +5103,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -5258,7 +5285,7 @@ async fn test_real_rr_multiple_breakpoints() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -5494,7 +5521,7 @@ async fn test_real_custom_breakpoint_stops_execution() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -5655,7 +5682,7 @@ async fn test_real_custom_remove_breakpoint_continues_past() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -5828,7 +5855,7 @@ async fn test_real_custom_multiple_breakpoints() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -6248,7 +6275,7 @@ async fn test_real_rr_flow_returns_steps() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -6492,7 +6519,7 @@ async fn test_real_rr_flow_diff_mode() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -6658,7 +6685,7 @@ async fn test_real_custom_flow_returns_steps() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -7148,7 +7175,7 @@ async fn test_real_rr_calltrace_returns_calls() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -7333,7 +7360,7 @@ async fn test_real_rr_search_calltrace_finds_function() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -7513,7 +7540,7 @@ async fn test_real_rr_events_returns_events() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -7691,7 +7718,7 @@ async fn test_real_rr_events_pagination() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -7886,7 +7913,7 @@ async fn test_real_rr_events_response_timing() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -8031,7 +8058,7 @@ async fn test_real_rr_terminal_returns_output() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -8199,7 +8226,7 @@ async fn test_real_custom_calltrace_returns_calls() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -8359,7 +8386,7 @@ async fn test_real_custom_search_calltrace_finds_function() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -8531,7 +8558,7 @@ async fn test_real_custom_events_returns_events() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -8704,7 +8731,7 @@ async fn test_real_custom_terminal_returns_output() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -8960,7 +8987,7 @@ async fn test_real_rr_single_process_trace() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -9092,7 +9119,7 @@ async fn test_real_custom_single_process_trace() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -9323,7 +9350,7 @@ async fn test_real_rr_query_prints_hello() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -9430,7 +9457,7 @@ async fn test_real_rr_query_inline_trace_bound() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -9536,7 +9563,7 @@ async fn test_real_custom_query_inline_executes() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -9643,7 +9670,7 @@ async fn test_real_rr_query_timeout_kills_script() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -9769,7 +9796,7 @@ async fn test_real_rr_query_script_error_traceback() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -10057,7 +10084,7 @@ async fn test_real_rr_mcp_trace_info() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10169,7 +10196,7 @@ async fn test_real_rr_mcp_exec_script() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10284,7 +10311,7 @@ async fn test_real_rr_mcp_list_source_files() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10448,7 +10475,7 @@ async fn test_real_rr_mcp_read_source_file() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10570,7 +10597,7 @@ async fn test_real_custom_mcp_trace_info() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10687,7 +10714,7 @@ async fn test_real_custom_mcp_exec_script() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10795,7 +10822,7 @@ async fn test_real_custom_mcp_list_source_files() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -10914,7 +10941,7 @@ async fn test_real_custom_mcp_read_source_file() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -11064,7 +11091,7 @@ async fn test_real_rr_mcp_resources_list() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -11257,7 +11284,7 @@ async fn test_real_rr_mcp_resource_read_info() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -11460,7 +11487,7 @@ async fn test_real_rr_mcp_resource_read_source() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -11606,7 +11633,7 @@ async fn test_real_rr_mcp_error_actionable() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -11780,7 +11807,7 @@ async fn test_real_rr_mcp_response_timing() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -11911,7 +11938,7 @@ async fn test_real_custom_mcp_resources_list() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -12069,7 +12096,7 @@ async fn test_real_custom_mcp_resource_read_info() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -12227,7 +12254,7 @@ async fn test_real_custom_mcp_resource_read_source() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -12349,7 +12376,7 @@ async fn test_real_custom_mcp_response_timing() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -12561,7 +12588,7 @@ async fn test_real_rr_example_scripts_execute() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -12823,7 +12850,7 @@ async fn test_real_custom_example_scripts_execute() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -12886,7 +12913,7 @@ async fn test_real_noir_session_launches_db_backend() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -12995,7 +13022,7 @@ async fn test_real_noir_trace_info_returns_metadata() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -13089,7 +13116,7 @@ async fn test_real_noir_navigate_step_over() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -13209,7 +13236,7 @@ async fn test_real_noir_calltrace_returns_calls() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -13359,7 +13386,7 @@ async fn test_real_noir_events_returns_events() {
         let (mut daemon, socket_path) =
             start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -13572,7 +13599,7 @@ async fn test_real_noir_mcp_trace_info() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -13682,7 +13709,7 @@ async fn test_real_noir_mcp_exec_script() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -13763,7 +13790,7 @@ async fn test_real_rr_locals_f64_values_non_empty() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -14132,7 +14159,7 @@ async fn test_real_rr_mcp_exec_script_f64_locals() {
         let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
         let _ = mcp.kill().await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -14279,7 +14306,7 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
         )
         .await;
 
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         sleep(Duration::from_millis(200)).await;
@@ -14418,7 +14445,7 @@ async fn test_cli_trace_info_rr() {
         );
 
         // Clean up: shutdown daemon.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -14521,7 +14548,7 @@ async fn test_cli_trace_query_rr_inline() {
         );
 
         // Clean up.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -14636,7 +14663,7 @@ print(f'DONE: {len(results)} steps completed')";
         );
 
         // Clean up.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -14775,7 +14802,7 @@ print('DONE')"
         );
 
         // Clean up.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -14939,7 +14966,7 @@ except Exception as e:
         }
 
         // Clean up.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -15074,7 +15101,7 @@ print('GOTO_TICKS_OK')";
         );
 
         // Clean up.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -15246,7 +15273,7 @@ except Exception as e:
         }
 
         // Clean up.
-        let mut client = UnixStream::connect(&socket_path)
+        let mut client = connect_to_daemon_socket(&socket_path)
             .await
             .map_err(|e| format!("connect for shutdown: {e}"))?;
         shutdown_daemon(&mut client, &mut daemon).await;
