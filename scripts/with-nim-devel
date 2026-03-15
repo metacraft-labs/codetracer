@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Execute a command with nim-devel in PATH
+# Usage: with-nim-devel <command> [args...]
+#
+# Uses the Nim compiler built from third_party/nim-lang/
+# (must be pre-built with `cd third_party/nim-lang && sh build_all.sh`)
+
+set -e
+
+if [ $# -eq 0 ]; then
+	echo "Usage: with-nim-devel <command> [args...]"
+	echo "Execute a command with nim-devel in PATH"
+	echo ""
+	echo "Requires pre-built Nim in third_party/nim-lang/bin/"
+	echo "Build with: cd third_party/nim-lang && sh build_all.sh"
+	exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+NIM_DEVEL_DIR="$SCRIPT_DIR/../third_party/nim-lang"
+
+if [ ! -x "$NIM_DEVEL_DIR/bin/nim" ]; then
+	echo "Error: nim-devel not found at $NIM_DEVEL_DIR/bin/nim"
+	echo "Build it first: cd $NIM_DEVEL_DIR && sh build_all.sh"
+	exit 1
+fi
+
+export PATH="$NIM_DEVEL_DIR/bin:$PATH"
+exec "$@"
