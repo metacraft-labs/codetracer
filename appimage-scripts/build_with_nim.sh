@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # depends on env `$ROOT_PATH` and `$CODETRACER_PREFIX`
-#   and nim 1.6 installed
+#   and nim installed
 #   and valid env `$LIBSQLITE3_PATH` at least for nixos
 
 set -e
@@ -18,10 +18,10 @@ echo "${APP_DIR}"
 # --passL:"${APP_DIR}/lib/libsqlite3.so.0" \
 
 # codetracer
-nim1 -d:release \
+nim -d:release \
 	--d:asyncBackend=asyncdispatch \
 	--dynlibOverride:std -d:staticStd \
-	--gc:refc --hints:on --warnings:off \
+	--mm:refc --hints:on --warnings:off \
 	--dynlibOverride:"sqlite3" \
 	--dynlibOverride:"pcre" \
 	--dynlibOverride:"libzip" \
@@ -46,9 +46,9 @@ nim1 -d:release \
 	--nimcache:nimcache \
 	--out:"${APP_DIR}/bin/ct_unwrapped" c ./src/ct/codetracer.nim
 
-nim1 \
+nim \
 	-d:release -d:asyncBackend=asyncdispatch \
-	--gc:refc --hints:off --warnings:off \
+	--mm:refc --hints:off --warnings:off \
 	--debugInfo --lineDir:on \
 	--boundChecks:on --stacktrace:on --linetrace:on \
 	-d:chronicles_sinks=json -d:chronicles_line_numbers=true \
@@ -80,20 +80,20 @@ nim1 \
 # patchelf --set-rpath ${APP_DIR}/lib ${APP_DIR}/bin/ct
 
 # index.js
-nim1 \
+nim \
 	--hints:on --warnings:off --sourcemap:on \
 	-d:ctIndex -d:chronicles_sinks=json \
 	-d:nodejs --out:"${APP_DIR}/index.js" js src/frontend/index.nim
 cp "${APP_DIR}/index.js" "${APP_DIR}/src/index.js"
 
-nim1 \
+nim \
 	--hints:on --warnings:off --sourcemap:on \
 	-d:ctIndex -d:server -d:chronicles_sinks=json \
 	-d:nodejs --out:"${APP_DIR}/server_index.js" js src/frontend/index.nim
 cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
 
 # ui.js
-nim1 \
+nim \
 	--hints:off --warnings:off \
 	-d:chronicles_enabled=off \
 	-d:ctRenderer \
@@ -101,7 +101,7 @@ nim1 \
 cp "${APP_DIR}/ui.js" "${APP_DIR}/src/ui.js"
 
 # subwindow.js
-nim1 \
+nim \
 	--hints:off --warnings:off \
 	-d:chronicles_enabled=off \
 	-d:ctRenderer \
