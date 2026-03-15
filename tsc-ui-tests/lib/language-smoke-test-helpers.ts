@@ -72,6 +72,10 @@ export async function assertEventLogPopulated(page: Page): Promise<void> {
 /**
  * Navigate call trace to find a function by name, activate it, and verify
  * that the editor jumps to a tab whose name contains `expectedFile`.
+ *
+ * Uses `navigateToEntry` which first tries expanding visible entries, then
+ * falls back to calltrace search to handle cases where the function is
+ * buried under many stdlib calls (common in Python/Ruby traces).
  */
 export async function assertCallTraceNavigation(
   page: Page,
@@ -85,38 +89,8 @@ export async function assertCallTraceNavigation(
   await clickTabButton(callTrace.tabButton());
   callTrace.invalidateEntries();
 
-  let targetFound = false;
-
-  await retry(
-    async () => {
-      callTrace.invalidateEntries();
-      const target = await callTrace.findEntry(functionName, true);
-      if (target !== null) {
-        await target.activate();
-        targetFound = true;
-        return true;
-      }
-
-      // Expand all visible entries to reveal nested functions.
-      const allEntries = await callTrace.getEntries(true);
-      for (const entry of allEntries) {
-        try {
-          await entry.expandChildren();
-        } catch {
-          // Entry may be scrolled out of the virtualized viewport
-        }
-      }
-
-      return false;
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-
-  if (!targetFound) {
-    throw new Error(
-      `Call trace entry '${functionName}' was not found after expanding all visible entries.`,
-    );
-  }
+  const entry = await callTrace.navigateToEntry(functionName);
+  await entry.activate();
 
   // After navigation the editor should show a tab containing the expected file name.
   await retry(
@@ -150,37 +124,8 @@ export async function assertVariableVisible(
   await clickTabButton(callTrace.tabButton());
   callTrace.invalidateEntries();
 
-  let targetFound = false;
-
-  await retry(
-    async () => {
-      callTrace.invalidateEntries();
-      const target = await callTrace.findEntry(functionName, true);
-      if (target !== null) {
-        await target.activate();
-        targetFound = true;
-        return true;
-      }
-
-      const allEntries = await callTrace.getEntries(true);
-      for (const entry of allEntries) {
-        try {
-          await entry.expandChildren();
-        } catch {
-          // Entry may be scrolled out of the virtualized viewport
-        }
-      }
-
-      return false;
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-
-  if (!targetFound) {
-    throw new Error(
-      `Call trace entry '${functionName}' was not found when trying to inspect variable '${variableName}'.`,
-    );
-  }
+  const entry = await callTrace.navigateToEntry(functionName);
+  await entry.activate();
 
   if (stepForwardFirst) {
     const stepOverBtn = page.locator("#next-debug");
