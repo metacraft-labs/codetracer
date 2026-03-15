@@ -17,6 +17,7 @@ export default defineConfig({
     ["./lib/stats-reporter.ts"],
   ],
   use: {
+    actionTimeout: 60_000,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
