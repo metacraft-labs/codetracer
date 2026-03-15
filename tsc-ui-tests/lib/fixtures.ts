@@ -41,6 +41,12 @@ import {
 } from "./performance-limits";
 
 // ---------------------------------------------------------------------------
+// Platform detection
+// ---------------------------------------------------------------------------
+
+const isWindows = process.platform === "win32";
+
+// ---------------------------------------------------------------------------
 // Path constants (shared with ct_helpers.ts)
 // ---------------------------------------------------------------------------
 
@@ -49,11 +55,12 @@ const codetracerInstallDir = path.dirname(currentDir);
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
 
+const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
 const codetracerPath =
   envCodetracerPath.length > 0
     ? envCodetracerPath
-    : path.join(codetracerPrefix, "bin", "ct");
+    : path.join(codetracerPrefix, "bin", ctBinaryName);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -106,16 +113,37 @@ interface CodetracerFixtures {
 // ---------------------------------------------------------------------------
 
 function setupLdLibraryPath(): void {
-  process.env.LD_LIBRARY_PATH = process.env.CT_LD_LIBRARY_PATH;
+  // LD_LIBRARY_PATH is a Linux/macOS concept; skip on Windows.
+  if (!isWindows) {
+    process.env.LD_LIBRARY_PATH = process.env.CT_LD_LIBRARY_PATH;
+  }
 }
 
 /**
  * Recursively kills a process and all its descendants.
  * Prevents backend-manager and db-backend from leaking as orphans
  * when Electron is killed during test teardown.
+ *
+ * On Windows, uses `taskkill /PID <pid> /T /F` which natively kills
+ * the entire process tree. On Linux/macOS, walks the tree via pgrep
+ * and sends SIGKILL to each process.
  */
 function killProcessTree(pid: number): void {
-  // Find children before killing the parent (once parent dies,
+  if (isWindows) {
+    // taskkill /T kills the process and all child processes.
+    // /F forces termination (equivalent to SIGKILL).
+    try {
+      childProcess.execSync(`taskkill /PID ${pid} /T /F`, {
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+    } catch {
+      // Process may already be dead.
+    }
+    return;
+  }
+
+  // Linux/macOS: find children before killing the parent (once parent dies,
   // children get reparented to init and we lose the relationship).
   let childPids: number[] = [];
   try {
@@ -241,6 +269,9 @@ function makeCleanEnv(
 
 /**
  * Resolves the chromium executable path from $PLAYWRIGHT_BROWSERS_PATH.
+ *
+ * On Linux, looks for chrome-linux directory with chrome binary.
+ * On Windows, looks for chrome-win directory with chrome.exe binary.
  */
 function resolveChromiumPath(): string {
   const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
@@ -257,15 +288,31 @@ function resolveChromiumPath(): string {
   if (!chromiumDir) {
     throw new Error(`no chromium-* directory found in ${browsersDir}`);
   }
+
+  const chromiumBase = path.join(browsersDir, chromiumDir);
+
+  if (isWindows) {
+    const chromeSubdir = fs
+      .readdirSync(chromiumBase)
+      .find((d: string) => d.startsWith("chrome-win"));
+    if (!chromeSubdir) {
+      throw new Error(
+        `no chrome-win* directory found in ${chromiumBase}`,
+      );
+    }
+    return path.join(chromiumBase, chromeSubdir, "chrome.exe");
+  }
+
+  // Linux (and fallback for other Unix-like systems)
   const chromeSubdir = fs
-    .readdirSync(path.join(browsersDir, chromiumDir))
+    .readdirSync(chromiumBase)
     .find((d: string) => d.startsWith("chrome-linux"));
   if (!chromeSubdir) {
     throw new Error(
-      `no chrome-linux* directory found in ${browsersDir}/${chromiumDir}`,
+      `no chrome-linux* directory found in ${chromiumBase}`,
     );
   }
-  return path.join(browsersDir, chromiumDir, chromeSubdir, "chrome");
+  return path.join(chromiumBase, chromeSubdir, "chrome");
 }
 
 // ---------------------------------------------------------------------------

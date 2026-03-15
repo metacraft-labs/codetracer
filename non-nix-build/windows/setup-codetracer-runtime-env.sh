@@ -33,26 +33,40 @@ if [[ -z ${CODETRACER_CTAGS_EXE_PATH:-} ]]; then
 fi
 
 # `ct host` serves static assets from `<build-debug>/public` in non-Nix mode.
-# Ensure the folder exists by linking it to `src/public` when missing.
-if [[ ! -e "$CODETRACER_PREFIX/public" && -d "$ROOT_DIR/src/public" ]]; then
-	mkdir -p "$CODETRACER_PREFIX"
-	ln -s "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public" 2>/dev/null || cp -R "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public"
-fi
-
 # `ct` runtime expects `<build-debug>/config/default_config.yaml` in non-Nix mode.
-if [[ ! -e "$CODETRACER_PREFIX/config" && -d "$ROOT_DIR/src/config" ]]; then
-	mkdir -p "$CODETRACER_PREFIX"
-	ln -s "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config" 2>/dev/null || cp -R "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config"
+#
+# On Windows with tup, CODETRACER_PREFIX points to the tup variant directory
+# (src/build-debug) which must ONLY contain tup.config before `tup build-debug`
+# runs. Skip creating config/public here if tup.config exists and the directory
+# doesn't yet have the tup-generated output (no bin/ dir yet). After tup builds,
+# these will be populated by the build system or can be set up separately.
+_should_setup_prefix_dirs=1
+if [[ -f "$CODETRACER_PREFIX/tup.config" && ! -d "$CODETRACER_PREFIX/bin" ]]; then
+	_should_setup_prefix_dirs=0
 fi
 
-if [[ -d "$ROOT_DIR/src/config" ]]; then
-	mkdir -p "$CODETRACER_PREFIX/config"
-	for filename in default_config.yaml default_layout.json; do
-		if [[ -f "$ROOT_DIR/src/config/$filename" && ! -f "$CODETRACER_PREFIX/config/$filename" ]]; then
-			cp "$ROOT_DIR/src/config/$filename" "$CODETRACER_PREFIX/config/$filename"
-		fi
-	done
+if [[ $_should_setup_prefix_dirs -eq 1 ]]; then
+	# Ensure the folder exists by linking it to `src/public` when missing.
+	if [[ ! -e "$CODETRACER_PREFIX/public" && -d "$ROOT_DIR/src/public" ]]; then
+		mkdir -p "$CODETRACER_PREFIX"
+		ln -s "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public" 2>/dev/null || cp -R "$ROOT_DIR/src/public" "$CODETRACER_PREFIX/public"
+	fi
+
+	if [[ ! -e "$CODETRACER_PREFIX/config" && -d "$ROOT_DIR/src/config" ]]; then
+		mkdir -p "$CODETRACER_PREFIX"
+		ln -s "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config" 2>/dev/null || cp -R "$ROOT_DIR/src/config" "$CODETRACER_PREFIX/config"
+	fi
+
+	if [[ -d "$ROOT_DIR/src/config" ]]; then
+		mkdir -p "$CODETRACER_PREFIX/config"
+		for filename in default_config.yaml default_layout.json; do
+			if [[ -f "$ROOT_DIR/src/config/$filename" && ! -f "$CODETRACER_PREFIX/config/$filename" ]]; then
+				cp "$ROOT_DIR/src/config/$filename" "$CODETRACER_PREFIX/config/$filename"
+			fi
+		done
+	fi
 fi
+unset _should_setup_prefix_dirs
 
 if [[ -z ${CODETRACER_E2E_CT_PATH:-} ]]; then
 	if [[ -f "$CODETRACER_PREFIX/bin/ct.exe" ]]; then
