@@ -126,9 +126,6 @@ mkShell {
     # Nim 2.2.x — the primary compiler (provides nim and nim2)
     ourPkgs.nim-codetracer
 
-    # Legacy Nim 1.6 for transition period (provides nim1)
-    ourPkgs.nim1-legacy
-
     # TODO: uncomment when nim-devel builds from source work in nix
     # ourPkgs.nim-devel
 

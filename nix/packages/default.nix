@@ -41,14 +41,6 @@
           '';
         });
 
-        # Legacy nim1 for transition period.
-        # Provides only 'nim1' binary (not 'nim') to avoid conflicts.
-        nim1-legacy = nimVersions.nim-1_6.overrideAttrs (old: {
-          postInstall = (old.postInstall or "") + ''
-            mv $out/bin/nim $out/bin/nim1
-          '';
-        });
-
         # Keep backward compat alias for anything that still references this
         upstream-nim-codetracer = nim-codetracer;
 
