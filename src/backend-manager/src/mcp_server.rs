@@ -41,6 +41,8 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1304,12 +1306,16 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
         std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
     eprintln!("mcp: auto-starting daemon: {} daemon start", exe.display());
 
-    std::process::Command::new(&exe)
+    let mut daemon_cmd = std::process::Command::new(&exe);
+    daemon_cmd
         .arg("daemon")
         .arg("start")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    daemon_cmd.creation_flags(crate::CREATE_NO_WINDOW);
+    daemon_cmd
         .spawn()
         .map_err(|e| format!("failed to spawn daemon: {e}"))?;
 
@@ -1394,12 +1400,16 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
         std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
     eprintln!("mcp: auto-starting daemon: {} daemon start", exe.display());
 
-    std::process::Command::new(&exe)
+    let mut daemon_cmd = std::process::Command::new(&exe);
+    daemon_cmd
         .arg("daemon")
         .arg("start")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    daemon_cmd.creation_flags(crate::CREATE_NO_WINDOW);
+    daemon_cmd
         .spawn()
         .map_err(|e| format!("failed to spawn daemon: {e}"))?;
 
