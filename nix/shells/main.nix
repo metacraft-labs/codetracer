@@ -302,15 +302,28 @@ mkShell {
     # ===========================================================================
     # Workspace tools detection
     # ===========================================================================
-    # When this repo lives inside a workspace directory (e.g. metacraft workspace),
-    # detect shared workspace-level scripts and add them to PATH. This makes tools
-    # like `with-nim-devel` available regardless of which repo's shell you're in.
+    # Detect shared metacraft scripts by walking up from the repo root.
+    # Supports both direct nesting (metacraft/codetracer/) and workspace
+    # nesting (metacraft/codetracer-main/codetracer/).
     WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
+    METACRAFT_SCRIPTS=""
 
+    # Check parent (workspace dir or metacraft root)
     if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/scripts" ]; then
+      METACRAFT_SCRIPTS="$WORKSPACE_ROOT/scripts"
+    fi
+    # Check grandparent (metacraft root when inside a workspace dir)
+    if [ -z "$METACRAFT_SCRIPTS" ] && [ -n "$WORKSPACE_ROOT" ]; then
+      METACRAFT_PARENT="$(cd "$WORKSPACE_ROOT/.." 2>/dev/null && pwd)"
+      if [ -n "$METACRAFT_PARENT" ] && [ -d "$METACRAFT_PARENT/scripts" ]; then
+        METACRAFT_SCRIPTS="$METACRAFT_PARENT/scripts"
+      fi
+    fi
+
+    if [ -n "$METACRAFT_SCRIPTS" ]; then
       export METACRAFT_WORKSPACE_PRESENT=1
-      export METACRAFT_WORKSPACE_SCRIPTS="$WORKSPACE_ROOT/scripts"
-      export PATH="$WORKSPACE_ROOT/scripts:$PATH"
+      export METACRAFT_WORKSPACE_SCRIPTS="$METACRAFT_SCRIPTS"
+      export PATH="$METACRAFT_SCRIPTS:$PATH"
     fi
 
     # ===========================================================================
