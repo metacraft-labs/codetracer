@@ -17,10 +17,22 @@ if [ $# -eq 0 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-NIM_DEVEL_DIR="$SCRIPT_DIR/../third_party/nim-lang"
+REPO_ROOT="$SCRIPT_DIR/.."
+WORKSPACE_ROOT="$REPO_ROOT/.."
+
+# Look for nim-devel in workspace root first, then repo-local
+if [ -d "$WORKSPACE_ROOT/third_party/nim-lang" ]; then
+	NIM_DEVEL_DIR="$WORKSPACE_ROOT/third_party/nim-lang"
+elif [ -d "$REPO_ROOT/third_party/nim-lang" ]; then
+	NIM_DEVEL_DIR="$REPO_ROOT/third_party/nim-lang"
+else
+	echo "Error: nim-devel checkout not found"
+	echo "Expected at: $WORKSPACE_ROOT/third_party/nim-lang"
+	exit 1
+fi
 
 if [ ! -x "$NIM_DEVEL_DIR/bin/nim" ]; then
-	echo "Error: nim-devel not found at $NIM_DEVEL_DIR/bin/nim"
+	echo "Error: nim-devel not built at $NIM_DEVEL_DIR/bin/nim"
 	echo "Build it first: cd $NIM_DEVEL_DIR && sh build_all.sh"
 	exit 1
 fi
