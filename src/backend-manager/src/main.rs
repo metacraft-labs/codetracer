@@ -23,10 +23,11 @@ use serde_json::{Value, json};
 use tokio::{
     fs::{create_dir_all, read_to_string, remove_file, write},
     io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
     signal,
     sync::mpsc,
 };
+#[cfg(unix)]
+use tokio::net::UnixStream;
 
 use crate::backend_manager::BackendManager;
 use crate::config::DaemonConfig;
@@ -178,13 +179,28 @@ enum DaemonAction {
 // ---------------------------------------------------------------------------
 
 /// Checks whether a process with the given PID is currently alive.
-///
-/// Uses the POSIX `kill(pid, 0)` technique: sending signal 0 does not
-/// actually deliver a signal but still performs the permission / existence
-/// check.
+#[cfg(unix)]
 fn is_pid_alive(pid: u32) -> bool {
     // SAFETY: signal 0 never kills anything; it only checks existence.
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+/// Checks whether a process with the given PID is currently alive.
+///
+/// On Windows, shells out to `tasklist` to check process existence.
+/// TODO: Replace with a proper Win32 API call for better performance.
+#[cfg(windows)]
+fn is_pid_alive(pid: u32) -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| {
+            let output = String::from_utf8_lossy(&o.stdout);
+            output.contains(&pid.to_string())
+        })
+        .unwrap_or(false)
 }
 
 /// Writes the current process PID to the daemon PID file.
@@ -233,6 +249,7 @@ async fn remove_pid_file(pid_path: &PathBuf) {
 /// Connects to the daemon socket and sends a `ct/daemon-shutdown` request.
 ///
 /// Waits briefly for the acknowledgement response before returning.
+#[cfg(unix)]
 async fn daemon_stop(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let mut stream = match UnixStream::connect(socket_path).await {
         Ok(s) => s,
@@ -270,8 +287,15 @@ async fn daemon_stop(socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Stub: Unix socket daemon communication not yet implemented on Windows.
+#[cfg(windows)]
+async fn daemon_stop(_socket_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    Err("daemon stop is not yet supported on Windows (requires Unix sockets)".into())
+}
+
 /// Checks whether the daemon is running and prints a human-readable status
 /// line to stdout.
+#[cfg(unix)]
 async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
     // First, check the PID file.
     let pid_info = if pid_path.exists() {
@@ -298,16 +322,32 @@ async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
     }
 }
 
+/// Stub: Unix socket daemon status check not yet implemented on Windows.
+#[cfg(windows)]
+async fn daemon_status(_socket_path: &PathBuf, pid_path: &PathBuf) {
+    // On Windows, we can still check the PID file.
+    let pid_info = if pid_path.exists() {
+        match read_to_string(pid_path).await {
+            Ok(contents) => contents.trim().parse::<u32>().ok(),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    if let Some(pid) = pid_info {
+        if is_pid_alive(pid) {
+            println!("Daemon process is alive (PID {pid}), but socket check not available on Windows.");
+        } else {
+            println!("Daemon is not running (stale PID file for {pid}).");
+        }
+    } else {
+        println!("Daemon is not running (no PID file).");
+    }
+}
+
 /// Auto-daemonization: connects to the daemon, starting it if necessary.
-///
-/// Protocol:
-/// 1. Try to connect to the well-known daemon socket.
-/// 2. If the connection fails (socket missing or stale):
-///    a. Remove the stale socket file if present.
-///    b. Spawn `backend-manager daemon start` as a detached child process.
-///    c. Poll for the socket file and a successful connection (exponential
-///    backoff, up to 5 seconds).
-/// 3. Once connected, print "connected" and exit.
+#[cfg(unix)]
 async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     // Try to connect to an existing daemon.
     if socket_path.exists() {
@@ -376,6 +416,12 @@ async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(),
     }
 }
 
+/// Stub: Unix socket daemon connection not yet implemented on Windows.
+#[cfg(windows)]
+async fn daemon_connect(_socket_path: &PathBuf, _pid_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    Err("daemon connect is not yet supported on Windows (requires Unix sockets)".into())
+}
+
 // ---------------------------------------------------------------------------
 // Mock backend (for integration tests)
 // ---------------------------------------------------------------------------
@@ -385,6 +431,7 @@ async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(),
 /// Used by integration tests to simulate a child replay process.  The real
 /// replay backend connects to a listener socket created by `start_replay`;
 /// this mock does the same but simply sleeps instead of speaking DAP.
+#[cfg(unix)]
 async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     let _stream = UnixStream::connect(socket_path).await?;
     // Keep the connection alive indefinitely (until killed).
@@ -403,6 +450,7 @@ async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 /// `reverseContinue`, `ct/goto-ticks`) with stateful tracking: each
 /// command updates the mock's current position (file, line, ticks) and
 /// emits a `stopped` event.  `stackTrace` returns the current position.
+#[cfg(unix)]
 ///
 /// This enables end-to-end testing of the `ct/open-trace` and
 /// `ct/py-navigate` flows without needing a real db-backend binary.
@@ -1535,6 +1583,18 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Stub: mock backends require Unix sockets (not available on Windows).
+#[cfg(windows)]
+async fn run_mock_backend(_socket_path: &str) -> Result<(), Box<dyn Error>> {
+    Err("mock-backend is not supported on Windows (requires Unix sockets)".into())
+}
+
+/// Stub: mock DAP backends require Unix sockets (not available on Windows).
+#[cfg(windows)]
+async fn run_mock_dap_backend(_socket_path: &str) -> Result<(), Box<dyn Error>> {
+    Err("mock-dap-backend is not supported on Windows (requires Unix sockets)".into())
+}
+
 // ---------------------------------------------------------------------------
 // Daemon logging
 // ---------------------------------------------------------------------------
@@ -1606,6 +1666,7 @@ fn init_daemon_logging(config: &DaemonConfig) {
 /// Sends a DAP request over `stream` and reads the response.
 ///
 /// Returns the parsed JSON response.  Times out after `deadline` seconds.
+#[cfg(unix)]
 async fn cli_dap_request(
     stream: &mut UnixStream,
     command: &str,
@@ -1662,6 +1723,7 @@ async fn cli_dap_request(
 /// Reads a single DAP-framed JSON message from `stream`.
 ///
 /// Minimal parser: reads `Content-Length` header, then the JSON body.
+#[cfg(unix)]
 async fn cli_dap_read(stream: &mut UnixStream) -> Result<serde_json::Value, Box<dyn Error>> {
     let mut header_buf = Vec::with_capacity(256);
     let mut single = [0u8; 1];
@@ -1702,6 +1764,7 @@ async fn cli_dap_read(stream: &mut UnixStream) -> Result<serde_json::Value, Box<
 /// If the daemon socket does not exist or a connection attempt fails, this
 /// function auto-starts the daemon by spawning `backend-manager daemon start`
 /// as a background process and polling for the socket.
+#[cfg(unix)]
 async fn ensure_daemon_connected(
     socket_path: &PathBuf,
     pid_path: &PathBuf,
@@ -1770,6 +1833,7 @@ async fn ensure_daemon_connected(
 ///
 /// Reads the script (from a file or inline `-c`), connects to the daemon,
 /// sends `ct/exec-script`, and prints the result.
+#[cfg(unix)]
 async fn run_trace_query(
     trace_path: &std::path::Path,
     script_file: Option<&std::path::Path>,
@@ -1887,6 +1951,7 @@ async fn run_trace_query(
 ///
 /// Connects to the daemon and sends `ct/close-trace` to explicitly
 /// tear down a session and kill the backend process.
+#[cfg(unix)]
 async fn run_session_close(
     trace_path: &std::path::Path,
     daemon_socket_path: &PathBuf,
@@ -1926,6 +1991,7 @@ async fn run_session_close(
 ///
 /// Connects to the daemon, opens the trace (if not already open), sends
 /// `ct/trace-info`, and pretty-prints the metadata.
+#[cfg(unix)]
 async fn run_trace_info(
     trace_path: &std::path::Path,
     daemon_socket_path: &PathBuf,
@@ -2056,6 +2122,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(Commands::Trace { action }) = &cli.command {
         flexi_logger::init();
         match action {
+            #[cfg(unix)]
             TraceAction::Query {
                 trace_path,
                 script_file,
@@ -2079,8 +2146,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .await;
             }
+            #[cfg(windows)]
+            TraceAction::Query { .. } => {
+                eprintln!("error: trace query is not yet supported on Windows (requires Unix sockets)");
+                std::process::exit(1);
+            }
+            #[cfg(unix)]
             TraceAction::Info { trace_path } => {
                 return run_trace_info(trace_path, &daemon_socket_path, &daemon_pid_path).await;
+            }
+            #[cfg(windows)]
+            TraceAction::Info { .. } => {
+                eprintln!("error: trace info is not yet supported on Windows (requires Unix sockets)");
+                std::process::exit(1);
             }
             TraceAction::Mcp => {
                 // MCP server: redirect all logging to stderr only.
@@ -2115,9 +2193,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 // If it fails (e.g. when already a session leader), we simply
                 // ignore the error — the daemon still works, just without full
                 // terminal detachment.
+                #[cfg(unix)]
                 unsafe {
                     libc::setsid();
                 }
+                // TODO: On Windows, consider using CREATE_NEW_PROCESS_GROUP
+                // or a Windows service for proper daemon detachment.
 
                 // Configure daemon-mode logging (file-based).
                 init_daemon_logging(&config);

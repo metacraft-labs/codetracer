@@ -37,7 +37,10 @@ pub(crate) fn prepare_trace_folder(
     let rr_link = wrapper.join("rr");
     // Remove stale symlink if present
     let _ = std::fs::remove_file(&rr_link);
+    #[cfg(unix)]
     std::os::unix::fs::symlink(rr_trace_dir, &rr_link)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(rr_trace_dir, &rr_link)?;
     Ok((wrapper.clone(), Some(wrapper)))
 }
 

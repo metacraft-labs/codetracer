@@ -44,7 +44,13 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::UnixStream;
+
+// On Windows, use TcpStream as a stand-in type so the rest of the code
+// compiles.  The actual connection function returns an error at runtime.
+#[cfg(windows)]
+type UnixStream = tokio::net::TcpStream;
 
 use crate::dap_parser::DapParser;
 
@@ -1248,6 +1254,7 @@ fn handle_resource_templates_list(id: &Value) -> Value {
 ///
 /// This mirrors the `ensure_daemon_connected` function in main.rs but
 /// is self-contained for the MCP server module.
+#[cfg(unix)]
 async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, String> {
     // Check for CODETRACER_DAEMON_SOCK override (used in tests).
     if let Ok(sock_path) = std::env::var("CODETRACER_DAEMON_SOCK") {
@@ -1325,6 +1332,12 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
 
         delay = (delay * 2).min(Duration::from_millis(500));
     }
+}
+
+/// Stub: daemon connection requires Unix sockets (not available on Windows).
+#[cfg(windows)]
+async fn connect_to_daemon(_config: &McpServerConfig) -> Result<UnixStream, String> {
+    Err("daemon connection is not yet supported on Windows (requires Unix sockets)".to_string())
 }
 
 /// Queries trace metadata from the daemon and returns a `LoadedTrace`.
