@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 use tokio::{
     fs::{create_dir_all, remove_file},
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
-    net::{UnixListener, UnixStream},
     process::{Child, Command},
     sync::{
         Mutex,
@@ -14,6 +13,8 @@ use tokio::{
     },
     time::sleep,
 };
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 
 use crate::{
     config::DaemonConfig,
@@ -86,6 +87,7 @@ impl BackendManager {
     // Legacy single-client constructor — UNCHANGED from the original code.
     // -----------------------------------------------------------------------
 
+    #[cfg(unix)]
     pub async fn new() -> Result<Arc<Mutex<Self>>, Box<dyn Error>> {
         let res = Arc::new(Mutex::new(Self {
             children: vec![],
@@ -214,6 +216,12 @@ impl BackendManager {
         Ok(res)
     }
 
+    /// Stub: Legacy single-client mode requires Unix sockets (not available on Windows).
+    #[cfg(windows)]
+    pub async fn new() -> Result<Arc<Mutex<Self>>, Box<dyn Error>> {
+        Err("BackendManager::new() is not yet supported on Windows (requires Unix sockets)".into())
+    }
+
     // -----------------------------------------------------------------------
     // Daemon (multi-client) constructor
     // -----------------------------------------------------------------------
@@ -236,6 +244,7 @@ impl BackendManager {
     /// The receiver fires when a `ct/daemon-shutdown` request is received
     /// (or auto-shutdown triggers), allowing the caller (main.rs) to tear
     /// down the process.
+    #[cfg(unix)]
     pub async fn new_daemon(
         socket_path: PathBuf,
         config: DaemonConfig,
@@ -391,8 +400,18 @@ impl BackendManager {
         Ok((mgr, shutdown_rx))
     }
 
+    /// Stub: daemon mode requires Unix sockets (not available on Windows).
+    #[cfg(windows)]
+    pub async fn new_daemon(
+        _socket_path: PathBuf,
+        _config: DaemonConfig,
+    ) -> Result<(Arc<Mutex<Self>>, UnboundedReceiver<()>), Box<dyn Error>> {
+        Err("BackendManager::new_daemon() is not yet supported on Windows (requires Unix sockets)".into())
+    }
+
     /// Spawns a task that reads DAP messages from a client's socket and forwards
     /// `(client_id, message)` tuples to the central dispatch channel.
+    #[cfg(unix)]
     fn spawn_client_reader(
         client_id: u64,
         mut read_half: tokio::io::ReadHalf<UnixStream>,
@@ -440,6 +459,7 @@ impl BackendManager {
 
     /// Spawns a task that drains a per-client channel and writes DAP-framed
     /// messages to the client's socket.
+    #[cfg(unix)]
     fn spawn_client_writer(
         client_id: u64,
         mut write_half: WriteHalf<UnixStream>,
@@ -1393,6 +1413,7 @@ impl BackendManager {
     /// make the channels available for the daemon's response router.
     ///
     /// Returns `(backend_id, sender_to_child, receiver_from_child)`.
+    #[cfg(unix)]
     pub async fn start_replay_raw(
         &mut self,
         cmd: &str,
@@ -1530,6 +1551,16 @@ impl BackendManager {
         });
 
         Ok((id, parent_tx, child_rx))
+    }
+
+    /// Stub: start_replay_raw requires Unix sockets (not available on Windows).
+    #[cfg(windows)]
+    pub async fn start_replay_raw(
+        &mut self,
+        _cmd: &str,
+        _args: &[&str],
+    ) -> Result<(usize, UnboundedSender<Value>, UnboundedReceiver<Value>), Box<dyn Error>> {
+        Err("start_replay_raw is not yet supported on Windows (requires Unix sockets)".into())
     }
 
     /// Installs the DAP channels for a previously-started replay, making it

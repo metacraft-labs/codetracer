@@ -47,19 +47,47 @@ first to rebuild the frontend before running the tests.
 
 ## Windows local setup (non-Nix)
 
-For Windows local setup context (non-Nix), use:
+For Windows development (both x64 and ARM64), use the DIY bootstrap:
 
+### First-time setup
 ```
 pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1
-source non-nix-build/windows/env.sh   # in Git Bash
-. .\non-nix-build\windows\env.ps1     # in PowerShell
 ```
 
-Pinned tool versions for that workflow are tracked in:
+### Activate environment
+```bash
+# Git Bash / MSYS2
+source non-nix-build/windows/env.sh
 
+# PowerShell
+. .\non-nix-build\windows\env.ps1
+```
+
+### Optional skip flags
+Components can be skipped via environment variables (e.g. for satellite repos
+that only need a subset):
+- `WINDOWS_DIY_SKIP_NARGO=1` — skip Noir compiler
+- `WINDOWS_DIY_SKIP_CT_REMOTE=1` — skip ct-remote desktop client
+- `WINDOWS_DIY_ENSURE_TTD=0` — skip TTD/WinDbg validation
+
+### Build commands (Windows)
+```bash
+# Rust components
+cd src/db-backend && cargo build && cargo test && cargo clippy
+cd src/tui && cargo build && cargo test
+cd src/backend-manager && cargo build
+
+# Full frontend (Nim + Tup)
+cd src/build-debug && source ../../non-nix-build/windows/env.sh && tup upd
+```
+
+### Version pins
+Pinned tool versions are tracked in:
 ```
 non-nix-build/windows/toolchain-versions.env
 ```
+
+For detailed Windows porting progress, see `windows-porting-initiative-status.md`.
 
 # Keeping notes
 
@@ -86,7 +114,7 @@ You can consult this file before starting your coding tasks.
 # Code commenting guidelines
 
 - Document public APIs and complex modules using standard code documentation conventions.
-- Comment the intention behind you code extensively. Omit comments only for very obvious
+- Comment the intention behind your code extensively. Omit comments only for very obvious
   facts that almost any developer would know.
 - Maintain the comments together with the code to keep them meaningful and current.
 - When the code is based on specific formats, standards or well-specified behavior of
@@ -96,5 +124,5 @@ You can consult this file before starting your coding tasks.
 # Writing git commit messages
 
 - You MUST use multiline git commit messages.
-- Use the convential commits style for the first line of the commit message.
+- Use the conventional commits style for the first line of the commit message.
 - Use the summary section of your final response as the remaining lines in the commit message.

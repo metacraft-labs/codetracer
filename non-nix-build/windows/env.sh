@@ -572,11 +572,18 @@ ensure_node_tooling() {
 
 	echo "Windows DIY: Node deps missing, running yarn install in node-packages..." >&2
 	pushd "$ROOT_DIR/node-packages" >/dev/null
-	if [[ -f yarn.lock ]]; then
-		npx yarn install --frozen-lockfile
-	else
-		npx yarn install
+	local npx_cmd="$NODE_DIR/npx.cmd"
+	if [[ ! -f $npx_cmd ]]; then
+		npx_cmd="$NODE_DIR/npx"
 	fi
+	local _saved_path="$PATH"
+	export PATH="$NODE_DIR:$PATH"
+	if [[ -f yarn.lock ]]; then
+		"$npx_cmd" yarn install --frozen-lockfile
+	else
+		"$npx_cmd" yarn install
+	fi
+	export PATH="$_saved_path"
 	popd >/dev/null
 
 	if [[ -d $node_modules_dir && ! -e "$ROOT_DIR/node_modules" ]]; then
