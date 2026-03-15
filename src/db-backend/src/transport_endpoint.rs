@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 pub enum DapEndpoint {
     UnixSocket(PathBuf),
     WindowsNamedPipe(String),
+    /// TCP connection to `host:port` (used on Windows for IPC with
+    /// backend-manager, which binds a TCP listener on localhost).
+    TcpSocket(String),
     Stdio,
 }
 

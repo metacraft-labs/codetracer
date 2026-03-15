@@ -1334,10 +1334,125 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
     }
 }
 
-/// Stub: daemon connection requires Unix sockets (not available on Windows).
+/// Connects to the daemon via TCP on Windows.
+///
+/// Reads the daemon's TCP port from the port file, auto-starting the daemon
+/// if needed.
 #[cfg(windows)]
-async fn connect_to_daemon(_config: &McpServerConfig) -> Result<UnixStream, String> {
-    Err("daemon connection is not yet supported on Windows (requires Unix sockets)".to_string())
+async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, String> {
+    // Check for CODETRACER_DAEMON_SOCK override (used in tests).
+    // On Windows, this should be a "host:port" string or just a port number.
+    if let Ok(sock_override) = std::env::var("CODETRACER_DAEMON_SOCK") {
+        let addr = if sock_override.contains(':') {
+            sock_override.clone()
+        } else {
+            format!("127.0.0.1:{sock_override}")
+        };
+        return tokio::net::TcpStream::connect(&addr)
+            .await
+            .map_err(|e| format!("cannot connect to daemon at {addr}: {e}"));
+    }
+
+    let socket_path = &config.daemon_socket_path;
+
+    // Try to connect to an already-running daemon via port file.
+    if let Ok(port) = read_port_file_mcp(socket_path).await {
+        if let Ok(stream) =
+            tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
+        {
+            return Ok(stream);
+        }
+    }
+    // Port file may exist but connection failed — stale.
+    if socket_path.exists() {
+        let _ = tokio::fs::remove_file(socket_path).await;
+    }
+
+    // Clean up stale PID file if the process is dead.
+    let pid_path = &config.daemon_pid_path;
+    if pid_path.exists() {
+        let contents = tokio::fs::read_to_string(pid_path)
+            .await
+            .unwrap_or_default();
+        if let Ok(old_pid) = contents.trim().parse::<u32>() {
+            let alive = is_pid_alive_mcp(old_pid);
+            if !alive {
+                let _ = tokio::fs::remove_file(pid_path).await;
+            }
+        }
+    }
+
+    // Ensure the parent directory exists.
+    if let Some(parent) = socket_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("cannot create daemon socket directory: {e}"))?;
+    }
+
+    // Spawn the daemon process.
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
+    eprintln!("mcp: auto-starting daemon: {} daemon start", exe.display());
+
+    std::process::Command::new(&exe)
+        .arg("daemon")
+        .arg("start")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn daemon: {e}"))?;
+
+    // Poll for the port file with exponential backoff.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut delay = Duration::from_millis(50);
+
+    loop {
+        tokio::time::sleep(delay).await;
+
+        if let Ok(port) = read_port_file_mcp(socket_path).await
+            && let Ok(stream) =
+                tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
+        {
+            return Ok(stream);
+        }
+
+        if tokio::time::Instant::now() > deadline {
+            return Err("timeout waiting for daemon to start".to_string());
+        }
+
+        delay = (delay * 2).min(Duration::from_millis(500));
+    }
+}
+
+/// Reads a port number from a port file (MCP server helper for Windows).
+#[cfg(windows)]
+async fn read_port_file_mcp(path: &std::path::Path) -> Result<u16, String> {
+    if !path.exists() {
+        return Err(format!("port file does not exist: {}", path.display()));
+    }
+    let contents = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| format!("cannot read port file: {e}"))?;
+    contents
+        .trim()
+        .parse::<u16>()
+        .map_err(|e| format!("invalid port in {}: {e}", path.display()))
+}
+
+/// Checks whether a process with the given PID is alive (MCP server helper for Windows).
+#[cfg(windows)]
+fn is_pid_alive_mcp(pid: u32) -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| {
+            let output = String::from_utf8_lossy(&o.stdout);
+            output.contains(&pid.to_string())
+        })
+        .unwrap_or(false)
 }
 
 /// Queries trace metadata from the daemon and returns a `LoadedTrace`.

@@ -7,12 +7,18 @@ pub struct Paths {
 }
 
 impl Paths {
-    /// Returns the well-known path for the daemon's Unix socket.
+    /// Returns the well-known path for the daemon's Unix socket (Unix) or
+    /// port file (Windows).
     ///
-    /// Clients connect to this socket when communicating with a daemon-mode
-    /// backend-manager instance.
+    /// On Unix, clients connect to this Unix domain socket.
+    /// On Windows, the daemon writes the TCP port number to this file and
+    /// clients read it to connect to `127.0.0.1:<port>`.
     pub fn daemon_socket_path(&self) -> PathBuf {
-        self.tmp_path.join("daemon.sock")
+        if cfg!(windows) {
+            self.tmp_path.join("daemon.port")
+        } else {
+            self.tmp_path.join("daemon.sock")
+        }
     }
 
     /// Returns the path where the daemon writes its PID file.
