@@ -65,7 +65,7 @@ const codetracerPath =
 // On Windows, the `python3` name often resolves to the Windows Store alias
 // stub which is not a real interpreter.  Detect and set the correct Python
 // path so that `ct record` can find the recorder package.
-if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER) {
+if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER && !process.env.CODETRACER_PYTHON_EXE_PATH) {
   // Strategy 1: Try common Python install locations directly.
   const homeDir = process.env.USERPROFILE || process.env.HOME || "";
   const knownPaths = [
@@ -80,6 +80,7 @@ if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER) {
   for (const p of knownPaths) {
     if (fs.existsSync(p)) {
       process.env.CODETRACER_PYTHON_INTERPRETER = p;
+      process.env.CODETRACER_PYTHON_EXE_PATH = p;
       break;
     }
   }
@@ -106,12 +107,68 @@ if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER) {
             });
             if (vResult.status === 0 && vResult.stdout.includes("Python")) {
               process.env.CODETRACER_PYTHON_INTERPRETER = realPath;
+              process.env.CODETRACER_PYTHON_EXE_PATH = realPath;
               break;
             }
           }
         }
       } catch {
         // candidate not found, try next
+      }
+    }
+  }
+}
+
+// On Windows, detect Ruby and the pure-Ruby recorder so that `ct record`
+// can trace Ruby programs.
+if (isWindows) {
+  if (!process.env.CODETRACER_RUBY_EXE_PATH) {
+    const rubyPaths = [
+      "C:\\Ruby33-x64\\bin\\ruby.exe",
+      "C:\\Ruby32-x64\\bin\\ruby.exe",
+      "C:\\Ruby31-x64\\bin\\ruby.exe",
+    ];
+    for (const p of rubyPaths) {
+      if (fs.existsSync(p)) {
+        process.env.CODETRACER_RUBY_EXE_PATH = p;
+        break;
+      }
+    }
+    // Fallback: try `where ruby`
+    if (!process.env.CODETRACER_RUBY_EXE_PATH) {
+      try {
+        const r = childProcess.spawnSync("where", ["ruby"], {
+          encoding: "utf-8",
+          timeout: 5_000,
+        });
+        if (r.status === 0) {
+          const line = r.stdout.trim().split("\n")[0]?.trim();
+          if (line && fs.existsSync(line)) {
+            process.env.CODETRACER_RUBY_EXE_PATH = line;
+          }
+        }
+      } catch { /* not found */ }
+    }
+  }
+
+  if (!process.env.CODETRACER_RUBY_RECORDER_PATH) {
+    // The pure-Ruby recorder is installed as a gem binary.
+    const rubyExeDir = process.env.CODETRACER_RUBY_EXE_PATH
+      ? path.dirname(process.env.CODETRACER_RUBY_EXE_PATH)
+      : null;
+    // The recorder script is invoked as `ruby <recorder_path>`, so we need
+    // the actual Ruby script, not the .bat wrapper.
+    const recorderCandidates = [
+      rubyExeDir ? path.join(rubyExeDir, "codetracer-pure-ruby-recorder") : "",
+      rubyExeDir ? path.join(rubyExeDir, "codetracer-ruby-recorder") : "",
+      // Also check the sibling repo source directly
+      path.join(codetracerInstallDir, "..", "codetracer-ruby-recorder", "gems",
+        "codetracer-pure-ruby-recorder", "bin", "codetracer-pure-ruby-recorder"),
+    ].filter(Boolean);
+    for (const p of recorderCandidates) {
+      if (fs.existsSync(p)) {
+        process.env.CODETRACER_RUBY_RECORDER_PATH = p;
+        break;
       }
     }
   }
@@ -735,8 +792,8 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
 
   const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
   const drArgs = (isWindows && electronExePath)
-    ? [codetracerPrefix, `--deepreview=${jsonPath}`]
-    : [`--deepreview=${jsonPath}`];
+    ? [codetracerPrefix, "--deepreview", jsonPath]
+    : ["--deepreview", jsonPath];
 
   const app = await _electron.launch({
     executablePath: drExe,

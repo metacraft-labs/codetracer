@@ -95,13 +95,17 @@ proc parseArgs* =
         data.startOptions.name = argsExceptNoSandbox[i + 3]
         let file = fs.lstatSync(data.startOptions.name)
         var folder = cstring""
-        if data.startOptions.name[0] == '/':
+        let nameStr = $data.startOptions.name
+        # Check for absolute path: Unix (/) or Windows drive letter (e.g. D:\)
+        let isAbsolute = nameStr.len > 0 and (nameStr[0] == '/' or
+          (nameStr.len >= 3 and nameStr[1] == ':' and (nameStr[2] == '\\' or nameStr[2] == '/')))
+        if isAbsolute:
           if cast[bool](file.isFile()):
             folder = nodePath.dirname(data.startOptions.name) & cstring"/"
           else:
             folder = data.startOptions.name
             data.startOptions.name = cstring""
-          if folder[folder.len - 1] != '/':
+          if folder[folder.len - 1] != '/' and folder[folder.len - 1] != '\\':
             folder = folder & cstring"/"
         else:
           folder = electronprocess.cwd() & cstring"/"

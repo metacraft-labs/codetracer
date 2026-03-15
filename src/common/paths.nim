@@ -110,7 +110,8 @@ let
   # External tools - use findTool (PATH lookup)
   bashExe* = when not defined(js): findTool("bash") else: codetracerPrefix / "bin" / "bash"
   taskProcessExe* = codetracerPrefix / "bin" / "task_process"
-  python3Path* = when not defined(js): findTool("python3") else: codetracerPrefix / "bin" / "python3"
+  python3Path* = env.get("CODETRACER_PYTHON_EXE_PATH",
+    when not defined(js): findTool("python3") else: codetracerPrefix / "bin" / "python3")
 
   rubyExe* = env.get("CODETRACER_RUBY_EXE_PATH",
     when not defined(js): findTool("ruby") else: codetracerPrefix / "bin" / "ruby")

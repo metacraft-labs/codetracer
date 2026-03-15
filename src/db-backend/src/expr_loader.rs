@@ -1421,10 +1421,26 @@ impl ExprLoader {
     fn find_real_path(&self, path: &Path) -> PathBuf {
         let read_path = if self.trace.imported {
             let trace_files_folder = PathBuf::from(&self.trace.trace_output_folder).join("files");
-            // take only after root: /path -> path, so join will work,
-            // because otherwise join /trace_output, /path returns just /path
-            // but we want /trace_output/path
-            let after_root_path = &(path.display().to_string())[1..];
+            // Strip the path root so join works correctly.
+            // On Unix: /path -> path
+            // On Windows: D:\path -> path  or  D:/path -> path
+            let path_str = path.display().to_string();
+            let after_root_path = if cfg!(windows) {
+                // Windows absolute paths: strip drive letter + colon + separator
+                // e.g. "D:\foo" -> "foo", "D:/foo" -> "foo"
+                if path_str.len() >= 3
+                    && path_str.as_bytes()[1] == b':'
+                    && (path_str.as_bytes()[2] == b'\\' || path_str.as_bytes()[2] == b'/')
+                {
+                    &path_str[3..]
+                } else if path_str.starts_with('/') || path_str.starts_with('\\') {
+                    &path_str[1..]
+                } else {
+                    &path_str[..]
+                }
+            } else {
+                &path_str[1..]
+            };
             info!("after root path {after_root_path:?}");
             trace_files_folder.join(PathBuf::from(after_root_path))
         } else {

@@ -3,7 +3,7 @@
 
 import
   std/[jsffi, strutils, os, json, strformat],
-  ../lib/[jslib],
+  ../lib/[jslib, electron_lib],
   ../../common/ct_logging
 
 # JavaScript Object global binding
@@ -109,5 +109,5 @@ proc parseLaunchJson*(launchJsonPath: cstring, workspaceFolder: cstring): seq[La
 proc getLaunchConfigsForWorkspace*(workspaceFolder: cstring): seq[LaunchConfig] =
   ## Get launch configs for a given workspace folder
   ## Looks for .vscode/launch.json
-  let launchJsonPath = ($workspaceFolder) / ".vscode" / "launch.json"
+  let launchJsonPath = nodePath.join(workspaceFolder, cstring".vscode", cstring"launch.json")
   return parseLaunchJson(launchJsonPath.cstring, workspaceFolder)
