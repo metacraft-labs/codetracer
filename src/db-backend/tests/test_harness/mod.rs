@@ -907,17 +907,34 @@ pub fn is_rr_available() -> bool {
 
 /// Check if TTD (Time Travel Debugging) is available (Windows only).
 ///
-/// Checks that ct-rr-support is present AND the Microsoft.TimeTravelDebugging
-/// package is installed (required for actual TTD recording/replay).
+/// Checks that ct-rr-support is present, the Microsoft.TimeTravelDebugging
+/// package is installed, AND the process is running elevated (Admin).
+/// TTD recording requires elevation on Windows.
 #[cfg(windows)]
 pub fn is_ttd_available() -> bool {
     if find_ct_rr_support().is_none() {
         return false;
     }
     // Check if TTD package is installed via PowerShell
-    Command::new("powershell")
+    let ttd_installed = Command::new("powershell")
         .args(["-NoProfile", "-Command",
             "if (Get-AppxPackage Microsoft.TimeTravelDebugging -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !ttd_installed {
+        return false;
+    }
+    // TTD recording requires elevation (Administrator)
+    is_elevated()
+}
+
+/// Check if the current process is running with elevated (Administrator) privileges.
+#[cfg(windows)]
+fn is_elevated() -> bool {
+    Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 } else { exit 1 }"])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
