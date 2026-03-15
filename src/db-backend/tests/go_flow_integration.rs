@@ -13,7 +13,7 @@ mod test_harness;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use test_harness::{find_ct_rr_support, is_replay_backend_available, run_flow_test, FlowTestConfig, Language};
+use test_harness::{find_ct_rr_support, is_command_available, is_replay_backend_available, run_flow_test, FlowTestConfig, Language};
 
 fn get_go_source_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -63,6 +63,11 @@ fn test_go_flow_integration() {
 
     if !is_replay_backend_available() {
         eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
+        return;
+    }
+
+    if !is_command_available("go") {
+        eprintln!("SKIPPED: go is not available on PATH");
         return;
     }
 
