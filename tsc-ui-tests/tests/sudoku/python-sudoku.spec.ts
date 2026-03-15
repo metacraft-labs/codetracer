@@ -38,7 +38,7 @@ test.describe("PythonSudoku", () => {
     await layout.waitForBaseComponentsLoaded();
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.tabButton().dispatchEvent("click");
     callTrace.invalidateEntries();
 
     // Locate solve_sudoku in the call trace.

@@ -59,9 +59,54 @@ pub struct CtLoadFlowArguments {
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct UpdateTableArgs {
     pub table_args: TableArgs,
+    /// The Nim JS frontend serializes `array[EventLogKind, bool]` as a JSON
+    /// object with string keys (`{"0": true, "1": true, ...}`), while the Rust
+    /// side expects a JSON array.  This custom deserializer handles both
+    /// formats transparently.
+    #[serde(deserialize_with = "deserialize_selected_kinds")]
     pub selected_kinds: [bool; EVENT_KINDS_COUNT],
     pub is_trace: bool,
     pub trace_id: usize,
+}
+
+fn deserialize_selected_kinds<'de, D>(deserializer: D) -> Result<[bool; EVENT_KINDS_COUNT], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    use serde_json::Value;
+
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Array(arr) => {
+            if arr.len() != EVENT_KINDS_COUNT {
+                return Err(de::Error::custom(format!(
+                    "expected array of length {}, got {}",
+                    EVENT_KINDS_COUNT,
+                    arr.len()
+                )));
+            }
+            let mut result = [false; EVENT_KINDS_COUNT];
+            for (i, v) in arr.into_iter().enumerate() {
+                result[i] = v.as_bool().unwrap_or(false);
+            }
+            Ok(result)
+        }
+        Value::Object(map) => {
+            let mut result = [false; EVENT_KINDS_COUNT];
+            for (key, val) in &map {
+                if let Ok(idx) = key.parse::<usize>() {
+                    if idx < EVENT_KINDS_COUNT {
+                        result[idx] = val.as_bool().unwrap_or(false);
+                    }
+                }
+            }
+            Ok(result)
+        }
+        _ => Err(de::Error::custom(
+            "selectedKinds must be an array or object",
+        )),
+    }
 }
 
 /// response for `ct/updated-table`: wrapping mostly Datatables.net data (in `TableData` in `table_update.data`)

@@ -122,7 +122,7 @@ proc recordDb(
       if vmExe.len == 0:
         echo "error: python interpreter not provided while trying to start recorder"
         quit(1)
-      var recorderArgs = @["-m", "codetracer_python_recorder", "--trace-dir", traceFolder, "--format", "json"]
+      var recorderArgs = @["-m", "codetracer_python_recorder", "--out-dir", traceFolder, "--format", "json"]
       if pythonActivationPath.len > 0:
         recorderArgs.add("--activation-path")
         recorderArgs.add(pythonActivationPath)

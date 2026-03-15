@@ -1,7 +1,25 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { LayoutPage } from "../page-objects/layout-page";
 import { retry } from "./retry-helpers";
 import { debugLogger } from "./debug-logger";
+
+/**
+ * Click a golden-layout tab button, working around the "element is outside
+ * of the viewport" issue that occurs on Windows when the Electron window is
+ * maximized but some tab buttons are positioned beyond the visible viewport.
+ *
+ * Falls back to dispatchEvent('click') when a normal click fails.
+ */
+async function clickTabButton(btn: Locator): Promise<void> {
+  try {
+    await btn.click({ timeout: 5_000 });
+  } catch {
+    // When the element is outside the viewport (common on Windows where
+    // the maximized Electron window may be clipped), dispatch a click
+    // event directly via JavaScript which bypasses all viewport checks.
+    await btn.dispatchEvent("click");
+  }
+}
 
 /**
  * Language-agnostic smoke test helpers that verify core CodeTracer UI
@@ -40,7 +58,7 @@ export async function assertEventLogPopulated(page: Page): Promise<void> {
   await layout.waitForBaseComponentsLoaded();
 
   const eventLog = (await layout.eventLogTabs())[0];
-  await eventLog.tabButton().click();
+  await clickTabButton(eventLog.tabButton());
 
   await retry(
     async () => {
@@ -64,7 +82,7 @@ export async function assertCallTraceNavigation(
   await layout.waitForBaseComponentsLoaded();
 
   const callTrace = (await layout.callTraceTabs())[0];
-  await callTrace.tabButton().click();
+  await clickTabButton(callTrace.tabButton());
   callTrace.invalidateEntries();
 
   let targetFound = false;
@@ -129,7 +147,7 @@ export async function assertVariableVisible(
   await layout.waitForBaseComponentsLoaded();
 
   const callTrace = (await layout.callTraceTabs())[0];
-  await callTrace.tabButton().click();
+  await clickTabButton(callTrace.tabButton());
   callTrace.invalidateEntries();
 
   let targetFound = false;
@@ -180,7 +198,7 @@ export async function assertVariableVisible(
 
   // Open the state pane and look for the variable.
   const statePane = (await layout.programStateTabs())[0];
-  await statePane.tabButton().click();
+  await clickTabButton(statePane.tabButton());
 
   await retry(
     async () => {
@@ -234,7 +252,7 @@ export async function assertFlowValueVisible(
 
       // Flow not ready yet — also check the state pane.
       if (!statePaneOpened) {
-        await statePane.tabButton().click();
+        await clickTabButton(statePane.tabButton());
         statePaneOpened = true;
       }
 
@@ -284,7 +302,7 @@ export async function assertTerminalOutputContains(
   }
 
   const terminal = terminalTabs[0];
-  await terminal.tabButton().click();
+  await clickTabButton(terminal.tabButton());
 
   await retry(
     async () => {
@@ -313,7 +331,7 @@ export async function assertEventLogContainsText(
   await layout.waitForBaseComponentsLoaded();
 
   const eventLog = (await layout.eventLogTabs())[0];
-  await eventLog.tabButton().click();
+  await clickTabButton(eventLog.tabButton());
 
   await retry(
     async () => {
@@ -361,7 +379,7 @@ export async function assertTerminalOutputAfterContinue(
   }
 
   const terminal = terminalTabs[0];
-  await terminal.tabButton().click();
+  await clickTabButton(terminal.tabButton());
 
   await retry(
     async () => {

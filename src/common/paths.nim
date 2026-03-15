@@ -86,12 +86,13 @@ when not defined(js):
   let bundledNargoPathWithExeExt = bundledNargoPath & ExeExt
 
 when defined(js) and not defined(ctRenderer):
-  # In the Electron main process (index.js), ct lives in the codetracer
-  # derivation's bin/ which is on PATH but NOT inside runtime-deps.
-  # Use bare names so child_process.spawn resolves them via PATH.
+  # In the Electron main process (index.js), use full paths derived from
+  # CODETRACER_PREFIX so that child_process.spawn works on all platforms
+  # (bare names require ct/db-backend-record to be on PATH, which is not
+  # guaranteed on Windows where there is no Nix profile).
   let
-    codetracerExe* = "ct"
-    dbBackendRecordExe* = "db-backend-record"
+    codetracerExe* = codetracerExeDir / "bin" / "ct"
+    dbBackendRecordExe* = codetracerExeDir / "bin" / "db-backend-record"
 elif not defined(pythonPackage):
   let
     codetracerExe* = codetracerExeDir / "bin" / "ct"

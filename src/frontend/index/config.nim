@@ -185,10 +185,14 @@ proc findConfig(folder: cstring, configPath: cstring): cstring =
     else:
       if config:
         return cstring""
-      current = nodePath.dirname(current)
-      if current == cstring"/":
+      let parent = nodePath.dirname(current)
+      # On Linux/macOS, the root is "/".  On Windows, path.dirname("D:\")
+      # returns "D:\" (i.e. parent == current).  Detect both cases.
+      if parent == cstring"/" or parent == current:
         current = userConfigDir
         config = true
+      else:
+        current = parent
 
 proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring"", send: bool = false): Future[Config] {.async.} =
   var file = findConfig(startOptions.folder, configPath)

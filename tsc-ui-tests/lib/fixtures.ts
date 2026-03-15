@@ -62,6 +62,61 @@ const codetracerPath =
     ? envCodetracerPath
     : path.join(codetracerPrefix, "bin", ctBinaryName);
 
+// On Windows, the `python3` name often resolves to the Windows Store alias
+// stub which is not a real interpreter.  Detect and set the correct Python
+// path so that `ct record` can find the recorder package.
+if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER) {
+  // Strategy 1: Try common Python install locations directly.
+  const homeDir = process.env.USERPROFILE || process.env.HOME || "";
+  const knownPaths = [
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python312", "python.exe"),
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python313", "python.exe"),
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python311", "python.exe"),
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python310", "python.exe"),
+    "C:\\Python312\\python.exe",
+    "C:\\Python311\\python.exe",
+    "C:\\Python313\\python.exe",
+  ];
+  for (const p of knownPaths) {
+    if (fs.existsSync(p)) {
+      process.env.CODETRACER_PYTHON_INTERPRETER = p;
+      break;
+    }
+  }
+
+  // Strategy 2: If not found above, try `where` to locate python/py.
+  if (!process.env.CODETRACER_PYTHON_INTERPRETER) {
+    for (const candidate of ["python", "py"]) {
+      try {
+        const whichResult = childProcess.spawnSync("where", [candidate], {
+          encoding: "utf-8",
+          timeout: 5_000,
+        });
+        if (whichResult.status === 0) {
+          // Filter out the Windows Store alias (WindowsApps path)
+          const lines = whichResult.stdout.trim().split("\n").map((l: string) => l.trim());
+          const realPath = lines.find(
+            (l: string) => l.endsWith(".exe") && !l.includes("WindowsApps"),
+          );
+          if (realPath) {
+            // Validate it actually works
+            const vResult = childProcess.spawnSync(realPath, ["--version"], {
+              encoding: "utf-8",
+              timeout: 5_000,
+            });
+            if (vResult.status === 0 && vResult.stdout.includes("Python")) {
+              process.env.CODETRACER_PYTHON_INTERPRETER = realPath;
+              break;
+            }
+          }
+        }
+      } catch {
+        // candidate not found, try next
+      }
+    }
+  }
+}
+
 // On Windows, ct.exe spawns Electron as a child process (no execv), which
 // prevents Playwright from connecting via CDP.  We launch Electron directly
 // and pass the app directory so it picks up package.json / index.js.
@@ -271,10 +326,16 @@ function makeCleanEnv(
   }
   delete env.CODETRACER_TRACE_ID;
   delete env.CODETRACER_CALLER_PID;
-  // Remove CODETRACER_PREFIX so the ct binary derives it from its own location
-  // (getAppDir().parentDir). The nix dev shell sets this to src/build-debug/
-  // which is wrong when running the nix-built binary from result/.
-  delete env.CODETRACER_PREFIX;
+  // On Windows with direct Electron launch, we MUST set CODETRACER_PREFIX
+  // because Electron's own exe path is not inside build-debug/ so the Nim
+  // code cannot derive the prefix from getAppDir().  On other platforms
+  // (or when ct.exe launches Electron), remove it so the ct binary derives
+  // it from its own location (getAppDir().parentDir).
+  if (isWindows && electronExePath) {
+    env.CODETRACER_PREFIX = codetracerPrefix;
+  } else {
+    delete env.CODETRACER_PREFIX;
+  }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   if (extra) {
@@ -829,14 +890,14 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         // Report collected JS errors from the renderer
         if (result.consoleErrors.length > 0) {
           console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
-          for (const err of result.consoleErrors.slice(0, 10)) {
+          for (const err of result.consoleErrors.slice(0, 50)) {
             console.log(`    ${err}`);
           }
         }
         // Report main process output (backend-manager, socket, init flow)
         if (result.mainProcessOutput.length > 0) {
           console.log(`  FAIL main process output (${result.mainProcessOutput.length} lines):`);
-          for (const line of result.mainProcessOutput.slice(0, 30)) {
+          for (const line of result.mainProcessOutput.slice(0, 100)) {
             console.log(`    ${line}`);
           }
         } else {
