@@ -87,8 +87,17 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   # ctrl+o/similar => direct
   let traceImported = not data.trace.isNil and data.trace.imported
   var readPath = if traceImported:
-      let traceFilesFolder = $data.trace.outputFolder / "files"
-      cstring(traceFilesFolder / $filename)
+      let traceFilesFolder = nodePath.join(data.trace.outputFolder, cstring"files")
+      # Strip drive letter / root from filename so the path is relative
+      # to the trace files folder (e.g. D:\foo -> foo).
+      let fnStr = $filename
+      let relName = if fnStr.len >= 3 and fnStr[1] == ':' and (fnStr[2] == '\\' or fnStr[2] == '/'):
+          cstring(fnStr[3..^1])
+        elif fnStr.len > 0 and (fnStr[0] == '/' or fnStr[0] == '\\'):
+          cstring(fnStr[1..^1])
+        else:
+          filename
+      nodePath.join(traceFilesFolder, relName)
     else:
       filename
 
