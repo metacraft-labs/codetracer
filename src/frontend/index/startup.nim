@@ -62,7 +62,7 @@ proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
   await wait(1_000)
   await started()
 
-proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
+proc init*(data: ptr ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
   debugPrint "index: init"
   let bypass = true
 
@@ -185,7 +185,8 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
       for i, config in launchConfigs:
         var envJs: seq[JsObject] = @[]
         for envPair in config.env:
-          envJs.add(js{key: envPair.key, value: envPair.value})
+          let envPairCopy = envPair
+          envJs.add(js{key: envPairCopy.key, value: envPairCopy.value})
         configsJs.add(js{
           index: i,
           name: config.name,
