@@ -17,6 +17,13 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
+/// a visible console window when spawned as child processes.
+#[cfg(windows)]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
@@ -446,12 +453,16 @@ async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(),
 
     // Build the command with the same environment (including TMPDIR) so that
     // the daemon uses the same paths.
-    let _child = std::process::Command::new(&exe)
+    let mut daemon_cmd = std::process::Command::new(&exe);
+    daemon_cmd
         .arg("daemon")
         .arg("start")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    daemon_cmd.creation_flags(CREATE_NO_WINDOW);
+    let _child = daemon_cmd
         .spawn()
         .map_err(|e| format!("failed to spawn daemon: {e}"))?;
 
@@ -515,12 +526,16 @@ async fn daemon_connect(socket_path: &PathBuf, pid_path: &PathBuf) -> Result<(),
     let exe = std::env::current_exe()?;
     info!("Auto-starting daemon: {} daemon start", exe.display());
 
-    let _child = std::process::Command::new(&exe)
+    let mut daemon_cmd = std::process::Command::new(&exe);
+    daemon_cmd
         .arg("daemon")
         .arg("start")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    daemon_cmd.creation_flags(CREATE_NO_WINDOW);
+    let _child = daemon_cmd
         .spawn()
         .map_err(|e| format!("failed to spawn daemon: {e}"))?;
 
@@ -2064,12 +2079,16 @@ async fn ensure_daemon_connected(
 
     // Spawn the daemon.
     let exe = std::env::current_exe()?;
-    let _child = std::process::Command::new(&exe)
+    let mut daemon_cmd = std::process::Command::new(&exe);
+    daemon_cmd
         .arg("daemon")
         .arg("start")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    daemon_cmd.creation_flags(CREATE_NO_WINDOW);
+    let _child = daemon_cmd
         .spawn()
         .map_err(|e| format!("failed to spawn daemon: {e}"))?;
 
@@ -2211,12 +2230,16 @@ async fn ensure_daemon_connected(
 
     // Spawn the daemon.
     let exe = std::env::current_exe()?;
-    let _child = std::process::Command::new(&exe)
+    let mut daemon_cmd = std::process::Command::new(&exe);
+    daemon_cmd
         .arg("daemon")
         .arg("start")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    daemon_cmd.creation_flags(CREATE_NO_WINDOW);
+    let _child = daemon_cmd
         .spawn()
         .map_err(|e| format!("failed to spawn daemon: {e}"))?;
 

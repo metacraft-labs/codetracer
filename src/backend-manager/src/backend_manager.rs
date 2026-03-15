@@ -1,6 +1,13 @@
 use std::{
     collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
 };
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
+/// a visible console window when spawned as child processes.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use serde_json::{Value, json};
 use tokio::{
@@ -1807,6 +1814,9 @@ impl BackendManager {
 
         let listener = UnixListener::bind(socket_path)?;
 
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
         let child = cmd.spawn();
         let child = match child {
             Ok(c) => c,
@@ -1937,6 +1947,9 @@ impl BackendManager {
         // Pass the TCP address as the last argument (same convention as Unix
         // socket path).
         cmd.arg(&addr_str);
+
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
 
         let child = cmd.spawn();
         let child = match child {
