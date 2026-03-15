@@ -210,11 +210,11 @@ proc flushPendingPrompts(self: AgentActivityComponent) =
   if self.pendingPrompts.len == 0:
     return
 
-  for queuedPrompt in self.pendingPrompts:
+  for i in 0 ..< self.pendingPrompts.len:
     data.ipc.send("CODETRACER::acp-prompt", js{
       "sessionId": self.sessionId,
       "clientSessionId": self.pendingSessionId,
-      "text": queuedPrompt
+      "text": self.pendingPrompts[i]
     })
   self.pendingPrompts.setLen(0)
 

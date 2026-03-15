@@ -10,7 +10,7 @@ proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.spli
 proc normalizePath(p: cstring): cstring {.importjs: "require('path').resolve(#)".}
 
 proc spawnProcess(cmd: cstring, args: seq[cstring]): JsObject {.
-  importjs: "require('child_process').spawn(#, #, { stdio: ['pipe', 'pipe', 'inherit'] })".}
+  importjs: "require('child_process').spawn(#, #, { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true })".}
 
 proc stdoutOf(p: JsObject): JsObject {.importjs: "#.stdout".}
 proc stdinOf(p: JsObject): JsObject {.importjs: "#.stdin".}

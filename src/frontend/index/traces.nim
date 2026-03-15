@@ -88,6 +88,9 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
     var processOptions = options
     if processOptions.stdio.isNil: # nil or undefined
       processOptions.stdio = cstring"ignore"
+    # Prevent spawned console apps from creating visible console windows on Windows.
+    # Harmless no-op on other platforms.
+    processOptions.windowsHide = true
       # make sure we don't let it be the default/not set
       # as this seems to lead to pass it to internal buffer/events
       # and as we might not handle that, this leads to hanging?
@@ -432,7 +435,8 @@ proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
   var configsJs: seq[JsObject] = @[]
   for i, config in launchConfigs:
     var envJs: seq[JsObject] = @[]
-    for envPair in config.env:
+    for j in 0 ..< config.env.len:
+      let envPair = config.env[j]
       envJs.add(js{key: envPair.key, value: envPair.value})
     configsJs.add(js{
       index: i,
@@ -492,7 +496,8 @@ proc onRecordWithLaunchConfig*(sender: js, response: jsobject(configIndex=int)) 
       let key = envKeys[i].to(cstring)
       processEnv[key] = nodeEnv[key]
     # Add launch config env vars (they override)
-    for envPair in config.env:
+    for j in 0 ..< config.env.len:
+      let envPair = config.env[j]
       processEnv[envPair.key] = envPair.value.toJs
     processOptions["env"] = processEnv
 
@@ -572,7 +577,8 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
     var configsJs: seq[JsObject] = @[]
     for i, config in launchConfigs:
       var envJs: seq[JsObject] = @[]
-      for envPair in config.env:
+      for j in 0 ..< config.env.len:
+        let envPair = config.env[j]
         envJs.add(js{key: envPair.key, value: envPair.value})
       configsJs.add(js{
         index: i,
