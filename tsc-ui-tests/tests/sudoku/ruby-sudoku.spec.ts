@@ -41,7 +41,7 @@ test.describe("RubySudoku", () => {
     await layout.waitForBaseComponentsLoaded();
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.tabButton().click({ force: true });
     callTrace.invalidateEntries();
 
     // Locate SudokuSolver#initialize in the call trace.

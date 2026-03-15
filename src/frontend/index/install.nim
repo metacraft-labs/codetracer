@@ -106,7 +106,11 @@ proc isCtInstalled*(config: Config): bool =
     return true
   else:
     if not config.skipInstall:
-      if process.platform == "darwin".toJs:
+      if process.platform == "win32".toJs:
+        # On Windows there is no shell-launcher or .desktop install step;
+        # the binary is already usable from the build directory.
+        return true
+      elif process.platform == "darwin".toJs:
         let ctLaunchersPath = cstring($paths.home / ".local" / "share" / "codetracer" / "shell-launchers" / "ct")
         return fs.existsSync(ctLaunchersPath)
       else:
