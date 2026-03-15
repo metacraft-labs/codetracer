@@ -100,35 +100,52 @@ test:
   fi
 
 # Run all GUI tests headlessly (TypeScript Playwright e2e suite).
-# Uses a virtual display (Xvfb) — same as CI. For visible windows on your
-# desktop, use `just test-gui-visible` instead.
+# On Linux, uses a virtual display (Xvfb) — same as CI.
+# On Windows, no virtual display is needed; Electron runs natively.
+# For visible windows on your desktop, use `just test-gui-visible` instead.
 test-gui *args:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
-  # Start a persistent Xvfb so Playwright/Electron tests have a display.
-  DISPLAY_NUM=99
-  while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-    DISPLAY_NUM=$((DISPLAY_NUM + 1))
-  done
-  Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-  XVFB_PID=$!
-  trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-  sleep 1
-  export DISPLAY=":${DISPLAY_NUM}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*)
+      # Windows: no Xvfb needed; Electron uses the native display.
+      just test-e2e {{args}}
+      ;;
+    *)
+      # Linux/macOS: start a persistent Xvfb so Playwright/Electron tests have a display.
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
 
-  just test-e2e {{args}}
+      just test-e2e {{args}}
+      ;;
+  esac
 
 # Run GUI tests with windows visible on the current desktop session.
-# Requires a running display server ($DISPLAY must be set).
+# On Linux, requires a running display server ($DISPLAY must be set).
+# On Windows, always works (no $DISPLAY needed).
 test-gui-visible *args:
   #!/usr/bin/env bash
   set -e
-  if [ -z "${DISPLAY:-}" ]; then
-    echo "Error: \$DISPLAY is not set. Run this from a desktop session." >&2
-    exit 1
-  fi
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*)
+      # Windows: no DISPLAY check needed.
+      ;;
+    *)
+      if [ -z "${DISPLAY:-}" ]; then
+        echo "Error: \$DISPLAY is not set. Run this from a desktop session." >&2
+        exit 1
+      fi
+      ;;
+  esac
   just test-e2e {{args}}
 
 make-quick-mr name message:
@@ -146,6 +163,7 @@ findtmp:
   if [ "$(uname)" = "Darwin" ]; then
     echo "$HOME/Library/Caches/com.codetracer.CodeTracer"
   else
+    # Works on both Linux (/tmp) and Windows (uses $TEMP/$TMP env vars)
     echo "${TEMP:-${TMP:-${TEMPDIR:-${TMPDIR:-/tmp}}}}/codetracer"
   fi
 
@@ -375,11 +393,18 @@ test-frontend-js:
 test-e2e *args:
   #!/usr/bin/env bash
   set -e
-  if [ -z "${DISPLAY:-}" ]; then
-    echo "Error: \$DISPLAY is not set. Electron tests require a display server." >&2
-    echo "Use 'just test-gui' to run under Xvfb, or 'just test-gui-visible' from a desktop session." >&2
-    exit 1
-  fi
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*)
+      # Windows: no DISPLAY needed.
+      ;;
+    *)
+      if [ -z "${DISPLAY:-}" ]; then
+        echo "Error: \$DISPLAY is not set. Electron tests require a display server." >&2
+        echo "Use 'just test-gui' to run under Xvfb, or 'just test-gui-visible' from a desktop session." >&2
+        exit 1
+      fi
+      ;;
+  esac
   cd "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests" && \
     npm install --no-audit --no-fund && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \

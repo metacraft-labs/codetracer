@@ -1,5 +1,3 @@
-#![cfg(not(windows))]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -14,6 +12,11 @@ fn find_db_backend() -> PathBuf {
 
 #[test]
 fn ruby_flow_dap_variables_and_values() {
+    if !test_harness::is_command_available("ruby") {
+        eprintln!("SKIPPED: ruby is not available on PATH");
+        return;
+    }
+
     if test_harness::find_ruby_recorder().is_none() {
         eprintln!("SKIPPED: Ruby recorder not found");
         return;

@@ -41,50 +41,16 @@ test.describe("RubySudoku", () => {
     await layout.waitForBaseComponentsLoaded();
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
-    callTrace.invalidateEntries();
+    await callTrace.tabButton().dispatchEvent("click");
 
-    // Locate SudokuSolver#initialize in the call trace.
-    let targetFound = false;
-    let targetEntry: Awaited<
-      ReturnType<typeof callTrace.findEntry>
-    > = null;
-
-    await retry(
-      async () => {
-        callTrace.invalidateEntries();
-        targetEntry = await callTrace.findEntry(
-          "SudokuSolver#initialize",
-          true,
-        );
-        if (targetEntry !== null) {
-          targetFound = true;
-          return true;
-        }
-
-        const allEntries = await callTrace.getEntries(true);
-        for (const entry of allEntries) {
-          try {
-            await entry.expandChildren();
-          } catch {
-            // entry not in viewport
-          }
-        }
-        return false;
-      },
-      { maxAttempts: 60, delayMs: 1000 },
+    const targetEntry = await callTrace.navigateToEntry(
+      "SudokuSolver#initialize",
     );
-
-    if (!targetFound || targetEntry === null) {
-      throw new Error(
-        "Call trace entry 'SudokuSolver#initialize' was not found when trying to inspect the 'board' argument.",
-      );
-    }
 
     // Verify the initialize entry has a 'board' argument.
     await retry(
       async () => {
-        const args = await targetEntry!.arguments();
+        const args = await targetEntry.arguments();
         for (const arg of args) {
           const name = await arg.name();
           if (name.toLowerCase() === "board") {

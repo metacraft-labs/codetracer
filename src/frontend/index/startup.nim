@@ -62,7 +62,12 @@ proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
   await wait(1_000)
   await started()
 
-proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
+proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
+  # Copy into a local var to work around Nim 2.2's capture check for
+  # var parameters in async procs.  On the JS backend, ServerData is a
+  # reference type (JS object), so mutations to 'data' propagate back
+  # to the caller.
+  var data = dataArg
   debugPrint "index: init"
   let bypass = true
 
@@ -184,7 +189,8 @@ proc init*(data: var ServerData, config: Config, layout: js, helpers: Helpers) {
       var configsJs: seq[JsObject] = @[]
       for i, config in launchConfigs:
         var envJs: seq[JsObject] = @[]
-        for envPair in config.env:
+        for j in 0 ..< config.env.len:
+          let envPair = config.env[j]
           envJs.add(js{key: envPair.key, value: envPair.value})
         configsJs.add(js{
           index: i,

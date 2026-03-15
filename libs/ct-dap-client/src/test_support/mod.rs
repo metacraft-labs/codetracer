@@ -37,7 +37,10 @@ pub(crate) fn prepare_trace_folder(
     let rr_link = wrapper.join("rr");
     // Remove stale symlink if present
     let _ = std::fs::remove_file(&rr_link);
+    #[cfg(unix)]
     std::os::unix::fs::symlink(rr_trace_dir, &rr_link)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(rr_trace_dir, &rr_link)?;
     Ok((wrapper.clone(), Some(wrapper)))
 }
 
@@ -62,14 +65,15 @@ pub(crate) fn find_ct_rr_support() -> Result<PathBuf, BoxError> {
     // 2. Sibling rr-backend repo's build output
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         let manifest = PathBuf::from(&manifest_dir);
+        let exe_name = format!("ct-rr-support{}", std::env::consts::EXE_SUFFIX);
         // When running from rr-backend: target/debug/ct-rr-support
-        let candidate = manifest.join("target/debug/ct-rr-support");
+        let candidate = manifest.join("target/debug").join(&exe_name);
         if candidate.is_file() {
             return Ok(candidate);
         }
         // When running from codetracer: ../codetracer-rr-backend/target/debug/ct-rr-support
         if let Some(ws) = manifest.parent() {
-            let sibling = ws.join("codetracer-rr-backend/target/debug/ct-rr-support");
+            let sibling = ws.join("codetracer-rr-backend/target/debug").join(&exe_name);
             if sibling.is_file() {
                 return Ok(sibling);
             }
@@ -77,9 +81,10 @@ pub(crate) fn find_ct_rr_support() -> Result<PathBuf, BoxError> {
     }
 
     // 3. PATH search
+    let exe_name = format!("ct-rr-support{}", std::env::consts::EXE_SUFFIX);
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {
-            let candidate = dir.join("ct-rr-support");
+            let candidate = dir.join(&exe_name);
             if candidate.is_file() {
                 return Ok(candidate);
             }

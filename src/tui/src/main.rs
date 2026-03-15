@@ -4,9 +4,18 @@
 use std::env;
 use std::error::Error;
 use std::io::{self, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::str;
+
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+
+#[cfg(unix)]
+type IpcStream = UnixStream;
+#[cfg(windows)]
+type IpcStream = std::fs::File;
+#[cfg(not(any(unix, windows)))]
+type IpcStream = std::io::Sink;
 
 use crossterm::{
     cursor,
@@ -72,8 +81,8 @@ pub struct App {
     location: Location,
     status: String,
     trace: Trace,
-    receiver: Option<UnixStream>,
-    sender: Option<UnixStream>,
+    receiver: Option<IpcStream>,
+    sender: Option<IpcStream>,
     caller_process_pid: u32,
     codetracer_prefix: PathBuf,
     codetracer_exe_dir: PathBuf,
@@ -298,7 +307,15 @@ impl App {
 
         let socket_path = format!("{tmp_socket_path_str}_{caller_pid}");
         eprintln!("{socket_path:?}");
+
+        #[cfg(unix)]
         let socket = UnixStream::connect(&socket_path)?;
+        #[cfg(windows)]
+        let socket = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&socket_path)?;
+
         eprintln!("{socket:?}");
 
         self.core = Core {
@@ -635,6 +652,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::App;
+    use crate::paths::CODETRACER_PATHS;
     use std::path::PathBuf;
     use std::{env, fs};
 
@@ -652,7 +670,7 @@ mod tests {
 
     #[test]
     fn register_trace_in_db() {
-        let tmp_path = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+        let tmp_path = CODETRACER_PATHS.lock().unwrap().tmp_path.clone();
         let base = tmp_path.join("ct_tui_test_db");
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
@@ -682,19 +700,16 @@ mod tests {
                     calltrace integer,
                     calltraceMode string,
                     date text);",
-                (),
             )
             .unwrap();
         connection
             .execute(
                 "CREATE TABLE IF NOT EXISTS trace_values (id integer, maxTraceID integer, UNIQUE(id));",
-                (),
             )
             .unwrap();
         connection
             .execute(
                 "INSERT INTO trace_values (id, maxTraceID) VALUES (0, 0)",
-                (),
             )
             .unwrap();
         drop(connection);

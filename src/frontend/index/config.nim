@@ -87,8 +87,17 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   # ctrl+o/similar => direct
   let traceImported = not data.trace.isNil and data.trace.imported
   var readPath = if traceImported:
-      let traceFilesFolder = $data.trace.outputFolder / "files"
-      cstring(traceFilesFolder / $filename)
+      let traceFilesFolder = nodePath.join(data.trace.outputFolder, cstring"files")
+      # Strip drive letter / root from filename so the path is relative
+      # to the trace files folder (e.g. D:\foo -> foo).
+      let fnStr = $filename
+      let relName = if fnStr.len >= 3 and fnStr[1] == ':' and (fnStr[2] == '\\' or fnStr[2] == '/'):
+          cstring(fnStr[3..^1])
+        elif fnStr.len > 0 and (fnStr[0] == '/' or fnStr[0] == '\\'):
+          cstring(fnStr[1..^1])
+        else:
+          filename
+      nodePath.join(traceFilesFolder, relName)
     else:
       filename
 
@@ -185,10 +194,14 @@ proc findConfig(folder: cstring, configPath: cstring): cstring =
     else:
       if config:
         return cstring""
-      current = nodePath.dirname(current)
-      if current == cstring"/":
+      let parent = nodePath.dirname(current)
+      # On Linux/macOS, the root is "/".  On Windows, path.dirname("D:\")
+      # returns "D:\" (i.e. parent == current).  Detect both cases.
+      if parent == cstring"/" or parent == current:
         current = userConfigDir
         config = true
+      else:
+        current = parent
 
 proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring"", send: bool = false): Future[Config] {.async.} =
   var file = findConfig(startOptions.folder, configPath)

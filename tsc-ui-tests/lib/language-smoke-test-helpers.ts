@@ -1,7 +1,25 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { LayoutPage } from "../page-objects/layout-page";
 import { retry } from "./retry-helpers";
 import { debugLogger } from "./debug-logger";
+
+/**
+ * Click a golden-layout tab button, working around the "element is outside
+ * of the viewport" issue that occurs on Windows when the Electron window is
+ * maximized but some tab buttons are positioned beyond the visible viewport.
+ *
+ * Falls back to dispatchEvent('click') when a normal click fails.
+ */
+async function clickTabButton(btn: Locator): Promise<void> {
+  try {
+    await btn.click({ timeout: 5_000 });
+  } catch {
+    // When the element is outside the viewport (common on Windows where
+    // the maximized Electron window may be clipped), dispatch a click
+    // event directly via JavaScript which bypasses all viewport checks.
+    await btn.dispatchEvent("click");
+  }
+}
 
 /**
  * Language-agnostic smoke test helpers that verify core CodeTracer UI
@@ -40,7 +58,7 @@ export async function assertEventLogPopulated(page: Page): Promise<void> {
   await layout.waitForBaseComponentsLoaded();
 
   const eventLog = (await layout.eventLogTabs())[0];
-  await eventLog.tabButton().click();
+  await clickTabButton(eventLog.tabButton());
 
   await retry(
     async () => {
@@ -54,6 +72,10 @@ export async function assertEventLogPopulated(page: Page): Promise<void> {
 /**
  * Navigate call trace to find a function by name, activate it, and verify
  * that the editor jumps to a tab whose name contains `expectedFile`.
+ *
+ * Uses `navigateToEntry` which first tries expanding visible entries, then
+ * falls back to calltrace search to handle cases where the function is
+ * buried under many stdlib calls (common in Python/Ruby traces).
  */
 export async function assertCallTraceNavigation(
   page: Page,
@@ -64,41 +86,11 @@ export async function assertCallTraceNavigation(
   await layout.waitForBaseComponentsLoaded();
 
   const callTrace = (await layout.callTraceTabs())[0];
-  await callTrace.tabButton().click();
+  await clickTabButton(callTrace.tabButton());
   callTrace.invalidateEntries();
 
-  let targetFound = false;
-
-  await retry(
-    async () => {
-      callTrace.invalidateEntries();
-      const target = await callTrace.findEntry(functionName, true);
-      if (target !== null) {
-        await target.activate();
-        targetFound = true;
-        return true;
-      }
-
-      // Expand all visible entries to reveal nested functions.
-      const allEntries = await callTrace.getEntries(true);
-      for (const entry of allEntries) {
-        try {
-          await entry.expandChildren();
-        } catch {
-          // Entry may be scrolled out of the virtualized viewport
-        }
-      }
-
-      return false;
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-
-  if (!targetFound) {
-    throw new Error(
-      `Call trace entry '${functionName}' was not found after expanding all visible entries.`,
-    );
-  }
+  const entry = await callTrace.navigateToEntry(functionName);
+  await entry.activate();
 
   // After navigation the editor should show a tab containing the expected file name.
   await retry(
@@ -129,40 +121,11 @@ export async function assertVariableVisible(
   await layout.waitForBaseComponentsLoaded();
 
   const callTrace = (await layout.callTraceTabs())[0];
-  await callTrace.tabButton().click();
+  await clickTabButton(callTrace.tabButton());
   callTrace.invalidateEntries();
 
-  let targetFound = false;
-
-  await retry(
-    async () => {
-      callTrace.invalidateEntries();
-      const target = await callTrace.findEntry(functionName, true);
-      if (target !== null) {
-        await target.activate();
-        targetFound = true;
-        return true;
-      }
-
-      const allEntries = await callTrace.getEntries(true);
-      for (const entry of allEntries) {
-        try {
-          await entry.expandChildren();
-        } catch {
-          // Entry may be scrolled out of the virtualized viewport
-        }
-      }
-
-      return false;
-    },
-    { maxAttempts: 60, delayMs: 1000 },
-  );
-
-  if (!targetFound) {
-    throw new Error(
-      `Call trace entry '${functionName}' was not found when trying to inspect variable '${variableName}'.`,
-    );
-  }
+  const entry = await callTrace.navigateToEntry(functionName);
+  await entry.activate();
 
   if (stepForwardFirst) {
     const stepOverBtn = page.locator("#next-debug");
@@ -180,7 +143,7 @@ export async function assertVariableVisible(
 
   // Open the state pane and look for the variable.
   const statePane = (await layout.programStateTabs())[0];
-  await statePane.tabButton().click();
+  await clickTabButton(statePane.tabButton());
 
   await retry(
     async () => {
@@ -234,7 +197,7 @@ export async function assertFlowValueVisible(
 
       // Flow not ready yet — also check the state pane.
       if (!statePaneOpened) {
-        await statePane.tabButton().click();
+        await clickTabButton(statePane.tabButton());
         statePaneOpened = true;
       }
 
@@ -284,7 +247,7 @@ export async function assertTerminalOutputContains(
   }
 
   const terminal = terminalTabs[0];
-  await terminal.tabButton().click();
+  await clickTabButton(terminal.tabButton());
 
   await retry(
     async () => {
@@ -313,7 +276,7 @@ export async function assertEventLogContainsText(
   await layout.waitForBaseComponentsLoaded();
 
   const eventLog = (await layout.eventLogTabs())[0];
-  await eventLog.tabButton().click();
+  await clickTabButton(eventLog.tabButton());
 
   await retry(
     async () => {
@@ -361,7 +324,7 @@ export async function assertTerminalOutputAfterContinue(
   }
 
   const terminal = terminalTabs[0];
-  await terminal.tabButton().click();
+  await clickTabButton(terminal.tabButton());
 
   await retry(
     async () => {

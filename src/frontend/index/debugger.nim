@@ -33,7 +33,8 @@ proc onShowInDebugInstance*(sender: js, response: jsobject(traceId=int, outputLi
   if not data.debugInstances.hasKey(response.traceId):
     var process = child_process.spawn(
       codetracerExe,
-      @[cstring"run", cstring($response.traceId)])
+      @[cstring"run", cstring($response.traceId)],
+      js{windowsHide: true})
     var pipe = await newDebugInstancePipe(process.pid)
     data.debugInstances[response.traceId] = DebugInstance(process: process, pipe: pipe)
     await wait(5_000)

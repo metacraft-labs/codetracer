@@ -1,7 +1,62 @@
 # Windows Porting Initiative Status
 
-Last updated: 2026-02-10
+Last updated: 2026-03-15
 Owner: Codetracer engineering
+
+## AMD64 (x64) Migration — 2026-03-15
+
+After the ARM64 machine disk failure, Windows development resumed on an AMD64 (x64) machine.
+The ARM64 porting work documented below (Steps 1-39+) was lost with the disk, but the scripts
+and code changes had been committed upstream.
+
+### x64 Bootstrap Status
+
+- Bootstrap (`bootstrap-windows-diy.ps1`) runs successfully on x64 with prebuilt Nim, Cap'n Proto, and Tup
+- All tools validated: rustc 1.92.0, nim 2.2.6 (amd64), node v24.13.0, capnp 1.3.0, tup v0.8-12, uv 0.9.28
+- .NET SDK 9.0.312 installed via winget (feature-band roll-forward from pinned 9.0.310)
+- Fixed env.sh npx PATH issue: `ensure_node_deps` now uses full path to npx.cmd and temporarily adds NODE_DIR to PATH
+
+### Satellite Repo Dev Environments
+
+New Windows dev environment scripts created for satellite repos:
+
+- **codetracer-rr-backend**: Wrapper approach — sets skip flags and sources codetracer's env
+  - `non-nix-build/windows/{env.ps1, env.sh, toolchain-versions.env, README.md}`
+- **codetracer-python-recorder**: Standalone lightweight bootstrap (Rust + CapnP + uv)
+  - `non-nix-build/windows/{bootstrap-windows-diy.ps1, env.ps1, env.sh, toolchain-versions.env, README.md}`
+- **codetracer-ruby-recorder**: Standalone lightweight bootstrap (Rust GNU target + CapnP)
+  - `non-nix-build/windows/{bootstrap-windows-diy.ps1, env.ps1, env.sh, toolchain-versions.env, README.md}`
+
+### Documentation Updates
+
+- All AGENTS.md files updated with Windows dev sections (build, test, lint commands)
+- CLAUDE.md symlinks already present in python-recorder and ruby-recorder
+
+### Build & Test Results (x64) — 2026-03-15
+
+**codetracer-python-recorder**:
+- `cargo build`: SUCCESS (7 warnings, 0 errors)
+- `cargo test`: 107/108 pass (1 flaky asyncio test)
+- Fixed: Windows path issues in activation tests, OnceCell contamination in metrics, IO stream/sys.modules contamination in test isolation
+
+**codetracer-rr-backend**:
+- `cargo build --features ttd-emulation-scaffold`: SUCCESS
+- `cargo test`: 397 unit tests pass, 23 doctests pass (11 ignored), 0 failures
+- Fixed: cfg(not(windows)) gating for deepreview/cli.rs recording processing, platform-specific symlink in ct-dap-client test_support, gated deepreview_integration_test.rs
+
+**codetracer db-backend**:
+- `cargo build`: SUCCESS (requires tree-sitter-nim parser.c generation and capnp on PATH)
+- `cargo test`: 45 pass, 0 fail, 4 ignored (noir_flow_integration correctly reports unsupported on Windows)
+- Fixed: missing `Instant` import in rr_dispatcher.rs
+
+**codetracer backend-manager**:
+- `cargo build`: SUCCESS (70 warnings, 0 errors)
+- Fixed: cfg-gated all Unix socket/process functions with Windows stubs, type alias for UnixStream on Windows
+
+**codetracer tui**:
+- `cargo build`: SUCCESS (6 warnings, 0 errors)
+- `cargo test`: 8 pass (all Windows named pipe tests), 2 fail (pre-existing test data issues), 1 ignored
+- Fixed: platform-specific IpcStream/CoreSocket type aliases, fixed sqlite execute API in tests
 
 ## Scope and Assumptions
 

@@ -41,6 +41,12 @@ import {
 } from "./performance-limits";
 
 // ---------------------------------------------------------------------------
+// Platform detection
+// ---------------------------------------------------------------------------
+
+const isWindows = process.platform === "win32";
+
+// ---------------------------------------------------------------------------
 // Path constants (shared with ct_helpers.ts)
 // ---------------------------------------------------------------------------
 
@@ -49,11 +55,140 @@ const codetracerInstallDir = path.dirname(currentDir);
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
 
+const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
 const codetracerPath =
   envCodetracerPath.length > 0
     ? envCodetracerPath
-    : path.join(codetracerPrefix, "bin", "ct");
+    : path.join(codetracerPrefix, "bin", ctBinaryName);
+
+// On Windows, the `python3` name often resolves to the Windows Store alias
+// stub which is not a real interpreter.  Detect and set the correct Python
+// path so that `ct record` can find the recorder package.
+if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER && !process.env.CODETRACER_PYTHON_EXE_PATH) {
+  // Strategy 1: Try common Python install locations directly.
+  const homeDir = process.env.USERPROFILE || process.env.HOME || "";
+  const knownPaths = [
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python312", "python.exe"),
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python313", "python.exe"),
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python311", "python.exe"),
+    path.join(homeDir, "AppData", "Local", "Programs", "Python", "Python310", "python.exe"),
+    "C:\\Python312\\python.exe",
+    "C:\\Python311\\python.exe",
+    "C:\\Python313\\python.exe",
+  ];
+  for (const p of knownPaths) {
+    if (fs.existsSync(p)) {
+      process.env.CODETRACER_PYTHON_INTERPRETER = p;
+      process.env.CODETRACER_PYTHON_EXE_PATH = p;
+      break;
+    }
+  }
+
+  // Strategy 2: If not found above, try `where` to locate python/py.
+  if (!process.env.CODETRACER_PYTHON_INTERPRETER) {
+    for (const candidate of ["python", "py"]) {
+      try {
+        const whichResult = childProcess.spawnSync("where", [candidate], {
+          encoding: "utf-8",
+          timeout: 5_000,
+        });
+        if (whichResult.status === 0) {
+          // Filter out the Windows Store alias (WindowsApps path)
+          const lines = whichResult.stdout.trim().split("\n").map((l: string) => l.trim());
+          const realPath = lines.find(
+            (l: string) => l.endsWith(".exe") && !l.includes("WindowsApps"),
+          );
+          if (realPath) {
+            // Validate it actually works
+            const vResult = childProcess.spawnSync(realPath, ["--version"], {
+              encoding: "utf-8",
+              timeout: 5_000,
+            });
+            if (vResult.status === 0 && vResult.stdout.includes("Python")) {
+              process.env.CODETRACER_PYTHON_INTERPRETER = realPath;
+              process.env.CODETRACER_PYTHON_EXE_PATH = realPath;
+              break;
+            }
+          }
+        }
+      } catch {
+        // candidate not found, try next
+      }
+    }
+  }
+}
+
+// On Windows, detect Ruby and the pure-Ruby recorder so that `ct record`
+// can trace Ruby programs.
+if (isWindows) {
+  if (!process.env.CODETRACER_RUBY_EXE_PATH) {
+    const rubyPaths = [
+      "C:\\Ruby33-x64\\bin\\ruby.exe",
+      "C:\\Ruby32-x64\\bin\\ruby.exe",
+      "C:\\Ruby31-x64\\bin\\ruby.exe",
+    ];
+    for (const p of rubyPaths) {
+      if (fs.existsSync(p)) {
+        process.env.CODETRACER_RUBY_EXE_PATH = p;
+        break;
+      }
+    }
+    // Fallback: try `where ruby`
+    if (!process.env.CODETRACER_RUBY_EXE_PATH) {
+      try {
+        const r = childProcess.spawnSync("where", ["ruby"], {
+          encoding: "utf-8",
+          timeout: 5_000,
+        });
+        if (r.status === 0) {
+          const line = r.stdout.trim().split("\n")[0]?.trim();
+          if (line && fs.existsSync(line)) {
+            process.env.CODETRACER_RUBY_EXE_PATH = line;
+          }
+        }
+      } catch { /* not found */ }
+    }
+  }
+
+  if (!process.env.CODETRACER_RUBY_RECORDER_PATH) {
+    // The pure-Ruby recorder is installed as a gem binary.
+    const rubyExeDir = process.env.CODETRACER_RUBY_EXE_PATH
+      ? path.dirname(process.env.CODETRACER_RUBY_EXE_PATH)
+      : null;
+    // The recorder script is invoked as `ruby <recorder_path>`, so we need
+    // the actual Ruby script, not the .bat wrapper.
+    const recorderCandidates = [
+      rubyExeDir ? path.join(rubyExeDir, "codetracer-pure-ruby-recorder") : "",
+      rubyExeDir ? path.join(rubyExeDir, "codetracer-ruby-recorder") : "",
+      // Also check the sibling repo source directly
+      path.join(codetracerInstallDir, "..", "codetracer-ruby-recorder", "gems",
+        "codetracer-pure-ruby-recorder", "bin", "codetracer-pure-ruby-recorder"),
+    ].filter(Boolean);
+    for (const p of recorderCandidates) {
+      if (fs.existsSync(p)) {
+        process.env.CODETRACER_RUBY_RECORDER_PATH = p;
+        break;
+      }
+    }
+  }
+}
+
+// On Windows, ct.exe spawns Electron as a child process (no execv), which
+// prevents Playwright from connecting via CDP.  We launch Electron directly
+// and pass the app directory so it picks up package.json / index.js.
+const electronExePath: string | null = (() => {
+  if (!isWindows) return null;
+  // Try node_modules in the codetracer install dir
+  const candidates = [
+    path.join(codetracerInstallDir, "node-packages", "node_modules", "electron", "dist", "electron.exe"),
+    path.join(codetracerInstallDir, "node_modules", "electron", "dist", "electron.exe"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+})();
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -106,16 +241,38 @@ interface CodetracerFixtures {
 // ---------------------------------------------------------------------------
 
 function setupLdLibraryPath(): void {
-  process.env.LD_LIBRARY_PATH = process.env.CT_LD_LIBRARY_PATH;
+  // LD_LIBRARY_PATH is a Linux/macOS concept; skip on Windows.
+  if (!isWindows) {
+    process.env.LD_LIBRARY_PATH = process.env.CT_LD_LIBRARY_PATH;
+  }
 }
 
 /**
  * Recursively kills a process and all its descendants.
  * Prevents backend-manager and db-backend from leaking as orphans
  * when Electron is killed during test teardown.
+ *
+ * On Windows, uses `taskkill /PID <pid> /T /F` which natively kills
+ * the entire process tree. On Linux/macOS, walks the tree via pgrep
+ * and sends SIGKILL to each process.
  */
 function killProcessTree(pid: number): void {
-  // Find children before killing the parent (once parent dies,
+  if (isWindows) {
+    // taskkill /T kills the process and all child processes.
+    // /F forces termination (equivalent to SIGKILL).
+    try {
+      childProcess.execSync(`taskkill /PID ${pid} /T /F`, {
+        encoding: "utf-8",
+        stdio: "pipe",
+        windowsHide: true,
+      });
+    } catch {
+      // Process may already be dead.
+    }
+    return;
+  }
+
+  // Linux/macOS: find children before killing the parent (once parent dies,
   // children get reparented to init and we lose the relationship).
   let childPids: number[] = [];
   try {
@@ -139,6 +296,27 @@ function killProcessTree(pid: number): void {
     process.kill(pid, "SIGKILL");
   } catch {
     // Already dead.
+  }
+}
+
+/**
+ * Kill stray CodeTracer-related processes that may have leaked from
+ * previous test runs.  On Windows, this kills all backend_manager.exe,
+ * db-backend.exe, and db-backend-record.exe instances.  No-op on other
+ * platforms where Unix process groups handle cleanup more reliably.
+ */
+function killStrayCodetracerProcesses(): void {
+  if (!isWindows) return;
+  for (const name of ["backend_manager.exe", "db-backend.exe", "db-backend-record.exe"]) {
+    try {
+      childProcess.execSync(`taskkill /IM ${name} /F`, {
+        encoding: "utf-8",
+        stdio: "pipe",
+        windowsHide: true,
+      });
+    } catch {
+      // No matching processes — expected.
+    }
   }
 }
 
@@ -171,6 +349,7 @@ function recordTestProgram(recordArg: string): number {
       stdio: "pipe",
       encoding: "utf-8",
       timeout: LIMIT_RR_RECORDING_MS,
+      windowsHide: true,
     },
   );
 
@@ -227,10 +406,16 @@ function makeCleanEnv(
   }
   delete env.CODETRACER_TRACE_ID;
   delete env.CODETRACER_CALLER_PID;
-  // Remove CODETRACER_PREFIX so the ct binary derives it from its own location
-  // (getAppDir().parentDir). The nix dev shell sets this to src/build-debug/
-  // which is wrong when running the nix-built binary from result/.
-  delete env.CODETRACER_PREFIX;
+  // On Windows with direct Electron launch, we MUST set CODETRACER_PREFIX
+  // because Electron's own exe path is not inside build-debug/ so the Nim
+  // code cannot derive the prefix from getAppDir().  On other platforms
+  // (or when ct.exe launches Electron), remove it so the ct binary derives
+  // it from its own location (getAppDir().parentDir).
+  if (isWindows && electronExePath) {
+    env.CODETRACER_PREFIX = codetracerPrefix;
+  } else {
+    delete env.CODETRACER_PREFIX;
+  }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   if (extra) {
@@ -241,6 +426,9 @@ function makeCleanEnv(
 
 /**
  * Resolves the chromium executable path from $PLAYWRIGHT_BROWSERS_PATH.
+ *
+ * On Linux, looks for chrome-linux directory with chrome binary.
+ * On Windows, looks for chrome-win directory with chrome.exe binary.
  */
 function resolveChromiumPath(): string {
   const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
@@ -257,15 +445,31 @@ function resolveChromiumPath(): string {
   if (!chromiumDir) {
     throw new Error(`no chromium-* directory found in ${browsersDir}`);
   }
+
+  const chromiumBase = path.join(browsersDir, chromiumDir);
+
+  if (isWindows) {
+    const chromeSubdir = fs
+      .readdirSync(chromiumBase)
+      .find((d: string) => d.startsWith("chrome-win"));
+    if (!chromeSubdir) {
+      throw new Error(
+        `no chrome-win* directory found in ${chromiumBase}`,
+      );
+    }
+    return path.join(chromiumBase, chromeSubdir, "chrome.exe");
+  }
+
+  // Linux (and fallback for other Unix-like systems)
   const chromeSubdir = fs
-    .readdirSync(path.join(browsersDir, chromiumDir))
+    .readdirSync(chromiumBase)
     .find((d: string) => d.startsWith("chrome-linux"));
   if (!chromeSubdir) {
     throw new Error(
-      `no chrome-linux* directory found in ${browsersDir}/${chromiumDir}`,
+      `no chrome-linux* directory found in ${chromiumBase}`,
     );
   }
-  return path.join(browsersDir, chromiumDir, chromeSubdir, "chrome");
+  return path.join(chromiumBase, chromeSubdir, "chrome");
 }
 
 // ---------------------------------------------------------------------------
@@ -359,14 +563,20 @@ async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SM
 
   console.log(`# launching Electron for trace ${traceId} (record: ${recordMs}ms)`);
 
+  // On Windows, ct.exe spawns Electron as a child process (no execv),
+  // which prevents Playwright from connecting via CDP.  Launch Electron
+  // directly and pass the app directory so it picks up package.json.
+  const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const launchArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
+
   const { result: app, durationMs: launchMs } = await timed(
     "electron launch",
     LIMIT_ELECTRON_LAUNCH_MS,
     async () =>
       _electron.launch({
-        executablePath: codetracerPath,
+        executablePath: launchExe,
         cwd: codetracerInstallDir,
-        args: [],
+        args: launchArgs,
         env: makeCleanEnv({
           CODETRACER_CALLER_PID: process.pid.toString(),
           CODETRACER_TRACE_ID: traceId.toString(),
@@ -440,6 +650,7 @@ async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_R
       cwd: codetracerInstallDir,
       env: makeCleanEnv(),
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     },
   );
 
@@ -523,10 +734,13 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
   setupLdLibraryPath();
   console.log("# launching welcome screen");
 
+  const welcomeExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const welcomeArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
+
   const app = await _electron.launch({
-    executablePath: codetracerPath,
+    executablePath: welcomeExe,
     cwd: codetracerInstallDir,
-    args: [],
+    args: welcomeArgs,
     env: makeCleanEnv(),
   });
 
@@ -559,10 +773,15 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
   console.log(`# launching edit mode for ${folderPath}`);
 
+  const editExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const editArgs = (isWindows && electronExePath)
+    ? [codetracerPrefix, "edit", folderPath]
+    : ["edit", folderPath];
+
   const app = await _electron.launch({
-    executablePath: codetracerPath,
+    executablePath: editExe,
     cwd: codetracerInstallDir,
-    args: ["edit", folderPath],
+    args: editArgs,
     env: makeCleanEnv(),
   });
 
@@ -595,10 +814,15 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
   console.log(`# launching deepreview mode for ${jsonPath}`);
 
+  const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const drArgs = (isWindows && electronExePath)
+    ? [codetracerPrefix, "--deepreview", jsonPath]
+    : ["--deepreview", jsonPath];
+
   const app = await _electron.launch({
-    executablePath: codetracerPath,
+    executablePath: drExe,
     cwd: codetracerInstallDir,
-    args: [`--deepreview=${jsonPath}`],
+    args: drArgs,
     env: makeCleanEnv(),
   });
 
@@ -642,7 +866,11 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   // Fixtures
   _workerCleanup: [
     async ({}, use) => {
+      // Kill any stray backend processes left over from previous runs.
+      killStrayCodetracerProcesses();
       await use();
+      // Kill any backend processes that may have leaked from this worker.
+      killStrayCodetracerProcesses();
       // Killing Electron with SIGKILL leaves Playwright's internal CDP
       // pipe handles open, preventing the worker from exiting.  Force
       // exit after a brief delay so test results can still be reported.
@@ -747,14 +975,14 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         // Report collected JS errors from the renderer
         if (result.consoleErrors.length > 0) {
           console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
-          for (const err of result.consoleErrors.slice(0, 10)) {
+          for (const err of result.consoleErrors.slice(0, 50)) {
             console.log(`    ${err}`);
           }
         }
         // Report main process output (backend-manager, socket, init flow)
         if (result.mainProcessOutput.length > 0) {
           console.log(`  FAIL main process output (${result.mainProcessOutput.length} lines):`);
-          for (const line of result.mainProcessOutput.slice(0, 30)) {
+          for (const line of result.mainProcessOutput.slice(0, 100)) {
             console.log(`    ${line}`);
           }
         } else {

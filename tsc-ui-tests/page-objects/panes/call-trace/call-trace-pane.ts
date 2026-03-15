@@ -102,6 +102,58 @@ export class CallTracePane {
     );
   }
 
+  /**
+   * Navigate to a function by name, using calltrace search as a fallback
+   * when the entry is not visible in the current viewport.
+   *
+   * Strategy 1: Quick check if the function is already visible.
+   * Strategy 2: Use the calltrace search to find and navigate to the function.
+   */
+  async navigateToEntry(
+    functionName: string,
+    maxSearchAttempts = 30,
+    delayMs = 1000,
+  ): Promise<CallTraceEntry> {
+    // Quick check: is the function already visible?
+    await this.waitForReady();
+    this.invalidateEntries();
+    const quickEntry = await this.findEntry(functionName, true);
+    if (quickEntry !== null) return quickEntry;
+
+    // Use calltrace search to navigate to the function
+    await this.search(functionName);
+
+    const results = this.searchResultsContainer().locator(".search-result");
+    const count = await results.count();
+    if (count === 0) {
+      throw new Error(
+        `Call trace search returned no results for '${functionName}'.`,
+      );
+    }
+
+    // Click the first search result to trigger calltraceJump via mousedown
+    await results.first().dispatchEvent("mousedown");
+
+    // Wait for the calltrace to re-center around the navigated function
+    let entry: CallTraceEntry | null = null;
+    await retry(
+      async () => {
+        this.invalidateEntries();
+        entry = await this.findEntry(functionName, true);
+        return entry !== null;
+      },
+      { maxAttempts: maxSearchAttempts, delayMs },
+    );
+
+    if (entry === null) {
+      throw new Error(
+        `Call trace entry '${functionName}' was not found after search navigation.`,
+      );
+    }
+
+    return entry;
+  }
+
   async activeTooltip(): Promise<ValueComponentView | null> {
     const tooltip = this.root.locator(".call-tooltip");
     if ((await tooltip.count()) === 0) return null;

@@ -160,7 +160,8 @@ proc buildCoverageDecorations(file: DeepReviewFileData): seq[JsObject] =
   if file.isNil:
     return
 
-  for cov in file.coverage:
+  for i in 0 ..< file.coverage.len:
+    let cov = file.coverage[i]
     if cov.line < 1:
       continue
     var className: cstring

@@ -11,11 +11,13 @@
 //! 3. db-backend can connect to the replay and initialize a DAP session
 //!
 //! The test is skipped if `ct-rr-support`, `rr`, or `lake` is not available.
+//!
+//! Lean uses rr-based traces on Unix and TTD-based traces on Windows.
 
 mod test_harness;
 
 use std::path::PathBuf;
-use test_harness::{find_ct_rr_support, is_rr_available, Language, TestRecording};
+use test_harness::{find_ct_rr_support, is_replay_backend_available, Language, TestRecording};
 
 fn get_lean_source_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -41,8 +43,8 @@ fn test_lean_build_and_record() {
         }
     };
 
-    if !is_rr_available() {
-        eprintln!("SKIPPED: rr is not available");
+    if !is_replay_backend_available() {
+        eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
         return;
     }
 
@@ -90,11 +92,8 @@ fn test_lean_build_and_record() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn test_lean_dap_replay_connects() {
-    use test_harness::DapTestClient;
-
     // Check prerequisites
     let ct_rr_support = match find_ct_rr_support() {
         Some(p) => p,
@@ -104,8 +103,8 @@ fn test_lean_dap_replay_connects() {
         }
     };
 
-    if !is_rr_available() {
-        eprintln!("SKIPPED: rr is not available");
+    if !is_replay_backend_available() {
+        eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
         return;
     }
 
@@ -122,14 +121,30 @@ fn test_lean_dap_replay_connects() {
         .expect("build+record should succeed");
 
     // Start DAP client and verify we can connect
-    println!("Starting DAP client for Lean replay...");
-    let mut client = DapTestClient::start(&recording.temp_dir, &ct_rr_support).expect("DAP client should start");
+    // On Unix, use Unix sockets; on other platforms, use stdio
+    #[cfg(unix)]
+    {
+        use test_harness::DapTestClient;
+        println!("Starting DAP client for Lean replay (Unix sockets)...");
+        let mut client = DapTestClient::start(&recording.temp_dir, &ct_rr_support).expect("DAP client should start");
 
-    // Initialize and launch — verifies db-backend can connect to the RR replay
-    println!("Initializing DAP session...");
-    client
-        .initialize_and_launch(&recording, &ct_rr_support)
-        .expect("DAP initialize+launch should succeed");
+        println!("Initializing DAP session...");
+        client
+            .initialize_and_launch(&recording, &ct_rr_support)
+            .expect("DAP initialize+launch should succeed");
+    }
+
+    #[cfg(not(unix))]
+    {
+        use test_harness::DapStdioTestClient;
+        println!("Starting DAP stdio client for Lean replay...");
+        let mut client = DapStdioTestClient::start().expect("DAP stdio client should start");
+
+        println!("Initializing DAP session...");
+        client
+            .initialize_and_launch_rr(&recording, &ct_rr_support)
+            .expect("DAP initialize+launch should succeed");
+    }
 
     println!("Lean DAP replay connection test passed!");
 }

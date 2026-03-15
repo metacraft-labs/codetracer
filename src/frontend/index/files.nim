@@ -27,6 +27,17 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
       return false
     return hasAccess == jsUndefined
 
+proc stripPathRoot(path: cstring): cstring =
+  ## Strip the root/drive letter from a path for relative joining.
+  ## D:\foo -> foo, /foo -> foo
+  let s = $path
+  if s.len >= 3 and s[1] == ':' and (s[2] == '\\' or s[2] == '/'):
+    return cstring(s[3..^1])
+  elif s.len > 0 and (s[0] == '/' or s[0] == '\\'):
+    return cstring(s[1..^1])
+  else:
+    return path
+
 proc stripLastChar(text: cstring, c: cstring): cstring =
   if cstring($(text[text.len - 1])) == c:
     return cstring(($(text)).substr(0, text.len - 2))
@@ -49,12 +60,10 @@ proc loadFile(
   let realPath = if not selfContained:
       path
     else:
-      # https://stackoverflow.com/a/39836259/438099
-      # see here ^:
-      # join combines two absolute paths /a and /b into /a/b
-      # resolve returns just /b
-      # here we want the first behavior!
-      nodePath.join(traceFilesPath, path)
+      # Strip the path root (drive letter on Windows, leading / on Unix)
+      # so that path.join produces traceFilesPath/relative/path
+      # instead of just returning the absolute path.
+      nodePath.join(traceFilesPath, stripPathRoot(path))
 
   try:
     data = await cast[Future[js]](fsAsync.lstat(realPath))
@@ -368,7 +377,8 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
   var repoPathSet: JsAssoc[cstring, bool] = JsAssoc[cstring, bool]{}
 
   if not selfContained:
-    for path in paths:
+    for i in 0 ..< paths.len:
+      let path = paths[i]
       try:
         let (stdoutRev, stderrRev, errRev) = await childProcessExec(cstring(&"git rev-parse --show-toplevel"), js{cwd: path})
         repoPathSet[stdoutRev.trim] = true

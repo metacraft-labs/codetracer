@@ -4,6 +4,25 @@ import
   ../utilities/[ git, language_detection ],
   json_serialization, results
 
+proc isAbsolutePath(path: string): bool =
+  ## Check if path is absolute on either Unix or Windows.
+  if path.len > 0 and (path[0] == '/' or path[0] == '\\'):
+    return true
+  if path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/'):
+    return true
+  return false
+
+proc stripPathRoot(path: string): string =
+  ## Strip the root/drive from an absolute path for use as a relative sub-path.
+  ## Unix: /path/to/file -> path/to/file
+  ## Windows: D:\path\to\file -> path\to\file
+  if path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/'):
+    return path[3..^1]
+  elif path.len > 0 and (path[0] == '/' or path[0] == '\\'):
+    return path[1..^1]
+  else:
+    return path
+
 proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
   let filesFolder = traceFolder / "files"
   createDir(filesFolder)
@@ -13,7 +32,7 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
   if lang in {LangNoir, LangRustWasm, LangCppWasm}:
     var baseFolder = ""
     for path in paths:
-      if path.len > 0 and path.startsWith('/'):
+      if path.len > 0 and isAbsolutePath(path):
         let originalFolder = path.parentDir
         if baseFolder.len == 0 or baseFolder.len > originalFolder.len and
             baseFolder.startsWith(originalFolder):
@@ -32,7 +51,7 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
   for path in sourcePaths:
     if path.len > 0:
       # echo "store path ", path
-      let traceFilePath = filesFolder / path
+      let traceFilePath = filesFolder / stripPathRoot(path)
       let traceFileFolder = traceFilePath.parentDir
       try:
         # echo "create ", traceFileFolder
@@ -225,7 +244,7 @@ proc importTrace*(
 
   var sourceFoldersInitialSet = initHashSet[string]()
   for path in paths:
-    if path.len > 0 and path.startsWith('/'):
+    if path.len > 0 and isAbsolutePath(path):
       sourceFoldersInitialSet.incl(path.parentDir)
 
   let sourceFolders = processSourceFoldersList(sourceFoldersInitialSet, workdir)

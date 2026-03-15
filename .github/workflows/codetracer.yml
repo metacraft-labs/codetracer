@@ -234,6 +234,54 @@ jobs:
         shell: pwsh
         run: cargo test --bin simple-tui windows_named_pipe -- --nocapture
 
+  windows-rust-components:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install capnproto
+        shell: pwsh
+        run: choco install capnproto -y
+
+      - name: Generate tree-sitter-nim parser
+        shell: pwsh
+        run: |
+          npm install -g tree-sitter-cli
+          cd libs/tree-sitter-nim
+          tree-sitter generate
+
+      - name: Build db-backend
+        working-directory: src/db-backend
+        shell: bash
+        run: cargo build
+
+      - name: Test db-backend
+        working-directory: src/db-backend
+        shell: bash
+        run: cargo test
+
+      - name: Build backend-manager
+        working-directory: src/backend-manager
+        shell: bash
+        run: cargo build
+
+      - name: Build tui
+        working-directory: src/tui
+        shell: bash
+        run: cargo build
+
+      - name: Test tui named pipe
+        working-directory: src/tui
+        shell: bash
+        run: cargo test --bin simple-tui windows_named_pipe
+
   lint-bash:
     runs-on: [self-hosted, nixos]
     steps:

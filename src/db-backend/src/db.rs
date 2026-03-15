@@ -1222,12 +1222,49 @@ impl DbReplay {
             return Some(id);
         }
 
+        // On Windows, normalize separators so that paths with `/` and `\` can
+        // match each other.  Ruby and other recorders may store forward-slash
+        // paths while the DAP client sends backslash paths (or vice-versa).
+        #[cfg(windows)]
+        let normalized = path.replace('\\', "/");
+        #[cfg(not(windows))]
+        let normalized = path.to_string();
+
+        #[cfg(windows)]
+        if normalized != path {
+            if let Some(&id) = self.db.path_map.get(&normalized) {
+                return Some(id);
+            }
+        }
+
         let abs_path = std::path::Path::new(path);
 
         // 2. Try stripping the workdir prefix to obtain a relative path.
         if let Ok(relative) = abs_path.strip_prefix(&self.db.workdir) {
             if let Some(rel_str) = relative.to_str() {
                 if let Some(&id) = self.db.path_map.get(rel_str) {
+                    return Some(id);
+                }
+                // Also try with normalized separators.
+                #[cfg(windows)]
+                {
+                    let norm_rel = rel_str.replace('\\', "/");
+                    if norm_rel != rel_str {
+                        if let Some(&id) = self.db.path_map.get(&norm_rel) {
+                            return Some(id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // On Windows, also try stripping the workdir with normalized separators.
+        #[cfg(windows)]
+        {
+            let norm_workdir = self.db.workdir.to_string_lossy().replace('\\', "/");
+            if normalized.starts_with(&norm_workdir) {
+                let relative = &normalized[norm_workdir.len()..].trim_start_matches('/');
+                if let Some(&id) = self.db.path_map.get(*relative) {
                     return Some(id);
                 }
             }

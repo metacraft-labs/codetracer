@@ -2,11 +2,20 @@ use std::env;
 use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 // use std::process::ChildStdin;
 use std::str;
 use std::time;
+
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+
+#[cfg(unix)]
+type CoreSocket = UnixStream;
+#[cfg(windows)]
+type CoreSocket = std::fs::File;
+#[cfg(not(any(unix, windows)))]
+type CoreSocket = std::io::Sink;
 
 use crate::event::{CtEvent, Event};
 use crate::paths::CODETRACER_PATHS;
@@ -18,7 +27,7 @@ use tokio::sync::mpsc;
 #[derive(Debug, Default)]
 pub struct Core {
     //   pub stdin_file: Option<std::fs::File>,
-    pub socket: Option<UnixStream>,
+    pub socket: Option<CoreSocket>,
     pub caller_process_pid: u32,
     //   pub last_line_length: usize
 }

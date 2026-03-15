@@ -1,5 +1,5 @@
 import
-  std / [ jsffi, sequtils ],
+  std / [ jsffi, sequtils, strutils ],
   electron_vars, config,
   ../types,
   ../lib/[ jslib, electron_lib ],
@@ -32,7 +32,16 @@ proc parseArgs* =
     data.startOptions.rawTestStrategy = electronProcess.env[cstring"CODETRACER_TEST_STRATEGY"]
     infoPrint "RAW TEST STRATEGY:", data.startOptions.rawTestStrategy
 
-  let argsExceptNoSandbox = electronProcess.argv.filterIt(it != cstring"--no-sandbox")
+  # Filter out flags injected by Electron/Playwright that are not
+  # CodeTracer arguments (--no-sandbox, --inspect, --remote-debugging-port,
+  # --remote-debugging-pipe, etc.).
+  proc isDebuggerFlag(arg: cstring): bool =
+    let s = $arg
+    s == "--no-sandbox" or
+      s.startsWith("--inspect") or
+      s.startsWith("--remote-debugging")
+
+  let argsExceptNoSandbox = electronProcess.argv.filterIt(not isDebuggerFlag(it))
 
   # TODO electron or just node? server code compatibility
   if argsExceptNoSandbox.len > 2:
@@ -86,13 +95,17 @@ proc parseArgs* =
         data.startOptions.name = argsExceptNoSandbox[i + 3]
         let file = fs.lstatSync(data.startOptions.name)
         var folder = cstring""
-        if data.startOptions.name[0] == '/':
+        let nameStr = $data.startOptions.name
+        # Check for absolute path: Unix (/) or Windows drive letter (e.g. D:\)
+        let isAbsolute = nameStr.len > 0 and (nameStr[0] == '/' or
+          (nameStr.len >= 3 and nameStr[1] == ':' and (nameStr[2] == '\\' or nameStr[2] == '/')))
+        if isAbsolute:
           if cast[bool](file.isFile()):
             folder = nodePath.dirname(data.startOptions.name) & cstring"/"
           else:
             folder = data.startOptions.name
             data.startOptions.name = cstring""
-          if folder[folder.len - 1] != '/':
+          if folder[folder.len - 1] != '/' and folder[folder.len - 1] != '\\':
             folder = folder & cstring"/"
         else:
           folder = electronprocess.cwd() & cstring"/"
