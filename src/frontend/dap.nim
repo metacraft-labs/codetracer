@@ -1,5 +1,5 @@
 import
-  std/[ jsffi, jsconsole, strformat, async ],
+  std/[ jsffi, jsconsole, strformat, asyncjs ],
   ../common/ct_event,
   lib/jslib,
   types,

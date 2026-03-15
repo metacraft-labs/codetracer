@@ -1,5 +1,5 @@
 import
-  std/[ jsffi, async, strutils, strformat, os ],
+  std/[ jsffi, asyncjs, strutils, strformat, os ],
   results,
   jslib,
   ../../common/[ ct_logging, paths ]

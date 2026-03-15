@@ -1,5 +1,5 @@
 import
-  std / [jsffi, jsconsole, async, strformat],
+  std / [jsffi, jsconsole, asyncjs, strformat],
   results,
   types, paths,
   lib/[ jslib, electron_lib ],

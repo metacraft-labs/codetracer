@@ -1,5 +1,5 @@
 import
-  async, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
+  asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   karax, karaxdsl, kdom, vstyles,
   ui/[agent_activity, layout, editor, trace, events, event_log,
       state, calltrace, loading, start, menu,

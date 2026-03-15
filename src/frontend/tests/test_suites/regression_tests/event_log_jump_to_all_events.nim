@@ -1,7 +1,7 @@
 import
   std / [
     sequtils, strutils, strformat, sets,
-    macros, jsffi, async, jsconsole,
+    macros, jsffi, asyncjs, jsconsole,
     algorithm, os, json
   ],
   lib,

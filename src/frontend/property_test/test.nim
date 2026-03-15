@@ -1,4 +1,4 @@
-import std / [jsffi, async]
+import std / [jsffi, asyncjs]
 from std / jsconsole import console, log
 from std / strformat import fmt
 import ../lib/[ jslib, logging ]

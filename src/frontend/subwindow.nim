@@ -1,5 +1,5 @@
 import
-  std/[ jsffi, jsconsole, async, strformat, strutils ],
+  std/[ jsffi, jsconsole, asyncjs, strformat, strutils ],
   karax, vdom, karaxdsl, kdom, vstyles, dom, jsffi, jsconsole, paths,
   types, lang,
   results,
