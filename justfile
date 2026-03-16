@@ -700,3 +700,10 @@ update-rr-backend-pin ref="":
   fi
   echo "$NEW_REF" > "$PIN_FILE"
   echo "Updated rr-backend pin: $OLD_REF -> $NEW_REF"
+
+sync-design-tokens:
+    rm -rf ./src/frontend/styles/generated
+    mkdir -p ./src/frontend/styles/generated
+    bash scripts/tokens-to-styl.sh \
+      ./libs/codetracer-design-system \
+      ./src/frontend/styles/generated
