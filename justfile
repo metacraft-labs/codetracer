@@ -92,11 +92,11 @@ test:
   set -e
   just test-rust
   just test-nimsuggest
-  if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "1" ]; then
+  if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
     echo "codetracer-rr-backend detected — running cross-repo tests..."
     just cross-test
   else
-    echo "CODETRACER_RR_BACKEND_PRESENT not set — skipping cross-repo tests"
+    echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
   fi
 
 # Run all GUI tests headlessly (TypeScript Playwright e2e suite).
@@ -375,7 +375,7 @@ test-frontend-js:
 test-e2e *args:
   #!/usr/bin/env bash
   set -e
-  if [ -z "${DISPLAY:-}" ]; then
+  if [ "$(uname)" != "Darwin" ] && [ -z "${DISPLAY:-}" ]; then
     echo "Error: \$DISPLAY is not set. Electron tests require a display server." >&2
     echo "Use 'just test-gui' to run under Xvfb, or 'just test-gui-visible' from a desktop session." >&2
     exit 1

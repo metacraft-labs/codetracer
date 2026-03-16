@@ -670,7 +670,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
       const needsRR = sourcePath ? requiresRR(sourcePath) : false;
       const recordingLimit = needsRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
 
-      if (needsRR && !process.env.CODETRACER_RR_BACKEND_PRESENT) {
+      if (needsRR && !process.env.CODETRACER_RR_BACKEND_PATH && !process.env.CODETRACER_RR_BACKEND_PRESENT) {
         testInfo.skip(true, "requires ct-rr-support (RR-based language)");
       }
       if (needsRR && process.env.CODETRACER_DB_TESTS_ONLY === "1") {

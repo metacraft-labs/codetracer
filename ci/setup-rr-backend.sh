@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Resolves the rr-backend ref from (in order):
 #   1. $RR_BACKEND_REF env var (explicit override)
-#   2. .github/sibling-pins.json (sibling-pins lock)
+#   2. .github/sibling-pins (sibling-pins lock, plain text format)
 #   3. .github/rr-backend-pin.txt (legacy pin file)
 #   4. "main" (fallback)
 #
@@ -173,6 +173,7 @@ export_to_github_env() {
 	fi
 
 	if [[ -n ${GITHUB_ENV:-} ]]; then
+		echo "CODETRACER_RR_BACKEND_PATH=${CLONE_DIR}" >>"$GITHUB_ENV"
 		echo "CODETRACER_RR_BACKEND_PRESENT=1" >>"$GITHUB_ENV"
 		if [[ -n ${RR_LD:-} ]]; then
 			echo "LD_LIBRARY_PATH=${RR_LD}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >>"$GITHUB_ENV"
