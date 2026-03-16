@@ -23,6 +23,7 @@ case "$PLATFORM" in
   macos)
     export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct}"
     export CODETRACER_DB_TESTS_ONLY=1
+    # shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT
     source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
     cd "$REPO_ROOT/tsc-ui-tests"
     npm install --no-audit --no-fund

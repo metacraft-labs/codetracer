@@ -22,6 +22,7 @@ case "$PLATFORM" in
   macos)
     # Source sibling detection for the non-nix environment.
     REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+    # shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT
     source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
     # Override rr-backend detection — rr is not available on macOS.
     export CODETRACER_RR_BACKEND_PATH=
