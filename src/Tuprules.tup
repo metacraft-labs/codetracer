@@ -205,3 +205,32 @@ RUST_WINDOWS_LINKER_CONFIG =
 !rust_cargo_small_lang = |> \
     cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/small_lang_target && \
     cp $(CARGO_TARGET_BASE)/small_lang_target/release/small-lang$(EXE_SUFFIX) %o |> %o | $(SMALL_LANG_CARGO_IGNORE_OUTPUTS)
+
+# Config-aware build macros: select debug or release based on @(DEBUG)
+ifeq (@(DEBUG),1)
+NIM_BUILD = $(NIM_DEBUG)
+else
+NIM_BUILD = $(NIM_RELEASE)
+endif
+
+!nim_c_build = |> ^ %f^ $(NIM_BUILD)\
+-d:ssl \
+-d:useOpenssl3 \
+--nimcache:/tmp/ct-nim-cache/%B_c\
+--out:%o\
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
+
+!codetracer_build = |> $(NIM_BUILD)\
+-d:testing\
+--boundChecks:on\
+--stacktrace:on\
+--linetrace:on\
+--warnings:on\
+--hints:on\
+-d:ctEntrypoint \
+-d:withTup \
+-d:useOpenssl3 \
+-d:ssl \
+--nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--out:%o\
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)

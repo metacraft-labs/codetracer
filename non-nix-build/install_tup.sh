@@ -17,12 +17,15 @@ else
 	echo tup is missing! installing...
 fi
 
-brew install pkg-config pcre2 macFUSE
+brew install pkg-config pcre2
 : "${DEPS_DIR:=$PWD/deps}"
 cd "$DEPS_DIR"
 rm -rf tup
 git clone https://github.com/gittup/tup
 cd tup
 git checkout $WANTED_TUP_REVISION
-./bootstrap.sh
-cp ./tup "$BIN_DIR"/
+# Use ldpreload server to avoid FUSE/macFUSE dependency.
+# The resulting tup binary can run `tup generate`, `tup init`, `tup parse`, etc.
+# but not `tup build` or `tup monitor` (which require FUSE).
+TUP_SERVER=ldpreload ./bootstrap-nofuse.sh
+cp ./build/tup "$BIN_DIR"/

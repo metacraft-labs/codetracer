@@ -1,6 +1,10 @@
 include_rules
 
+ifeq (@(DEBUG),1)
 : src/main.rs |> !debug_rust_cargo_db_backend |> ../bin/db-backend$(EXE_SUFFIX)
+else
+: src/main.rs |> !rust_cargo_db_backend |> ../bin/db-backend$(EXE_SUFFIX)
+endif
 # required for now only for system lang backend
 # for now not needed for db-backend
 # : src/bin/virtualization-layers.rs |> !rust_cargo_virtualization_layers |> ../bin/virtualization-layers$(EXE_SUFFIX)

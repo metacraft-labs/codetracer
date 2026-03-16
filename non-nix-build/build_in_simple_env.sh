@@ -15,46 +15,76 @@ rm -rf "$ROOT_DIR/non-nix-build/CodeTracer.app"
 mkdir -p "$DIST_DIR/bin"
 mkdir -p "$DIST_DIR/src"
 
-# setup node deps
+# setup node deps (includes webpack)
 bash setup_node_deps.sh
 
-# build our css files
-bash build_css.sh
+# Build everything via tup generate (avoids FUSE requirement)
+pushd "$ROOT_DIR/src"
+if [ ! -d .tup ]; then
+    tup init
+fi
+TUP_OUTPUT_SCRIPT=tup-generated-build-once.sh
+tup generate --config build-release/tup.config "$TUP_OUTPUT_SCRIPT"
+./"$TUP_OUTPUT_SCRIPT"
+rm "$TUP_OUTPUT_SCRIPT"
+popd
 
-cd "$ROOT_DIR"
-# build/setup nim-based files
-bash ./non-nix-build/build_with_nim.sh
+BUILD_DIR="$ROOT_DIR/src/build-release"
 
-cd non-nix-build
+# Copy compiled binaries from tup build output
+cp "$BUILD_DIR"/bin/ct "$DIST_DIR"/bin/ct
+cp "$BUILD_DIR"/bin/codetracer_depending_on_env_vars_in_tup "$DIST_DIR"/bin/codetracer_depending_on_env_vars_in_tup
+cp "$BUILD_DIR"/bin/db-backend-record "$DIST_DIR"/bin/db-backend-record
+cp "$BUILD_DIR"/bin/db-backend "$DIST_DIR"/bin/db-backend
+cp "$BUILD_DIR"/bin/backend-manager "$DIST_DIR"/bin/backend-manager
 
-# build/setup db-backend
-bash build_db_backend.sh
+# Copy JS files
+cp "$BUILD_DIR"/index.js "$DIST_DIR"/index.js
+cp "$BUILD_DIR"/src/index.js "$DIST_DIR"/src/index.js
+cp "$BUILD_DIR"/subwindow.js "$DIST_DIR"/subwindow.js
+cp "$BUILD_DIR"/ui.js "$DIST_DIR"/ui.js
+cp "$BUILD_DIR"/helpers.js "$DIST_DIR"/helpers.js
+cp "$BUILD_DIR"/src/helpers.js "$DIST_DIR"/src/helpers.js
 
-# build backend-manager
-bash build_backend_manager.sh
+# Copy HTML files
+cp "$BUILD_DIR"/index.html "$DIST_DIR"/index.html
+cp "$BUILD_DIR"/subwindow.html "$DIST_DIR"/subwindow.html
 
-# for now just put them in src/
-#   not great, but much easier for now as the public/static files
-#   are just there, no need for special copying/linking
-#   however it would be best to link to them in a separate tup-like
-#   src/build-debug!
-
-# setup/copy/link other files
-cp "$ROOT_DIR"/resources/electron "$DIST_DIR"/bin/
-
-# The built-in macOS ruby binary is too old and has to be hacked around
-ln -s "$(brew --prefix ruby)"/bin/ruby "$DIST_DIR"/bin/ruby
-cp -Lr "${ROOT_DIR}"/libs/codetracer-ruby-recorder "$DIST_DIR"/
-cp "$(which ctags)" "$DIST_DIR"/bin/ctags
-cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/src/helpers.js
-cp "$ROOT_DIR"/src/helpers.js "$DIST_DIR"/helpers.js
-cp "$ROOT_DIR"/src/frontend/*.html "$DIST_DIR"/src/
-cp "$ROOT_DIR"/src/frontend/*.html "$DIST_DIR"/
+# Copy config and public assets
 rm -f "$DIST_DIR"/config
 rm -f "$DIST_DIR"/public
-cp -r "$ROOT_DIR"/src/config "$DIST_DIR"/config
-cp -r "$ROOT_DIR"/src/public "$DIST_DIR"/public
+cp -r "$BUILD_DIR"/config "$DIST_DIR"/config
+cp -r "$BUILD_DIR"/public "$DIST_DIR"/public
+
+# Copy frontend styles
+mkdir -p "$DIST_DIR/frontend/styles"
+cp "$BUILD_DIR"/frontend/styles/*.css "$DIST_DIR"/frontend/styles/
+
+# setup/copy/link non-tup-managed files
+cp "$ROOT_DIR"/resources/electron "$DIST_DIR"/bin/
+
+if [ "$CODETRACER_BUILD_OS" == "mac" ]; then
+    # The built-in macOS ruby binary is too old and has to be hacked around
+    ln -s "$(brew --prefix ruby)"/bin/ruby "$DIST_DIR"/bin/ruby
+fi
+
+cp -Lr "${ROOT_DIR}"/libs/codetracer-ruby-recorder "$DIST_DIR"/
+cp "$(which ctags)" "$DIST_DIR"/bin/ctags
 cp -r "$BIN_DIR"/* "$DIST_DIR"/bin/
+
+# Mac-specific binary post-processing
+if [ "$CODETRACER_BUILD_OS" == "mac" ]; then
+    install_name_tool \
+        -add_rpath "@executable_path/../../Frameworks" \
+        "${DIST_DIR}/bin/ct"
+    install_name_tool -add_rpath "@loader_path" "${DIST_DIR}/bin/ct"
+    codesign -s - --force --deep "${DIST_DIR}/bin/ct"
+
+    install_name_tool \
+        -add_rpath "@executable_path/../../Frameworks" \
+        "${DIST_DIR}/bin/db-backend-record"
+    codesign -s - --force --deep "${DIST_DIR}/bin/db-backend-record"
+fi
 
 mv "$DIST_DIR"/bin/ct "$DIST_DIR"/bin/ct_unwrapped
 

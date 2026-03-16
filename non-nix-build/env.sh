@@ -61,6 +61,7 @@ fi
 ./install_nargo.sh
 ./install_wazero.sh
 ./install_nim_osx.sh
+./install_tup.sh
 ./install_ct_remote.sh
 
 if [[ $platform == "mac" ]]; then
