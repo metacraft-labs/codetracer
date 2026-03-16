@@ -824,6 +824,10 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       # --- macOS setup ---
+      - name: Install just (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install just
+
       - name: Build (non-nix)
         if: matrix.platform == 'macos'
         run: ./non-nix-build/build.sh
@@ -888,6 +892,10 @@ jobs:
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       # --- macOS setup ---
+      - name: Install just (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install just
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
         run: ./non-nix-build/build.sh
