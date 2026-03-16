@@ -791,13 +791,20 @@ jobs:
           ./CodeTracer.AppImage --version
 
   test-non-gui:
-    runs-on: [self-hosted, nixos]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: nixos
+            runner: [self-hosted, nixos]
+          - platform: macos
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
     needs:
-      - dev-build
-      - nix-build
-      - appimage-build
-      - dmg-build
-      - build-python-packages
+      - lint-bash
+      - lint-nim
+      - lint-nix
+      - lint-rust
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -805,25 +812,59 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
+      # --- NixOS setup ---
       - name: Install Nix
+        if: matrix.platform == 'nixos'
         uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      # --- macOS setup ---
+      - name: Build (non-nix)
+        if: matrix.platform == 'macos'
+        run: ./non-nix-build/build.sh
+
+      - name: Clone python-recorder (macOS)
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-python-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-python-recorder
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Clone ruby-recorder (macOS)
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-ruby-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       # Runs all Rust tests including flow integration tests for all languages.
-      # WASM flow tests (wasm_flow_integration.rs) skip automatically if wazero
-      # or wasm32-wasip1 target are not available.
-      # Stylus flow tests are #[ignore] and require a devnode — not run here.
+      # WASM flow tests skip automatically if wazero or wasm32-wasip1 target
+      # are not available. Stylus flow tests are #[ignore] and need a devnode.
       # Cross-repo tests (rr) run in the separate test-ui-tests-rr job.
-      # Override CODETRACER_RR_BACKEND_PRESENT after nix shell hook sets it.
-      - run: "nix develop .#devShells.x86_64-linux.default --command env CODETRACER_RR_BACKEND_PRESENT=0 just test"
+      - name: Run tests
+        run: ./ci/test/non-gui.sh
+        env:
+          CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
 
   test-ui-tests:
-    runs-on: [self-hosted, nixos]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: nixos
+            runner: [self-hosted, nixos]
+          - platform: macos
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -831,7 +872,9 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
+      # --- NixOS setup ---
       - name: Install Nix
+        if: matrix.platform == 'nixos'
         uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -840,14 +883,38 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - name: Build CodeTracer
+      - name: Build CodeTracer (nix)
+        if: matrix.platform == 'nixos'
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
+      # --- macOS setup ---
+      - name: Build CodeTracer (non-nix)
+        if: matrix.platform == 'macos'
+        run: ./non-nix-build/build.sh
+
+      - name: Clone python-recorder (macOS)
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-python-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-python-recorder
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Clone ruby-recorder (macOS)
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-ruby-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-ruby-recorder
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
       - name: Run TypeScript Playwright UI tests (DB-based only)
+        run: ./ci/test/ui-tests-db.sh
         env:
-          CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
+          CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
           CODETRACER_DB_TESTS_ONLY: "1"
-        run: "nix develop .#devShells.x86_64-linux.default --command just test-gui"
 
   test-ui-tests-rr:
     runs-on: [self-hosted, nixos]
@@ -879,6 +946,7 @@ jobs:
       - name: Run TypeScript Playwright UI tests (RR-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
+          CODETRACER_RR_BACKEND_PATH: ${{ github.workspace }}/../codetracer-rr-backend
           CODETRACER_RR_BACKEND_PRESENT: "1"
           CODETRACER_RR_TESTS_ONLY: "1"
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"

@@ -70,51 +70,12 @@ jobs:
           echo "Resolved rr-backend ref: $REF"
 
       - name: Clone rr-backend
-        run: |
-          REF="${{ steps.resolve-ref.outputs.ref }}"
-          echo "Cloning codetracer-rr-backend at ref: $REF"
-
-          # Rewrite all GitHub URL styles to authenticated HTTPS.
-          # Submodules may use SSH or HTTPS URLs in .gitmodules, so we cover all:
-          #   git@github.com:org/repo.git    -> https://token@github.com/org/repo.git
-          #   ssh://git@github.com/org/repo  -> https://token@github.com/org/repo
-          #   https://github.com/org/repo    -> https://token@github.com/org/repo
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
-
-          # Clone as a sibling of the codetracer checkout so that path deps in
-          # Cargo.toml (../codetracer/libs/ct-dap-client) resolve correctly.
-          CLONE_DIR="$(pwd)/../codetracer-rr-backend"
-          rm -rf "$CLONE_DIR"
-          git clone \
-            "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-rr-backend.git" \
-            "$CLONE_DIR"
-          cd "$CLONE_DIR"
-          git checkout "$REF"
-
-          # Initialize submodules and explicitly rewrite their URLs to include the
-          # access token. The url.insteadOf config may not always apply to submodule
-          # URLs already written to .git/config.
-          git submodule init
-          for url in $(git config --get-regexp '^submodule\..*\.url$' | grep -E 'git@github\.com:|https://github\.com/' | cut -d' ' -f1); do
-            old_url=$(git config --get "$url")
-            new_url=$(echo "$old_url" \
-              | sed "s|git@github.com:|https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/|" \
-              | sed "s|https://github.com/|https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/|")
-            echo "Rewriting submodule URL: $url"
-            git config "$url" "$new_url"
-          done
-          git submodule update --recursive
-
-          # Rewrite .gitmodules SSH URLs to HTTPS so that nix's internal git
-          # fetcher (which may not honor global git url.insteadOf) can resolve
-          # submodules when evaluating the flake with submodules=1.
-          sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
-          sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
-          # Stage and commit the rewrite so nix sees it in the git tree
-          git add .gitmodules
-          git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-rr-backend
+          ref: ${{ steps.resolve-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-rr-backend
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build ct-rr-support
         run: |
@@ -196,23 +157,12 @@ jobs:
           echo "Resolved shell-recorders ref: $REF"
 
       - name: Clone shell-recorders
-        run: |
-          REF="${{ steps.resolve-ref.outputs.ref }}"
-          echo "Cloning codetracer-shell-recorders at ref: $REF"
-
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/".insteadOf "https://github.com/"
-
-          # Clone as a sibling of the codetracer checkout so that path deps in
-          # Cargo.toml (../../../codetracer/libs/codetracer-trace-format/...) resolve.
-          CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
-          rm -rf "$CLONE_DIR"
-          git clone \
-            "https://x-access-token:${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}@github.com/metacraft-labs/codetracer-shell-recorders.git" \
-            "$CLONE_DIR"
-          cd "$CLONE_DIR"
-          git checkout "$REF"
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-shell-recorders
+          ref: ${{ steps.resolve-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-shell-recorders
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build shell trace writer
         run: |
