@@ -53,7 +53,8 @@ _ct_try_workspace_root() {
      [ -d "$candidate/codetracer-ruby-recorder" ] ||
      [ -d "$candidate/codetracer-js-recorder" ] ||
      [ -d "$candidate/codetracer-shell-recorders" ] ||
-     [ -d "$candidate/codetracer-wasm-recorder" ]; then
+     [ -d "$candidate/codetracer-wasm-recorder" ] ||
+     [ -d "$candidate/noir" ]; then
     _CT_WORKSPACE_ROOT="$candidate"
     return 0
   fi
@@ -122,6 +123,23 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-shell-re
   export CODETRACER_BASH_RECORDER_PATH="$_CT_WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder/launcher.sh"
   export CODETRACER_ZSH_RECORDER_PATH="$_CT_WORKSPACE_ROOT/codetracer-shell-recorders/zsh-recorder/launcher.zsh"
   _ct_detect_summary "codetracer-shell-recorders"
+fi
+
+# --- noir (metacraft-labs fork, provides nargo) ---
+# Exports: CODETRACER_NARGO_PATH, prepends to PATH
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/noir" ]; then
+  # Prefer a pre-built nargo binary (release or debug).
+  if [ -x "$_CT_WORKSPACE_ROOT/noir/target/release/nargo" ]; then
+    export CODETRACER_NARGO_PATH="$_CT_WORKSPACE_ROOT/noir/target/release/nargo"
+    export PATH="$_CT_WORKSPACE_ROOT/noir/target/release:$PATH"
+    _ct_detect_summary "noir (nargo release build)"
+  elif [ -x "$_CT_WORKSPACE_ROOT/noir/target/debug/nargo" ]; then
+    export CODETRACER_NARGO_PATH="$_CT_WORKSPACE_ROOT/noir/target/debug/nargo"
+    export PATH="$_CT_WORKSPACE_ROOT/noir/target/debug:$PATH"
+    _ct_detect_summary "noir (nargo debug build)"
+  else
+    _ct_detect_summary "noir (repo present, nargo not built)"
+  fi
 fi
 
 # --- codetracer-wasm-recorder ---
