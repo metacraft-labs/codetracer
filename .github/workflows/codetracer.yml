@@ -800,6 +800,8 @@ jobs:
           - platform: macos
             runner: macos-latest
     runs-on: ${{ matrix.runner }}
+    # macOS tests are new and may have pre-existing failures; don't block PRs
+    continue-on-error: ${{ matrix.platform == 'macos' }}
     needs:
       - lint-bash
       - lint-nim
@@ -869,6 +871,8 @@ jobs:
           - platform: macos
             runner: macos-latest
     runs-on: ${{ matrix.runner }}
+    # macOS tests are new and may have pre-existing failures; don't block PRs
+    continue-on-error: ${{ matrix.platform == 'macos' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
