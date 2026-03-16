@@ -198,46 +198,9 @@ mkShell {
 
 
     # ===========================================================================
-    # Sibling repo detection
+    # Sibling repo detection (unified script)
     # ===========================================================================
-    WORKSPACE_ROOT="$(cd "$ROOT_PATH/.." 2>/dev/null && pwd)"
-
-    # --- codetracer-python-recorder ---
-    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-python-recorder" ]; then
-      export CODETRACER_PYTHON_RECORDER_PRESENT=1
-      export CODETRACER_PYTHON_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py"
-    elif [ -d "$ROOT_PATH/libs/codetracer-python-recorder/codetracer-pure-python-recorder" ]; then
-      export CODETRACER_PYTHON_RECORDER_PRESENT=1
-      export CODETRACER_PYTHON_RECORDER_PATH="$ROOT_PATH/libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py"
-    fi
-
-    # --- codetracer-ruby-recorder ---
-    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-ruby-recorder/gems" ]; then
-      export CODETRACER_RUBY_RECORDER_PRESENT=1
-      export RUBY_RECORDER_ROOT="$WORKSPACE_ROOT/codetracer-ruby-recorder"
-    elif [ -d "$ROOT_PATH/libs/codetracer-ruby-recorder/gems" ]; then
-      export CODETRACER_RUBY_RECORDER_PRESENT=1
-      export RUBY_RECORDER_ROOT="$ROOT_PATH/libs/codetracer-ruby-recorder"
-    fi
-
-    # --- codetracer-js-recorder ---
-    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-js-recorder/packages/cli" ]; then
-      export CODETRACER_JS_RECORDER_PRESENT=1
-      export CODETRACER_JS_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-js-recorder/packages/cli/dist/index.js"
-    fi
-
-    # --- codetracer-shell-recorders ---
-    if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder" ]; then
-      export CODETRACER_SHELL_RECORDERS_PRESENT=1
-      export CODETRACER_BASH_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder/launcher.sh"
-      export CODETRACER_ZSH_RECORDER_PATH="$WORKSPACE_ROOT/codetracer-shell-recorders/zsh-recorder/launcher.zsh"
-    fi
-
-    # --- codetracer-rr-backend ---
-    if [ -n "$WORKSPACE_ROOT" ] && [ -x "$WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
-      export PATH="$WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
-      export CODETRACER_RR_BACKEND_PRESENT=1
-    fi
+    source "$ROOT_PATH/scripts/detect-siblings.sh" "$ROOT_PATH"
 
     # ui-test shell hooks
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}

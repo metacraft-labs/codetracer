@@ -44,12 +44,12 @@ cp "$ROOT_DIR"/resources/electron "$DIST_DIR"/bin/
 
 # The built-in macOS ruby binary is too old and has to be hacked around
 ln -s "$(brew --prefix ruby)"/bin/ruby "$DIST_DIR"/bin/ruby
-# ruby recorder — prefer sibling repo, fall back to submodule (deprecated)
-WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." 2>/dev/null && pwd)"
-if [ -d "${WORKSPACE_ROOT}/codetracer-ruby-recorder" ]; then
-	cp -Lr "${WORKSPACE_ROOT}/codetracer-ruby-recorder" "$DIST_DIR"/
-elif [ -d "${ROOT_DIR}/libs/codetracer-ruby-recorder" ]; then
-	cp -Lr "${ROOT_DIR}/libs/codetracer-ruby-recorder" "$DIST_DIR"/
+# Detect sibling repos (sets RUBY_RECORDER_ROOT, CODETRACER_*_PATH, etc.)
+source "$ROOT_DIR/scripts/detect-siblings.sh" "$ROOT_DIR"
+
+# ruby recorder — copy from detected sibling
+if [ -n "${RUBY_RECORDER_ROOT:-}" ]; then
+	cp -Lr "${RUBY_RECORDER_ROOT}" "$DIST_DIR"/
 else
 	echo "WARNING: codetracer-ruby-recorder not found; build will lack Ruby tracing support"
 fi
