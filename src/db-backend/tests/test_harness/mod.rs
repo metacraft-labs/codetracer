@@ -216,6 +216,13 @@ impl DapTestClient {
         let (stream, _) = accept_with_timeout(&listener, Duration::from_secs(10))
             .map_err(|e| format!("failed to accept connection: {}", e))?;
 
+        // The listener was set to non-blocking for accept_with_timeout, and the
+        // accepted stream inherits that mode. Switch it back to blocking so that
+        // DAP message reads wait for data instead of returning EAGAIN/WouldBlock.
+        stream
+            .set_nonblocking(false)
+            .map_err(|e| format!("failed to set stream to blocking: {}", e))?;
+
         let reader = BufReader::new(stream.try_clone().unwrap());
         let writer = stream;
 
@@ -861,7 +868,13 @@ fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
         .ok_or("Python recorder not found. Set CODETRACER_PYTHON_RECORDER_PATH or check out the sibling/submodule")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let output = Command::new("python")
+    // Use "python3" first (standard on macOS), fall back to "python" (nix dev shell).
+    let python = if Command::new("python3").arg("--version").output().is_ok() {
+        "python3"
+    } else {
+        "python"
+    };
+    let output = Command::new(python)
         .args([recorder.to_str().unwrap(), source_path.to_str().unwrap()])
         .current_dir(trace_dir)
         .output()
