@@ -705,6 +705,47 @@ pub fn find_python_recorder() -> Option<PathBuf> {
     None
 }
 
+/// Find a suitable Python 3.10+ interpreter for the recorder.
+///
+/// Returns the command name and version string, or `None` if no suitable
+/// Python is available. The Python recorder uses PEP 604 union syntax
+/// (`X | None`) which requires Python 3.10+.
+pub fn find_suitable_python() -> Option<(String, String)> {
+    use std::process::Command;
+
+    let cmd = env::var("CODETRACER_PYTHON_CMD")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            ["python3.12", "python3.13", "python3", "python"]
+                .iter()
+                .find(|c| {
+                    Command::new(c)
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                })
+                .copied()
+                .unwrap_or("python3")
+                .to_string()
+        });
+
+    let version = Command::new(&cmd)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.split_whitespace().nth(1).map(|v| v.to_string()))?;
+
+    let parts: Vec<u32> = version.split('.').filter_map(|p| p.parse().ok()).collect();
+    if parts.len() >= 2 && (parts[0] > 3 || (parts[0] == 3 && parts[1] >= 10)) {
+        Some((cmd, version))
+    } else {
+        None
+    }
+}
+
 /// Find the pure-Ruby recorder script.
 ///
 /// Search order:
@@ -868,12 +909,26 @@ fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
         .ok_or("Python recorder not found. Set CODETRACER_PYTHON_RECORDER_PATH or check out the sibling/submodule")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    // Use "python3" first (standard on macOS), fall back to "python" (nix dev shell).
-    let python = if Command::new("python3").arg("--version").output().is_ok() {
-        "python3"
-    } else {
-        "python"
-    };
+    // Pick a Python 3.10+ interpreter. Prefer CODETRACER_PYTHON_CMD (set by
+    // detect-siblings.sh or the user), then try versioned brew binaries
+    // (python3.12, python3.13), then the generic python3/python.
+    let python = std::env::var("CODETRACER_PYTHON_CMD")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            ["python3.12", "python3.13", "python3", "python"]
+                .iter()
+                .find(|cmd| {
+                    Command::new(cmd)
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                })
+                .copied()
+                .unwrap_or("python3")
+                .to_string()
+        });
     let output = Command::new(python)
         .args([recorder.to_str().unwrap(), source_path.to_str().unwrap()])
         .current_dir(trace_dir)

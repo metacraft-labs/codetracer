@@ -830,6 +830,12 @@ jobs:
         if: matrix.platform == 'macos'
         run: brew install just
 
+      - name: Set up Python 3.12 (macOS)
+        if: matrix.platform == 'macos'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Build (non-nix)
         if: matrix.platform == 'macos'
         run: ./non-nix-build/build.sh
@@ -899,6 +905,12 @@ jobs:
       - name: Install just (macOS)
         if: matrix.platform == 'macos'
         run: brew install just
+
+      - name: Set up Python 3.12 (macOS)
+        if: matrix.platform == 'macos'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'

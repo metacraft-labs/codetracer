@@ -56,24 +56,13 @@ fn test_python_flow_integration() {
     }
 
     // The Python recorder uses PEP 604 union syntax (X | None) which requires Python 3.10+.
-    let python_cmd = if std::process::Command::new("python3").arg("--version").output().is_ok() {
-        "python3"
-    } else {
-        "python"
-    };
-    let python_version = std::process::Command::new(python_cmd)
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.split_whitespace().nth(1).map(|v| v.to_string()));
-    if let Some(ref ver) = python_version {
-        let parts: Vec<u32> = ver.split('.').filter_map(|p| p.parse().ok()).collect();
-        if parts.len() >= 2 && (parts[0] < 3 || (parts[0] == 3 && parts[1] < 10)) {
-            eprintln!("SKIPPED: Python {} is too old (need 3.10+ for the recorder)", ver);
+    let (_python_cmd, version_label) = match test_harness::find_suitable_python() {
+        Some(pair) => pair,
+        None => {
+            eprintln!("SKIPPED: Python 3.10+ not found (needed for the recorder)");
             return;
         }
-    }
+    };
 
     let source_path = get_python_source_path();
     assert!(
@@ -83,23 +72,6 @@ fn test_python_flow_integration() {
     );
 
     let config = create_python_flow_config();
-
-    // Get Python version for labeling (try python3 first, then python)
-    let python_cmd = if std::process::Command::new("python3").arg("--version").output().is_ok() {
-        "python3"
-    } else {
-        "python"
-    };
-    let version_label = std::process::Command::new(python_cmd)
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| {
-            // Parse "Python 3.12.5"
-            s.split_whitespace().nth(1).map(|v| v.to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string());
 
     match run_db_flow_test(&config, &version_label) {
         Ok(()) => println!("Python flow integration test passed!"),

@@ -20,24 +20,13 @@ fn python_flow_dap_variables_and_values() {
     }
 
     // The Python recorder uses PEP 604 union syntax (X | None) which requires Python 3.10+.
-    let python_cmd = if std::process::Command::new("python3").arg("--version").output().is_ok() {
-        "python3"
-    } else {
-        "python"
-    };
-    let python_version = std::process::Command::new(python_cmd)
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.split_whitespace().nth(1).map(|v| v.to_string()));
-    if let Some(ref ver) = python_version {
-        let parts: Vec<u32> = ver.split('.').filter_map(|p| p.parse().ok()).collect();
-        if parts.len() >= 2 && (parts[0] < 3 || (parts[0] == 3 && parts[1] < 10)) {
-            eprintln!("SKIPPED: Python {} is too old (need 3.10+ for the recorder)", ver);
+    let (_python_cmd, version_label) = match test_harness::find_suitable_python() {
+        Some(pair) => pair,
+        None => {
+            eprintln!("SKIPPED: Python 3.10+ not found (needed for the recorder)");
             return;
         }
-    }
+    };
 
     let db_backend = find_db_backend();
 
@@ -47,15 +36,6 @@ fn python_flow_dap_variables_and_values() {
         "Python test program not found at {}",
         source_path.display()
     );
-
-    // Get Python version for labeling
-    let version_label = std::process::Command::new(python_cmd)
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.split_whitespace().nth(1).map(|v| v.to_string()))
-        .unwrap_or_else(|| "unknown".to_string());
 
     // Record the trace using the existing test_harness recording infrastructure
     let recording = TestRecording::create_db_trace(&source_path, Language::Python, &version_label)
