@@ -32,4 +32,7 @@ pushd nim
 git checkout $WANTED_NIM_VERSION
 bin/nim c koch.nim
 ./koch boot -d:release
+# Compile nimsuggest alongside Nim — needed by `just test-nimsuggest`
+# which validates that the CodeTracer LSP module can be loaded.
+bin/nim c -d:release -o:bin/nimsuggest nimsuggest/nimsuggest.nim
 popd
