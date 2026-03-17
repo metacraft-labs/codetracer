@@ -62,15 +62,11 @@ fn create_noir_flow_config() -> FlowTestConfig {
 
 #[test]
 fn test_noir_flow_integration() {
-    // Skip when nargo is not on PATH (e.g. macOS CI without nix dev shell)
-    let nargo_available = std::process::Command::new("nargo")
-        .arg("--version")
-        .output()
-        .is_ok();
-    if !nargo_available {
+    if !test_harness::is_command_available("nargo") {
         eprintln!("SKIPPED: nargo not found on PATH");
         return;
     }
+
 
     let project_path = get_noir_project_path();
     assert!(
