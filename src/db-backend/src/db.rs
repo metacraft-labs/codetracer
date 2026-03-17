@@ -1227,8 +1227,6 @@ impl DbReplay {
         // paths while the DAP client sends backslash paths (or vice-versa).
         #[cfg(windows)]
         let normalized = path.replace('\\', "/");
-        #[cfg(not(windows))]
-        let normalized = path.to_string();
 
         #[cfg(windows)]
         if normalized != path {
