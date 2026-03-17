@@ -9,15 +9,15 @@ pub trait Component: std::fmt::Debug + Send + Sync {
     fn name(&self) -> String;
     fn on_complete_move(
         &mut self,
-        move_state: MoveState,
-        event_id: EventId,
+        _move_state: MoveState,
+        _event_id: EventId,
     ) -> Result<(), Box<dyn Error>> {
         unimplemented!();
     }
     fn on_updated_flow(
         &mut self,
-        flow_update: FlowUpdate,
-        event_id: EventId,
+        _flow_update: FlowUpdate,
+        _event_id: EventId,
     ) -> Result<(), Box<dyn Error>> {
         unimplemented!();
     }

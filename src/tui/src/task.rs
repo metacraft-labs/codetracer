@@ -82,6 +82,7 @@ pub struct MoveState {
     Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq,
 )]
 #[repr(u8)]
+#[allow(clippy::enum_variant_names)]
 pub enum RRGDBStopSignal {
     #[default]
     NoStopSignal,
@@ -96,6 +97,7 @@ pub enum RRGDBStopSignal {
     Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq,
 )]
 #[repr(u8)]
+#[allow(clippy::enum_variant_names)]
 pub enum Action {
     #[default]
     StepIn,
@@ -148,6 +150,7 @@ pub struct FlowUpdateState {
     Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq,
 )]
 #[repr(u8)]
+#[allow(clippy::enum_variant_names)]
 pub enum FlowUpdateStateKind {
     #[default]
     FlowNotLoading,
@@ -201,6 +204,7 @@ pub struct FlowUpdate {
 }
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
+#[allow(clippy::enum_variant_names)]
 pub enum TaskKind {
     #[default]
     LoadFlow = 0,
@@ -253,6 +257,7 @@ pub enum TaskKind {
 pub struct TaskId(String);
 
 #[derive(Debug, Default)]
+#[allow(clippy::enum_variant_names)]
 pub enum EventKind {
     #[default]
     CompleteMove,
@@ -275,7 +280,7 @@ pub enum EventKind {
 #[derive(Debug, Default, Clone)]
 pub struct EventId(String);
 
-pub static mut TASK_ID_MAP: &'static mut [usize] = &mut [0; 100];
+pub static mut TASK_ID_MAP: &mut [usize] = &mut [0; 100];
 
 fn from_camel_case_to_lisp_case(text: &str) -> String {
     let mut result = String::from("");
@@ -381,7 +386,7 @@ impl LoopId {
 impl StepArg {
     pub fn new(action: Action) -> StepArg {
         StepArg {
-            action: action,
+            action,
             reverse: false,
             repeat: 1,
             complete: true,

@@ -50,7 +50,7 @@ type DapReaderStream = std::io::Cursor<Vec<u8>>;
 type DapWriterStream = std::io::Sink;
 
 pub struct DapClient {
-    child: Child,
+    _child: Child,
     reader: BufReader<DapReaderStream>,
     writer: DapWriterStream,
     seq: i64,
@@ -328,7 +328,7 @@ mod windows_transport_tests {
             .launch(r"C:\tmp\trace", r"C:\tmp\program")
             .expect("launch request should succeed and trigger configurationDone send");
 
-        let status = wait_for_child_exit(&mut client.child, Duration::from_secs(10))
+        let status = wait_for_child_exit(&mut client._child, Duration::from_secs(10))
             .expect("mock backend process should exit");
         assert!(
             status.success(),
@@ -624,7 +624,7 @@ impl DapClient {
             let reader_stream = stream.try_clone()?;
 
             return Ok(Self {
-                child,
+                _child: child,
                 reader: BufReader::new(reader_stream),
                 writer: stream,
                 seq: 1,
@@ -650,12 +650,12 @@ impl DapClient {
                 format!("connected Windows named pipe '{pipe_path}', but failed to clone stream handle: {e}")
             })?;
 
-            return Ok(Self {
-                child,
+            Ok(Self {
+                _child: child,
                 reader: BufReader::new(reader_stream),
                 writer: stream,
                 seq: 1,
-            });
+            })
         }
 
         #[cfg(not(any(unix, windows)))]

@@ -16,7 +16,6 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
-use serde_json;
 
 fn with_line_numbers(lines: &[String]) -> Vec<String> {
     let max_digits = 5;
@@ -44,7 +43,7 @@ struct App {
     calltrace: Vec<String>,
     calltrace_scroll: u16,
     dap: Option<DapClient>,
-    program: String,
+    _program: String,
     status: String,
 }
 
@@ -98,7 +97,7 @@ impl App {
             calltrace,
             calltrace_scroll: 0,
             dap,
-            program: program.to_string(),
+            _program: program.to_string(),
             status: String::new(),
         })
     }

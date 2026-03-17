@@ -24,7 +24,6 @@ use crossterm::{
     style::{self, Stylize},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use sqlite;
 use tokio::signal;
 use tokio::sync::mpsc;
 
@@ -162,7 +161,7 @@ impl App {
             output_folder: statement.read::<String, _>("outputFolder")?,
             date: statement.read::<String, _>("date")?,
             duration: "".to_string(),
-            lang: lang,
+            lang,
             imported: statement.read::<i64, _>("imported")? == 1,
         };
 
@@ -185,8 +184,7 @@ impl App {
         if let Ok(sqlite::State::Row) = statement.next() {
             return self.parse_trace_record(&statement);
         }
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(Box::new(std::io::Error::other(
             "sqlite loading trace error",
         )))
     }
@@ -343,7 +341,7 @@ impl App {
                     .to_str()
                     .unwrap()
                     .to_string(),
-                program: program,
+                program,
                 paths: self.trace.source_folders.clone(),
                 trace_id: self.trace.id,
                 callgraph: false,

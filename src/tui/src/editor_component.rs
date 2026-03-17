@@ -75,7 +75,7 @@ impl Component for EditorComponent {
     fn on_complete_move(
         &mut self,
         move_state: MoveState,
-        event_id: EventId,
+        _event_id: EventId,
     ) -> Result<(), Box<dyn Error>> {
         let raw_bytes = std::fs::read(PathBuf::from(&move_state.location.path))?;
         let source = str::from_utf8(&raw_bytes)?.to_string();
@@ -95,7 +95,7 @@ impl Component for EditorComponent {
     fn on_updated_flow(
         &mut self,
         flow_update: FlowUpdate,
-        event_id: EventId,
+        _event_id: EventId,
     ) -> Result<(), Box<dyn Error>> {
         self.flow_update = flow_update;
         self.render()?;
@@ -142,7 +142,7 @@ impl EditorComponent {
 
     //   fn current_loop_and_iteration_and_step(&self) -> (Loop, Iteration, S)
     fn current_iteration_and_loop_for(&self, line_number: usize) -> (Iteration, LoopId) {
-        if self.flow_update.view_updates.len() > 0 {
+        if !self.flow_update.view_updates.is_empty() {
             let view_update = &self.flow_update.view_updates[0];
             let position = Position::new(line_number as i64);
             if view_update.position_step_counts.contains_key(&position) {
@@ -217,7 +217,7 @@ impl EditorComponent {
     }
 
     fn load_flow_info(&self, line_number: usize) -> Result<String, Box<dyn Error>> {
-        if self.flow_update.view_updates.len() > 0 {
+        if !self.flow_update.view_updates.is_empty() {
             let view_update = &self.flow_update.view_updates[0];
             let position = Position::new(line_number as i64);
             if view_update.position_step_counts.contains_key(&position) {

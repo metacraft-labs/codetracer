@@ -116,10 +116,10 @@ pub struct Value {
 pub fn text_repr(value: &Value) -> String {
     match value.kind {
         ValueKind::Int => {
-            format!("{}", value.i)
+            value.i.to_string()
         }
         ValueKind::Float => {
-            format!("{}", value.f)
+            value.f.to_string()
         }
         ValueKind::String => {
             format!("\"{}\"", value.text)
@@ -138,7 +138,7 @@ pub fn text_repr(value: &Value) -> String {
             }
         }
         ValueKind::Raw => {
-            format!("{}", value.r)
+            value.r.to_string()
         }
         ValueKind::Error => {
             format!("<error: {}>", value.msg)

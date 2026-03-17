@@ -2,6 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 
+#[allow(dead_code)]
 pub struct Paths {
     pub tmp_path: PathBuf,
     pub socket_path: PathBuf,
@@ -13,7 +14,7 @@ impl Default for Paths {
             PathBuf::from(env::var("HOME").unwrap_or("/".to_string()))
                 .join("Library/Caches/com.codetracer.CodeTracer/")
         } else {
-            PathBuf::from(env::temp_dir()).join("codetracer/")
+            env::temp_dir().join("codetracer/")
         };
         Self {
             tmp_path: PathBuf::from(&tmpdir),
@@ -22,5 +23,6 @@ impl Default for Paths {
     }
 }
 
+#[allow(dead_code)]
 pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> =
     LazyLock::new(|| Mutex::new(Paths::default()));

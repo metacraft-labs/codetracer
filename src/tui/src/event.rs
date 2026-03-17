@@ -2,6 +2,7 @@ use crate::task::{EventId, EventKind};
 use serde_json::Value;
 
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Event {
     Keyboard {
         key_event: crossterm::event::KeyEvent,

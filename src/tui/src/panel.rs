@@ -83,7 +83,7 @@ pub fn size(width: u16, height: u16) -> Size {
 pub fn panel(coord: Coord, size: Size) -> Panel {
     Panel {
         start: coord,
-        size: size,
+        size,
     }
 }
 

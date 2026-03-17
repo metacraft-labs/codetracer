@@ -21,7 +21,6 @@ use crate::event::{CtEvent, Event};
 use crate::paths::CODETRACER_PATHS;
 use crate::task::{gen_task_id, to_event_kind, to_task_kind_text, EventId, TaskId, TaskKind};
 use serde::Serialize;
-use tokio;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Default)]
@@ -163,12 +162,11 @@ pub fn track_responses(tx: mpsc::Sender<CtEvent>) {
             let maybe_core_raw = read_core_responses();
             if let Some(core_raw) = maybe_core_raw {
                 let lines = core_raw.trim().split('\n').collect::<Vec<&str>>();
-                for i in next_line_index..lines.len() {
-                    let line = lines[i];
-                    if line.len() > 0 {
+                for (i, line) in lines.iter().enumerate().skip(next_line_index) {
+                    if !line.is_empty() {
                         next_line_index = i + 1;
                         // eprintln!("load [{line}]");
-                        let event = load_response(&line);
+                        let event = load_response(line);
                         // eprintln!("send {event:?}");
                         tx.send(CtEvent::Builtin(event)).await.unwrap();
                     }
