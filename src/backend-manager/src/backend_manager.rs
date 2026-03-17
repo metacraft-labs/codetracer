@@ -5387,11 +5387,8 @@ impl BackendManager {
                             "ct-rr-support"
                         };
                         if let Ok(self_exe) = std::env::current_exe() {
-                            if let Some(dir) = self_exe.parent() {
-                                let sibling = dir.join(exe_name);
-                                if sibling.is_file() {
-                                    return Some(sibling);
-                                }
+                            if let Some(sibling) = self_exe.parent().map(|dir| dir.join(exe_name)).filter(|p| p.is_file()) {
+                                return Some(sibling);
                             }
                         }
                         // Fall back to PATH search.

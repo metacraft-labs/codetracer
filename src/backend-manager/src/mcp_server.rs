@@ -1362,12 +1362,11 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
     let socket_path = &config.daemon_socket_path;
 
     // Try to connect to an already-running daemon via port file.
-    if let Ok(port) = read_port_file_mcp(socket_path).await {
-        if let Ok(stream) =
+    if let Ok(port) = read_port_file_mcp(socket_path).await
+        && let Ok(stream) =
             tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
-        {
-            return Ok(stream);
-        }
+    {
+        return Ok(stream);
     }
     // Port file may exist but connection failed — stale.
     if socket_path.exists() {
