@@ -189,8 +189,14 @@ impl FlowTestRunner {
     /// Run the flow test: set breakpoint, continue to it, load flow, verify results.
     pub fn run_and_verify(&mut self, config: &FlowTestConfig) -> Result<(), BoxError> {
         // 1. Set breakpoint
-        self.client
+        println!(
+            "Setting breakpoint: file={}, line={}",
+            config.source_file, config.breakpoint_line
+        );
+        let bp_response = self
+            .client
             .set_breakpoints(&config.source_file, &[config.breakpoint_line])?;
+        println!("setBreakpoints response: {}", bp_response);
 
         // 2. Continue to breakpoint
         let move_state = self.client.dap_continue()?;
