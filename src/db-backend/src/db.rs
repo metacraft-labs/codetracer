@@ -1235,8 +1235,11 @@ impl DbReplay {
 
         // 3. Suffix match: check if the absolute path ends with any stored
         //    relative path (compared component-wise).
+        //    Skip empty stored paths — Path::ends_with("") returns true for any
+        //    path (vacuous truth), which would cause every lookup to match the
+        //    empty-path entry instead of the correct file.
         for (stored_path, &id) in &self.db.path_map {
-            if abs_path.ends_with(stored_path) {
+            if !stored_path.is_empty() && abs_path.ends_with(stored_path) {
                 return Some(id);
             }
         }

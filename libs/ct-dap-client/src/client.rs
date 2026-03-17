@@ -32,7 +32,6 @@ impl DapStdioClient {
         let mut child = Command::new(db_backend_bin)
             .arg("dap-server")
             .arg("--stdio")
-            .env("RUST_LOG", "warn")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
