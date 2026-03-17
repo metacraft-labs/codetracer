@@ -20,8 +20,15 @@ case "$PLATFORM" in
       env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 just test
     ;;
   macos)
-    # Source sibling detection for the non-nix environment.
     REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+    # Add non-nix build tools (Nim, Cargo, etc.) to PATH so that
+    # binaries compiled during the build step are available for tests.
+    NON_NIX_DEPS="$REPO_ROOT/non-nix-build/deps"
+    NON_NIX_BIN="$REPO_ROOT/non-nix-build/bin"
+    export PATH="$NON_NIX_DEPS/nim/bin:$NON_NIX_DEPS/cargo/bin:$NON_NIX_BIN:$REPO_ROOT/src/build-debug/bin:$PATH"
+
+    # Source sibling detection for recorder paths.
     # shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT
     source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
     # Override rr-backend detection — rr is not available on macOS.
