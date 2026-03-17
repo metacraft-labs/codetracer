@@ -1812,7 +1812,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
         println!("Flow has {} steps", flow.steps.len());
 
         // Verify results
-        return verify_flow_results(config, &flow);
+        verify_flow_results(config, &flow)
     }
 
     #[cfg(not(unix))]
@@ -1840,7 +1840,7 @@ pub fn run_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<(),
         println!("Flow has {} steps", flow.steps.len());
 
         // Verify results
-        return verify_flow_results(config, &flow);
+        verify_flow_results(config, &flow)
     }
 }
 

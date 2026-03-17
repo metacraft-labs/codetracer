@@ -22,15 +22,18 @@ impl Display for InvalidID {
 
 impl Error for InvalidID {}
 
+#[cfg(unix)]
 #[derive(Debug)]
 pub struct SocketPathError;
 
+#[cfg(unix)]
 impl Display for SocketPathError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Can't get path for socket!")
     }
 }
 
+#[cfg(unix)]
 impl Error for SocketPathError {}
 
 /// The daemon is already running (PID file exists and process is alive).

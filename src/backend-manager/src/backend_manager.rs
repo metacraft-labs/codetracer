@@ -25,11 +25,13 @@ use tokio::net::{UnixListener, UnixStream};
 #[cfg(windows)]
 use tokio::net::{TcpListener, TcpStream};
 
+#[cfg(unix)]
+use crate::errors::SocketPathError;
 use crate::{
     config::DaemonConfig,
     dap_init,
     dap_parser::DapParser,
-    errors::{InvalidID, SocketPathError},
+    errors::InvalidID,
     paths::CODETRACER_PATHS,
     python_bridge::{
         self, PendingPyNavState, PendingPyRequest, PendingPyRequestKind, PyBridgeState,
