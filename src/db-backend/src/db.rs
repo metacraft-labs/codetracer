@@ -1244,6 +1244,45 @@ impl DbReplay {
             }
         }
 
+        // 4. Canonicalize and retry: on macOS, /tmp is a symlink to
+        //    /private/tmp, so a path recorded as /tmp/… won't match a
+        //    lookup for /private/tmp/… (or vice-versa).  Canonicalizing
+        //    both sides resolves such symlink mismatches.
+        if let Ok(canonical) = abs_path.canonicalize() {
+            if canonical != abs_path {
+                // Retry exact match with the canonical path.
+                if let Some(canonical_str) = canonical.to_str() {
+                    if let Some(&id) = self.db.path_map.get(canonical_str) {
+                        return Some(id);
+                    }
+                }
+
+                // Retry suffix match with the canonical path.
+                for (stored_path, &id) in &self.db.path_map {
+                    if !stored_path.is_empty() && canonical.ends_with(stored_path) {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+
+        // 5. Reverse canonicalize: the stored paths themselves may be
+        //    symlink-resolved while the lookup path is not.  Try
+        //    canonicalizing each stored absolute path against the lookup.
+        for (stored_path, &id) in &self.db.path_map {
+            if stored_path.is_empty() {
+                continue;
+            }
+            let sp = std::path::Path::new(stored_path);
+            if sp.is_absolute() {
+                if let Ok(canonical_stored) = sp.canonicalize() {
+                    if canonical_stored == abs_path {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+
         None
     }
 

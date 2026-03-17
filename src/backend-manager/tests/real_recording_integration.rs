@@ -452,6 +452,11 @@ async fn start_daemon_with_real_backend(
     cmd.arg("daemon")
         .arg("start")
         .env("TMPDIR", test_dir)
+        // Explicitly tell the daemon where to create its socket so that
+        // each test gets its own isolated instance.  On macOS the default
+        // path (~/Library/Caches/…) ignores TMPDIR and would collide with
+        // a running production daemon.
+        .env("CODETRACER_DAEMON_SOCKET", socket_path.to_string_lossy().as_ref())
         .env("CODETRACER_DB_BACKEND_CMD", &db_backend_str)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

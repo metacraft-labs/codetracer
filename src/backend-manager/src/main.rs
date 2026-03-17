@@ -2108,6 +2108,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 // Load configuration from env vars / config file / defaults.
                 let config = DaemonConfig::load();
 
+                // Apply config overrides: if CODETRACER_DAEMON_SOCKET is set,
+                // use it (and derive the PID path from the same directory).
+                let (daemon_socket_path, daemon_pid_path) = if let Some(ref sp) = config.socket_path
+                {
+                    let pid = sp.with_extension("pid");
+                    (sp.clone(), pid)
+                } else {
+                    (daemon_socket_path, daemon_pid_path)
+                };
+
                 // Detach from the controlling terminal (if any) so that the
                 // daemon survives the parent process exiting.
                 // SAFETY: setsid() is safe to call; it creates a new session
