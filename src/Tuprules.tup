@@ -1,3 +1,7 @@
+# TODO(windows): The flags --jsbigint64:off and -d:nimStringHash2 are needed
+# on Windows (Nim 2.2.6) to prevent BigInt errors in the JS frontend, but they
+# are Nim 2.0+ only and cause fatal errors on Nim 1.6.20 (used by Nix CI).
+# A per-platform mechanism is needed to include them only for Windows builds.
 NIM_COMMON_FLAGS=\
 -d:asyncBackend=asyncdispatch\
 -d:chronicles_sinks=json\

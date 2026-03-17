@@ -90,6 +90,11 @@ when defined(js) and not defined(ctRenderer):
   # relying on PATH.  On Linux/macOS the Nix wrapper sets PATH to include
   # the codetracer derivation's bin/, and CODETRACER_PREFIX points to
   # runtime-deps (which does NOT contain ct), so bare names are correct.
+  # TODO(cross-compile): This is a compile-time check — index.js compiled on
+  # Linux will always use bare names, even if the JS bundle is later run on
+  # Windows.  This is fine while each platform compiles its own index.js, but
+  # would break if JS bundles are ever shared across platforms.  Consider a
+  # runtime check (e.g. process.platform == "win32") if that becomes needed.
   when defined(windows):
     let
       codetracerExe* = codetracerExeDir / "bin" / "ct"
