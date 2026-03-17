@@ -5386,10 +5386,13 @@ impl BackendManager {
                         } else {
                             "ct-rr-support"
                         };
-                        if let Ok(self_exe) = std::env::current_exe() {
-                            if let Some(sibling) = self_exe.parent().map(|dir| dir.join(exe_name)).filter(|p| p.is_file()) {
-                                return Some(sibling);
-                            }
+                        if let Ok(self_exe) = std::env::current_exe()
+                            && let Some(sibling) = self_exe
+                                .parent()
+                                .map(|dir| dir.join(exe_name))
+                                .filter(|p| p.is_file())
+                        {
+                            return Some(sibling);
                         }
                         // Fall back to PATH search.
                         let which_cmd = if cfg!(windows) { "where" } else { "which" };
