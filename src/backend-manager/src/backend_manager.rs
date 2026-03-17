@@ -2,6 +2,7 @@ use std::{
     collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
 };
 #[cfg(windows)]
+#[allow(unused_imports)]
 use std::os::windows::process::CommandExt;
 
 /// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
@@ -11,7 +12,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use serde_json::{Value, json};
 use tokio::{
-    fs::{create_dir_all, remove_file},
+    fs::create_dir_all,
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
     process::{Child, Command},
     sync::{
@@ -20,6 +21,8 @@ use tokio::{
     },
     time::sleep,
 };
+#[cfg(unix)]
+use tokio::fs::remove_file;
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 #[cfg(windows)]

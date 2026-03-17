@@ -259,12 +259,11 @@ fn find_db_backend() -> Option<PathBuf> {
     if let Ok(output) = std::process::Command::new("which")
         .arg("db-backend")
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
         }
     }
 
@@ -292,12 +291,11 @@ fn find_ct_rr_support() -> Option<PathBuf> {
     if let Ok(output) = std::process::Command::new("which")
         .arg("ct-rr-support")
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
         }
     }
 
@@ -845,12 +843,12 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
 /// When `REQUIRE_REAL_RECORDINGS=1` is set and nargo is not found,
 /// this function panics instead of returning `None`.
 fn find_nargo() -> Option<PathBuf> {
-    if let Ok(output) = std::process::Command::new("which").arg("nargo").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+    if let Ok(output) = std::process::Command::new("which").arg("nargo").output()
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
         }
     }
 
@@ -886,12 +884,11 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     if let Ok(output) = std::process::Command::new("which")
         .arg("codetracer-pure-ruby-recorder")
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
         }
     }
 
@@ -1992,11 +1989,11 @@ async fn navigate(
 
     // Merge any extra arguments (e.g., `ticks` for goto_ticks) into the
     // top-level arguments object.
-    if let Some(extras) = extra_args {
-        if let Some(obj) = extras.as_object() {
-            for (k, v) in obj {
-                arguments[k] = v.clone();
-            }
+    if let Some(extras) = extra_args
+        && let Some(obj) = extras.as_object()
+    {
+        for (k, v) in obj {
+            arguments[k] = v.clone();
         }
     }
 
@@ -2071,19 +2068,14 @@ fn extract_nav_location(resp: &Value) -> Result<(String, i64, i64, i64, bool), S
 /// module-loaded) that would confuse subsequent reads.  This helper reads
 /// and discards them with a short timeout.
 async fn drain_events(client: &mut UnixStream, log_path: &Path) {
-    loop {
-        match timeout(Duration::from_millis(500), dap_read(client)).await {
-            Ok(Ok(msg)) => {
-                let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
-                if msg_type == "event" {
-                    log_line(log_path, &format!("drain: skipped event: {msg}"));
-                    continue;
-                }
-                // Non-event message; not expected here but log it.
-                log_line(log_path, &format!("drain: unexpected non-event: {msg}"));
-            }
-            _ => break, // Timeout or error — no more pending messages.
+    while let Ok(Ok(msg)) = timeout(Duration::from_millis(500), dap_read(client)).await {
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            log_line(log_path, &format!("drain: skipped event: {msg}"));
+            continue;
         }
+        // Non-event message; not expected here but log it.
+        log_line(log_path, &format!("drain: unexpected non-event: {msg}"));
     }
 }
 
@@ -2308,7 +2300,7 @@ async fn test_real_rr_navigate_step_in_out() {
             // to be exactly on line 19 — any line in main() is fine
             // because step_in from any statement will at least enter the
             // next function call or advance the instruction pointer.
-            if in_user_code && line >= 17 && line <= 21 {
+            if in_user_code && (17..=21).contains(&line) {
                 log_line(
                     &log_path,
                     &format!("reached function call area at line {line}"),
@@ -6042,6 +6034,7 @@ async fn test_real_custom_multiple_breakpoints() {
 ///   source file).
 ///
 /// Returns the `ct/py-flow` response as JSON.
+#[allow(clippy::too_many_arguments)]
 async fn send_py_flow(
     client: &mut UnixStream,
     seq: i64,
@@ -6414,7 +6407,7 @@ async fn test_real_rr_flow_returns_steps() {
                 }
             }
             Err(e) => {
-                let err_lower = format!("{e}").to_lowercase();
+                let err_lower = e.to_string().to_lowercase();
                 if err_lower.contains("timeout") {
                     // INTENTIONAL DUAL-ACCEPT: RR flow requests spawn a ct-rr-support
                     // worker process and are inherently slow.  Timeouts in CI or
