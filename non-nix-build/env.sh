@@ -52,7 +52,7 @@ export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/b
 export NIM1=$DEPS_DIR/nim/bin/nim
 
 if [ "$os" == "mac" ]; then
-	brew install sqlite3 ruby universal-ctags go capnp tree-sitter
+	brew install sqlite3 ruby universal-ctags go capnp tree-sitter-cli
 fi
 
 ./install_rust.sh

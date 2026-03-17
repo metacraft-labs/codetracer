@@ -38,11 +38,14 @@ else
 	if command -v tree-sitter &>/dev/null; then
 		echo "tree-sitter-nim: using system tree-sitter CLI: $(command -v tree-sitter)"
 		TREE_SITTER_CLI_CMD="tree-sitter"
-	# 2. Try lockfile install with --ignore-scripts to avoid node-gyp
-	#    building the native addon (which requires parser.c to exist).
-	elif [[ -f "package-lock.json" ]]; then
+	# 2. Try lockfile install, but only when parser.c already exists.
+	#    When parser.c is missing, npm ci triggers node-gyp which fails
+	#    because it needs parser.c (chicken-and-egg).  Even with
+	#    --ignore-scripts, npm ci creates a broken node_modules/tree-sitter-cli/
+	#    directory that interferes with the isolated CLI cache fallback.
+	elif [[ -f "package-lock.json" && -f "src/parser.c" ]]; then
 		echo "tree-sitter-nim: local CLI missing; attempting lockfile install with npm ci..."
-		if npm ci --no-audit --fund=false --ignore-scripts; then
+		if npm ci --no-audit --fund=false; then
 			if [[ -x $LOCAL_TREE_SITTER_CLI ]]; then
 				TREE_SITTER_CLI_CMD="$LOCAL_TREE_SITTER_CLI"
 			else
@@ -52,7 +55,7 @@ else
 			echo "tree-sitter-nim: npm ci failed; falling back to isolated CLI path." >&2
 		fi
 	else
-		echo "tree-sitter-nim: package-lock.json is missing; skipping npm ci and using isolated CLI fallback."
+		echo "tree-sitter-nim: skipping npm ci (parser.c missing or no lockfile); using CLI fallback."
 	fi
 fi
 
