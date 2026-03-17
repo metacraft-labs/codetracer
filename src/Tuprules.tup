@@ -5,8 +5,6 @@ NIM_COMMON_FLAGS=\
 -d:chronicles_timestamps=UnixTime\
 -d:ssl\
 --gc:refc\
---jsbigint64:off\
--d:nimStringHash2\
 -d:nimNoLentIterators\
 --hints:off\
 --warnings:off\
