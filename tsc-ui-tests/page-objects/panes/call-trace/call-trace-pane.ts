@@ -43,6 +43,7 @@ export class CallTracePane {
     await retry(
       async () =>
         (await this.linesContainer().locator(".calltrace-call-line").count()) > 0,
+      { maxAttempts: 60, delayMs: 1000 },
     );
   }
 

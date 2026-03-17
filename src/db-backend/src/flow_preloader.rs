@@ -188,10 +188,22 @@ impl<'a> CallFlowPreloader<'a> {
             // let function_first = self.db.functions[function_id].line;
             // info!("load {arg:?}");
 
+            let original_ticks = location.rr_ticks.clone();
+            let original_event = location.event;
             self.location = self
                 .flow_preloader
                 .expr_loader
                 .find_function_location(&location, &Line(location.line));
+            // Preserve rr_ticks and event from the original location so
+            // that RR/TTD flow workers can seek to the correct trace
+            // position.  find_function_location only knows about source
+            // boundaries and defaults these to zero.
+            if self.location.rr_ticks.0 == 0 && original_ticks.0 != 0 {
+                self.location.rr_ticks = original_ticks;
+            }
+            if self.location.event == 0 && original_event != 0 {
+                self.location.event = original_event;
+            }
         }
 
         // info!("location flow {:?}", self.location);
@@ -381,7 +393,17 @@ impl<'a> CallFlowPreloader<'a> {
                 step_id = StepId(location.rr_ticks.0);
                 progressing = true;
             } else {
-                move_error = true;
+                // Fallback for TTD traces where jump_to_call is not yet
+                // supported: run_to_entry navigates the flow worker to the
+                // program entry point (main) so the flow loop can start
+                // stepping from there.
+                info!("  flow: jump_to_call failed, falling back to run_to_entry");
+                if let Ok(()) = replay.run_to_entry() {
+                    step_id = replay.current_step_id();
+                    progressing = true;
+                } else {
+                    move_error = true;
+                }
             }
         }
         Ok((step_id, progressing, move_error))

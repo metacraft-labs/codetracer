@@ -7,8 +7,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use codetracer_trace_types::{CallKey, EventLogKind, StepId, TypeKind};
 use num_derive::FromPrimitive;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_repr::*;
+
+/// Deserializes a `T` that may be JSON `null`, returning `T::default()` for null.
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 use crate::lang::*;
 use crate::value::{Type, Value, ValueRecordWithType};
@@ -300,29 +309,38 @@ pub struct CodeSnippet {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Location {
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub path: String,
     pub line: i64,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub function_name: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub high_level_path: String,
     pub high_level_line: i64,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub high_level_function_name: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub low_level_path: String,
     pub low_level_line: i64,
     pub rr_ticks: RRTicks,
     pub function_first: i64,
     pub function_last: i64,
     pub event: i64,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub expression: String,
     pub offset: i64,
     pub error: bool,
     pub callstack_depth: usize,
     pub originating_instruction_address: i64,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub key: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub global_call_key: String,
 
     // for now not including most expansion-related fields
     // including this to make sure we don't pass undefined/null
     // for strings/seq-s
+    #[serde(deserialize_with = "deserialize_null_default")]
     pub expansion_parents: Vec<usize>,
 
     pub missing_path: bool,

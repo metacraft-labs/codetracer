@@ -5362,8 +5362,9 @@ impl BackendManager {
             };
 
         // Build DAP launch options.  If the trace directory contains an `rr/`
-        // subdirectory, we need to tell db-backend where `ct-rr-support` is so
-        // it can spawn the RR replay worker.
+        // subdirectory (Linux RR traces) or `.run` files (Windows TTD traces),
+        // we need to tell db-backend where `ct-rr-support` is so it can spawn
+        // the replay worker.
         //
         // The `ct-rr-support` path is resolved from (in priority order):
         //   1. `CODETRACER_CT_RR_SUPPORT_CMD` environment variable
@@ -5372,19 +5373,41 @@ impl BackendManager {
         // Reference: db-backend/src/dap.rs — `LaunchRequestArguments.ctRRWorkerExe`
         let dap_launch_opts = {
             let mut opts = dap_init::DapLaunchOptions::default();
-            if trace_path.join("rr").is_dir() {
+            let needs_rr_support = trace_path.join("rr").is_dir()
+                || trace_path.join("ttd-trace-manifest.json").is_file();
+            if needs_rr_support {
                 let rr_support_cmd = std::env::var("CODETRACER_CT_RR_SUPPORT_CMD")
                     .ok()
                     .map(PathBuf::from)
                     .or_else(|| {
-                        // Try to find ct-rr-support on PATH.
-                        std::process::Command::new("which")
-                            .arg("ct-rr-support")
+                        // Try sibling of the current executable first (same bin/ dir).
+                        let exe_name = if cfg!(windows) {
+                            "ct-rr-support.exe"
+                        } else {
+                            "ct-rr-support"
+                        };
+                        if let Ok(self_exe) = std::env::current_exe() {
+                            if let Some(dir) = self_exe.parent() {
+                                let sibling = dir.join(exe_name);
+                                if sibling.is_file() {
+                                    return Some(sibling);
+                                }
+                            }
+                        }
+                        // Fall back to PATH search.
+                        let which_cmd = if cfg!(windows) { "where" } else { "which" };
+                        std::process::Command::new(which_cmd)
+                            .arg(exe_name)
                             .output()
                             .ok()
                             .filter(|o| o.status.success())
                             .and_then(|o| {
-                                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                let s = String::from_utf8_lossy(&o.stdout)
+                                    .lines()
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim()
+                                    .to_string();
                                 if s.is_empty() {
                                     None
                                 } else {

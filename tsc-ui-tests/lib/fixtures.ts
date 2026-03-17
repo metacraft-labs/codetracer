@@ -307,7 +307,14 @@ function killProcessTree(pid: number): void {
  */
 function killStrayCodetracerProcesses(): void {
   if (!isWindows) return;
-  for (const name of ["backend_manager.exe", "db-backend.exe", "db-backend-record.exe"]) {
+  for (const name of [
+    "backend_manager.exe",
+    "db-backend.exe",
+    "db-backend-record.exe",
+    "ct-rr-support.exe",
+    "TTD.exe",
+    "TTDInject.exe",
+  ]) {
     try {
       childProcess.execSync(`taskkill /IM ${name} /F`, {
         encoding: "utf-8",
@@ -908,9 +915,10 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         testInfo.skip(true, "DB-based test skipped — running RR tests only");
       }
 
-      // RR-based tests need more time: compile + rr record + Electron + UI.
+      // RR-based tests need more time: compile + rr/ttd record + Electron + UI.
+      // TTD (Windows) recording has much higher overhead than RR.
       if (needsRR) {
-        test.setTimeout(120_000);
+        test.setTimeout(process.platform === "win32" ? 720_000 : 120_000);
       }
 
       switch (launchMode) {

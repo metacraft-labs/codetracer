@@ -70,6 +70,12 @@ proc createMainWindow*: js =
       initInfo["titleBarOverlay"] = js{
         "height": 70
       }
+    elif defined(windows):
+      # On Windows, frame:false can cause BrowserWindow to hang indefinitely
+      # during creation (Electron compositor issue).  Use frame:true so the
+      # window creates successfully; the menu bar is hidden separately via
+      # setMenuBarVisibility(false).
+      initInfo["frame"] = true
     else:
       initInfo["frame"] = false
       initInfo["transparent"] = true

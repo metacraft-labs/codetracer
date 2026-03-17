@@ -222,7 +222,10 @@ impl DapStdioClient {
     /// Returns the raw event body (caller parses as needed).
     pub fn load_flow(&mut self, args: LoadFlowArguments) -> Result<Value, BoxError> {
         self.send_request("ct/load-flow", serde_json::to_value(&args)?)?;
-        let event = self.recv_event("ct/updated-flow", Duration::from_secs(60))?;
+        // TTD flow computation in CDB mode spawns a new CDB process per
+        // operation (step, load_location, load_value), so the flow loop
+        // for even a small function can take several minutes.
+        let event = self.recv_event("ct/updated-flow", Duration::from_secs(300))?;
         Ok(event.body)
     }
 

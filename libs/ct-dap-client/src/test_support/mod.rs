@@ -17,9 +17,23 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// If `rr_trace_dir`'s parent already contains an `rr` entry pointing to it,
 /// use the parent directly. Otherwise create a temporary wrapper directory
 /// with an `rr` symlink.
+///
+/// On Windows, TTD traces are `.run` files (not directories).  When the path
+/// points to a `.run` file, pass its parent directory directly — db-backend's
+/// `resolve_replay_trace_path` will discover the `.run` file automatically.
 pub(crate) fn prepare_trace_folder(
     rr_trace_dir: &Path,
 ) -> Result<(PathBuf, Option<PathBuf>), BoxError> {
+    // Case 0 (Windows TTD): if the path is a .run file, use the parent dir.
+    // db-backend discovers .run files by scanning the trace folder.
+    if rr_trace_dir.extension().and_then(|e| e.to_str()) == Some("run")
+        && rr_trace_dir.is_file()
+    {
+        if let Some(parent) = rr_trace_dir.parent() {
+            return Ok((parent.to_path_buf(), None));
+        }
+    }
+
     // Case 1: parent/rr == rr_trace_dir (uncached layout)
     if let Some(parent) = rr_trace_dir.parent() {
         let rr_child = parent.join("rr");

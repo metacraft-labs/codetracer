@@ -38,8 +38,10 @@ export const LIMIT_CACHED_RECORDING_MS = 500;
 /** Small program recording (< 100 lines). */
 export const LIMIT_SMALL_RECORDING_MS = 5_000;
 
-/** RR recording: compile + rr record. Ranges from 8s (C) to 60s+ (Crystal, Lean). */
-export const LIMIT_RR_RECORDING_MS = 90_000;
+/** RR recording: compile + rr record. Ranges from 8s (C) to 60s+ (Crystal, Lean).
+ * TTD (Windows) recording has much higher overhead than RR.  Compute-heavy
+ * programs like sudoku solvers can take 4-10+ minutes under TTD. */
+export const LIMIT_RR_RECORDING_MS = process.platform === "win32" ? 900_000 : 90_000;
 
 // ---------------------------------------------------------------------------
 // UI interactions (with loaded trace)

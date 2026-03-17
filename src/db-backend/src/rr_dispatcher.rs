@@ -99,6 +99,16 @@ impl CtRRWorker {
             self.rr_trace_folder.display()
         );
 
+        // Redirect worker stderr to a log file for debugging.
+        let log_dir = std::env::temp_dir().join("codetracer");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join(format!(
+            "ct-rr-support-{}-{}.log",
+            self.name, self.index
+        ));
+        info!("worker stderr log: {}", log_path.display());
+        let stderr_file = std::fs::File::create(&log_path)?;
+
         let ct_worker = Command::new(&self.ct_rr_worker_exe)
             .arg("replay-worker")
             .arg("--name")
@@ -107,7 +117,7 @@ impl CtRRWorker {
             .arg(self.index.to_string())
             .arg(&self.rr_trace_folder)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr_file))
             .spawn()?;
 
         let worker_pid = ct_worker.id();

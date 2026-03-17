@@ -28,12 +28,16 @@ pub enum Lang {
     Nim,
     Go,
     Pascal,
+    Fortran,
+    D,
+    Crystal,
+    Lean,
+    Julia,
+    Ada,
     Python,
     Ruby,
     RubyDb,
     Javascript,
-    Bash,
-    Zsh,
     Lua,
     Asm,
     Noir,
@@ -41,8 +45,11 @@ pub enum Lang {
     CppWasm,
     Small,
     PythonDb,
-    D,
     Unknown,
+    // Shell languages: not in the Nim frontend enum, kept here for
+    // expr_loader tree-sitter support.  Ordinals 24+ are internal only.
+    Bash,
+    Zsh,
 }
 
 pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
@@ -63,9 +70,14 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "nim" => Lang::Nim,
         "d" => Lang::D,
         "go" => Lang::Go,
+        "f90" | "f95" | "f03" | "f08" | "f" | "for" => Lang::Fortran,
+        "cr" => Lang::Crystal,
+        "lean" => Lang::Lean,
+        "jl" => Lang::Julia,
+        "adb" | "ads" => Lang::Ada,
         "js" | "mjs" | "cjs" => Lang::Javascript,
-        "sh" | "bash" => Lang::Bash,
-        "zsh" => Lang::Zsh,
+        "lua" => Lang::Lua,
+        "s" | "asm" => Lang::Asm,
         _ => Lang::Unknown,
     }
 }
