@@ -824,7 +824,7 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
   const drArgs = (isWindows && electronExePath)
     ? [codetracerPrefix, "--deepreview", jsonPath]
-    : ["--deepreview", jsonPath];
+    : [`--deepreview=${jsonPath}`];
 
   const app = await _electron.launch({
     executablePath: drExe,
