@@ -245,6 +245,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Install capnproto
         shell: pwsh
@@ -276,6 +278,21 @@ jobs:
         working-directory: src/tui
         shell: bash
         run: cargo build
+
+      - name: Clippy db-backend
+        working-directory: src/db-backend
+        shell: bash
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy backend-manager
+        working-directory: src/backend-manager
+        shell: bash
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy tui
+        working-directory: src/tui
+        shell: bash
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test tui named pipe
         working-directory: src/tui
