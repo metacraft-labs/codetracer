@@ -561,6 +561,12 @@ ensure_node_tooling() {
 	local webpack_cmd="$NODE_PACKAGES_BIN/webpack.cmd"
 	local node_modules_dir="$ROOT_DIR/node-packages/node_modules"
 
+	# Skip node tooling entirely if Node was explicitly skipped in bootstrap
+	if [[ ${WINDOWS_DIY_SKIP_NODE:-0} == "1" ]]; then
+		echo "WARNING: Node tooling skipped (WINDOWS_DIY_SKIP_NODE=1)." >&2
+		return 0
+	fi
+
 	if [[ -f $stylus_cmd && -f $webpack_cmd ]]; then
 		return
 	fi
