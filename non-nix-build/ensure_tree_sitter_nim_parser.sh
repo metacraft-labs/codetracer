@@ -32,10 +32,17 @@ TREE_SITTER_CLI_CACHE_DIR="${ROOT_DIR}/.tools/tree-sitter-cli-cache"
 if [[ -x $LOCAL_TREE_SITTER_CLI ]]; then
 	TREE_SITTER_CLI_CMD="$LOCAL_TREE_SITTER_CLI"
 else
-	# Prefer lockfile installs first when available, but do not require them.
-	if [[ -f "package-lock.json" ]]; then
+	# 1. Check for a system-installed tree-sitter (e.g. from brew or nix).
+	#    This avoids the chicken-and-egg problem where npm ci triggers
+	#    node-gyp which needs parser.c before we can generate it.
+	if command -v tree-sitter &>/dev/null; then
+		echo "tree-sitter-nim: using system tree-sitter CLI: $(command -v tree-sitter)"
+		TREE_SITTER_CLI_CMD="tree-sitter"
+	# 2. Try lockfile install with --ignore-scripts to avoid node-gyp
+	#    building the native addon (which requires parser.c to exist).
+	elif [[ -f "package-lock.json" ]]; then
 		echo "tree-sitter-nim: local CLI missing; attempting lockfile install with npm ci..."
-		if npm ci --no-audit --fund=false; then
+		if npm ci --no-audit --fund=false --ignore-scripts; then
 			if [[ -x $LOCAL_TREE_SITTER_CLI ]]; then
 				TREE_SITTER_CLI_CMD="$LOCAL_TREE_SITTER_CLI"
 			else

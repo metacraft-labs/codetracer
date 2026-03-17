@@ -7,6 +7,16 @@ brew install create-dmg
 # Remove any leftover DMG from a previous run
 rm -f CodeTracer.dmg
 
+# create-dmg copies the *contents* of the source directory into the DMG
+# volume.  If we pass CodeTracer.app directly, the volume root ends up
+# with Contents/ at the top level instead of CodeTracer.app/Contents/.
+# Use a staging directory so that the .app bundle is preserved inside
+# the DMG — this is the standard macOS convention and what users and CI
+# tools expect when extracting.
+DMG_STAGING="$(mktemp -d)"
+trap 'rm -rf "$DMG_STAGING"' EXIT
+cp -R CodeTracer.app "$DMG_STAGING/"
+
 create-dmg \
 	--volname "CodeTracer" \
 	--background "dmg_background.png" \
@@ -18,4 +28,4 @@ create-dmg \
 	--sandbox-safe \
 	--hdiutil-retries 15 \
 	"CodeTracer.dmg" \
-	"CodeTracer.app"
+	"$DMG_STAGING"
