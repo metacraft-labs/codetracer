@@ -145,10 +145,14 @@ proc ready*(): Future[void] {.async.} =
           ipc.emit(id, payload))
 
   when not defined(server):
-    config.skipInstall = isCtInstalled(config)
-    if not config.skipInstall:
-      installDialogWindow = createInstallSubwindow()
-      discard await waitForResponseFromInstall()
+    # Skip the install dialog entirely when running in test mode
+    # (CODETRACER_TEST=1). Without this, the dialog blocks creation of
+    # the main window and Playwright tests see only subwindow.html.
+    if not data.startOptions.inTest:
+      config.skipInstall = isCtInstalled(config)
+      if not config.skipInstall:
+        installDialogWindow = createInstallSubwindow()
+        discard await waitForResponseFromInstall()
 
   debugPrint "index: creating window"
   mainWindow = createMainWindow()

@@ -1,6 +1,12 @@
 import type { Page } from "@playwright/test";
+import * as os from "node:os";
 import * as path from "node:path";
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+
+// On macOS, the in-app HTML menu (#menu-root, #navigation-menu) is replaced by
+// native Electron menus (compiled with -d:ctmacos), so DOM-based menu tests
+// cannot work there.
+const isMacOS = os.platform() === "darwin";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,7 +40,9 @@ test.describe("Launch Configuration Menu", () => {
     await ensureMenuClosed(ctPage);
   });
 
-  test("edit mode loads successfully with examples folder", async ({ ctPage }) => {
+  test("edit mode loads successfully with examples folder", async ({
+    ctPage,
+  }) => {
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     const layout = ctPage.locator(".lm_goldenlayout");
@@ -42,6 +50,7 @@ test.describe("Launch Configuration Menu", () => {
   });
 
   test("navigation menu is visible", async ({ ctPage }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     const menu = ctPage.locator("#navigation-menu");
@@ -49,6 +58,7 @@ test.describe("Launch Configuration Menu", () => {
   });
 
   test("can open main menu by clicking logo", async ({ ctPage }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);
@@ -58,6 +68,7 @@ test.describe("Launch Configuration Menu", () => {
   });
 
   test("Debug menu folder exists", async ({ ctPage }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);
@@ -67,6 +78,7 @@ test.describe("Launch Configuration Menu", () => {
   });
 
   test("Launch Configurations submenu exists under Debug", async ({ ctPage }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);
@@ -87,6 +99,7 @@ test.describe("Launch Configuration Menu", () => {
   test("Launch Configurations submenu contains Python: Fibonacci", async ({
     ctPage,
   }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);
@@ -110,6 +123,7 @@ test.describe("Launch Configuration Menu", () => {
   test("Launch Configurations submenu contains Ruby: Fibonacci", async ({
     ctPage,
   }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);
@@ -129,6 +143,7 @@ test.describe("Launch Configuration Menu", () => {
   });
 
   test("Launch config items are clickable", async ({ ctPage }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);
@@ -195,6 +210,7 @@ test.describe("Debug: Inspect Menu Structure", () => {
   test.use({ launchMode: "edit", editFolderPath: examplesFolder });
 
   test("dump menu structure for debugging", async ({ ctPage }) => {
+    test.skip(isMacOS, "macOS uses native Electron menus, not in-app HTML menu");
     await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 15000 });
 
     await ensureMenuOpen(ctPage);

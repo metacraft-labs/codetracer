@@ -20,9 +20,14 @@ proc parseArgs* =
 
   data.startOptions.folder = electronprocess.cwd()
 
+  # Check CODETRACER_TEST for all launch modes (trace, deepreview, welcome, edit, etc.)
+  # so that test-mode behaviour (e.g. skipping the install dialog) is always available.
+  if electronProcess.env.hasKey(cstring"CODETRACER_TEST") and
+      electronProcess.env[cstring"CODETRACER_TEST"] == cstring"1":
+    data.startOptions.inTest = true
+
   if electronProcess.env.hasKey(cstring"CODETRACER_TRACE_ID"):
     data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"].parseJSInt
-    data.startOptions.inTest = electronProcess.env[cstring"CODETRACER_TEST"] == cstring"1"
     callerProcessPid = electronProcess.env[cstring"CODETRACER_CALLER_PID"].parseJsInt
     return
   else:
