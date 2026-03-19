@@ -209,7 +209,11 @@
   opacity: 0.5
 
 .flow-loop-slider-container
-  position: absolute
+  if IS_EXTENSION
+    position: relative
+    z-index: 0
+  else
+    position: absolute
   width: 100px !important
 
 .flow-component-container
@@ -227,7 +231,7 @@
   .noUi-base
     if IS_EXTENSION
       width: 550px
-      margin-left: 220px
+      margin-left: 10px
     else
       width: 100%
     height: 2px !important
@@ -247,7 +251,7 @@
     border-radius: 100px
     outline: 2px solid NOUI_SLIDER_HANDLER_BORDER
     if IS_EXTENSION
-      transform: translate(620px, -4px)
+      transform: translate(550px, -4px)
   .noUi-connect
     background: transparent
   .noUi-tooltip
