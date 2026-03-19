@@ -16,6 +16,11 @@ function Get-DefaultInstallRoot {
     return $envInstallRoot.Trim()
   }
 
+  # Prefer D: drive root when available (more space, avoids C: bloat).
+  if (Test-Path -LiteralPath "D:\" -PathType Container) {
+    return "D:\metacraft-dev-deps"
+  }
+
   $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
   if ([string]::IsNullOrWhiteSpace($localAppData)) {
     throw "Could not resolve LocalApplicationData for default WINDOWS_DIY_INSTALL_ROOT."

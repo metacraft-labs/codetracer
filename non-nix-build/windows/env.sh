@@ -22,16 +22,21 @@ WINDBG_REQUIRED_MIN_VERSION="${WINDBG_MIN_VERSION:-1.2601.12001.0}"
 TTD_REQUIRED_MIN_VERSION="${TTD_MIN_VERSION:-1.11.584.0}"
 
 if [[ -z ${WINDOWS_DIY_INSTALL_ROOT:-} ]]; then
-	if [[ -n ${LOCALAPPDATA:-} ]]; then
-		if command -v cygpath >/dev/null 2>&1; then
-			windows_diy_local_app_data=$(cygpath -u "$LOCALAPPDATA")
-		else
-			windows_diy_local_app_data="$LOCALAPPDATA"
-		fi
+	# Prefer D: drive root when available (more space, avoids C: bloat).
+	if [[ -d /d/ ]]; then
+		WINDOWS_DIY_INSTALL_ROOT="/d/metacraft-dev-deps"
 	else
-		windows_diy_local_app_data="$HOME/AppData/Local"
+		if [[ -n ${LOCALAPPDATA:-} ]]; then
+			if command -v cygpath >/dev/null 2>&1; then
+				windows_diy_local_app_data=$(cygpath -u "$LOCALAPPDATA")
+			else
+				windows_diy_local_app_data="$LOCALAPPDATA"
+			fi
+		else
+			windows_diy_local_app_data="$HOME/AppData/Local"
+		fi
+		WINDOWS_DIY_INSTALL_ROOT="$windows_diy_local_app_data/codetracer/windows-diy"
 	fi
-	WINDOWS_DIY_INSTALL_ROOT="$windows_diy_local_app_data/codetracer/windows-diy"
 fi
 export WINDOWS_DIY_INSTALL_ROOT
 #
