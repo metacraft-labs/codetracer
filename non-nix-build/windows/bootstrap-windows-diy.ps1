@@ -48,7 +48,7 @@ $toolchain = [ordered]@{
   tupSourceBuildCommand = "TUP_MINGW=1 TUP_MINGW32=0 ./bootstrap.sh"
   tupPrebuiltVersion = "latest"
   tupPrebuiltUrl = "https://gittup.org/tup/win32/tup-latest.zip"
-  tupPrebuiltSha256 = "fc55fcff297050582c21454af54372f69057e3c2008dbc093c84eeee317e285e"
+  tupPrebuiltSha256 = "efa3a4ecb4e63a9b3f9ced9c18d15ef59fabaf1942c9fffa9a930fb5ebf853a0"
   tupMsys2BaseVersion = "20251213"
   tupMsys2BaseX64Sha256 = "999f63c2fc7525af5cd41b55e9ea704471a4f9d0278a257fff3b0d1183c441b9"
   tupMsys2Packages = "mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf make"

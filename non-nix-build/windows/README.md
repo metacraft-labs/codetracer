@@ -344,7 +344,7 @@ bootstrap by default, with source mode still available:
   - `TUP_PREBUILT_URL` (currently
     `https://gittup.org/tup/win32/tup-latest.zip`)
   - `TUP_PREBUILT_SHA256` (currently
-    `fc55fcff297050582c21454af54372f69057e3c2008dbc093c84eeee317e285e`)
+    `efa3a4ecb4e63a9b3f9ced9c18d15ef59fabaf1942c9fffa9a930fb5ebf853a0`)
   - `TUP_PREBUILT_VERSION` (currently `latest`)
 - Optional prebuilt override controls:
   - `TUP_WINDOWS_PREBUILT_URL`
