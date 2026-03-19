@@ -21,6 +21,11 @@ gem_home/
 *.wasm
 # object files
 *.o
+# MSVC build artifacts
+*.obj
+*.ilk
+*.pdb
+*.ct-build-sources.json
 
 # Mac build
 *.app
@@ -85,6 +90,12 @@ styles/*_theme.css
 styles/defaults.css
 
 src/db-backend/test-traces
+
+# TTD trace output
+test-programs/*/ttd-trace/
+
+# Test statistics
+test-stats/
 
 tests/codetracer/*
 tests/python/__pycache__/
