@@ -80,7 +80,8 @@ proc loadTerminal*(self: EventLogService) =
 #   discard eventComponent.onUpdatedTable(response)
 
 data.services.eventLog.onUpdatedEvents = proc(self: EventLogService, response: seq[ProgramEvent]) {.async.} =
-  data.maxRRTicks = response[0].maxRRTicks
+  if response.len > 0:
+    data.maxRRTicks = response[0].maxRRTicks
   if self.ignoreOutput:
     return
 

@@ -3177,33 +3177,44 @@ proc updateIterationStepCount*(self: FlowComponent, line: int, stepCount: int, l
     return stepCount
 
 proc getCurrentStepCount*(self: FlowComponent, line: int): int =
-  var stepCount: int
-  stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
-  let step = self.flow.steps[stepCount]
-
-  if self.flowLoops.hasKey(self.flow.loops[step.loop].first):
-    let loopStep = self.flowLoops[self.flow.loops[step.loop].first].loopStep
-    stepCount = self.updateIterationStepCount(line, stepCount, loopStep.loop, loopStep.iteration)
-  elif self.activeStep.rrTicks == NO_TICKS:
+  try:
+    var stepCount: int
     stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
-  else:
-    stepCount = self.positionRRTicksToStepCount(line, self.activeStep.rrTicks)
-    let activeStep = self.flow.steps[stepCount]
-    let loop = self.flow.loops[activeStep.loop]
-    if self.flow.steps[stepCount].loop == self.activeStep.loop:
-      stepCount = self.updateIterationStepCount(line, stepCount, self.activeStep.loop, self.activeStep.iteration)
-    elif self.flow.loops[self.activeStep.loop].internal != []:
-      var activeLoop = self.flow.loops[self.activeStep.loop]
-      var loopId = activeLoop.internal[min(self.activeStep.iteration, len(activeLoop.internal) - 1)]
-      var iteration =
-        if activeLoop.internal.len == self.activeStep.iteration:
-          len(self.flow.loopIterationSteps[loopId]) - 1
-        else:
-          FLOW_ITERATION_START
+    if stepCount < 0 or stepCount >= self.flow.steps.len:
+      return NO_STEP_COUNT
+    let step = self.flow.steps[stepCount]
 
-      stepCount = self.updateIterationStepCount(line, stepCount, loopId, iteration)
+    if step.loop >= 0 and step.loop < self.flow.loops.len and
+       self.flowLoops.hasKey(self.flow.loops[step.loop].first):
+      let loopStep = self.flowLoops[self.flow.loops[step.loop].first].loopStep
+      stepCount = self.updateIterationStepCount(line, stepCount, loopStep.loop, loopStep.iteration)
+    elif self.activeStep.rrTicks == NO_TICKS:
+      stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
+    else:
+      stepCount = self.positionRRTicksToStepCount(line, self.activeStep.rrTicks)
+      if stepCount < 0 or stepCount >= self.flow.steps.len:
+        return NO_STEP_COUNT
+      let activeStep = self.flow.steps[stepCount]
+      if activeStep.loop >= 0 and activeStep.loop < self.flow.loops.len:
+        let loop = self.flow.loops[activeStep.loop]
+        if self.flow.steps[stepCount].loop == self.activeStep.loop:
+          stepCount = self.updateIterationStepCount(line, stepCount, self.activeStep.loop, self.activeStep.iteration)
+        elif self.activeStep.loop >= 0 and self.activeStep.loop < self.flow.loops.len and
+             self.flow.loops[self.activeStep.loop].internal != []:
+          var activeLoop = self.flow.loops[self.activeStep.loop]
+          var loopId = activeLoop.internal[min(self.activeStep.iteration, len(activeLoop.internal) - 1)]
+          var iteration =
+            if activeLoop.internal.len == self.activeStep.iteration:
+              len(self.flow.loopIterationSteps[loopId]) - 1
+            else:
+              FLOW_ITERATION_START
 
-  return stepCount
+          stepCount = self.updateIterationStepCount(line, stepCount, loopId, iteration)
+
+    return stepCount
+  except IndexDefect:
+    cerror cstring(fmt"flow: getCurrentStepCount IndexDefect for line {line}")
+    return NO_STEP_COUNT
 
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
@@ -3216,28 +3227,35 @@ proc renderFlowLines*(self: FlowComponent) =
   self.createLoopStates()
 
   for line, flowLine in self.flowLines:
-    let stepCount = self.getCurrentStepCount(line)
-    let step = self.flow.steps[stepCount]
-    let loopId = step.loop
-    let loopIteration = step.iteration
+    try:
+      let stepCount = self.getCurrentStepCount(line)
+      if stepCount < 0 or stepCount >= self.flow.steps.len:
+        continue
+      let step = self.flow.steps[stepCount]
+      let loopId = step.loop
+      let loopIteration = step.iteration
 
-    # TODO: We need to calculate the position beforehand
-    # it will be used both in the extension and standalone
-    if toSeq(self.flowLines[step.position].variablesPositions.keys()).len == 0:
-      for expression, values in step.beforeValues:
-        discard calculateVariablePosition(self, step.position, expression)
-      self.sortVariablesPositions(step, false)
+      # TODO: We need to calculate the position beforehand
+      # it will be used both in the extension and standalone
+      if toSeq(self.flowLines[step.position].variablesPositions.keys()).len == 0:
+        for expression, values in step.beforeValues:
+          discard calculateVariablePosition(self, step.position, expression)
+        self.sortVariablesPositions(step, false)
 
-    # add step values
-    let monacoEditorRange = self.editorUI.monacoEditor.getVisibleRanges()[0]
-    let flowViewStartLine = monacoEditorRange.startLineNumber.to(int)
-    let flowViewEndLine = monacoEditorRange.endLineNumber.to(int)
+      # add step values
+      let monacoEditorRange = self.editorUI.monacoEditor.getVisibleRanges()[0]
+      let flowViewStartLine = monacoEditorRange.startLineNumber.to(int)
+      let flowViewEndLine = monacoEditorRange.endLineNumber.to(int)
 
-    if not self.stepNodes.hasKey(step.stepCount):
-      if step.position == self.flow.loops[loopId].registeredLine:
-        self.addLoopInfo(step)
-      if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
-        self.addStepValues(step)
+      if not self.stepNodes.hasKey(step.stepCount):
+        if loopId >= 0 and loopId < self.flow.loops.len and
+           step.position == self.flow.loops[loopId].registeredLine:
+          self.addLoopInfo(step)
+        if step.beforeValues.len > 0 or step.afterValues.len > 0 or step.events.len > 0:
+          self.addStepValues(step)
+    except IndexDefect:
+      cerror cstring(fmt"flow: renderFlowLines IndexDefect for line {line}")
+      continue
 
 proc reloadFlow*(self:FlowComponent) =
   self.renderFlowLines()

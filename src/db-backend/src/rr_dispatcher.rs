@@ -104,10 +104,7 @@ impl CtRRWorker {
         // Redirect worker stderr to a log file for debugging.
         let log_dir = std::env::temp_dir().join("codetracer");
         let _ = std::fs::create_dir_all(&log_dir);
-        let log_path = log_dir.join(format!(
-            "ct-rr-support-{}-{}.log",
-            self.name, self.index
-        ));
+        let log_path = log_dir.join(format!("ct-rr-support-{}-{}.log", self.name, self.index));
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
@@ -416,17 +413,12 @@ impl CtRRWorker {
         if res.starts_with('{') {
             if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&res) {
                 if envelope.get("status").and_then(|v| v.as_str()) == Some("error") {
-                    let code = envelope
-                        .get("code")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+                    let code = envelope.get("code").and_then(|v| v.as_str()).unwrap_or("unknown");
                     let message = envelope
                         .get("message")
                         .and_then(|v| v.as_str())
                         .unwrap_or("(no message)");
-                    return Err(
-                        format!("run_query ct rr worker error: [{code}] {message}").into(),
-                    );
+                    return Err(format!("run_query ct rr worker error: [{code}] {message}").into());
                 }
             }
         }

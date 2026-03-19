@@ -54,7 +54,7 @@ proc refreshTraces(self: TraceLogComponent) =
             js{
               className: cstring"direct-location-rr-ticks",
               data: cstring"rrTicks",
-              render: proc(rrTicks: int64): cstring =
+              render: proc(rrTicks: int): cstring =
                 renderRRTicksLine(rrTicks, self.data.minRRTicks, self.data.maxRRTicks, "event-rr-ticks-line")
             },
             js{

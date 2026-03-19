@@ -13,22 +13,23 @@ proc rowTimestamp*(row: Element, event: ProgramEvent, rrTicks: int) =
   else:
     row.classList.add("future")
 
-proc renderRRTicksLine*(rrTicks: int64, minRRTicks: int64, maxRRTicks: int64, className: string): cstring =
+proc renderRRTicksLine*(rrTicks: int, minRRTicks: int, maxRRTicks: int, className: string): cstring =
+  ## Render a visual timeline bar for the given rr ticks position.
+  ## All arithmetic is done in float to avoid Nim 2.2 BigInt issues
+  ## (int64 maps to JS BigInt and cannot be mixed with float).
   var percent = 0.0
-  # let rrTicksSymbols = ($(rrTicks)).len
+  let rrTicksF = float(rrTicks)
+  let minF = float(minRRTicks)
+  let maxF = float(maxRRTicks)
 
-  if maxRRTicks == minRRTicks:
-    if rrTicks == minRRTicks:
-      percent = 0.0
-    else:
-      percent = 0.0
-  elif maxRRTicks < minRRTicks:
+  if maxF == minF:
     percent = 0.0
-  elif rrTicks < minRRTicks:
+  elif maxF < minF:
+    percent = 0.0
+  elif rrTicksF < minF:
     percent = 0.0
   else:
-    let diff = maxRRTicks - minRRTicks
-    percent = ((rrTicks.toJs - minRRTicks.toJs).to(float) * 100.0) / (diff.float)
+    percent = ((rrTicksF - minF) * 100.0) / (maxF - minF)
 
   let remainingPercent = 101.0 - percent
 

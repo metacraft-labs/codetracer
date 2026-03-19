@@ -70,12 +70,25 @@ pub struct UpdateTableArgs {
     pub table_args: TableArgs,
     /// The Nim JS frontend serializes `array[EventLogKind, bool]` as a JSON
     /// object with string keys (`{"0": true, "1": true, ...}`), while the Rust
-    /// side expects a JSON array.  This custom deserializer handles both
-    /// formats transparently.
+    /// side expects a JSON array.  Additionally, Nim 2.2's JS backend serializes
+    /// `bool` values as numbers (1/0) rather than JSON booleans (true/false).
+    /// This custom deserializer handles all three formats transparently.
     #[serde(deserialize_with = "deserialize_selected_kinds")]
     pub selected_kinds: [bool; EVENT_KINDS_COUNT],
     pub is_trace: bool,
     pub trace_id: usize,
+}
+
+/// Interpret a JSON value as a boolean, treating numeric values as truthy/falsy.
+/// Nim 2.2's JS backend serializes `bool` values in `array[enum, bool]` as
+/// numbers (1/0) rather than JSON booleans (true/false). This helper handles
+/// both representations transparently.
+fn value_as_truthy(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Bool(b) => *b,
+        serde_json::Value::Number(n) => n.as_i64().unwrap_or(0) != 0,
+        _ => false,
+    }
 }
 
 fn deserialize_selected_kinds<'de, D>(deserializer: D) -> Result<[bool; EVENT_KINDS_COUNT], D::Error>
@@ -97,7 +110,7 @@ where
             }
             let mut result = [false; EVENT_KINDS_COUNT];
             for (i, v) in arr.into_iter().enumerate() {
-                result[i] = v.as_bool().unwrap_or(false);
+                result[i] = value_as_truthy(&v);
             }
             Ok(result)
         }
@@ -106,15 +119,13 @@ where
             for (key, val) in &map {
                 if let Ok(idx) = key.parse::<usize>() {
                     if idx < EVENT_KINDS_COUNT {
-                        result[idx] = val.as_bool().unwrap_or(false);
+                        result[idx] = value_as_truthy(val);
                     }
                 }
             }
             Ok(result)
         }
-        _ => Err(de::Error::custom(
-            "selectedKinds must be an array or object",
-        )),
+        _ => Err(de::Error::custom("selectedKinds must be an array or object")),
     }
 }
 

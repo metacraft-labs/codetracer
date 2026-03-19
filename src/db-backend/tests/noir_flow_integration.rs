@@ -67,7 +67,6 @@ fn test_noir_flow_integration() {
         return;
     }
 
-
     let project_path = get_noir_project_path();
     assert!(
         project_path.join("Nargo.toml").exists(),

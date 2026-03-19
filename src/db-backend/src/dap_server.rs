@@ -246,7 +246,8 @@ pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
             info!("Connecting to backend-manager via TCP at {addr}");
             let stream = std::net::TcpStream::connect(&addr)
                 .map_err(|e| format!("failed to connect to TCP endpoint {addr}: {e}"))?;
-            let writer = stream.try_clone()
+            let writer = stream
+                .try_clone()
                 .map_err(|e| format!("connected to TCP {addr}, but failed to clone stream: {e}"))?;
             let reader = BufReader::new(stream);
             run_with_stream(reader, writer)

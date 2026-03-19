@@ -1079,22 +1079,15 @@ method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.}
     self.redraw()
 
 method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.async.} =
-  echo "ON UPDATED EVENTS"
   self.receivedUpdates = true
-  self.data.maxRRTicks = response[0].maxRRTicks
+  if response.len > 0:
+    self.data.maxRRTicks = response[0].maxRRTicks
   if self.ignoreOutput:
     return
 
-  # console.time(cstring"new events loaded")
-
   for element in response:
     self.programEvents.add(element)
-    # TODO: use ansi_up or the escape function?
-    # eventually have a flag/shortcut or menu option to
-    # toggle between non-escaped and escaped content
-    # think again about html/xml in content escaping/pre tags
 
-  # console.timeEnd(cstring"new events loaded")
   if not self.denseTable.isNil and not self.denseTable.context.isNil:
     self.denseTable.context.ajax.reload()
   self.redraw()

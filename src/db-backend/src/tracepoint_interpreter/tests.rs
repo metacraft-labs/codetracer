@@ -240,10 +240,7 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
 }
 
 fn find_nargo() -> bool {
-    Command::new("nargo")
-        .arg("--version")
-        .output()
-        .is_ok()
+    Command::new("nargo").arg("--version").output().is_ok()
 }
 
 fn record_noir_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dyn Error>> {
