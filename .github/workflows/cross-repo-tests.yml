@@ -77,17 +77,6 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-rr-backend
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      # Rewrite .gitmodules SSH URLs to HTTPS so nix's internal git fetcher
-      # can resolve submodules when evaluating the flake with submodules=1.
-      - name: Rewrite rr-backend .gitmodules for nix
-        run: |
-          CLONE_DIR="$(pwd)/../codetracer-rr-backend"
-          cd "$CLONE_DIR"
-          sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
-          sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
-          git add .gitmodules
-          git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
-
       - name: Build ct-rr-support
         run: |
           CLONE_DIR="$(pwd)/../codetracer-rr-backend"

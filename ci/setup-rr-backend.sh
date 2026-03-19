@@ -89,14 +89,6 @@ clone_rr_backend() {
 			git config "$url" "$new_url"
 		done
 		git submodule update --recursive
-
-		# Rewrite .gitmodules SSH URLs to HTTPS so nix's internal git fetcher
-		# can resolve submodules when evaluating the flake with submodules=1
-		sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
-		sed -i 's|ssh://git@github.com/|https://github.com/|g' .gitmodules
-		# Stage and commit the rewrite so nix sees it in the git tree
-		git add .gitmodules
-		git -c user.name="CI" -c user.email="ci@local" commit --no-gpg-sign -m "CI: rewrite submodule URLs to HTTPS"
 	)
 }
 
