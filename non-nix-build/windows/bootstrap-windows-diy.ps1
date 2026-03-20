@@ -2145,17 +2145,10 @@ function Ensure-NimFromSource {
   if ([string]::IsNullOrWhiteSpace($csourcesRef)) {
     $csourcesRef = $toolchain.nimCsourcesRef
   }
-  $csourcesRevisionOverride = [Environment]::GetEnvironmentVariable("NIM_WINDOWS_CSOURCES_REVISION")
-
   $nimRevision = if ([string]::IsNullOrWhiteSpace($nimRevisionOverride)) {
     Resolve-GitRefToRevision -Repository $nimRepo -RefName $nimRef
   } else {
     $nimRevisionOverride.Trim().ToLowerInvariant()
-  }
-  $csourcesRevision = if ([string]::IsNullOrWhiteSpace($csourcesRevisionOverride)) {
-    Resolve-GitRefToRevision -Repository $csourcesRepo -RefName $csourcesRef
-  } else {
-    $csourcesRevisionOverride.Trim().ToLowerInvariant()
   }
   Ensure-NimSourceCompilerEnvironment -Arch $Arch -Root $Root
   $compilerHint = Get-NimSourceCompilerHint
@@ -2169,7 +2162,6 @@ function Ensure-NimFromSource {
     nim_revision = $nimRevision
     csources_repo = $csourcesRepo
     csources_ref = $csourcesRef
-    csources_revision = $csourcesRevision
     bootstrap_compiler_mode = $bootstrapCompilerMode
     compiler_hint = $compilerHint
   }
@@ -2209,9 +2201,9 @@ function Ensure-NimFromSource {
     if ($LASTEXITCODE -ne 0) {
       throw "Failed to clone Nim csources repository '$csourcesRepo'."
     }
-    & $gitCommand.Source -C $csourcesDir checkout --detach $csourcesRevision
+    & $gitCommand.Source -C $csourcesDir checkout --detach $csourcesRef
     if ($LASTEXITCODE -ne 0) {
-      throw "Failed to checkout csources revision '$csourcesRevision'."
+      throw "Failed to checkout csources ref '$csourcesRef'."
     }
 
     & $gitCommand.Source clone $nimRepo $nimSourceDir

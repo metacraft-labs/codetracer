@@ -8,9 +8,9 @@ Default install root:
 - `%LOCALAPPDATA%/codetracer/windows-diy`
   (PowerShell/bootstrap default)
 - POSIX equivalent in Git Bash via
-  `source non-nix-build/windows/env.sh`
+  `source env.sh`
 - PowerShell equivalent via
-  `. .\non-nix-build\windows\env.ps1`
+  `. .\env.ps1`
 - Override with `WINDOWS_DIY_INSTALL_ROOT` or bootstrap
   `-InstallRoot`
 
@@ -28,7 +28,7 @@ Default install root:
 
 `env.ps1` dot-sourcing behavior (PowerShell):
 
-- Dot-source with `. .\non-nix-build\windows\env.ps1` so
+- Dot-source with `. .\env.ps1` so
   environment variables remain in your current shell.
 - Mirrors the same bootstrap + PATH wiring goals as `env.sh`
   for Windows-native shells.
@@ -80,7 +80,7 @@ Default install root:
 
 ## tree-sitter-nim parser generation
 
-After `source non-nix-build/windows/env.sh` (Git Bash), the
+After `source env.sh` (Git Bash), the
 workflow runs
 `non-nix-build/ensure_tree_sitter_nim_parser.sh`, which
 regenerates `libs/tree-sitter-nim/src/parser.c` when it is
@@ -696,7 +696,7 @@ Run these from repo root:
 pwsh -File non-nix-build/windows/validate-toolchain-versions.ps1
 pwsh -Command "$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('non-nix-build/windows/bootstrap-windows-diy.ps1', [ref]$null, [ref]$errors); if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }"
 pwsh -Command "$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('non-nix-build/windows/validate-toolchain-versions.ps1', [ref]$null, [ref]$errors); if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }"
-bash -n non-nix-build/windows/env.sh
+bash -n env.sh
 ```
 
 ## Changelog and Status Update Expectations

@@ -12,9 +12,9 @@ if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 0 ]]; then
 	set -e
 fi
 
-WINDOWS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-NON_NIX_BUILD_DIR=$(cd "$WINDOWS_DIR/.." && pwd)
-ROOT_DIR=$(cd "$NON_NIX_BUILD_DIR/.." && pwd)
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WINDOWS_DIR="$ROOT_DIR/non-nix-build/windows"
+NON_NIX_BUILD_DIR="$ROOT_DIR/non-nix-build"
 
 # shellcheck disable=SC1091
 source "$WINDOWS_DIR/toolchain-versions.env"

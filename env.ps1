@@ -5,9 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Get-RepoRoot {
-  $windowsDir = Split-Path -Parent $PSCommandPath
-  $nonNixBuildDir = Split-Path -Parent $windowsDir
-  return (Split-Path -Parent $nonNixBuildDir)
+  return (Split-Path -Parent $PSCommandPath)
 }
 
 function Get-DefaultInstallRoot {
@@ -582,8 +580,8 @@ function Set-ExecutableAliasIfPresent {
   }
 }
 
-$windowsDir = Split-Path -Parent $PSCommandPath
 $repoRoot = Get-RepoRoot
+$windowsDir = Join-Path $repoRoot "non-nix-build\windows"
 $toolchainPath = Join-Path $windowsDir "toolchain-versions.env"
 $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 
