@@ -20,8 +20,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f non-nix-build/windows/env.sh
-          bash -n non-nix-build/windows/env.sh
+          test -f env.sh
+          bash -n env.sh
 
       - name: Validate PowerShell parser
         shell: pwsh
@@ -67,7 +67,7 @@ jobs:
           export WINDOWS_DIY_SKIP_CT_REMOTE=1
           export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
           export WINDOWS_DIY_ENSURE_TTD=0
-          source non-nix-build/windows/env.sh >/dev/null
+          source env.sh >/dev/null
           command -v tup.exe
           tup.exe --version
 
@@ -84,7 +84,7 @@ jobs:
           export WINDOWS_DIY_SKIP_CT_REMOTE=1
           export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
           export WINDOWS_DIY_ENSURE_TTD=0
-          source non-nix-build/windows/env.sh >/dev/null
+          source env.sh >/dev/null
           command -v nim
           nim --version
           command -v tup.exe

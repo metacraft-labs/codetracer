@@ -198,8 +198,8 @@ For Windows local development without Nix, use the scripts under `non-nix-build/
 
 1. Bootstrap pinned toolchains: `pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1`
 1. Inspect pinned versions and source refs (Rust, Node.js, uv, Nim, ct-remote, Cap'n Proto, Tup): `non-nix-build/windows/toolchain-versions.env`
-1. In Git Bash, source the environment before building: `source non-nix-build/windows/env.sh`
-1. In PowerShell, dot-source the environment before building: `. .\non-nix-build\windows\env.ps1`
+1. In Git Bash, source the environment before building: `source env.sh`
+1. In PowerShell, dot-source the environment before building: `. .\env.ps1`
 
 This workflow bootstraps pinned tools into a shared user cache (`%LOCALAPPDATA%/codetracer/windows-diy` by default) and keeps setup deterministic for Windows contributors.
 When `env.sh` is sourced, it also ensures `libs/tree-sitter-nim/src/parser.c` is generated when missing or stale.

@@ -57,10 +57,10 @@ pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1
 ### Activate environment
 ```bash
 # Git Bash / MSYS2
-source non-nix-build/windows/env.sh
+source env.sh
 
 # PowerShell
-. .\non-nix-build\windows\env.ps1
+. .\env.ps1
 ```
 
 ### Optional skip flags
@@ -78,7 +78,7 @@ cd src/tui && cargo build && cargo test
 cd src/backend-manager && cargo build
 
 # Full frontend (Nim + Tup)
-cd src/build-debug && source ../../non-nix-build/windows/env.sh && tup upd
+cd src/build-debug && source ../../env.sh && tup upd
 ```
 
 ### Version pins
