@@ -68,19 +68,17 @@ test-rust:
   set -e
   pushd src/db-backend
   # Unit tests (inside the binary)
-  cargo test --release --bin db-backend
-  cargo test --release --bin db-backend -- --ignored
+  cargo nextest run --release --bin db-backend
+  cargo nextest run --release --bin db-backend --run-ignored ignored-only
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
   # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
   # and are run separately in cross-repo CI jobs.
-  cargo test --release --test '*' -- \
-    --skip bash_flow_integration \
-    --skip zsh_flow_integration \
-    --skip javascript_flow_integration
+  cargo nextest run --release --test '*' \
+    -E 'not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
   popd
   pushd src/backend-manager
-  cargo test --release
+  cargo nextest run --release
   popd
 
 # Run all non-GUI tests.

@@ -84,6 +84,9 @@ mkShell {
     # https://github.com/casey/just
     just
 
+    # Test runner
+    cargo-nextest
+
     rust-analyzer
     rustup
     rustfmt
