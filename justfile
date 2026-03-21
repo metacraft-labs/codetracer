@@ -69,17 +69,31 @@ test-rust:
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin db-backend
-  cargo nextest run --release --bin db-backend --run-ignored ignored-only
-  # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
-  # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
-  # and are run separately in cross-repo CI jobs.
-  cargo nextest run --release --test '*' \
-    -E 'not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  # Ignored tests (tracepoint_interpreter) require the Ruby recorder sibling repo
+  # and a working `ruby` that can record traces. Run them separately via:
+  #   just test-rust-tracepoint-interpreter
+  # Integration tests: only fast DAP protocol/transport tests.
+  # Flow tests (nim, rust, python, etc.) spawn compilers and recorders —
+  # run them via dedicated recipes (just test-rust-flow, test-nim-flow, etc.).
+  # TTD tests spawn debugger processes — run via just test-ttd.
+  cargo nextest run --release \
+    --test dap_protocol \
+    --test dap_backend_server \
+    --test dap_backend_stdio
   popd
   pushd src/backend-manager
   cargo nextest run --release
   popd
+
+# Tracepoint interpreter tests (ignored by default).
+# Requires the codetracer-ruby-recorder sibling repo and a working `ruby` on PATH.
+# Uses cargo test (not nextest) because the tests share recorded traces via
+# in-process Once/Mutex which only works within a single process.
+test-rust-tracepoint-interpreter:
+  #!/usr/bin/env bash
+  set -e
+  cd src/db-backend
+  cargo test --release --bin db-backend -- --ignored
 
 # Run all non-GUI tests.
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
