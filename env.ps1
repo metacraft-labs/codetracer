@@ -135,7 +135,8 @@ function Resolve-DotnetRoot {
     }
   }
 
-  throw "Could not find dotnet.exe. Expected one of: WINDOWS_DIY_DOTNET_ROOT, '$InstallRoot\\dotnet\\$PinnedSdkVersion', or '$($env:ProgramFiles)\\dotnet'. Install with: winget install --id Microsoft.DotNet.SDK.9 --exact --source winget"
+  # Fall back to the managed install path — Ensure-Dotnet will create it during sync.
+  return (Join-Path $InstallRoot ("dotnet\" + $PinnedSdkVersion))
 }
 
 function Resolve-TtdExe {
@@ -580,6 +581,7 @@ $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 . "$windowsDir/ensure-nim.ps1"
 . "$windowsDir/ensure-capnp.ps1"
 . "$windowsDir/ensure-tup.ps1"
+. "$windowsDir/ensure-dotnet.ps1"
 . "$windowsDir/ensure-ct-remote.ps1"
 . "$windowsDir/ensure-nargo.ps1"
 . "$windowsDir/ensure-ttd.ps1"
@@ -647,7 +649,8 @@ if ($doSync) {
   # Phase 5: Depends on Rust + MSYS2
   if (Test-BootstrapStepEnabled "NARGO") { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
 
-  # Phase 6: Depends on dotnet
+  # Phase 6: dotnet and tools that depend on it
+  if (Test-BootstrapStepEnabled "DOTNET")    { Ensure-Dotnet    -Root $installRoot -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "CT_REMOTE") { Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir }
 }
 
