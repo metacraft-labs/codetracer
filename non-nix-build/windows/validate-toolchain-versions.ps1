@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $requiredKeys = @(
   "RUSTUP_VERSION",
   "RUST_TOOLCHAIN_VERSION",
+  "JUST_VERSION",
   "NODE_VERSION",
   "UV_VERSION",
   "DOTNET_SDK_VERSION",
@@ -39,6 +40,7 @@ $requiredKeys = @(
 $valuePatterns = @{
   "RUSTUP_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "RUST_TOOLCHAIN_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
+  "JUST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "NODE_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "UV_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "DOTNET_SDK_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
