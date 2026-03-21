@@ -31,6 +31,7 @@ jobs:
             "non-nix-build/windows/toolchain-utils.ps1",
             "non-nix-build/windows/ensure-rust.ps1",
             "non-nix-build/windows/ensure-just.ps1",
+            "non-nix-build/windows/ensure-nextest.ps1",
             "non-nix-build/windows/ensure-node.ps1",
             "non-nix-build/windows/ensure-uv.ps1",
             "non-nix-build/windows/ensure-nim.ps1",

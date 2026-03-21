@@ -574,6 +574,7 @@ $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 . "$windowsDir/toolchain-utils.ps1"
 . "$windowsDir/ensure-rust.ps1"
 . "$windowsDir/ensure-just.ps1"
+. "$windowsDir/ensure-nextest.ps1"
 . "$windowsDir/ensure-node.ps1"
 . "$windowsDir/ensure-uv.ps1"
 . "$windowsDir/ensure-nim.ps1"
@@ -636,6 +637,7 @@ if ($doSync) {
 
   # Phase 3: Depends on Rust/cargo
   if (Test-BootstrapStepEnabled "JUST") { Ensure-Just -Root $installRoot -Toolchain $toolchain }
+  if (Test-BootstrapStepEnabled "NEXTEST") { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
 
   # Phase 4: May need MSYS2 for source builds
   if (Test-BootstrapStepEnabled "NIM")   { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
@@ -869,6 +871,7 @@ Set-ExecutableAliasIfPresent -Name "cargo" -ExePath (Join-Path ([Environment]::G
 Set-ExecutableAliasIfPresent -Name "rustc" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\rustc.exe")
 Set-ExecutableAliasIfPresent -Name "rustup" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\rustup.exe")
 Set-ExecutableAliasIfPresent -Name "just" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\just.exe")
+Set-ExecutableAliasIfPresent -Name "cargo-nextest" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\cargo-nextest.exe")
 Set-ExecutableAliasIfPresent -Name "cl" -ExePath $clExe
 if (-not [string]::IsNullOrWhiteSpace($ttdExe)) {
   Set-ExecutableAliasIfPresent -Name "ttd" -ExePath $ttdExe
@@ -895,6 +898,7 @@ New-BashExeShim -ShimsDir $shimsDir -CommandName "cargo" -ExePath (Join-Path ([E
 New-BashExeShim -ShimsDir $shimsDir -CommandName "rustc" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\rustc.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "rustup" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\rustup.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "just" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\just.exe")
+New-BashExeShim -ShimsDir $shimsDir -CommandName "cargo-nextest" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\cargo-nextest.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "cl" -ExePath $clExe
 if (-not [string]::IsNullOrWhiteSpace($ttdExe)) {
   New-BashExeShim -ShimsDir $shimsDir -CommandName "ttd" -ExePath $ttdExe
