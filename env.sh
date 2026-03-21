@@ -636,6 +636,7 @@ if [[ ${WINDOWS_DIY_SYNC:-1} == "1" ]]; then
 		. \"\$windowsDir/toolchain-utils.ps1\"
 		. \"\$windowsDir/ensure-rust.ps1\"
 		. \"\$windowsDir/ensure-just.ps1\"
+		. \"\$windowsDir/ensure-nextest.ps1\"
 		. \"\$windowsDir/ensure-node.ps1\"
 		. \"\$windowsDir/ensure-uv.ps1\"
 		. \"\$windowsDir/ensure-nim.ps1\"
@@ -655,6 +656,7 @@ if [[ ${WINDOWS_DIY_SYNC:-1} == "1" ]]; then
 		if (Test-BootstrapStepEnabled 'UV')   { Ensure-Uv   -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'RUST') { Ensure-Rust -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'JUST') { Ensure-Just -Root \$installRoot -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'NEXTEST') { Ensure-Nextest -Root \$installRoot -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'NIM')   { Ensure-Nim   -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'CAPNP') { Ensure-Capnp -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
 		if (Test-BootstrapStepEnabled 'TUP')   { Ensure-Tup   -Root \$installRoot -Toolchain \$toolchain }
@@ -719,6 +721,7 @@ create_bash_exe_shim "cargo" "$CARGO_HOME/bin/cargo.exe"
 create_bash_exe_shim "rustc" "$CARGO_HOME/bin/rustc.exe"
 create_bash_exe_shim "rustup" "$CARGO_HOME/bin/rustup.exe"
 create_bash_exe_shim "just" "$CARGO_HOME/bin/just.exe"
+create_bash_exe_shim "cargo-nextest" "$CARGO_HOME/bin/cargo-nextest.exe"
 if [[ -n ${WINDOWS_DIY_TTD_EXE:-} ]]; then
 	create_bash_exe_shim "ttd" "$WINDOWS_DIY_TTD_EXE"
 fi
