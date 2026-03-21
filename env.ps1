@@ -78,21 +78,6 @@ function Parse-ToolchainVersions {
   return $map
 }
 
-function Get-WindowsArch {
-  $systemType = (Get-CimInstance Win32_ComputerSystem).SystemType.ToLowerInvariant()
-  if ($systemType.Contains("arm64")) { return "arm64" }
-  if ($systemType.Contains("x64") -or $systemType.Contains("x86_64")) { return "x64" }
-  throw "Unsupported Windows architecture '$systemType'."
-}
-
-function Get-NodeArch {
-  param([string]$WindowsArch)
-  switch ($WindowsArch) {
-    "arm64" { return "arm64" }
-    "x64" { return "x64" }
-    default { throw "Unsupported Node architecture mapping '$WindowsArch'." }
-  }
-}
 
 function Set-EnvDefault {
   param(
@@ -585,6 +570,19 @@ $windowsDir = Join-Path $repoRoot "non-nix-build\windows"
 $toolchainPath = Join-Path $windowsDir "toolchain-versions.env"
 $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 
+# Dot-source ensure modules for install-on-demand bootstrap.
+. "$windowsDir/toolchain-utils.ps1"
+. "$windowsDir/ensure-rust.ps1"
+. "$windowsDir/ensure-just.ps1"
+. "$windowsDir/ensure-node.ps1"
+. "$windowsDir/ensure-uv.ps1"
+. "$windowsDir/ensure-nim.ps1"
+. "$windowsDir/ensure-capnp.ps1"
+. "$windowsDir/ensure-tup.ps1"
+. "$windowsDir/ensure-ct-remote.ps1"
+. "$windowsDir/ensure-nargo.ps1"
+. "$windowsDir/ensure-ttd.ps1"
+
 $preferGitBash = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_PREFER_GIT_BASH" -Default $true
 $gitBashBinDir = ""
 if ($preferGitBash) {
@@ -626,11 +624,33 @@ Set-EnvDefault -Name "CT_REMOTE_WINDOWS_SOURCE_REPO" -Value (Join-Path $repoRoot
 
 $doSync = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SYNC" -Default $true
 if ($doSync) {
-  & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsDir "bootstrap-windows-diy.ps1") -InstallRoot $installRoot
+  $arch = Get-WindowsArch
+
+  # Phase 1: No dependencies
+  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd }
+  if (Test-BootstrapStepEnabled "NODE") { Ensure-Node -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  if (Test-BootstrapStepEnabled "UV")   { Ensure-Uv   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+
+  # Phase 2: Rust (no deps on other managed tools)
+  if (Test-BootstrapStepEnabled "RUST") { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
+
+  # Phase 3: Depends on Rust/cargo
+  if (Test-BootstrapStepEnabled "JUST") { Ensure-Just -Root $installRoot -Toolchain $toolchain }
+
+  # Phase 4: May need MSYS2 for source builds
+  if (Test-BootstrapStepEnabled "NIM")   { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  if (Test-BootstrapStepEnabled "CAPNP") { Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  if (Test-BootstrapStepEnabled "TUP")   { Ensure-Tup   -Root $installRoot -Toolchain $toolchain }
+
+  # Phase 5: Depends on Rust + MSYS2
+  if (Test-BootstrapStepEnabled "NARGO") { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
+
+  # Phase 6: Depends on dotnet
+  if (Test-BootstrapStepEnabled "CT_REMOTE") { Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir }
 }
 
 $arch = Get-WindowsArch
-$nodeArch = Get-NodeArch -WindowsArch $arch
+$nodeArch = ConvertTo-NodeFileArch -Arch $arch
 
 if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("CT_REMOTE_WINDOWS_SOURCE_RID"))) {
   $rid = if ($nodeArch -eq "arm64") { "win-arm64" } else { "win-x64" }
@@ -848,6 +868,7 @@ Set-ExecutableAliasIfPresent -Name "ct-remote" -ExePath (Join-Path $ctRemoteDir 
 Set-ExecutableAliasIfPresent -Name "cargo" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\cargo.exe")
 Set-ExecutableAliasIfPresent -Name "rustc" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\rustc.exe")
 Set-ExecutableAliasIfPresent -Name "rustup" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\rustup.exe")
+Set-ExecutableAliasIfPresent -Name "just" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\\just.exe")
 Set-ExecutableAliasIfPresent -Name "cl" -ExePath $clExe
 if (-not [string]::IsNullOrWhiteSpace($ttdExe)) {
   Set-ExecutableAliasIfPresent -Name "ttd" -ExePath $ttdExe
@@ -873,6 +894,7 @@ New-BashExeShim -ShimsDir $shimsDir -CommandName "ct-remote" -ExePath (Join-Path
 New-BashExeShim -ShimsDir $shimsDir -CommandName "cargo" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\cargo.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "rustc" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\rustc.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "rustup" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\rustup.exe")
+New-BashExeShim -ShimsDir $shimsDir -CommandName "just" -ExePath (Join-Path ([Environment]::GetEnvironmentVariable("CARGO_HOME")) "bin\just.exe")
 New-BashExeShim -ShimsDir $shimsDir -CommandName "cl" -ExePath $clExe
 if (-not [string]::IsNullOrWhiteSpace($ttdExe)) {
   New-BashExeShim -ShimsDir $shimsDir -CommandName "ttd" -ExePath $ttdExe
