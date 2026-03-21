@@ -3,9 +3,10 @@
 # so they need sequential execution to avoid resource contention.
 [test-groups]
 serial-flow = { max-threads = 1 }
+serial-tracepoint = { max-threads = 1 }
 
 [profile.default]
-fail-fast = false
+fail-fast = true
 
 # Don't show output for passing tests
 status-level = "leak"
@@ -91,6 +92,15 @@ test-group = "serial-flow"
 filter = "test(javascript_flow_integration)"
 slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
 test-group = "serial-flow"
+
+# Override for tracepoint interpreter tests (log_array, array_indexing).
+# These tests share a test-traces/ directory and use in-process Once/Mutex
+# for coordination. Since nextest runs each test in a separate process,
+# they must be serialized to avoid race conditions on trace recording.
+[[profile.default.overrides]]
+filter = "test(tracepoint_interpreter::tests::)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-tracepoint"
 
 # Override for Noir real recordings tests (backend-manager).
 # These require nargo + db-backend and are normally ignored.
