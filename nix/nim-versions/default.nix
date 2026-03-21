@@ -18,6 +18,7 @@ let
     "1.6.20" = "sha256-/+0EdQTR/K9hDw3Xzz4Ce+kaKSsMnFEWFQTC87mE/7k=";
     "2.0.14" = "sha256-1CC5VYMylLeGHj+2UCHawm0cGcUoxNbhOczTeeLBWkM=";
     "2.2.6" = "sha256-ZXsOPV3veIFI0qh/phI/p1Wy2SytMe9g/SYeRReFUos=";
+    "2.2.8" = "sha256-EUGRr6CDxQWdy+XOiNvk9CVCz/BOLDAXZo7kOLwLjPw=";
   };
 
   # Build Nim for a specific version from vanilla upstream source.
@@ -37,18 +38,26 @@ let
         url = "https://nim-lang.org/download/nim-${version}.tar.xz";
         inherit hash;
       };
-      patches = [ ];
+      # Clear nixpkgs patches - they're version-specific and don't apply to other versions.
+      # Add back per-version patches as needed.
+      patches = pkgs.lib.optionals (builtins.compareVersions version "2.2.8" >= 0) [
+        # Fix cstring-to-string implicit conversion: add(var string, cstring) is
+        # defined later in system.nim than excpt.nim is included.
+        ./excpt-cstring.patch
+      ];
     });
 
 in
 {
   nim-1_6 = mkNim "1.6.20" versions."1.6.20";
   nim-2_0 = mkNim "2.0.14" versions."2.0.14";
-  nim-2_2 = mkNim "2.2.6" versions."2.2.6";
+  nim-2_2 = mkNim "2.2.8" versions."2.2.8";
+  nim-2_2_6 = mkNim "2.2.6" versions."2.2.6";
+  nim-2_2_8 = mkNim "2.2.8" versions."2.2.8";
 
   # Convenient aliases
   nim1 = mkNim "1.6.20" versions."1.6.20";
-  nim2 = mkNim "2.2.6" versions."2.2.6";
+  nim2 = mkNim "2.2.8" versions."2.2.8";
 
   # nim-devel: built from the third_party/nim-lang checkout (upstream devel branch).
   # TODO: Uncomment when building Nim from source in nix is validated.
