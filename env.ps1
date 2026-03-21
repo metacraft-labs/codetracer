@@ -424,7 +424,8 @@ function Resolve-TtdRuntimeInfo {
 function Ensure-NodeTooling {
   param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
-    [Parameter(Mandatory = $true)][string]$NodePackagesBin
+    [Parameter(Mandatory = $true)][string]$NodePackagesBin,
+    [Parameter(Mandatory = $true)][string]$NodeDir
   )
 
   $stylusCmd = Join-Path $NodePackagesBin "stylus.cmd"
@@ -439,18 +440,28 @@ function Ensure-NodeTooling {
     return
   }
 
+  $npxExe = Join-Path $NodeDir "npx.cmd"
+  if (-not (Test-Path -LiteralPath $npxExe -PathType Leaf)) {
+    throw "npx not found at '$npxExe'. Ensure Node.js is installed (Ensure-Node)."
+  }
+
   Write-Host "Windows DIY: Node deps missing, running yarn install in node-packages..."
   $nodePackagesDir = Join-Path $RepoRoot "node-packages"
+
+  # Temporarily put NodeDir on PATH so child processes (yarn -> node) can find node.exe.
+  $savedPath = $env:PATH
+  $env:PATH = "$NodeDir;$env:PATH"
   Push-Location $nodePackagesDir
   try {
     $lockFile = Join-Path $nodePackagesDir "yarn.lock"
     if (Test-Path -LiteralPath $lockFile -PathType Leaf) {
-      & npx yarn install --frozen-lockfile
+      & $npxExe yarn install --frozen-lockfile
     } else {
-      & npx yarn install
+      & $npxExe yarn install
     }
   } finally {
     Pop-Location
+    $env:PATH = $savedPath
   }
 
   if ((-not (Test-Path -LiteralPath $stylusCmd -PathType Leaf)) -or (-not (Test-Path -LiteralPath $webpackCmd -PathType Leaf))) {
@@ -797,7 +808,7 @@ $shimsDir = Join-Path $installRoot "shims"
 $nargoRoot = Join-Path $installRoot "nargo"
 $nargoDir = Resolve-InstallDirFromRelativePathFile -InstallRoot $installRoot -RelativePathFile (Join-Path $nargoRoot "nargo.install.relative-path")
 
-Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin
+Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
 
 $msvcBlob = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsDir "export-msvc-env.ps1")
 foreach ($line in $msvcBlob) {
