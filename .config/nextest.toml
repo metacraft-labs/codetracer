@@ -1,0 +1,122 @@
+# Test groups for controlling concurrency of specific test sets.
+# Flow tests build/record programs and exercise the full CodeTracer pipeline,
+# so they need sequential execution to avoid resource contention.
+[test-groups]
+serial-flow = { max-threads = 1 }
+
+[profile.default]
+fail-fast = false
+
+# Don't show output for passing tests
+status-level = "leak"
+
+# Show any skipped tests in the end
+final-status-level = "skip"
+
+# Mark tests "slow" after 30s and kill them after 2 periods (60s),
+# with a 10s grace period before SIGKILL (Unix).
+slow-timeout = { period = "30s", terminate-after = 2, grace-period = "10s" }
+
+# Global timeout for test runs.
+# Set to 30m to accommodate flow tests that build, record, and replay
+# programs across multiple languages (Nim, Rust, Python, Ruby, Noir, etc.).
+global-timeout = "30m"
+
+[profile.default.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true
+
+# Override for Nim flow integration tests.
+# Each test compiles a Nim program, records it, and replays the trace —
+# Nim compilation alone can take 20-30s.
+[[profile.default.overrides]]
+filter = "test(test_nim_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for Rust flow integration tests.
+# Each test builds a Rust program, records it, and replays.
+[[profile.default.overrides]]
+filter = "test(test_rust_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for Python flow integration tests.
+# Records a Python program and exercises the trace replay pipeline.
+[[profile.default.overrides]]
+filter = "test(test_python_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for Ruby flow integration tests.
+# Records a Ruby program and exercises the trace replay pipeline.
+[[profile.default.overrides]]
+filter = "test(test_ruby_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for Noir flow integration tests.
+# Noir tests are normally ignored (require nargo infrastructure).
+# They compile and record a Noir program — can take 60-90s.
+[[profile.default.overrides]]
+filter = "test(test_noir_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for WASM flow integration tests.
+# Compiles to WASM, records, and replays.
+[[profile.default.overrides]]
+filter = "test(test_wasm_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for Stylus flow integration tests.
+# Stylus tests are normally ignored (require Stylus SDK infrastructure).
+# They compile and record a Stylus program.
+[[profile.default.overrides]]
+filter = "test(test_stylus_flow)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for bash/zsh shell flow integration tests.
+# These record shell sessions and exercise the trace pipeline.
+[[profile.default.overrides]]
+filter = "test(bash_flow_integration) | test(zsh_flow_integration)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for JavaScript flow integration tests.
+[[profile.default.overrides]]
+filter = "test(javascript_flow_integration)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+test-group = "serial-flow"
+
+# Override for Noir real recordings tests (backend-manager).
+# These require nargo + db-backend and are normally ignored.
+[[profile.default.overrides]]
+filter = "test(test_real_noir)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+
+# Override for trace validation tests.
+# These replay and validate existing traces — can be slow under load.
+[[profile.default.overrides]]
+filter = "test(test_valid_trace)"
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "10s" }
+
+# Single-threaded profile for debugging individual test failures.
+[profile.single]
+status-level = "fail"
+final-status-level = "fail"
+# Run tests sequentially
+test-threads = 1
+# Disable slow-timeout — let tests run to completion
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "10s" }
+global-timeout = "20m"
+retries = 0
+
+[profile.single.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true
+success-output = "immediate"
