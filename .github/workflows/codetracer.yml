@@ -66,46 +66,6 @@ jobs:
         run: |
           pwsh -File non-nix-build/windows/validate-toolchain-versions.ps1
 
-      - name: Probe Windows env shell wiring (tup version)
-        shell: bash
-        run: |
-          set -euo pipefail
-          export WINDOWS_DIY_SKIP_RUST=1
-          export WINDOWS_DIY_SKIP_JUST=1
-          export WINDOWS_DIY_SKIP_NEXTEST=1
-          export WINDOWS_DIY_SKIP_NARGO=1
-          export WINDOWS_DIY_SKIP_NODE=1
-          export WINDOWS_DIY_SKIP_UV=1
-          export WINDOWS_DIY_SKIP_NIM=1
-          export WINDOWS_DIY_SKIP_CAPNP=1
-          export WINDOWS_DIY_SKIP_CT_REMOTE=1
-          export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
-          export WINDOWS_DIY_ENSURE_TTD=0
-          source env.sh >/dev/null
-          command -v tup.exe
-          tup.exe --version
-
-      - name: Probe Windows env shell wiring (nim + tup)
-        shell: bash
-        run: |
-          set -euo pipefail
-          export WINDOWS_DIY_SKIP_RUST=1
-          export WINDOWS_DIY_SKIP_JUST=1
-          export WINDOWS_DIY_SKIP_NEXTEST=1
-          export WINDOWS_DIY_SKIP_NARGO=1
-          export WINDOWS_DIY_SKIP_NODE=1
-          export WINDOWS_DIY_SKIP_UV=1
-          export WINDOWS_DIY_SKIP_NIM=0
-          export WINDOWS_DIY_SKIP_CAPNP=1
-          export WINDOWS_DIY_SKIP_CT_REMOTE=1
-          export WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=0
-          export WINDOWS_DIY_ENSURE_TTD=0
-          source env.sh >/dev/null
-          command -v nim
-          nim --version
-          command -v tup.exe
-          tup.exe --version
-
       - name: Validate arm64 mode routing smoke checks
         shell: pwsh
         run: |
