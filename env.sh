@@ -608,7 +608,59 @@ ensure_node_tooling() {
 }
 
 if [[ ${WINDOWS_DIY_SYNC:-1} == "1" ]]; then
-	"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "$(to_windows_path "$WINDOWS_DIR/bootstrap-windows-diy.ps1")" -InstallRoot "$(to_windows_path "$WINDOWS_DIY_INSTALL_ROOT")"
+	WINDOWS_DIR_WIN=$(to_windows_path "$WINDOWS_DIR")
+	INSTALL_ROOT_WIN=$(to_windows_path "$WINDOWS_DIY_INSTALL_ROOT")
+	REPO_ROOT_WIN=$(to_windows_path "$ROOT_DIR")
+	"$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -Command "
+		Set-StrictMode -Version Latest
+		\$ErrorActionPreference = 'Stop'
+
+		\$windowsDir = '$WINDOWS_DIR_WIN'
+		\$installRoot = '$INSTALL_ROOT_WIN'
+		\$repoRoot = '$REPO_ROOT_WIN'
+		\$toolchainPath = Join-Path \$windowsDir 'toolchain-versions.env'
+
+		# Parse toolchain versions
+		\$toolchain = @{}
+		foreach (\$line in Get-Content -LiteralPath \$toolchainPath) {
+			if (\$line -match '^\s*#' -or [string]::IsNullOrWhiteSpace(\$line)) { continue }
+			if (\$line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { continue }
+			\$name = \$matches[1]
+			\$value = \$matches[2].Trim()
+			if (\$value.StartsWith('\"') -and \$value.EndsWith('\"') -and \$value.Length -ge 2) {
+				\$value = \$value.Substring(1, \$value.Length - 2)
+			}
+			\$toolchain[\$name] = \$value
+		}
+
+		. \"\$windowsDir/toolchain-utils.ps1\"
+		. \"\$windowsDir/ensure-rust.ps1\"
+		. \"\$windowsDir/ensure-just.ps1\"
+		. \"\$windowsDir/ensure-node.ps1\"
+		. \"\$windowsDir/ensure-uv.ps1\"
+		. \"\$windowsDir/ensure-nim.ps1\"
+		. \"\$windowsDir/ensure-capnp.ps1\"
+		. \"\$windowsDir/ensure-tup.ps1\"
+		. \"\$windowsDir/ensure-ct-remote.ps1\"
+		. \"\$windowsDir/ensure-nargo.ps1\"
+		. \"\$windowsDir/ensure-ttd.ps1\"
+
+		\$arch = Get-WindowsArch
+
+		[Environment]::SetEnvironmentVariable('RUSTUP_HOME', (Join-Path \$installRoot 'rustup'), 'Process')
+		[Environment]::SetEnvironmentVariable('CARGO_HOME', (Join-Path \$installRoot 'cargo'), 'Process')
+
+		if (Test-BootstrapStepEnabled 'TTD')  { Ensure-Ttd }
+		if (Test-BootstrapStepEnabled 'NODE') { Ensure-Node -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'UV')   { Ensure-Uv   -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'RUST') { Ensure-Rust -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'JUST') { Ensure-Just -Root \$installRoot -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'NIM')   { Ensure-Nim   -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'CAPNP') { Ensure-Capnp -Root \$installRoot -Arch \$arch -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'TUP')   { Ensure-Tup   -Root \$installRoot -Toolchain \$toolchain }
+		if (Test-BootstrapStepEnabled 'NARGO') { Ensure-Nargo -Root \$installRoot -Toolchain \$toolchain -RepoRoot \$repoRoot }
+		if (Test-BootstrapStepEnabled 'CT_REMOTE') { Ensure-CtRemote -Root \$installRoot -Arch \$arch -Toolchain \$toolchain -WindowsDir \$windowsDir }
+	"
 	CAPNP_DIR=$(resolve_capnp_dir)
 	TUP_DIR=$(resolve_tup_dir)
 	TUP="$TUP_DIR/tup.exe"
@@ -666,6 +718,7 @@ create_bash_exe_shim "ct-remote" "$CT_REMOTE_DIR/ct-remote.exe"
 create_bash_exe_shim "cargo" "$CARGO_HOME/bin/cargo.exe"
 create_bash_exe_shim "rustc" "$CARGO_HOME/bin/rustc.exe"
 create_bash_exe_shim "rustup" "$CARGO_HOME/bin/rustup.exe"
+create_bash_exe_shim "just" "$CARGO_HOME/bin/just.exe"
 if [[ -n ${WINDOWS_DIY_TTD_EXE:-} ]]; then
 	create_bash_exe_shim "ttd" "$WINDOWS_DIY_TTD_EXE"
 fi

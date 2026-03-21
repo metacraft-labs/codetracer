@@ -27,7 +27,18 @@ jobs:
         shell: pwsh
         run: |
           $scriptPaths = @(
-            "non-nix-build/windows/bootstrap-windows-diy.ps1",
+            "env.ps1",
+            "non-nix-build/windows/toolchain-utils.ps1",
+            "non-nix-build/windows/ensure-rust.ps1",
+            "non-nix-build/windows/ensure-just.ps1",
+            "non-nix-build/windows/ensure-node.ps1",
+            "non-nix-build/windows/ensure-uv.ps1",
+            "non-nix-build/windows/ensure-nim.ps1",
+            "non-nix-build/windows/ensure-capnp.ps1",
+            "non-nix-build/windows/ensure-tup.ps1",
+            "non-nix-build/windows/ensure-ct-remote.ps1",
+            "non-nix-build/windows/ensure-nargo.ps1",
+            "non-nix-build/windows/ensure-ttd.ps1",
             "non-nix-build/windows/validate-toolchain-versions.ps1"
           )
 
@@ -93,15 +104,13 @@ jobs:
       - name: Validate arm64 mode routing smoke checks
         shell: pwsh
         run: |
-          $bootstrapScript = "non-nix-build/windows/bootstrap-windows-diy.ps1"
-          if (-not (Test-Path -LiteralPath $bootstrapScript -PathType Leaf)) {
-            throw "Missing required file: $bootstrapScript"
-          }
+          $windowsDir = "non-nix-build/windows"
 
           function Invoke-BootstrapProbe {
             param(
               [Parameter(Mandatory = $true)][string]$Name,
               [Parameter(Mandatory = $true)][hashtable]$Env,
+              [Parameter(Mandatory = $true)][scriptblock]$Action,
               [Parameter(Mandatory = $true)][string[]]$RequiredPatterns,
               [string[]]$ForbiddenPatterns = @()
             )
@@ -125,7 +134,7 @@ jobs:
             $probeOutput = @()
             try {
               $probeSucceeded = $true
-              $probeOutput = & $bootstrapScript -InstallRoot $installRoot 2>&1
+              $probeOutput = & $Action $installRoot 2>&1
             } catch {
               $probeSucceeded = $false
               $probeOutput = @($probeOutput) + $_.Exception.Message + ($_ | Out-String -Width 10000)
@@ -155,18 +164,35 @@ jobs:
             }
           }
 
+          # Load shared modules
+          . "$windowsDir/toolchain-utils.ps1"
+          . "$windowsDir/ensure-nim.ps1"
+          . "$windowsDir/ensure-capnp.ps1"
+          . "$windowsDir/ensure-ct-remote.ps1"
+
+          # Parse toolchain versions
+          $toolchainPath = Join-Path $windowsDir "toolchain-versions.env"
+          $toolchain = @{}
+          foreach ($line in Get-Content -LiteralPath $toolchainPath) {
+            if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) { continue }
+            if ($line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { continue }
+            $name = $matches[1]
+            $value = $matches[2].Trim()
+            if ($value.StartsWith('"') -and $value.EndsWith('"') -and $value.Length -ge 2) {
+              $value = $value.Substring(1, $value.Length - 2)
+            }
+            $toolchain[$name] = $value
+          }
+
           Invoke-BootstrapProbe `
             -Name "nim-auto-arm64-source-first" `
             -Env @{
               "NIM_WINDOWS_SOURCE_MODE" = "auto"
-              "WINDOWS_DIY_SKIP_RUST" = "1"
-              "WINDOWS_DIY_SKIP_NARGO" = "1"
-              "WINDOWS_DIY_SKIP_NODE" = "1"
-              "WINDOWS_DIY_SKIP_UV" = "1"
-              "WINDOWS_DIY_SKIP_NIM" = "0"
-              "WINDOWS_DIY_SKIP_CAPNP" = "1"
-              "WINDOWS_DIY_SKIP_TUP" = "1"
-              "WINDOWS_DIY_SKIP_CT_REMOTE" = "1"
+            } `
+            -Action {
+              param($installRoot)
+              $arch = Get-WindowsArch
+              Ensure-Nim -Root $installRoot -Arch $arch -Toolchain $toolchain
             } `
             -RequiredPatterns @(
               "NIM_WINDOWS_SOURCE_MODE=auto attempted Nim source bootstrap on 'arm64' and failed:",
@@ -181,14 +207,11 @@ jobs:
             -Name "capnp-auto-arm64-source-route" `
             -Env @{
               "CAPNP_WINDOWS_SOURCE_MODE" = "auto"
-              "WINDOWS_DIY_SKIP_RUST" = "1"
-              "WINDOWS_DIY_SKIP_NARGO" = "1"
-              "WINDOWS_DIY_SKIP_NODE" = "1"
-              "WINDOWS_DIY_SKIP_UV" = "1"
-              "WINDOWS_DIY_SKIP_NIM" = "1"
-              "WINDOWS_DIY_SKIP_CAPNP" = "0"
-              "WINDOWS_DIY_SKIP_TUP" = "1"
-              "WINDOWS_DIY_SKIP_CT_REMOTE" = "1"
+            } `
+            -Action {
+              param($installRoot)
+              $arch = Get-WindowsArch
+              Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain
             } `
             -RequiredPatterns @(
               "git is required for source bootstrap but was not found on PATH"
@@ -202,14 +225,11 @@ jobs:
             -Env @{
               "CT_REMOTE_WINDOWS_SOURCE_MODE" = "auto"
               "CT_REMOTE_WINDOWS_SOURCE_REPO" = (Join-Path $env:RUNNER_TEMP "codetracer-ci-missing-routes")
-              "WINDOWS_DIY_SKIP_RUST" = "1"
-              "WINDOWS_DIY_SKIP_NARGO" = "1"
-              "WINDOWS_DIY_SKIP_NODE" = "1"
-              "WINDOWS_DIY_SKIP_UV" = "1"
-              "WINDOWS_DIY_SKIP_NIM" = "1"
-              "WINDOWS_DIY_SKIP_CAPNP" = "1"
-              "WINDOWS_DIY_SKIP_TUP" = "1"
-              "WINDOWS_DIY_SKIP_CT_REMOTE" = "0"
+            } `
+            -Action {
+              param($installRoot)
+              $arch = Get-WindowsArch
+              Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir
             } `
             -RequiredPatterns @(
               "CT_REMOTE_WINDOWS_SOURCE_MODE=auto on 'arm64' requires local source project",

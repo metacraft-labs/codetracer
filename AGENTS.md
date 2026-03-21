@@ -49,12 +49,7 @@ first to rebuild the frontend before running the tests.
 
 For Windows development (both x64 and ARM64), use the DIY bootstrap:
 
-### First-time setup
-```
-pwsh -File non-nix-build/windows/bootstrap-windows-diy.ps1
-```
-
-### Activate environment
+### Activate environment (auto-installs tools on first run)
 ```bash
 # Git Bash / MSYS2
 source env.sh
