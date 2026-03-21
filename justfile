@@ -304,7 +304,7 @@ log-args pid_or_current_or_last task-id:
 
 test-valid-trace trace_dir:
   cd src/db-backend && \
-    env CODETRACER_VALID_TEST_TRACE_DIR={{trace_dir}} cargo test test_valid_trace
+    env CODETRACER_VALID_TEST_TRACE_DIR={{trace_dir}} cargo nextest run test_valid_trace
 # no need to cd back: i assume and manual use shows
 # just probably runs this in a subshell(or at least it doesn't seem to affect
 # our callsite)
@@ -433,7 +433,7 @@ test-python-recorder:
 # Tests the db-backend's ability to resolve Nim global variables using mangled names
 #
 # Uses scripts/with-nim-* wrappers which can be chained with other language wrappers:
-#   scripts/with-nim-1.6 scripts/with-rust-1.80 cargo test ...
+#   scripts/with-nim-1.6 scripts/with-rust-1.80 cargo nextest run ...
 
 # Test with Nim 1.6.x (uses ROT13 mangling)
 test-nim-flow-1_6:
@@ -442,7 +442,7 @@ test-nim-flow-1_6:
   echo "Testing Nim flow integration with Nim 1.6..."
   ./scripts/with-nim-1.6 nim --version
   cd src/db-backend
-  ../../scripts/with-nim-1.6 cargo test test_nim_flow -- --nocapture
+  ../../scripts/with-nim-1.6 cargo nextest run --no-capture test_nim_flow
   echo "Nim 1.6 flow test passed!"
 
 # Test with Nim 2.0.x (uses direct mangling, no ROT13)
@@ -452,7 +452,7 @@ test-nim-flow-2_0:
   echo "Testing Nim flow integration with Nim 2.0..."
   ./scripts/with-nim-2.0 nim --version
   cd src/db-backend
-  ../../scripts/with-nim-2.0 cargo test test_nim_flow -- --nocapture
+  ../../scripts/with-nim-2.0 cargo nextest run --no-capture test_nim_flow
   echo "Nim 2.0 flow test passed!"
 
 # Test with Nim 2.2.x (uses direct mangling, no ROT13)
@@ -462,7 +462,7 @@ test-nim-flow-2_2:
   echo "Testing Nim flow integration with Nim 2.2..."
   ./scripts/with-nim-2.2 nim --version
   cd src/db-backend
-  ../../scripts/with-nim-2.2 cargo test test_nim_flow -- --nocapture
+  ../../scripts/with-nim-2.2 cargo nextest run --no-capture test_nim_flow
   echo "Nim 2.2 flow test passed!"
 
 # Test with all Nim versions
@@ -502,7 +502,7 @@ test-rust-flow:
   echo "Testing Rust flow integration..."
   rustc --version
   cd src/db-backend
-  cargo test test_rust_flow -- --nocapture
+  cargo nextest run --no-capture test_rust_flow
   echo "Rust flow test passed!"
 
 # Test with Rust stable (via nix)
@@ -512,7 +512,7 @@ test-rust-flow-stable:
   echo "Testing Rust flow integration with Rust stable..."
   ./scripts/with-rust-stable rustc --version
   cd src/db-backend
-  ../../scripts/with-rust-stable cargo test test_rust_flow -- --nocapture
+  ../../scripts/with-rust-stable cargo nextest run --no-capture test_rust_flow
   echo "Rust stable flow test passed!"
 
 # Test with Rust nightly (via nix)
@@ -522,7 +522,7 @@ test-rust-flow-nightly:
   echo "Testing Rust flow integration with Rust nightly..."
   ./scripts/with-rust-nightly rustc --version
   cd src/db-backend
-  ../../scripts/with-rust-nightly cargo test test_rust_flow -- --nocapture
+  ../../scripts/with-rust-nightly cargo nextest run --no-capture test_rust_flow
   echo "Rust nightly flow test passed!"
 
 # Test with all supported Rust versions
@@ -545,7 +545,7 @@ test-python-flow:
   #!/usr/bin/env bash
   set -e
   echo "Running Python flow integration test..."
-  cd src/db-backend && cargo test test_python_flow -- --nocapture
+  cd src/db-backend && cargo nextest run --no-capture test_python_flow
   echo "Python flow test passed!"
 
 # Ruby flow/omniscience integration test (DB-based, no rr required)
@@ -553,7 +553,7 @@ test-ruby-flow:
   #!/usr/bin/env bash
   set -e
   echo "Running Ruby flow integration test..."
-  cd src/db-backend && cargo test test_ruby_flow -- --nocapture
+  cd src/db-backend && cargo nextest run --no-capture test_ruby_flow
   echo "Ruby flow test passed!"
 
 # Noir flow/omniscience integration test (DB-based, no rr required)
@@ -561,7 +561,7 @@ test-noir-flow:
   #!/usr/bin/env bash
   set -e
   echo "Running Noir flow integration test..."
-  cd src/db-backend && cargo test test_noir_flow -- --nocapture --include-ignored
+  cd src/db-backend && cargo nextest run --no-capture --run-ignored all test_noir_flow
   echo "Noir flow test passed!"
 
 # WASM flow/omniscience integration test (DB-based, no rr required)
@@ -570,7 +570,7 @@ test-wasm-flow:
   #!/usr/bin/env bash
   set -e
   echo "Running WASM flow integration test..."
-  cd src/db-backend && cargo test test_wasm_flow -- --nocapture
+  cd src/db-backend && cargo nextest run --no-capture test_wasm_flow
   echo "WASM flow test passed!"
 
 # Stylus flow/omniscience integration test (requires Arbitrum devnode)
@@ -580,7 +580,7 @@ test-stylus-flow:
   set -e
   echo "Running Stylus flow integration test..."
   echo "NOTE: Requires Arbitrum devnode running at localhost:8547"
-  cd src/db-backend && cargo test test_stylus_flow -- --nocapture --include-ignored
+  cd src/db-backend && cargo nextest run --no-capture --run-ignored all test_stylus_flow
   echo "Stylus flow test passed!"
 
 # Noir real-recording integration tests (backend-manager, requires nargo + db-backend)
@@ -588,7 +588,7 @@ test-noir-real-recordings:
   #!/usr/bin/env bash
   set -e
   echo "Running Noir real-recording integration tests..."
-  cd src/backend-manager && cargo test test_real_noir -- --nocapture --include-ignored
+  cd src/backend-manager && cargo nextest run --no-capture --run-ignored all test_real_noir
   echo "Noir real-recording tests passed!"
 
 # ====
