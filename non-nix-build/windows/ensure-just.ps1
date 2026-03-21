@@ -13,7 +13,8 @@ function Ensure-Just {
   $cargoExe = Join-Path $cargoHome "bin/cargo.exe"
 
   if (-not (Test-Path -LiteralPath $cargoExe -PathType Leaf)) {
-    throw "Ensure-Just requires cargo at '$cargoExe'. Run Ensure-Rust first."
+    Write-Warning "Ensure-Just: cargo not found at '$cargoExe'. Skipping (install Rust first)."
+    return
   }
 
   if (Test-Path -LiteralPath $justExe -PathType Leaf) {

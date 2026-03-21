@@ -13,7 +13,8 @@ function Ensure-Nextest {
   $cargoExe = Join-Path $cargoHome "bin/cargo.exe"
 
   if (-not (Test-Path -LiteralPath $cargoExe -PathType Leaf)) {
-    throw "Ensure-Nextest requires cargo at '$cargoExe'. Run Ensure-Rust first."
+    Write-Warning "Ensure-Nextest: cargo not found at '$cargoExe'. Skipping (install Rust first)."
+    return
   }
 
   if (Test-Path -LiteralPath $nextestExe -PathType Leaf) {
