@@ -492,11 +492,33 @@ function Ensure-Nim {
     [Parameter(Mandatory = $true)][hashtable]$Toolchain
   )
 
-  $requestedModeRaw = [Environment]::GetEnvironmentVariable("NIM_WINDOWS_SOURCE_MODE")
-  $requestedMode = if ([string]::IsNullOrWhiteSpace($requestedModeRaw)) { "auto" } else { $requestedModeRaw.Trim().ToLowerInvariant() }
-  $nimVersionRoot = Join-Path $Root "nim/$($Toolchain["NIM_VERSION"])"
+  $version = $Toolchain["NIM_VERSION"]
+  $nimVersionRoot = Join-Path $Root "nim/$version"
   $installPathFile = Join-Path $nimVersionRoot "nim.install.relative-path"
   $installMetaFile = Join-Path $nimVersionRoot "nim.install.meta"
+
+  # Fast path: if Nim is already installed at the expected version, skip all
+  # expensive work (git ls-remote, compiler probing, cache key computation).
+  if ((Test-Path -LiteralPath $installPathFile -PathType Leaf) -and (Test-Path -LiteralPath $installMetaFile -PathType Leaf)) {
+    $existingRelPath = (Get-Content -LiteralPath $installPathFile -Raw).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($existingRelPath)) {
+      $existingNimExe = Join-Path $Root "$existingRelPath/bin/nim.exe"
+      if (Test-Path -LiteralPath $existingNimExe -PathType Leaf) {
+        try {
+          $existingVersion = Get-NimCompilerVersion -NimExe $existingNimExe
+          if ($existingVersion -eq $version) {
+            Write-Host "Nim $version already installed at $(Split-Path -Parent (Split-Path -Parent $existingNimExe))"
+            return
+          }
+        } catch {
+          # Version check failed; fall through to full bootstrap
+        }
+      }
+    }
+  }
+
+  $requestedModeRaw = [Environment]::GetEnvironmentVariable("NIM_WINDOWS_SOURCE_MODE")
+  $requestedMode = if ([string]::IsNullOrWhiteSpace($requestedModeRaw)) { "auto" } else { $requestedModeRaw.Trim().ToLowerInvariant() }
 
   $result = $null
   switch ($requestedMode) {
