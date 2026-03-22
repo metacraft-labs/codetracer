@@ -13,7 +13,7 @@
     # All CodeTracer repos share the same nixpkgs pin via this flake to ensure
     # ABI compatibility (same glibc, libstdc++, LLDB, etc.) across dev shells.
     # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
-    codetracer-toolchains.url = "github:metacraft-labs/nix-codetracer-toolchains/57190da5ec700d8cc6a67a76cc2ea633a839a4cd";
+    codetracer-toolchains.url = "github:metacraft-labs/nix-codetracer-toolchains";
 
     # Use the toolchains flake's nixpkgs pin. This ensures binaries built in
     # this shell are link-compatible with binaries from sibling repos that also

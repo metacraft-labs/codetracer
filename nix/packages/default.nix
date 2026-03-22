@@ -11,8 +11,8 @@
 
       src = ../../.;
 
-      # Import multiple Nim versions
-      nimVersions = import ../nim-versions { inherit pkgs; };
+      # Nim and other toolchains from the shared codetracer-toolchains flake.
+      toolchainsPkgs = inputs."codetracer-toolchains".packages.${system};
 
       # Import multiple Rust versions via fenix
       rustVersions = import ../rust-versions {
@@ -23,7 +23,7 @@
     {
       packages = rec {
         # Nim versions for testing with different compilers
-        inherit (nimVersions) nim-1_6 nim-2_0 nim-2_2;
+        inherit (toolchainsPkgs) nim-1_6 nim-2_0 nim-2_2;
 
         # Rust versions for testing with different compilers
         inherit (rustVersions)
@@ -37,7 +37,7 @@
         # Provides both 'nim' and 'nim2' binaries.
         # Wraps all Nim tools with NIM_CONFIG_PATH so they can find the
         # stdlib in the nix store (nim-unwrapped alone doesn't set this).
-        nim-codetracer = nimVersions.nim-2_2.overrideAttrs (old: {
+        nim-codetracer = toolchainsPkgs.nim-2_2.overrideAttrs (old: {
           nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
           postInstall = (old.postInstall or "") + ''
             ln -sf $out/nim/bin/nim $out/bin/nim2
