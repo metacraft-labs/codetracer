@@ -69,13 +69,7 @@ test-rust:
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin db-backend
-  # Ignored tests require trace recording infrastructure (ruby recorder, etc.)
-  # which may not be fully functional on all CI platforms (e.g. macOS).
-  if [ "${CODETRACER_CI_PLATFORM:-}" != "macos" ]; then
-    cargo nextest run --release --bin db-backend --run-ignored ignored-only
-  else
-    echo "  NOTE: Skipping ignored tests on macOS CI (trace recording not available)"
-  fi
+  cargo nextest run --release --bin db-backend --run-ignored ignored-only
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
   # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
