@@ -886,6 +886,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install cargo-nextest (macOS)
+        if: matrix.platform == 'macos'
+        run: curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+
       - name: Build (non-nix)
         if: matrix.platform == 'macos'
         run: ./non-nix-build/build.sh
