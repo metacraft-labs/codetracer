@@ -6,11 +6,10 @@ use core::panic;
 use std::{
     env,
     error::Error,
-    fs::{create_dir, remove_dir_all},
+    fs::{create_dir_all, remove_dir_all},
     iter::zip,
     path::{Path, PathBuf},
     process::Command,
-    sync::{LazyLock, Mutex, Once},
 };
 
 use codetracer_trace_types::{StepId, TypeKind};
@@ -274,9 +273,13 @@ fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(),
     Ok(())
 }
 
-static DIR_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-static CLEAN_TRACES: Once = Once::new();
-
+/// Load (or record) a test trace for the given program and language.
+///
+/// Each invocation records into a per-process temporary directory under
+/// `test-traces/`. This avoids the race condition that occurs with
+/// `cargo nextest`, which runs each test in a separate process — in-process
+/// `Mutex`/`Once` guards cannot synchronize across processes, so two tests
+/// that share a trace name would stomp on each other's output.
 fn load_test_trace(name: &str, lang: Lang) -> Result<Db, Box<dyn Error>> {
     let cwd = env::current_dir()?;
 
@@ -286,38 +289,21 @@ fn load_test_trace(name: &str, lang: Lang) -> Result<Db, Box<dyn Error>> {
         return Err("Can't find test programs. Please run 'cargo test' in src/db-backend.".into());
     }
 
-    let test_trace_path = cwd.join("test-traces");
+    // Use the PID to isolate each nextest worker process so parallel
+    // test invocations never share (and therefore never clobber) trace
+    // directories.
+    let pid = std::process::id();
+    let trace_dir = cwd
+        .join("test-traces")
+        .join(format!("pid-{pid}"))
+        .join(name)
+        .join(&lang_string);
 
-    let program_trace_path = test_trace_path.join(name);
-    let program_lang_path = program_trace_path.join(&lang_string);
-
-    {
-        let _guard = DIR_MUTEX.lock().unwrap();
-
-        // Clear old traces
-        CLEAN_TRACES.call_once(|| {
-            if test_trace_path.exists() {
-                if let Err(x) = remove_dir_all(&test_trace_path) {
-                    panic!("{}", x);
-                }
-            }
-        });
-
-        // Ensure parent directories
-        if !test_trace_path.exists() {
-            create_dir(&test_trace_path).unwrap();
-        }
-
-        if !program_trace_path.exists() {
-            create_dir(&program_trace_path).unwrap();
-        }
-
-        // Create trace if not already created
-        if !program_lang_path.exists() {
-            create_dir(&program_lang_path).unwrap();
-            record_trace(&program_dir, &program_lang_path, lang).unwrap();
-        }
+    if trace_dir.exists() {
+        remove_dir_all(&trace_dir)?;
     }
+    create_dir_all(&trace_dir)?;
+    record_trace(&program_dir, &trace_dir, lang)?;
 
-    Ok(load_db_for_trace(&program_lang_path))
+    Ok(load_db_for_trace(&trace_dir))
 }
