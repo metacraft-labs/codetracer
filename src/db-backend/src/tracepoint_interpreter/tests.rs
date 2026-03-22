@@ -2,7 +2,6 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
 
-use core::panic;
 use std::{
     env,
     error::Error,
