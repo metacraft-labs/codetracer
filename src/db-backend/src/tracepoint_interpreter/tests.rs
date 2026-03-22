@@ -26,7 +26,6 @@ use crate::{
 use super::TracepointInterpreter;
 
 #[test]
-#[ignore]
 fn log_array() -> Result<(), Box<dyn Error>> {
     if find_ruby_recorder().is_none() {
         eprintln!("SKIPPED: Ruby recorder not found");
@@ -48,7 +47,6 @@ fn log_array() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-#[ignore]
 fn array_indexing() -> Result<(), Box<dyn Error>> {
     if find_ruby_recorder().is_none() {
         eprintln!("SKIPPED: Ruby recorder not found");
