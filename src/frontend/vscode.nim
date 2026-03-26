@@ -35,7 +35,7 @@ when defined(ctInExtension):
 
   var vscode* {.importc.}: VsCode # vscode in extension central context; acquireVsCodeApi() in webview;
 
-  const ctExtensionLogging {.strdefine.}: bool = true # TODO: false default for production
+  const ctExtensionLogging {.booldefine.}: bool = true # TODO: false default for production
   const logging = ctExtensionLogging
   const NO_INDEX = -1
 
@@ -67,13 +67,14 @@ when defined(ctInExtension):
     t.internalRawReceive(eventData.toJs, Subscriber(name: cstring"vscode extenson context"))
 
   proc newVsCodeViewTransport*(vscode: VsCode, vscodeWindow: JsObject): VsCodeViewTransport =
-    result = VsCodeViewTransport(vscode: vscode)
+    let transport = VsCodeViewTransport(vscode: vscode)
     vscodeWindow.addEventListener(cstring"message", proc(event: JsObject) =
       if logging: console.log cstring"vscode view received new message in event listener: ", event.toJs
       let data = event.data
       if not data.kind.isNil and not data.value.isNil:
         # check that it's probably a ct raw event: as maybe we can receive other messages?
-        result.onVsCodeMessage(cast[CtRawEvent](data)))
+        transport.onVsCodeMessage(cast[CtRawEvent](data)))
+    transport
 
   proc newVsCodeViewApi*(name: cstring, vscode: VsCode, vscodeWindow: JsObject): MediatorWithSubscribers {.exportc.} =
     let transport = newVsCodeViewTransport(vscode, vscodeWindow)

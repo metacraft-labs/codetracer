@@ -227,14 +227,14 @@ else:
     discard dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)
 
   proc newDapVsCodeApi*(vscode: VsCode, context: VsCodeContext): DapApi {.exportc.} =
-    result = DapApi(vscode: vscode, context: context)
+    let dap = DapApi(vscode: vscode, context: context)
     proc onDidSendMessage(message: VsCodeDapMessage) =
       console.log cstring"<- dap message:", message.`type`, message.command, message.event, message
       if message.`type` == cstring"event":
-        result.receiveEvent(message.event, message.body)
+        dap.receiveEvent(message.event, message.body)
       elif message.`type` == cstring"response":
         try:
-          result.receiveResponse(message.command, message.body)
+          dap.receiveResponse(message.command, message.body)
         except ValueError as e:
           console.warn cstring"  receive response error: ", cstring(e.msg)
 
@@ -247,6 +247,7 @@ else:
         }
       )
     )
+    dap
 
   type
     VsCodeEditor* = ref object
