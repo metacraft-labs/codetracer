@@ -580,8 +580,19 @@ test-stylus-flow:
   set -e
   echo "Running Stylus flow integration test..."
   echo "NOTE: Requires Arbitrum devnode running at localhost:8547"
-  cd src/db-backend && cargo nextest run --no-capture --run-ignored all test_stylus_flow
+  cd src/db-backend && cargo nextest run --no-capture --run-ignored all test_stylus_flow_integration
   echo "Stylus flow test passed!"
+
+# Full Stylus integration test: recording + trace content verification (requires Arbitrum devnode)
+# This runs Tier 1 (recording) and Tier 2 (trace analysis) together.
+# Set STYLUS_FIXTURE_OUTPUT_DIR to export the trace for VS Code extension UI tests.
+test-stylus-flow-full:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Stylus full integration test (recording + trace analysis)..."
+  echo "NOTE: Requires Arbitrum devnode running at localhost:8547"
+  cd src/db-backend && cargo nextest run --no-capture --run-ignored all test_stylus_trace_analysis
+  echo "Stylus full integration test passed!"
 
 # Noir real-recording integration tests (backend-manager, requires nargo + db-backend)
 test-noir-real-recordings:

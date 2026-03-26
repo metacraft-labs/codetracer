@@ -73,6 +73,7 @@ pub enum Language {
     JavaScript,
     Bash,
     Zsh,
+    Stylus,
 }
 
 impl Language {
@@ -91,6 +92,7 @@ impl Language {
             Language::JavaScript => "js",
             Language::Bash => "sh",
             Language::Zsh => "zsh",
+            Language::Stylus => "stylus",
         }
     }
 
@@ -105,6 +107,7 @@ impl Language {
                 | Language::JavaScript
                 | Language::Bash
                 | Language::Zsh
+                | Language::Stylus
         )
     }
 }
@@ -1251,6 +1254,44 @@ fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Record a Stylus (Arbitrum WASM) trace by running wazero with the `-stylus` flag.
+///
+/// Unlike plain WASM recording, Stylus recording requires an EVM trace obtained
+/// from `cargo stylus trace` after sending a transaction to a deployed contract.
+/// The `-stylus` flag tells wazero to interpret the WASM in the context of the
+/// Stylus EVM execution environment.
+///
+/// `evm_trace_path` must be a file path to a JSON file containing the EVM trace
+/// (output of `cargo stylus trace`).
+///
+/// Invokes: `wazero run -stylus <evm_trace_path> --trace-dir <trace_dir> <wasm_path>`.
+pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_path: &Path) -> Result<(), String> {
+    let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    let output = Command::new(&wazero)
+        .args([
+            "run",
+            "-stylus",
+            evm_trace_path.to_str().unwrap(),
+            "-out-dir",
+            trace_dir.to_str().unwrap(),
+            wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| format!("failed to run wazero with Stylus trace: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Stylus WASM recording failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
 /// Record a Python trace by running the pure-Python recorder.
 ///
 /// The recorder writes `trace.json`, `trace_metadata.json`, `trace_paths.json` to CWD,
@@ -1731,6 +1772,11 @@ pub fn run_db_flow_test(config: &FlowTestConfig, version_label: &str) -> Result<
         // wazero stores absolute source paths in trace_paths.json,
         // so the suffix-match works with the actual .rs source file.
         config.source_path.join("src/main.rs")
+    } else if config.language == Language::Stylus {
+        // For Stylus, source_path is the Cargo project directory.
+        // wazero stores absolute source paths in trace_paths.json.
+        // The contract code is in src/lib.rs (not main.rs).
+        config.source_path.join("src/lib.rs")
     } else if config.language == Language::Bash || config.language == Language::Zsh {
         // Bash/Zsh recorder stores absolute paths, suffix-match works
         config.source_path.clone()

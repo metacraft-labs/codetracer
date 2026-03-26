@@ -13,6 +13,7 @@ use codetracer_trace_types::{
 };
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
+use crate::task::NO_INDEX;
 // use crate::task::{Comp}
 //
 
@@ -69,7 +70,7 @@ impl<'a> TraceProcessor<'a> {
             "db.instructions has different length than db.steps, can't ensure StepId remains valid index for it",
         );
 
-        self.db.end_of_program = if !self.db.events.is_empty() {
+        self.db.end_of_program = if !self.db.events.is_empty() && !self.db.steps.is_empty() {
             let last_event = &self.db.events[self.db.events.len() - 1];
             let on_last_step = (last_event.step_id.0 as usize) == self.db.steps.len() - 1;
             if last_event.kind == EventLogKind::Error && on_last_step {
@@ -236,10 +237,19 @@ impl<'a> TraceProcessor<'a> {
                 }
             }
             TraceLowLevelEvent::Event(record_event) => {
+                // Use the current step ID if steps exist, otherwise use NO_INDEX.
+                // Stylus traces contain only Event entries (no Step entries), so
+                // current_step_id remains at the default StepId(0) which would be
+                // an invalid index into the empty steps vector.
+                let event_step_id = if self.db.steps.is_empty() {
+                    StepId(NO_INDEX)
+                } else {
+                    self.current_step_id
+                };
                 self.db.events.push(DbRecordEvent {
                     kind: record_event.kind,
                     content: record_event.content.clone(),
-                    step_id: self.current_step_id,
+                    step_id: event_step_id,
                     metadata: record_event.metadata.clone(),
                 });
             }

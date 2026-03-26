@@ -1329,6 +1329,12 @@ impl DbReplay {
 impl Replay for DbReplay {
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
         info!("load_location: db replay");
+        // Event-only traces (e.g. Stylus) have no steps — return a default location
+        // so the DAP server can still initialize and serve event data.
+        if self.db.steps.is_empty() {
+            info!("  no steps in trace, returning default location");
+            return Ok(Location::default());
+        }
         let call_key = self.db.call_key_for_step(self.step_id);
         self.call_key = call_key;
         let location = self.db.load_location(self.step_id, call_key, expr_loader);
@@ -1337,7 +1343,10 @@ impl Replay for DbReplay {
     }
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
-        self.step_id_jump(StepId(0));
+        // For event-only traces (no steps), keep step_id at the default.
+        if !self.db.steps.is_empty() {
+            self.step_id_jump(StepId(0));
+        }
         Ok(())
     }
 
