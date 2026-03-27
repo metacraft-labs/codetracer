@@ -86,6 +86,13 @@ fn stylus_flow_dap_variables() {
     // Copy fixture and rewrite trace_paths.json to use current checkout paths.
     let working_fixture = prepare_fixture_copy(&fixture_dir, &project_path);
 
+    // Diagnostic: verify the rewrite happened.
+    let rewritten_paths = fs::read_to_string(working_fixture.join("trace_paths.json"))
+        .expect("failed to read rewritten trace_paths.json");
+    println!("Working fixture: {}", working_fixture.display());
+    println!("Rewritten trace_paths.json: {rewritten_paths}");
+    println!("Breakpoint source: {}", breakpoint_source.display());
+
     // We expect `pari` to be visible at line 59 (inside fund()).
     // pari is U256, which the trace encodes as BigInt — FlowTestConfig.expected_values
     // only supports i64, so we verify variable presence but skip value comparison.
