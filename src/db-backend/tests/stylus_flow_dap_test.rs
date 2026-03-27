@@ -45,16 +45,20 @@ fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
         .join("src/lib.rs")
         .canonicalize()
         .expect("failed to canonicalize source path");
-    let actual_source_str = actual_source.to_str().unwrap();
+    let actual_source_str = actual_source.to_str().unwrap().to_string();
     // On Windows, canonicalize() produces extended-length paths with a `\\?\`
     // prefix (e.g. `\\?\D:\a\...`) and uses backslashes. Strip the prefix and
     // normalize to forward slashes so the replacement string is valid inside
     // JSON files (raw backslashes like `\t` in `\test-programs` would be
     // interpreted as escape sequences by JSON parsers).
     #[cfg(windows)]
-    let actual_source_str = actual_source_str.strip_prefix(r"\\?\").unwrap_or(actual_source_str);
-    #[cfg(windows)]
-    let actual_source_str = actual_source_str.replace('\\', "/");
+    let actual_source_str = {
+        let s = actual_source_str
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&actual_source_str)
+            .replace('\\', "/");
+        s
+    };
 
     // Copy fixture files, rewriting any embedded hardcoded paths.
     // Both trace.json (Path entries) and trace_paths.json contain the
@@ -64,7 +68,7 @@ fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
         let dest = tmp_dir.join(entry.file_name());
         let content = fs::read_to_string(entry.path()).unwrap_or_default();
         if content.contains(FIXTURE_ORIGINAL_SOURCE) {
-            let rewritten = content.replace(FIXTURE_ORIGINAL_SOURCE, actual_source_str);
+            let rewritten = content.replace(FIXTURE_ORIGINAL_SOURCE, &actual_source_str);
             fs::write(&dest, rewritten).expect("failed to write rewritten fixture file");
         } else {
             fs::copy(entry.path(), &dest).expect("failed to copy fixture file");
@@ -113,15 +117,17 @@ fn stylus_flow_dap_variables() {
     let canonical_source = breakpoint_source
         .canonicalize()
         .expect("failed to canonicalize breakpoint source");
-    let canonical_source_str = canonical_source.to_str().unwrap();
+    let canonical_source_str = canonical_source.to_str().unwrap().to_string();
     // Strip Windows extended-length path prefix and normalize to forward
     // slashes so the path matches what was written into the fixture files.
     #[cfg(windows)]
-    let canonical_source_str = canonical_source_str
-        .strip_prefix(r"\\?\")
-        .unwrap_or(canonical_source_str);
-    #[cfg(windows)]
-    let canonical_source_str = canonical_source_str.replace('\\', "/");
+    let canonical_source_str = {
+        let s = canonical_source_str
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&canonical_source_str)
+            .replace('\\', "/");
+        s
+    };
     println!("Working fixture: {}", working_fixture.display());
     println!("Rewritten trace_paths.json: {rewritten_paths}");
     println!("Breakpoint source (canonical): {canonical_source_str}");
@@ -130,7 +136,7 @@ fn stylus_flow_dap_variables() {
     // pari is U256, which the trace encodes as BigInt — FlowTestConfig.expected_values
     // only supports i64, so we verify variable presence but skip value comparison.
     let config = FlowTestConfig {
-        source_file: canonical_source_str.to_string(),
+        source_file: canonical_source_str.clone(),
         breakpoint_line: 59,
         expected_variables: vec!["pari".to_string()],
         // Stylus macros (sol_storage!, #[public]) expand to generated code;
