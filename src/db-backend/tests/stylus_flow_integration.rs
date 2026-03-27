@@ -19,6 +19,10 @@
 //!   host function calls (read_args, storage ops) and correct calldata.
 //!   Catches regressions in both the Arbitrum toolchain and the wazero recorder.
 //!
+//! - `test_stylus_dap_trace` (Tier 2, offline): Loads the committed fixture
+//!   and verifies the DAP server can initialize, launch, and respond to
+//!   standard debug requests. No devnode needed.
+//!
 //! Prerequisites:
 //! - Arbitrum devnode running on localhost:8547
 //! - `cargo-stylus` on PATH
@@ -533,15 +537,16 @@ fn test_stylus_trace_analysis() {
 /// Tier 2 (DAP): Verify the DAP server can load a pre-recorded Stylus trace
 /// and respond to standard + custom requests.
 ///
-/// Stylus traces contain only EVM host function Event entries (no Step/Call/Function
-/// entries). This test validates that the DAP server handles this event-only format
-/// correctly: initializes without panicking, returns thread info, and delivers
-/// the event log containing EVM host function calls.
+/// Stylus traces contain both DWARF-based Step/Call/Function entries (from wazero
+/// replaying the EVM trace through the debug WASM binary) and EVM host function
+/// Event entries. This test validates that the DAP server handles this mixed
+/// format correctly: initializes without panicking, returns thread info, and
+/// delivers stopped + complete-move events.
 ///
 /// Uses the trace at `STYLUS_TRACE_DIR` (env var) or the checked-in fixture at
-/// `../../stylus-trace-manual`. Does NOT require a devnode — works offline.
+/// `tests/fixtures/stylus-fund-trace/`. Does NOT require a devnode — works offline.
 #[test]
-fn test_stylus_dap_event_only_trace() {
+fn test_stylus_dap_trace() {
     // Use STYLUS_TRACE_DIR env var if set, otherwise fall back to the committed fixture.
     let trace_dir = std::env::var("STYLUS_TRACE_DIR")
         .map(PathBuf::from)
@@ -584,7 +589,7 @@ fn test_stylus_dap_event_only_trace() {
         .initialize_and_launch(&recording)
         .unwrap_or_else(|e| panic!("Failed to initialize and launch: {}", e));
 
-    println!("\nStylus DAP event-only trace test passed!");
+    println!("\nStylus DAP trace test passed!");
     println!("  DAP server initialized, launched, and delivered stopped + complete-move events");
     // Don't clean up — we don't own the trace directory
 }

@@ -61,6 +61,7 @@ mkShell {
 
     # stylus
     ourPkgs.cargo-stylus
+    foundry # provides cast, forge, anvil (needed for Stylus integration tests)
 
     # codex acp agent client
     ourPkgs.codex-acp
