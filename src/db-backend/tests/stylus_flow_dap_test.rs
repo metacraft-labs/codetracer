@@ -47,10 +47,14 @@ fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
         .expect("failed to canonicalize source path");
     let actual_source_str = actual_source.to_str().unwrap();
     // On Windows, canonicalize() produces extended-length paths with a `\\?\`
-    // prefix (e.g. `\\?\D:\a\...`). The DAP server doesn't use this prefix
-    // when matching paths, so strip it to avoid breakpoint mismatches.
+    // prefix (e.g. `\\?\D:\a\...`) and uses backslashes. Strip the prefix and
+    // normalize to forward slashes so the replacement string is valid inside
+    // JSON files (raw backslashes like `\t` in `\test-programs` would be
+    // interpreted as escape sequences by JSON parsers).
     #[cfg(windows)]
     let actual_source_str = actual_source_str.strip_prefix(r"\\?\").unwrap_or(actual_source_str);
+    #[cfg(windows)]
+    let actual_source_str = actual_source_str.replace('\\', "/");
 
     // Copy fixture files, rewriting any embedded hardcoded paths.
     // Both trace.json (Path entries) and trace_paths.json contain the
@@ -110,11 +114,14 @@ fn stylus_flow_dap_variables() {
         .canonicalize()
         .expect("failed to canonicalize breakpoint source");
     let canonical_source_str = canonical_source.to_str().unwrap();
-    // Strip Windows extended-length path prefix (see prepare_fixture_copy).
+    // Strip Windows extended-length path prefix and normalize to forward
+    // slashes so the path matches what was written into the fixture files.
     #[cfg(windows)]
     let canonical_source_str = canonical_source_str
         .strip_prefix(r"\\?\")
         .unwrap_or(canonical_source_str);
+    #[cfg(windows)]
+    let canonical_source_str = canonical_source_str.replace('\\', "/");
     println!("Working fixture: {}", working_fixture.display());
     println!("Rewritten trace_paths.json: {rewritten_paths}");
     println!("Breakpoint source (canonical): {canonical_source_str}");
