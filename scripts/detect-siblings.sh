@@ -56,6 +56,7 @@ _ct_try_workspace_root() {
 		[ -d "$candidate/codetracer-js-recorder" ] ||
 		[ -d "$candidate/codetracer-shell-recorders" ] ||
 		[ -d "$candidate/codetracer-wasm-recorder" ] ||
+		[ -d "$candidate/codetracer-native-test-programs" ] ||
 		[ -d "$candidate/noir" ]; then
 		_CT_WORKSPACE_ROOT="$candidate"
 		return 0
@@ -93,6 +94,13 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backe
 	export CODETRACER_RR_BACKEND_PATH="$_CT_WORKSPACE_ROOT/codetracer-rr-backend"
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
 	_ct_detect_summary "codetracer-rr-backend (ct-rr-support available)"
+fi
+
+# --- codetracer-native-test-programs ---
+# Exports: CODETRACER_NATIVE_TEST_PROGRAMS_PATH
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native-test-programs" ]; then
+	export CODETRACER_NATIVE_TEST_PROGRAMS_PATH="$_CT_WORKSPACE_ROOT/codetracer-native-test-programs"
+	_ct_detect_summary "codetracer-native-test-programs"
 fi
 
 # --- codetracer-python-recorder ---
@@ -169,6 +177,9 @@ fi
 # ---------------------------------------------------------------------------
 if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
 	export CODETRACER_RR_BACKEND_PRESENT=1
+fi
+if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PATH:-}" ]; then
+	export CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT=1
 fi
 if [ -n "${CODETRACER_PYTHON_RECORDER_PATH:-}" ]; then
 	export CODETRACER_PYTHON_RECORDER_PRESENT=1
