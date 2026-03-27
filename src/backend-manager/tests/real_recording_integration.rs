@@ -926,7 +926,7 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 /// and VariableName trace events -- enough to exercise navigation and
 /// event-loading pipelines.
 ///
-/// `nargo trace` requires `--trace-dir <DIR>` and produces:
+/// `nargo trace` requires `--out-dir <DIR>` and produces:
 ///   - `trace.json`          -- array of `TraceLowLevelEvent` entries
 ///   - `trace_metadata.json` -- `{"workdir": ..., "program": ..., "args": []}`
 ///   - `trace_paths.json`    -- array of source file paths
@@ -969,10 +969,10 @@ fn create_noir_recording(test_dir: &Path, log_path: &Path) -> Result<PathBuf, St
         ),
     );
 
-    // Run `nargo trace --trace-dir <trace_dir>` from the project directory.
+    // Run `nargo trace --out-dir <trace_dir>` from the project directory.
     let output = std::process::Command::new("nargo")
         .arg("trace")
-        .arg("--trace-dir")
+        .arg("--out-dir")
         .arg(trace_dir.to_str().unwrap())
         .current_dir(&project_dir)
         .output()

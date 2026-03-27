@@ -1227,7 +1227,7 @@ pub fn build_wasm_test_program(project_dir: &Path) -> Result<PathBuf, String> {
 
 /// Record a WASM trace by running wazero.
 ///
-/// Invokes `wazero run --trace-dir <trace_dir> <wasm_path>`.
+/// Invokes `wazero run --out-dir <trace_dir> <wasm_path>`.
 /// wazero stores absolute source paths in `trace_paths.json`.
 fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
@@ -1236,7 +1236,7 @@ fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let output = Command::new(&wazero)
         .args([
             "run",
-            "--trace-dir",
+            "--out-dir",
             trace_dir.to_str().unwrap(),
             wasm_path.to_str().unwrap(),
         ])
@@ -1264,7 +1264,7 @@ fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
 /// `evm_trace_path` must be a file path to a JSON file containing the EVM trace
 /// (output of `cargo stylus trace`).
 ///
-/// Invokes: `wazero run -stylus <evm_trace_path> --trace-dir <trace_dir> <wasm_path>`.
+/// Invokes: `wazero run -stylus <evm_trace_path> --out-dir <trace_dir> <wasm_path>`.
 pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_path: &Path) -> Result<(), String> {
     let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
@@ -1644,7 +1644,7 @@ fn record_noir_trace(project_dir: &Path, trace_dir: &Path) -> Result<(), String>
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
     let output = Command::new("nargo")
-        .args(["trace", "--trace-dir", trace_dir.to_str().unwrap()])
+        .args(["trace", "--out-dir", trace_dir.to_str().unwrap()])
         .current_dir(project_dir)
         .output()
         .map_err(|e| format!("failed to run nargo trace: {}", e))?;

@@ -106,7 +106,7 @@ proc recordDb(
       if stylusTrace.len > 0:
         vmArgs.add("-stylus")
         vmArgs.add(stylusTrace)
-      vmArgs = vmArgs.concat(@["--trace-dir", traceFolder, program])
+      vmArgs = vmArgs.concat(@["--out-dir", traceFolder, program])
       startArgs = vmArgs
     of LangNoir:
       let backendArgs = if backend == "plonky2":
@@ -117,7 +117,7 @@ proc recordDb(
         else:
           @[]
 
-      startArgs = @["trace", "--trace-dir", traceFolder].concat(backendArgs)
+      startArgs = @["trace", "--out-dir", traceFolder].concat(backendArgs)
     of LangPythonDb:
       if vmExe.len == 0:
         echo "error: python interpreter not provided while trying to start recorder"

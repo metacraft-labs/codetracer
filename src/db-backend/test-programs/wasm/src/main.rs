@@ -1,7 +1,7 @@
 // Simple Rust/WASM program for flow/omniscience integration testing.
 //
 // Compiled with `cargo build --target wasm32-wasip1` (debug mode with DWARF).
-// Recorded by wazero: `wazero run --trace-dir <dir> <wasm>`.
+// Recorded by wazero: `wazero run --out-dir <dir> <wasm>`.
 //
 // The computation matches the other language flow test programs:
 //   a=10, b=32, sum_val=42, doubled=84, final_result=94

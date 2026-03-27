@@ -4,7 +4,7 @@
 //! extracts variables and filters out function calls when loading flow data
 //! for Rust programs compiled to WASM and recorded by wazero.
 //!
-//! WASM programs use DB-based traces produced by `wazero run --trace-dir`,
+//! WASM programs use DB-based traces produced by `wazero run --out-dir`,
 //! so this test does NOT require `ct-rr-support` or `rr`.
 //!
 //! Prerequisites:

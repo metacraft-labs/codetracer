@@ -101,8 +101,10 @@ fn check_prerequisites() -> bool {
 
 /// Build the Stylus contract WASM binary.
 fn build_stylus_wasm(project_dir: &Path) -> Result<PathBuf, String> {
+    // Build in debug mode to preserve DWARF symbols for source-level stepping.
+    // The `ct arb deploy` command (deploy.nim) also uses debug builds for the same reason.
     let output = Command::new("cargo")
-        .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
+        .args(["build", "--target", "wasm32-unknown-unknown"])
         .current_dir(project_dir)
         .output()
         .map_err(|e| format!("failed to build Stylus contract: {}", e))?;
@@ -115,7 +117,7 @@ fn build_stylus_wasm(project_dir: &Path) -> Result<PathBuf, String> {
         ));
     }
 
-    let wasm_path = project_dir.join("target/wasm32-unknown-unknown/release/stylus_fund_tracking_demo.wasm");
+    let wasm_path = project_dir.join("target/wasm32-unknown-unknown/debug/stylus_fund_tracking_demo.wasm");
     if !wasm_path.exists() {
         return Err(format!("WASM binary not found at {}", wasm_path.display()));
     }
