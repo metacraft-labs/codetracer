@@ -29,6 +29,10 @@ fn get_stylus_fixture_dir() -> PathBuf {
 /// actual source paths. This is necessary because the fixture was recorded on a
 /// specific machine and the DAP server resolves breakpoints by matching against
 /// `trace_paths.json` entries.
+/// The hardcoded path embedded in the fixture's trace.json and trace_paths.json
+/// from the original recording machine.
+const FIXTURE_ORIGINAL_SOURCE: &str = "/home/zahary/metacraft/codetracer/test-programs/stylus_fund_tracker/src/lib.rs";
+
 fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
     let tmp_dir = std::env::temp_dir().join(format!("stylus-fixture-{}", std::process::id()));
     if tmp_dir.exists() {
@@ -36,19 +40,27 @@ fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
     }
     fs::create_dir_all(&tmp_dir).expect("failed to create temp fixture dir");
 
-    // Copy all fixture files.
+    // Compute the canonical actual source path for this checkout.
+    let actual_source = project_path
+        .join("src/lib.rs")
+        .canonicalize()
+        .expect("failed to canonicalize source path");
+    let actual_source_str = actual_source.to_str().unwrap();
+
+    // Copy fixture files, rewriting any embedded hardcoded paths.
+    // Both trace.json (Path entries) and trace_paths.json contain the
+    // recording-time absolute path that must match the current checkout.
     for entry in fs::read_dir(fixture_dir).expect("failed to read fixture dir") {
         let entry = entry.expect("failed to read dir entry");
         let dest = tmp_dir.join(entry.file_name());
-        fs::copy(entry.path(), &dest).expect("failed to copy fixture file");
+        let content = fs::read_to_string(entry.path()).unwrap_or_default();
+        if content.contains(FIXTURE_ORIGINAL_SOURCE) {
+            let rewritten = content.replace(FIXTURE_ORIGINAL_SOURCE, actual_source_str);
+            fs::write(&dest, rewritten).expect("failed to write rewritten fixture file");
+        } else {
+            fs::copy(entry.path(), &dest).expect("failed to copy fixture file");
+        }
     }
-
-    // Rewrite trace_paths.json: replace the old source path with the current one.
-    let trace_paths_file = tmp_dir.join("trace_paths.json");
-    let actual_source = project_path.join("src/lib.rs");
-    let new_paths =
-        serde_json::to_string(&vec![actual_source.to_str().unwrap()]).expect("failed to serialize trace_paths");
-    fs::write(&trace_paths_file, new_paths).expect("failed to write trace_paths.json");
 
     tmp_dir
 }
@@ -89,15 +101,18 @@ fn stylus_flow_dap_variables() {
     // Diagnostic: verify the rewrite happened.
     let rewritten_paths = fs::read_to_string(working_fixture.join("trace_paths.json"))
         .expect("failed to read rewritten trace_paths.json");
+    let canonical_source = breakpoint_source
+        .canonicalize()
+        .expect("failed to canonicalize breakpoint source");
     println!("Working fixture: {}", working_fixture.display());
     println!("Rewritten trace_paths.json: {rewritten_paths}");
-    println!("Breakpoint source: {}", breakpoint_source.display());
+    println!("Breakpoint source (canonical): {}", canonical_source.display());
 
     // We expect `pari` to be visible at line 59 (inside fund()).
     // pari is U256, which the trace encodes as BigInt — FlowTestConfig.expected_values
     // only supports i64, so we verify variable presence but skip value comparison.
     let config = FlowTestConfig {
-        source_file: breakpoint_source.to_str().unwrap().to_string(),
+        source_file: canonical_source.to_str().unwrap().to_string(),
         breakpoint_line: 59,
         expected_variables: vec!["pari".to_string()],
         // Stylus macros (sol_storage!, #[public]) expand to generated code;
