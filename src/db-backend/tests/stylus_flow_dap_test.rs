@@ -46,6 +46,11 @@ fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
         .canonicalize()
         .expect("failed to canonicalize source path");
     let actual_source_str = actual_source.to_str().unwrap();
+    // On Windows, canonicalize() produces extended-length paths with a `\\?\`
+    // prefix (e.g. `\\?\D:\a\...`). The DAP server doesn't use this prefix
+    // when matching paths, so strip it to avoid breakpoint mismatches.
+    #[cfg(windows)]
+    let actual_source_str = actual_source_str.strip_prefix(r"\\?\").unwrap_or(actual_source_str);
 
     // Copy fixture files, rewriting any embedded hardcoded paths.
     // Both trace.json (Path entries) and trace_paths.json contain the
@@ -104,15 +109,21 @@ fn stylus_flow_dap_variables() {
     let canonical_source = breakpoint_source
         .canonicalize()
         .expect("failed to canonicalize breakpoint source");
+    let canonical_source_str = canonical_source.to_str().unwrap();
+    // Strip Windows extended-length path prefix (see prepare_fixture_copy).
+    #[cfg(windows)]
+    let canonical_source_str = canonical_source_str
+        .strip_prefix(r"\\?\")
+        .unwrap_or(canonical_source_str);
     println!("Working fixture: {}", working_fixture.display());
     println!("Rewritten trace_paths.json: {rewritten_paths}");
-    println!("Breakpoint source (canonical): {}", canonical_source.display());
+    println!("Breakpoint source (canonical): {canonical_source_str}");
 
     // We expect `pari` to be visible at line 59 (inside fund()).
     // pari is U256, which the trace encodes as BigInt — FlowTestConfig.expected_values
     // only supports i64, so we verify variable presence but skip value comparison.
     let config = FlowTestConfig {
-        source_file: canonical_source.to_str().unwrap().to_string(),
+        source_file: canonical_source_str.to_string(),
         breakpoint_line: 59,
         expected_variables: vec!["pari".to_string()],
         // Stylus macros (sol_storage!, #[public]) expand to generated code;
