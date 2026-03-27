@@ -7,7 +7,8 @@
 //! This test does NOT require a devnode — it works offline with the fixture.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
@@ -21,6 +22,35 @@ fn find_db_backend() -> PathBuf {
 fn get_stylus_fixture_dir() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.join("tests/fixtures/stylus-fund-trace")
+}
+
+/// Copy the fixture to a temp directory and rewrite `trace_paths.json` so that
+/// the hardcoded recording-time paths are replaced with the current checkout's
+/// actual source paths. This is necessary because the fixture was recorded on a
+/// specific machine and the DAP server resolves breakpoints by matching against
+/// `trace_paths.json` entries.
+fn prepare_fixture_copy(fixture_dir: &Path, project_path: &Path) -> PathBuf {
+    let tmp_dir = std::env::temp_dir().join(format!("stylus-fixture-{}", std::process::id()));
+    if tmp_dir.exists() {
+        fs::remove_dir_all(&tmp_dir).expect("failed to clean temp fixture dir");
+    }
+    fs::create_dir_all(&tmp_dir).expect("failed to create temp fixture dir");
+
+    // Copy all fixture files.
+    for entry in fs::read_dir(fixture_dir).expect("failed to read fixture dir") {
+        let entry = entry.expect("failed to read dir entry");
+        let dest = tmp_dir.join(entry.file_name());
+        fs::copy(entry.path(), &dest).expect("failed to copy fixture file");
+    }
+
+    // Rewrite trace_paths.json: replace the old source path with the current one.
+    let trace_paths_file = tmp_dir.join("trace_paths.json");
+    let actual_source = project_path.join("src/lib.rs");
+    let new_paths =
+        serde_json::to_string(&vec![actual_source.to_str().unwrap()]).expect("failed to serialize trace_paths");
+    fs::write(&trace_paths_file, new_paths).expect("failed to write trace_paths.json");
+
+    tmp_dir
 }
 
 /// Tier 2 (DAP flow): Verify the DAP server can load a Stylus trace fixture,
@@ -53,6 +83,9 @@ fn stylus_flow_dap_variables() {
         breakpoint_source.display()
     );
 
+    // Copy fixture and rewrite trace_paths.json to use current checkout paths.
+    let working_fixture = prepare_fixture_copy(&fixture_dir, &project_path);
+
     // We expect `pari` to be visible at line 59 (inside fund()).
     // pari is U256, which the trace encodes as BigInt — FlowTestConfig.expected_values
     // only supports i64, so we verify variable presence but skip value comparison.
@@ -68,7 +101,7 @@ fn stylus_flow_dap_variables() {
     };
 
     let mut runner =
-        FlowTestRunner::new_db_trace(&db_backend, &fixture_dir).expect("DAP init failed for Stylus fixture");
+        FlowTestRunner::new_db_trace(&db_backend, &working_fixture).expect("DAP init failed for Stylus fixture");
 
     match runner.run_and_verify(&config) {
         Ok(()) => {
@@ -85,4 +118,7 @@ fn stylus_flow_dap_variables() {
     }
 
     runner.finish().expect("disconnect failed");
+
+    // Clean up temp fixture.
+    let _ = fs::remove_dir_all(&working_fixture);
 }

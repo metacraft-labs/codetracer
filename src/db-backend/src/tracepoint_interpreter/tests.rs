@@ -244,7 +244,7 @@ fn record_noir_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
         return Err("nargo not found on PATH".into());
     }
     let result = Command::new("nargo")
-        .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
+        .args(["trace", "--trace-dir", target_dir.to_str().unwrap()])
         .current_dir(program_dir)
         .output()
         .unwrap();

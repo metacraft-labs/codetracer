@@ -1,7 +1,6 @@
 [book]
 authors = ["CodeTracer team"]
 language = "en"
-multilingual = false
 src = "src"
 title = "codetracer docs"
 
