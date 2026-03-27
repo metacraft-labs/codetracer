@@ -1644,7 +1644,7 @@ fn record_noir_trace(project_dir: &Path, trace_dir: &Path) -> Result<(), String>
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
     let output = Command::new("nargo")
-        .args(["trace", "--trace-dir", trace_dir.to_str().unwrap()])
+        .args(["trace", "--out-dir", trace_dir.to_str().unwrap()])
         .current_dir(project_dir)
         .output()
         .map_err(|e| format!("failed to run nargo trace: {}", e))?;
