@@ -258,6 +258,7 @@ src/db-backend/test-programs/*/Cargo.lock
 src/libs
 src/tup.config
 .nix/
+node-packages/
 /sub-agent-report-*.txt
 .tmp/
 .tools/
