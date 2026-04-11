@@ -5395,7 +5395,7 @@ impl BackendManager {
             let mut opts = dap_init::DapLaunchOptions::default();
             let needs_rr_support = trace_path.join("rr").is_dir()
                 || trace_path.join("ttd-trace-manifest.json").is_file()
-                || trace_path.extension().map_or(false, |ext| ext == "ct")
+                || trace_path.extension().is_some_and(|ext| ext == "ct")
                 || has_ctfs_magic(&trace_path);
             if needs_rr_support {
                 let rr_support_cmd = std::env::var("CODETRACER_CT_RR_SUPPORT_CMD")

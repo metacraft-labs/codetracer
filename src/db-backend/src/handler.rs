@@ -202,7 +202,10 @@ impl Handler {
 
     fn load_location(&self, step_id: StepId) -> Location {
         let step_id_int = step_id.0;
-        let step_record = self.reader.step(step_id).expect("load_location: invalid step_id");
+        let Some(step_record) = self.reader.step(step_id) else {
+            error!("load_location: invalid step_id {:?}", step_id);
+            return Location::new("", NO_POSITION, RRTicks(step_id_int), "<unknown>", "-1", "-1", 0);
+        };
         let path = format!(
             "{}",
             self.reader
@@ -217,9 +220,16 @@ impl Handler {
         assert!(call_key_int >= 0);
 
         let function_name = if step_record.call_key != NO_KEY {
-            let call = self.reader.call(call_key).expect("load_location: invalid call_key");
-            let function = self.reader.function(call.function_id).expect("load_location: invalid function_id");
-            function.name.clone()
+            let name = self.reader.call(call_key)
+                .and_then(|call| self.reader.function(call.function_id))
+                .map(|function| function.name.clone());
+            match name {
+                Some(n) => n,
+                None => {
+                    error!("load_location: invalid call_key or function_id for call_key {:?}", call_key);
+                    "<unknown>".to_string()
+                }
+            }
         } else {
             "<unknown>".to_string()
         };
@@ -296,7 +306,8 @@ impl Handler {
                     //   this internal one: for which kinds do we produce dap events
                     #[allow(clippy::collapsible_if)]
                     if event.kind == EventLogKind::Write {
-                        let step = *self.reader.step(event.step_id).expect("prepare_output_events: invalid step_id");
+                        let step = *self.reader.step(event.step_id)
+                            .ok_or_else(|| format!("prepare_output_events: invalid step_id {:?}", event.step_id))?;
                         info!("generate output event");
                         let raw_output_event = self.dap_client.output_event(
                             "stdout",
@@ -495,7 +506,7 @@ impl Handler {
 
     fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
         let call_key = self.reader.call_key_for_step(self.step_id)
-            .expect("load_local_calltrace: invalid step_id");
+            .ok_or_else(|| format!("load_local_calltrace: invalid step_id {:?}", self.step_id))?;
         self.calltrace.optimize_collapse = args.optimize_collapse;
         if call_key != self.calltrace.start_call_key {
             // When not auto-collapsing (e.g. Python API bridge), pass the
@@ -636,7 +647,9 @@ impl Handler {
         if depth < depth_limit && db_call.key.0 >= 0 {
             for child_call_id in &db_call.children_keys {
                 assert!(child_call_id.0 >= 0);
-                let child_db_call = self.reader.call(*child_call_id).expect("to_ct_calltrace_call: invalid child call_key").clone();
+                let child_db_call = self.reader.call(*child_call_id)
+                    .ok_or_else(|| format!("to_ct_calltrace_call: invalid child call_key {:?}", child_call_id))?
+                    .clone();
                 let (child_call, child_call_count) = self.to_ct_calltrace_call(
                     &child_db_call,
                     depth + 1,
@@ -1099,8 +1112,8 @@ impl Handler {
         // TODO: eventually expose slice index? not obvious if easy
         // for now this is not often
         for step in self.reader.steps_from(self.step_id) {
-            let call = self.reader.call(step.call_key).expect("get_call_target: invalid call_key");
-            let function = self.reader.function(call.function_id).expect("get_call_target: invalid function_id");
+            let call = self.reader.call(step.call_key)?;
+            let function = self.reader.function(call.function_id)?;
             if loc.token == function.name {
                 line = function.line;
                 path_id = function.path_id;
@@ -1801,18 +1814,23 @@ impl Handler {
         Ok(())
     }
 
-    fn load_steps_for_call(&mut self, call_key: CallKey) -> IndexMap<i64, StepId> {
+    fn load_steps_for_call(&mut self, call_key: CallKey) -> Result<IndexMap<i64, StepId>, Box<dyn Error>> {
         let mut list: IndexMap<i64, StepId> = IndexMap::default();
-        let db_call = self.reader.call(call_key).expect("load_steps_for_call: invalid call_key").clone();
-        let function_step = *self.reader.step(db_call.step_id).expect("load_steps_for_call: invalid step_id");
+        let db_call = self.reader.call(call_key)
+            .ok_or_else(|| format!("load_steps_for_call: invalid call_key {:?}", call_key))?
+            .clone();
+        let function_step = *self.reader.step(db_call.step_id)
+            .ok_or_else(|| format!("load_steps_for_call: invalid step_id {:?}", db_call.step_id))?;
         let location = self.load_location(db_call.step_id);
         let function_location = self
             .flow_preloader
             .expr_loader
             .find_function_location(&location, &function_step.line);
         for line in function_location.function_first..function_location.function_last {
-            let function_id = self.reader.function(db_call.function_id).expect("load_steps_for_call: invalid function_id");
-            let step_map = self.reader.step_map_for_path(function_id.path_id).expect("load_steps_for_call: missing step_map");
+            let function_id = self.reader.function(db_call.function_id)
+                .ok_or_else(|| format!("load_steps_for_call: invalid function_id {:?}", db_call.function_id))?;
+            let step_map = self.reader.step_map_for_path(function_id.path_id)
+                .ok_or_else(|| format!("load_steps_for_call: missing step_map for path_id {:?}", function_id.path_id))?;
             if let Some(steps) = step_map.get(&(line as usize)) {
                 for step in steps {
                     if step.call_key == call_key {
@@ -1831,7 +1849,7 @@ impl Handler {
                 list.insert(line, StepId(-1));
             }
         }
-        list
+        Ok(list)
     }
 
     pub fn load_asm_function(
@@ -1844,10 +1862,11 @@ impl Handler {
         match args.key.parse::<i64>() {
             Ok(number) => {
                 let call_key = CallKey(number);
-                let interesting_steps = self.load_steps_for_call(call_key);
+                let interesting_steps = self.load_steps_for_call(call_key)?;
                 for (line, step_id) in interesting_steps.iter() {
                     if step_id.0 != NO_STEP_ID {
-                        let current_step = *self.reader.step(*step_id).expect("load_asm_function: invalid step_id");
+                        let current_step = *self.reader.step(*step_id)
+                            .ok_or_else(|| format!("load_asm_function: invalid step_id {:?}", step_id))?;
                         if let Some(asm_instructions) = self.reader.instructions_at(*step_id) {
                             if asm_instructions.is_empty() {
                                 instructions.push(Instruction::empty(
@@ -1868,8 +1887,12 @@ impl Handler {
                             }
                         }
                     } else {
-                        let fn_id = self.reader.call(call_key).expect("load_asm_function: invalid call_key").function_id;
-                        let fn_path_id = self.reader.function(fn_id).expect("load_asm_function: invalid function_id").path_id;
+                        let fn_id = self.reader.call(call_key)
+                            .ok_or_else(|| format!("load_asm_function: invalid call_key {:?}", call_key))?
+                            .function_id;
+                        let fn_path_id = self.reader.function(fn_id)
+                            .ok_or_else(|| format!("load_asm_function: invalid function_id {:?}", fn_id))?
+                            .path_id;
                         instructions.push(Instruction::empty(
                             *line,
                             self.reader.path(fn_path_id).unwrap_or(""),
@@ -1995,7 +2018,24 @@ impl Handler {
     fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
         let step_id_int = event_record.step_id.0;
         let (path, line) = if step_id_int != NO_INDEX {
-            let step_record = self.reader.step(event_record.step_id).expect("to_program_event: invalid step_id");
+            let Some(step_record) = self.reader.step(event_record.step_id) else {
+                error!("to_program_event: invalid step_id {:?}", event_record.step_id);
+                return ProgramEvent {
+                    kind: event_record.kind,
+                    content: event_record.content.clone(),
+                    bytes: event_record.content.len(),
+                    rr_event_id: index,
+                    direct_location_rr_ticks: step_id_int,
+                    metadata: event_record.metadata.to_string(),
+                    stdout: true,
+                    event_index: index,
+                    tracepoint_result_index: NO_INDEX,
+                    high_level_path: NO_PATH.to_string(),
+                    high_level_line: NO_POSITION,
+                    base64_encoded: false,
+                    max_rr_ticks: 0,
+                };
+            };
             (
                 self.reader
                     .workdir()
@@ -2054,8 +2094,8 @@ impl Handler {
         //   or a new kind of index?
         // TODO(Phase 4): migrate to_call and load_location to TraceReader or free function
         let call = self.db.to_call(call_record, &mut self.expr_loader);
-        let current_call_key = self.reader.step(self.step_id).expect("produce_stack_frame: invalid step_id").call_key;
-        let location = if call_record.key == current_call_key {
+        let current_call_key = self.reader.step(self.step_id).map(|s| s.call_key);
+        let location = if Some(call_record.key) == current_call_key {
             self.db
                 .load_location(self.step_id, call_record.key, &mut self.expr_loader)
         } else {
@@ -2206,8 +2246,10 @@ impl Handler {
             self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![] }, sender)?;
             return Ok(());
         }
-        let call = self.reader.call(CallKey(arg.frame_id)).expect("load_dap_scopes: invalid call_key");
-        let function = self.reader.function(call.function_id).expect("load_dap_scopes: invalid function_id");
+        let call = self.reader.call(CallKey(arg.frame_id))
+            .ok_or_else(|| format!("load_dap_scopes: invalid call_key {:?}", arg.frame_id))?;
+        let function = self.reader.function(call.function_id)
+            .ok_or_else(|| format!("load_dap_scopes: invalid function_id {:?}", call.function_id))?;
         let scope = dap_types::Scope {
             name: function.name.clone(),
             presentation_hint: Some("locals".to_string()),

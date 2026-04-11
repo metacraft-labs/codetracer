@@ -286,7 +286,7 @@ impl CtfsReader {
         }
 
         let mut result = Vec::with_capacity(entry.size as usize);
-        let total_data_blocks = (entry.size as usize + self.block_size - 1) / self.block_size;
+        let total_data_blocks = (entry.size as usize).div_ceil(self.block_size);
 
         // Read data blocks by walking the mapping hierarchy.
         for block_index in 0..total_data_blocks {
@@ -474,7 +474,7 @@ pub fn write_minimal_ctfs(
         let num_data_blocks = if data.is_empty() {
             0
         } else {
-            (data.len() + block_size - 1) / block_size
+            data.len().div_ceil(block_size)
         };
 
         let map_block = if data.is_empty() {
