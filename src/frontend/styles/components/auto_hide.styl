@@ -56,6 +56,23 @@
   border-top: 1px solid PRIMARY_BASE
 
 // ---------------------------------------------------------------------------
+// Adaptive strip sizing (M12: Fitts' Law edge bounding)
+// ---------------------------------------------------------------------------
+// When the window edge coincides with the screen boundary the mouse cursor
+// naturally stops at the edge, so the activation strip can be very thin
+// (3px).  When there is space beyond the edge (floating window or adjacent
+// monitor), we keep the default 28px width so the user can hit the target
+// comfortably.  The Nim code toggles the `auto-hide-strip-bounded` class
+// per-edge based on runtime window/screen geometry.
+
+.auto-hide-strip-bounded
+  &.auto-hide-strip-left,
+  &.auto-hide-strip-right
+    width: 3px
+  &.auto-hide-strip-bottom
+    height: 3px
+
+// ---------------------------------------------------------------------------
 // Individual tab
 // ---------------------------------------------------------------------------
 
@@ -154,10 +171,12 @@
   transition: transform 0.2s ease-out
 
   // Overlay from left edge — slides in from behind the left strip.
+  // The inset uses a CSS variable so it tracks the adaptive strip width
+  // set by the M12 edge-bounding logic in auto_hide.nim.
   &.auto-hide-overlay-left
     top: 0
     bottom: 0
-    left: 28px
+    left: var(--auto-hide-strip-left, 28px)
     transform: translateX(-100%)
     &.auto-hide-overlay-visible
       transform: translateX(0)
@@ -166,7 +185,7 @@
   &.auto-hide-overlay-right
     top: 0
     bottom: 0
-    right: 28px
+    right: var(--auto-hide-strip-right, 28px)
     transform: translateX(100%)
     &.auto-hide-overlay-visible
       transform: translateX(0)
@@ -175,7 +194,7 @@
   &.auto-hide-overlay-bottom
     left: 0
     right: 0
-    bottom: 28px
+    bottom: var(--auto-hide-strip-bottom, 28px)
     transform: translateY(100%)
     &.auto-hide-overlay-visible
       transform: translateY(0)

@@ -27,6 +27,26 @@ const AutoHideStorageKey = cstring"codetracer-auto-hide-state"
 # JS timer bindings used for hover delay and dismiss grace period.
 proc jsSetTimeout(callback: proc(); delay: int): int {.importjs: "setTimeout(#, #)".}
 proc jsClearTimeout(timerId: int) {.importjs: "clearTimeout(#)".}
+proc jsSetInterval(callback: proc(); interval: int): int {.importjs: "setInterval(#, #)".}
+
+# ---------------------------------------------------------------------------
+# Window / screen geometry FFI (M12: adaptive strip sizing)
+# ---------------------------------------------------------------------------
+# These map to standard Web API properties available in the Electron renderer
+# process.  They let us detect whether a window edge coincides with the
+# screen boundary without IPC to the main process.
+
+proc windowScreenX(): int {.importjs: "window.screenX".}
+proc windowScreenY(): int {.importjs: "window.screenY".}
+proc windowOuterWidth(): int {.importjs: "window.outerWidth".}
+proc windowOuterHeight(): int {.importjs: "window.outerHeight".}
+proc screenAvailWidth(): int {.importjs: "screen.availWidth".}
+proc screenAvailHeight(): int {.importjs: "screen.availHeight".}
+proc screenAvailLeft(): int {.importjs: "(screen.availLeft || 0)".}
+proc screenAvailTop(): int {.importjs: "(screen.availTop || 0)".}
+
+proc styleSetProperty(el: Element, name: cstring, value: cstring) {.importjs: "#.style.setProperty(#, #)".}
+  ## Set a CSS custom property (variable) on an element's inline style.
 
 # ---------------------------------------------------------------------------
 # GoldenLayout FFI for detach / attach
@@ -271,11 +291,75 @@ const
   # cursor "near" the edge during a drag.
   EdgeThresholdPx = 60
 
+  # M12: CSS class applied to strips whose edge is bounded by the screen
+  # boundary (Fitts' Law — the mouse stops at the screen edge, so the
+  # activation zone can be very thin).
+  StripBoundedClass = "auto-hide-strip-bounded"
+
+  # M12: Strip width in pixels when the edge is bounded vs unbounded.
+  BoundedStripPx  = 3
+  DefaultStripPx  = 28
+
+  # M12: Tolerance in pixels for screen-edge detection.  A small tolerance
+  # accounts for rounding and OS-specific insets.
+  EdgeBoundTolerance = 4
+
 proc edgeStripClass(edge: AutoHideEdge): cstring =
-  case edge
-  of Left:   cstring(StripClass & " " & StripLeftClass)
-  of Right:  cstring(StripClass & " " & StripRightClass)
-  of Bottom: cstring(StripClass & " " & StripBottomClass)
+  ## Return the CSS class list for a strip element, including the bounded
+  ## modifier when M12 edge-bounding detects the edge is at the screen boundary.
+  let base = case edge
+    of Left:   StripClass & " " & StripLeftClass
+    of Right:  StripClass & " " & StripRightClass
+    of Bottom: StripClass & " " & StripBottomClass
+  if edgeBounded[edge]:
+    cstring(base & " " & StripBoundedClass)
+  else:
+    cstring(base)
+
+# ---------------------------------------------------------------------------
+# M12: Adaptive strip sizing — detect bounded edges
+# ---------------------------------------------------------------------------
+
+proc updateEdgeBounding() =
+  ## Check which window edges coincide with the screen work-area boundary.
+  ##
+  ## When an edge is "bounded" (i.e. the window extends to the screen edge),
+  ## the mouse cursor physically stops at the screen boundary (Fitts' Law),
+  ## so a very thin activation strip (3 px) is sufficient.  When the edge is
+  ## "unbounded" (floating window, adjacent monitor) we keep the default
+  ## 28 px strip so it is easy to target.
+  ##
+  ## Updates the ``edgeBounded`` array and refreshes strip CSS classes and
+  ## the CSS custom properties used by the overlay inset.
+  let winX = windowScreenX()
+  let winY = windowScreenY()
+  let winW = windowOuterWidth()
+  let winH = windowOuterHeight()
+  let scrW = screenAvailWidth()
+  let scrH = screenAvailHeight()
+  let scrLeft = screenAvailLeft()
+  let scrTop  = screenAvailTop()
+
+  edgeBounded[Left]   = (winX - scrLeft) <= EdgeBoundTolerance
+  edgeBounded[Right]  = (scrLeft + scrW) - (winX + winW) <= EdgeBoundTolerance
+  edgeBounded[Bottom] = (scrTop + scrH) - (winY + winH) <= EdgeBoundTolerance
+
+  # Update strip element CSS classes to reflect bounded state.
+  if stripsCreated:
+    for edge in AutoHideEdge:
+      stripElements[edge].class = edgeStripClass(edge)
+
+    # Set CSS custom properties on the session container so the overlay
+    # positioning (via var(--auto-hide-strip-*)) tracks the current strip
+    # widths without hard-coded pixel values in the stylesheet.
+    let container = document.getElementById("session-container-0")
+    if not container.isNil:
+      let leftPx  = if edgeBounded[Left]:   BoundedStripPx else: DefaultStripPx
+      let rightPx = if edgeBounded[Right]:  BoundedStripPx else: DefaultStripPx
+      let botPx   = if edgeBounded[Bottom]: BoundedStripPx else: DefaultStripPx
+      styleSetProperty(container, cstring"--auto-hide-strip-left",   cstring($leftPx & "px"))
+      styleSetProperty(container, cstring"--auto-hide-strip-right",  cstring($rightPx & "px"))
+      styleSetProperty(container, cstring"--auto-hide-strip-bottom", cstring($botPx & "px"))
 
 # ---------------------------------------------------------------------------
 # M8: Edge indicators — shown during drag when cursor nears an edge
@@ -371,6 +455,11 @@ var
   # ``dragExternalDrop`` handler knows where to place the panel.
   lastDragEdge*: AutoHideEdge = Bottom
   dragNearEdge*: bool = false
+
+  # M12: Per-edge bounding state.  True when the window edge coincides with
+  # the screen boundary (mouse can't overshoot → thin strip is fine).
+  edgeBounded: array[AutoHideEdge, bool]
+  boundingCheckStarted = false
 
 proc clearChildren(el: Element) =
   ## Remove all child nodes from an element.
@@ -620,6 +709,11 @@ proc refreshAllStrips*(state: AutoHideState) =
   ## stay in sync with the current auto-hide panel set and active overlay.
   if not stripsCreated:
     return
+
+  # M12: Re-evaluate which edges are bounded before rebuilding strips, so
+  # the strip class list (and overlay inset CSS vars) are up-to-date.
+  updateEdgeBounding()
+
   for edge in AutoHideEdge:
     refreshStrip(state, edge)
 
@@ -783,6 +877,26 @@ proc setupStripElements*(state: AutoHideState) =
           hideOverlay(state)
           refreshAllStrips(state)
     )
+
+  # -------------------------------------------------------------------------
+  # M12: Window resize and periodic checks for edge-bounding changes
+  # -------------------------------------------------------------------------
+  # Electron fires "resize" on the renderer window when the OS window is
+  # resized or maximized.  It does NOT fire a "move" event, so we also poll
+  # every 2 seconds to catch window drags that change which edges are
+  # bounded.
+
+  if not boundingCheckStarted:
+    boundingCheckStarted = true
+
+    window.addEventListener("resize", proc(ev: Event) =
+      updateEdgeBounding()
+    )
+
+    # Periodic fallback: catches window moves that don't trigger resize.
+    discard jsSetInterval(proc() =
+      updateEdgeBounding()
+    , 2000)
 
   refreshAllStrips(state)
 
