@@ -221,3 +221,39 @@
   right: 0
   bottom: 0
   overflow: auto
+
+// ---------------------------------------------------------------------------
+// Drag-to-edge indicators (M8)
+// ---------------------------------------------------------------------------
+// Shown during GL drag operations when the cursor nears a container edge.
+// These are pointer-events:none overlays that hint where the panel will
+// land if the user drops it.
+
+.auto-hide-indicator
+  position: absolute
+  z-index: 8
+  background: rgba(86, 86, 86, 0.15)
+  border: 2px dashed PRIMARY_BASE
+  display: none
+  pointer-events: none
+
+.auto-hide-indicator-left
+  @extend .auto-hide-indicator
+  top: 0
+  bottom: 0
+  left: 0
+  width: 50px
+
+.auto-hide-indicator-right
+  @extend .auto-hide-indicator
+  top: 0
+  bottom: 0
+  right: 0
+  width: 50px
+
+.auto-hide-indicator-bottom
+  @extend .auto-hide-indicator
+  left: 0
+  right: 0
+  bottom: 0
+  height: 50px

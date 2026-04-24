@@ -11,7 +11,7 @@
 ## GoldenLayout rendering pipelines.
 
 import
-  std/[jsffi, dom],
+  std/[jsffi, dom, math],
   ../types
 
 # JS timer bindings used for hover delay and dismiss grace period.
@@ -114,11 +114,87 @@ const
   # Grace period (ms) before the overlay auto-dismisses on mouse-leave.
   DismissGraceMs = 300
 
+  # M8: Edge indicator CSS class names (keep in sync with auto_hide.styl).
+  IndicatorLeftClass    = "auto-hide-indicator-left"
+  IndicatorRightClass   = "auto-hide-indicator-right"
+  IndicatorBottomClass  = "auto-hide-indicator-bottom"
+
+  # Distance in pixels from the container edge at which we consider the
+  # cursor "near" the edge during a drag.
+  EdgeThresholdPx = 60
+
 proc edgeStripClass(edge: AutoHideEdge): cstring =
   case edge
   of Left:   cstring(StripClass & " " & StripLeftClass)
   of Right:  cstring(StripClass & " " & StripRightClass)
   of Bottom: cstring(StripClass & " " & StripBottomClass)
+
+# ---------------------------------------------------------------------------
+# M8: Edge indicators — shown during drag when cursor nears an edge
+# ---------------------------------------------------------------------------
+
+proc showEdgeIndicator*(edge: AutoHideEdge) =
+  ## Make the indicator for the given edge visible; hide the others.
+  if not indicatorsCreated:
+    return
+  for e in AutoHideEdge:
+    if e == edge:
+      indicatorElements[e].style.display = "block"
+    else:
+      indicatorElements[e].style.display = "none"
+
+proc hideAllEdgeIndicators*() =
+  ## Hide all edge indicators.
+  if not indicatorsCreated:
+    return
+  for e in AutoHideEdge:
+    indicatorElements[e].style.display = "none"
+
+type DragEdgeResult* = tuple[edge: AutoHideEdge, near: bool]
+
+proc detectNearestEdge*(x, y: float): DragEdgeResult =
+  ## Determine which edge (if any) the cursor at ``(x, y)`` is close to.
+  ## Returns the nearest edge and whether the cursor is within the threshold.
+  ##
+  ## Uses the bounding rect of ``#session-container-0`` as the reference frame.
+  let container = document.getElementById("session-container-0")
+  if container.isNil:
+    return (edge: Bottom, near: false)
+
+  let rect = container.getBoundingClientRect()
+
+  let distLeft   = x - rect.left
+  let distRight  = rect.right - x
+  let distBottom = rect.bottom - y
+
+  # Check each edge against the threshold.  When multiple edges are within
+  # range (e.g. the bottom-left corner), prefer the one with the smallest
+  # distance.
+  var minDist = Inf
+  var bestEdge = Bottom
+  var nearAny = false
+
+  if distLeft < EdgeThresholdPx.float and distLeft < minDist:
+    minDist = distLeft
+    bestEdge = Left
+    nearAny = true
+
+  if distRight < EdgeThresholdPx.float and distRight < minDist:
+    minDist = distRight
+    bestEdge = Right
+    nearAny = true
+
+  if distBottom < EdgeThresholdPx.float and distBottom < minDist:
+    minDist = distBottom
+    bestEdge = Bottom
+    nearAny = true
+
+  # Update the module-level drag state so that the dragExternalDrop handler
+  # in layout.nim can read it.
+  lastDragEdge = bestEdge
+  dragNearEdge = nearAny
+
+  return (edge: bestEdge, near: nearAny)
 
 # ---------------------------------------------------------------------------
 # DOM management — forward declarations
@@ -138,6 +214,15 @@ var
   overlayPinBtn: Element   ## Pin / unpin toggle button.
   dismissTimerId: int = 0  ## Grace timer for mouse-leave dismissal.
   escListenerInstalled = false
+
+  # M8: Edge indicator elements shown during GL drag-to-edge operations.
+  indicatorElements: array[AutoHideEdge, Element]
+  indicatorsCreated = false
+
+  # M8: Track the most recently detected edge during a drag so the
+  # ``dragExternalDrop`` handler knows where to place the panel.
+  lastDragEdge*: AutoHideEdge = Bottom
+  dragNearEdge*: bool = false
 
 proc clearChildren(el: Element) =
   ## Remove all child nodes from an element.
@@ -401,6 +486,24 @@ proc setupStripElements*(state: AutoHideState) =
     el.style.display = "none"  # hidden by default (no panels)
     stripElements[edge] = el
     sessionContainer.appendChild(el)
+
+  # -------------------------------------------------------------------------
+  # M8: Edge indicator elements — thin highlight bars shown during drag.
+  # -------------------------------------------------------------------------
+
+  if not indicatorsCreated:
+    indicatorsCreated = true
+    let indicatorClasses: array[AutoHideEdge, cstring] = [
+      cstring(IndicatorLeftClass),
+      cstring(IndicatorRightClass),
+      cstring(IndicatorBottomClass)
+    ]
+    for edge in AutoHideEdge:
+      let ind = document.createElement("div")
+      ind.class = indicatorClasses[edge]
+      # Hidden by default; shown by showEdgeIndicator during drag.
+      indicatorElements[edge] = ind
+      sessionContainer.appendChild(ind)
 
   # -------------------------------------------------------------------------
   # Overlay elements — a single shared overlay that slides in over the GL area.

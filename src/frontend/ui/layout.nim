@@ -628,6 +628,63 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
     data.ui.saveLayout = true
 
+  # -------------------------------------------------------------------------
+  # M8: Drag-to-edge auto-hide handlers
+  # -------------------------------------------------------------------------
+  # Show edge indicators when a GL component is dragged near a container edge,
+  # and auto-hide the component when it is dropped outside all GL stacks.
+
+  layout.on(cstring"dragMove") do (x: js, y: js, componentItem: js):
+    let fx = x.to(float)
+    let fy = y.to(float)
+    let result = detectNearestEdge(fx, fy)
+    if result.near:
+      showEdgeIndicator(result.edge)
+    else:
+      hideAllEdgeIndicators()
+
+  layout.on(cstring"dragExternalDrop") do (componentItem: js, claimCallback: js):
+    # Always hide indicators when a drag ends.
+    hideAllEdgeIndicators()
+
+    # Only claim the drop if the cursor was near an edge during the last
+    # dragMove event.
+    if not dragNearEdge:
+      return
+
+    # Claim the drop so GoldenLayout does not try to revert the component.
+    {.emit: "`claimCallback`(true);".}
+
+    let autoHideState = data.ui.autoHide
+    if autoHideState.isNil:
+      return
+
+    # Extract panel metadata from the dropped componentItem.
+    let config = componentItem.toConfig()
+    let componentState = config.componentState
+    let contentEnum = componentState.content.to(Content)
+    let title = if not componentState.label.isNil and not componentState.label.isUndefined:
+        componentState.label.to(cstring)
+      else:
+        cstring($contentEnum)
+
+    let edge = lastDragEdge
+
+    # Add the panel to the auto-hide strip on the detected edge.
+    let panel = autoHideState.addPanelAndRefresh(
+      edge,
+      title,
+      icon = cstring"",
+      contentEnum,
+      cast[JsObject](config)
+    )
+
+    # The componentItem has been removed from the GL tree by the drag system.
+    # Store the DOM element and the componentItem itself as the detached handle
+    # so that restorePanel can re-attach it later.
+    panel.detachedElement = cast[Element](componentItem.element)
+    panel.detachedHandle = cast[JsObject](componentItem)
+
 # Wire the initLayout proc into session_switch to break the circular
 # import dependency (layout -> session_tabs -> session_switch -> layout).
 setInitLayoutProc(initLayout)
