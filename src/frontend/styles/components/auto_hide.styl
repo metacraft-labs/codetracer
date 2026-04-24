@@ -257,3 +257,30 @@
   right: 0
   bottom: 0
   height: 50px
+
+// ---------------------------------------------------------------------------
+// Status bar toggle icons (M10)
+// ---------------------------------------------------------------------------
+// Small clickable icons rendered inside the Karax status bar for each
+// auto-hidden panel.  Clicking toggles the panel overlay, same as the
+// strip tabs.
+
+.auto-hide-status-icons
+  display: inline-flex
+  align-items: center
+  gap: 2px
+  margin-left: 8px
+  margin-right: 8px
+
+.auto-hide-status-icon
+  cursor: pointer
+  padding: 2px 6px
+  border-radius: 3px
+  font-size: 11px
+  color: HEADER_PANEL_COLOR
+  &:hover
+    color: PRIMARY_TEXT_COLOR
+    background: rgba(255, 255, 255, 0.1)
+  &.auto-hide-status-icon-active
+    color: PRIMARY_TEXT_COLOR
+    background: PRIMARY_BASE

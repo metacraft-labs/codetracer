@@ -12,6 +12,7 @@
 
 import
   std/[jsffi, dom, math],
+  karax,
   ../types
 
 # JS timer bindings used for hover delay and dismiss grace period.
@@ -504,6 +505,8 @@ proc refreshStrip(state: AutoHideState, edge: AutoHideEdge) =
 
 proc refreshAllStrips*(state: AutoHideState) =
   ## Re-render all three strip elements and synchronise overlay visibility.
+  ## Also triggers a redraw of the Karax status bar so the M10 toggle icons
+  ## stay in sync with the current auto-hide panel set and active overlay.
   if not stripsCreated:
     return
   for edge in AutoHideEdge:
@@ -512,6 +515,10 @@ proc refreshAllStrips*(state: AutoHideState) =
   # Drive overlay visibility based on activeOverlay state.
   if not state.activeOverlay.isNil:
     showOverlay(state, state.activeOverlay)
+
+  # M10: Notify the status bar so its auto-hide icons re-render.
+  if not data.ui.status.isNil and not data.ui.status.kxi.isNil:
+    redraw(data.ui.status.kxi)
 
 proc setupStripElements*(state: AutoHideState) =
   ## Create the strip DOM elements and the shared overlay container, then

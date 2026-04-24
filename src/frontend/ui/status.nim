@@ -2,7 +2,7 @@ import
   std/sequtils,
   ../communication,
   ../../common/ct_event,
-  ui_imports, flow, shell
+  ui_imports, flow, shell, auto_hide
 
 from editor import clearViewZones
 
@@ -540,6 +540,43 @@ method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   )
 
 
+proc autoHidePanelIcons(self: StatusComponent): VNode =
+  ## Render clickable icons in the status bar for each auto-hidden panel.
+  ## Clicking an icon toggles the panel's overlay, mirroring the strip tab
+  ## behaviour defined in auto_hide.nim.
+  let state = data.ui.autoHide
+  if state.isNil:
+    return buildHtml(span())
+
+  # Check whether there are any panels across all edges; skip the whole
+  # section when there is nothing to show so we do not render an empty
+  # container with margins.
+  var totalPanels = 0
+  for edge in AutoHideEdge:
+    totalPanels += state.panels[edge].len
+  if totalPanels == 0:
+    return buildHtml(span())
+
+  buildHtml(span(class = "auto-hide-status-icons")):
+    for edge in AutoHideEdge:
+      for panel in state.panels[edge]:
+        let isActive = not state.activeOverlay.isNil and
+                       state.activeOverlay.id == panel.id
+        let activeClass =
+          if isActive: " auto-hide-status-icon-active"
+          else: ""
+        # Capture the panel reference for the closure.
+        let capturedPanel = panel
+        span(
+          class = cstring("auto-hide-status-icon" & activeClass),
+          title = panel.title,
+          onclick = proc =
+            handleTabClick(state, capturedPanel)
+            # Trigger a status bar redraw so the active highlight updates.
+            self.redraw()
+        ):
+          span(class = panel.icon)
+
 method render*(self: StatusComponent): VNode =
   let statusExpanded = if self.build.expanded or self.errors.expanded: statusExpandedView(self) else: nil
   let statusClass = if self.build.expanded or self.errors.expanded: "status-with-expanded" else: ""
@@ -571,6 +608,7 @@ method render*(self: StatusComponent): VNode =
         span(class = "test-movement"):
           text $self.completeMoveId
       span(class = "status-right"):
+        autoHidePanelIcons(self)
         disconnectedBadge(self)
         locationView(self)
     if self.showNotifications:
