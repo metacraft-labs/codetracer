@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs,
-  session_switch, panel_transfer,
+  session_switch, panel_transfer, auto_hide,
   ../[ types, renderer, config ],
   ../lib/[ logging, misc_lib, jslib ]
 
@@ -229,6 +229,11 @@ proc ensureSharedRenderers() =
   data.ui.menu.kxi = kxiMap["menu"]
   data.ui.status.kxi = kxiMap["status"]
   data.ui.searchResults.kxi = kxiMap["search-results"]
+
+  # Auto-hide strips: initialise state and create the strip DOM elements
+  # alongside the GL container in the session container.
+  data.ui.autoHide = newAutoHideState()
+  setupStripElements(data.ui.autoHide)
 
 # Triage: rename to initGoldenLayout
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,

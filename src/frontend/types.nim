@@ -1552,6 +1552,24 @@ type
     index*: int
     config*: GoldenLayoutResolvedConfig
 
+  AutoHideEdge* = enum
+    Left, Right, Bottom
+
+  AutoHidePanel* = ref object
+    id*: int
+    edge*: AutoHideEdge
+    title*: cstring
+    icon*: cstring            ## CSS class for the tab icon (e.g. "fa fa-terminal")
+    content*: Content         ## CodeTracer content type
+    preferredSize*: float     ## fraction of window dimension (0.0-1.0)
+    componentConfig*: JsObject  ## serialised GL config for lazy instantiation
+
+  AutoHideState* = ref object
+    panels*: array[AutoHideEdge, seq[AutoHidePanel]]
+    activeOverlay*: AutoHidePanel  ## currently slid-in panel, or nil
+    overlayPinned*: bool
+    nextId*: int
+
   Components* = ref object
     welcomeScreen*:  WelcomeScreenComponent
     editors*:        JsAssoc[cstring, EditorViewComponent] # ast! ir kind etc
@@ -1592,6 +1610,7 @@ type
     initEventReceived*: bool
     focusHistory*: seq[JsObject]
     editModeHiddenPanels*: seq[EditModeHiddenPanel]
+    autoHide*: AutoHideState
 
 
   ClientActionHandler* = proc(actionData: JsObject): void {.nimcall.}

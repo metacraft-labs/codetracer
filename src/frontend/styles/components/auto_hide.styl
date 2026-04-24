@@ -1,0 +1,127 @@
+// Auto-hide strip styles.
+//
+// Three strips (left, right, bottom) sit at the edges of the session
+// container and hold tabs for panels that have been auto-hidden.  When no
+// panels are present the strip has zero dimensions (display: none is set
+// inline by the Nim code).
+//
+// Theme variables (BACKGROUND_COLOR, HEADER_PANEL_BACKGROUND_COLOR, etc.)
+// are defined in the theme stylus files and available here because this
+// file is imported from codetracer.styl after the theme is loaded.
+
+// ---------------------------------------------------------------------------
+// Shared strip base
+// ---------------------------------------------------------------------------
+
+.auto-hide-strip
+  position: absolute
+  z-index: 5
+  background-color: HEADER_PANEL_BACKGROUND_COLOR
+  overflow: hidden
+  // Transition for smooth show/hide if we later animate dimensions.
+  transition: width 150ms ease, height 150ms ease
+
+// ---------------------------------------------------------------------------
+// Edge-specific positioning
+// ---------------------------------------------------------------------------
+
+.auto-hide-strip-left
+  top: 0
+  left: 0
+  bottom: 0
+  width: 28px
+  display: flex
+  flex-direction: column
+  align-items: center
+  border-right: 1px solid PRIMARY_BASE
+
+.auto-hide-strip-right
+  top: 0
+  right: 0
+  bottom: 0
+  width: 28px
+  display: flex
+  flex-direction: column
+  align-items: center
+  border-left: 1px solid PRIMARY_BASE
+
+.auto-hide-strip-bottom
+  left: 0
+  right: 0
+  bottom: 0
+  height: 28px
+  display: flex
+  flex-direction: row
+  align-items: center
+  border-top: 1px solid PRIMARY_BASE
+
+// ---------------------------------------------------------------------------
+// Individual tab
+// ---------------------------------------------------------------------------
+
+.auto-hide-tab
+  display: flex
+  align-items: center
+  justify-content: center
+  cursor: pointer
+  user-select: none
+  color: HEADER_PANEL_COLOR
+  font-family: "SpaceGrotesk"
+  font-size: 12px
+  font-weight: 500
+  transition: background-color 150ms ease
+
+  &:hover
+    background-color: ACTIVE_ROW
+
+  &.auto-hide-tab-active
+    background-color: BACKGROUND_COLOR
+    color: PRIMARY_TEXT_COLOR
+
+// Tabs in vertical strips (left / right) are rotated and stacked vertically.
+.auto-hide-strip-left .auto-hide-tab,
+.auto-hide-strip-right .auto-hide-tab
+  writing-mode: vertical-lr
+  padding: 8px 4px
+  width: 100%
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+// Left strip text reads bottom-to-top for a natural reading direction.
+.auto-hide-strip-left .auto-hide-tab
+  transform: rotate(180deg)
+
+// Tabs in the horizontal bottom strip flow left to right.
+.auto-hide-strip-bottom .auto-hide-tab
+  padding: 4px 10px
+  height: 100%
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+// ---------------------------------------------------------------------------
+// Icon and title inside a tab
+// ---------------------------------------------------------------------------
+
+.auto-hide-tab-icon
+  font-size: 14px
+  flex-shrink: 0
+
+// Vertical strips: icon sits above title.
+.auto-hide-strip-left .auto-hide-tab-icon,
+.auto-hide-strip-right .auto-hide-tab-icon
+  margin-bottom: 4px
+
+// Horizontal strip: icon sits to the left of title.
+.auto-hide-strip-bottom .auto-hide-tab-icon
+  margin-right: 6px
+
+.auto-hide-tab-title
+  overflow: hidden
+  text-overflow: ellipsis
+
+// Vertical strips: constrain title length so it does not overflow.
+.auto-hide-strip-left .auto-hide-tab-title,
+.auto-hide-strip-right .auto-hide-tab-title
+  max-height: 100px
