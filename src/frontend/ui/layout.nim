@@ -353,6 +353,51 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     newElement.appendChild(hiddenDropdown)
     tabContainer.appendChild(newElement)
 
+    # M7: Subscribe to the pin event on each stack.  When the user clicks the
+    # pin button in a stack header, detach the active component and move it
+    # into the auto-hide strip.
+    let stack = ev.toJs.target
+    stack.on(cstring"pin") do ():
+      let activeItem = stack.getActiveContentItem()
+      if activeItem.isNil or activeItem.isUndefined:
+        return
+
+      # Detach the component from the GL tree.  Returns an object with
+      # {componentItem, config, element}.
+      let detached = detachChild(cast[JsObject](stack), cast[JsObject](activeItem))
+      if detached.isNil or detached.isUndefined:
+        return
+
+      # Determine content type and title from the component's config/state.
+      let config = detached.config
+      let componentState = config.componentState
+      let contentEnum = componentState.content.to(Content)
+      let title = if not componentState.label.isNil and not componentState.label.isUndefined:
+          componentState.label.to(cstring)
+        else:
+          cstring($contentEnum)
+
+      # Determine edge heuristic: use Bottom as default (most natural for
+      # non-editor panels).  A smarter heuristic can be added later.
+      let edge = Bottom
+
+      # Add to auto-hide strip.
+      let autoHideState = data.ui.autoHide
+      if autoHideState.isNil:
+        return
+
+      let panel = autoHideState.addPanelAndRefresh(
+        edge,
+        title,
+        icon = cstring"",   # no icon for now
+        contentEnum,
+        config
+      )
+
+      # Store the detached DOM element and handle for later reattachment.
+      panel.detachedElement = cast[Element](detached.element)
+      panel.detachedHandle = detached
+
   data.ui.layout = layout
   data.ui.layoutConfig = cast[GoldenLayoutConfigClass](window.toJs.LayoutConfig)
   data.ui.contentItemConfig = cast[GoldenLayoutItemConfigClass](window.toJs.ItemConfig)

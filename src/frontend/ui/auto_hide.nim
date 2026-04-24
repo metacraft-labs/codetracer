@@ -19,6 +19,16 @@ proc jsSetTimeout(callback: proc(); delay: int): int {.importjs: "setTimeout(#, 
 proc jsClearTimeout(timerId: int) {.importjs: "clearTimeout(#)".}
 
 # ---------------------------------------------------------------------------
+# GoldenLayout FFI for detach / attach
+# ---------------------------------------------------------------------------
+
+proc detachChild*(stack: JsObject, item: JsObject): JsObject {.importjs: "#.detachChild(#)".}
+proc attachChild*(stack: JsObject, detached: JsObject) {.importjs: "#.attachChild(#)".}
+
+# Forward-declare restorePanel so the overlay header buttons can reference it.
+proc restorePanel*(state: AutoHideState, panel: AutoHidePanel)
+
+# ---------------------------------------------------------------------------
 # Construction helpers
 # ---------------------------------------------------------------------------
 
@@ -172,16 +182,24 @@ proc showOverlay*(state: AutoHideState, panel: AutoHidePanel) =
     else:
       overlayPinBtn.innerHTML = cstring"\xF0\x9F\x93\x8C"  # same icon, styled differently via active class
 
-  # Placeholder content (actual GL reparenting is M7).
+  # Reparent the detached GL component's DOM element into the overlay content
+  # area.  If no detached element is available, show a placeholder.
   if not overlayContentEl.isNil:
     clearChildren(overlayContentEl)
-    let placeholder = document.createElement("div")
-    placeholder.style.padding = "16px"
-    placeholder.style.color = "#888"
-    placeholder.style.fontFamily = "SpaceGrotesk"
-    placeholder.style.fontSize = "13px"
-    placeholder.innerHTML = cstring("Panel content will appear here")
-    overlayContentEl.appendChild(placeholder)
+    if not panel.detachedElement.isNil:
+      # The detached element from GL needs to fill the overlay content area.
+      panel.detachedElement.style.width = "100%"
+      panel.detachedElement.style.height = "100%"
+      panel.detachedElement.style.display = "block"
+      overlayContentEl.appendChild(panel.detachedElement)
+    else:
+      let placeholder = document.createElement("div")
+      placeholder.style.padding = "16px"
+      placeholder.style.color = "#888"
+      placeholder.style.fontFamily = "SpaceGrotesk"
+      placeholder.style.fontSize = "13px"
+      placeholder.innerHTML = cstring("Panel content will appear here")
+      overlayContentEl.appendChild(placeholder)
 
   # Set edge-specific class and size based on the panel's preferred dimension.
   let edgeCls = edgeOverlayClass(panel.edge)
@@ -224,8 +242,16 @@ proc hideOverlay*(state: AutoHideState) =
     # Fallback: just remove visible class if no panel reference.
     overlayEl.class = cstring(OverlayClass)
 
+  # Detach the panel's DOM element from the overlay content area before hiding
+  # so it isn't destroyed — it stays referenced by the panel for later re-show.
+  let leavingPanel = state.activeOverlay
+  if not leavingPanel.isNil and not leavingPanel.detachedElement.isNil and
+     not overlayContentEl.isNil:
+    if leavingPanel.detachedElement.parentNode == overlayContentEl:
+      overlayContentEl.removeChild(leavingPanel.detachedElement)
+
   # After the transition completes (200ms matches the CSS), hide the elements
-  # and clear the placeholder content.
+  # and clear any remaining placeholder content.
   discard jsSetTimeout(proc() =
     overlayEl.style.display = "none"
     backdropEl.style.display = "none"
@@ -406,32 +432,31 @@ proc setupStripElements*(state: AutoHideState) =
   overlayTitleEl.class = cstring(OverlayTitleClass)
   header.appendChild(overlayTitleEl)
 
-  # Pin button — toggles overlayPinned.
+  # Pin button — restore the panel back to the GoldenLayout tree.
   overlayPinBtn = document.createElement("span")
   overlayPinBtn.class = cstring(OverlayBtnClass)
   overlayPinBtn.innerHTML = cstring"\xF0\x9F\x93\x8C"  # 📌
-  overlayPinBtn.setAttribute("title", "Pin overlay")
+  overlayPinBtn.setAttribute("title", "Restore to layout")
   overlayPinBtn.addEventListener("click", proc(ev: Event) =
-    state.overlayPinned = not state.overlayPinned
-    # Update button appearance to reflect state.
-    if state.overlayPinned:
-      overlayPinBtn.setAttribute("title", "Unpin overlay")
-      overlayPinBtn.style.opacity = "1.0"
-    else:
-      overlayPinBtn.setAttribute("title", "Pin overlay")
-      overlayPinBtn.style.opacity = "0.5"
+    let panel = state.activeOverlay
+    if not panel.isNil:
+      restorePanel(state, panel)
   )
-  overlayPinBtn.style.opacity = "0.5"  # starts unpinned visually
+  overlayPinBtn.style.opacity = "1.0"
   header.appendChild(overlayPinBtn)
 
-  # Close button — hard dismiss regardless of pin state.
+  # Close button — restore panel to GL and dismiss overlay.
   let closeBtn = document.createElement("span")
   closeBtn.class = cstring(OverlayBtnClass)
   closeBtn.innerHTML = cstring"\xE2\x9C\x95"  # ✕
-  closeBtn.setAttribute("title", "Close overlay")
+  closeBtn.setAttribute("title", "Restore to layout")
   closeBtn.addEventListener("click", proc(ev: Event) =
-    hideOverlay(state)
-    refreshAllStrips(state)
+    let panel = state.activeOverlay
+    if not panel.isNil:
+      restorePanel(state, panel)
+    else:
+      hideOverlay(state)
+      refreshAllStrips(state)
   )
   header.appendChild(closeBtn)
 
@@ -504,4 +529,51 @@ proc addPanelAndRefresh*(state: AutoHideState,
 proc removePanelAndRefresh*(state: AutoHideState, panelId: int) =
   ## Remove a panel and immediately update the strip DOM.
   state.removePanel(panelId)
+  refreshAllStrips(state)
+
+# ---------------------------------------------------------------------------
+# Restore panel back to GoldenLayout
+# ---------------------------------------------------------------------------
+
+proc restorePanel*(state: AutoHideState, panel: AutoHidePanel) =
+  ## Restore an auto-hidden panel back into the GoldenLayout tree.
+  ##
+  ## Uses the DetachedComponent handle saved during detach to call
+  ## ``stack.attachChild(detached)`` on a suitable stack.  If no detached
+  ## handle is available the panel is simply removed from auto-hide.
+
+  # Dismiss the overlay first (if this panel is currently shown).
+  if not state.activeOverlay.isNil and state.activeOverlay.id == panel.id:
+    hideOverlay(state)
+
+  if not panel.detachedHandle.isNil:
+    # Find a suitable stack in the GL layout to re-attach to.
+    # We access the layout via the global `data` object.  The import is
+    # kept lightweight by going through JsObject.
+    {.emit: """
+      // Find the first stack in the GL ground item to attach to.
+      var layout = `data`.ui.layout;
+      if (layout && layout.groundItem) {
+        var stacks = [];
+        function findStacks(item) {
+          if (item.isStack) stacks.push(item);
+          if (item.contentItems) {
+            for (var i = 0; i < item.contentItems.length; i++) {
+              findStacks(item.contentItems[i]);
+            }
+          }
+        }
+        findStacks(layout.groundItem);
+        if (stacks.length > 0) {
+          stacks[0].attachChild(`panel`.detachedHandle);
+        }
+      }
+    """.}
+
+  # Clean up references on the panel.
+  panel.detachedElement = nil
+  panel.detachedHandle = nil
+
+  # Remove the panel from auto-hide state and refresh strips.
+  state.removePanel(panel.id)
   refreshAllStrips(state)
