@@ -6,6 +6,8 @@ import
   ../[ types, renderer, config ],
   ../lib/[ logging, misc_lib, jslib ]
 
+proc jsThen*(future: Future[JsObject], cb: proc(response: JsObject)) {.importjs: "#.then(#)".}
+
 import kdom except Location
 import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document,
@@ -116,7 +118,7 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
       else:
         0
 
-    discard requestWindowList().then(proc(response: JsObject) =
+    requestWindowList().jsThen(proc(response: JsObject) =
       let items = buildSendToWindowMenuItems(contentItem, sessionId, response)
       let x = event.clientX.to(int)
       let y = event.clientY.to(int)
@@ -347,8 +349,21 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let container = ev.toJs.target.element.childNodes[0].childNodes[1]
     let tabContainer = ev.toJs.target.element.childNodes[0].childNodes[0]
 
-    while cast[kdom.Element](container).childNodes.len() > 0:
-      container.removeChild(container.childNodes[0])
+    # Remove existing controls but preserve any pin button (lm_pin class)
+    # added by the GL fork.  The pin button is wired to the auto-hide system.
+    var pinBtn: JsObject = nil
+    let controlsEl = cast[kdom.Element](container)
+    for i in 0 ..< controlsEl.childNodes.len:
+      let child = controlsEl.childNodes[i]
+      if not child.isNil and not child.toJs.classList.isNil:
+        if child.toJs.classList.contains(cstring"lm_pin").to(bool):
+          pinBtn = child.toJs
+          break
+    while controlsEl.childNodes.len > 0:
+      controlsEl.removeChild(controlsEl.childNodes[0])
+    # Re-add the pin button if it existed
+    if not pinBtn.isNil:
+      controlsEl.appendChild(pinBtn)
 
     newElement.appendChild(hiddenDropdown)
     tabContainer.appendChild(newElement)
@@ -395,7 +410,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       )
 
       # Store the detached DOM element and handle for later reattachment.
-      panel.detachedElement = cast[Element](detached.element)
+      panel.detachedElement = cast[kdom.Element](detached.element)
       panel.detachedHandle = detached
 
   data.ui.layout = layout
@@ -566,6 +581,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         discard component.afterInit()
       discard windowSetTimeout((proc = redrawAll()), 200)), 200)
 
+  # Ensure the pin button is always enabled in the GL header config,
+  # regardless of whether the saved layout includes the pin setting.
+  # This is needed because layouts saved before the auto-hide feature
+  # was added won't have the pin field.
+  if not initialLayout.toJs.header.isNil:
+    initialLayout.toJs.header.pin = cstring"auto-hide"
+  else:
+    initialLayout.toJs.header = js{pin: cstring"auto-hide"}
+
   layout.loadLayout(initialLayout)
 
   # M9: Provide the GL layout reference to the auto-hide module so it can
@@ -692,7 +716,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     # The componentItem has been removed from the GL tree by the drag system.
     # Store the DOM element and the componentItem itself as the detached handle
     # so that restorePanel can re-attach it later.
-    panel.detachedElement = cast[Element](componentItem.element)
+    panel.detachedElement = cast[kdom.Element](componentItem.element)
     panel.detachedHandle = cast[JsObject](componentItem)
 
   # -------------------------------------------------------------------------

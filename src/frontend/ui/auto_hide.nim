@@ -11,9 +11,10 @@
 ## GoldenLayout rendering pipelines.
 
 import
-  std/[jsffi, dom, math],
-  karax,
-  ../types
+  std/[jsffi, math],
+  karax, kdom,
+  ../types,
+  ../lib/jslib
 
 # ---------------------------------------------------------------------------
 # localStorage FFI for persistence (M11)
@@ -36,14 +37,22 @@ proc jsSetInterval(callback: proc(); interval: int): int {.importjs: "setInterva
 # process.  They let us detect whether a window edge coincides with the
 # screen boundary without IPC to the main process.
 
-proc windowScreenX(): int {.importjs: "window.screenX".}
-proc windowScreenY(): int {.importjs: "window.screenY".}
-proc windowOuterWidth(): int {.importjs: "window.outerWidth".}
-proc windowOuterHeight(): int {.importjs: "window.outerHeight".}
-proc screenAvailWidth(): int {.importjs: "screen.availWidth".}
-proc screenAvailHeight(): int {.importjs: "screen.availHeight".}
-proc screenAvailLeft(): int {.importjs: "(screen.availLeft || 0)".}
-proc screenAvailTop(): int {.importjs: "(screen.availTop || 0)".}
+proc windowScreenX(): int =
+  {.emit: "`result` = (window.screenX || 0);".}
+proc windowScreenY(): int =
+  {.emit: "`result` = (window.screenY || 0);".}
+proc windowOuterWidth(): int =
+  {.emit: "`result` = (window.outerWidth || 0);".}
+proc windowOuterHeight(): int =
+  {.emit: "`result` = (window.outerHeight || 0);".}
+proc screenAvailWidth(): int =
+  {.emit: "`result` = (screen.availWidth || 0);".}
+proc screenAvailHeight(): int =
+  {.emit: "`result` = (screen.availHeight || 0);".}
+proc screenAvailLeft(): int =
+  {.emit: "`result` = (screen.availLeft || 0);".}
+proc screenAvailTop(): int =
+  {.emit: "`result` = (screen.availTop || 0);".}
 
 proc styleSetProperty(el: Element, name: cstring, value: cstring) {.importjs: "#.style.setProperty(#, #)".}
   ## Set a CSS custom property (variable) on an element's inline style.
@@ -90,6 +99,15 @@ proc removeDragSourceForPanel(panelId: int) =
 
 # Forward-declare restorePanel so the overlay header buttons can reference it.
 proc restorePanel*(state: AutoHideState, panel: AutoHidePanel)
+
+# Forward-declare addPanel so deserializeAutoHideState can call it.
+proc addPanel*(state: AutoHideState,
+               edge: AutoHideEdge,
+               title: cstring,
+               icon: cstring,
+               content: Content,
+               config: JsObject,
+               preferredSize: float = 0.25): AutoHidePanel {.discardable.}
 
 # ---------------------------------------------------------------------------
 # Construction helpers
@@ -252,6 +270,39 @@ proc findPanel*(state: AutoHideState, panelId: int): AutoHidePanel =
       if panel.id == panelId:
         return panel
   return nil
+
+# ---------------------------------------------------------------------------
+# DOM management — module-level state variables
+# ---------------------------------------------------------------------------
+
+# References to the three strip DOM elements so we can update them in place.
+var
+  stripElements: array[AutoHideEdge, Element]
+  stripsCreated = false
+  hoverTimerId: int = 0
+
+  # Overlay DOM elements — a single shared overlay, backdrop, and dismiss timer.
+  overlayEl: Element       ## The slide-in panel container.
+  backdropEl: Element      ## Semi-transparent backdrop behind the overlay.
+  overlayTitleEl: Element  ## Title text span inside the overlay header.
+  overlayContentEl: Element ## Content area where panel DOM will be placed.
+  overlayPinBtn: Element   ## Pin / unpin toggle button.
+  dismissTimerId: int = 0  ## Grace timer for mouse-leave dismissal.
+  escListenerInstalled = false
+
+  # M8: Edge indicator elements shown during GL drag-to-edge operations.
+  indicatorElements: array[AutoHideEdge, Element]
+  indicatorsCreated = false
+
+  # M8: Track the most recently detected edge during a drag so the
+  # ``dragExternalDrop`` handler knows where to place the panel.
+  lastDragEdge*: AutoHideEdge = Bottom
+  dragNearEdge*: bool = false
+
+  # M12: Per-edge bounding state.  True when the window edge coincides with
+  # the screen boundary (mouse can't overshoot → thin strip is fine).
+  edgeBounded: array[AutoHideEdge, bool]
+  boundingCheckStarted = false
 
 # ---------------------------------------------------------------------------
 # CSS class names (keep in sync with auto_hide.styl)
@@ -427,39 +478,6 @@ proc detectNearestEdge*(x, y: float): DragEdgeResult =
   dragNearEdge = nearAny
 
   return (edge: bestEdge, near: nearAny)
-
-# ---------------------------------------------------------------------------
-# DOM management — forward declarations
-# ---------------------------------------------------------------------------
-
-# References to the three strip DOM elements so we can update them in place.
-var
-  stripElements: array[AutoHideEdge, Element]
-  stripsCreated = false
-  hoverTimerId: int = 0
-
-  # Overlay DOM elements — a single shared overlay, backdrop, and dismiss timer.
-  overlayEl: Element       ## The slide-in panel container.
-  backdropEl: Element      ## Semi-transparent backdrop behind the overlay.
-  overlayTitleEl: Element  ## Title text span inside the overlay header.
-  overlayContentEl: Element ## Content area where panel DOM will be placed.
-  overlayPinBtn: Element   ## Pin / unpin toggle button.
-  dismissTimerId: int = 0  ## Grace timer for mouse-leave dismissal.
-  escListenerInstalled = false
-
-  # M8: Edge indicator elements shown during GL drag-to-edge operations.
-  indicatorElements: array[AutoHideEdge, Element]
-  indicatorsCreated = false
-
-  # M8: Track the most recently detected edge during a drag so the
-  # ``dragExternalDrop`` handler knows where to place the panel.
-  lastDragEdge*: AutoHideEdge = Bottom
-  dragNearEdge*: bool = false
-
-  # M12: Per-edge bounding state.  True when the window edge coincides with
-  # the screen boundary (mouse can't overshoot → thin strip is fine).
-  edgeBounded: array[AutoHideEdge, bool]
-  boundingCheckStarted = false
 
 proc clearChildren(el: Element) =
   ## Remove all child nodes from an element.
@@ -811,7 +829,7 @@ proc setupStripElements*(state: AutoHideState) =
     if not panel.isNil:
       restorePanel(state, panel)
   )
-  overlayPinBtn.style.opacity = "1.0"
+  styleSetProperty(overlayPinBtn, cstring"opacity", cstring"1.0")
   header.appendChild(overlayPinBtn)
 
   # Close button — restore panel to GL and dismiss overlay.

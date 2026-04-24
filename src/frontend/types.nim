@@ -1563,7 +1563,7 @@ type
     content*: Content         ## CodeTracer content type
     preferredSize*: float     ## fraction of window dimension (0.0-1.0)
     componentConfig*: JsObject  ## serialised GL config for lazy instantiation
-    detachedElement*: Element  ## DOM element from detachChild, reparented into overlay
+    detachedElement*: kdom.Element  ## DOM element from detachChild, reparented into overlay
     detachedHandle*: JsObject  ## The DetachedComponent handle from GL (for attachChild)
 
   AutoHideState* = ref object
