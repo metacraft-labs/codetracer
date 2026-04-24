@@ -125,3 +125,99 @@
 .auto-hide-strip-left .auto-hide-tab-title,
 .auto-hide-strip-right .auto-hide-tab-title
   max-height: 100px
+
+// ---------------------------------------------------------------------------
+// Overlay backdrop
+// ---------------------------------------------------------------------------
+
+.auto-hide-backdrop
+  position: absolute
+  top: 0
+  left: 0
+  right: 0
+  bottom: 0
+  background: rgba(0, 0, 0, 0.3)
+  z-index: 6
+  display: none
+
+// ---------------------------------------------------------------------------
+// Overlay panel (slide-in container)
+// ---------------------------------------------------------------------------
+
+.auto-hide-overlay
+  position: absolute
+  z-index: 7
+  background: BACKGROUND_COLOR
+  border: 1px solid LAYOUT_SPLITTER_COLOR
+  display: none
+  overflow: hidden
+  transition: transform 0.2s ease-out
+
+  // Overlay from left edge — slides in from behind the left strip.
+  &.auto-hide-overlay-left
+    top: 0
+    bottom: 0
+    left: 28px
+    transform: translateX(-100%)
+    &.auto-hide-overlay-visible
+      transform: translateX(0)
+
+  // Overlay from right edge — slides in from behind the right strip.
+  &.auto-hide-overlay-right
+    top: 0
+    bottom: 0
+    right: 28px
+    transform: translateX(100%)
+    &.auto-hide-overlay-visible
+      transform: translateX(0)
+
+  // Overlay from bottom edge — slides up from behind the bottom strip.
+  &.auto-hide-overlay-bottom
+    left: 0
+    right: 0
+    bottom: 28px
+    transform: translateY(100%)
+    &.auto-hide-overlay-visible
+      transform: translateY(0)
+
+// ---------------------------------------------------------------------------
+// Overlay header (title, pin, close)
+// ---------------------------------------------------------------------------
+
+.auto-hide-overlay-header
+  display: flex
+  align-items: center
+  padding: 4px 8px
+  background: HEADER_PANEL_BACKGROUND_COLOR
+  border-bottom: 1px solid LAYOUT_SPLITTER_COLOR
+  height: 28px
+  user-select: none
+
+.auto-hide-overlay-title
+  flex: 1
+  color: PRIMARY_TEXT_COLOR
+  font-family: "SpaceGrotesk"
+  font-size: 12px
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+.auto-hide-overlay-btn
+  cursor: pointer
+  color: HEADER_PANEL_COLOR
+  padding: 2px 6px
+  font-size: 12px
+  &:hover
+    color: PRIMARY_TEXT_COLOR
+
+// ---------------------------------------------------------------------------
+// Overlay content area
+// ---------------------------------------------------------------------------
+
+.auto-hide-overlay-content
+  position: absolute
+  top: 28px
+  left: 0
+  right: 0
+  bottom: 0
+  overflow: auto

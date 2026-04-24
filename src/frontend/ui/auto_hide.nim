@@ -14,7 +14,7 @@ import
   std/[jsffi, dom],
   ../types
 
-# JS timer bindings used for hover delay.
+# JS timer bindings used for hover delay and dismiss grace period.
 proc jsSetTimeout(callback: proc(); delay: int): int {.importjs: "setTimeout(#, #)".}
 proc jsClearTimeout(timerId: int) {.importjs: "clearTimeout(#)".}
 
@@ -89,6 +89,21 @@ const
   TabIconClass      = "auto-hide-tab-icon"
   TabTitleClass     = "auto-hide-tab-title"
 
+  # Overlay CSS classes (keep in sync with auto_hide.styl).
+  BackdropClass       = "auto-hide-backdrop"
+  OverlayClass        = "auto-hide-overlay"
+  OverlayLeftClass    = "auto-hide-overlay-left"
+  OverlayRightClass   = "auto-hide-overlay-right"
+  OverlayBottomClass  = "auto-hide-overlay-bottom"
+  OverlayVisibleClass = "auto-hide-overlay-visible"
+  OverlayHeaderClass  = "auto-hide-overlay-header"
+  OverlayTitleClass   = "auto-hide-overlay-title"
+  OverlayBtnClass     = "auto-hide-overlay-btn"
+  OverlayContentClass = "auto-hide-overlay-content"
+
+  # Grace period (ms) before the overlay auto-dismisses on mouse-leave.
+  DismissGraceMs = 300
+
 proc edgeStripClass(edge: AutoHideEdge): cstring =
   case edge
   of Left:   cstring(StripClass & " " & StripLeftClass)
@@ -105,6 +120,15 @@ var
   stripsCreated = false
   hoverTimerId: int = 0
 
+  # Overlay DOM elements — a single shared overlay, backdrop, and dismiss timer.
+  overlayEl: Element       ## The slide-in panel container.
+  backdropEl: Element      ## Semi-transparent backdrop behind the overlay.
+  overlayTitleEl: Element  ## Title text span inside the overlay header.
+  overlayContentEl: Element ## Content area where panel DOM will be placed.
+  overlayPinBtn: Element   ## Pin / unpin toggle button.
+  dismissTimerId: int = 0  ## Grace timer for mouse-leave dismissal.
+  escListenerInstalled = false
+
 proc clearChildren(el: Element) =
   ## Remove all child nodes from an element.
   while el.childNodes.len > 0:
@@ -113,6 +137,104 @@ proc clearChildren(el: Element) =
 # Forward-declare refreshAllStrips so the interaction handlers can call it,
 # and the tab builder can reference the interaction handlers.
 proc refreshAllStrips*(state: AutoHideState)
+
+proc edgeOverlayClass(edge: AutoHideEdge): string =
+  ## Return the edge-specific CSS class for the overlay positioning.
+  case edge
+  of Left:   OverlayLeftClass
+  of Right:  OverlayRightClass
+  of Bottom: OverlayBottomClass
+
+# ---------------------------------------------------------------------------
+# Overlay show / hide
+# ---------------------------------------------------------------------------
+
+proc cancelDismissTimer() =
+  ## Cancel any pending grace-period dismiss timer.
+  if dismissTimerId != 0:
+    jsClearTimeout(dismissTimerId)
+    dismissTimerId = 0
+
+proc showOverlay*(state: AutoHideState, panel: AutoHidePanel) =
+  ## Position and reveal the overlay for the given panel.
+  ## The overlay slides in from the edge where the panel's strip lives.
+  if overlayEl.isNil:
+    return
+
+  # Update header title.
+  if not overlayTitleEl.isNil:
+    overlayTitleEl.innerHTML = panel.title
+
+  # Update pin button text to reflect current pin state.
+  if not overlayPinBtn.isNil:
+    if state.overlayPinned:
+      overlayPinBtn.innerHTML = cstring"\xF0\x9F\x93\x8C"  # 📌 (pinned)
+    else:
+      overlayPinBtn.innerHTML = cstring"\xF0\x9F\x93\x8C"  # same icon, styled differently via active class
+
+  # Placeholder content (actual GL reparenting is M7).
+  if not overlayContentEl.isNil:
+    clearChildren(overlayContentEl)
+    let placeholder = document.createElement("div")
+    placeholder.style.padding = "16px"
+    placeholder.style.color = "#888"
+    placeholder.style.fontFamily = "SpaceGrotesk"
+    placeholder.style.fontSize = "13px"
+    placeholder.innerHTML = cstring("Panel content will appear here")
+    overlayContentEl.appendChild(placeholder)
+
+  # Set edge-specific class and size based on the panel's preferred dimension.
+  let edgeCls = edgeOverlayClass(panel.edge)
+  overlayEl.class = cstring(OverlayClass & " " & edgeCls)
+
+  case panel.edge
+  of Left, Right:
+    let w = int(panel.preferredSize * float(window.innerWidth))
+    overlayEl.style.width = cstring($w & "px")
+    overlayEl.style.height = ""   # top/bottom set by CSS
+  of Bottom:
+    let h = int(panel.preferredSize * float(window.innerHeight))
+    overlayEl.style.height = cstring($h & "px")
+    overlayEl.style.width = ""    # left/right set by CSS
+
+  # Show backdrop and overlay (display must come before adding visible class
+  # so that the CSS transition fires from the off-screen transform).
+  backdropEl.style.display = "block"
+  overlayEl.style.display = "block"
+
+  # Force a reflow so the browser registers the initial transform before we
+  # add the visible class that transitions to the final position.
+  discard overlayEl.offsetHeight
+
+  # Slide in by adding the visible class.
+  overlayEl.class = cstring(OverlayClass & " " & edgeCls & " " & OverlayVisibleClass)
+
+proc hideOverlay*(state: AutoHideState) =
+  ## Slide the overlay out and hide it.  Clears activeOverlay and overlayPinned.
+  cancelDismissTimer()
+
+  if overlayEl.isNil:
+    return
+
+  # Remove the visible class to trigger the slide-out CSS transition.
+  if not state.activeOverlay.isNil:
+    let edgeCls = edgeOverlayClass(state.activeOverlay.edge)
+    overlayEl.class = cstring(OverlayClass & " " & edgeCls)
+  else:
+    # Fallback: just remove visible class if no panel reference.
+    overlayEl.class = cstring(OverlayClass)
+
+  # After the transition completes (200ms matches the CSS), hide the elements
+  # and clear the placeholder content.
+  discard jsSetTimeout(proc() =
+    overlayEl.style.display = "none"
+    backdropEl.style.display = "none"
+    if not overlayContentEl.isNil:
+      clearChildren(overlayContentEl)
+  , 220)
+
+  state.activeOverlay = nil
+  state.overlayPinned = false
 
 # ---------------------------------------------------------------------------
 # Interaction handlers
@@ -128,13 +250,14 @@ proc handleTabClick*(state: AutoHideState, panel: AutoHidePanel) =
   ## Toggle the overlay for the given panel.  If the same panel is already
   ## showing, dismiss it; otherwise switch to it.
   if not state.activeOverlay.isNil and state.activeOverlay.id == panel.id:
-    # Dismiss the current overlay.
-    state.activeOverlay = nil
-    state.overlayPinned = false
+    # Clicking the active tab dismisses the overlay (hard dismiss).
+    hideOverlay(state)
+    refreshAllStrips(state)
   else:
+    # Show the new panel's overlay, pinned (click implies intent to keep it).
     state.activeOverlay = panel
     state.overlayPinned = true
-  refreshAllStrips(state)
+    refreshAllStrips(state)
 
 proc handleTabHover*(state: AutoHideState, panel: AutoHidePanel) =
   ## Activate the overlay for the given panel after a short delay (300 ms).
@@ -186,6 +309,16 @@ proc buildTabElement(state: AutoHideState, panel: AutoHidePanel): Element =
   )
   tab.addEventListener("mouseleave", proc(ev: Event) =
     cancelHover()
+    # If an overlay is showing (hover-triggered, not pinned), start a grace
+    # timer so it dismisses if the mouse doesn't re-enter.
+    if not state.activeOverlay.isNil and not state.overlayPinned:
+      cancelDismissTimer()
+      dismissTimerId = jsSetTimeout(proc() =
+        dismissTimerId = 0
+        if not state.overlayPinned and not state.activeOverlay.isNil:
+          hideOverlay(state)
+          refreshAllStrips(state)
+      , DismissGraceMs)
   )
 
   result = tab
@@ -208,15 +341,20 @@ proc refreshStrip(state: AutoHideState, edge: AutoHideEdge) =
       el.appendChild(buildTabElement(state, panel))
 
 proc refreshAllStrips*(state: AutoHideState) =
-  ## Re-render all three strip elements.
+  ## Re-render all three strip elements and synchronise overlay visibility.
   if not stripsCreated:
     return
   for edge in AutoHideEdge:
     refreshStrip(state, edge)
 
+  # Drive overlay visibility based on activeOverlay state.
+  if not state.activeOverlay.isNil:
+    showOverlay(state, state.activeOverlay)
+
 proc setupStripElements*(state: AutoHideState) =
-  ## Create the strip DOM elements and append them to the active session
-  ## container as siblings of the GL ``<section id="main">``.
+  ## Create the strip DOM elements and the shared overlay container, then
+  ## append them to the active session container as siblings of the GL
+  ## ``<section id="main">``.
   ##
   ## Safe to call multiple times — only acts on the first invocation.
   if stripsCreated:
@@ -228,7 +366,7 @@ proc setupStripElements*(state: AutoHideState) =
     return
 
   # The session container needs relative positioning so that the absolutely
-  # positioned strips reference it correctly.
+  # positioned strips and overlay reference it correctly.
   sessionContainer.style.position = "relative"
 
   for edge in AutoHideEdge:
@@ -237,6 +375,114 @@ proc setupStripElements*(state: AutoHideState) =
     el.style.display = "none"  # hidden by default (no panels)
     stripElements[edge] = el
     sessionContainer.appendChild(el)
+
+  # -------------------------------------------------------------------------
+  # Overlay elements — a single shared overlay that slides in over the GL area.
+  # -------------------------------------------------------------------------
+
+  # Backdrop (semi-transparent, covers GL area but not the strips).
+  backdropEl = document.createElement("div")
+  backdropEl.class = cstring(BackdropClass)
+  backdropEl.style.display = "none"
+  sessionContainer.appendChild(backdropEl)
+
+  # Dismiss overlay when the backdrop is clicked.
+  backdropEl.addEventListener("click", proc(ev: Event) =
+    hideOverlay(state)
+    refreshAllStrips(state)
+  )
+
+  # Overlay panel container.
+  overlayEl = document.createElement("div")
+  overlayEl.class = cstring(OverlayClass)
+  overlayEl.style.display = "none"
+  sessionContainer.appendChild(overlayEl)
+
+  # -- Header bar --
+  let header = document.createElement("div")
+  header.class = cstring(OverlayHeaderClass)
+
+  overlayTitleEl = document.createElement("span")
+  overlayTitleEl.class = cstring(OverlayTitleClass)
+  header.appendChild(overlayTitleEl)
+
+  # Pin button — toggles overlayPinned.
+  overlayPinBtn = document.createElement("span")
+  overlayPinBtn.class = cstring(OverlayBtnClass)
+  overlayPinBtn.innerHTML = cstring"\xF0\x9F\x93\x8C"  # 📌
+  overlayPinBtn.setAttribute("title", "Pin overlay")
+  overlayPinBtn.addEventListener("click", proc(ev: Event) =
+    state.overlayPinned = not state.overlayPinned
+    # Update button appearance to reflect state.
+    if state.overlayPinned:
+      overlayPinBtn.setAttribute("title", "Unpin overlay")
+      overlayPinBtn.style.opacity = "1.0"
+    else:
+      overlayPinBtn.setAttribute("title", "Pin overlay")
+      overlayPinBtn.style.opacity = "0.5"
+  )
+  overlayPinBtn.style.opacity = "0.5"  # starts unpinned visually
+  header.appendChild(overlayPinBtn)
+
+  # Close button — hard dismiss regardless of pin state.
+  let closeBtn = document.createElement("span")
+  closeBtn.class = cstring(OverlayBtnClass)
+  closeBtn.innerHTML = cstring"\xE2\x9C\x95"  # ✕
+  closeBtn.setAttribute("title", "Close overlay")
+  closeBtn.addEventListener("click", proc(ev: Event) =
+    hideOverlay(state)
+    refreshAllStrips(state)
+  )
+  header.appendChild(closeBtn)
+
+  overlayEl.appendChild(header)
+
+  # -- Content area --
+  overlayContentEl = document.createElement("div")
+  overlayContentEl.class = cstring(OverlayContentClass)
+  overlayEl.appendChild(overlayContentEl)
+
+  # -------------------------------------------------------------------------
+  # Dismissal handlers: mouse-leave grace timer
+  # -------------------------------------------------------------------------
+
+  # When the mouse leaves the overlay, start a grace timer.  If it re-enters
+  # the overlay or a strip tab before the timer fires, cancel the dismiss.
+  overlayEl.addEventListener("mouseleave", proc(ev: Event) =
+    if state.overlayPinned:
+      return
+    cancelDismissTimer()
+    dismissTimerId = jsSetTimeout(proc() =
+      dismissTimerId = 0
+      if not state.overlayPinned and not state.activeOverlay.isNil:
+        hideOverlay(state)
+        refreshAllStrips(state)
+    , DismissGraceMs)
+  )
+
+  overlayEl.addEventListener("mouseenter", proc(ev: Event) =
+    cancelDismissTimer()
+  )
+
+  # Also cancel the dismiss timer when hovering back over any strip tab.
+  for edge in AutoHideEdge:
+    stripElements[edge].addEventListener("mouseenter", proc(ev: Event) =
+      cancelDismissTimer()
+    )
+
+  # -------------------------------------------------------------------------
+  # Global Escape key dismissal
+  # -------------------------------------------------------------------------
+
+  if not escListenerInstalled:
+    escListenerInstalled = true
+    document.addEventListener("keydown", proc(ev: Event) =
+      # keyCode 27 = Escape
+      if cast[int](ev.toJs.keyCode) == 27:
+        if not state.activeOverlay.isNil:
+          hideOverlay(state)
+          refreshAllStrips(state)
+    )
 
   refreshAllStrips(state)
 
