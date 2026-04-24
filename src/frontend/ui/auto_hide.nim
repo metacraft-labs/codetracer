@@ -15,6 +15,15 @@ import
   karax,
   ../types
 
+# ---------------------------------------------------------------------------
+# localStorage FFI for persistence (M11)
+# ---------------------------------------------------------------------------
+
+proc localStorageGetItem(key: cstring): cstring {.importjs: "window.localStorage.getItem(#)".}
+proc localStorageSetItem(key: cstring, value: cstring) {.importjs: "window.localStorage.setItem(#, #)".}
+
+const AutoHideStorageKey = cstring"codetracer-auto-hide-state"
+
 # JS timer bindings used for hover delay and dismiss grace period.
 proc jsSetTimeout(callback: proc(); delay: int): int {.importjs: "setTimeout(#, #)".}
 proc jsClearTimeout(timerId: int) {.importjs: "clearTimeout(#)".}
@@ -76,6 +85,108 @@ proc newAutoHideState*(): AutoHideState =
     overlayPinned: false,
     nextId: 0
   )
+
+# ---------------------------------------------------------------------------
+# Serialization / deserialization (M11: persistence across restarts)
+# ---------------------------------------------------------------------------
+
+proc edgeToString(edge: AutoHideEdge): cstring =
+  ## Convert an AutoHideEdge to its string representation for JSON.
+  case edge
+  of Left:   cstring"Left"
+  of Right:  cstring"Right"
+  of Bottom: cstring"Bottom"
+
+proc stringToEdge(s: cstring): AutoHideEdge =
+  ## Parse a string back to an AutoHideEdge.  Defaults to Bottom on unknown input.
+  if s == cstring"Left":   return Left
+  if s == cstring"Right":  return Right
+  return Bottom
+
+proc serializeAutoHideState*(state: AutoHideState): JsObject =
+  ## Convert the auto-hide state to a JSON-serializable JS object.
+  ##
+  ## Saves each panel's edge, title, icon, content enum ordinal, preferred size,
+  ## and GoldenLayout component config.  Runtime-only fields (detachedElement,
+  ## detachedHandle) are deliberately omitted — they will be nil on load and
+  ## panels will be lazily re-created when restored to GL.
+  var panelArray = newSeq[JsObject]()
+  for edge in AutoHideEdge:
+    for panel in state.panels[edge]:
+      let obj = JsObject{}
+      obj.edge = edgeToString(panel.edge).toJs
+      obj.title = panel.title.toJs
+      obj.icon = panel.icon.toJs
+      obj.content = cast[int](panel.content).toJs
+      obj.preferredSize = panel.preferredSize.toJs
+      if not panel.componentConfig.isNil:
+        obj.componentConfig = panel.componentConfig
+      else:
+        obj.componentConfig = jsNull
+      panelArray.add(obj)
+
+  let resultObj = JsObject{}
+  resultObj.panels = panelArray.toJs
+  resultObj.nextId = state.nextId.toJs
+  return resultObj
+
+proc deserializeAutoHideState*(jsObj: JsObject): AutoHideState =
+  ## Reconstruct an AutoHideState from a previously serialized JS object.
+  ##
+  ## Panels are created without detachedElement or detachedHandle — they show
+  ## in the strips and their component config is available for creating a fresh
+  ## GL component when the user restores or opens them.
+  result = newAutoHideState()
+
+  if jsObj.isNil:
+    return
+
+  let panels = jsObj.panels
+  if panels.isNil or panels.isUndefined:
+    return
+
+  let length = cast[int](panels.length)
+  for i in 0 ..< length:
+    let p = panels[i]
+    let edge = stringToEdge(cast[cstring](p.edge))
+    let title = cast[cstring](p.title)
+    let icon = cast[cstring](p.icon)
+    let contentOrd = cast[int](p.content)
+    let content = cast[Content](contentOrd)
+    let preferredSize = cast[float](p.preferredSize)
+    var config: JsObject = nil
+    if not p.componentConfig.isNil and not p.componentConfig.isUndefined:
+      config = p.componentConfig
+
+    discard result.addPanel(edge, title, icon, content, config, preferredSize)
+
+  # Restore the nextId counter so new panels don't collide with loaded ones.
+  if not jsObj.nextId.isNil and not jsObj.nextId.isUndefined:
+    result.nextId = cast[int](jsObj.nextId)
+
+# ---------------------------------------------------------------------------
+# Persistence via localStorage (M11)
+# ---------------------------------------------------------------------------
+
+proc saveAutoHideState*(state: AutoHideState) =
+  ## Serialize the current auto-hide state and persist it to localStorage.
+  ## Called from ``refreshAllStrips`` after every state mutation.
+  let serialized = serializeAutoHideState(state)
+  let json = JSON.stringify(serialized)
+  localStorageSetItem(AutoHideStorageKey, json)
+
+proc loadAutoHideState*(): AutoHideState =
+  ## Load previously saved auto-hide state from localStorage.
+  ## Returns a fresh empty state if nothing was saved or the data is invalid.
+  let json = localStorageGetItem(AutoHideStorageKey)
+  if json.isNil or json == cstring"":
+    return newAutoHideState()
+  try:
+    let parsed = JSON.parse(json)
+    return deserializeAutoHideState(cast[JsObject](parsed))
+  except:
+    # If the saved data is corrupted, start fresh rather than crashing.
+    return newAutoHideState()
 
 proc addPanel*(state: AutoHideState,
                edge: AutoHideEdge,
@@ -515,6 +626,9 @@ proc refreshAllStrips*(state: AutoHideState) =
   # Drive overlay visibility based on activeOverlay state.
   if not state.activeOverlay.isNil:
     showOverlay(state, state.activeOverlay)
+
+  # M11: Persist auto-hide state to localStorage on every mutation.
+  saveAutoHideState(state)
 
   # M10: Notify the status bar so its auto-hide icons re-render.
   if not data.ui.status.isNil and not data.ui.status.kxi.isNil:

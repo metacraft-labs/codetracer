@@ -230,9 +230,9 @@ proc ensureSharedRenderers() =
   data.ui.status.kxi = kxiMap["status"]
   data.ui.searchResults.kxi = kxiMap["search-results"]
 
-  # Auto-hide strips: initialise state and create the strip DOM elements
-  # alongside the GL container in the session container.
-  data.ui.autoHide = newAutoHideState()
+  # Auto-hide strips: load persisted state (M11) or create empty state,
+  # then create the strip DOM elements alongside the GL container.
+  data.ui.autoHide = loadAutoHideState()
   setupStripElements(data.ui.autoHide)
 
 # Triage: rename to initGoldenLayout
@@ -571,6 +571,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # M9: Provide the GL layout reference to the auto-hide module so it can
   # register strip tabs as DragSources for drag-back into the layout.
   setAutoHideLayout(cast[JsObject](layout))
+
+  # M11: If auto-hide state was loaded from localStorage, refresh the strips
+  # now that the GL layout is available so DragSources are registered and
+  # the strip tabs render for any previously auto-hidden panels.
+  if not data.ui.autoHide.isNil:
+    refreshAllStrips(data.ui.autoHide)
 
   # M21: Register IPC handler for receiving panels from other windows.
   registerPanelAttachHandler(layout)
