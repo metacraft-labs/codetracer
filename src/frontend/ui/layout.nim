@@ -568,6 +568,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   layout.loadLayout(initialLayout)
 
+  # M9: Provide the GL layout reference to the auto-hide module so it can
+  # register strip tabs as DragSources for drag-back into the layout.
+  setAutoHideLayout(cast[JsObject](layout))
+
   # M21: Register IPC handler for receiving panels from other windows.
   registerPanelAttachHandler(layout)
 
@@ -684,6 +688,51 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     # so that restorePanel can re-attach it later.
     panel.detachedElement = cast[Element](componentItem.element)
     panel.detachedHandle = cast[JsObject](componentItem)
+
+  # -------------------------------------------------------------------------
+  # M9: Drag-back handler — clean up auto-hide panel after a strip tab is
+  # dragged back into the GL layout area.
+  # -------------------------------------------------------------------------
+  # When a DragSource (registered on strip tabs in auto_hide.nim) is dropped
+  # into a GL drop zone, GL creates a fresh component from the config
+  # callback.  The ``itemDropped`` event fires after the drop completes.
+  # We check the component state for the ``fromAutoHide`` marker and, if
+  # present, remove the corresponding panel from the auto-hide strip.
+
+  layout.on(cstring"itemDropped") do (event: js):
+    cdebug "layout event: itemDropped"
+    let componentItem = event.toJs
+    # The event target is the newly created component item.
+    if componentItem.isNil or componentItem.isUndefined:
+      return
+
+    # Try to read the fromAutoHide marker from the component state.
+    var panelId: int = -1
+    {.emit: """
+      var item = `event`;
+      // itemDropped may fire with the event itself being the component, or
+      // it may wrap it.  Try both shapes.
+      var st = null;
+      if (item && item.componentState) {
+        st = item.componentState;
+      } else if (item && item.target && item.target.componentState) {
+        st = item.target.componentState;
+      }
+      if (st && st.fromAutoHide !== undefined && st.fromAutoHide !== null) {
+        `panelId` = st.fromAutoHide;
+      }
+    """.}
+
+    if panelId >= 0:
+      let autoHideState = data.ui.autoHide
+      if not autoHideState.isNil:
+        # Dismiss any visible overlay for this panel before removing it.
+        if not autoHideState.activeOverlay.isNil and
+           autoHideState.activeOverlay.id == panelId:
+          hideOverlay(autoHideState)
+        autoHideState.removePanelAndRefresh(panelId)
+
+    data.ui.saveLayout = true
 
 # Wire the initLayout proc into session_switch to break the circular
 # import dependency (layout -> session_tabs -> session_switch -> layout).

@@ -25,6 +25,39 @@ proc jsClearTimeout(timerId: int) {.importjs: "clearTimeout(#)".}
 proc detachChild*(stack: JsObject, item: JsObject): JsObject {.importjs: "#.detachChild(#)".}
 proc attachChild*(stack: JsObject, detached: JsObject) {.importjs: "#.attachChild(#)".}
 
+# ---------------------------------------------------------------------------
+# GoldenLayout FFI for DragSource registration (M9: drag-back)
+# ---------------------------------------------------------------------------
+
+proc glNewDragSource*(layout: JsObject, element: Element, callback: proc(): JsObject): JsObject {.importjs: "#.newDragSource(#, #)".}
+proc glRemoveDragSource*(layout: JsObject, handle: JsObject) {.importjs: "#.removeDragSource(#)".}
+
+# Module-level reference to the GoldenLayout instance, set from layout.nim
+# after layout.loadLayout so that DragSource registration can access it.
+var glLayout*: JsObject
+
+# Stores DragSource handles keyed by panel id so they can be removed when the
+# panel leaves the auto-hide strip (restore, drag-back, or close).
+var dragSourceHandles: seq[tuple[panelId: int, handle: JsObject]]
+
+proc setAutoHideLayout*(layout: JsObject) =
+  ## Store the GoldenLayout instance for DragSource registration.
+  ## Called from layout.nim after ``layout.loadLayout()``.
+  glLayout = layout
+
+proc removeDragSourceForPanel(panelId: int) =
+  ## Remove and unregister the DragSource handle for the given panel id.
+  if glLayout.isNil:
+    return
+  var idx = -1
+  for i in 0 ..< dragSourceHandles.len:
+    if dragSourceHandles[i].panelId == panelId:
+      idx = i
+      break
+  if idx >= 0:
+    glRemoveDragSource(glLayout, dragSourceHandles[idx].handle)
+    dragSourceHandles.delete(idx)
+
 # Forward-declare restorePanel so the overlay header buttons can reference it.
 proc restorePanel*(state: AutoHideState, panel: AutoHidePanel)
 
@@ -66,6 +99,7 @@ proc addPanel*(state: AutoHideState,
 
 proc removePanel*(state: AutoHideState, panelId: int) =
   ## Remove the panel with the given id from whichever edge it belongs to.
+  ## Also removes any DragSource registration for the panel (M9).
   for edge in AutoHideEdge:
     let panels = state.panels[edge]
     for i in 0 ..< panels.len:
@@ -74,6 +108,8 @@ proc removePanel*(state: AutoHideState, panelId: int) =
         if not state.activeOverlay.isNil and state.activeOverlay.id == panelId:
           state.activeOverlay = nil
           state.overlayPinned = false
+        # Remove the GL DragSource registration (M9: drag-back).
+        removeDragSourceForPanel(panelId)
         state.panels[edge].delete(i)
         return
 
@@ -431,6 +467,21 @@ proc buildTabElement(state: AutoHideState, panel: AutoHidePanel): Element =
           refreshAllStrips(state)
       , DismissGraceMs)
   )
+
+  # M9: Register the tab as a GL DragSource so it can be dragged back into the
+  # layout area.  The config callback returns the panel's saved component
+  # config with a ``fromAutoHide`` marker so the itemDropped handler in
+  # layout.nim can clean up the auto-hide panel after the drop completes.
+  if not glLayout.isNil and not panel.componentConfig.isNil:
+    let panelId = panel.id
+    let config = panel.componentConfig
+    let handle = glNewDragSource(glLayout, tab, proc(): JsObject =
+      # Stamp the config with a marker so the drop handler knows this
+      # component came from the auto-hide strip.
+      config.componentState.toJs.fromAutoHide = panelId.toJs
+      result = config
+    )
+    dragSourceHandles.add((panelId: panelId, handle: handle))
 
   result = tab
 
