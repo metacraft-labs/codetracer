@@ -303,3 +303,29 @@
   &.auto-hide-status-icon-active
     color: PRIMARY_TEXT_COLOR
     background: PRIMARY_BASE
+
+// ---------------------------------------------------------------------------
+// GL header pin button (auto-hide toggle)
+// ---------------------------------------------------------------------------
+// The pin button sits inside `.lm_controls` alongside `.lm_close` and
+// `.lm_maximise`.  Base dimensions (18x18) come from the GL base CSS rule
+// `.lm_header .lm_controls > *`.  We use an inline SVG data URI for the
+// thumbtack icon so no external image file is needed.
+
+.lm_pin
+  // Dimensions inherited from `.lm_controls > *` (18x18), but set
+  // explicitly for clarity and to match sibling buttons.
+  width: 18px
+  height: 18px
+  cursor: pointer
+  // Override `.lm_controls > *` which sets `opacity: 1 !important`.
+  opacity: 0.4 !important
+  position: relative
+  background-size: 12px 12px
+  background-repeat: no-repeat
+  background-position: center
+  // Thumbtack SVG icon (white fill, works on dark header backgrounds).
+  // The path is a simplified pin/thumbtack silhouette.
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16 12V4h1V2H7v2h1v8l-2 2v2h5v6h2v-6h5v-2z'/%3E%3C/svg%3E")
+  &:hover
+    opacity: 1 !important
