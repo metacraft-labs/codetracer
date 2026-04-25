@@ -363,7 +363,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       controlsEl.removeChild(controlsEl.childNodes[0])
     # Re-add the pin button if it existed
     if not pinBtn.isNil:
-      controlsEl.appendChild(pinBtn)
+      controlsEl.appendChild(cast[kdom.Node](pinBtn))
 
     newElement.appendChild(hiddenDropdown)
     tabContainer.appendChild(newElement)
