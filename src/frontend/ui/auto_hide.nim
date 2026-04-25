@@ -280,6 +280,10 @@ var
   stripElements: array[AutoHideEdge, Element]
   stripsCreated = false
   hoverTimerId: int = 0
+  # Module-level reference to the auto-hide state so that ``updateEdgeBounding``
+  # (called from periodic timers / resize handlers without a state parameter)
+  # can check whether an edge has panels.  Set by ``setupStripElements``.
+  moduleAutoHideState: AutoHideState
 
   # Overlay DOM elements — a single shared overlay, backdrop, and dismiss timer.
   overlayEl: Element       ## The slide-in panel container.
@@ -396,18 +400,38 @@ proc updateEdgeBounding() =
   edgeBounded[Bottom] = (scrTop + scrH) - (winY + winH) <= EdgeBoundTolerance
 
   # Update strip element CSS classes to reflect bounded state.
+  # When an edge has panels, always use the full-sized strip (28px) so the
+  # tabs are readable and clickable.  The thin bounded strip (3px) is only
+  # meaningful as an empty hover-activation zone, but empty strips are
+  # hidden (display:none) anyway, so it never applies in practice.
   if stripsCreated:
     for edge in AutoHideEdge:
-      stripElements[edge].class = edgeStripClass(edge)
+      let hasPanels = not moduleAutoHideState.isNil and
+                      moduleAutoHideState.panels[edge].len > 0
+      if hasPanels:
+        # Full-sized strip — omit the bounded class so tabs are visible.
+        let base = case edge
+          of Left:   StripClass & " " & StripLeftClass
+          of Right:  StripClass & " " & StripRightClass
+          of Bottom: StripClass & " " & StripBottomClass
+        stripElements[edge].class = cstring(base)
+      else:
+        stripElements[edge].class = edgeStripClass(edge)
 
     # Set CSS custom properties on the session container so the overlay
     # positioning (via var(--auto-hide-strip-*)) tracks the current strip
     # widths without hard-coded pixel values in the stylesheet.
     let container = document.getElementById("session-container-0")
     if not container.isNil:
-      let leftPx  = if edgeBounded[Left]:   BoundedStripPx else: DefaultStripPx
-      let rightPx = if edgeBounded[Right]:  BoundedStripPx else: DefaultStripPx
-      let botPx   = if edgeBounded[Bottom]: BoundedStripPx else: DefaultStripPx
+      let leftHasPanels = not moduleAutoHideState.isNil and
+                          moduleAutoHideState.panels[Left].len > 0
+      let rightHasPanels = not moduleAutoHideState.isNil and
+                           moduleAutoHideState.panels[Right].len > 0
+      let bottomHasPanels = not moduleAutoHideState.isNil and
+                            moduleAutoHideState.panels[Bottom].len > 0
+      let leftPx  = if edgeBounded[Left] and not leftHasPanels:   BoundedStripPx else: DefaultStripPx
+      let rightPx = if edgeBounded[Right] and not rightHasPanels:  BoundedStripPx else: DefaultStripPx
+      let botPx   = if edgeBounded[Bottom] and not bottomHasPanels: BoundedStripPx else: DefaultStripPx
       styleSetProperty(container, cstring"--auto-hide-strip-left",   cstring($leftPx & "px"))
       styleSetProperty(container, cstring"--auto-hide-strip-right",  cstring($rightPx & "px"))
       styleSetProperty(container, cstring"--auto-hide-strip-bottom", cstring($botPx & "px"))
@@ -755,6 +779,7 @@ proc setupStripElements*(state: AutoHideState) =
   if stripsCreated:
     return
   stripsCreated = true
+  moduleAutoHideState = state
 
   let sessionContainer = document.getElementById("session-container-0")
   if sessionContainer.isNil:
