@@ -124,7 +124,7 @@ tempfile = "3"
 [features]
 debugging = []
 
-default = ["io-transport", "syntax-highlight"]
+default = ["io-transport", "syntax-highlight", "nim-reader"]
 
 io-transport = ["dep:shellexpand"]
 
