@@ -14,16 +14,43 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/debug_controls_vm import
   DebugControlsVM, createDebugControlsVM
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_debug_controls_view import
+  mountIsoNimDebugControls
 
 # Module-level DebugControlsVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy data
 # so behaviour is unchanged.
 var debugControlsVMInstance: DebugControlsVM
 var debugControlsVMStore: ReplayDataStore
+var isoNimDebugMounted: bool = false
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
+
+proc tryMountIsoNimDebugControls() =
+  ## Mount the IsoNim debug controls view into the dedicated
+  ## `#isonim-debug-controls` container div (defined in index.html).
+  ##
+  ## This div lives outside Karax's VDOM tree, so direct DOM manipulation
+  ## is safe and won't be overwritten by Karax redraw cycles.
+  ## Safe to call multiple times — mounts only once.
+  if isoNimDebugMounted or debugControlsVMInstance.isNil:
+    return
+
+  # Short delay to ensure the HTML has been parsed and the container exists.
+  discard setTimeout(proc() =
+    if isoNimDebugMounted:
+      return
+    let container = dom_api.getElementById(dom_api.document, cstring"isonim-debug-controls")
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      clog "IsoNim debug controls: #isonim-debug-controls element not found"
+      return
+    isoNimDebugMounted = true
+    mountIsoNimDebugControls(container, debugControlsVMInstance)
+    clog "IsoNim debug controls: mounted into #isonim-debug-controls"
+  , 200)
 
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel DebugControlsVM using an externally-provided
@@ -34,6 +61,7 @@ proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   debugControlsVMStore = store
   debugControlsVMInstance = createDebugControlsVM(store)
   clog "DebugControlsVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimDebugControls()
 
 proc initDebugControlsVM() =
   ## Lazily create the parallel DebugControlsVM backed by a stub
@@ -60,6 +88,7 @@ proc initDebugControlsVM() =
   debugControlsVMStore = createReplayDataStore(stubBackend)
   debugControlsVMInstance = createDebugControlsVM(debugControlsVMStore)
   clog "DebugControlsVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimDebugControls()
 
 proc syncDebugControlsPosition(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so

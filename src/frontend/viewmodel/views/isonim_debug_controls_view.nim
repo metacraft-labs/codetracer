@@ -20,12 +20,18 @@
 ##   check panel.textContent.contains("Idle")
 ##
 ## Usage (web):
-##   let panel = renderDebugControlsPanel(webRenderer, debugControlsVM)
-##   document.body.appendChild(panel)
+##   import isonim/web/web_renderer
+##   let r = WebRenderer()
+##   let panel = renderDebugControlsPanel(r, debugControlsVM)
+##   # panel is a dom_api.Element, append to any real DOM container
 
 import isonim/core/[signals, computation]
 discard  # isonim/dsl not needed for this simple view
 import isonim/testing/mock_dom  # MockNode type used in generic signatures
+
+when defined(js):
+  import isonim/web/web_renderer
+  import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/debug_controls_vm
 
@@ -125,3 +131,68 @@ proc renderDebugControlsPanel*(r: MockRenderer; vm: DebugControlsVM): MockNode =
   renderStatusText(r, panel, vm)
 
   panel
+
+# ---------------------------------------------------------------------------
+# WebRenderer overload — renders into real browser DOM elements
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc renderDebugControlsPanel*(r: WebRenderer;
+                                  vm: DebugControlsVM): isonim_dom.Element =
+    ## Render the complete Debug Controls toolbar using real DOM elements.
+    ##
+    ## Returns an `isonim_dom.Element` that can be appended to any live
+    ## DOM container. All content is reactive: changing DebugControlsVM
+    ## memos automatically updates the DOM tree via `createRenderEffect`.
+    let panel = r.createElement("div")
+    r.setAttribute(panel, "class", "debug-controls isonim-debug-controls")
+
+    # Step Backward
+    renderControlButton(r, panel, "step-backward", "\u25C0",
+      proc(): bool = vm.canStepBackward.val,
+      proc() = vm.stepBackward())
+
+    # Step Forward
+    renderControlButton(r, panel, "step-forward", "\u25B6",
+      proc(): bool = vm.canStepForward.val,
+      proc() = vm.stepForward())
+
+    # Step In
+    renderControlButton(r, panel, "step-in", "\u2193",
+      proc(): bool = vm.canStepForward.val,
+      proc() = vm.stepIn())
+
+    # Step Out
+    renderControlButton(r, panel, "step-out", "\u2191",
+      proc(): bool = vm.canStepForward.val,
+      proc() = vm.stepOut())
+
+    # Continue
+    renderControlButton(r, panel, "continue-btn", "\u23E9",
+      proc(): bool = vm.canContinue.val,
+      proc() = vm.continueExecution())
+
+    # Reverse Continue
+    renderControlButton(r, panel, "reverse-continue", "\u23EA",
+      proc(): bool = vm.canContinue.val,
+      proc() = vm.reverseContinue())
+
+    # Status text
+    renderStatusText(r, panel, vm)
+
+    panel
+
+  proc mountIsoNimDebugControls*(container: isonim_dom.Element;
+                                  vm: DebugControlsVM) =
+    ## Mount the IsoNim debug controls view into a real DOM container.
+    ##
+    ## Creates the reactive DOM tree and appends it as a child of
+    ## `container`. The IsoNim reactive effects handle all subsequent
+    ## updates — no manual redraw is needed.
+    ##
+    ## Call this once after the DebugControlsVM has been created.
+    ## The Karax debug controls should remain visible alongside this
+    ## view during the transition period.
+    let r = WebRenderer()
+    let panel = renderDebugControlsPanel(r, vm)
+    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
