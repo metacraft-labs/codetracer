@@ -25,7 +25,7 @@
 when defined(js):
   {.error: "headless_session.nim is native-only".}
 
-import std/[json, strutils, asyncdispatch]
+import std/[json, strutils, asyncdispatch, osproc, os, streams]
 
 import isonim/core/[signals, computation]
 
@@ -500,6 +500,124 @@ proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
           lines.add(parseCallLine(callLinesNode[idx], startCallLineIdx + idx.int64))
         s.session.store.updateCalltraceSection(lines, startCallLineIdx, totalCount)
         drain()
+
+# ---------------------------------------------------------------------------
+# Breakpoints
+# ---------------------------------------------------------------------------
+
+proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int) =
+  ## Send a ``setBreakpoints`` DAP request for a single breakpoint at the
+  ## given file and line.  The standard DAP ``setBreakpoints`` command
+  ## replaces all breakpoints for the specified source, so calling this
+  ## multiple times for the same file will overwrite previous breakpoints
+  ## in that file.
+  let args = %*{
+    "source": {
+      "path": file,
+    },
+    "breakpoints": [
+      {"line": line},
+    ],
+  }
+  let resp = s.backend.sendDapRequest("setBreakpoints", args)
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(IOError,
+      "setBreakpoints failed: " & $resp)
+
+# ---------------------------------------------------------------------------
+# Event log
+# ---------------------------------------------------------------------------
+
+type
+  EventLogEntry* = object
+    ## A single entry from the ``ct/event-load`` response.
+    content*: string
+    rrTicks*: uint64
+    line*: int
+    file*: string
+
+proc requestAndLoadEventLog*(s: HeadlessDebugSession;
+                             start: int = 0;
+                             count: int = 0): seq[EventLogEntry] =
+  ## Send ``ct/event-load`` to the backend and return the parsed event log
+  ## entries.  When ``count`` is 0 (default) the backend returns the first
+  ## 20 events (legacy behaviour); pass an explicit ``count`` for pagination.
+  let args = %*{
+    "start": start,
+    "count": count,
+  }
+  let resp = s.backend.sendDapRequest("ct/event-load", args)
+  # Drain interleaved events (the server may push events before the response).
+  discard s.backend.drainEvents()
+  if resp.getOrDefault("success").getBool(false):
+    let body = resp.getOrDefault("body")
+    if not body.isNil and body.kind == JObject:
+      let eventsNode = body.getOrDefault("events")
+      if not eventsNode.isNil and eventsNode.kind == JArray:
+        for ev in eventsNode:
+          var entry = EventLogEntry()
+          entry.content = ev.getOrDefault("content").getStr("")
+          # ProgramEvent fields use camelCase serde names:
+          #   high_level_path -> highLevelPath (or high_level_path)
+          #   high_level_line -> highLevelLine (or high_level_line)
+          #   directLocationRRTicks -> directLocationRRTicks
+          entry.file = ev.getOrDefault("high_level_path").getStr(
+            ev.getOrDefault("highLevelPath").getStr(""))
+          entry.line = ev.getOrDefault("high_level_line").getInt(
+            ev.getOrDefault("highLevelLine").getInt(0))
+          entry.rrTicks = ev.getOrDefault("directLocationRRTicks").getBiggestInt(0).uint64
+          result.add(entry)
+
+# ---------------------------------------------------------------------------
+# Trace recording
+# ---------------------------------------------------------------------------
+
+proc findCtBinary*(): string =
+  ## Locate the ``ct`` binary for recording traces.
+  ## Falls back to the CT_BIN environment variable.
+  let envBin = getEnv("CT_BIN", "")
+  if envBin.len > 0 and fileExists(envBin):
+    return envBin
+  # headless_session.nim is at src/frontend/viewmodel/headless_session.nim
+  # so 4 parentDir calls reach the repo root.
+  let thisFile = currentSourcePath()
+  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir
+  let candidate = repoRoot / "src" / "build-debug" / "bin" / "ct"
+  if fileExists(candidate):
+    return candidate
+  raise newException(IOError,
+    "Could not find ct binary. Set CT_BIN or build it. Tried: " & candidate)
+
+proc recordTrace*(programPath: string; outputDir: string = "";
+                  lang: string = ""): string =
+  ## Record a trace for the given program and return the trace folder path.
+  ##
+  ## If ``outputDir`` is empty, a temporary directory is created.
+  ## The returned path is the directory containing the trace files.
+  ##
+  ## This shells out to ``ct record -o <dir> <program>`` which invokes
+  ## the appropriate recorder for the language.
+  let ctBin = findCtBinary()
+  let traceDir = if outputDir.len > 0: outputDir
+                 else: getTempDir() / "ct-headless-test-traces" /
+                       programPath.extractFilename().changeFileExt("")
+  createDir(traceDir)
+
+  var args = @["record", "-o", traceDir]
+  if lang.len > 0:
+    args.add("--lang")
+    args.add(lang)
+  args.add(programPath)
+
+  let process = startProcess(ctBin, args = args,
+                             options = {poStdErrToStdOut, poUsePath})
+  let exitCode = process.waitForExit()
+  let output = process.outputStream.readAll()
+  process.close()
+  if exitCode != 0:
+    raise newException(IOError,
+      "ct record failed (exit " & $exitCode & "): " & output)
+  return traceDir
 
 # ---------------------------------------------------------------------------
 # Watch expressions
