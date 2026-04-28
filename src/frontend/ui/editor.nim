@@ -18,12 +18,21 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
   EditorVM, createEditorVM
+# The IsoNim editor view is defined in isonim_editor_view.nim. The
+# current mount strategy reuses the Karax-rendered container and only
+# removes the kxiMap entry. The view file exists for future expansion
+# (e.g. expansion editors, tests) and to follow the panel pattern.
 
 # Module-level EditorVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
 # data so behaviour is unchanged.
 var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
+
+# Track which editor instances have been IsoNim-mounted by their id.
+# Once an editor's container is created by IsoNim, the Karax render()
+# returns a stub and the kxiMap entry is removed.
+var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -104,6 +113,8 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
+proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
+proc editorAfterRedraw(self: EditorViewComponent)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
@@ -276,10 +287,15 @@ proc closeEditorTab*(data: Data, id: cstring) =
   cdebug "tabs: closeEditorTab: historyIndex -> " & $data.services.editor.historyIndex
 
   # remove editor component from editors registry
+  let editorId = editor.id
   discard jsDelete(data.ui.editors[id])
 
-  # remove editor karax instance
+  # remove editor karax instance (may already be absent if IsoNim-mounted)
   discard jsDelete(kxiMap[id])
+
+  # Clean up the IsoNim mount tracking for this editor.
+  if isoNimEditorMountedIds.hasKey(editorId):
+    discard jsDelete(isoNimEditorMountedIds[editorId])
 
   # add editor to closed tabs registry
   let header = EditorViewTabArgs(name: id, editorView: editor.editorView)
@@ -1687,6 +1703,291 @@ proc clearTest(self: EditorViewComponent) =
       testLine.contentWidget = nil
   self.testDom = JsAssoc[int, Node]{}
 
+# ---------------------------------------------------------------------------
+# IsoNim primary rendering — Monaco init and after-redraw extracted procs
+# ---------------------------------------------------------------------------
+
+proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
+  ## Initialise Monaco Editor inside the container identified by `selector`.
+  ## Extracted from the legacy Karax afterRedraws callback so it can be
+  ## called from both the Karax path and the IsoNim mount path.
+  ## Runs only once — guarded by `tabInfo.monacoEditor.isNil`.
+  var tabInfo = self.tabInfo
+  if tabInfo.isNil or not tabInfo.monacoEditor.isNil:
+    return
+
+  let path = tabInfo.name
+  var readOnly: bool
+  if self.data.ui.readOnly:
+    readOnly = true
+  else:
+    readOnly = false
+
+  const whiteThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
+  const darkThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
+
+  cdebug "HEHE XD"
+
+  try:
+    {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
+    {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
+  except:
+    let message = getCurrentExceptionMsg()
+    cerror "editor: defining themes: " & message
+
+  let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
+
+  var editorReady = false
+  try:
+    let documentTmp = domWindow.document
+    let overflowHost = documentTmp.createElement(cstring("div"))
+    overflowHost.className = cstring("monaco-editor")
+    documentTmp.body.appendChild(overflowHost)
+
+    cdebug "editor: creating monaco editor " & $self.name
+    var lang = fromPath(path)
+    if lang == LangNoir:
+      lang = LangRust
+
+    cdebug lang
+
+    tabInfo.monacoEditor = createMonacoEditor(
+      selector,
+      MonacoEditorOptions(
+        value: tabInfo.source,
+        language: lang.toCLang(),
+        readOnly: readOnly,
+        theme: theme,
+        automaticLayout: true,
+        folding: true,
+        fontSize: self.data.ui.fontSize,
+        minimap: js{ enabled: false },
+        renderIndentGuides: true,
+        find: js{ addExtraSpaceOnTop: false },
+        renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
+        lineNumbers: proc(line: int): cstring = self.editorLineNumber(path, line),
+        lineNumbersMinChars: monacoLineNumbersMinChars(lineCountForGutter(tabInfo.source)),
+        lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
+        showFoldingControls: cstring"always",
+        scrollBeyondLastColumn: 0,
+        contextmenu: false,
+        overflowWidgetsDomNode: overflowHost,
+        fixedOverflowWidgets: true
+      )
+    )
+
+    tabInfo.monacoEditor.config = getConfiguration(tabInfo.monacoEditor)
+    tabInfo.monacoEditor.onDidChangeModelContent(proc(event: JsObject) =
+      updateMonacoGutterWidth(tabInfo.monacoEditor, self.data.ui.fontSize)
+    )
+    editorReady = true
+  except:
+    cerror "editor: " & getCurrentExceptionMsg()
+    if tabInfo.monacoEditor.isNil:
+      return
+  finally:
+    if not tabInfo.monacoEditor.isNil:
+      self.monacoEditor = tabInfo.monacoEditor
+      if self.monacoEditor notin self.data.ui.monacoEditors:
+        self.data.ui.monacoEditors.add(self.monacoEditor)
+      registerLspEditor(self)
+      try:
+        self.delegateShortcuts(self.monacoEditor)
+      except:
+        cerror "delegateShortcuts " & getCurrentExceptionMsg()
+    if not editorReady:
+      return
+
+  self.monacoEditor = tabInfo.monacoEditor
+  if self.monacoEditor notin self.data.ui.monacoEditors:
+    self.data.ui.monacoEditors.add(self.monacoEditor)
+
+  tabInfo.monacoEditor.onMouseWheel(proc(e: js) =
+    if not self.flow.isNil and self.flow.shouldRecalcFlow:
+      self.flow.resizeFlowSlider()
+  )
+
+  tabInfo.monacoEditor.onDidScrollChange(proc(e: js) =
+    let leftPos = fmt"{e.scrollLeft}px".cstring
+    for trace in self.traces:
+      trace.viewZone.domNode.style.toJs.left = leftPos
+    for flowLoop in self.flow.flowLoops:
+      if not flowLoop.flowZones.isNil:
+        self.flow.leftPos = leftPos
+        flowLoop.flowZones.dom.style.toJs.left = leftPos
+  )
+
+  tabInfo.monacoEditor.onMouseDown(proc(e: js) =
+    if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
+      try:
+        let targetToken = self.getTokenFromPosition(e.target.position)
+        if targetToken != "":
+          self.sourceCallJump(
+            self.name,
+            self.lastMouseMoveLine,
+            targetToken,
+            SmartJump)
+      except AmbiguousFunctionCallException:
+        self.api.errorMessage getCurrentExceptionMsg()
+    elif cast[bool](e.event.ctrlKey) or cast[bool](e.event.middleButton):
+      self.lastMouseClickLine = self.lastMouseMoveLine
+      self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
+      if cast[bool](e.event.middleButton) :
+        self.sourceOrCallJump(e.target.position)
+      else:
+        self.editorLineJump(self.lastMouseMoveLine, SmartJump)
+    else:
+      let position = e.target.position
+      let target = cast[cstring](e.target.element.classList.value).split(" ")[0]
+      let line = cast[int](position.lineNumber)
+      if target != "fa" and not ui_imports.jslib.startsWith(target, "value"):
+        self.lastMouseClickLine = line
+        self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
+        self.data.redraw()
+    self.data.ui.activeFocus = self)
+
+  tabInfo.monacoEditor.onContextMenu(proc(ev: js) =
+    console.log(cstring"editor: onContextMenu fired")
+    let contextMenu = createContextMenuItems(self, ev)
+    console.log(cstring"editor: context menu items count = " & $contextMenu.len)
+    if contextMenu.len > 0:
+      showContextMenu(contextMenu, cast[int](ev.event.posx), cast[int](ev.event.posy)))
+
+  tabInfo.monacoEditor.onMouseMove(proc(event: js) =
+    let position = event.target.position
+    let line = if not position.isNil:
+        cast[int](position.lineNumber)
+      else:
+        (cast[int](event.target.element.parentElement.offsetTop) div 20) + tabInfo.location.expansionFirstLine
+    self.lastMouseMoveLine = line)
+
+  tabInfo.monacoEditor.toJs.getModel().onDidChangeContent(proc =
+    if tabInfo.reloadChange:
+      tabInfo.reloadChange = false
+    else:
+      tabInfo.changed = true)
+
+  console.log("DELEGATING SHORTCUTS")
+
+  try:
+    self.delegateShortcuts(self.monacoEditor)
+  except:
+    cerror "delegateShorcuts " & getCurrentExceptionMsg()
+
+  try:
+    self.loadKeyPlugins()
+  except:
+    cerror "loadKeyPlugins " & getCurrentExceptionMsg()
+
+  document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
+    ev.stopPropagation()
+    for element in cast[seq[cstring]](ev.toJs.target.classList):
+      if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
+        self.lineActionClick(tabInfo, ev.target.toJs)
+        return
+      if ($element).contains("gutter"):
+        self.lineActionClick(tabInfo, ev.target.toJs)
+  )
+
+  document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
+    for element in cast[seq[cstring]](ev.toJs.target.classList):
+      if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
+        ev.preventDefault()
+        ev.stopPropagation()
+        self.lineActionContextMenu(tabInfo, ev.target.toJs)
+        return
+  )
+
+proc editorAfterRedraw(self: EditorViewComponent) =
+  ## Per-redraw work for the editor: flow rendering, line styles, test
+  ## actions, trace/expansion redraws. Extracted from the legacy Karax
+  ## afterRedraws callback so it can be called from both paths.
+  let tabInfo = self.tabInfo
+  if tabInfo.isNil:
+    return
+
+  try:
+    if self.isExpansion:
+      var zoneNode = cast[Node](self.viewZone.domNode)
+
+    if not self.flow.isNil and self.data.config.flow.enabled and self.data.ui.mode == DebugMode:
+      self.redrawFlow()
+    else:
+      if not self.flow.isNil and not self.flow.flow.isNil:
+        self.flow.clear()
+
+    if self.shouldLoadFlow and not self.tabInfo.monacoEditor.isNil:
+      self.loadFlow(FlowMode.Call, tabInfo.location)
+      self.shouldLoadFlow = false
+
+    if not self.data.startOptions.diff.isNil and
+      self.diffViewZones.len() == 0 and
+      self.diffAddedLines.len() == 0:
+        self.clearDiffViewZones()
+        self.makeDiffViewZones()
+        self.loadFlow(FlowMode.Diff, types.Location())
+
+    self.addTestActions()
+    self.applyEventualStylesLines()
+
+  except Exception as e:
+    cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
+
+  var toggleList: seq[int] = @[]
+
+  for line, trace in self.traces:
+    if trace.expanded:
+      if not trace.m.isNil:
+        trace.m.redraw()
+
+  for line, expandedInstance in self.expanded:
+    self.ensureExpanded(expandedInstance, line)
+    if expandedInstance.isExpanded:
+      expandedInstance.renderer.redraw()
+
+proc tryMountIsoNimEditorPanel(self: EditorViewComponent) =
+  ## Take over an editor's container from Karax, making IsoNim the
+  ## primary renderer.
+  ##
+  ## This must be called AFTER Karax has rendered the container and
+  ## Monaco has been initialised (i.e. `tabInfo.monacoEditor` is not nil).
+  ## The Karax-rendered element already has the correct id, class,
+  ## data-label and tabindex attributes. We simply remove the kxiMap
+  ## entry so `redrawAll()` no longer triggers Karax VDOM diffing for
+  ## this component (which would corrupt the Monaco-managed DOM).
+  ##
+  ## The per-redraw work (flow, styles, test actions) is triggered from
+  ## `onCompleteMove` directly via `editorAfterRedraw`.
+  ##
+  ## Safe to call multiple times per editor — mounts only once per id.
+  let editorId = self.id
+  if isoNimEditorMountedIds.hasKey(editorId):
+    return
+  if editorVMInstance.isNil:
+    return
+
+  let tabInfo = self.tabInfo
+  if tabInfo.isNil:
+    return
+
+  # Only mount after Monaco has been created — we need the container
+  # to already be in the DOM with Monaco attached.
+  if tabInfo.monacoEditor.isNil:
+    return
+
+  let containerId = cstring(&"editorComponent-{editorId}")
+
+  # Remove the Karax instance so redrawAll() skips this component.
+  # Editor tabs use the file path (self.name) as the kxiMap key.
+  # This prevents Karax VDOM diffing from corrupting the IsoNim/Monaco
+  # managed DOM on subsequent redraw cycles.
+  if not self.name.isNil:
+    kxiMap.del(self.name)
+
+  isoNimEditorMountedIds[editorId] = true
+
+  clog "IsoNim editor: mounted as primary renderer in #" & containerId
+
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
 
@@ -1697,6 +1998,18 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       text "file not loaded"
 
   let index = self.id
+
+  # -----------------------------------------------------------------------
+  # IsoNim primary rendering path — when mounted, the kxiMap entry has
+  # been removed so redrawAll() no longer calls this. This guard is a
+  # safety net in case render()/editorView() is called from another path.
+  # -----------------------------------------------------------------------
+  if isoNimEditorMountedIds.hasKey(index):
+    return buildHtml(tdiv())
+
+  # -----------------------------------------------------------------------
+  # Legacy Karax rendering path — active until IsoNim takes over.
+  # -----------------------------------------------------------------------
   var selector = cstring""
 
   if not self.isExpansion:
@@ -1712,237 +2025,20 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
 
   if tabInfo.monacoEditor.isNil:
     self.renderer.afterRedraws.add(proc: void =
-      let trace = not self.data.trace.isNil
-      var readOnly: bool
-      if self.data.ui.readOnly:
-        readOnly = true
-      else:
-        readOnly = false
-
-      const whiteThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
-      const darkThemeDef = staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
-
-      cdebug "HEHE XD"
-
-      try:
-        {.emit: "monaco.editor.defineTheme('codetracerWhite', " & whiteThemeDef & ")\n".}
-        {.emit: "monaco.editor.defineTheme('codetracerDark', " & darkThemeDef & ")\n".}
-      except:
-        let message = getCurrentExceptionMsg()
-        cerror "editor: defining themes: " & message
-
-      let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
-
-      var editorReady = false
-      try:
-        let documentTmp = domWindow.document
-        let overflowHost = documentTmp.createElement(cstring("div"))
-        overflowHost.className = cstring("monaco-editor")
-        documentTmp.body.appendChild(overflowHost)
-
-        cdebug "editor: creating monaco editor " & $self.name
-        var lang = fromPath(path)
-        if lang == LangNoir:
-          lang = LangRust
-
-        cdebug lang
-
-        tabInfo.monacoEditor = createMonacoEditor(
-          selector,
-          MonacoEditorOptions(
-            value: tabInfo.source,
-            language: lang.toCLang(),
-            readOnly: readOnly,
-            theme: theme,
-            automaticLayout: true,
-            folding: true,
-            fontSize: self.data.ui.fontSize,
-            minimap: js{ enabled: false },
-            renderIndentGuides: true,
-            find: js{ addExtraSpaceOnTop: false },
-            renderLineHighlight: if self.editorView == ViewLowLevelCode: "none".cstring else: "".cstring,
-            lineNumbers: proc(line: int): cstring = self.editorLineNumber(path, line),
-            lineNumbersMinChars: monacoLineNumbersMinChars(lineCountForGutter(tabInfo.source)),
-            lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
-            showFoldingControls: cstring"always",
-            scrollBeyondLastColumn: 0,
-            contextmenu: false,
-            # scrollbar: js{
-            #   horizontalScrollbarSize: 14,
-            #   horizontalSliderSize: 8,
-            #   verticalScrollbarSize: 14,
-            #   verticalSliderSize: 8
-            # },
-            overflowWidgetsDomNode: overflowHost,
-            fixedOverflowWidgets: true
-          )
-        )
-
-        tabInfo.monacoEditor.config = getConfiguration(tabInfo.monacoEditor)
-        tabInfo.monacoEditor.onDidChangeModelContent(proc(event: JsObject) =
-          updateMonacoGutterWidth(tabInfo.monacoEditor, self.data.ui.fontSize)
-        )
-        editorReady = true
-      except:
-        cerror "editor: " & getCurrentExceptionMsg()
-        if tabInfo.monacoEditor.isNil:
-          return
-      finally:
-        if not tabInfo.monacoEditor.isNil:
-          self.monacoEditor = tabInfo.monacoEditor
-          if self.monacoEditor notin self.data.ui.monacoEditors:
-            self.data.ui.monacoEditors.add(self.monacoEditor)
-          registerLspEditor(self)
-          try:
-            self.delegateShortcuts(self.monacoEditor)
-          except:
-            cerror "delegateShortcuts " & getCurrentExceptionMsg()
-        if not editorReady:
-          return
-
-      self.monacoEditor = tabInfo.monacoEditor
-      if self.monacoEditor notin self.data.ui.monacoEditors:
-        self.data.ui.monacoEditors.add(self.monacoEditor)
-
-      tabInfo.monacoEditor.onMouseWheel(proc(e: js) =
-        if not self.flow.isNil and self.flow.shouldRecalcFlow:
-          self.flow.resizeFlowSlider()
-      )
-
-      tabInfo.monacoEditor.onDidScrollChange(proc(e: js) =
-        let leftPos = fmt"{e.scrollLeft}px".cstring
-        for trace in self.traces:
-          trace.viewZone.domNode.style.toJs.left = leftPos
-        for flowLoop in self.flow.flowLoops:
-          if not flowLoop.flowZones.isNil:
-            self.flow.leftPos = leftPos
-            flowLoop.flowZones.dom.style.toJs.left = leftPos
-      )
-
-      tabInfo.monacoEditor.onMouseDown(proc(e: js) =
-        if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
-          try:
-            let targetToken = self.getTokenFromPosition(e.target.position)
-            if targetToken != "":
-              self.sourceCallJump(
-                self.name,
-                self.lastMouseMoveLine,
-                targetToken,
-                SmartJump)
-          except AmbiguousFunctionCallException:
-            self.api.errorMessage getCurrentExceptionMsg()
-        elif cast[bool](e.event.ctrlKey) or cast[bool](e.event.middleButton):
-          self.lastMouseClickLine = self.lastMouseMoveLine
-          self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
-          if cast[bool](e.event.middleButton) :
-            self.sourceOrCallJump(e.target.position)
-          else:
-            self.editorLineJump(self.lastMouseMoveLine, SmartJump)
-        else:
-          let position = e.target.position
-          let target = cast[cstring](e.target.element.classList.value).split(" ")[0]
-          let line = cast[int](position.lineNumber)
-          if target != "fa" and not ui_imports.jslib.startsWith(target, "value"):
-            self.lastMouseClickLine = line
-            self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
-            self.data.redraw()
-        self.data.ui.activeFocus = self)
-
-      tabInfo.monacoEditor.onContextMenu(proc(ev: js) =
-        console.log(cstring"editor: onContextMenu fired")
-        let contextMenu = createContextMenuItems(self, ev)
-        console.log(cstring"editor: context menu items count = " & $contextMenu.len)
-        if contextMenu.len > 0:
-          showContextMenu(contextMenu, cast[int](ev.event.posx), cast[int](ev.event.posy)))
-
-      tabInfo.monacoEditor.onMouseMove(proc(event: js) =
-        let position = event.target.position
-        let line = if not position.isNil:
-            cast[int](position.lineNumber)
-          else:
-            (cast[int](event.target.element.parentElement.offsetTop) div 20) + tabInfo.location.expansionFirstLine
-        self.lastMouseMoveLine = line)
-
-      tabInfo.monacoEditor.toJs.getModel().onDidChangeContent(proc =
-        if tabInfo.reloadChange:
-          tabInfo.reloadChange = false
-        else:
-          tabInfo.changed = true)
-
-      console.log("DELEGATING SHORTCUTS")
-
-      try:
-        # echo "delegate shortcuts"
-        self.delegateShortcuts(self.monacoEditor)
-      except:
-        cerror "delegateShorcuts " & getCurrentExceptionMsg()
-
-      try:
-        self.loadKeyPlugins()
-      except:
-        cerror "loadKeyPlugins " & getCurrentExceptionMsg()
-
-      document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
-        ev.stopPropagation()
-        for element in cast[seq[cstring]](ev.toJs.target.classList):
-          if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
-            self.lineActionClick(tabInfo, ev.target.toJs)
-            return
-          if ($element).contains("gutter"):
-            self.lineActionClick(tabInfo, ev.target.toJs)
-      )
-
-      document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
-        for element in cast[seq[cstring]](ev.toJs.target.classList):
-          if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
-            ev.preventDefault()
-            ev.stopPropagation()
-            self.lineActionContextMenu(tabInfo, ev.target.toJs)
-            return
-      )
+      self.initMonacoForEditor(selector)
+      # After Monaco init succeeds, schedule the IsoNim takeover.
+      # The mount runs via setTimeout so it happens AFTER the current
+      # Karax render cycle completes — this prevents Karax from
+      # diffing and corrupting the Monaco DOM.
+      if not editorVMInstance.isNil and not self.isExpansion and
+         not tabInfo.monacoEditor.isNil:
+        discard setTimeout(proc() =
+          self.tryMountIsoNimEditorPanel()
+        , 200)
     )
 
-  var self2 = self
-
   self.renderer.afterRedraws.add(proc: void =
-    try:
-      if self.isExpansion:
-        var zoneNode = cast[Node](self.viewZone.domNode)
-
-      if not self.flow.isNil and self.data.config.flow.enabled and self.data.ui.mode == DebugMode:
-        self.redrawFlow()
-      else:
-        if not self.flow.isNil and not self.flow.flow.isNil:
-          self.flow.clear()
-
-      if self.shouldLoadFlow and not self.tabInfo.monacoEditor.isNil:
-        self.loadFlow(FlowMode.Call, tabInfo.location)
-        self.shouldLoadFlow = false
-
-      if not self.data.startOptions.diff.isNil and
-        self.diffViewZones.len() == 0 and
-        self.diffAddedLines.len() == 0:
-          self.clearDiffViewZones()
-          self.makeDiffViewZones()
-          self.loadFlow(FlowMode.Diff, types.Location())
-
-      self.addTestActions()
-      self.applyEventualStylesLines()
-
-    except Exception as e:
-      cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
-
-    var toggleList: seq[int] = @[]
-
-    for line, trace in self.traces:
-      if trace.expanded:
-        if not trace.m.isNil:
-          trace.m.redraw()
-
-    for line, expandedInstance in self.expanded:
-      self.ensureExpanded(expandedInstance, line)
-      if expandedInstance.isExpanded:
-        expandedInstance.renderer.redraw()
+    self.editorAfterRedraw()
   )
 
   let depth = self.tabInfo.location.expansionDepth
@@ -2098,6 +2194,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
 
   if not self.flow.isNil:
     discard self.flow.onCompleteMove(response)
+
+  # For IsoNim-mounted editors, run the after-redraw work directly
+  # since the kxiMap entry has been removed and redrawAll() will not
+  # reach this component's afterRedraws callbacks.
+  if isoNimEditorMountedIds.hasKey(self.id):
+    self.editorAfterRedraw()
+
   self.data.redraw()
 
 proc onSelectFlow*(data: Data) {.async.} =
@@ -2110,6 +2213,13 @@ method render*(self: EditorViewComponent): VNode =
   if not self.data.lspStarted:
     self.data.ipc.send("CODETRACER::start-lsp", js{})
     self.data.lspStarted = true
+
+  # When the IsoNim editor view is mounted, return a stable empty stub.
+  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
+  # calls this. This guard is a safety net in case render() is called
+  # from another path.
+  if isoNimEditorMountedIds.hasKey(self.id):
+    return buildHtml(tdiv())
 
   if self.editorView == ViewNoSource:
     result = self.noInfo.render()
