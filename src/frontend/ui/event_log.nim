@@ -38,9 +38,13 @@ proc eventLogAfterRedraws(self: EventLogComponent)
 proc initEventLogVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel EventLogVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel).
-  ## If the EventLogVM has already been created this is a no-op.
+  ##
+  ## If a stub-backed instance already exists (created by initEventLogVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if eventLogVMInstance != nil:
-    return
+    clog "EventLogVM: replacing existing instance with shared-store version"
+    isoNimEventLogMounted = false
   eventLogVMStore = store
   eventLogVMInstance = createEventLogVM(store)
   clog "EventLogVM: parallel ViewModel instance created (shared store)"

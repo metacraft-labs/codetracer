@@ -965,10 +965,16 @@ proc tryMountIsoNimCalltrace() =
 proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel CalltraceVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel
-  ## which is backed by a real DapApi).  If the CalltraceVM has already
-  ## been created this is a no-op — the first caller wins.
+  ## which is backed by a real DapApi).
+  ##
+  ## If a stub-backed instance already exists (created by initCalltraceVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if calltraceVMInstance != nil:
-    return
+    clog "CalltraceVM: replacing existing instance with shared-store version"
+    # Reset the IsoNim mount flag so tryMountIsoNimCalltrace() will
+    # remount the view with the new, real-backend VM instance.
+    isoNimCalltraceMounted = false
   calltraceVMStore = store
   calltraceVMInstance = createCalltraceVM(store)
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"

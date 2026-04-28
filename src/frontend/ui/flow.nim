@@ -36,9 +36,13 @@ proc tryMountIsoNimFlowPanel()
 proc initFlowVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel FlowVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel).
-  ## If the FlowVM has already been created this is a no-op.
+  ##
+  ## If a stub-backed instance already exists (created by initFlowVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if flowVMInstance != nil:
-    return
+    clog "FlowVM: replacing existing instance with shared-store version"
+    isoNimFlowMounted = false
   flowVMStore = store
   flowVMInstance = createFlowVM(store)
   clog "FlowVM: parallel ViewModel instance created (shared store)"

@@ -41,9 +41,12 @@ var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 proc initEditorVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel EditorVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel).
-  ## If the EditorVM has already been created this is a no-op.
+  ##
+  ## If a stub-backed instance already exists (created by initEditorVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if editorVMInstance != nil:
-    return
+    clog "EditorVM: replacing existing instance with shared-store version"
   editorVMStore = store
   editorVMInstance = createEditorVM(store)
   clog "EditorVM: parallel ViewModel instance created (shared store)"

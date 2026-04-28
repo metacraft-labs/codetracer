@@ -32,9 +32,13 @@ proc tryMountIsoNimTimelinePanel()
 proc initTimelineVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel TimelineVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel).
-  ## If the TimelineVM has already been created this is a no-op.
+  ##
+  ## If a stub-backed instance already exists (created by initTimelineVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if timelineVMInstance != nil:
-    return
+    clog "TimelineVM: replacing existing instance with shared-store version"
+    isoNimTimelineMounted = false
   timelineVMStore = store
   timelineVMInstance = createTimelineVM(store)
   clog "TimelineVM: parallel ViewModel instance created (shared store)"

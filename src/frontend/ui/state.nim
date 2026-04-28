@@ -134,10 +134,14 @@ proc tryMountIsoNimStatePanel() =
 proc initStateVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel StateVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel
-  ## which is backed by a real DapApi).  If the StateVM has already
-  ## been created this is a no-op — the first caller wins.
+  ## which is backed by a real DapApi).
+  ##
+  ## If a stub-backed instance already exists (created by initStateVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if stateVMInstance != nil:
-    return
+    clog "StateVM: replacing existing instance with shared-store version"
+    isoNimStateMounted = false
   stateVMStore = store
   stateVMInstance = createStateVM(store)
   clog "StateVM: parallel ViewModel instance created (shared store)"

@@ -974,10 +974,12 @@ when not defined(ctInExtension):
       activeSessionVM = createSessionVM(realBackend)
       clog "SessionViewModel: created with real DapApi backend"
 
-      # Pre-initialise the panel VMs that have legacy bridge code so they
-      # use the shared store from the SessionViewModel.  When register()
-      # later calls initStateVM() / initCalltraceVM() they will be no-ops
-      # because the instances are already set.
+      # Pre-initialise (or upgrade) the panel VMs that have legacy bridge
+      # code so they use the shared store from the SessionViewModel.
+      # If register() already created stub-backed VM instances during
+      # createUIComponents(), these calls replace them with real-backend
+      # instances.  If register() hasn't run yet, the instances are
+      # created fresh with the real backend.
       state.initStateVMWithStore(activeSessionVM.store)
       calltrace.initCalltraceVMWithStore(activeSessionVM.store)
       debug.initDebugControlsVMWithStore(activeSessionVM.store)

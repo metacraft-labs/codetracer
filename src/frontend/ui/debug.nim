@@ -58,9 +58,13 @@ proc tryMountIsoNimDebugControls() =
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel DebugControlsVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel).
-  ## If the DebugControlsVM has already been created this is a no-op.
+  ##
+  ## If a stub-backed instance already exists (created by initDebugControlsVM
+  ## before the real backend was available), it is replaced so that the
+  ## panel uses the real DapApi instead of the no-op stub.
   if debugControlsVMInstance != nil:
-    return
+    clog "DebugControlsVM: replacing existing instance with shared-store version"
+    isoNimDebugMounted = false
   debugControlsVMStore = store
   debugControlsVMInstance = createDebugControlsVM(store)
   clog "DebugControlsVM: parallel ViewModel instance created (shared store)"
