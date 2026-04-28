@@ -16,12 +16,18 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/flow_vm import
   FlowVM, createFlowVM
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_flow_view import
+  mountIsoNimFlow
 
 # Module-level FlowVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
 # data so behaviour is unchanged.
 var flowVMInstance: FlowVM
 var flowVMStore: ReplayDataStore
+var isoNimFlowMounted: bool = false
+
+proc tryMountIsoNimFlowPanel()
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -36,6 +42,7 @@ proc initFlowVMWithStore*(store: ReplayDataStore) =
   flowVMStore = store
   flowVMInstance = createFlowVM(store)
   clog "FlowVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimFlowPanel()
 
 proc initFlowVM() =
   ## Lazily create the parallel FlowVM backed by a stub
@@ -62,6 +69,7 @@ proc initFlowVM() =
   flowVMStore = createReplayDataStore(stubBackend)
   flowVMInstance = createFlowVM(flowVMStore)
   clog "FlowVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimFlowPanel()
 
 proc syncFlowDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
@@ -71,6 +79,38 @@ proc syncFlowDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   let ticks = cast[uint64](rrTicks)
   flowVMStore.updateDebuggerPosition(ticks, $path, line)
   clog fmt"FlowVM: synced debugger rrTicks={ticks}"
+
+proc jsQuerySelector(selector: cstring): dom_api.Element
+  {.importcpp: "document.querySelector(#)".}
+  ## Thin wrapper around `document.querySelector` for cases where
+  ## the isonim dom_api does not expose this method.
+
+proc tryMountIsoNimFlowPanel() =
+  ## Mount the IsoNim flow panel view into the first
+  ## `.flow-component-container` element in the DOM. We inject a child
+  ## div for the IsoNim view alongside the Karax-rendered content.
+  ##
+  ## Safe to call multiple times — mounts only once.
+  if isoNimFlowMounted or flowVMInstance.isNil:
+    return
+
+  # Short delay to ensure the Karax container has been created.
+  discard setTimeout(proc() =
+    if isoNimFlowMounted:
+      return
+    let container = jsQuerySelector(cstring".flow-component-container")
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      clog "IsoNim flow panel: .flow-component-container element not found"
+      return
+    # Create a dedicated wrapper div inside the container so that the
+    # IsoNim view sits alongside the Karax content.
+    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
+    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-flow-panel")
+    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+    isoNimFlowMounted = true
+    mountIsoNimFlow(wrapper, flowVMInstance)
+    clog "IsoNim flow panel: mounted into .flow-component-container"
+  , 500)
 
 # thank, God!
 proc resizeLineSlider(self: FlowComponent, position: int)

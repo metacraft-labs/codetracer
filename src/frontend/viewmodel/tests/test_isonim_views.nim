@@ -24,12 +24,20 @@ import ../viewmodels/debug_controls_vm
 import ../viewmodels/event_log_vm
 import ../viewmodels/flow_vm
 import ../viewmodels/timeline_vm
+import ../viewmodels/search_vm
+import ../viewmodels/point_list_vm
+import ../viewmodels/scratchpad_vm
+import ../viewmodels/shell_vm
 import ../views/isonim_state_view
 import ../views/isonim_calltrace_view
 import ../views/isonim_debug_controls_view
 import ../views/isonim_event_log_view
 import ../views/isonim_flow_view
 import ../views/isonim_timeline_view
+import ../views/isonim_search_view
+import ../views/isonim_point_list_view
+import ../views/isonim_scratchpad_view
+import ../views/isonim_shell_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -1800,5 +1808,501 @@ suite "IsoNim Timeline Panel — hover tooltip":
 
       vm.hover(none(uint64))
       check tooltip.styles["display"] == "none"
+
+      dispose()
+
+# ===========================================================================
+# Search panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Search structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Panel — structure":
+
+  test "renders root with search-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "search-component"
+
+      dispose()
+
+  test "renders four mode buttons":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      let modeBar = findByClass(panel, "search-mode-selector")
+      check modeBar != nil
+
+      let cmdBtn = findByClass(panel, "mode-command")
+      let fileBtn = findByClass(panel, "mode-file")
+      let findBtn = findByClass(panel, "mode-find-in-files")
+      let symBtn = findByClass(panel, "mode-find-symbol")
+
+      check cmdBtn != nil
+      check fileBtn != nil
+      check findBtn != nil
+      check symBtn != nil
+
+      check cmdBtn.textContent == "Command"
+      check fileBtn.textContent == "File"
+      check findBtn.textContent == "Find in Files"
+      check symBtn.textContent == "Find Symbol"
+
+      # Command mode active by default
+      check "active" in cmdBtn.attributes["class"]
+      check "active" notin fileBtn.attributes["class"]
+
+      dispose()
+
+  test "renders search input":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      let input = findByClass(panel, "search-query-input")
+      check input != nil
+      check input.attributes["placeholder"] == "Search..."
+
+      dispose()
+
+  test "renders results container (hidden by default)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      let results = findByClass(panel, "search-results")
+      check results != nil
+      check results.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Search mode switching tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Panel — mode switching":
+
+  test "clicking file mode updates active class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      let fileBtn = findByClass(panel, "mode-file")
+      fileBtn.fireEvent("click")
+
+      check vm.mode.val == smFile
+      check "active" in fileBtn.attributes["class"]
+
+      let cmdBtn = findByClass(panel, "mode-command")
+      check "active" notin cmdBtn.attributes["class"]
+
+      dispose()
+
+  test "setting query shows results":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      let results = findByClass(panel, "search-results")
+      check results.styles["display"] == "none"
+
+      vm.setQuery("test")
+
+      check results.styles["display"] == "block"
+
+      dispose()
+
+  test "selected result indicator updates":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchPanel(r, vm)
+
+      let indicator = findByClass(panel, "search-selected-indicator")
+      check indicator.textContent == ""
+
+      vm.selectResult(some(3))
+
+      check "3" in indicator.textContent
+      check "active" in indicator.attributes["class"]
+
+      dispose()
+
+# ===========================================================================
+# Point List panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Point List structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Point List Panel — structure":
+
+  test "renders root with point-list-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "point-list-component"
+
+      dispose()
+
+  test "renders header with title":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel(r, vm)
+
+      let title = findByClass(panel, "point-list-title")
+      check title != nil
+      check title.textContent == "Points"
+
+      dispose()
+
+  test "renders points container":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel(r, vm)
+
+      let container = findByClass(panel, "point-list-items")
+      check container != nil
+
+      dispose()
+
+  test "edit indicator hidden by default":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel(r, vm)
+
+      let editIndicator = findByClass(panel, "point-edit-indicator")
+      check editIndicator != nil
+      check editIndicator.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Point List interaction tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Point List Panel — interactions":
+
+  test "selected point indicator updates":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel(r, vm)
+
+      let indicator = findByClass(panel, "point-selected-indicator")
+      check indicator.textContent == ""
+
+      vm.selectPoint(some(5))
+
+      check "5" in indicator.textContent
+      check "active" in indicator.attributes["class"]
+
+      dispose()
+
+  test "edit indicator shown when editing":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel(r, vm)
+
+      let editIndicator = findByClass(panel, "point-edit-indicator")
+      check editIndicator.styles["display"] == "none"
+
+      vm.startEditing(2)
+
+      check editIndicator.styles["display"] == "inline"
+      check "2" in editIndicator.textContent
+
+      vm.stopEditing()
+
+      check editIndicator.styles["display"] == "none"
+
+      dispose()
+
+# ===========================================================================
+# Scratchpad panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Scratchpad structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Scratchpad Panel — structure":
+
+  test "renders root with scratchpad-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "scratchpad-component"
+
+      dispose()
+
+  test "renders header with title":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+
+      let title = findByClass(panel, "scratchpad-title")
+      check title != nil
+      check title.textContent == "Scratchpad"
+
+      dispose()
+
+  test "renders items container":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+
+      let container = findByClass(panel, "scratchpad-items")
+      check container != nil
+
+      dispose()
+
+  test "renders comparison toggle button":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+
+      let toggleBtn = findByClass(panel, "comparison-toggle")
+      check toggleBtn != nil
+      check toggleBtn.textContent == "Compare"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Scratchpad interaction tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Scratchpad Panel — interactions":
+
+  test "comparison toggle changes text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+
+      let toggleBtn = findByClass(panel, "comparison-toggle")
+      check toggleBtn.textContent == "Compare"
+
+      toggleBtn.fireEvent("click")
+
+      check vm.comparisonMode.val == true
+      check toggleBtn.textContent == "Exit Compare"
+      check "active" in toggleBtn.attributes["class"]
+
+      dispose()
+
+  test "selected item indicator updates":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+
+      let indicator = findByClass(panel, "scratchpad-selected-indicator")
+      check indicator.textContent == ""
+
+      vm.selectItem(some(2))
+
+      check "2" in indicator.textContent
+      check "active" in indicator.attributes["class"]
+
+      dispose()
+
+# ===========================================================================
+# Shell panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Shell structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Shell Panel — structure":
+
+  test "renders root with shell-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      let panel = renderShellPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "shell-component"
+
+      dispose()
+
+  test "renders output area":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      let panel = renderShellPanel(r, vm)
+
+      let output = findByClass(panel, "shell-output")
+      check output != nil
+
+      dispose()
+
+  test "renders input with prompt":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      let panel = renderShellPanel(r, vm)
+
+      let prompt = findByClass(panel, "shell-prompt")
+      check prompt != nil
+      check prompt.textContent == "> "
+
+      let input = findByClass(panel, "shell-input")
+      check input != nil
+      check input.attributes["placeholder"] == "Enter command..."
+
+      dispose()
+
+  test "history indicator hidden by default":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      let panel = renderShellPanel(r, vm)
+
+      let indicator = findByClass(panel, "shell-history-indicator")
+      check indicator != nil
+      check indicator.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Shell interaction tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Shell Panel — interactions":
+
+  test "input buffer reflects in input field":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      let panel = renderShellPanel(r, vm)
+
+      let input = findByClass(panel, "shell-input")
+
+      vm.setInput("print(x)")
+
+      check input.attributes["value"] == "print(x)"
+
+      dispose()
+
+  test "history indicator shown when navigating":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      # Submit some history entries
+      vm.setInput("cmd1")
+      vm.submitInput()
+      vm.setInput("cmd2")
+      vm.submitInput()
+
+      let panel = renderShellPanel(r, vm)
+
+      let indicator = findByClass(panel, "shell-history-indicator")
+      check indicator.styles["display"] == "none"
+
+      vm.historyUp()
+
+      check indicator.styles["display"] == "inline"
+      check "2" in indicator.textContent
+
+      dispose()
+
+  test "scroll indicator shown when scrolled":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createShellVM(store)
+      let r = MockRenderer()
+
+      let panel = renderShellPanel(r, vm)
+
+      let scrollInd = findByClass(panel, "shell-scroll-indicator")
+      check scrollInd.styles["display"] == "none"
+
+      vm.scroll(10)
+
+      check scrollInd.styles["display"] == "inline"
+      check "10" in scrollInd.textContent
 
       dispose()

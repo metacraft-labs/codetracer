@@ -12,12 +12,18 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_timeline_view import
+  mountIsoNimTimeline
 
 # Module-level TimelineVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
 # data so behaviour is unchanged.
 var timelineVMInstance: TimelineVM
 var timelineVMStore: ReplayDataStore
+var isoNimTimelineMounted: bool = false
+
+proc tryMountIsoNimTimelinePanel()
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -32,6 +38,7 @@ proc initTimelineVMWithStore*(store: ReplayDataStore) =
   timelineVMStore = store
   timelineVMInstance = createTimelineVM(store)
   clog "TimelineVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimTimelinePanel()
 
 proc initTimelineVM() =
   ## Lazily create the parallel TimelineVM backed by a stub
@@ -58,6 +65,7 @@ proc initTimelineVM() =
   timelineVMStore = createReplayDataStore(stubBackend)
   timelineVMInstance = createTimelineVM(timelineVMStore)
   clog "TimelineVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimTimelinePanel()
 
 proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
@@ -67,6 +75,34 @@ proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   let ticks = cast[uint64](rrTicks)
   timelineVMStore.updateDebuggerPosition(ticks, $path, line)
   clog fmt"TimelineVM: synced debugger rrTicks={ticks}"
+
+proc tryMountIsoNimTimelinePanel() =
+  ## Mount the IsoNim timeline panel view into the `#timeline` element.
+  ## The TimelineComponent renders `tdiv(id="timeline")` in ui_js.nim.
+  ## We inject a child div for the IsoNim view alongside the
+  ## Karax-rendered content.
+  ##
+  ## Safe to call multiple times — mounts only once.
+  if isoNimTimelineMounted or timelineVMInstance.isNil:
+    return
+
+  # Short delay to ensure the Karax container has been created.
+  discard setTimeout(proc() =
+    if isoNimTimelineMounted:
+      return
+    let container = dom_api.getElementById(dom_api.document, cstring"timeline")
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      clog "IsoNim timeline panel: #timeline element not found"
+      return
+    # Create a dedicated wrapper div inside the timeline container
+    # so that the IsoNim view sits alongside the Karax content.
+    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
+    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-timeline-panel")
+    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+    isoNimTimelineMounted = true
+    mountIsoNimTimeline(wrapper, timelineVMInstance)
+    clog "IsoNim timeline panel: mounted into #timeline"
+  , 500)
 
 let
   MIN_EDITOR_WIDTH: float = 20 #%

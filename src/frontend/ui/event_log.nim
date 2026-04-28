@@ -13,12 +13,18 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/event_log_vm import
   EventLogVM, createEventLogVM
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_event_log_view import
+  mountIsoNimEventLog
 
 # Module-level EventLogVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
 # data so behaviour is unchanged.
 var eventLogVMInstance: EventLogVM
 var eventLogVMStore: ReplayDataStore
+var isoNimEventLogMounted: bool = false
+
+proc tryMountIsoNimEventLogPanel()
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -33,6 +39,7 @@ proc initEventLogVMWithStore*(store: ReplayDataStore) =
   eventLogVMStore = store
   eventLogVMInstance = createEventLogVM(store)
   clog "EventLogVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimEventLogPanel()
 
 proc initEventLogVM() =
   ## Lazily create the parallel EventLogVM backed by a stub
@@ -59,6 +66,7 @@ proc initEventLogVM() =
   eventLogVMStore = createReplayDataStore(stubBackend)
   eventLogVMInstance = createEventLogVM(eventLogVMStore)
   clog "EventLogVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimEventLogPanel()
 
 proc syncEventLogDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
@@ -68,6 +76,34 @@ proc syncEventLogDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   let ticks = cast[uint64](rrTicks)
   eventLogVMStore.updateDebuggerPosition(ticks, $path, line)
   clog fmt"EventLogVM: synced debugger rrTicks={ticks}"
+
+proc tryMountIsoNimEventLogPanel() =
+  ## Mount the IsoNim event log panel view into the GoldenLayout-managed
+  ## event log component container. The container is created by
+  ## GoldenLayout with the id `eventLogComponent-0`. We inject a child
+  ## div for the IsoNim view alongside the Karax-rendered content.
+  ##
+  ## Safe to call multiple times — mounts only once.
+  if isoNimEventLogMounted or eventLogVMInstance.isNil:
+    return
+
+  # Short delay to ensure the GoldenLayout container has been created.
+  discard setTimeout(proc() =
+    if isoNimEventLogMounted:
+      return
+    let container = dom_api.getElementById(dom_api.document, cstring"eventLogComponent-0")
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      clog "IsoNim event log panel: #eventLogComponent-0 element not found"
+      return
+    # Create a dedicated wrapper div inside the GoldenLayout container
+    # so that the IsoNim view sits alongside the Karax content.
+    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
+    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-event-log-panel")
+    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+    isoNimEventLogMounted = true
+    mountIsoNimEventLog(wrapper, eventLogVMInstance)
+    clog "IsoNim event log panel: mounted into #eventLogComponent-0"
+  , 500)
 
 var arg: js
 
