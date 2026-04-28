@@ -25,7 +25,7 @@ from ../viewmodel/views/isonim_flow_view import
 # data so behaviour is unchanged.
 var flowVMInstance: FlowVM
 var flowVMStore: ReplayDataStore
-var isoNimFlowMounted: bool = false
+var isoNimFlowMounted*: bool = false
 
 proc tryMountIsoNimFlowPanel()
 
@@ -87,8 +87,17 @@ proc jsQuerySelector(selector: cstring): dom_api.Element
 
 proc tryMountIsoNimFlowPanel() =
   ## Mount the IsoNim flow panel view into the first
-  ## `.flow-component-container` element in the DOM. We inject a child
-  ## div for the IsoNim view alongside the Karax-rendered content.
+  ## `.flow-component-container` element in the DOM. The IsoNim view
+  ## replaces existing Karax content and becomes the primary renderer,
+  ## creating the container structure that the Monaco view zone
+  ## integration code and noUiSlider attach to.
+  ##
+  ## After mounting:
+  ## - `isoNimFlowMounted` is set to true
+  ## - The Karax render() returns a minimal stub
+  ## - The existing DOM manipulation code (createFlowViewZone,
+  ##   makeSlider, addStepValues, etc.) continues to work on
+  ##   the IsoNim-created containers
   ##
   ## Safe to call multiple times — mounts only once.
   if isoNimFlowMounted or flowVMInstance.isNil:
@@ -102,14 +111,18 @@ proc tryMountIsoNimFlowPanel() =
     if dom_api.isNodeNil(dom_api.Node(container)):
       clog "IsoNim flow panel: .flow-component-container element not found"
       return
-    # Create a dedicated wrapper div inside the container so that the
-    # IsoNim view sits alongside the Karax content.
-    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
-    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-flow-panel")
-    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+
+    # Clear existing Karax-rendered content so the IsoNim view has a
+    # clean container. The existing DOM manipulation code
+    # (createFlowViewZone, makeSlider, etc.) will re-populate the
+    # container via its normal code paths.
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
     isoNimFlowMounted = true
-    mountIsoNimFlow(wrapper, flowVMInstance)
-    clog "IsoNim flow panel: mounted into .flow-component-container"
+    mountIsoNimFlow(dom_api.Element(containerNode), flowVMInstance)
+    clog "IsoNim flow panel: mounted as primary renderer in .flow-component-container"
   , 500)
 
 # thank, God!
@@ -204,6 +217,14 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   )
 
 method render*(self: FlowComponent): VNode =
+  # When the IsoNim flow view is mounted, return a stable empty stub.
+  # The existing DOM manipulation code (createFlowViewZone, makeSlider,
+  # addStepValues) continues to work on the IsoNim-created containers.
+  # This guard prevents Karax from overwriting the IsoNim-managed DOM.
+  if isoNimFlowMounted:
+    return buildHtml(tdiv(class="flow-component-container"))
+
+  # Legacy Karax rendering path — active only before IsoNim mounts.
   let allIterations = if self.flow.isNil: 0 else: self.flow.loops[self.activeStep.loop].rrTicksForIterations.len - 1
   result = buildHtml(tdiv(class="flow-component-container")):
     makeLoopLine(self, self.activeStep, allIterations)

@@ -21,7 +21,7 @@ from ../viewmodel/views/isonim_timeline_view import
 # data so behaviour is unchanged.
 var timelineVMInstance: TimelineVM
 var timelineVMStore: ReplayDataStore
-var isoNimTimelineMounted: bool = false
+var isoNimTimelineMounted*: bool = false
 
 proc tryMountIsoNimTimelinePanel()
 
@@ -77,31 +77,52 @@ proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   clog fmt"TimelineVM: synced debugger rrTicks={ticks}"
 
 proc tryMountIsoNimTimelinePanel() =
-  ## Mount the IsoNim timeline panel view into the `#timeline` element.
-  ## The TimelineComponent renders `tdiv(id="timeline")` in ui_js.nim.
-  ## We inject a child div for the IsoNim view alongside the
-  ## Karax-rendered content.
+  ## Mount the IsoNim timeline panel view into the GoldenLayout-managed
+  ## timeline component container. The container is created by
+  ## GoldenLayout with the id `timelineComponent-0`. The IsoNim view
+  ## replaces all Karax content and becomes the primary renderer,
+  ## creating the `div#timeline` that the legacy render() produced.
+  ##
+  ## After mounting:
+  ## - `isoNimTimelineMounted` is set to true
+  ## - The Karax render() in ui_js.nim returns a minimal stub
+  ## - The kxiMap entry is removed so redrawAll() skips this component
   ##
   ## Safe to call multiple times — mounts only once.
   if isoNimTimelineMounted or timelineVMInstance.isNil:
     return
 
-  # Short delay to ensure the Karax container has been created.
+  # Short delay to ensure the GoldenLayout container has been created
+  # and the initial Karax render has populated it.
   discard setTimeout(proc() =
     if isoNimTimelineMounted:
       return
-    let container = dom_api.getElementById(dom_api.document, cstring"timeline")
+    let container = dom_api.getElementById(dom_api.document, cstring"timelineComponent-0")
     if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim timeline panel: #timeline element not found"
+      clog "IsoNim timeline panel: #timelineComponent-0 element not found"
       return
-    # Create a dedicated wrapper div inside the timeline container
-    # so that the IsoNim view sits alongside the Karax content.
-    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
-    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-timeline-panel")
-    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+
+    # Clear existing Karax-rendered content so the IsoNim view has a
+    # clean container. We also remove the Karax renderer from kxiMap
+    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
+    # this component (which would corrupt the IsoNim-managed DOM).
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    # Remove the Karax instance so redrawAll() skips this component.
+    kxiMap.del(cstring"timelineComponent-0")
+
     isoNimTimelineMounted = true
-    mountIsoNimTimeline(wrapper, timelineVMInstance)
-    clog "IsoNim timeline panel: mounted into #timeline"
+
+    # Create the div#timeline that the legacy TimelineComponent.render()
+    # produced, then mount the IsoNim view inside it.
+    let timelineDiv = dom_api.createElement(dom_api.document, cstring"div")
+    dom_api.setAttribute(timelineDiv, cstring"id", cstring"timeline")
+    dom_api.appendChild(containerNode, dom_api.Node(timelineDiv))
+
+    mountIsoNimTimeline(timelineDiv, timelineVMInstance)
+    clog "IsoNim timeline panel: mounted as primary renderer in #timelineComponent-0"
   , 500)
 
 let
