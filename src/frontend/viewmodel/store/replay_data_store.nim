@@ -194,23 +194,46 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
 proc requestCalltraceSection*(store: ReplayDataStore;
                               startIndex: int64;
                               height: int;
-                              depth: int) =
+                              depth: int;
+                              rrTicks: uint64 = 0;
+                              file: string = "";
+                              line: int = 0;
+                              rawIgnorePatterns: string = "";
+                              optimizeCollapse: bool = true;
+                              autoCollapsing: bool = false;
+                              renderCallLineIndex: int = 0) =
   ## Request a window of calltrace lines from the backend.
   ## Skipped if an identical request is already in flight.
+  ##
+  ## The command name matches the legacy CtLoadCalltraceSection event
+  ## ("ct/load-calltrace-section") so that the RealBackendService can
+  ## translate it to the correct CtEventKind via dapCommandToEventKind.
+  ## The backend responds with CtUpdatedCalltrace which is handled by
+  ## the existing event-bus subscription in calltrace.nim.
   let key = "load-calltrace"
-  let argsStr = $startIndex & "|" & $height & "|" & $depth
+  let argsStr = $startIndex & "|" & $height & "|" & $depth & "|" & $rrTicks
   if store.requestTracker.isDuplicate(key, argsStr):
     return
 
   store.requestTracker.markPending(key, argsStr)
   store.calltrace.loadingState.val = lsLoading
 
+  # Build a location sub-object matching the legacy CalltraceLoadArgs format.
   let args = %*{
-    "startIndex": startIndex,
+    "location": {
+      "rrTicks": rrTicks,
+      "path": file,
+      "line": line,
+    },
+    "startCallLineIndex": startIndex,
     "height": height,
     "depth": depth,
+    "rawIgnorePatterns": rawIgnorePatterns,
+    "optimizeCollapse": optimizeCollapse,
+    "autoCollapsing": autoCollapsing,
+    "renderCallLineIndex": renderCallLineIndex,
   }
-  let fut = store.backend.send("ct/load-calltrace", args)
+  let fut = store.backend.send("ct/load-calltrace-section", args)
 
   let s = store
   fut.onComplete(

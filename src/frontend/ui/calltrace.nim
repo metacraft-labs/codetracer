@@ -12,7 +12,9 @@ from ../viewmodel/store/types as vm_types import nil
 from ../viewmodel/store/replay_data_store import
   ReplayDataStore, createReplayDataStore, updateCalltraceSection,
   updateDebuggerPosition, makeCallLine
-from ../viewmodel/viewmodels/calltrace_vm import CalltraceVM, createCalltraceVM
+from ../viewmodel/viewmodels/calltrace_vm import
+  CalltraceVM, createCalltraceVM,
+  scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns
 
 # Module-level CalltraceVM instance. Created once in `register()` and
 # fed data whenever the legacy event-bus handlers fire.  Rendering
@@ -1079,7 +1081,14 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool) =
 proc scroll(self: CalltraceComponent) =
   let index = self.scrollLineIndex()
   self.startCallLineIndex = index
-  self.loadLines(fromScroll=true)
+
+  # Feed the scroll position into the CalltraceVM so its auto-load
+  # effect triggers a fresh requestCalltraceSection.  This replaces
+  # the direct self.loadLines(fromScroll=true) call.
+  if calltraceVMInstance != nil:
+    calltraceVMInstance.scroll(index.int64)
+  else:
+    self.loadLines(fromScroll=true)
 
 # debouncing algorithm based on
 # multiple answers to https://stackoverflow.com/questions/25991367/difference-between-throttling-and-debouncing-a-function
@@ -1126,7 +1135,14 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
           try:
             let index = self.scrollLineIndex()
             self.startCallLineIndex = index
-            self.loadLines(fromScroll=false)
+            # Update the VM's scroll position and viewport dimensions
+            # so the auto-load effect re-requests data for the new size.
+            if calltraceVMInstance != nil:
+              calltraceVMInstance.setViewportHeight(self.panelHeight())
+              calltraceVMInstance.setViewportDepth(self.panelDepth())
+              calltraceVMInstance.scroll(index.int64)
+            else:
+              self.loadLines(fromScroll=false)
           except:
             cwarn "scroll or load lines exception in mutation observer: ok if in editor mode"),
           100
@@ -1355,8 +1371,21 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
   self.location = response.location
 
   # Mirror the debugger position into the parallel ViewModel store.
+  # This update triggers the CalltraceVM's auto-load effect which calls
+  # store.requestCalltraceSection — so we no longer need to call
+  # self.loadLines(fromScroll=false) directly here.  The backend will
+  # respond with CtUpdatedCalltrace which is still handled by the
+  # existing onUpdatedCalltrace subscription.
   syncCalltraceDebuggerPosition(
     response.location.rrTicks, response.location.path, response.location.line)
+
+  # Sync the viewport dimensions and filter patterns to the VM so the
+  # auto-load effect can include them in its request.
+  if calltraceVMInstance != nil:
+    calltraceVMInstance.setViewportHeight(self.panelHeight())
+    calltraceVMInstance.setViewportDepth(self.panelDepth())
+    if not self.rawIgnorePatterns.isNil:
+      calltraceVMInstance.setRawIgnorePatterns($self.rawIgnorePatterns)
 
   #TODO: pass explicitly in trace as trace kind/in init/other way?
   let lang = toLangFromFilename(self.location.path)
@@ -1364,8 +1393,8 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     self.usesMaterializedTracesTrace = lang != LangUnknown and lang.usesMaterializedTraces
     self.usesMaterializedTracesTraceSet = true
 
-  # for rr traces: try to always load lines again!
-  #   eventually when we have a reliable key, maybe check again
+  # For materialized traces: if the call key is already loaded, just
+  # update the active index and scroll position without re-requesting.
   echo "ON COMPLETE MOVE; is db?: ", self.usesMaterializedTracesTrace
   if self.usesMaterializedTracesTrace and self.loadedCallKeys.hasKey(response.location.key):
     let buffer = self.getStartBufferLen()
@@ -1377,8 +1406,12 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
   elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true
-    echo "LOAD LINES"
-    self.loadLines(fromScroll=false)
+    # Data loading is now driven by the CalltraceVM's auto-load effect
+    # which fires when syncCalltraceDebuggerPosition updates the store's
+    # rrTicks signal.  The effect calls store.requestCalltraceSection()
+    # which sends the ct/load-calltrace-section command through the real
+    # backend.  The response still arrives via the CtUpdatedCalltrace
+    # event-bus subscription -> onUpdatedCalltrace, so rendering is unchanged.
   self.redraw()
 
 proc asyncFlowToggleView(self: CalltraceComponent): VNode =

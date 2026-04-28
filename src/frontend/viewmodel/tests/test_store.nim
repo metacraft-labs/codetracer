@@ -176,19 +176,26 @@ suite "ReplayDataStore requests":
       check mock.receivedCommands[1].args["rrTicks"].getBiggestInt == 99
       dispose()
 
-  test "requestCalltraceSection sends ct/load-calltrace":
+  test "requestCalltraceSection sends ct/load-calltrace-section":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let store = createReplayDataStore(mock.toBackendService())
 
-      store.requestCalltraceSection(100'i64, 50, 10)
+      store.requestCalltraceSection(100'i64, 50, 10,
+                                    rrTicks = 42'u64,
+                                    file = "main.nim",
+                                    line = 5)
       drain()
 
       check mock.receivedCommands.len == 1
-      check mock.receivedCommands[0].command == "ct/load-calltrace"
-      check mock.receivedCommands[0].args["startIndex"].getBiggestInt == 100
+      check mock.receivedCommands[0].command == "ct/load-calltrace-section"
+      check mock.receivedCommands[0].args["startCallLineIndex"].getBiggestInt == 100
       check mock.receivedCommands[0].args["height"].getInt == 50
       check mock.receivedCommands[0].args["depth"].getInt == 10
+      # Verify location is included in the request.
+      check mock.receivedCommands[0].args["location"]["rrTicks"].getBiggestInt == 42
+      check mock.receivedCommands[0].args["location"]["path"].getStr == "main.nim"
+      check mock.receivedCommands[0].args["location"]["line"].getInt == 5
       dispose()
 
   test "requestStep sends ct/step and sets status to stepping":

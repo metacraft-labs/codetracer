@@ -54,6 +54,7 @@ type
     ##   selectedEntry      — index of the selected calltrace line, or none
     ##   expandedNodes      — set of line indices whose children are visible
     ##   searchQuery        — current search/filter text
+    ##   rawIgnorePatterns  — filter patterns for calltrace (e.g. "path~lib/system")
     ##
     ## Derived memos:
     ##   visibleLines       — the CallLine seq for the current viewport
@@ -73,6 +74,7 @@ type
     selectedEntry*: Signal[Option[int64]]
     expandedNodes*: Signal[HashSet[int64]]
     searchQuery*: Signal[string]
+    rawIgnorePatterns*: Signal[string]
 
     # -- Derived state --
     visibleLines*: Memo[seq[CallLine]]
@@ -141,6 +143,11 @@ proc setViewportDepth*(vm: CalltraceVM; depth: int) =
   if depth > 0:
     vm.viewportDepth.val = depth
 
+proc setRawIgnorePatterns*(vm: CalltraceVM; patterns: string) =
+  ## Update the calltrace filter patterns (e.g. "path~lib/system;path~chronicles").
+  ## Triggers the auto-load effect if the value changes.
+  vm.rawIgnorePatterns.val = patterns
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -160,6 +167,7 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
     let selectedEntry = createSignal(none(int64))
     let expandedNodes = createSignal(initHashSet[int64]())
     let searchQuery = createSignal("")
+    let rawIgnorePatterns = createSignal("")
 
     # Derived: extract the slice of lines that falls within the viewport.
     # The store holds a window of lines starting at `startLineIndex`.
@@ -225,6 +233,7 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       selectedEntry: selectedEntry,
       expandedNodes: expandedNodes,
       searchQuery: searchQuery,
+      rawIgnorePatterns: rawIgnorePatterns,
       visibleLines: visibleLines,
       hasMoreAbove: hasMoreAbove,
       hasMoreBelow: hasMoreBelow,
@@ -233,17 +242,29 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       disposeProc: dispose,
     )
 
-    # Auto-load effect: whenever scrollPosition or viewportHeight changes,
-    # request the appropriate calltrace section from the backend.
-    # This replaces the old scroll-handler + loadLines pattern.
+    # Auto-load effect: whenever scrollPosition, viewportHeight, or the
+    # debugger's rrTicks position changes, request the appropriate
+    # calltrace section from the backend.  This replaces the old
+    # scroll-handler + loadLines pattern and the loadLines call in
+    # onCompleteMove.  The debugger position is watched so that a move
+    # (step/jump) automatically triggers a fresh calltrace request,
+    # mirroring the same pattern used by the StateVM's auto-load effect.
     createEffect proc() =
       let scrollPos = scrollPosition.val
       let vpHeight = viewportHeight.val
       let depth = viewportDepth.val
-      if vpHeight > 0:
+      let dbg = store.debugger.val
+      let patterns = rawIgnorePatterns.val
+      if vpHeight > 0 and dbg.rrTicks > 0'u64:
         # Request a section with buffer on both sides for smooth scrolling.
         let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
         let totalHeight = vpHeight + CALLTRACE_BUFFER * 2
-        store.requestCalltraceSection(bufferStart, totalHeight, depth)
+        store.requestCalltraceSection(
+          bufferStart, totalHeight, depth,
+          rrTicks = dbg.rrTicks,
+          file = dbg.location.file,
+          line = dbg.location.line,
+          rawIgnorePatterns = patterns,
+        )
 
     vm

@@ -173,22 +173,25 @@ suite "CalltraceVM scroll":
       let initialCount = mock.receivedCommands.len
       check initialCount == 0
 
+      # Set a debugger position so the auto-load effect's guard passes.
+      store.updateDebuggerPosition(100'u64, "main.nim", 1)
+
       # Set viewport height so the effect will request data.
       vm.setViewportHeight(25)
       drain()
 
       # The effect should have fired a calltrace section request.
       check mock.receivedCommands.len == 1
-      check mock.receivedCommands[0].command == "ct/load-calltrace"
+      check mock.receivedCommands[0].command == "ct/load-calltrace-section"
 
       # Now scroll — this should trigger another request.
       vm.scroll(100)
       drain()
 
       check mock.receivedCommands.len == 2
-      check mock.receivedCommands[1].command == "ct/load-calltrace"
+      check mock.receivedCommands[1].command == "ct/load-calltrace-section"
       # The start index should account for the buffer.
-      let startIdx = mock.receivedCommands[1].args["startIndex"].getBiggestInt
+      let startIdx = mock.receivedCommands[1].args["startCallLineIndex"].getBiggestInt
       check startIdx == 100 - CALLTRACE_BUFFER
 
       dispose()
@@ -603,12 +606,15 @@ suite "CalltraceVM auto-load effect":
       # No request yet — viewport height is 0.
       check mock.receivedCommands.len == 0
 
+      # Set a debugger position so the auto-load effect's guard passes.
+      store.updateDebuggerPosition(100'u64, "main.nim", 1)
+
       vm.setViewportHeight(30)
       drain()
 
       # Now the effect should have fired.
       check mock.receivedCommands.len == 1
-      check mock.receivedCommands[0].command == "ct/load-calltrace"
+      check mock.receivedCommands[0].command == "ct/load-calltrace-section"
       check mock.receivedCommands[0].args["height"].getInt ==
             30 + CALLTRACE_BUFFER * 2
 
@@ -620,6 +626,10 @@ suite "CalltraceVM auto-load effect":
       let vm = createCalltraceVM(store)
       drain()
 
+      # Set a debugger position; the guard should still skip because
+      # viewport height is 0.
+      store.updateDebuggerPosition(100'u64, "main.nim", 1)
+
       # Scroll without setting viewport height — effect should skip.
       vm.scroll(50)
       drain()
@@ -628,11 +638,50 @@ suite "CalltraceVM auto-load effect":
 
       dispose()
 
+  test "effect does not fire when rrTicks is 0":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      drain()
+
+      # Set viewport height but leave debugger at rrTicks=0.
+      vm.setViewportHeight(20)
+      drain()
+
+      check mock.receivedCommands.len == 0
+
+      dispose()
+
+  test "debugger position change triggers calltrace section request":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      drain()
+
+      # Set up viewport and initial debugger position.
+      store.updateDebuggerPosition(100'u64, "main.nim", 1)
+      vm.setViewportHeight(20)
+      drain()
+      let countAfterInit = mock.receivedCommands.len
+
+      # Move the debugger — auto-load effect should fire again.
+      store.updateDebuggerPosition(200'u64, "main.nim", 5)
+      drain()
+
+      check mock.receivedCommands.len == countAfterInit + 1
+      let lastCmd = mock.receivedCommands[^1]
+      check lastCmd.command == "ct/load-calltrace-section"
+
+      dispose()
+
   test "scroll triggers a new calltrace section request":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
       drain()
+
+      # Set a debugger position so the auto-load effect's guard passes.
+      store.updateDebuggerPosition(100'u64, "main.nim", 1)
 
       vm.setViewportHeight(20)
       drain()
@@ -643,8 +692,8 @@ suite "CalltraceVM auto-load effect":
 
       check mock.receivedCommands.len == countAfterInit + 1
       let lastCmd = mock.receivedCommands[^1]
-      check lastCmd.command == "ct/load-calltrace"
+      check lastCmd.command == "ct/load-calltrace-section"
       # Buffer start: max(0, 50 - 20) = 30
-      check lastCmd.args["startIndex"].getBiggestInt == 50 - CALLTRACE_BUFFER
+      check lastCmd.args["startCallLineIndex"].getBiggestInt == 50 - CALLTRACE_BUFFER
 
       dispose()
