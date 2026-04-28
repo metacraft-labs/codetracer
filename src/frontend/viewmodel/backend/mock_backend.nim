@@ -12,7 +12,7 @@
 ##
 ## Works on both JS and C backends.
 
-import std/json
+import std/[json, options]
 
 when defined(js):
   import std/asyncjs
@@ -80,6 +80,23 @@ proc expect*(mock: MockBackendService, command: string,
   ## Enqueue an expectation: when `command` is sent, `response` is
   ## returned.  Expectations are matched FIFO.
   mock.expectations.add((command, response))
+
+proc clearReceivedCommands*(mock: MockBackendService) =
+  ## Clear the recorded command log.  Useful in multi-phase tests
+  ## where you want to assert only on commands sent after a certain
+  ## point without counting earlier setup traffic.
+  mock.receivedCommands.setLen(0)
+
+proc findCommand*(mock: MockBackendService;
+                  command: string): Option[ReceivedCommand] =
+  ## Search the recorded commands for the first matching command name.
+  ## Returns `some(ReceivedCommand)` if found, `none` otherwise.
+  ## Useful for asserting that a specific command was (or was not)
+  ## sent without caring about its position in the log.
+  for rc in mock.receivedCommands:
+    if rc.command == command:
+      return some(rc)
+  return none(ReceivedCommand)
 
 # ---------------------------------------------------------------------------
 # Event simulation
