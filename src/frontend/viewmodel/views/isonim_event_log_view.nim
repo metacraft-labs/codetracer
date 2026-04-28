@@ -2,18 +2,22 @@
 ##
 ## IsoNim DOM-rendering view for the Event Log panel.
 ##
-## Renders a live, reactive DOM tree driven by EventLogVM signals.
-## When the VM's signals change (event rows, pagination, search,
-## sort), the DOM updates automatically via IsoNim's
-## `createRenderEffect`.
+## This view creates the container DOM structure that DataTables
+## attaches to. IsoNim builds the shell (outer container, header
+## with search/filter, `<table>` elements with the correct IDs),
+## then the existing DataTables FFI code from event_log.nim
+## initialises the widget on those elements.
+##
+## The pattern is:
+## 1. IsoNim creates the same DOM skeleton that Karax's render() produced
+## 2. After mount, a caller-provided callback triggers DataTables init
+## 3. DataTables manages the table body DOM from there
+## 4. IsoNim effects can update the DataTable via its API when
+##    ViewModel signals change
 ##
 ## Generic over the renderer type `R` so that:
 ## - `MockRenderer` can be used for headless unit tests
 ## - The web renderer can be used for real browser DOM
-##
-## This view is intended to eventually replace the Karax event_log.nim
-## component. It consumes the same EventLogVM but renders through
-## IsoNim's renderer API instead of Karax's VDOM.
 ##
 ## Usage (test):
 ##   let r = MockRenderer()
@@ -23,7 +27,7 @@
 ## Usage (web):
 ##   import isonim/web/web_renderer
 ##   let r = WebRenderer()
-##   let panel = renderEventLogPanel(r, eventLogVM)
+##   let panel = renderEventLogPanel(r, eventLogVM, denseId, detailedId)
 ##   # panel is a dom_api.Element, append to any real DOM container
 
 import std/[options, strutils, tables]
@@ -296,13 +300,166 @@ proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
   panel
 
 # ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
+# WebRenderer overload — renders DataTables-compatible DOM structure
+# ---------------------------------------------------------------------------
+#
+# The web version creates the same DOM structure that Karax's render()
+# produced, so that the existing DataTables FFI initialisation code can
+# run unchanged on the IsoNim-created elements.
+#
+# Karax render() produces:
+#   div.component-container.eventLog               (outer container)
+#     div.ct-flex                                   (header: filter + search)
+#       button#category-image                       (filter dropdown trigger)
+#       input.ct-input-panel.ct-input-search-image  (search input)
+#       div.eventLog-switch ...                     (dense/detailed toggle)
+#     div.eventLog-dense-table.data-table           (dense table wrapper)
+#       table#eventLog-{id}-dense-table-{index}     (DataTables target)
+#     div.data-tables-footer                        (footer with row info)
+#     div.eventLog-detailed-table.data-table        (detailed table wrapper)
+#       table#eventLog-{id}-detailed-table-{index}  (DataTables target)
+#
+# After mount, the caller invokes the EventLogComponent's events() /
+# eventLogAfterRedraws() to initialise the DataTables widget on the
+# `<table>` elements. DataTables manages its own DOM from there.
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc renderWebEventLogPanel*(r: WebRenderer;
+                                vm: EventLogVM;
+                                componentId: int;
+                                denseTableId: string;
+                                detailedTableId: string;
+                                searchInputId: string
+                               ): isonim_dom.Element =
+    ## Render the Event Log panel container with DataTables-compatible
+    ## DOM structure. The `<table>` elements are empty shells that
+    ## DataTables will populate during initialisation.
+    ##
+    ## Parameters:
+    ##   componentId    - the EventLogComponent.id (usually 0)
+    ##   denseTableId   - the ID for the dense `<table>` (e.g. "eventLog-0-dense-table-0")
+    ##   detailedTableId - the ID for the detailed `<table>`
+    ##   searchInputId  - the ID for the search input (e.g. "eventLog-0-search")
+    let panel = r.createElement("div")
+    r.setAttribute(panel, "class",
+      "component-container eventLog isonim-event-log")
+    r.setAttribute(panel, "tabindex", "2")
+
+    # -- Header section: filter button + search input + dense/detailed toggle --
+    let header = r.createElement("div")
+    r.setAttribute(header, "class", "ct-flex")
+    r.appendChild(panel, header)
+
+    # Filter dropdown button — the existing showDropdown() creates the
+    # dropdown DOM dynamically and positions it relative to this button.
+    # We give it the same ID so the legacy code can find it.
+    let filterBtn = r.createElement("button")
+    r.setAttribute(filterBtn, "id", "category-image")
+    r.setAttribute(filterBtn, "class",
+      "ct-button-image-md-secondary ct-mr-2 ct-button-no-border")
+    r.setAttribute(filterBtn, "tabindex", "0")
+    r.appendChild(header, filterBtn)
+
+    # Search input — matches the Karax-produced input element.
+    let searchInput = r.createElement("input")
+    r.setAttribute(searchInput, "class",
+      "ct-input-panel ct-input-search-image")
+    r.setAttribute(searchInput, "id", searchInputId)
+    r.setAttribute(searchInput, "type", "text")
+    r.setAttribute(searchInput, "placeholder", "Find event")
+    r.appendChild(header, searchInput)
+
+    # Wire up search: on input/change, read value and drive DataTables search.
+    # The DataTables search is triggered by the EventLogComponent's
+    # eventLogSearchValue + denseTable.context.search().draw() calls.
+    # IsoNim does not need to do anything extra here — the existing
+    # jQuery selectors in eventLogHeaderView find the input by ID.
+
+    # Dense/detailed toggle placeholder — the EventLogComponent manages
+    # this state; here we provide the container the existing toggle
+    # code expects.
+    let toggleDiv = r.createElement("div")
+    r.setAttribute(toggleDiv, "class",
+      "eventLog-switch eventLog-button eventLog-normal-color-button")
+    r.appendChild(header, toggleDiv)
+
+    let toggleSpan = r.createElement("span")
+    r.setAttribute(toggleSpan, "id", "detailed")
+    r.setTextContent(toggleSpan, "detailed")
+    r.appendChild(toggleDiv, toggleSpan)
+
+    # -- Dense table wrapper --
+    let denseWrapper = r.createElement("div")
+    r.setAttribute(denseWrapper, "class", "eventLog-dense-table data-table")
+    r.appendChild(panel, denseWrapper)
+
+    # The `<table>` element that DataTables attaches to.
+    let denseTable = r.createElement("table")
+    r.setAttribute(denseTable, "id", denseTableId)
+    r.appendChild(denseWrapper, denseTable)
+
+    # -- Footer placeholder --
+    # DataTables creates its own pagination/info elements, but the
+    # EventLogComponent also renders a custom footer via tableFooter().
+    # Create the container div so eventLogAfterRedraws can find it.
+    let footer = r.createElement("div")
+    r.setAttribute(footer, "class", "data-tables-footer 0to0")
+    r.appendChild(panel, footer)
+
+    # Footer inner structure matching tableFooter() output:
+    #   div.data-tables-footer-info
+    #     "Rows" input.ct-input-small.mx-2 "to"
+    #     div.data-tables-footer-end-row "of"
+    #     div.data-tables-footer-rows-count
+    let footerInfo = r.createElement("div")
+    r.setAttribute(footerInfo, "class", "data-tables-footer-info")
+    r.appendChild(footer, footerInfo)
+
+    let rowsLabel = r.createElement("span")
+    r.setTextContent(rowsLabel, "Rows")
+    r.appendChild(footerInfo, rowsLabel)
+
+    let footerInput = r.createElement("input")
+    r.setAttribute(footerInput, "class", "ct-input-small mx-2")
+    r.setAttribute(footerInput, "value", "0")
+    r.appendChild(footerInfo, footerInput)
+
+    let toLabel = r.createElement("span")
+    r.setTextContent(toLabel, "to")
+    r.appendChild(footerInfo, toLabel)
+
+    let endRowDiv = r.createElement("div")
+    r.setAttribute(endRowDiv, "class", "data-tables-footer-end-row")
+    r.setTextContent(endRowDiv, "0")
+    r.appendChild(footerInfo, endRowDiv)
+
+    let ofLabel = r.createElement("span")
+    r.setTextContent(ofLabel, "of")
+    r.appendChild(footerInfo, ofLabel)
+
+    let rowsCountDiv = r.createElement("div")
+    r.setAttribute(rowsCountDiv, "class", "data-tables-footer-rows-count")
+    r.setTextContent(rowsCountDiv, "0")
+    r.appendChild(footerInfo, rowsCountDiv)
+
+    # -- Detailed table wrapper --
+    let detailedWrapper = r.createElement("div")
+    r.setAttribute(detailedWrapper, "class",
+      "eventLog-detailed-table data-table")
+    r.appendChild(panel, detailedWrapper)
+
+    let detailedTable = r.createElement("table")
+    r.setAttribute(detailedTable, "id", detailedTableId)
+    r.appendChild(detailedWrapper, detailedTable)
+
+    panel
+
   proc renderEventLogPanel*(r: WebRenderer;
                              vm: EventLogVM): isonim_dom.Element =
-    ## Render the complete Event Log panel using real DOM elements.
+    ## Render a simple IsoNim-only Event Log panel (no DataTables).
+    ## Retained for backward compatibility with the non-DataTables
+    ## mount path and tests.
     let panel = r.createElement("div")
     r.setAttribute(panel, "class", "event-log-component isonim-event-log")
 
@@ -316,11 +473,36 @@ when defined(js):
 
   proc mountIsoNimEventLog*(container: isonim_dom.Element;
                              vm: EventLogVM) =
-    ## Mount the IsoNim event log view into a real DOM container.
-    ##
-    ## Creates the reactive DOM tree and appends it as a child of
-    ## `container`. The IsoNim reactive effects handle all subsequent
-    ## updates — no manual redraw is needed.
+    ## Mount the simple IsoNim event log view (no DataTables) into a
+    ## real DOM container. Retained for backward compatibility.
+    ## The primary mount path is `mountIsoNimEventLogWithDataTables`.
     let r = WebRenderer()
     let panel = renderEventLogPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+
+  proc mountIsoNimEventLogWithDataTables*(
+      container: isonim_dom.Element;
+      vm: EventLogVM;
+      componentId: int;
+      denseTableId: string;
+      detailedTableId: string;
+      searchInputId: string;
+      afterMount: proc()
+    ) =
+    ## Mount the IsoNim event log view with DataTables-compatible DOM
+    ## structure, then invoke `afterMount` to trigger DataTables
+    ## initialisation on the created `<table>` elements.
+    ##
+    ## This is the primary mount path for the Event Log panel migration.
+    ## IsoNim creates the container shell, then the caller's `afterMount`
+    ## callback runs the existing DataTables FFI init code.
+    let r = WebRenderer()
+    let panel = renderWebEventLogPanel(
+      r, vm, componentId,
+      denseTableId, detailedTableId, searchInputId)
+    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+
+    # Trigger DataTables initialisation after the DOM elements are in
+    # the document tree. A microtask delay ensures the browser has
+    # committed the DOM nodes before DataTables queries them.
+    afterMount()

@@ -15,16 +15,21 @@ from ../viewmodel/viewmodels/event_log_vm import
   EventLogVM, createEventLogVM
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_view import
-  mountIsoNimEventLog
+  mountIsoNimEventLog, mountIsoNimEventLogWithDataTables
 
 # Module-level EventLogVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
 # data so behaviour is unchanged.
 var eventLogVMInstance: EventLogVM
 var eventLogVMStore: ReplayDataStore
-var isoNimEventLogMounted: bool = false
+var isoNimEventLogMounted*: bool = false
+
+# Reference to the EventLogComponent instance so that the IsoNim mount
+# callback can trigger DataTables initialisation via events().
+var eventLogComponentRef: EventLogComponent
 
 proc tryMountIsoNimEventLogPanel()
+proc eventLogAfterRedraws(self: EventLogComponent)
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -78,16 +83,29 @@ proc syncEventLogDebuggerPosition(rrTicks: int, path: cstring, line: int) =
   clog fmt"EventLogVM: synced debugger rrTicks={ticks}"
 
 proc tryMountIsoNimEventLogPanel() =
-  ## Mount the IsoNim event log panel view into the GoldenLayout-managed
+  ## Mount the IsoNim event log view into the GoldenLayout-managed
   ## event log component container. The container is created by
-  ## GoldenLayout with the id `eventLogComponent-0`. We inject a child
-  ## div for the IsoNim view alongside the Karax-rendered content.
+  ## GoldenLayout with the id `eventLogComponent-0`. The IsoNim view
+  ## replaces all Karax content and becomes the primary renderer,
+  ## creating the DOM structure that DataTables attaches to.
+  ##
+  ## After mounting:
+  ## - `isoNimEventLogMounted` is set to true
+  ## - The Karax render() returns a minimal stub
+  ## - The kxiMap entry is removed so redrawAll() skips this component
+  ## - The EventLogComponent's events() runs to init DataTables on the
+  ##   IsoNim-created `<table>` elements
+  ## - Event handlers (onUpdatedTable, onUpdatedEvents, etc.) still feed
+  ##   data through the DataTables API; IsoNim effects can also react
   ##
   ## Safe to call multiple times — mounts only once.
   if isoNimEventLogMounted or eventLogVMInstance.isNil:
     return
+  if eventLogComponentRef.isNil:
+    return
 
-  # Short delay to ensure the GoldenLayout container has been created.
+  # Short delay to ensure the GoldenLayout container has been created
+  # and the initial Karax render has populated it.
   discard setTimeout(proc() =
     if isoNimEventLogMounted:
       return
@@ -95,14 +113,45 @@ proc tryMountIsoNimEventLogPanel() =
     if dom_api.isNodeNil(dom_api.Node(container)):
       clog "IsoNim event log panel: #eventLogComponent-0 element not found"
       return
-    # Create a dedicated wrapper div inside the GoldenLayout container
-    # so that the IsoNim view sits alongside the Karax content.
-    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
-    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-event-log-panel")
-    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+
+    # Clear existing Karax-rendered content so the IsoNim view has a
+    # clean container. We also remove the Karax renderer from kxiMap
+    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
+    # this component (which would corrupt the IsoNim-managed DOM).
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    # Remove the Karax instance so redrawAll() skips this component.
+    # The `del` call is safe even if the key is absent (JS delete on
+    # a missing property is a no-op that returns true).
+    kxiMap.del(cstring"eventLogComponent-0")
+
     isoNimEventLogMounted = true
-    mountIsoNimEventLog(wrapper, eventLogVMInstance)
-    clog "IsoNim event log panel: mounted into #eventLogComponent-0"
+
+    let comp = eventLogComponentRef
+    # Compute table IDs inline — the denseId/detailedId procs are
+    # defined later in the file and not available here.
+    let denseId = "eventLog-" & $comp.id & "-dense-table-" & $comp.index
+    let detailedId = "eventLog-" & $comp.id & "-detailed-table-" & $comp.index
+    let searchId = "eventLog-" & $comp.id & "-search"
+
+    mountIsoNimEventLogWithDataTables(
+      container,
+      eventLogVMInstance,
+      comp.id,
+      denseId,
+      detailedId,
+      searchId,
+      proc() =
+        # Trigger DataTables initialisation on the IsoNim-created
+        # table elements. Reset init state so events() goes through
+        # the full initialisation branch.
+        comp.init = false
+        comp.redrawColumns = true
+        comp.eventLogAfterRedraws()
+    )
+    clog "IsoNim event log panel: mounted as primary renderer in #eventLogComponent-0"
   , 500)
 
 var arg: js
@@ -1316,6 +1365,15 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
   resizeEventLogHandler(self)
 
 method render*(self: EventLogComponent): VNode =
+  # When the IsoNim event log view is mounted, return a stable empty stub.
+  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
+  # calls this. This guard is a safety net in case render() is called
+  # from another path (e.g. redrawDynamically before the guard there).
+  if isoNimEventLogMounted:
+    return buildHtml(
+      tdiv(class = componentContainerClass("eventLog")))
+
+  # Legacy Karax rendering path — active only before IsoNim mounts.
   self.kxi.afterRedraws.add(proc = self.eventLogAfterRedraws())
 
   result = buildHtml(
@@ -1418,6 +1476,15 @@ method onEnter*(self: EventLogComponent) {.async.} =
 
 method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   self.api = api
+
+  # Store a module-level reference so the IsoNim mount callback can
+  # trigger DataTables initialisation via eventLogAfterRedraws().
+  if eventLogComponentRef.isNil:
+    eventLogComponentRef = self
+    # If the VM was already created before the component registered,
+    # try mounting now.
+    tryMountIsoNimEventLogPanel()
+
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
     # The legacy CtEventLoad emit has been removed.  On the first (and
