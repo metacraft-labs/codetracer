@@ -19,7 +19,9 @@ const
     cstring"CODETRACER::trace-loaded",
     cstring"CODETRACER::filenames-loaded",
     cstring"CODETRACER::filesystem-loaded",
-    cstring"CODETRACER::symbols-loaded"
+    cstring"CODETRACER::symbols-loaded",
+    cstring"CODETRACER::dap-replay-selected",
+    cstring"CODETRACER::complete-move"
   ]
 
 proc upsertBootstrap*(cache: var seq[BootstrapPayload], payload: BootstrapPayload) =

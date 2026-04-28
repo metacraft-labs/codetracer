@@ -2692,6 +2692,34 @@ when not defined(ctInExtension):
         configureIPC(data)
         configure(data)
 
+        # Register the dap-replay-selected handler early so it is ready
+        # before bootstrap-cache replay delivers the event.  The handler
+        # in onTraceLoaded may run too late because onTraceLoaded is async
+        # and the bootstrap replay fires events synchronously.
+        if not dapReplayHandlerRegistered:
+          data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
+            # Ensure middleware is initialised — it may not have been set up
+            # yet if this fires from a bootstrap-cache replay before
+            # onTraceLoaded completes.
+            if not middlewareConfigured:
+              configureMiddleware()
+              middlewareConfigured = true
+
+            let trace = response["trace"].to(Trace)
+            # Store the Backend Manager's replayId so we can stop it on close.
+            data.activeSession.replayId = response["replayId"].to(int)
+            infoPrint "ui: reinitializing dap for trace ", $trace.id
+            data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+              clientName: "codetracer"
+            )))
+            data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+            data.dapApi.sendCtRequest(DapLaunch, js{
+              traceFolder: trace.outputFolder,
+              rawDiffIndex: data.startOptions.rawDiffIndex,
+              ctRRWorkerExe: data.config.rrBackend.path,
+            })
+          dapReplayHandlerRegistered = true
+
     startIPC()
 
 when defined(ctInExtension):
