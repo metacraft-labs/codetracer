@@ -74,12 +74,22 @@ when defined(ctInExtension):
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
+proc initStateVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel StateVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel
+  ## which is backed by a real DapApi).  If the StateVM has already
+  ## been created this is a no-op — the first caller wins.
+  if stateVMInstance != nil:
+    return
+  stateVMStore = store
+  stateVMInstance = createStateVM(store)
+  clog "StateVM: parallel ViewModel instance created (shared store)"
+
 proc initStateVM() =
   ## Lazily create the parallel StateVM instance backed by a stub
-  ## BackendService.  The stub never sends real requests — the legacy
-  ## code path handles all backend communication.  We only use the
-  ## store's reactive signals to mirror the data the legacy code
-  ## receives, proving the ViewModel reactive pipeline works.
+  ## BackendService.  This fallback is used when no shared store has
+  ## been provided via `initStateVMWithStore` (e.g. in the VS Code
+  ## extension where the SessionViewModel is not yet wired).
   if stateVMInstance != nil:
     return
 
@@ -102,7 +112,7 @@ proc initStateVM() =
 
   stateVMStore = createReplayDataStore(stubBackend)
   stateVMInstance = createStateVM(stateVMStore)
-  clog "StateVM: parallel ViewModel instance created"
+  clog "StateVM: parallel ViewModel instance created (stub backend)"
 
 proc syncStoreLocals(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the

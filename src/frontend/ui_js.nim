@@ -30,6 +30,15 @@ var vex* {.importc.}: js
 var middlewareConfigured = false
 var dapReplayHandlerRegistered = false
 const TAB_LIMIT = 20
+
+# ---------------------------------------------------------------------------
+# ViewModel layer — SessionViewModel backed by the real DapApi.
+# Created once in configureMiddleware; the shared store is passed to
+# individual panels so they all share a single real backend connection.
+# ---------------------------------------------------------------------------
+import viewmodel/session_vm
+import viewmodel/backend/[backend_service, real_backend]
+var activeSessionVM: SessionViewModel
 const MIN_FONTSIZE = 6
 const MAX_FONTSIZE = 40
 const EDITOR_GUTTER_PADDING = 2 #px
@@ -939,6 +948,38 @@ when not defined(ctInExtension):
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
       clientName: "codetracer"
     )))
+
+    # -----------------------------------------------------------------------
+    # ViewModel layer: create a SessionViewModel backed by the real DapApi.
+    # This must happen BEFORE component.register() calls, because register()
+    # lazily creates panel VMs — if the shared store is already in place the
+    # panels will use it instead of falling back to stub backends.
+    # -----------------------------------------------------------------------
+    if activeSessionVM.isNil:
+      let dapRef = data.dapApi
+      let realBackend = newRealBackendService(
+        sendCommand = proc(command: string, argsJs: JsObject) =
+          # Translate the BackendService string command to a CtEventKind
+          # and forward it through the existing DapApi IPC channel.
+          let kind = dapCommandToEventKind(cstring(command))
+          dapRef.sendCtRequest(kind, argsJs),
+        onBackendEvent = proc(handler: proc(kind: string, raw: JsObject)) =
+          # Subscribe to every event kind that has a DAP mapping so the
+          # ViewModel store receives the same events as the legacy UI.
+          for k in CtEventKind:
+            if EVENT_KIND_TO_DAP_MAPPING[k] != "":
+              dap.on[JsObject](dapRef, k, proc(kind: CtEventKind, raw: JsObject) =
+                handler($kind, raw)),
+      )
+      activeSessionVM = createSessionVM(realBackend)
+      clog "SessionViewModel: created with real DapApi backend"
+
+      # Pre-initialise the panel VMs that have legacy bridge code so they
+      # use the shared store from the SessionViewModel.  When register()
+      # later calls initStateVM() / initCalltraceVM() they will be no-ops
+      # because the instances are already set.
+      state.initStateVMWithStore(activeSessionVM.store)
+      calltrace.initCalltraceVMWithStore(activeSessionVM.store)
 
     for content, components in data.ui.componentMapping:
       for i, component in components:

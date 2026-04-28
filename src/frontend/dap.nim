@@ -43,7 +43,7 @@ type
 # empty strings represent two kind of situations:
 # 1. Response CtEventKinds
 # 2. Non backend related events
-const EVENT_KIND_TO_DAP_MAPPING: array[CtEventKind, cstring] = [
+const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtUpdateTable: "ct/update-table",
   CtUpdatedTable: "ct/updated-table",
   CtUpdateTableResponse: "",
@@ -127,6 +127,19 @@ for kind, command in EVENT_KIND_TO_DAP_MAPPING:
   if command != "":
     DAP_TO_EVENT_KIND_MAPPING[command] = kind
 
+proc dapCommandToEventKind*(command: cstring): CtEventKind =
+  ## Convert a DAP command string (e.g. "ct/load-locals") to its
+  ## corresponding CtEventKind.  Used by the RealBackendService adapter
+  ## to translate BackendService string commands into DapApi calls.
+  ## Raises ValueError if the command is not in the mapping.
+  if DAP_TO_EVENT_KIND_MAPPING.hasKey(command):
+    DAP_TO_EVENT_KIND_MAPPING[command]
+  else:
+    raise newException(
+      ValueError,
+      "no ct event kind for command: \"" & $command & "\" defined"
+    )
+
 func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # TODO: based on $kind? or mapping?
   case kind:
@@ -174,7 +187,7 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
     "no ct event kind response for command: \"" & $command & "\" defined")
 
 
-proc dapEventToCtEventKind(event: cstring): CtEventKind =
+proc dapEventToCtEventKind*(event: cstring): CtEventKind =
   console.log cstring"CONVERTING EVENT: ", event
   if DAP_TO_EVENT_KIND_MAPPING.hasKey(event):
     DAP_TO_EVENT_KIND_MAPPING[event]

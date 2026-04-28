@@ -908,12 +908,22 @@ proc calltraceScroll(self: CalltraceComponent, height: int) =
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
+proc initCalltraceVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel CalltraceVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel
+  ## which is backed by a real DapApi).  If the CalltraceVM has already
+  ## been created this is a no-op — the first caller wins.
+  if calltraceVMInstance != nil:
+    return
+  calltraceVMStore = store
+  calltraceVMInstance = createCalltraceVM(store)
+  clog "CalltraceVM: parallel ViewModel instance created (shared store)"
+
 proc initCalltraceVM() =
   ## Lazily create the parallel CalltraceVM instance backed by a stub
-  ## BackendService.  The stub never sends real requests — the legacy
-  ## code path handles all backend communication.  We only use the
-  ## store's reactive signals to mirror the data the legacy code
-  ## receives, proving the ViewModel reactive pipeline works.
+  ## BackendService.  This fallback is used when no shared store has
+  ## been provided via `initCalltraceVMWithStore` (e.g. in the VS Code
+  ## extension where the SessionViewModel is not yet wired).
   if calltraceVMInstance != nil:
     return
 
@@ -936,7 +946,7 @@ proc initCalltraceVM() =
 
   calltraceVMStore = createReplayDataStore(stubBackend)
   calltraceVMInstance = createCalltraceVM(calltraceVMStore)
-  clog "CalltraceVM: parallel ViewModel instance created"
+  clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
 
 proc syncCalltraceData(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
