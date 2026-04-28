@@ -2,6 +2,24 @@ import
   ui_imports, show_code, value, ../utils,
   ../communication, ../../common/ct_event
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The CalltraceVM receives the same data but does not affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+from ../viewmodel/store/types as vm_types import nil
+from ../viewmodel/store/replay_data_store import
+  ReplayDataStore, createReplayDataStore, updateCalltraceSection,
+  updateDebuggerPosition, makeCallLine
+from ../viewmodel/viewmodels/calltrace_vm import CalltraceVM, createCalltraceVM
+
+# Module-level CalltraceVM instance. Created once in `register()` and
+# fed data whenever the legacy event-bus handlers fire.  Rendering
+# still reads from the legacy `self.callLines` so behaviour is unchanged.
+var calltraceVMInstance: CalltraceVM
+var calltraceVMStore: ReplayDataStore
+
 let returnValueName: cstring = "<return value>"
 
 const
@@ -884,8 +902,79 @@ proc calltraceScroll(self: CalltraceComponent, height: int) =
   if not calltraceElement.isNil and not calltraceElement.toJs[0].isNil:
     calltraceElement.toJs[0].scrollTop = height
 
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# Placed before onUpdatedCalltrace / onCompleteMove so they are visible at
+# the call sites without forward declarations.
+# ---------------------------------------------------------------------------
+
+proc initCalltraceVM() =
+  ## Lazily create the parallel CalltraceVM instance backed by a stub
+  ## BackendService.  The stub never sends real requests — the legacy
+  ## code path handles all backend communication.  We only use the
+  ## store's reactive signals to mirror the data the legacy code
+  ## receives, proving the ViewModel reactive pipeline works.
+  if calltraceVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    # Return an immediately-resolved future so the store's loading
+    # state transitions correctly but no real I/O happens.
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  calltraceVMStore = createReplayDataStore(stubBackend)
+  calltraceVMInstance = createCalltraceVM(calltraceVMStore)
+  clog "CalltraceVM: parallel ViewModel instance created"
+
+proc syncCalltraceData(results: CtUpdatedCalltraceResponseBody) =
+  ## Mirror the legacy calltrace section data into the ViewModel store
+  ## so the CalltraceVM's visibleLines memo sees the same data.
+  if calltraceVMStore.isNil:
+    return
+  var vmLines: seq[vm_types.CallLine] = @[]
+  for callLine in results.callLines:
+    let call = callLine.content.call
+    let loc = call.location
+    vmLines.add(makeCallLine(
+      name = $loc.highLevelFunctionName,
+      depth = callLine.depth,
+      rrTicks = cast[uint64](loc.rrTicks),
+      file = $loc.highLevelPath,
+      line = loc.highLevelLine,
+    ))
+  calltraceVMStore.updateCalltraceSection(
+    vmLines,
+    startIndex = 0'i64,
+    totalCount = cast[uint64](results.totalCallsCount),
+  )
+  clog fmt"CalltraceVM: synced {vmLines.len} calltrace lines into store"
+
+proc syncCalltraceDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
+  if calltraceVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  calltraceVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"CalltraceVM: synced debugger rrTicks={ticks}"
+
 method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
   self.totalCallsCount = results.totalCallsCount
+
+  # Feed the same data into the parallel ViewModel store.
+  syncCalltraceData(results)
 
   for key, res in results.args:
     self.args[key] = res
@@ -936,6 +1025,10 @@ func supportCallstackOnly(self: CalltraceComponent): bool =
 
 method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   self.api = api
+
+  # Initialize the parallel ViewModel instance (no-op if already created).
+  initCalltraceVM()
+
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
   )
@@ -1250,6 +1343,10 @@ method onFindOrFilter*(self: CalltraceComponent) {.async.} =
 
 method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} =
   self.location = response.location
+
+  # Mirror the debugger position into the parallel ViewModel store.
+  syncCalltraceDebuggerPosition(
+    response.location.rrTicks, response.location.path, response.location.line)
 
   #TODO: pass explicitly in trace as trace kind/in init/other way?
   let lang = toLangFromFilename(self.location.path)

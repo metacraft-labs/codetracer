@@ -237,6 +237,30 @@ proc newVariableSeq*(): seq[Variable] =
   ## cannot name the Variable type due to import conflicts.
   newSeq[Variable]()
 
+proc updateCalltraceSection*(store: ReplayDataStore;
+                             lines: seq[CallLine];
+                             startIndex: int64;
+                             totalCount: uint64) =
+  ## Replace the store's calltrace signals with new section data.
+  ## Used by legacy UI code to mirror calltrace responses into the
+  ## ViewModel layer.
+  store.calltrace.lines.val = lines
+  store.calltrace.startLineIndex.val = startIndex
+  store.calltrace.totalCallsCount.val = totalCount
+  store.calltrace.loadingState.val = lsIdle
+
+proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
+                   file: string = ""; line: int = 0): CallLine =
+  ## Convenience constructor for CallLine — avoids the need for callers
+  ## to import store/types.
+  CallLine(
+    index: 0,
+    name: name,
+    depth: depth,
+    rrTicks: rrTicks,
+    location: Location(file: file, line: line),
+  )
+
 proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   ## Send a step command to the backend.
   ## Marks the debugger as stepping while the request is in flight.
