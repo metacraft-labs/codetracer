@@ -567,14 +567,33 @@ suite "Real backend: full debugging workflow":
 # Helper: locate or record a trace for a given test program
 # ---------------------------------------------------------------------------
 
+proc findCtFile(dir: string): string =
+  ## Return the path to the first ``.ct`` file in ``dir``, or "" if none.
+  for kind, path in walkDir(dir):
+    if kind != pcFile:
+      continue
+    if path.endsWith(".ct"):
+      return path
+  return ""
+
+proc isUsableTraceDir(dir: string): bool =
+  ## Return true if ``dir`` contains a trace format the replay-server can open.
+  if fileExists(dir / "trace.bin"):
+    return true
+  if dirExists(dir / "rr"):
+    return true
+  if findCtFile(dir).len > 0:
+    return true
+  return false
+
 proc findExistingTrace(programPattern: string): string =
   ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
-  ## ``trace_metadata.json`` program field contains ``programPattern``.
+  ## metadata program field contains ``programPattern``.
   ## Returns the trace directory path, or "" if not found.
   ##
-  ## Only considers traces that have the ``trace.bin`` format (the replay-server's
-  ## preferred binary format), not CTFS ``.ct`` files which currently do not
-  ## send ``stopped``/``ct/complete-move`` events after launch.
+  ## Considers ``trace.bin`` (DB), ``rr/`` (rr-replay), and CTFS ``.ct``
+  ## formats.  CTFS-only traces (no external metadata file) are skipped
+  ## during search because the metadata is embedded inside the container.
   let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
   if not dirExists(baseDir):
     return ""
@@ -586,17 +605,24 @@ proc findExistingTrace(programPattern: string): string =
     let dirname = path.extractFilename()
     if not dirname.startsWith("trace-"):
       continue
-    let metaPath = path / "trace_metadata.json"
-    let binPath = path / "trace.bin"
-    if not fileExists(metaPath) or not fileExists(binPath):
+    if not isUsableTraceDir(path):
       continue
-    try:
-      let meta = parseFile(metaPath)
-      let program = meta.getOrDefault("program").getStr("")
-      if programPattern in program:
-        return path
-    except:
-      discard
+    # Try both metadata file names (DB traces use trace_metadata.json,
+    # rr traces use trace_db_metadata.json).
+    var program = ""
+    for metaName in ["trace_metadata.json", "trace_db_metadata.json"]:
+      let metaPath = path / metaName
+      if not fileExists(metaPath):
+        continue
+      try:
+        let meta = parseFile(metaPath)
+        program = meta.getOrDefault("program").getStr("")
+        if program.len > 0:
+          break
+      except:
+        discard
+    if programPattern in program:
+      return path
   return ""
 
 proc findOrRecordTrace(testProgram: string; lang: string = "";
@@ -625,8 +651,7 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
 
   # 2. Check the temp cache from a previous test run.
   let cacheDir = getTempDir() / "ct-headless-test-traces" / testProgram
-  let hasBin = fileExists(cacheDir / "trace.bin")
-  if hasBin:
+  if isUsableTraceDir(cacheDir):
     echo "  Using cached trace: ", cacheDir
     return cacheDir
 

@@ -62,6 +62,15 @@ proc repoRoot(): string =
   ## Return the repository root (5 levels up from this test file).
   currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
 
+proc findCtFile(dir: string): string =
+  ## Return the path to the first ``.ct`` file in ``dir``, or "" if none.
+  for kind, path in walkDir(dir):
+    if kind != pcFile:
+      continue
+    if path.endsWith(".ct"):
+      return path
+  return ""
+
 proc isUsableTraceDir(dir: string): bool =
   ## Return true if ``dir`` contains a trace format that the replay-server
   ## can open via the DAP stdio protocol and that works with
@@ -72,14 +81,14 @@ proc isUsableTraceDir(dir: string): bool =
   ##     older Python/Ruby recorders)
   ##   - ``rr/`` subdirectory — rr-based trace replayed via ct-native-replay
   ##     (used by Nim, Rust, C, etc.)
-  ##
-  ## NOT supported:
-  ##   - CTFS ``.ct`` files — the CTFS codepath in the replay-server does not
-  ##     emit ``stopped``/``ct/complete-move`` DAP events after launch, so
-  ##     HeadlessDebugSession hangs waiting for them.
+  ##   - CTFS ``.ct`` files — CTFS containers produced by Python, Ruby, and
+  ##     other recorders.  The replay-server auto-detects the format and emits
+  ##     the same ``stopped``/``ct/complete-move`` DAP events as DB traces.
   if fileExists(dir / "trace.bin"):
     return true
   if dirExists(dir / "rr"):
+    return true
+  if findCtFile(dir).len > 0:
     return true
   return false
 
@@ -87,9 +96,13 @@ proc findExistingTrace(programPattern: string): string =
   ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
   ## metadata program field contains ``programPattern``.
   ##
-  ## Considers both ``trace.bin`` (DB) and ``rr/`` (rr-replay) formats.
+  ## Considers DB (``trace.bin``), rr (``rr/``), and CTFS (``.ct``) formats.
   ## Checks ``trace_metadata.json`` first; falls back to ``trace_db_metadata.json``
   ## (used by rr-based traces).
+  ##
+  ## CTFS-only traces (no external metadata file) cannot be matched by program
+  ## name because the metadata is embedded inside the ``.ct`` container.
+  ## These are skipped during search — the caller should re-record if needed.
   let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
   if not dirExists(baseDir):
     return ""
@@ -130,9 +143,8 @@ proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): strin
   ## Parses the ``traceId:<N>`` line from stdout to locate the trace.
   ## Returns the trace directory path.  Times out after ``recordTimeoutMs``.
   ##
-  ## Note: some recorders (Python, Ruby) now produce CTFS ``.ct`` files
-  ## instead of ``trace.bin``.  Only traces with ``trace.bin`` or ``rr/``
-  ## are usable with HeadlessDebugSession.  Callers should verify the format.
+  ## Recorders may produce different formats (``trace.bin``, ``rr/``, or
+  ## CTFS ``.ct`` files).  All are supported by HeadlessDebugSession.
   let ctBin = findCtBinary()
   var args = @["record"]
   if lang.len > 0:
@@ -166,15 +178,14 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
                        programPattern: string = ""): string =
   ## Locate a pre-recorded trace or record a fresh one.
   ##
-  ## If a trace with ``trace.bin`` format exists, it is used directly.
-  ## Otherwise, a fresh trace is recorded.  If the fresh trace produces
-  ## only a CTFS ``.ct`` file (no ``trace.bin``), the function raises
-  ## an error — the HeadlessDebugSession cannot handle CTFS traces yet.
+  ## Searches for existing traces by program name match, then falls back
+  ## to recording a fresh trace.  Supports ``trace.bin``, ``rr/``, and
+  ## CTFS ``.ct`` formats.
   ##
   ## Raises ``IOError`` on failure so the calling test can skip.
   let pattern = if programPattern.len > 0: programPattern else: testProgram
 
-  # 1. Search user's trace store for an existing trace.bin trace.
+  # 1. Search user's trace store for an existing trace.
   let existing = findExistingTrace(pattern)
   if existing.len > 0:
     echo "  Using existing trace: ", existing
@@ -188,12 +199,13 @@ proc findOrRecordTrace(testProgram: string; lang: string = "";
   let traceDir = recordTraceToDefaultLocation(programPath, lang)
   echo "  Recorded trace to: ", traceDir
 
-  # 3. Verify the trace uses a format compatible with HeadlessDebugSession.
+  # 3. Verify the trace uses a format supported by the replay-server.
   if not isUsableTraceDir(traceDir):
     raise newException(IOError,
-      "Recorded trace at " & traceDir & " uses an incompatible format " &
-      "(only trace.bin and rr/ are supported). " &
-      "The recorder for " & testProgram & " does not produce compatible traces.")
+      "Recorded trace at " & traceDir & " uses an unrecognized format. " &
+      "Expected trace.bin, rr/, or a .ct file.")
+
+  return traceDir
 
 proc stepToSourceFile(session: HeadlessDebugSession; pattern: string;
                       maxSteps: int = 30) =
