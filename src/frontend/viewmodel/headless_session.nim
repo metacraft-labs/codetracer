@@ -25,7 +25,7 @@
 when defined(js):
   {.error: "headless_session.nim is native-only".}
 
-import std/[json, asyncdispatch]
+import std/[json, strutils, asyncdispatch]
 
 import isonim/core/[signals, computation]
 
@@ -252,7 +252,20 @@ proc getLocals*(s: HeadlessDebugSession): seq[Variable] =
   s.session.stateVM.currentVariables.val
 
 proc getCalltraceLines*(s: HeadlessDebugSession): seq[CallLine] =
-  ## Get the visible calltrace lines from the CalltraceVM.
+  ## Get the calltrace lines from the store.
+  ##
+  ## Reads directly from the store's ``calltrace.lines`` signal rather
+  ## than the CalltraceVM's ``visibleLines`` memo.  The VM memo filters
+  ## by viewport height (which defaults to 0 in headless mode), so
+  ## reading from the store ensures we see all loaded data.
+  ##
+  ## Use ``getVisibleCalltraceLines`` to test the VM's viewport logic.
+  s.session.store.calltrace.lines.val
+
+proc getVisibleCalltraceLines*(s: HeadlessDebugSession): seq[CallLine] =
+  ## Get the visible calltrace lines from the CalltraceVM's viewport memo.
+  ## Requires that ``calltraceVM.viewportHeight`` is set to a value > 0
+  ## (e.g. via ``calltraceVM.setViewportHeight(50)``).
   s.session.calltraceVM.visibleLines.val
 
 proc getCurrentFile*(s: HeadlessDebugSession): string =
@@ -270,6 +283,223 @@ proc getCurrentRRTicks*(s: HeadlessDebugSession): uint64 =
 proc getDebuggerStatus*(s: HeadlessDebugSession): DebuggerStatus =
   ## Get the current debugger status (idle, stepping, running, etc.).
   s.session.store.debugger.val.status
+
+# ---------------------------------------------------------------------------
+# DAP response parsing helpers
+# ---------------------------------------------------------------------------
+
+proc extractValueText(valueNode: JsonNode): string =
+  ## Extract a human-readable text representation from a ct/load-locals
+  ## ``Value`` JSON object.
+  ##
+  ## The backend's ``Value`` struct (see ``src/db-backend/src/value.rs``)
+  ## uses a tagged-flat layout: ``kind`` is a numeric ``TypeKind`` ordinal,
+  ## and the actual data lives in ``i`` (int), ``f`` (float), ``text``
+  ## (string), ``b`` (bool), ``c`` (char), ``r`` (raw), ``msg`` (error),
+  ## or ``elements`` (compound).
+  ##
+  ## TypeKind ordinals (from codetracer-trace-format):
+  ##   7 = Int, 8 = Float, 3 = String, 4 = CString, 5 = Bool,
+  ##   6 = Struct, 9 = Seq, 10 = Char, 11 = Tuple, 30 = None, etc.
+  if valueNode.isNil or valueNode.kind != JObject:
+    return ""
+  let kind = valueNode.getOrDefault("kind").getInt(-1)
+  case kind
+  of 7:  # Int
+    result = valueNode.getOrDefault("i").getStr("")
+  of 8:  # Float
+    result = valueNode.getOrDefault("f").getStr("")
+  of 3:  # String
+    result = "\"" & valueNode.getOrDefault("text").getStr("") & "\""
+  of 4:  # CString
+    result = "\"" & valueNode.getOrDefault("cText").getStr("") & "\""
+  of 5:  # Bool
+    result = if valueNode.getOrDefault("b").getBool(false): "true" else: "false"
+  of 10: # Char
+    result = "'" & valueNode.getOrDefault("c").getStr("") & "'"
+  of 6, 9, 11: # Struct, Seq, Tuple
+    # For compound types, produce a comma-separated list of child representations.
+    let elements = valueNode.getOrDefault("elements")
+    if not elements.isNil and elements.kind == JArray:
+      var parts: seq[string]
+      # For structs, try to include field labels from typ.labels.
+      let typ = valueNode.getOrDefault("typ")
+      var labels: seq[string]
+      if not typ.isNil and typ.kind == JObject:
+        let labelsNode = typ.getOrDefault("labels")
+        if not labelsNode.isNil and labelsNode.kind == JArray:
+          for lbl in labelsNode:
+            labels.add(lbl.getStr(""))
+      for idx in 0 ..< elements.len:
+        let elem = elements[idx]
+        let childRepr = extractValueText(elem)
+        if idx < labels.len and labels[idx].len > 0:
+          parts.add(labels[idx] & ": " & childRepr)
+        else:
+          parts.add(childRepr)
+      let open = if kind == 9: "[" elif kind == 11: "(" else: "{"
+      let close = if kind == 9: "]" elif kind == 11: ")" else: "}"
+      result = open & parts.join(", ") & close
+    else:
+      result = "()"
+  of 30: # None
+    result = "nil"
+  of 14: # Raw
+    result = valueNode.getOrDefault("r").getStr("")
+  of 15: # Error
+    result = "<error: " & valueNode.getOrDefault("msg").getStr("") & ">"
+  else:
+    # Unknown kind — fall back to ``i`` or ``text`` if present, otherwise empty.
+    let i = valueNode.getOrDefault("i").getStr("")
+    if i.len > 0: return i
+    let text = valueNode.getOrDefault("text").getStr("")
+    if text.len > 0: return text
+    result = ""
+
+proc parseVariable(localNode: JsonNode): Variable =
+  ## Parse a single variable entry from the ct/load-locals response.
+  let expression = localNode.getOrDefault("expression").getStr("")
+  let valueNode = localNode.getOrDefault("value")
+  let valueText = extractValueText(valueNode)
+  var typeName = ""
+  if not valueNode.isNil and valueNode.kind == JObject:
+    let typ = valueNode.getOrDefault("typ")
+    if not typ.isNil and typ.kind == JObject:
+      typeName = typ.getOrDefault("langType").getStr("")
+
+  # Check for compound children (structs, seqs, tuples).
+  var children: seq[Variable]
+  var hasChildren = false
+  if not valueNode.isNil and valueNode.kind == JObject:
+    let elements = valueNode.getOrDefault("elements")
+    if not elements.isNil and elements.kind == JArray and elements.len > 0:
+      hasChildren = true
+      let typ = valueNode.getOrDefault("typ")
+      var labels: seq[string]
+      if not typ.isNil and typ.kind == JObject:
+        let labelsNode = typ.getOrDefault("labels")
+        if not labelsNode.isNil and labelsNode.kind == JArray:
+          for lbl in labelsNode:
+            labels.add(lbl.getStr(""))
+      for idx in 0 ..< elements.len:
+        let elem = elements[idx]
+        let childName = if idx < labels.len and labels[idx].len > 0: labels[idx]
+                        else: "[" & $idx & "]"
+        let childValue = extractValueText(elem)
+        var childTypeName = ""
+        let childTyp = elem.getOrDefault("typ")
+        if not childTyp.isNil and childTyp.kind == JObject:
+          childTypeName = childTyp.getOrDefault("langType").getStr("")
+        children.add(Variable(
+          name: childName,
+          value: childValue,
+          typeName: childTypeName,
+        ))
+
+  Variable(
+    name: expression,
+    value: valueText,
+    typeName: typeName,
+    hasChildren: hasChildren,
+    children: children,
+  )
+
+proc parseCallLine(callLineNode: JsonNode; globalIndex: int64): CallLine =
+  ## Parse a single calltrace line from the ct/load-calltrace-section response.
+  ## The response JSON uses ``callLines[].content.call`` for the call data
+  ## and ``callLines[].depth`` for the indentation level.
+  let content = callLineNode.getOrDefault("content")
+  let depth = callLineNode.getOrDefault("depth").getInt(0)
+  var name = ""
+  var file = ""
+  var line = 0
+  var rrTicks: uint64 = 0
+
+  if not content.isNil and content.kind == JObject:
+    let call = content.getOrDefault("call")
+    if not call.isNil and call.kind == JObject:
+      name = call.getOrDefault("rawName").getStr("")
+      let loc = call.getOrDefault("location")
+      if not loc.isNil and loc.kind == JObject:
+        file = loc.getOrDefault("path").getStr("")
+        line = loc.getOrDefault("line").getInt(0)
+        rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
+
+  CallLine(
+    index: globalIndex,
+    name: name,
+    depth: depth,
+    rrTicks: rrTicks,
+    location: Location(file: file, line: line),
+  )
+
+# ---------------------------------------------------------------------------
+# Data loading — send DAP requests and feed responses into the store
+# ---------------------------------------------------------------------------
+
+proc requestAndLoadLocals*(s: HeadlessDebugSession) =
+  ## Send ``ct/load-locals`` to the backend, parse the response, and
+  ## feed the resulting Variable sequence into the store.
+  ##
+  ## This closes the data-flow loop that the GUI achieves via event-bus
+  ## wiring: request -> response -> store update -> reactive signal change.
+  let args = %*{
+    "rrTicks": s.getCurrentRRTicks().int64,
+    "countBudget": 3000,
+    "minCountLimit": 50,
+    "depthLimit": 7,
+    "watchExpressions": [],
+    "lang": 0,  # auto-detect
+  }
+  let resp = s.backend.sendDapRequest("ct/load-locals", args)
+  if resp.getOrDefault("success").getBool(false):
+    let body = resp.getOrDefault("body")
+    if not body.isNil and body.kind == JObject:
+      let localsNode = body.getOrDefault("locals")
+      if not localsNode.isNil and localsNode.kind == JArray:
+        var variables: seq[Variable]
+        for localNode in localsNode:
+          variables.add(parseVariable(localNode))
+        s.session.store.updateLocals(variables)
+        drain()
+
+proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
+                              startIndex: int64 = 0;
+                              height: int = 50;
+                              depth: int = 20) =
+  ## Send ``ct/load-calltrace-section`` to the backend, parse the
+  ## response, and feed the resulting CallLine sequence into the store.
+  let dbg = s.session.store.debugger.val
+  let args = %*{
+    "location": {
+      "rrTicks": dbg.rrTicks.int64,
+      "path": dbg.location.file,
+      "line": dbg.location.line,
+    },
+    "startCallLineIndex": startIndex,
+    "height": height,
+    "depth": depth,
+    "rawIgnorePatterns": "",
+    "optimizeCollapse": true,
+    "autoCollapsing": false,
+    "renderCallLineIndex": 0,
+  }
+  let resp = s.backend.sendDapRequest("ct/load-calltrace-section", args)
+  # The calltrace response also emits an event before the response —
+  # drain any interleaved events from the queue.
+  discard s.backend.drainEvents()
+  if resp.getOrDefault("success").getBool(false):
+    let body = resp.getOrDefault("body")
+    if not body.isNil and body.kind == JObject:
+      let callLinesNode = body.getOrDefault("callLines")
+      let startCallLineIdx = body.getOrDefault("startCallLineIndex").getBiggestInt(0).int64
+      let totalCount = body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64
+      if not callLinesNode.isNil and callLinesNode.kind == JArray:
+        var lines: seq[CallLine]
+        for idx in 0 ..< callLinesNode.len:
+          lines.add(parseCallLine(callLinesNode[idx], startCallLineIdx + idx.int64))
+        s.session.store.updateCalltraceSection(lines, startCallLineIdx, totalCount)
+        drain()
 
 # ---------------------------------------------------------------------------
 # Watch expressions
