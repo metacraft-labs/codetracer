@@ -159,11 +159,13 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
       disposeProc: dispose,
     )
 
-    # Auto-load effect: whenever rrTicks changes, request fresh locals.
-    # This replaces the old `onCompleteMove` subscription.
+    # Auto-load effect: whenever rrTicks or watchExpressions change,
+    # request fresh locals.  This replaces the legacy `loadLocals()`
+    # call that used to happen inside `onMove` / `onCompleteMove`.
     createEffect proc() =
       let ticks = store.debugger.val.rrTicks
+      let watches = watchExpressions.val
       if ticks > 0'u64:
-        store.requestLocals(ticks)
+        store.requestLocals(ticks, watchExpressions = watches)
 
     vm

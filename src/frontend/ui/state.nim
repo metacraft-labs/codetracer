@@ -53,7 +53,16 @@ proc submitWatchExpression(self: StateComponent) =
     return
 
   self.watchExpressions.add(expression)
-  self.loadLocals()
+
+  # Sync the new watch expression to the StateVM so its auto-load
+  # effect re-requests locals with the updated watch list.
+  if stateVMInstance != nil:
+    stateVMInstance.addWatch($expression)
+  else:
+    # Fallback: if the ViewModel is not yet initialised, use the
+    # legacy path directly.
+    self.loadLocals()
+
   input.toJs.value = cstring""
 
 
@@ -197,9 +206,13 @@ proc loadLocals*(self: StateComponent) =
   self.api.emit(CtLoadLocals, arguments)
 
 method onMove(self: StateComponent) {.async.} =
-  # TODO: fixing rr ticks
-  # self.rrTicks = response.location.rrTicks
-  self.loadLocals()
+  # The legacy self.loadLocals() call has been removed.  Data loading
+  # is now driven by the StateVM's auto-load effect which fires when
+  # syncStoreDebuggerPosition (called in onCompleteMove) updates the
+  # store's rrTicks signal.  The effect calls store.requestLocals()
+  # which sends the ct/load-locals command through the real backend.
+  # The response still arrives via the CtLoadLocalsResponse event-bus
+  # subscription → registerLocals, so rendering is unchanged.
   self.redraw()
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =

@@ -136,18 +136,42 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
 # Request procs
 # ---------------------------------------------------------------------------
 
-proc requestLocals*(store: ReplayDataStore; rrTicks: uint64) =
+proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
+                    countBudget: int = 3000;
+                    minCountLimit: int = 50;
+                    depthLimit: int = 7;
+                    watchExpressions: seq[string] = @[];
+                    lang: int = 0) =
   ## Request locals/globals from the backend for the given rrTicks.
   ## Skipped if an identical request is already in flight.
+  ##
+  ## The backend expects the full ``CtLoadLocalsArguments`` set
+  ## (rrTicks, countBudget, minCountLimit, depthLimit,
+  ## watchExpressions, lang).  Default values match the legacy
+  ## ``loadLocals`` in state.nim so callers that only know the
+  ## tick position still produce a valid request.
+  ##
+  ## ``lang`` is the ordinal of the ``Lang`` enum (matching the Rust
+  ## backend's ``#[repr(u8)]`` Lang which uses ``serde_repr``).
+  ## 0 = C (the Rust-side default).
   let key = "load-locals"
-  let argsStr = $rrTicks
+  # Include watch expressions in the dedup key so that adding a new
+  # watch at the same rrTicks position still triggers a fresh request.
+  let argsStr = $rrTicks & "|" & $watchExpressions.len
   if store.requestTracker.isDuplicate(key, argsStr):
     return
 
   store.requestTracker.markPending(key, argsStr)
   store.locals.loadingState.val = lsLoading
 
-  let args = %*{"rrTicks": rrTicks}
+  let args = %*{
+    "rrTicks": rrTicks,
+    "countBudget": countBudget,
+    "minCountLimit": minCountLimit,
+    "depthLimit": depthLimit,
+    "watchExpressions": watchExpressions,
+    "lang": lang,
+  }
   let fut = store.backend.send("ct/load-locals", args)
 
   # In the native (C) backend the future resolves synchronously in
