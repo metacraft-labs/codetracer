@@ -2,9 +2,12 @@ import
   ui_imports, show_code, value, ../utils,
   ../communication, ../../common/ct_event
 
+from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
+
 # ---------------------------------------------------------------------------
-# ViewModel layer — wired in parallel with the legacy event-bus code.
-# The CalltraceVM receives the same data but does not affect rendering yet.
+# ViewModel layer — IsoNim is now the primary renderer for the calltrace.
+# The CalltraceVM drives the IsoNim reactive DOM tree; the legacy Karax
+# render() returns an empty stub once the IsoNim view is mounted.
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -15,12 +18,16 @@ from ../viewmodel/store/replay_data_store import
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
   scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_calltrace_view import
+  mountIsoNimCalltrace
 
 # Module-level CalltraceVM instance. Created once in `register()` and
-# fed data whenever the legacy event-bus handlers fire.  Rendering
-# still reads from the legacy `self.callLines` so behaviour is unchanged.
+# fed data whenever the legacy event-bus handlers fire.  The IsoNim
+# view is the primary renderer once mounted.
 var calltraceVMInstance: CalltraceVM
 var calltraceVMStore: ReplayDataStore
+var isoNimCalltraceMounted: bool = false
 
 let returnValueName: cstring = "<return value>"
 
@@ -910,6 +917,51 @@ proc calltraceScroll(self: CalltraceComponent, height: int) =
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
+proc tryMountIsoNimCalltrace() =
+  ## Mount the IsoNim calltrace view into the GoldenLayout-managed
+  ## calltrace component container. The container is created by
+  ## GoldenLayout with the id `calltraceComponent-0`. The IsoNim view
+  ## replaces all Karax content and becomes the primary renderer.
+  ##
+  ## After mounting:
+  ## - `isoNimCalltraceMounted` is set to true
+  ## - The Karax render() returns a minimal stub
+  ## - The kxiMap entry is removed so redrawAll() skips this component
+  ## - onUpdatedCalltrace / onCompleteMove still feed data into the
+  ##   store, and IsoNim's reactive effects update the DOM automatically
+  ##
+  ## Safe to call multiple times — mounts only once.
+  if isoNimCalltraceMounted or calltraceVMInstance.isNil:
+    return
+
+  # Short delay to ensure the GoldenLayout container has been created
+  # and the initial Karax render has populated it.
+  discard setTimeout(proc() =
+    if isoNimCalltraceMounted:
+      return
+    let container = dom_api.getElementById(dom_api.document, cstring"calltraceComponent-0")
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      clog "IsoNim calltrace: #calltraceComponent-0 element not found"
+      return
+
+    # Clear existing Karax-rendered content so the IsoNim view has a
+    # clean container. We also remove the Karax renderer from kxiMap
+    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
+    # this component (which would corrupt the IsoNim-managed DOM).
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    # Remove the Karax instance so redrawAll() skips this component.
+    # The `del` call is safe even if the key is absent (JS delete on
+    # a missing property is a no-op that returns true).
+    kxiMap.del(cstring"calltraceComponent-0")
+
+    isoNimCalltraceMounted = true
+    mountIsoNimCalltrace(container, calltraceVMInstance)
+    clog "IsoNim calltrace: mounted as primary renderer in #calltraceComponent-0"
+  , 500)
+
 proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel CalltraceVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel
@@ -920,6 +972,7 @@ proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   calltraceVMStore = store
   calltraceVMInstance = createCalltraceVM(store)
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimCalltrace()
 
 proc initCalltraceVM() =
   ## Lazily create the parallel CalltraceVM instance backed by a stub
@@ -949,6 +1002,7 @@ proc initCalltraceVM() =
   calltraceVMStore = createReplayDataStore(stubBackend)
   calltraceVMInstance = createCalltraceVM(calltraceVMStore)
   clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimCalltrace()
 
 proc syncCalltraceData(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
@@ -1455,6 +1509,16 @@ proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
   self.asyncThreads = threads
 
 method render*(self: CalltraceComponent): VNode =
+  # When the IsoNim calltrace view is mounted, return a stable empty stub.
+  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
+  # calls this. This guard is a safety net in case render() is called
+  # from another path (e.g. redrawDynamically before the guard there).
+  if isoNimCalltraceMounted:
+    return buildHtml(
+      tdiv(id = cstring(fmt"calltraceComponent-{self.id}"),
+        class = componentContainerClass("calltrace-view")))
+
+  # Legacy Karax rendering path — active only before IsoNim mounts.
   self.callsByLine = @[]
   self.lineIndex = JsAssoc[cstring, int]{}
 
