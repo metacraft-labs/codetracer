@@ -24,13 +24,14 @@
 ##   let panel = renderStatePanel(webRenderer, stateVM)
 ##   document.body.appendChild(panel)
 
-import std/strutils
-
 import isonim/core/[signals, computation]
-import isonim/dsl/[ui, components]
+import isonim/dsl/components
 import isonim/testing/mock_dom  # MockNode type used in generic signatures
 
-import ../store/types
+when defined(js):
+  import isonim/web/web_renderer
+  import isonim/web/dom_api as isonim_dom
+
 import ../viewmodels/state_vm
 import ../views/state_view
 
@@ -70,7 +71,7 @@ proc renderVariableRow*[R, N](r: R; parent: N;
     # Clear previous children by rebuilding (simple approach).
     # For a production version we would use fine-grained effects per
     # text node, but this is correct and sufficient for the first cut.
-    row.children.setLen(0)
+    r.clearChildren(row)
 
     # Indentation via padding-left style
     if vs.depth > 0:
@@ -218,7 +219,7 @@ proc renderVariableList*[R, N](r: R; parent: N; vm: StateVM) =
 
         # Clear and rebuild row content on each update.
         # A more optimised version would use per-field effects.
-        row.children.setLen(0)
+        r.clearChildren(row)
 
         # Indentation
         if vs.depth > 0:
@@ -302,3 +303,54 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
   renderVariableList(r, panel, vm)
 
   panel
+
+# ---------------------------------------------------------------------------
+# WebRenderer overload — renders into real browser DOM elements
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc renderStatePanel*(r: WebRenderer;
+                          vm: StateVM): isonim_dom.Element =
+    ## Render the complete State panel using real DOM elements.
+    ##
+    ## Returns an `isonim_dom.Element` that can be appended to any live
+    ## DOM container. All content is reactive: changing StateVM signals
+    ## automatically updates the DOM tree via `createRenderEffect`.
+    let panel = r.createElement("div")
+    r.setAttribute(panel, "class", "state-component isonim-state")
+
+    # Tab bar
+    renderTabBar(r, panel, vm)
+
+    # Loading indicator
+    renderLoadingIndicator(r, panel, vm)
+
+    # Watch input (visibility controlled reactively)
+    let watchContainer = r.createElement("div")
+    r.setAttribute(watchContainer, "class", "watch-input-container")
+    r.appendChild(panel, watchContainer)
+    renderWatchInput(r, watchContainer, vm)
+
+    createRenderEffect proc() =
+      let visible = vm.activeTab.val == stWatches
+      r.setStyle(watchContainer, "display", if visible: "block" else: "none")
+
+    # Variable list
+    renderVariableList(r, panel, vm)
+
+    panel
+
+  proc mountIsoNimStatePanel*(container: isonim_dom.Element;
+                               vm: StateVM) =
+    ## Mount the IsoNim state panel view into a real DOM container.
+    ##
+    ## Creates the reactive DOM tree and appends it as a child of
+    ## `container`. The IsoNim reactive effects handle all subsequent
+    ## updates — no manual redraw is needed.
+    ##
+    ## Call this once after the StateVM has been created.
+    ## The Karax state component renders alongside this view during
+    ## the transition period.
+    let r = WebRenderer()
+    let panel = renderStatePanel(r, vm)
+    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

@@ -118,7 +118,7 @@ proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
 
         # Clear and rebuild row content on each update.
         # A more optimised version would use per-field effects.
-        row.children.setLen(0)
+        r.clearChildren(row)
 
         # Depth-based indentation via padding-left style
         if line.depth > 0:
@@ -143,7 +143,7 @@ proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
         # Re-register event listeners on each rebuild since we clear children
         # and the row itself is reused. Event listeners are additive on MockNode
         # so we clear and re-add by rebuilding the listeners table.
-        row.eventListeners.clear()
+        r.clearEventListeners(row)
         r.addEventListener(row, "click", makeSelectHandler(vm, line.index))
         r.addEventListener(row, "dblclick", makeDoubleClickHandler(vm, line.index))
 

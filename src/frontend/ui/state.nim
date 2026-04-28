@@ -16,12 +16,16 @@ import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/viewmodels/state_vm
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_state_view import
+  mountIsoNimStatePanel
 
 # Module-level StateVM instance. Created once in `register()` and
 # fed data whenever the legacy event-bus handlers fire.  Rendering
 # still reads from the legacy `self.locals` so behaviour is unchanged.
 var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
+var isoNimStateMounted: bool = false
 
 # let MIN_NAME_WIDTH: float = 15 #%
 # let MAX_NAME_WIDTH: float = 85 #%
@@ -83,6 +87,34 @@ when defined(ctInExtension):
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
+proc tryMountIsoNimStatePanel() =
+  ## Mount the IsoNim state panel view into the GoldenLayout-managed
+  ## state component container. The container is created by GoldenLayout
+  ## with the id `stateComponent-0`. We inject a child div for the
+  ## IsoNim view alongside the Karax-rendered content.
+  ##
+  ## Safe to call multiple times — mounts only once.
+  if isoNimStateMounted or stateVMInstance.isNil:
+    return
+
+  # Short delay to ensure the GoldenLayout container has been created.
+  discard setTimeout(proc() =
+    if isoNimStateMounted:
+      return
+    let container = dom_api.getElementById(dom_api.document, cstring"stateComponent-0")
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      clog "IsoNim state panel: #stateComponent-0 element not found"
+      return
+    # Create a dedicated wrapper div inside the GoldenLayout container
+    # so that the IsoNim view sits alongside the Karax content.
+    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
+    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-state-panel")
+    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+    isoNimStateMounted = true
+    mountIsoNimStatePanel(wrapper, stateVMInstance)
+    clog "IsoNim state panel: mounted into #stateComponent-0"
+  , 500)
+
 proc initStateVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel StateVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel
@@ -93,6 +125,7 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   stateVMStore = store
   stateVMInstance = createStateVM(store)
   clog "StateVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimStatePanel()
 
 proc initStateVM() =
   ## Lazily create the parallel StateVM instance backed by a stub
@@ -122,6 +155,7 @@ proc initStateVM() =
   stateVMStore = createReplayDataStore(stubBackend)
   stateVMInstance = createStateVM(stateVMStore)
   clog "StateVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimStatePanel()
 
 proc syncStoreLocals(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the

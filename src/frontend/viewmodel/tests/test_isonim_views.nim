@@ -21,9 +21,15 @@ import ../store/replay_data_store
 import ../viewmodels/state_vm
 import ../viewmodels/calltrace_vm
 import ../viewmodels/debug_controls_vm
+import ../viewmodels/event_log_vm
+import ../viewmodels/flow_vm
+import ../viewmodels/timeline_vm
 import ../views/isonim_state_view
 import ../views/isonim_calltrace_view
 import ../views/isonim_debug_controls_view
+import ../views/isonim_event_log_view
+import ../views/isonim_flow_view
+import ../views/isonim_timeline_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -1059,5 +1065,740 @@ suite "IsoNim Debug Controls Panel — status text":
       store.debugger.val = dbg
 
       check status.textContent == "Finished"
+
+      dispose()
+
+# ===========================================================================
+# Event Log panel tests
+# ===========================================================================
+
+proc makeTestEvent(eventId: uint64; kind: string; line: int;
+                   value: string): EventLogRow =
+  EventLogRow(eventId: eventId, kind: kind, line: line, value: value)
+
+# ---------------------------------------------------------------------------
+# Event Log structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Event Log Panel — structure":
+
+  test "renders root with event-log-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "event-log-component"
+
+      dispose()
+
+  test "renders search input":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let input = findByClass(panel, "event-log-search-input")
+      check input != nil
+      check input.attributes["placeholder"] == "Search events..."
+
+      dispose()
+
+  test "renders column headers":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let headerRow = findByClass(panel, "event-log-header-row")
+      check headerRow != nil
+
+      let col0 = findByClass(panel, "column-0")
+      let col1 = findByClass(panel, "column-1")
+      let col2 = findByClass(panel, "column-2")
+      let col3 = findByClass(panel, "column-3")
+
+      check col0 != nil
+      check col1 != nil
+      check col2 != nil
+      check col3 != nil
+
+      check "ID" in col0.textContent
+      check "Kind" in col1.textContent
+      check "Line" in col2.textContent
+      check "Value" in col3.textContent
+
+      dispose()
+
+  test "renders pagination controls":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let prevBtn = findByClass(panel, "page-prev")
+      let nextBtn = findByClass(panel, "page-next")
+      let indicator = findByClass(panel, "page-indicator")
+
+      check prevBtn != nil
+      check nextBtn != nil
+      check indicator != nil
+
+      check prevBtn.tag == "button"
+      check nextBtn.tag == "button"
+
+      dispose()
+
+  test "renders loading indicator (hidden by default)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let indicator = findByClass(panel, "event-log-loading")
+      check indicator != nil
+      check indicator.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Event Log row rendering tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Event Log Panel — rows":
+
+  test "renders event rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      vm.eventRows.val = @[
+        makeTestEvent(1, "call", 10, "foo()"),
+        makeTestEvent(2, "return", 15, "42"),
+      ]
+
+      let panel = renderEventLogPanel(r, vm)
+      let container = findByClass(panel, "event-log-rows")
+      check container != nil
+
+      let rows = findAllByClass(container, "event-row")
+      check rows.len == 2
+
+      check "1" in rows[0].textContent
+      check "call" in rows[0].textContent
+      check "foo()" in rows[0].textContent
+
+      check "2" in rows[1].textContent
+      check "return" in rows[1].textContent
+      check "42" in rows[1].textContent
+
+      dispose()
+
+  test "click selects row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      vm.eventRows.val = @[
+        makeTestEvent(1, "call", 10, "foo()"),
+        makeTestEvent(2, "return", 15, "42"),
+      ]
+
+      let panel = renderEventLogPanel(r, vm)
+      let container = findByClass(panel, "event-log-rows")
+      let rows = findAllByClass(container, "event-row")
+
+      check vm.selectedRow.val.isNone
+
+      rows[1].fireEvent("click")
+
+      check vm.selectedRow.val.isSome
+      check vm.selectedRow.val.get == 1
+
+      dispose()
+
+  test "selected row gets highlighted class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      vm.eventRows.val = @[
+        makeTestEvent(1, "call", 10, "foo()"),
+        makeTestEvent(2, "return", 15, "42"),
+      ]
+
+      let panel = renderEventLogPanel(r, vm)
+      let container = findByClass(panel, "event-log-rows")
+      let rows = findAllByClass(container, "event-row")
+
+      vm.selectRow(some(0))
+
+      check "selected" in rows[0].attributes["class"]
+      check "selected" notin rows[1].attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Event Log sort tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Event Log Panel — sorting":
+
+  test "click column header toggles sort":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let col1 = findByClass(panel, "column-1")
+      check col1 != nil
+
+      col1.fireEvent("click")
+
+      check vm.sortColumn.val == 1
+      check vm.sortAscending.val == true
+
+      # Click again to toggle direction
+      col1.fireEvent("click")
+
+      check vm.sortColumn.val == 1
+      check vm.sortAscending.val == false
+
+      dispose()
+
+  test "sort indicator shown on active column":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      # Sort by column 0 (default)
+      let col0 = findByClass(panel, "column-0")
+      check col0 != nil
+      check "sort-active" in col0.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Event Log pagination tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Event Log Panel — pagination":
+
+  test "prev button disabled on first page":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let prevBtn = findByClass(panel, "page-prev")
+      check prevBtn.attributes.getOrDefault("disabled", "") == "true"
+
+      dispose()
+
+  test "page indicator shows correct text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      vm.totalEventCount.val = 150
+
+      let panel = renderEventLogPanel(r, vm)
+
+      let indicator = findByClass(panel, "page-indicator")
+      check indicator != nil
+      check "Page 1" in indicator.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Event Log loading tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Event Log Panel — loading":
+
+  test "loading indicator becomes visible when loading":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEventLogPanel(r, vm)
+      let indicator = findByClass(panel, "event-log-loading")
+
+      check indicator.styles["display"] == "none"
+
+      vm.loadingState.val = lsLoading
+      check indicator.styles["display"] == "block"
+
+      vm.loadingState.val = lsIdle
+      check indicator.styles["display"] == "none"
+
+      dispose()
+
+# ===========================================================================
+# Flow panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Flow structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Flow Panel — structure":
+
+  test "renders root with flow-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "flow-component"
+
+      dispose()
+
+  test "renders three mode buttons":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let modeBar = findByClass(panel, "flow-mode-selector")
+      check modeBar != nil
+
+      let callBtn = findByClass(panel, "mode-call")
+      let lineBtn = findByClass(panel, "mode-line")
+      let funcBtn = findByClass(panel, "mode-function")
+
+      check callBtn != nil
+      check lineBtn != nil
+      check funcBtn != nil
+
+      check callBtn.tag == "button"
+      check lineBtn.tag == "button"
+      check funcBtn.tag == "button"
+
+      check callBtn.textContent == "Call"
+      check lineBtn.textContent == "Line"
+      check funcBtn.textContent == "Function"
+
+      # Call mode active by default
+      check "active" in callBtn.attributes["class"]
+      check "active" notin lineBtn.attributes["class"]
+      check "active" notin funcBtn.attributes["class"]
+
+      dispose()
+
+  test "renders iteration slider":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let slider = findByClass(panel, "flow-iteration-slider")
+      check slider != nil
+
+      let label = findByClass(panel, "iteration-label")
+      check label != nil
+
+      let rangeInput = findByClass(panel, "iteration-range")
+      check rangeInput != nil
+
+      dispose()
+
+  test "renders value display":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let display = findByClass(panel, "flow-value-display")
+      check display != nil
+
+      let toggleBtn = findByClass(panel, "raw-value-toggle")
+      check toggleBtn != nil
+      check toggleBtn.textContent == "Raw"
+
+      dispose()
+
+  test "renders flow steps container":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let steps = findByClass(panel, "flow-steps")
+      check steps != nil
+
+      dispose()
+
+  test "renders loading indicator (hidden by default)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let indicator = findByClass(panel, "flow-loading")
+      check indicator != nil
+      check indicator.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Flow mode switching tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Flow Panel — mode switching":
+
+  test "clicking line mode updates active class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let lineBtn = findByClass(panel, "mode-line")
+      check lineBtn != nil
+      lineBtn.fireEvent("click")
+
+      check vm.flowMode.val == fmLine
+
+      check "active" in lineBtn.attributes["class"]
+
+      let callBtn = findByClass(panel, "mode-call")
+      check "active" notin callBtn.attributes["class"]
+
+      dispose()
+
+  test "clicking function mode updates active class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let funcBtn = findByClass(panel, "mode-function")
+      funcBtn.fireEvent("click")
+
+      check vm.flowMode.val == fmFunction
+      check "active" in funcBtn.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Flow raw value toggle tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Flow Panel — raw values":
+
+  test "toggle raw values button changes text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+
+      let toggleBtn = findByClass(panel, "raw-value-toggle")
+      check toggleBtn.textContent == "Raw"
+
+      toggleBtn.fireEvent("click")
+
+      check vm.showRawValues.val == true
+      check toggleBtn.textContent == "Formatted"
+      check "active" in toggleBtn.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Flow iteration slider tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Flow Panel — iteration slider":
+
+  test "iteration label shows current / total":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      vm.iterationCount.val = 10
+
+      let panel = renderFlowPanel(r, vm)
+
+      let label = findByClass(panel, "iteration-label")
+      check label != nil
+      check "0" in label.textContent
+      check "10" in label.textContent
+
+      vm.selectIteration(5)
+
+      check "5" in label.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Flow loading tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Flow Panel — loading":
+
+  test "loading indicator becomes visible when loading":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFlowVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFlowPanel(r, vm)
+      let indicator = findByClass(panel, "flow-loading")
+
+      check indicator.styles["display"] == "none"
+
+      vm.loadingState.val = lsLoading
+      check indicator.styles["display"] == "block"
+
+      vm.loadingState.val = lsIdle
+      check indicator.styles["display"] == "none"
+
+      dispose()
+
+# ===========================================================================
+# Timeline panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Timeline structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Timeline Panel — structure":
+
+  test "renders root with timeline-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "timeline-component"
+
+      dispose()
+
+  test "renders position indicator":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let posDiv = findByClass(panel, "timeline-position")
+      check posDiv != nil
+
+      let ticksSpan = findByClass(panel, "position-ticks")
+      check ticksSpan != nil
+      check "Tick:" in ticksSpan.textContent
+
+      dispose()
+
+  test "renders zoom controls":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let zoomBar = findByClass(panel, "timeline-zoom-controls")
+      check zoomBar != nil
+
+      let zoomOut = findByClass(panel, "zoom-out")
+      let zoomIn = findByClass(panel, "zoom-in")
+      let zoomLevel = findByClass(panel, "zoom-level")
+
+      check zoomOut != nil
+      check zoomIn != nil
+      check zoomLevel != nil
+
+      check zoomOut.tag == "button"
+      check zoomIn.tag == "button"
+
+      dispose()
+
+  test "renders timeline track":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let track = findByClass(panel, "timeline-track")
+      check track != nil
+
+      let playhead = findByClass(panel, "timeline-playhead")
+      check playhead != nil
+
+      dispose()
+
+  test "renders hover tooltip (hidden by default)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let tooltip = findByClass(panel, "timeline-hover-tooltip")
+      check tooltip != nil
+      check tooltip.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Timeline position tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Timeline Panel — position":
+
+  test "position ticks updates reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let ticksSpan = findByClass(panel, "position-ticks")
+
+      check "0" in ticksSpan.textContent
+
+      # Move debugger position
+      var dbg = store.debugger.val
+      dbg.rrTicks = 500'u64
+      store.debugger.val = dbg
+
+      check "500" in ticksSpan.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Timeline zoom tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Timeline Panel — zoom":
+
+  test "zoom in button doubles zoom level":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let zoomIn = findByClass(panel, "zoom-in")
+      check vm.zoomLevel.val == 1.0
+
+      zoomIn.fireEvent("click")
+
+      check vm.zoomLevel.val == 2.0
+
+      dispose()
+
+  test "zoom out button halves zoom level":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let zoomOut = findByClass(panel, "zoom-out")
+      check vm.zoomLevel.val == 1.0
+
+      zoomOut.fireEvent("click")
+
+      check vm.zoomLevel.val == 0.5
+
+      dispose()
+
+  test "zoom level display updates reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+
+      let zoomText = findByClass(panel, "zoom-level")
+      check "1.0x" in zoomText.textContent
+
+      vm.zoom(4.0)
+
+      check "4.0x" in zoomText.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Timeline hover tooltip tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Timeline Panel — hover tooltip":
+
+  test "tooltip shown when hovering":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTimelineVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTimelinePanel(r, vm)
+      let tooltip = findByClass(panel, "timeline-hover-tooltip")
+
+      check tooltip.styles["display"] == "none"
+
+      vm.hover(some(250'u64))
+      check tooltip.styles["display"] == "block"
+      check "250" in tooltip.textContent
+
+      vm.hover(none(uint64))
+      check tooltip.styles["display"] == "none"
 
       dispose()
