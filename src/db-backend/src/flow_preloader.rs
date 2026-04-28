@@ -391,40 +391,38 @@ impl<'a> CallFlowPreloader<'a> {
         if self.trace_kind == TraceKind::Materialized {
             // For materialized traces the frontend usually sends an exact rrTicks for the
             // current stop, while some API callers only provide a source line.
-            // In both cases call-mode flow should start from the enclosing call
-            // entry, not from the current statement.
-            let mut expr_loader = ExprLoader::new(CoreTrace::default());
-            let current_location = if step_id.0 == 0 && self.mode == FlowMode::Call && self.location.line > 0 {
+            // When step_id is non-zero the caller already knows the exact step
+            // (e.g. from a DAP breakpoint hit) — we just jump there directly.
+            // When step_id is 0, only a source line was provided: we set a
+            // temporary breakpoint to reach it, then jump_to_call to widen the
+            // flow to the enclosing call entry.
+            if step_id.0 == 0 && self.mode == FlowMode::Call && self.location.line > 0 {
                 replay.jump_to(StepId(0))?;
                 let bp = replay.add_breakpoint(&self.location.path, self.location.line)?;
                 let hit = replay.step(Action::Continue, true)?;
                 let _ = replay.delete_breakpoint(&bp);
                 if hit {
-                    replay.load_location(&mut expr_loader)?
+                    let mut expr_loader = ExprLoader::new(CoreTrace::default());
+                    let at_line_loc = replay.load_location(&mut expr_loader)?;
+                    match replay.jump_to_call(&at_line_loc) {
+                        Ok(call_start_loc) => {
+                            step_id = StepId(call_start_loc.rr_ticks.0);
+                            info!(
+                                "  flow: navigated to function call entry at step {} (line {})",
+                                step_id.0, call_start_loc.line
+                            );
+                        }
+                        Err(e) => {
+                            warn!("  flow: jump_to_call failed after breakpoint hit: {e:?}");
+                            step_id = replay.current_step_id();
+                        }
+                    }
                 } else {
                     warn!("  flow: breakpoint at line {} was never hit", self.location.line);
                     move_error = true;
-                    Location::default()
                 }
             } else {
                 replay.jump_to(step_id)?;
-                replay.load_location(&mut expr_loader)?
-            };
-
-            if !move_error {
-                match replay.jump_to_call(&current_location) {
-                    Ok(call_start_loc) => {
-                        step_id = StepId(call_start_loc.rr_ticks.0);
-                        info!(
-                            "  flow: navigated to function call entry at step {} (line {})",
-                            step_id.0, call_start_loc.line
-                        );
-                    }
-                    Err(e) => {
-                        warn!("  flow: jump_to_call failed, keeping current flow start: {e:?}");
-                        step_id = replay.current_step_id();
-                    }
-                }
             }
         } else {
             // For RR traces we still need to resolve the current stop first so
@@ -1143,7 +1141,12 @@ mod tests {
     }
 
     #[test]
-    fn db_call_flow_starts_from_enclosing_call_entry() {
+    fn db_call_flow_starts_from_exact_step_when_step_id_is_nonzero() {
+        // When step_id is non-zero the caller already has an exact step
+        // (e.g. from a DAP breakpoint hit). We should jump directly to that
+        // step without rewinding via jump_to_call — otherwise we would land
+        // at the enclosing function entry and produce flow data for the wrong
+        // loop iteration / call instance.
         let flow_preloader = FlowPreloader::new();
         let request_location = make_location(15, 42, 0);
         let current_location = request_location.clone();
@@ -1162,10 +1165,10 @@ mod tests {
             todo!()
         };
 
-        assert_eq!(step_id, StepId(17));
+        assert_eq!(step_id, StepId(42));
         assert!(progressing);
         assert!(!move_error);
-        assert_eq!(replay.calls, vec!["jump_to:42", "load_location", "jump_to_call:42"]);
+        assert_eq!(replay.calls, vec!["jump_to:42"]);
     }
 
     #[test]
