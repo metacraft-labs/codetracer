@@ -28,13 +28,15 @@ type
     ## Renderer-agnostic snapshot of a single variable row.
     ##
     ## Fields:
-    ##   name        — variable name
+    ##   name        — variable name (leaf name, e.g. "x")
+    ##   path        — dot-separated full path (e.g. "parent.x") for expand toggle
     ##   value       — display string for the variable's value
     ##   typeName    — type annotation (e.g. "int", "string")
     ##   isExpanded  — whether the variable's children are visible
     ##   hasChildren — whether the variable has child entries
     ##   depth       — nesting level (0 = top-level)
     name*: string
+    path*: string
     value*: string
     typeName*: string
     isExpanded*: bool
@@ -83,6 +85,7 @@ proc flattenVariables(
     let expanded = path in expandedPaths
     result.add VariableViewState(
       name: v.name,
+      path: path,
       value: v.value,
       typeName: v.typeName,
       isExpanded: expanded,

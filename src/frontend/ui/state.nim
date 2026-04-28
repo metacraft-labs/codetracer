@@ -90,14 +90,21 @@ when defined(ctInExtension):
 proc tryMountIsoNimStatePanel() =
   ## Mount the IsoNim state panel view into the GoldenLayout-managed
   ## state component container. The container is created by GoldenLayout
-  ## with the id `stateComponent-0`. We inject a child div for the
-  ## IsoNim view alongside the Karax-rendered content.
+  ## with the id `stateComponent-0`. The IsoNim view replaces all Karax
+  ## content and becomes the primary renderer.
+  ##
+  ## After mounting:
+  ## - `isoNimStateMounted` is set to true
+  ## - `redrawDynamically` / `redrawForSinglePage` become no-ops
+  ## - `registerLocals` still feeds data into the store, and IsoNim's
+  ##   reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
   if isoNimStateMounted or stateVMInstance.isNil:
     return
 
-  # Short delay to ensure the GoldenLayout container has been created.
+  # Short delay to ensure the GoldenLayout container has been created
+  # and the initial Karax render has populated it.
   discard setTimeout(proc() =
     if isoNimStateMounted:
       return
@@ -105,14 +112,23 @@ proc tryMountIsoNimStatePanel() =
     if dom_api.isNodeNil(dom_api.Node(container)):
       clog "IsoNim state panel: #stateComponent-0 element not found"
       return
-    # Create a dedicated wrapper div inside the GoldenLayout container
-    # so that the IsoNim view sits alongside the Karax content.
-    let wrapper = dom_api.createElement(dom_api.document, cstring"div")
-    dom_api.setAttribute(wrapper, cstring"id", cstring"isonim-state-panel")
-    dom_api.appendChild(dom_api.Node(container), dom_api.Node(wrapper))
+
+    # Clear existing Karax-rendered content so the IsoNim view has a
+    # clean container. We also remove the Karax renderer from kxiMap
+    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
+    # this component (which would corrupt the IsoNim-managed DOM).
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    # Remove the Karax instance so redrawAll() skips this component.
+    # The `del` call is safe even if the key is absent (JS delete on
+    # a missing property is a no-op that returns true).
+    kxiMap.del(cstring"stateComponent-0")
+
     isoNimStateMounted = true
-    mountIsoNimStatePanel(wrapper, stateVMInstance)
-    clog "IsoNim state panel: mounted into #stateComponent-0"
+    mountIsoNimStatePanel(container, stateVMInstance)
+    clog "IsoNim state panel: mounted as primary renderer in #stateComponent-0"
   , 500)
 
 proc initStateVMWithStore*(store: ReplayDataStore) =
@@ -205,6 +221,12 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   self.redraw()
 
 proc redrawDynamically*(self: StateComponent) =
+  # When IsoNim is the primary renderer, skip Karax DOM updates.
+  # The IsoNim reactive effects handle all DOM updates automatically
+  # when the store signals change (via syncStoreLocals).
+  if isoNimStateMounted:
+    return
+
   let vdom = self.render()
   let newDom = vnodeToDom(vdom, KaraxInstance())
 
@@ -219,6 +241,12 @@ proc redrawDynamically*(self: StateComponent) =
   # console.log("new ", node)
 
 method redrawForSinglePage*(self: StateComponent) =
+  # When IsoNim is the primary renderer, skip Karax redraw.
+  # Data flow: registerLocals -> syncStoreLocals -> store signals ->
+  # IsoNim reactive effects automatically update the DOM.
+  if isoNimStateMounted:
+    return
+
   self.redrawDynamically()
   # should be working.. but for now workaround with redrawDynamically
   # if not self.kxi.isNil:
@@ -270,6 +298,16 @@ proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscri
   component.register(api)
 
 method render*(self: StateComponent): VNode =
+  # When the IsoNim state panel is mounted, return a stable empty stub.
+  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
+  # calls this. This guard is a safety net in case render() is called
+  # from another path (e.g. redrawDynamically before the guard there).
+  if isoNimStateMounted:
+    return buildHtml(
+      tdiv(id = cstring(fmt"stateComponent-{self.id}"),
+        class = componentContainerClass("active-state") & cstring" " & cstring"state-component"))
+
+  # Legacy Karax rendering path — active only before IsoNim mounts.
   # render using value components
   # most of the stuff is separated into  watches and normal local values
   # the watch functionality has a search form and editable names

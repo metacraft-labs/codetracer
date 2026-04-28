@@ -279,7 +279,8 @@ suite "IsoNim State Panel — variables":
       let container = findByClass(panel, "value-components-container")
       check container != nil
 
-      let rows = findAllByClass(container, "variable-row")
+      # Rows use the Karax-compatible "value-expanded" class
+      let rows = findAllByClass(container, "value-expanded")
       check rows.len == 2
 
       # Check first variable content
@@ -303,18 +304,19 @@ suite "IsoNim State Panel — variables":
 
       let panel = renderStatePanel(r, vm)
 
-      # Initially no variables
+      # Initially no variables — use value-expanded class to find rows
       let container = findByClass(panel, "value-components-container")
-      check container.children.len == 0
+      check findAllByClass(container, "value-expanded").len == 0
 
       # Add variables
       store.updateLocals(@[
         makeVariable("count", "7", "int"),
       ])
 
-      check container.children.len == 1
-      check "count" in container.children[0].textContent
-      check "7" in container.children[0].textContent
+      let rows1 = findAllByClass(container, "value-expanded")
+      check rows1.len == 1
+      check "count" in rows1[0].textContent
+      check "7" in rows1[0].textContent
 
       # Update variables
       store.updateLocals(@[
@@ -322,9 +324,10 @@ suite "IsoNim State Panel — variables":
         makeVariable("name", "\"world\"", "string"),
       ])
 
-      check container.children.len == 2
-      check "8" in container.children[0].textContent
-      check "name" in container.children[1].textContent
+      let rows2 = findAllByClass(container, "value-expanded")
+      check rows2.len == 2
+      check "8" in rows2[0].textContent
+      check "name" in rows2[1].textContent
 
       dispose()
 
@@ -346,14 +349,16 @@ suite "IsoNim State Panel — variables":
 
       # Initially shows locals
       let container = findByClass(panel, "value-components-container")
-      check container.children.len == 1
-      check "localVar" in container.children[0].textContent
+      let localRows = findAllByClass(container, "value-expanded")
+      check localRows.len == 1
+      check "localVar" in localRows[0].textContent
 
       # Switch to globals
       vm.selectTab(stGlobals)
 
-      check container.children.len == 1
-      check "globalVar" in container.children[0].textContent
+      let globalRows = findAllByClass(container, "value-expanded")
+      check globalRows.len == 1
+      check "globalVar" in globalRows[0].textContent
 
       dispose()
 
@@ -376,16 +381,18 @@ suite "IsoNim State Panel — variables":
       let container = findByClass(panel, "value-components-container")
 
       # Initially collapsed: only the parent row
-      check container.children.len == 1
+      let rows1 = findAllByClass(container, "value-expanded")
+      check rows1.len == 1
 
       # Expand
       vm.toggleExpand("obj")
 
       # Now should show parent + 2 children = 3 rows
-      check container.children.len == 3
-      check "obj" in container.children[0].textContent
-      check "field1" in container.children[1].textContent
-      check "field2" in container.children[2].textContent
+      let rows2 = findAllByClass(container, "value-expanded")
+      check rows2.len == 3
+      check "obj" in rows2[0].textContent
+      check "field1" in rows2[1].textContent
+      check "field2" in rows2[2].textContent
 
       dispose()
 
