@@ -50,6 +50,9 @@ proc tryMountIsoNimDebugControls() =
     isoNimDebugMounted = true
     mountIsoNimDebugControls(container, debugControlsVMInstance)
     clog "IsoNim debug controls: mounted into #isonim-debug-controls"
+    # The legacy Karax `#debug` div is hidden on next Karax redraw
+    # cycle — see the `isoNimDebugMounted` check at the top of
+    # `DebugComponent.render`.
   , 200)
 
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
@@ -390,8 +393,30 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
     discard self.onCompleteMove(response)
   )
 
+  # Wire up the legacy bridge callbacks on the DebugControlsVM so that
+  # IsoNim view button clicks route through the existing DAP event mediator.
+  initDebugControlsVM()
+  if not debugControlsVMInstance.isNil:
+    debugControlsVMInstance.onDapStep = proc(action: cstring) =
+      dapStep(api, action)
+    debugControlsVMInstance.onAction = proc(id: string) =
+      self.action(id)
+
 
 method render*(self: DebugComponent): VNode =
+  # When the IsoNim debug controls are mounted, skip rendering the
+  # legacy Karax debug buttons. The IsoNim view in `#isonim-debug-controls`
+  # is now the primary toolbar. We still render the `#debug` div so that
+  # the command palette (which lives inside it) remains in the Karax VDOM
+  # tree and can be activated via keyboard shortcuts.
+  if isoNimDebugMounted:
+    return buildHtml(
+      tdiv(
+        id="debug",
+        class="ct-header"
+      )):
+        render(data.ui.commandPalette)
+
   # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
 
   # On macOS we display the native traffic light buttons, which means that we need to give them some space.

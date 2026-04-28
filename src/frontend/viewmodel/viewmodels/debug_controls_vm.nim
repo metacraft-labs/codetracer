@@ -49,6 +49,20 @@ type
     isRunning*: Memo[bool]
     statusText*: Memo[string]
 
+    # -- Legacy bridge callbacks --
+    # These are set by the Karax debug component to delegate stepping
+    # to the existing DAP-based event mediator, which is the only path
+    # that actually reaches the replay backend today.
+    # When the new ct/step backend path is wired end-to-end, these
+    # callbacks can be removed and the VM action procs used directly.
+    onDapStep*: proc(action: cstring)
+      ## Called by IsoNim view buttons for DAP-based step actions.
+      ## Maps to `dapStep(api, action)` in the legacy system.
+    onAction*: proc(action: string)
+      ## Called by IsoNim view buttons for non-step actions
+      ## (e.g. "run-to-entry", "reset-operation", "history-back").
+      ## Maps to `DebugComponent.action(id)` in the legacy system.
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
