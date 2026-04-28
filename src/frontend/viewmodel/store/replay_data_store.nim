@@ -198,6 +198,45 @@ proc requestCalltraceSection*(store: ReplayDataStore;
       s.calltrace.loadingState.val = lsError,
   )
 
+# ---------------------------------------------------------------------------
+# Bridge procs — used by the legacy UI layer to feed data into the store
+# without importing store/types (which would cause name conflicts with
+# the legacy types).
+# ---------------------------------------------------------------------------
+
+proc updateDebuggerPosition*(store: ReplayDataStore;
+                             rrTicks: uint64;
+                             file: string = "";
+                             line: int = 0) =
+  ## Update the store's debugger signal with a new rrTicks position.
+  ## Used by legacy UI code to mirror move events into the ViewModel layer.
+  var dbg = store.debugger.val
+  if dbg.rrTicks != rrTicks:
+    dbg.rrTicks = rrTicks
+    dbg.location = Location(file: file, line: line)
+    store.debugger.val = dbg
+
+proc updateLocals*(store: ReplayDataStore;
+                   variables: seq[Variable]) =
+  ## Replace the store's locals signal with a new variable list.
+  ## Used by legacy UI code to mirror locals responses into the
+  ## ViewModel layer.
+  store.locals.locals.val = variables
+  store.locals.loadingState.val = lsIdle
+
+proc makeVariable*(name, value, typeName: string;
+                   hasChildren: bool = false;
+                   children: seq[Variable] = @[]): Variable =
+  ## Convenience constructor for Variable — avoids the need for callers
+  ## to import store/types.
+  Variable(name: name, value: value, typeName: typeName,
+           hasChildren: hasChildren, children: children)
+
+proc newVariableSeq*(): seq[Variable] =
+  ## Create an empty seq of store Variables. Useful for callers that
+  ## cannot name the Variable type due to import conflicts.
+  newSeq[Variable]()
+
 proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   ## Send a step command to the backend.
   ## Marks the debugger as stepping while the request is in flight.

@@ -8,6 +8,21 @@ import
 
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The StateVM receives the same data but does not affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+import ../viewmodel/viewmodels/state_vm
+
+# Module-level StateVM instance. Created once in `register()` and
+# fed data whenever the legacy event-bus handlers fire.  Rendering
+# still reads from the legacy `self.locals` so behaviour is unchanged.
+var stateVMInstance: StateVM
+var stateVMStore: ReplayDataStore
+
 # let MIN_NAME_WIDTH: float = 15 #%
 # let MAX_NAME_WIDTH: float = 85 #%
 # let TOTAL_VALUE_COMPONENT_WIDTH: float = 95 #%
@@ -53,9 +68,73 @@ when defined(ctInExtension):
       stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
     result = stateComponentForExtension
 
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# Placed before registerLocals / onCompleteMove so they are visible at
+# the call sites without forward declarations.
+# ---------------------------------------------------------------------------
+
+proc initStateVM() =
+  ## Lazily create the parallel StateVM instance backed by a stub
+  ## BackendService.  The stub never sends real requests — the legacy
+  ## code path handles all backend communication.  We only use the
+  ## store's reactive signals to mirror the data the legacy code
+  ## receives, proving the ViewModel reactive pipeline works.
+  if stateVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    # Return an immediately-resolved future so the store's loading
+    # state transitions correctly but no real I/O happens.
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  stateVMStore = createReplayDataStore(stubBackend)
+  stateVMInstance = createStateVM(stateVMStore)
+  clog "StateVM: parallel ViewModel instance created"
+
+proc syncStoreLocals(legacyLocals: seq[Variable]) =
+  ## Mirror the legacy locals into the ViewModel store so the
+  ## StateVM's currentVariables memo sees the same data.
+  if stateVMStore.isNil:
+    return
+  var vmLocals = newVariableSeq()
+  for v in legacyLocals:
+    vmLocals.add(makeVariable(
+      name = $v.expression,
+      value = (if v.value.isNil: "" else: $v.value.text),
+      typeName = (if v.value.isNil: "" else: $v.value.kind),
+      hasChildren = (if v.value.isNil: false else: v.value.elements.len > 0),
+    ))
+  stateVMStore.updateLocals(vmLocals)
+  clog fmt"StateVM: synced {vmLocals.len} locals into store"
+
+proc syncStoreDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the StateVM's reactive pipeline sees the same rrTicks value.
+  if stateVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  stateVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"StateVM: synced debugger rrTicks={ticks}"
+
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
   clog fmt"registerLocals"
   self.locals = response.locals
+
+  # Feed the same data into the parallel ViewModel store.
+  syncStoreLocals(response.locals)
   for localVariable in response.locals:
     let expression = localVariable.expression
 
@@ -115,6 +194,10 @@ method onMove(self: StateComponent) {.async.} =
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
+
+  # Initialize the parallel ViewModel instance (no-op if already created).
+  initStateVM()
+
   # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
     # discard self.onMove())
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
@@ -308,4 +391,9 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.location = response.location
   for value in self.values:
     value.location = response.location
+
+  # Mirror the debugger position into the parallel ViewModel store.
+  syncStoreDebuggerPosition(
+    response.location.rrTicks, response.location.path, response.location.line)
+
   await self.onMove()
