@@ -3672,6 +3672,10 @@ proc makeSlider(self: FlowComponent, position: int) =
 
   if not element.toJs.noUiSlider.isNil:
     element.toJs.noUiSlider.destroy()
+  elif loop.iteration <= FLOW_ITERATION_START:
+    # Single-iteration loop (min == max): noUiSlider cannot create a slider
+    # with zero range, so skip slider creation entirely.
+    return
   else:
     noUiSlider.create(element, js{
       "start": step.iteration,

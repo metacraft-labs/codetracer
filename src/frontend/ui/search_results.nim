@@ -105,6 +105,10 @@ proc renderFileGroup(self: SearchResultsComponent, filePath: cstring, results: s
           highlightMatch(res.text, query)
 
 method render*(self: SearchResultsComponent): VNode =
+  # Guard against nil query ref: it is unassigned until the first search runs.
+  if self.service.query.isNil:
+    return buildHtml(tdiv(class = componentContainerClass("search-results search-results-non-active")))
+
   let results = self.service.results[SearchFixed]
   let resultCount = results.len
   let query = if self.service.query.query.isNil: cstring"" else: self.service.query.query
