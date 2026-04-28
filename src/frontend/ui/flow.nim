@@ -7,6 +7,71 @@ import
 
 from trace import getConfiguration
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The FlowVM receives the same data but does not affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/viewmodels/flow_vm import
+  FlowVM, createFlowVM
+
+# Module-level FlowVM instance. Created once and fed data whenever
+# the legacy event-bus handlers fire. Rendering still reads from legacy
+# data so behaviour is unchanged.
+var flowVMInstance: FlowVM
+var flowVMStore: ReplayDataStore
+
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# ---------------------------------------------------------------------------
+
+proc initFlowVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel FlowVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel).
+  ## If the FlowVM has already been created this is a no-op.
+  if flowVMInstance != nil:
+    return
+  flowVMStore = store
+  flowVMInstance = createFlowVM(store)
+  clog "FlowVM: parallel ViewModel instance created (shared store)"
+
+proc initFlowVM() =
+  ## Lazily create the parallel FlowVM backed by a stub
+  ## BackendService.  Fallback when no shared store has been provided
+  ## via `initFlowVMWithStore`.
+  if flowVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  flowVMStore = createReplayDataStore(stubBackend)
+  flowVMInstance = createFlowVM(flowVMStore)
+  clog "FlowVM: parallel ViewModel instance created (stub backend)"
+
+proc syncFlowDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the FlowVM's auto-load effect fires with the updated rrTicks.
+  if flowVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  flowVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"FlowVM: synced debugger rrTicks={ticks}"
+
 # thank, God!
 proc resizeLineSlider(self: FlowComponent, position: int)
 proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int)
@@ -77,6 +142,13 @@ when defined(ctInExtension):
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    # Feed the same position into the parallel ViewModel store.
+    initFlowVM()
+    syncFlowDebuggerPosition(
+      response.location.rrTicks,
+      response.location.path,
+      response.location.line)
+
     self.location = response.location
     api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: FlowMode.Call, location: self.location))
     self.redraw()

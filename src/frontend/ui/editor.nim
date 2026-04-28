@@ -9,6 +9,71 @@ from welcome_screen import resetView
 from event_log import findTRNode
 from dom import createElement
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The EditorVM receives the same data but does not affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/viewmodels/editor_vm import
+  EditorVM, createEditorVM
+
+# Module-level EditorVM instance. Created once and fed data whenever
+# the legacy event-bus handlers fire. Rendering still reads from legacy
+# data so behaviour is unchanged.
+var editorVMInstance: EditorVM
+var editorVMStore: ReplayDataStore
+
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# ---------------------------------------------------------------------------
+
+proc initEditorVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel EditorVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel).
+  ## If the EditorVM has already been created this is a no-op.
+  if editorVMInstance != nil:
+    return
+  editorVMStore = store
+  editorVMInstance = createEditorVM(store)
+  clog "EditorVM: parallel ViewModel instance created (shared store)"
+
+proc initEditorVM() =
+  ## Lazily create the parallel EditorVM backed by a stub
+  ## BackendService.  Fallback when no shared store has been provided
+  ## via `initEditorVMWithStore`.
+  if editorVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  editorVMStore = createReplayDataStore(stubBackend)
+  editorVMInstance = createEditorVM(editorVMStore)
+  clog "EditorVM: parallel ViewModel instance created (stub backend)"
+
+proc syncEditorDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the EditorVM's activeFileName memo sees the updated location.
+  if editorVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  editorVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"EditorVM: synced debugger rrTicks={ticks}"
+
 include system/timers
 
 type langstring = cstring
@@ -1962,6 +2027,13 @@ method onFindOrFilter*(self: EditorViewComponent) {.async.} =
   self.monacoEditor.trigger("keyboard".cstring, "actions.find".cstring)
 
 method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.} =
+  # Feed the same position into the parallel ViewModel store.
+  initEditorVM()
+  syncEditorDebuggerPosition(
+    response.location.rrTicks,
+    response.location.path,
+    response.location.line)
+
   duration("complete move")
   self.location = response.location
   # cdebug fmt"reset Flow {response.resetFlow}"

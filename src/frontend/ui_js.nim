@@ -980,6 +980,11 @@ when not defined(ctInExtension):
       # because the instances are already set.
       state.initStateVMWithStore(activeSessionVM.store)
       calltrace.initCalltraceVMWithStore(activeSessionVM.store)
+      debug.initDebugControlsVMWithStore(activeSessionVM.store)
+      event_log.initEventLogVMWithStore(activeSessionVM.store)
+      flow.initFlowVMWithStore(activeSessionVM.store)
+      editor.initEditorVMWithStore(activeSessionVM.store)
+      trace.initTimelineVMWithStore(activeSessionVM.store)
 
     for content, components in data.ui.componentMapping:
       for i, component in components:

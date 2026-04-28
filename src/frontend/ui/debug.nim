@@ -4,6 +4,72 @@ import
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The DebugControlsVM reads debugger state from the store but does not
+# affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/viewmodels/debug_controls_vm import
+  DebugControlsVM, createDebugControlsVM
+
+# Module-level DebugControlsVM instance. Created once and fed data whenever
+# the legacy event-bus handlers fire. Rendering still reads from legacy data
+# so behaviour is unchanged.
+var debugControlsVMInstance: DebugControlsVM
+var debugControlsVMStore: ReplayDataStore
+
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# ---------------------------------------------------------------------------
+
+proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel DebugControlsVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel).
+  ## If the DebugControlsVM has already been created this is a no-op.
+  if debugControlsVMInstance != nil:
+    return
+  debugControlsVMStore = store
+  debugControlsVMInstance = createDebugControlsVM(store)
+  clog "DebugControlsVM: parallel ViewModel instance created (shared store)"
+
+proc initDebugControlsVM() =
+  ## Lazily create the parallel DebugControlsVM backed by a stub
+  ## BackendService.  Fallback when no shared store has been provided
+  ## via `initDebugControlsVMWithStore`.
+  if debugControlsVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  debugControlsVMStore = createReplayDataStore(stubBackend)
+  debugControlsVMInstance = createDebugControlsVM(debugControlsVMStore)
+  clog "DebugControlsVM: parallel ViewModel instance created (stub backend)"
+
+proc syncDebugControlsPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the DebugControlsVM's reactive memos see the updated state.
+  if debugControlsVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  debugControlsVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"DebugControlsVM: synced debugger rrTicks={ticks}"
+
 proc messageView(self: DebugComponent): VNode =
   var current = now()
 
@@ -260,6 +326,13 @@ method resetBeforeRestart*(self: DebugComponent) =
   self.historyIndex = 1
 
 method onCompleteMove*(self: DebugComponent, response: MoveState) {.async.} =
+  # Feed the same position into the parallel ViewModel store.
+  initDebugControlsVM()
+  syncDebugControlsPosition(
+    response.location.rrTicks,
+    response.location.path,
+    response.location.line)
+
   echo "onCompleteMove for debug "
   console.log(response.location)
   if self.jumpHistory.len() > 0:

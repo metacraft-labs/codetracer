@@ -4,6 +4,71 @@ import
   ui_imports, colors, events, trace, typetraits, strutils, jsconsole,
   datatable, strutils, base64
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The EventLogVM receives the same data but does not affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/viewmodels/event_log_vm import
+  EventLogVM, createEventLogVM
+
+# Module-level EventLogVM instance. Created once and fed data whenever
+# the legacy event-bus handlers fire. Rendering still reads from legacy
+# data so behaviour is unchanged.
+var eventLogVMInstance: EventLogVM
+var eventLogVMStore: ReplayDataStore
+
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# ---------------------------------------------------------------------------
+
+proc initEventLogVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel EventLogVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel).
+  ## If the EventLogVM has already been created this is a no-op.
+  if eventLogVMInstance != nil:
+    return
+  eventLogVMStore = store
+  eventLogVMInstance = createEventLogVM(store)
+  clog "EventLogVM: parallel ViewModel instance created (shared store)"
+
+proc initEventLogVM() =
+  ## Lazily create the parallel EventLogVM backed by a stub
+  ## BackendService.  Fallback when no shared store has been provided
+  ## via `initEventLogVMWithStore`.
+  if eventLogVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  eventLogVMStore = createReplayDataStore(stubBackend)
+  eventLogVMInstance = createEventLogVM(eventLogVMStore)
+  clog "EventLogVM: parallel ViewModel instance created (stub backend)"
+
+proc syncEventLogDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the EventLogVM's auto-load effect fires with the updated rrTicks.
+  if eventLogVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  eventLogVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"EventLogVM: synced debugger rrTicks={ticks}"
+
 var arg: js
 
 const
@@ -1251,6 +1316,13 @@ proc afterMove(self: EventLogComponent) =
     self.isFlowUpdate = false
 
 method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
+  # Feed the same position into the parallel ViewModel store.
+  initEventLogVM()
+  syncEventLogDebuggerPosition(
+    response.location.rrTicks,
+    response.location.path,
+    response.location.line)
+
   self.location = response.location
   let lang = toLangFromFilename(self.location.path)
   # if self.data.ui.activeFocus != self:

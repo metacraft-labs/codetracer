@@ -3,6 +3,71 @@ import
   ../[ types, lang, utils, renderer, communication, dap, event_helpers ],
   ../../common/ct_event
 
+# ---------------------------------------------------------------------------
+# ViewModel layer — wired in parallel with the legacy event-bus code.
+# The TimelineVM receives the same data but does not affect rendering yet.
+# ---------------------------------------------------------------------------
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/viewmodels/timeline_vm import
+  TimelineVM, createTimelineVM
+
+# Module-level TimelineVM instance. Created once and fed data whenever
+# the legacy event-bus handlers fire. Rendering still reads from legacy
+# data so behaviour is unchanged.
+var timelineVMInstance: TimelineVM
+var timelineVMStore: ReplayDataStore
+
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# ---------------------------------------------------------------------------
+
+proc initTimelineVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel TimelineVM using an externally-provided
+  ## ReplayDataStore (typically the shared store from SessionViewModel).
+  ## If the TimelineVM has already been created this is a no-op.
+  if timelineVMInstance != nil:
+    return
+  timelineVMStore = store
+  timelineVMInstance = createTimelineVM(store)
+  clog "TimelineVM: parallel ViewModel instance created (shared store)"
+
+proc initTimelineVM() =
+  ## Lazily create the parallel TimelineVM backed by a stub
+  ## BackendService.  Fallback when no shared store has been provided
+  ## via `initTimelineVMWithStore`.
+  if timelineVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  timelineVMStore = createReplayDataStore(stubBackend)
+  timelineVMInstance = createTimelineVM(timelineVMStore)
+  clog "TimelineVM: parallel ViewModel instance created (stub backend)"
+
+proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the TimelineVM's currentPosition memo sees the updated rrTicks.
+  if timelineVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  timelineVMStore.updateDebuggerPosition(ticks, $path, line)
+  clog fmt"TimelineVM: synced debugger rrTicks={ticks}"
+
 let
   MIN_EDITOR_WIDTH: float = 20 #%
   MAX_EDITOR_WIDTH: float = 70 #%
@@ -1436,6 +1501,13 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   data.ui.activeFocus = trace
 
 method onCompleteMove*(self: TraceComponent, response: MoveState) {.async.} =
+  # Feed the same position into the parallel ViewModel store.
+  initTimelineVM()
+  syncTimelineDebuggerPosition(
+    response.location.rrTicks,
+    response.location.path,
+    response.location.line)
+
   self.location = response.location
   # TODO: For now find a better way when in extension
   # self.editorUI.updateLineNumbersOnly()
