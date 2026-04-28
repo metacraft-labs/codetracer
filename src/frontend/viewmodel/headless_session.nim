@@ -502,6 +502,35 @@ proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
         drain()
 
 # ---------------------------------------------------------------------------
+# Navigation — calltrace and event jumps
+# ---------------------------------------------------------------------------
+
+proc calltraceJump*(s: HeadlessDebugSession; file: string; line: int;
+                    rrTicks: uint64) =
+  ## Jump to a specific calltrace entry by its location.
+  ## This mirrors the GUI's double-click-on-calltrace-entry action.
+  ## Sends ``ct/calltrace-jump`` and waits for the ``stopped`` +
+  ## ``ct/complete-move`` events that carry the new debugger position.
+  ##
+  ## The ``ct/calltrace-jump`` handler does NOT send a DAP response --
+  ## it only emits events (``stopped`` + ``ct/complete-move``) via the
+  ## channel.  We use ``sendDapRequestNoResponse`` to avoid blocking
+  ## forever waiting for a response that never arrives.
+  let args = %*{
+    "file": file,
+    "line": line,
+    "rrTicks": rrTicks,
+  }
+  s.backend.sendDapRequestNoResponse("ct/calltrace-jump", args)
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
+
+proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
+  ## Convenience: jump to a calltrace entry using a CallLine object.
+  s.calltraceJump(callLine.location.file, callLine.location.line,
+                  callLine.rrTicks)
+
+# ---------------------------------------------------------------------------
 # Breakpoints
 # ---------------------------------------------------------------------------
 
@@ -567,6 +596,34 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
             ev.getOrDefault("highLevelLine").getInt(0))
           entry.rrTicks = ev.getOrDefault("directLocationRRTicks").getBiggestInt(0).uint64
           result.add(entry)
+
+proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
+  ## Jump to the location of an event log entry.
+  ## Sends ``ct/event-jump`` and waits for the position update.
+  ##
+  ## The ProgramEvent struct uses ``serde(rename_all = "camelCase")`` with
+  ## explicit ``#[serde(rename)]`` overrides for some fields.  The JSON
+  ## keys must match what the Rust deserializer expects.
+  ## EventLogKind is repr(u8) with Serialize_repr/Deserialize_repr:
+  ##   0 = Write, 1 = WriteFile, 2 = WriteOther, 3 = Read, etc.
+  let args = %*{
+    "kind": 0,
+    "content": event.content,
+    "rrEventId": 0,
+    "highLevelPath": event.file,
+    "highLevelLine": event.line,
+    "metadata": "",
+    "bytes": 0,
+    "stdout": true,
+    "directLocationRRTicks": event.rrTicks.int64,
+    "tracepointResultIndex": -1,
+    "eventIndex": 0,
+    "base64Encoded": false,
+    "maxRRTicks": 0,
+  }
+  s.backend.sendDapRequestNoResponse("ct/event-jump", args)
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
 
 # ---------------------------------------------------------------------------
 # Trace recording

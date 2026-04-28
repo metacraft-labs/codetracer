@@ -124,6 +124,29 @@ proc sendDapRequest*(backend: DapStdioBackend; command: string;
       backend.eventQueue.add(msg)
     # Ignore other messages (e.g. reverse requests from the server).
 
+proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
+                                args: JsonNode = newJObject()) =
+  ## Send a DAP request without waiting for a response.
+  ##
+  ## Some CT-specific commands (``ct/calltrace-jump``, ``ct/event-jump``,
+  ## etc.) are dispatched via the handler's ``handle_request`` function
+  ## which does NOT send a DAP response — it only sends events through
+  ## the channel.  Using ``sendDapRequest`` for these commands would block
+  ## forever waiting for a response that never arrives.
+  ##
+  ## The caller should follow up with ``waitForEvent`` to consume the
+  ## events emitted by the handler.
+  inc backend.seqCounter
+  let seqId = backend.seqCounter
+
+  let request = %*{
+    "seq": seqId,
+    "type": "request",
+    "command": command,
+    "arguments": args,
+  }
+  backend.writeDapMessage(request)
+
 proc waitForEvent*(backend: DapStdioBackend; eventName: string;
                    maxMessages: int = 50): JsonNode =
   ## Wait for a specific DAP event by name.
