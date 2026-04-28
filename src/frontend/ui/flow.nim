@@ -150,7 +150,11 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
       response.location.line)
 
     self.location = response.location
-    api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: FlowMode.Call, location: self.location))
+    # The legacy CtLoadFlow emit has been removed.  The
+    # syncFlowDebuggerPosition call above updates the store's debugger
+    # signal which triggers the FlowVM's auto-load effect.  That effect
+    # sends the ct/load-flow command through the real backend, and the
+    # response arrives via the existing CtUpdatedFlow subscription.
     self.redraw()
   )
   api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =

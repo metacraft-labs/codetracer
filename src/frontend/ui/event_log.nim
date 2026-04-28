@@ -1384,11 +1384,14 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
-    if self.started:
-      discard
-    else:
+    # The legacy CtEventLoad emit has been removed.  On the first (and
+    # every subsequent) complete-move the syncEventLogDebuggerPosition call
+    # in onCompleteMove updates the store's debugger signal.  The
+    # EventLogVM's auto-load effect detects the change and sends the
+    # ct/load-event-log command through the real backend, so the initial
+    # event load now happens automatically.
+    if not self.started:
       self.started = true
-      self.api.emit(CtEventLoad, EmptyArg())
   )
 
   api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
