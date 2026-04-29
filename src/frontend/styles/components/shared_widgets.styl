@@ -188,20 +188,31 @@ body
 //     white-space: nowrap !important
 
 #root-container
-  // padding 0.25em
   position: fixed
   height: calc(100vh - 2.27em - 2em)
   top: 2.27em
+  left: 0
+  right: 0
   z-index: 0
   padding-left: 0
   padding-right: 0
+  display: flex
+  flex-direction: column
+  min-height: 0
 
 #ROOT
+  // The auto-hide row and GoldenLayout both rely on #ROOT staying flexible.
+  // A fixed viewport width here collapses the height chain and only tab
+  // headers remain visible after layout restore.
   background-color: colors-ui-surface-primary-default !important
   color: TEXT_CONTENT_COLOR
   height: 100%
-  width: calc(100vw - 0.5em)
+  flex: 1
+  min-width: 0
+  min-height: 0
   position: relative
+  overflow: hidden
+  box-sizing: border-box
   padding-right: 0.25em
   padding-left: 0.25em
 

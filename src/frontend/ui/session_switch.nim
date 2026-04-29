@@ -170,6 +170,15 @@ proc createNewSession*(data: Data) =
       paths: JsAssoc[cstring, bool]{},
       pluginCommands: JsAssoc[cstring, SearchSource]{},
       activeCommandName: cstring"",
+      # New sessions reuse the same shared chrome, so seed an empty query.
+      query: SearchQuery(
+        kind: TextSearchQuery,
+        value: cstring"",
+        expectArgs: false,
+        query: cstring"",
+        includePattern: cstring"",
+        excludePattern: cstring"",
+        searchMode: SearchFixed),
       selected: 0),
     shell: ShellService())
   session.ui = Components(

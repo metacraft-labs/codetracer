@@ -2027,8 +2027,6 @@ proc restoreLayoutState*(layout: GoldenLayout, conf: GoldenLayoutResolvedConfig)
     item.remove()  # Assuming remove is a method on the content items
 
   # Now restore content from the passed `GoldenLayoutResolvedConfig`
-  echo "### KUR"
-  kout conf
   for item in conf.root:
     root.addChild(item)  # Assuming addChild is a method to add items back into the layout
 
@@ -2093,8 +2091,8 @@ proc refreshCalltraceOverlays(data: Data) =
   for _, component in data.ui.componentMapping[Content.Calltrace]:
     if not component.isNil:
       let calltrace = CalltraceComponent(component)
-      if calltrace.isDbBasedTrace:
-        calltrace.refreshTraceOverlay()
+      # if calltrace.isDbBasedTrace:
+      calltrace.refreshTraceOverlay()
 
 proc updateLayout(data: Data) =
   dom.document.documentElement.style.fontSize = &"{data.ui.fontSize}px"
