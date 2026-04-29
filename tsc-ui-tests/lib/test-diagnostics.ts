@@ -37,7 +37,31 @@ export async function captureFailureDiagnostics(
 
     const dir = DIAGNOSTICS_DIR;
     debugLogger.log(`Diagnostics saved to ${dir}/${baseName}.*`);
-    console.log(`  Diagnostics: ${dir}/${baseName}.*`);
+
+    const htmlPath = path.join(dir, `${baseName}.html`);
+    const summaryPath = path.join(dir, `${baseName}.summary.txt`);
+    const errorPath = path.join(dir, `${baseName}.txt`);
+
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║  TEST FAILURE DEBUGGING GUIDE                               ║
+╠══════════════════════════════════════════════════════════════╣
+║  DOM dump:     ${htmlPath}
+║  DOM summary:  ${summaryPath}
+║  Error detail: ${errorPath}
+║
+║  Debugging guide: docs/book/src/misc/troubleshooting.md
+║  Logs guide:      docs/book/src/misc/logs.md
+║  Headless test:   src/frontend/viewmodel/tests/scenarios/
+║  Test policy:     src/frontend/viewmodel/tests/README.md
+║
+║  STEPS:
+║  1. Read the DOM summary — check component counts
+║  2. Read the headless counterpart — does it pass?
+║  3. If headless passes, the issue is View-layer only
+║  4. Check console errors in the error detail file
+╚══════════════════════════════════════════════════════════════╝
+`);
   } catch (err) {
     debugLogger.log(`Failed to capture diagnostics: ${err}`);
   }
