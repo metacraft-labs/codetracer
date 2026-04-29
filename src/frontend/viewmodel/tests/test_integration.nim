@@ -20,15 +20,18 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_integration.nim
 
-import std/[json, unittest, asyncdispatch, options]
+import std/[json, unittest, asyncdispatch, options, strutils]
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import ../backend/backend_service
 import ../backend/mock_backend
+import ../backend/dap_commands
 import ../store/types
 import ../store/replay_data_store
+import ../store/request_tracker
 import ../session_vm
-import ../viewmodels/[state_vm, calltrace_vm, debug_controls_vm]
+import ../viewmodels/[state_vm, calltrace_vm, debug_controls_vm,
+                      event_log_vm, flow_vm, shell_vm, timeline_vm]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -405,7 +408,7 @@ suite "Integration: debug controls reflect debugger state":
       session.debugControlsVM.stepForward()
       drain()
 
-      let stepCmd = mock.findCommand("ct/step")
+      let stepCmd = mock.findCommand("next")
       check stepCmd.isSome
       check stepCmd.get.args["direction"].getStr == "sdForward"
 
@@ -551,7 +554,7 @@ suite "Integration: cross-VM coordination":
       drain()
 
       # Step command was sent.
-      let stepCmd = mock.findCommand("ct/step")
+      let stepCmd = mock.findCommand("next")
       check stepCmd.isSome
       check stepCmd.get.args["direction"].getStr == "sdForward"
 
@@ -573,5 +576,109 @@ suite "Integration: cross-VM coordination":
         makeVariable("counter", "1", "int"),
       ])
       check session.stateVM.currentVariables.val[0].value == "1"
+
+      dispose()
+
+# ===========================================================================
+# DAP command validation
+# ===========================================================================
+#
+# These tests guard against the bug where ViewModel code sends a command
+# string that is not in the DAP mapping (EVENT_KIND_TO_DAP_MAPPING in
+# dap.nim).  When an unmapped command reaches dapCommandToEventKind it
+# raises ValueError, which kills ALL subsequent reactive effects in the
+# current batch.
+#
+# The approach: trigger all auto-load effects and user actions, then
+# verify that every command the mock backend received is in the
+# authoritative set of valid DAP commands (VALID_DAP_COMMANDS from
+# dap_commands.nim).
+# ===========================================================================
+
+suite "Integration: all ViewModel commands are valid DAP commands":
+
+  test "auto-load effects send only valid DAP commands":
+    ## Trigger every auto-load effect by moving the debugger to a
+    ## non-zero rrTicks position, then verify all recorded commands
+    ## are in the valid DAP command set.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let session = createSessionVM(mock.toBackendService())
+      drain()
+
+      # Move debugger to trigger auto-load effects in EventLogVM,
+      # FlowVM, StateVM (locals + calltrace).
+      session.store.updateDebuggerPosition(500, "main.py", 10)
+      drain()
+
+      check mock.receivedCommands.len > 0
+      for cmd in mock.receivedCommands:
+        check cmd.command.isValidDapCommand
+
+      dispose()
+
+  test "step commands send only valid DAP commands":
+    ## Exercise every step direction through requestStep and verify
+    ## the resulting commands are valid DAP strings.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      drain()
+
+      for dir in StepDirection:
+        mock.clearReceivedCommands()
+        # Reset request tracker so deduplication doesn't block.
+        store.requestTracker.markComplete("step")
+        # Reset debugger status to idle so the step is accepted.
+        store.debugger.val = DebuggerState(
+          rrTicks: 100'u64,
+          location: Location(file: "test.py", line: 1),
+          status: dsIdle,
+          threadId: 0'u32,
+        )
+        store.requestStep(dir)
+        drain()
+
+        check mock.receivedCommands.len >= 1
+        for cmd in mock.receivedCommands:
+          check cmd.command.isValidDapCommand
+
+      dispose()
+
+  test "user actions send only valid DAP commands":
+    ## Exercise user actions across VMs (doubleClickRow, clickStep,
+    ## seek, submitInput) and verify all commands are valid.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let session = createSessionVM(mock.toBackendService())
+      drain()
+
+      # Populate event log rows for doubleClickRow.
+      session.eventLogVM.eventRows.val = @[
+        EventLogRow(eventId: 1'u64, kind: "call", line: 10, value: "foo()"),
+      ]
+
+      mock.clearReceivedCommands()
+
+      # EventLogVM: double-click navigates to event.
+      session.eventLogVM.doubleClickRow(0)
+      drain()
+
+      # FlowVM: click a step.
+      session.flowVM.clickStep(0)
+      drain()
+
+      # TimelineVM: seek to a tick.
+      session.timelineVM.seek(200'u64)
+      drain()
+
+      # ShellVM: submit a command.
+      session.shellVM.setInput("print(x)")
+      session.shellVM.submitInput()
+      drain()
+
+      check mock.receivedCommands.len >= 4
+      for cmd in mock.receivedCommands:
+        check cmd.command.isValidDapCommand
 
       dispose()

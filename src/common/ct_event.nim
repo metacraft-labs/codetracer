@@ -75,6 +75,9 @@ type
     CtNotification,
     TracepointLocals,
     CtTracepointResults,
+    CtFlowJump,
+    CtTimelineSeek,
+    CtShellEval,
 
 when defined(js):
   import std / jsffi

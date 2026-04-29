@@ -837,7 +837,7 @@ suite "Scenario 8: Cross-VM consistency after move":
       check session.debugControlsVM.statusText.val == "Idle"
 
       # EventLogVM: event log request was sent.
-      let eventLogCmd = mock.findCommand("ct/load-event-log")
+      let eventLogCmd = mock.findCommand("ct/event-load")
       check eventLogCmd.isSome
       check eventLogCmd.get.args["rrTicks"].getBiggestInt == 500
 

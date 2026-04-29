@@ -20,7 +20,7 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_debug_controls_vm.nim
 
-import std/[json, unittest, asyncdispatch]
+import std/[json, unittest, asyncdispatch, sets]
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import ../backend/backend_service
@@ -41,6 +41,13 @@ proc drain() =
   except ValueError:
     # "No handles or timers registered in dispatcher" — nothing to drain.
     discard
+
+const DAP_STEP_COMMANDS = ["next", "stepBack", "stepIn", "stepOut",
+                            "continue", "reverseContinue"].toHashSet
+
+proc isStepCommand(command: string): bool =
+  ## Return true if the command is any of the DAP step/continue commands.
+  command in DAP_STEP_COMMANDS
 
 proc makeStoreWithMock(autoRespond: bool = true):
     tuple[store: ReplayDataStore, mock: MockBackendService] =
@@ -338,7 +345,7 @@ suite "DebugControlsVM step actions":
       var found = false
       for i in cmdCountBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/step":
+        if cmd.command == "next":
           check cmd.args["direction"].getStr == "sdForward"
           found = true
           break
@@ -363,7 +370,7 @@ suite "DebugControlsVM step actions":
       var found = false
       for i in cmdCountBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/step":
+        if cmd.command == "stepBack":
           check cmd.args["direction"].getStr == "sdBackward"
           found = true
           break
@@ -386,7 +393,7 @@ suite "DebugControlsVM step actions":
       var found = false
       for i in cmdCountBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/step":
+        if cmd.command == "stepIn":
           check cmd.args["direction"].getStr == "sdStepIn"
           found = true
           break
@@ -409,7 +416,7 @@ suite "DebugControlsVM step actions":
       var found = false
       for i in cmdCountBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/step":
+        if cmd.command == "stepOut":
           check cmd.args["direction"].getStr == "sdStepOut"
           found = true
           break
@@ -432,7 +439,7 @@ suite "DebugControlsVM step actions":
       var found = false
       for i in cmdCountBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/step":
+        if cmd.command == "continue":
           check cmd.args["direction"].getStr == "sdContinue"
           found = true
           break
@@ -455,7 +462,7 @@ suite "DebugControlsVM step actions":
       var found = false
       for i in cmdCountBefore ..< mock.receivedCommands.len:
         let cmd = mock.receivedCommands[i]
-        if cmd.command == "ct/step":
+        if cmd.command == "reverseContinue":
           check cmd.args["direction"].getStr == "sdReverseContinue"
           found = true
           break
@@ -483,7 +490,7 @@ suite "DebugControlsVM action guards":
 
       # No step command should have been sent.
       for i in cmdCountBefore ..< mock.receivedCommands.len:
-        check mock.receivedCommands[i].command != "ct/step"
+        check not mock.receivedCommands[i].command.isStepCommand
 
       dispose()
 
@@ -502,7 +509,7 @@ suite "DebugControlsVM action guards":
       drain()
 
       for i in cmdCountBefore ..< mock.receivedCommands.len:
-        check mock.receivedCommands[i].command != "ct/step"
+        check not mock.receivedCommands[i].command.isStepCommand
 
       dispose()
 
@@ -519,7 +526,7 @@ suite "DebugControlsVM action guards":
       drain()
 
       for i in cmdCountBefore ..< mock.receivedCommands.len:
-        check mock.receivedCommands[i].command != "ct/step"
+        check not mock.receivedCommands[i].command.isStepCommand
 
       dispose()
 
@@ -536,6 +543,6 @@ suite "DebugControlsVM action guards":
       drain()
 
       for i in cmdCountBefore ..< mock.receivedCommands.len:
-        check mock.receivedCommands[i].command != "ct/step"
+        check not mock.receivedCommands[i].command.isStepCommand
 
       dispose()

@@ -171,7 +171,7 @@ suite "EventLogVM doubleClickRow":
       let jumpCmds = mock.receivedCommands[cmdCountBefore .. ^1]
       var found = false
       for cmd in jumpCmds:
-        if cmd.command == "ct/event-log-jump":
+        if cmd.command == "ct/event-jump":
           check cmd.args["eventId"].getBiggestInt == 2
           check cmd.args["line"].getInt == 20
           found = true
@@ -198,7 +198,7 @@ suite "EventLogVM doubleClickRow":
       # No event-log-jump command should have been sent.
       let jumpCmds = mock.receivedCommands[cmdCountBefore .. ^1]
       for cmd in jumpCmds:
-        check cmd.command != "ct/event-log-jump"
+        check cmd.command != "ct/event-jump"
 
       dispose()
 
@@ -470,7 +470,7 @@ suite "EventLogVM auto-load effect":
       # The effect should have triggered a load-event-log request.
       var found = false
       for cmd in mock.receivedCommands:
-        if cmd.command == "ct/load-event-log":
+        if cmd.command == "ct/event-load":
           check cmd.args["rrTicks"].getBiggestInt == 100
           found = true
           break
@@ -490,6 +490,6 @@ suite "EventLogVM auto-load effect":
       drain()
 
       for cmd in mock.receivedCommands:
-        check cmd.command != "ct/load-event-log"
+        check cmd.command != "ct/event-load"
 
       dispose()

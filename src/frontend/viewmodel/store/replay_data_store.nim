@@ -314,9 +314,27 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
     location: Location(file: file, line: line),
   )
 
+proc stepDirectionToDapCommand*(direction: StepDirection): string =
+  ## Map a StepDirection to the correct DAP command string.
+  ## Each direction corresponds to a standard DAP command or a
+  ## CodeTracer extension command, all of which are registered
+  ## in the EVENT_KIND_TO_DAP_MAPPING table in dap.nim.
+  case direction
+  of sdForward:          "next"
+  of sdBackward:         "stepBack"
+  of sdStepIn:           "stepIn"
+  of sdStepOut:          "stepOut"
+  of sdContinue:         "continue"
+  of sdReverseContinue:  "reverseContinue"
+
 proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   ## Send a step command to the backend.
   ## Marks the debugger as stepping while the request is in flight.
+  ##
+  ## The direction is mapped to the correct DAP command string
+  ## (e.g. sdForward → "next", sdStepIn → "stepIn") so that
+  ## ``dapCommandToEventKind`` in dap.nim can resolve it without
+  ## raising ``ValueError``.
   let key = "step"
   let dirStr = $direction
   if store.requestTracker.isDuplicate(key, dirStr):
@@ -334,8 +352,9 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
     threadId: current.threadId,
   )
 
+  let command = stepDirectionToDapCommand(direction)
   let args = %*{"direction": dirStr}
-  let fut = store.backend.send("ct/step", args)
+  let fut = store.backend.send(command, args)
 
   let s = store
   fut.onComplete(

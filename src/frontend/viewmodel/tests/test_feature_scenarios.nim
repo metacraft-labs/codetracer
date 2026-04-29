@@ -140,7 +140,7 @@ suite "Event Log: row selection and navigation":
   test "double-click row navigates to event location via backend":
     ## Simulates a developer double-clicking an event log row to jump
     ## to the corresponding source location. The backend should receive
-    ## a ct/event-log-jump command with the event's ID and line number.
+    ## a ct/event-jump command with the event's ID and line number.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createEventLogVM(store)
@@ -162,7 +162,7 @@ suite "Event Log: row selection and navigation":
       vm.doubleClickRow(1)
       drain()
 
-      let jumpCmd = mock.findCommand("ct/event-log-jump")
+      let jumpCmd = mock.findCommand("ct/event-jump")
       check jumpCmd.isSome
       check jumpCmd.get.args["eventId"].getBiggestInt == 101
       check jumpCmd.get.args["line"].getInt == 18
@@ -190,7 +190,7 @@ suite "Event Log: row selection and navigation":
       vm.doubleClickRow(0)
       drain()
 
-      var cmd = mock.findCommand("ct/event-log-jump")
+      var cmd = mock.findCommand("ct/event-jump")
       check cmd.isSome
       check cmd.get.args["eventId"].getBiggestInt == 50
       check cmd.get.args["line"].getInt == 1
@@ -200,7 +200,7 @@ suite "Event Log: row selection and navigation":
       vm.doubleClickRow(2)
       drain()
 
-      cmd = mock.findCommand("ct/event-log-jump")
+      cmd = mock.findCommand("ct/event-jump")
       check cmd.isSome
       check cmd.get.args["eventId"].getBiggestInt == 52
       check cmd.get.args["line"].getInt == 99
@@ -221,7 +221,7 @@ suite "Event Log: row selection and navigation":
       store.debugger.val = dbg
       drain()
 
-      let cmd = mock.findCommand("ct/load-event-log")
+      let cmd = mock.findCommand("ct/event-load")
       check cmd.isSome
       check cmd.get.args["rrTicks"].getBiggestInt == 500
 
@@ -250,7 +250,7 @@ suite "Event Log: row selection and navigation":
       store.debugger.val = dbg
       drain()
 
-      let cmd = mock.findCommand("ct/load-event-log")
+      let cmd = mock.findCommand("ct/event-load")
       check cmd.isSome
       check cmd.get.args["page"].getInt == 2
       check cmd.get.args["pageSize"].getInt == 25
@@ -332,7 +332,7 @@ suite "Event Log: row selection and navigation":
       store.debugger.val = dbg
       drain()
 
-      let cmd = mock.findCommand("ct/load-event-log")
+      let cmd = mock.findCommand("ct/event-load")
       check cmd.isSome
       check cmd.get.args["searchQuery"].getStr == "TypeError"
 
@@ -907,7 +907,7 @@ suite "Multi-session: independent debugger state":
       drain()
 
       # Session 1 should have sent the step command.
-      check mock1.countCommands("ct/step") >= 1
+      check mock1.countCommands("next") >= 1
 
       # Session 2 should have received no commands at all.
       check mock2.receivedCommands.len == 0
@@ -973,7 +973,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.continueExecution()
       drain()
 
-      let cmd = mock.findCommand("ct/step")
+      let cmd = mock.findCommand("continue")
       check cmd.isSome
       check cmd.get.args["direction"].getStr == "sdContinue"
 
@@ -1000,7 +1000,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.reverseContinue()
       drain()
 
-      let cmd = mock.findCommand("ct/step")
+      let cmd = mock.findCommand("reverseContinue")
       check cmd.isSome
       check cmd.get.args["direction"].getStr == "sdReverseContinue"
 
@@ -1017,7 +1017,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.stepIn()
       drain()
 
-      let cmd = mock.findCommand("ct/step")
+      let cmd = mock.findCommand("stepIn")
       check cmd.isSome
       check cmd.get.args["direction"].getStr == "sdStepIn"
 
@@ -1034,7 +1034,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.stepOut()
       drain()
 
-      let cmd = mock.findCommand("ct/step")
+      let cmd = mock.findCommand("stepOut")
       check cmd.isSome
       check cmd.get.args["direction"].getStr == "sdStepOut"
 
@@ -1060,7 +1060,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.stepBackward()
       drain()
 
-      let cmd = mock.findCommand("ct/step")
+      let cmd = mock.findCommand("stepBack")
       check cmd.isSome
       check cmd.get.args["direction"].getStr == "sdBackward"
 
@@ -1090,7 +1090,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.stepBackward()
       drain()
 
-      let stepBackCmd = mock.findCommand("ct/step")
+      let stepBackCmd = mock.findCommand("stepBack")
       check stepBackCmd.isSome
       check stepBackCmd.get.args["direction"].getStr == "sdBackward"
 
@@ -1108,7 +1108,7 @@ suite "Debugger: continue and breakpoint operations":
       session.debugControlsVM.continueExecution()
       drain()
 
-      let contCmd = mock.findCommand("ct/step")
+      let contCmd = mock.findCommand("continue")
       check contCmd.isSome
       check contCmd.get.args["direction"].getStr == "sdContinue"
 
@@ -1185,7 +1185,9 @@ suite "Debugger: continue and breakpoint operations":
 
       # No additional step commands should have been sent because
       # canStepForward and canContinue are false while dsStepping.
-      check mock.countCommands("ct/step") == 0
+      check mock.countCommands("next") + mock.countCommands("stepBack") +
+            mock.countCommands("stepIn") + mock.countCommands("stepOut") +
+            mock.countCommands("continue") + mock.countCommands("reverseContinue") == 0
 
       dispose()
 
@@ -1448,7 +1450,7 @@ suite "Full workflow: record -> replay -> debug":
       # Verify all panels requested initial data.
       check mock.findCommand("ct/load-locals").isSome
       check mock.findCommand("ct/load-calltrace-section").isSome
-      check mock.findCommand("ct/load-event-log").isSome
+      check mock.findCommand("ct/event-load").isSome
       check mock.findCommand("ct/load-flow").isSome
 
       # Verify editor shows the right file.
@@ -1568,7 +1570,7 @@ suite "Full workflow: record -> replay -> debug":
       check session.stateVM.currentVariables.val.len == 3
 
       # ---- Step 9: Verify event log was requested ----
-      check mock.findCommand("ct/load-event-log").isSome
+      check mock.findCommand("ct/event-load").isSome
 
       # ---- Step 10: Verify flow data was requested ----
       check mock.findCommand("ct/load-flow").isSome
@@ -1614,7 +1616,7 @@ suite "Full workflow: record -> replay -> debug":
         # Verify all data panels sent requests.
         check mock.findCommand("ct/load-locals").isSome
         check mock.findCommand("ct/load-calltrace-section").isSome
-        check mock.findCommand("ct/load-event-log").isSome
+        check mock.findCommand("ct/event-load").isSome
         check mock.findCommand("ct/load-flow").isSome
 
       dispose()

@@ -198,7 +198,7 @@ suite "ReplayDataStore requests":
       check mock.receivedCommands[0].args["location"]["line"].getInt == 5
       dispose()
 
-  test "requestStep sends ct/step and sets status to stepping":
+  test "requestStep sends DAP command and sets status to stepping":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let store = createReplayDataStore(mock.toBackendService())
@@ -208,7 +208,7 @@ suite "ReplayDataStore requests":
       # Status should be stepping immediately (before async completes).
       check store.debugger.val.status == dsStepping
       check mock.receivedCommands.len == 1
-      check mock.receivedCommands[0].command == "ct/step"
+      check mock.receivedCommands[0].command == "next"
       dispose()
 
   test "requestStep deduplicates identical in-flight steps":

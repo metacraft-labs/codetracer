@@ -245,11 +245,11 @@ proc toBackendService*(backend: DapStdioBackend): BackendService =
   ## Because this is synchronous/blocking and BackendService.sendProc
   ## returns a Future, we create already-completed futures.
   ##
-  ## Note: The BackendService expects CT-style command names like
-  ## ``"ct/step"`` and ``"ct/load-locals"``.  The sendProc here maps
-  ## them to DAP commands understood by replay-server.  For standard
-  ## DAP commands (initialize, launch, next, stepBack, etc.) the caller
-  ## should use sendDapRequest directly.
+  ## Note: The BackendService expects DAP-compatible command names like
+  ## ``"next"``, ``"stepIn"``, ``"ct/load-locals"``.  The sendProc here
+  ## maps them to DAP commands understood by replay-server.  Step
+  ## commands use standard DAP names (next, stepBack, stepIn, stepOut,
+  ## continue, reverseContinue) directly.
   let b = backend  # capture for closures
 
   let sendProc = proc(command: string;

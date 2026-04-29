@@ -91,7 +91,7 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
       "eventId": event.eventId,
       "line": event.line,
     }
-    discard vm.store.backend.send("ct/event-log-jump", args)
+    discard vm.store.backend.send("ct/event-jump", args)
 
 proc nextPage*(vm: EventLogVM) =
   ## Advance to the next page, clamped to totalPages - 1.
@@ -200,6 +200,6 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           "sortAscending": asc,
           "rrTicks": ticks,
         }
-        discard store.backend.send("ct/load-event-log", args)
+        discard store.backend.send("ct/event-load", args)
 
     vm
