@@ -257,11 +257,17 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
                              line: int = 0) =
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
-  var dbg = store.debugger.val
-  if dbg.rrTicks != rrTicks:
-    dbg.rrTicks = rrTicks
-    dbg.location = Location(file: file, line: line)
-    store.debugger.val = dbg
+  let current = store.debugger.val
+  if current.rrTicks != rrTicks:
+    # Construct a NEW object — on JS backend, var = signal.val gets a
+    # reference, so mutating and writing back the same object doesn't
+    # trigger the signal's equality check (it compares to itself).
+    store.debugger.val = DebuggerState(
+      rrTicks: rrTicks,
+      location: Location(file: file, line: line),
+      status: current.status,
+      threadId: current.threadId,
+    )
 
 proc updateLocals*(store: ReplayDataStore;
                    variables: seq[Variable]) =
@@ -319,9 +325,14 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   store.requestTracker.markPending(key, dirStr)
 
   # Update debugger status to stepping.
-  var dbg = store.debugger.val
-  dbg.status = dsStepping
-  store.debugger.val = dbg
+  # Construct a NEW object to avoid JS reference semantics bug.
+  let current = store.debugger.val
+  store.debugger.val = DebuggerState(
+    rrTicks: current.rrTicks,
+    location: current.location,
+    status: dsStepping,
+    threadId: current.threadId,
+  )
 
   let args = %*{"direction": dirStr}
   let fut = store.backend.send("ct/step", args)
