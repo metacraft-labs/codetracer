@@ -38,7 +38,9 @@ const TAB_LIMIT = 20
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
+import viewmodel/app/isonim_app
 var activeSessionVM: SessionViewModel
+var activeIsoNimApp: IsoNimApp
 const MIN_FONTSIZE = 6
 const MAX_FONTSIZE = 40
 const EDITOR_GUTTER_PADDING = 2 #px
@@ -987,6 +989,42 @@ when not defined(ctInExtension):
       flow.initFlowVMWithStore(activeSessionVM.store)
       editor.initEditorVMWithStore(activeSessionVM.store)
       trace.initTimelineVMWithStore(activeSessionVM.store)
+
+      # -----------------------------------------------------------------
+      # IsoNim app shell: mount the parallel IsoNim renderer if enabled.
+      #
+      # The IsoNim app renders all panels from SessionViewModel signals
+      # into a separate `#isonim-app` container. It coexists with the
+      # Karax app — both read from the same SessionViewModel instance
+      # (same-process fast path).
+      #
+      # Enable via:
+      #   - Compile-time: `-d:isoNimApp` (always on)
+      #   - Runtime: `?isonim=1` URL parameter (on-demand)
+      # -----------------------------------------------------------------
+      block:
+        var enableIsoNim = false
+        when defined(isoNimApp):
+          enableIsoNim = true
+        # Runtime URL parameter check: ?isonim=1
+        if not enableIsoNim:
+          {.emit: """
+            try {
+              var params = new URLSearchParams(window.location.search);
+              if (params.get('isonim') === '1') {
+                `enableIsoNim` = true;
+              }
+            } catch(e) {}
+          """.}
+        if enableIsoNim:
+          # Show the hidden container
+          {.emit: """
+            var isoEl = document.getElementById('isonim-app');
+            if (isoEl) isoEl.style.display = 'block';
+          """.}
+          activeIsoNimApp = mountIsoNimApp(activeSessionVM)
+          if not activeIsoNimApp.isNil:
+            clog "IsoNimApp: mounted successfully (same-process fast path)"
 
     for content, components in data.ui.componentMapping:
       for i, component in components:
