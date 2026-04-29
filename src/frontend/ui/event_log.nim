@@ -1369,34 +1369,13 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
   resizeEventLogHandler(self)
 
 method render*(self: EventLogComponent): VNode =
-  # When the IsoNim event log view is mounted, return a stable empty stub.
-  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
-  # calls this. This guard is a safety net in case render() is called
-  # from another path (e.g. redrawDynamically before the guard there).
-  if isoNimEventLogMounted:
-    return buildHtml(
-      tdiv(class = componentContainerClass("eventLog")))
-
-  # Legacy Karax rendering path — active only before IsoNim mounts.
-  self.kxi.afterRedraws.add(proc = self.eventLogAfterRedraws())
-
+  # IsoNim is the primary renderer. Return a minimal empty container
+  # with the correct class so that GoldenLayout's container exists and
+  # the IsoNim tryMountIsoNimEventLogPanel() can find and populate it.
+  # All rendering is handled by the IsoNim reactive view; Karax
+  # produces no DOM content for this panel.
   result = buildHtml(
-    tdiv(
-      class = componentContainerClass("eventLog"),
-      tabIndex = "2",
-      onclick = proc(ev: Event, v:VNode) =
-        ev.stopPropagation()
-        if self.data.ui.activeFocus != self:
-          self.data.ui.activeFocus = self
-    )
-  ):
-    eventLogHeaderView(self)
-    tdiv(class = local("dense-table") & " data-table"):
-      table(id = self.denseId)
-    if not self.denseTable.isNil:
-      tableFooter(self.denseTable)
-    tdiv(class = local("detailed-table") & " data-table"):
-      table(id = self.detailedId)
+    tdiv(class = componentContainerClass("eventLog")))
 
 proc scrollOnMove*(self: EventLogComponent, rowSelected: int) =
   if rowSelected > self.denseTable.endRow - 1 or rowSelected < self.denseTable.startRow:

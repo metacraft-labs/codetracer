@@ -1515,69 +1515,14 @@ proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
   self.asyncThreads = threads
 
 method render*(self: CalltraceComponent): VNode =
-  # When the IsoNim calltrace view is mounted, return a stable empty stub.
-  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
-  # calls this. This guard is a safety net in case render() is called
-  # from another path (e.g. redrawDynamically before the guard there).
-  if isoNimCalltraceMounted:
-    return buildHtml(
-      tdiv(id = cstring(fmt"calltraceComponent-{self.id}"),
-        class = componentContainerClass("calltrace-view")))
-
-  # Legacy Karax rendering path — active only before IsoNim mounts.
-  self.callsByLine = @[]
-  self.lineIndex = JsAssoc[cstring, int]{}
-
-  # if self.data.trace.isNil:
-  #   return buildHtml(tdiv())
-
-  if self.inExtension:
-    self.kxi.afterRedraws.add(proc = self.redrawCallLines())
-  else:
-    if not self.kxi.isNil:
-      self.kxi.afterRedraws.add(proc =
-        self.redrawCallLines()
-      )
-
+  # IsoNim is the primary renderer. Return a minimal empty container
+  # with the correct class so that GoldenLayout's container exists and
+  # the IsoNim tryMountIsoNimCalltrace() can find and populate it.
+  # All rendering is handled by the IsoNim reactive view; Karax
+  # produces no DOM content for this panel.
   result = buildHtml(
-    tdiv(
-      class = componentContainerClass("calltrace-view"),
-      `data-label` = fmt"calltrace-data-label-{self.id}",
-      tabIndex = "2",
-      onclick = proc(ev: Event, v: VNode) =
-        ev.stopPropagation()
-        if self.data.ui.activeFocus != self:
-          self.data.ui.activeFocus = self
-    )
-  ):
-    tdiv():
-      searchCalltraceView(self)
-      asyncFlowToggleView(self)
-      # TODO: not ready for rr traces too: for now just comment out!
-      # if not self.inExtension and not self.usesMaterializedTracesTrace:
-      #  filterCalltraceView(self)
-    if self.service.isCalltrace:
-      if self.asyncFlowMode == afmVirtual:
-        tdiv(class = "calltrace-virtual-placeholder"):
-          text "Virtual call trace: follow the ↗ links to navigate async continuations"
-      else:
-        tdiv(
-          id = fmt"calltraceScroll-{self.id}",
-          class = "local-calltrace-view",
-          onscroll = proc =
-            self.eventuallyScroll()
-        ):
-          # TODO: This is commented out only for the demo recording
-          # if self.panelHeight() < self.totalCallsCount:
-          #   tdiv(
-          #     class = "calltrace-loading",
-          #     id = fmt"calltrace-toggle-loading-{self.id}",
-          #     style = style(StyleAttr.display, "none")
-          #   ):
-          #     text "Loading..."
-          localCalltraceView(self)
-    else:
-      discard
+    tdiv(id = cstring(fmt"calltraceComponent-{self.id}"),
+      class = componentContainerClass("calltrace-view")))
 
 proc renderRemoveButtonView(self: CallExpandedValuesComponent, key: cstring): VNode =
   buildHtml(

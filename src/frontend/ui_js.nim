@@ -991,33 +991,29 @@ when not defined(ctInExtension):
       trace.initTimelineVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
-      # IsoNim app shell: mount the parallel IsoNim renderer if enabled.
+      # IsoNim app shell: mount the parallel IsoNim renderer.
       #
       # The IsoNim app renders all panels from SessionViewModel signals
       # into a separate `#isonim-app` container. It coexists with the
       # Karax app — both read from the same SessionViewModel instance
       # (same-process fast path).
       #
-      # Enable via:
-      #   - Compile-time: `-d:isoNimApp` (always on)
-      #   - Runtime: `?isonim=1` URL parameter (on-demand)
+      # IsoNim is enabled by default. Disable via:
+      #   - Runtime: `?karax=1` URL parameter (opt-out)
       # -----------------------------------------------------------------
       block:
-        var enableIsoNim = false
-        when defined(isoNimApp):
-          enableIsoNim = true
-        # Runtime URL parameter check: ?isonim=1
-        if not enableIsoNim:
-          {.emit: """
-            try {
-              var params = new URLSearchParams(window.location.search);
-              if (params.get('isonim') === '1') {
-                `enableIsoNim` = true;
-              }
-            } catch(e) {}
-          """.}
+        var enableIsoNim = true
+        # Runtime URL parameter check: ?karax=1 disables IsoNim
+        {.emit: """
+          try {
+            var params = new URLSearchParams(window.location.search);
+            if (params.get('karax') === '1') {
+              `enableIsoNim` = false;
+            }
+          } catch(e) {}
+        """.}
         if enableIsoNim:
-          # Show the hidden container
+          # Show the IsoNim app container
           {.emit: """
             var isoEl = document.getElementById('isonim-app');
             if (isoEl) isoEl.style.display = 'block';

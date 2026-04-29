@@ -2,13 +2,12 @@
 ##
 ## IsoNim application shell for CodeTracer.
 ##
-## This module provides a parallel IsoNim rendering entry point that can
-## coexist with the existing Karax-based UI. It renders all panels from
+## This module provides the primary IsoNim rendering entry point that
+## coexists with the Karax layout manager. It renders all panels from
 ## SessionViewModel signals into a dedicated `#isonim-app` container div,
-## which is hidden by default and can be toggled on via:
+## which is visible by default. Disable via:
 ##
-##   - URL parameter: `?isonim=1`
-##   - Compile-time flag: `-d:isoNimApp`
+##   - URL parameter: `?karax=1` (opt-out, falls back to legacy Karax rendering)
 ##
 ## Architecture:
 ##
@@ -25,9 +24,8 @@
 ##
 ## Usage:
 ##   # In ui_js.nim configureMiddleware, after creating activeSessionVM:
-##   when defined(isoNimApp):
-##     import viewmodel/app/isonim_app
-##     mountIsoNimApp(activeSessionVM)
+##   import viewmodel/app/isonim_app
+##   mountIsoNimApp(activeSessionVM)
 
 when not defined(js):
   {.error: "isonim_app requires the JS backend".}
@@ -187,9 +185,9 @@ proc mountIsoNimApp*(session: SessionViewModel): IsoNimApp =
   ## full IsoNim app with all panels, or returns nil if the container div
   ## is not present in the HTML.
   ##
-  ## The app is opt-in: the `#isonim-app` div is hidden by default and
-  ## only shown when the `?isonim=1` URL parameter is present or the
-  ## `isoNimApp` compile-time flag is set.
+  ## The app is enabled by default. The `#isonim-app` div is visible and
+  ## IsoNim mounts into it automatically. Disable with `?karax=1` URL
+  ## parameter to fall back to legacy Karax rendering.
   result = createIsoNimApp(session)
   if result.isNil:
     return

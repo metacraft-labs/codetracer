@@ -408,134 +408,13 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
 
 
 method render*(self: DebugComponent): VNode =
-  # When the IsoNim debug controls are mounted, skip rendering the
-  # legacy Karax debug buttons. The IsoNim view in `#isonim-debug-controls`
-  # is now the primary toolbar. We still render the `#debug` div so that
-  # the command palette (which lives inside it) remains in the Karax VDOM
-  # tree and can be activated via keyboard shortcuts.
-  if isoNimDebugMounted:
-    return buildHtml(
-      tdiv(
-        id="debug",
-        class="ct-header"
-      )):
-        render(data.ui.commandPalette)
-
-  # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
-
-  # On macOS we display the native traffic light buttons, which means that we need to give them some space.
-  # They use about 20px per button and 25 for side margin for the whole widget
-  let style = when defined(ctmacos):
-    style(StyleAttr.paddingLeft, cstring("85px"))
-  else:
-    style()
-
+  # IsoNim is the primary renderer for debug controls (mounted in
+  # `#isonim-debug-controls`). Karax only renders the `#debug` div
+  # as a minimal shell so the command palette (which lives inside it)
+  # remains in the Karax VDOM tree for keyboard shortcut activation.
   result = buildHtml(
     tdiv(
       id="debug",
-      class="ct-header",
-      style=style
+      class="ct-header"
     )):
-    # messageView(self)
-
-      proc debugStepButton(id: string, action: DebuggerAction, reverse: bool): VNode {.closure.} =
-        # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000:
-        #       cstring"debug-button busy"
-        #     else:
-        #       cstring"debug-button"
-
-        var click = proc =
-          let taskId = genTaskId(Step)
-          clog "click on step button", taskId
-          dapStep(self.api, id)
-
-          # TODO?
-          # ctStep(data, id, action, reverse, 1, fromShortcutArg=false, taskId)
-
-        buildHtml(button(
-            id = cstring(fmt"{id}-image"),
-            class = "ct-button-image-md-secondary ct-button-no-border",
-            onclick = click,
-            disabled = toDisabled(id == "reset-operation")
-          )):
-            tdiv(
-              class = "custom-tooltip",
-            ):
-              text tooltipText[id] & cstring(fmt" ({shortcuts[id]})")
-
-      proc debugButton(id: string, disabled: bool = false): VNode {.closure.} =
-        let disabledClass = if disabled: "disabled" else: ""
-        # let klass = if self.service.stableBusy and delta(now(), self.data.ui.lastRedraw) >= 1_000: "debug-button busy" else: "debug-button"
-        var click = proc = action(self, id)
-
-        if not self.usingContextMenu:
-          self.activeHistory = ""
-
-        buildHtml(button(
-            id = cstring(fmt"{id}-image"),
-            class = "ct-button-image-md-secondary ct-button-no-border",
-            onclick = proc() =
-              if not disabled:
-                click()
-              else:
-                discard,
-            oncontextmenu = proc(ev: Event, tg: VNode) =
-              if id == "history-back" or id == "history-forward":
-                self.usingContextMenu = true
-                if self.activeHistory == id:
-                  self.activeHistory = ""
-                  self.listHistory = false
-                else:
-                  self.activeHistory = id
-                  self.listHistory = true
-                self.historyDirection = id == "history-forward"
-                self.fullHistory = false
-                discard setTimeout(proc() =
-                  try:
-                    jq("#history-focus-id").focus()
-                  except:
-                    discard,
-                  100
-                )
-          )):
-            tdiv(
-              class = "custom-tooltip",
-            ):
-              text tooltipText[id]
-
-      if not self.finished:
-        # Looks ugly when rendering with the traffic light buttons
-        when not defined(ctmacos):
-          separateBar()
-        debugButton("history-back")
-        if self.listHistory:
-          buildHistoryMenu(self)
-        debugButton("history-forward")
-        separateBar()
-        debugStepButton("reverse-next", Next, true)
-        debugStepButton("next", Next, false)
-        separateBar()
-        debugStepButton("reverse-step-in", StepIn, true)
-        debugStepButton("step-in", StepIn, false)
-        separateBar()
-        debugStepButton("reverse-step-out", StepOut, true)
-        debugStepButton("step-out", StepOut, false)
-        separateBar()
-        debugStepButton("reverse-continue", Continue, true)
-        debugStepButton("continue", Continue, false)
-        separateBar()
-        debugButton("run-to-entry")
-        separateBar()
-        debugButton("reset-operation", false) # not self.stableBusy)
-        separateBar()
-        if not self.isLoading:
-          debugButton("run-tests")
-        else:
-          debugButton("run-tests-loading")
-        separateBar()
-      else:
-        debugStepButton("continue", Continue, false)
-        debugButton("run-to-entry")
-        tdiv(class="debug-finished"):
-          text "FINISHED"
       render(data.ui.commandPalette)

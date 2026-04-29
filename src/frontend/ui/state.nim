@@ -225,36 +225,16 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
   self.redraw()
 
 proc redrawDynamically*(self: StateComponent) =
-  # When IsoNim is the primary renderer, skip Karax DOM updates.
-  # The IsoNim reactive effects handle all DOM updates automatically
-  # when the store signals change (via syncStoreLocals).
-  if isoNimStateMounted:
-    return
-
-  let vdom = self.render()
-  let newDom = vnodeToDom(vdom, KaraxInstance())
-
-  # console.log "new vdom, dom ", vdom, newDom
-
-  let idSelector = cstring(fmt"#stateComponent-{self.id}")
-  var node = cast[Node](kdom.document.querySelector(idSelector)).parentNode # value-components-container"))
-  if node.childNodes.len > 0:
-    node.removeChild(node.childNodes[0])
-  # console.log("old ", node)
-  node.appendChild(newDom)
-  # console.log("new ", node)
+  # IsoNim is the primary renderer. All DOM updates are handled by
+  # IsoNim reactive effects when the store signals change (via
+  # syncStoreLocals). No Karax DOM manipulation needed.
+  discard
 
 method redrawForSinglePage*(self: StateComponent) =
-  # When IsoNim is the primary renderer, skip Karax redraw.
-  # Data flow: registerLocals -> syncStoreLocals -> store signals ->
+  # IsoNim is the primary renderer. Data flow:
+  # registerLocals -> syncStoreLocals -> store signals ->
   # IsoNim reactive effects automatically update the DOM.
-  if isoNimStateMounted:
-    return
-
-  self.redrawDynamically()
-  # should be working.. but for now workaround with redrawDynamically
-  # if not self.kxi.isNil:
-  #   self.kxi.redraw()
+  discard
 
 const LOCALS_RR_DEPTH_LIMIT: int = 7
 
@@ -302,122 +282,14 @@ proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscri
   component.register(api)
 
 method render*(self: StateComponent): VNode =
-  # When the IsoNim state panel is mounted, return a stable empty stub.
-  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
-  # calls this. This guard is a safety net in case render() is called
-  # from another path (e.g. redrawDynamically before the guard there).
-  if isoNimStateMounted:
-    return buildHtml(
-      tdiv(id = cstring(fmt"stateComponent-{self.id}"),
-        class = componentContainerClass("active-state") & cstring" " & cstring"state-component"))
-
-  # Legacy Karax rendering path — active only before IsoNim mounts.
-  # render using value components
-  # most of the stuff is separated into  watches and normal local values
-  # the watch functionality has a search form and editable names
-  let klass = "active-state"
-
-  for localVariable in self.locals:
-    let name = localVariable.expression
-
-    if not self.values.hasKey(name):
-      self.values[name] = ValueComponent(
-        expanded: JsAssoc[cstring, bool]{},
-        charts: JsAssoc[cstring, ChartComponent]{},
-        state: self,
-        showInline: JsAssoc[cstring, bool]{},
-        baseExpression: name,
-        baseAddress: localVariable.address,
-        stateID: self.id,
-        id: self.values.len,
-        data: self.data,
-        nameWidth: self.nameWidth,
-        valueWidth: self.calculateValueWidth(),
-        location: self.location,
-        api: self.api
-      )
-      registerValueComponent(self.values[name], self.api)
-    elif self.valueHistory.hasKey(name):
-      checkHistoryLocation(self.values[name], name)
-
-    # ensure it's updated so we show history for the right, maybe differrent expression
-    self.values[name].baseAddress = localVariable.address
-
-    for key, history in self.valueHistory:
-      if cstring($self.values[name].baseAddress) == key:
-        # reload history chart for it: without reloading value history
-        #   as it's already loaded, just the chart
-        self.values[name].charts = JsAssoc[cstring, ChartComponent]{}
-        self.values[name].showInline = JsAssoc[cstring, bool]{}
-        discard self.values[name].showHistory(name, redraw=false)
-
-
-  try:
-    proc renderFunction(value: ValueComponent): VNode =
-      value.nameWidth = self.nameWidth
-      value.valueWidth = self.calculateValueWidth()
-      value.render()
-
-    var initialPosition: float
-
-    proc resizeColumns(ev: Event, tg:VNode) =
-      let mouseEvent = cast[MouseEvent](ev)
-      let containerWidth = jq(".active-state #chevron-container").offsetWidth.toJs.to(float)
-      let currentPosition = mouseEvent.screenX.toJs.to(float)
-      let movementX = (currentPosition-initialPosition) * 100 / containerWidth
-      let newPosition = self.nameWidth + movementX
-
-      if newPosition >= self.minNameWidth and newPosition < self.maxNameWidth:
-        self.nameWidth = max(newPosition, self.minNameWidth)
-        self.redraw()
-        initialPosition = currentPosition
-
-    result = buildHtml(
-      tdiv(id = cstring(fmt"stateComponent-{self.id}"),
-        class = componentContainerClass(klass) & cstring" " & cstring"state-component",
-        onclick = proc(ev: Event, tg: VNode) =
-          self.chevronClicked = false
-          ev.preventDefault(),
-        # onmousemove = proc(ev: Event, tg:VNode) =
-        #   if self.chevronClicked:
-        #     resizeColumns(ev,tg),
-        # onmousedown = proc(ev: Event, tg:VNode) =
-        #   if self.chevronClicked:
-        #     initialPosition = cast[MouseEvent](ev).screenX.toJs.to(float),
-        onmouseup = proc =
-          self.chevronClicked = false,
-        onmouseleave = proc = self.chevronClicked = false
-      )
-    ):
-      # TODO: For now comment out as per new design
-      # if not self.inExtension:
-      #   excerpt(self)
-      watchView(self) # TODO: Add later on
-
-      tdiv(class = "value-components-container"):
-        if (not self.stableBusy or delta(now(), self.data.ui.lastRedraw) < 1_000) or self.inExtension:
-          self.i = 0
-          if self.locals.len() > 0:
-            let localsList = self.locals
-            for variable in localsList:
-              let name = variable.expression
-              let value = variable.value
-              if value.isNil:
-                continue
-              # var realValue = readValue(cast[uint](value))
-              if self.values[name].baseValue.isNil or self.values[name].baseValue.kind != value.kind:
-                self.values[name].fresh = true
-                self.values[name].freshIndex = self.values[name].freshIndex + 1
-              else:
-                self.values[name].fresh = false
-              self.values[name].baseValue = value
-              self.values[name].i = self.i
-              renderFunction(self.values[name])
-          else:
-            tdiv(class = "empty-overlay"):
-              text "No local variables are present in the current point of execution."
-  except:
-    echo getCurrentExceptionMsg()
+  # IsoNim is the primary renderer. Return a minimal empty container
+  # with the correct ID so that GoldenLayout's container exists and
+  # the IsoNim tryMountIsoNimStatePanel() can find and populate it.
+  # All rendering is handled by the IsoNim reactive view; Karax
+  # produces no DOM content for this panel.
+  result = buildHtml(
+    tdiv(id = cstring(fmt"stateComponent-{self.id}"),
+      class = componentContainerClass("active-state") & cstring" " & cstring"state-component"))
 
 # Show the current active debugger line on top of the search bar in the state component
 proc excerpt(self: StateComponent): VNode =

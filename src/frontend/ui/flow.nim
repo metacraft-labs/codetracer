@@ -221,21 +221,12 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   )
 
 method render*(self: FlowComponent): VNode =
-  # When the IsoNim flow view is mounted, return a stable empty stub.
-  # The existing DOM manipulation code (createFlowViewZone, makeSlider,
-  # addStepValues) continues to work on the IsoNim-created containers.
-  # This guard prevents Karax from overwriting the IsoNim-managed DOM.
-  if isoNimFlowMounted:
-    return buildHtml(tdiv(class="flow-component-container"))
-
-  # Legacy Karax rendering path — active only before IsoNim mounts.
-  let allIterations = if self.flow.isNil: 0 else: self.flow.loops[self.activeStep.loop].rrTicksForIterations.len - 1
-  result = buildHtml(tdiv(class="flow-component-container")):
-    makeLoopLine(self, self.activeStep, allIterations)
-    tdiv(
-      class = "flow-loop-slider-container",
-      id = fmt"flow-loop-slider-container-{self.position}"
-    )
+  # IsoNim is the primary renderer. Return a minimal empty container
+  # so that GoldenLayout's container exists and the IsoNim
+  # tryMountIsoNimFlowPanel() can find and populate it.
+  # All rendering is handled by the IsoNim reactive view; Karax
+  # produces no DOM content for this panel.
+  result = buildHtml(tdiv(class="flow-component-container"))
 
 
 proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =
