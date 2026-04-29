@@ -2027,8 +2027,6 @@ proc restoreLayoutState*(layout: GoldenLayout, conf: GoldenLayoutResolvedConfig)
     item.remove()  # Assuming remove is a method on the content items
 
   # Now restore content from the passed `GoldenLayoutResolvedConfig`
-  echo "### KUR"
-  kout conf
   for item in conf.root:
     root.addChild(item)  # Assuming addChild is a method to add items back into the layout
 
