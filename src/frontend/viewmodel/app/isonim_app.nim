@@ -124,9 +124,10 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   r.setTextContent(appHeader, "IsoNim Rendering (experimental)")
   r.appendChild(root, appHeader)
 
-  # --- Debug Controls ---
-  let debugSection = addPanelSection(r, root, "debug-controls", "Debug Controls")
-  mountIsoNimDebugControls(debugSection, session.debugControlsVM)
+  # Debug controls are mounted separately into `#isonim-debug-controls`
+  # (defined in index.html) by `tryMountIsoNimDebugControls` in debug.nim.
+  # Do NOT mount them here — that would create duplicate elements with the
+  # same IDs (e.g. `#next-debug`), breaking Playwright locators.
 
   # --- State (Locals / Globals / Watches) ---
   let stateSection = addPanelSection(r, root, "state", "State")

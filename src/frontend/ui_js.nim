@@ -1050,6 +1050,25 @@ when not defined(ctInExtension):
           let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
           component.register(componentToMiddlewareApi)
 
+    # Replay the last known debugger position so that newly-created
+    # VMs (which start with rrTicks=0) learn the current position.
+    # CtCompleteMove may have already fired before the VMs were created
+    # and before register() wired up the component subscriptions.
+    # InternalLastCompleteMove asks the middleware to re-emit CtCompleteMove,
+    # which triggers onCompleteMove -> loadLines -> CtLoadCalltraceSection
+    # now that all subscriptions are in place.
+    if not activeSessionVM.isNil:
+      # Immediate replay: catches the case where CtCompleteMove already
+      # fired and lastCompleteMove is set in the middleware.
+      data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
+      # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
+      # typically arrives 1-5 seconds after configureMiddleware.  This
+      # retry ensures VMs learn the position even when the backend
+      # responds after the immediate replay above found nothing.
+      discard windowSetTimeout(proc() =
+        data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
+      , 3_000)
+
     # discard windowSetTimeout(proc =
     #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
 
