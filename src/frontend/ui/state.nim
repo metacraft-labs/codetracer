@@ -177,7 +177,7 @@ proc initStateVM() =
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()
 
-proc syncStoreLocals(legacyLocals: seq[Variable]) =
+proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the
   ## StateVM's currentVariables memo sees the same data.
   if stateVMStore.isNil:
@@ -193,7 +193,7 @@ proc syncStoreLocals(legacyLocals: seq[Variable]) =
   stateVMStore.updateLocals(vmLocals)
   clog fmt"StateVM: synced {vmLocals.len} locals into store"
 
-proc syncStoreDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the StateVM's reactive pipeline sees the same rrTicks value.
   if stateVMStore.isNil:

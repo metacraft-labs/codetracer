@@ -76,6 +76,12 @@ type
     searchQuery*: Signal[string]
     rawIgnorePatterns*: Signal[string]
 
+    # -- Backend search results --
+    # Populated by the legacy calltrace component when it receives
+    # CtCalltraceSearchResponse. Each entry is (name, rrTicks, key)
+    # matching what the Karax search results view shows.
+    backendSearchResults*: Signal[seq[tuple[name: string, rrTicks: int, key: string]]]
+
     # -- Derived state --
     visibleLines*: Memo[seq[CallLine]]
     hasMoreAbove*: Memo[bool]
@@ -128,9 +134,22 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
     discard vm.store.backend.send("ct/calltrace-jump", args)
 
 proc setSearchQuery*(vm: CalltraceVM; query: string) =
-  ## Update the search query. The `highlightedMatches` memo will
-  ## recompute automatically.
+  ## Update the search query. Sends the query to the backend via
+  ## ct/search-calltrace and also updates the local highlightedMatches.
+  ## The backend response arrives via registerSearchRes in calltrace.nim
+  ## which calls setBackendSearchResults.
   vm.searchQuery.val = query
+
+  # Also send the query to the backend for full-trace search.
+  if query.len > 0:
+    let args = %*{"value": query}
+    discard vm.store.backend.send("ct/search-calltrace", args)
+
+proc setBackendSearchResults*(vm: CalltraceVM;
+    results: seq[tuple[name: string, rrTicks: int, key: string]]) =
+  ## Update the backend search results. Called by the legacy calltrace
+  ## component when it receives CtCalltraceSearchResponse.
+  vm.backendSearchResults.val = results
 
 proc setViewportHeight*(vm: CalltraceVM; height: int) =
   ## Update the viewport height (number of visible rows).
@@ -178,14 +197,21 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let scrollPos = scrollPosition.val
       let vpHeight = viewportHeight.val
 
-      if lines.len == 0 or vpHeight <= 0:
+      if lines.len == 0:
         return newSeq[CallLine]()
+
+      # When viewport height is not yet known (e.g. before the resize
+      # observer fires), show all available lines so the calltrace is
+      # visible immediately. Playwright tests query `.calltrace-call-line`
+      # right after the data arrives, so returning empty here would cause
+      # test timeouts.
+      let effectiveHeight = if vpHeight <= 0: lines.len else: vpHeight
 
       # Calculate which portion of the store's lines falls within the viewport.
       # The store holds lines [storeStart .. storeStart + lines.len - 1].
-      # The viewport wants lines [scrollPos .. scrollPos + vpHeight - 1].
+      # The viewport wants lines [scrollPos .. scrollPos + effectiveHeight - 1].
       let viewStart = max(scrollPos, storeStart)
-      let viewEnd = min(scrollPos + vpHeight.int64 - 1,
+      let viewEnd = min(scrollPos + effectiveHeight.int64 - 1,
                         storeStart + lines.len.int64 - 1)
 
       if viewStart > viewEnd:
@@ -225,6 +251,8 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
     let isLoading = createMemo[bool] proc(): bool =
       store.calltrace.loadingState.val == lsLoading
 
+    let backendSearchResults = createSignal(newSeq[tuple[name: string, rrTicks: int, key: string]]())
+
     let vm = CalltraceVM(
       store: store,
       scrollPosition: scrollPosition,
@@ -234,6 +262,7 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       expandedNodes: expandedNodes,
       searchQuery: searchQuery,
       rawIgnorePatterns: rawIgnorePatterns,
+      backendSearchResults: backendSearchResults,
       visibleLines: visibleLines,
       hasMoreAbove: hasMoreAbove,
       hasMoreBelow: hasMoreBelow,
@@ -255,10 +284,16 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let depth = viewportDepth.val
       let dbg = store.debugger.val
       let patterns = rawIgnorePatterns.val
-      if vpHeight > 0 and dbg.rrTicks > 0'u64:
+      if dbg.rrTicks > 0'u64:
+        # Use a reasonable default when viewport height is not yet known.
+        # The resize observer will update viewportHeight later, triggering
+        # a follow-up request with the correct dimensions. Without this
+        # fallback, the initial data request would never fire if the
+        # calltrace panel hasn't been laid out yet.
+        let effectiveHeight = if vpHeight > 0: vpHeight else: 50
         # Request a section with buffer on both sides for smooth scrolling.
         let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
-        let totalHeight = vpHeight + CALLTRACE_BUFFER * 2
+        let totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
         store.requestCalltraceSection(
           bufferStart, totalHeight, depth,
           rrTicks = dbg.rrTicks,

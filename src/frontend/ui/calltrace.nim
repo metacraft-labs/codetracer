@@ -14,10 +14,11 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 from ../viewmodel/store/types as vm_types import nil
 from ../viewmodel/store/replay_data_store import
   ReplayDataStore, createReplayDataStore, updateCalltraceSection,
-  updateDebuggerPosition, makeCallLine
+  updateDebuggerPosition, makeCallLine, requestCalltraceSection
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
-  scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns
+  scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns,
+  setBackendSearchResults
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_calltrace_view import
   mountIsoNimCalltrace
@@ -895,6 +896,18 @@ proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
     self.searchResults = @[]
     self.isSearching = false
 
+  # Sync search results into the CalltraceVM so the IsoNim view
+  # can render them in the `.call-search-results` container.
+  if calltraceVMInstance != nil:
+    var vmResults: seq[tuple[name: string, rrTicks: int, key: string]] = @[]
+    for call in searchResults:
+      vmResults.add((
+        name: $call.location.highLevelFunctionName,
+        rrTicks: call.location.rrTicks,
+        key: $call.key,
+      ))
+    calltraceVMInstance.setBackendSearchResults(vmResults)
+
   self.redraw()
 
 func findCall(call: Call, key: cstring): Call =
@@ -1010,22 +1023,24 @@ proc initCalltraceVM() =
   clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimCalltrace()
 
-proc syncCalltraceData(results: CtUpdatedCalltraceResponseBody) =
+proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
   ## so the CalltraceVM's visibleLines memo sees the same data.
   if calltraceVMStore.isNil:
     return
   var vmLines: seq[vm_types.CallLine] = @[]
-  for callLine in results.callLines:
+  for i, callLine in results.callLines:
     let call = callLine.content.call
     let loc = call.location
-    vmLines.add(makeCallLine(
+    var cl = makeCallLine(
       name = $loc.highLevelFunctionName,
       depth = callLine.depth,
       rrTicks = cast[uint64](loc.rrTicks),
       file = $loc.highLevelPath,
       line = loc.highLevelLine,
-    ))
+    )
+    cl.index = i.int64
+    vmLines.add(cl)
   calltraceVMStore.updateCalltraceSection(
     vmLines,
     startIndex = 0'i64,
@@ -1033,7 +1048,7 @@ proc syncCalltraceData(results: CtUpdatedCalltraceResponseBody) =
   )
   clog fmt"CalltraceVM: synced {vmLines.len} calltrace lines into store"
 
-proc syncCalltraceDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
   if calltraceVMStore.isNil:
@@ -1133,6 +1148,23 @@ proc loadLines(self: CalltraceComponent, fromScroll: bool) =
 
     echo "LOAD CALLTRACE SECTION"
     self.api.emit(CtLoadCalltraceSection, calltraceLoadArgs)
+
+    # Also send the request via the ViewModel store's backend as a
+    # fallback. The mediator path (self.api.emit) may fail if the
+    # middleware subscription hasn't been set up yet (early registration).
+    # The store backend uses DapApi directly, bypassing the mediator.
+    if calltraceVMStore != nil:
+      calltraceVMStore.requestCalltraceSection(
+        startIndex = int64(self.startCallLineIndex - startBuffer),
+        height = height + CALL_BUFFER + startBuffer,
+        depth = depth,
+        rrTicks = cast[uint64](self.location.rrTicks),
+        file = $self.location.path,
+        line = self.location.line,
+        rawIgnorePatterns = $self.rawIgnorePatterns,
+        optimizeCollapse = true,
+        autoCollapsing = not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse,
+      )
 
     self.loadedCallKeys = JsAssoc[cstring, int]{}
   else:
@@ -1275,6 +1307,14 @@ proc refreshTraceOverlay*(self: CalltraceComponent) =
     self.redrawTraceLine()
 
 proc redrawCallLines(self: CalltraceComponent) =
+  # When IsoNim is the primary renderer, skip the legacy Karax
+  # DOM manipulation.  The IsoNim reactive effects update the DOM
+  # automatically when the store signals change.  Allowing the
+  # legacy code to run would replace the IsoNim-managed
+  # `.calltrace-lines` element with a Karax-rendered one,
+  # destroying the reactive bindings.
+  if isoNimCalltraceMounted:
+    return
   let scrollElement = jq(cstring(fmt"#calltraceScroll-{self.id}"))
   let calltraceLinesVdom = self.calltraceLines()
   let calltraceLinesDom = cast[kdom.Element](vnodeToDom(calltraceLinesVdom, KaraxInstance()))
@@ -1466,12 +1506,14 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
   elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true
-    # Data loading is now driven by the CalltraceVM's auto-load effect
-    # which fires when syncCalltraceDebuggerPosition updates the store's
-    # rrTicks signal.  The effect calls store.requestCalltraceSection()
-    # which sends the ct/load-calltrace-section command through the real
-    # backend.  The response still arrives via the CtUpdatedCalltrace
-    # event-bus subscription -> onUpdatedCalltrace, so rendering is unchanged.
+    # The CalltraceVM's auto-load effect will also request data when
+    # the store's rrTicks signal changes, but as a safety net we still
+    # call loadLines here.  The legacy path sends CtLoadCalltraceSection
+    # through the mediator and the response arrives via onUpdatedCalltrace
+    # → syncCalltraceData, which feeds data into the IsoNim store.
+    # Without this fallback, data may never load when the auto-load
+    # effect skips (e.g. viewportHeight not yet set).
+    self.loadLines(fromScroll=false)
   self.redraw()
 
 proc asyncFlowToggleView(self: CalltraceComponent): VNode =

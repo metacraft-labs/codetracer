@@ -38,7 +38,7 @@
 ##   let panel = renderCalltracePanel(r, calltraceVM)
 ##   # panel is an isonim_dom.Element, append to any real DOM container
 
-import std/[options, tables, strutils]
+import std/[json, options, tables, strutils]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/components
@@ -49,6 +49,7 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../store/types
+import ../backend/backend_service
 import ../viewmodels/calltrace_vm
 
 # ---------------------------------------------------------------------------
@@ -400,32 +401,36 @@ when defined(js):
     r.setAttribute(resultsDiv, "class", "call-search-results hidden")
     r.appendChild(parent, resultsDiv)
 
-    # Reactive update: show/hide results and populate matches
+    # Reactive update: show/hide results from backend search.
+    # Uses backendSearchResults (populated by the legacy calltrace
+    # component's registerSearchRes via CtCalltraceSearchResponse)
+    # instead of the local highlightedMatches memo, because the
+    # backend searches the full trace while local search only
+    # covers the currently loaded viewport.
     createRenderEffect proc() =
-      let matches = vm.highlightedMatches.val
+      let results = vm.backendSearchResults.val
       r.clearChildren(resultsDiv)
-      if matches.len == 0:
+      if results.len == 0:
         r.setAttribute(resultsDiv, "class", "call-search-results hidden")
       else:
         r.setAttribute(resultsDiv, "class", "call-search-results")
-        for idx in matches:
+        for res in results:
           let resultDiv = r.createElement("div")
           r.setAttribute(resultDiv, "class", "search-result")
-          # Look up the line name from the visible lines if available
-          let lines = vm.visibleLines.val
-          let storeStart = vm.store.calltrace.startLineIndex.val
-          let offset = idx - storeStart
-          var text = "#" & $idx
-          if offset >= 0 and offset < lines.len.int64:
-            let line = lines[offset.int]
-            text = line.name & " #" & $idx
+          # Format: "#key - rrTicks(N): functionName"
+          # matching the Karax searchResultView output
+          let text = "#" & res.key & " - rrTicks(" & $res.rrTicks & "): " & res.name
           r.setTextContent(resultDiv, text)
           r.appendChild(resultsDiv, resultDiv)
 
-          # Click on search result navigates to entry
-          let capturedIdx = idx
+          # Click on search result navigates to the entry's location.
+          # Use the key and rrTicks to build a calltrace-jump command.
+          let capturedRrTicks = res.rrTicks
           r.addEventListener(resultDiv, "mousedown", proc() =
-            vm.doubleClickEntry(capturedIdx))
+            let args = %*{
+              "rrTicks": capturedRrTicks,
+            }
+            discard vm.store.backend.send("ct/calltrace-jump", args))
 
   # -----------------------------------------------------------------------
   # Loading indicator (web version)

@@ -991,6 +991,28 @@ when not defined(ctInExtension):
       trace.initTimelineVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
+      # Direct viewsApi subscriptions: bypass the component mediator
+      # routing so the ViewModel store receives data even when the
+      # component-level subscriptions are not yet wired up (the mediator
+      # routing between early-registered components and viewsApi is
+      # order-dependent and can miss events).
+      # -----------------------------------------------------------------
+      data.viewsApi.subscribe(CtUpdatedCalltrace,
+        proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
+          calltrace.syncCalltraceData(response))
+
+      data.viewsApi.subscribe(CtLoadLocalsResponse,
+        proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
+          state.syncStoreLocals(response.locals))
+
+      data.viewsApi.subscribe(CtCompleteMove,
+        proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+          calltrace.syncCalltraceDebuggerPosition(
+            response.location.rrTicks, response.location.path, response.location.line)
+          state.syncStoreDebuggerPosition(
+            response.location.rrTicks, response.location.path, response.location.line))
+
+      # -----------------------------------------------------------------
       # IsoNim app shell: mount the parallel IsoNim renderer.
       #
       # The IsoNim app renders all panels from SessionViewModel signals
