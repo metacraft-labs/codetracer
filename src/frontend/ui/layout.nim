@@ -518,14 +518,18 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
 
-    # IsoNim-migrated components (Calltrace, State, EventLog, Timeline)
-    # mount directly into the GoldenLayout container — no Karax
-    # setRenderer needed. Other components still use Karax rendering.
+    # IsoNim-migrated components mount directly into the GoldenLayout
+    # container — no Karax setRenderer needed. Other components still
+    # use Karax rendering.
     let isIsoNimComponent = state.content in {
       Content.Calltrace,
       Content.State,
       Content.EventLog,
       Content.Timeline,
+      Content.Build,
+      Content.BuildErrors,
+      Content.SearchResults,
+      Content.Shell,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -544,7 +548,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not data.ui.componentMapping[state.content][state.id].isNil:
         let component = data.ui.componentMapping[state.content][state.id]
 
-        if not isIsoNimComponent and state.content != Content.Shell:
+        if not isIsoNimComponent:
           kxiMap[state.label] = setRenderer(
             (proc: VNode = component.render()),
             containerId,
@@ -556,6 +560,29 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           let shellComponent = ShellComponent(component)
           if shellComponent.shell.isNil:
             discard shellComponent.createShell()
+
+        # Build, BuildErrors, SearchResults: render via vnodeToDom
+        # into the GL container since they no longer use Karax setRenderer.
+        # Also register a redraw callback so redrawAll() re-renders them.
+        if state.content in {Content.Build, Content.BuildErrors, Content.SearchResults}:
+          let target = kdom.document.getElementById(containerId)
+          if not target.isNil:
+            target.innerHTML = cstring""
+            let vnode = component.render()
+            let dom = vnodeToDom(vnode, KaraxInstance())
+            target.appendChild(dom)
+
+          # Register a vnodeToDom redraw callback for this component.
+          let capturedComponent = component
+          let capturedContainerId = containerId
+          vnodeToDomRedrawCallbacks.add(proc() =
+            let el = kdom.document.getElementById(capturedContainerId)
+            if not el.isNil:
+              el.innerHTML = cstring""
+              let v = capturedComponent.render()
+              let d = vnodeToDom(v, KaraxInstance())
+              el.appendChild(d)
+          )
 
         discard component.afterInit()
 
@@ -686,38 +713,45 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           continue
 
       # Panel is not in GL — create a standalone auto-hide panel with
-      # its own DOM container and Karax renderer.
+      # its own DOM container. Build/BuildErrors/SearchResults are now
+      # IsoNim-migrated and render via vnodeToDom instead of Karax.
 
       # Create a wrapper element that the auto-hide overlay will
-      # reparent when the panel is shown. It lives inside the hidden
-      # host so that Karax's getElementById call succeeds during
-      # setRenderer.
+      # reparent when the panel is shown.
       let wrapper = kdom.document.createElement("div")
       wrapper.id = cstring("auto-hide-standalone-" & $panelDef.label)
       wrapper.class = cstring"auto-hide-standalone-container"
       wrapper.style.width = cstring"100%"
       wrapper.style.height = cstring"100%"
 
-      # Inner div matching the component label id that the Karax
-      # renderer expects (same as the GL container would create).
+      # Inner div matching the component label id.
       let innerDiv = kdom.document.createElement("div")
       innerDiv.id = panelDef.label
       innerDiv.class = cstring"component-container"
       wrapper.appendChild(innerDiv)
 
-      # Attach to the hidden host so setRenderer can find the element.
+      # Attach to the hidden host so getElementById can find the element.
       if not host.isNil:
         host.appendChild(wrapper)
 
-      # Look up the singleton component from the mapping and set up a
-      # Karax renderer only if GL did not already create one.
+      # Render the component via vnodeToDom (no Karax setRenderer).
+      # Also register a redraw callback so redrawAll() re-renders it.
       let component = data.ui.componentMapping[panelDef.content][0]
-      if not component.isNil and not kxiMap.hasKey(panelDef.label):
-        kxiMap[panelDef.label] = setRenderer(
-          (proc: VNode = component.render()),
-          panelDef.label,
-          proc = discard)
-        component.kxi = kxiMap[panelDef.label]
+      if not component.isNil:
+        let vnode = component.render()
+        let dom = vnodeToDom(vnode, KaraxInstance())
+        innerDiv.appendChild(dom)
+
+        let capturedComponent = component
+        let capturedLabel = panelDef.label
+        vnodeToDomRedrawCallbacks.add(proc() =
+          let el = kdom.document.getElementById(capturedLabel)
+          if not el.isNil:
+            el.innerHTML = cstring""
+            let v = capturedComponent.render()
+            let d = vnodeToDom(v, KaraxInstance())
+            el.appendChild(d)
+        )
 
       addStandaloneAutoHidePanel(
         panelDef.title,

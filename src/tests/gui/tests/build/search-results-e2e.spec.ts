@@ -37,19 +37,22 @@ test.describe("Search Results Panel", () => {
     await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
 
     // The search results panel renders `.search-results` inside
-    // `#searchResultsComponent-0`. Due to Karax renderer timing (the
-    // component DOM element may not be fully attached when the initial
-    // setTimeout fires), we also accept the container element being
-    // visible as proof the tab was activated.
-    const searchPanel = ctPage.locator("#auto-hide-overlay-content .search-results");
+    // `#searchResultsComponent-0`. The `.search-results` element has
+    // `display: none` via `.search-results-non-active` until a search
+    // is performed. Check the container element visibility instead,
+    // which proves the auto-hide tab was activated and the panel was
+    // rendered into the overlay.
     const searchContainer = ctPage.locator("#auto-hide-overlay-content #searchResultsComponent-0");
+    const searchPanel = ctPage.locator("#auto-hide-overlay-content .search-results");
     const visible = await retry(
       async () => {
-        if ((await searchPanel.count()) > 0) {
-          return searchPanel.first().isVisible();
-        }
+        // Check the outer container first — it is always visible when
+        // the overlay is shown, even if .search-results has display:none.
         if ((await searchContainer.count()) > 0) {
           return searchContainer.first().isVisible();
+        }
+        if ((await searchPanel.count()) > 0) {
+          return searchPanel.first().isVisible();
         }
         return false;
       },
@@ -79,15 +82,18 @@ test.describe("Search Results Panel", () => {
     await expect(overlay).toHaveClass(/visible/, { timeout: 5_000 });
 
     // Wait for the panel container to be visible inside the overlay.
-    const searchPanel = ctPage.locator("#auto-hide-overlay-content .search-results");
+    // The `.search-results` element has `display: none` via
+    // `.search-results-non-active` until a search is performed, so
+    // check the outer container first.
     const searchContainer = ctPage.locator("#auto-hide-overlay-content #searchResultsComponent-0");
+    const searchPanel = ctPage.locator("#auto-hide-overlay-content .search-results");
     const containerVisible = await retry(
       async () => {
-        if ((await searchPanel.count()) > 0) {
-          return searchPanel.first().isVisible();
-        }
         if ((await searchContainer.count()) > 0) {
           return searchContainer.first().isVisible();
+        }
+        if ((await searchPanel.count()) > 0) {
+          return searchPanel.first().isVisible();
         }
         return false;
       },
@@ -96,7 +102,8 @@ test.describe("Search Results Panel", () => {
 
     expect(containerVisible).toBe(true);
 
-    // If the Karax renderer has populated the panel, verify empty state.
+    // Verify empty state: no match rows should be present since
+    // no search has been performed.
     if ((await searchPanel.count()) > 0) {
       const matchRows = searchPanel.locator(".search-results-match-row");
       const matchCount = await matchRows.count();

@@ -164,14 +164,14 @@ proc redrawAll* =
     e += 1
   if e != kxiMap.len:
     cerror "redrawAll: not all redrawed, e != kxiMap.len"
-  # if redrawIndex mod 50 == 0 and not data.ui.layout.isNil:
-    # var build = data.ui.layout.root.contentItems[0].contentItems[0].contentItems[2]
-    # workaround
-    # if not build.config.isNil:
-    #   var oldWidth = build.config.width
-    #   build.config.width = 45
-    # data.saveConfig(data.ui.layout)
-    #   build.config.width = oldWidth
+
+  # Re-render IsoNim-migrated components that use vnodeToDom.
+  for cb in vnodeToDomRedrawCallbacks:
+    try:
+      cb()
+    except:
+      cerror "redrawAll: error in vnodeToDom redraw callback"
+
   data.ui.lastRedraw = now()
   # echo "## FINISH REDRAW"
 data.redraw = redrawAll
