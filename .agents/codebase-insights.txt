@@ -1,4 +1,6 @@
 # Codebase insights
+- `direnv` now treats submodule refresh as best-effort: if `git submodule update --init --recursive` fails (for example because a gitlink points at a vanished commit), activation continues with the existing checkout. Set `CODETRACER_SKIP_SUBMODULE_UPDATE=1` to suppress that step entirely.
+- The default Nix dev shell excludes the Sui toolchain to keep activation stable; opt into the heavier Move-recorder shell with `CODETRACER_ENABLE_SUI=1` (which selects `.#with-sui` from `.envrc`).
 - When adding new UI component modules under `src/frontend/ui/`, they must be imported from `src/frontend/ui_js.nim` (the main entry point) so their `render` methods are compiled into the JS output. Without this import, the component's render falls back to the base `Component.render()` which returns an empty VNode.
 - Ruby loops were originally detected only for 'while' and 'until'.
 - 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.
